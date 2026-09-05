@@ -1269,6 +1269,56 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
     );
   });
 
+  describe('editing a task after repository discovery', () => {
+    const foreignPr = 'https://github.com/other/repo/pull/42';
+    const foreignIssue = 'https://github.com/other/repo/issues/43';
+
+    it.each(['fix the local bug', 'review other/repo2'])('revokes references no longer corroborated by: %s', (task) => {
+      const { store, run } = scopedRun('review other/repo');
+      store.appendEvent(run.id, { type: 'result', result: `${foreignPr} ${foreignIssue}` });
+      expect(run.referencedPullRequestUrl).toBe(foreignPr);
+      expect(run.issueNumber).toBe(43);
+      const seen: Array<string | undefined> = [];
+      store.on('run', (record: RunRecord) => seen.push(record.referencedPullRequestUrl));
+
+      store.updateRun(run.id, { task }); // the mutation used by queued RunManager.editTask
+      store.flush();
+
+      expect(run.referencedPullRequestUrl).toBeUndefined();
+      expect(run.referencedIssueUrl).toBeUndefined();
+      expect(run.issueNumber).toBeUndefined();
+      expect(run.referencedPrCandidates).toEqual([foreignPr]);
+      expect(run.referencedIssueCandidates).toEqual([foreignIssue]);
+      expect(seen).toEqual([undefined]);
+      const saved = JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8'))[0];
+      expect(saved.referencedPullRequestUrl).toBeUndefined();
+      expect(saved.referencedIssueUrl).toBeUndefined();
+    });
+
+    it('preserves created PR ownership and an independently supplied issue number', () => {
+      const { store, run } = scopedRun('review other/repo');
+      store.appendEvent(run.id, { type: 'result', result: `${foreignPr} ${foreignIssue}` });
+      store.updateRun(run.id, { pullRequestUrl: 'https://github.com/other/repo/pull/99' });
+      store.updateRun(run.id, { task: 'fix local issue 7', issueNumber: 7 });
+      expect(run.referencedIssueUrl).toBeUndefined();
+      expect(run.issueNumber).toBe(7);
+      expect(run.pullRequestUrl).toBe('https://github.com/other/repo/pull/99');
+      store.flush();
+    });
+
+    it.each([
+      ['review other/repo again', HANDLE],
+      ['fix the local bug', null],
+    ] as const)('keeps an allowed reference when edited to %s', (task, handle) => {
+      const { store, run } = scopedRun('review other/repo', handle);
+      store.appendEvent(run.id, { type: 'result', result: `${foreignPr} ${foreignIssue}` });
+      store.updateRun(run.id, { task });
+      expect(run.referencedPullRequestUrl).toBe(foreignPr);
+      expect(run.referencedIssueUrl).toBe(foreignIssue);
+      store.flush();
+    });
+  });
+
   describe('prompt repository boundaries', () => {
     const foreignPr = 'https://github.com/acme/service/pull/42';
     const foreignIssue = 'https://github.com/acme/service/issues/43';

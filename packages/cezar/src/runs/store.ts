@@ -832,6 +832,9 @@ export class RunStore extends EventEmitter {
       normalized.autoResumeAt = undefined;
     }
     Object.assign(run, this.redactPatch(normalized));
+    // Queued-task edits can remove the prompt's corroboration for a foreign reference.
+    // Reuse the subtractive heal before notifying readers; evidence and owned numbers survive.
+    if (normalized.task !== undefined) this.rescopeRun(run);
     this.touch(run);
     return run;
   }
