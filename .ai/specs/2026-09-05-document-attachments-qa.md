@@ -35,3 +35,11 @@ Both inline findings reproduced before their fixes: a failed document-only queue
 The effort-override unit fixture now explicitly completes its stubbed first continuation before requesting another: accepting Continue synchronously persists running state, so a second request while still running correctly refuses. The effort preservation and override assertions remain unchanged. Browser QA above remains applicable: review fixes change server persistence/recovery only.
 
 Final review-round verification: typecheck, all 6,682 Vitest tests, unit suites, build/check-pack (496 files, 84 web assets), and all 22 package tests passed. Logs: /tmp/cez91-review-final-{type,vitest,unit,build,package}.log.
+
+## PR #101 review round 2
+
+PDF/TXT/MD download chips now resolve their persisted URLs through the same active-project resolver as image previews. Three non-boot-project UI regressions failed before this fix. Legacy `.img` uploads retain their original octet-stream content type and inline headers; the HTTP regression failed before restoring that behavior. The previous test expectation adding nosniff to `.img` was corrected against the explicit existing-image compatibility requirement; document download protections remain asserted.
+
+The first full verification attempt hit an unrelated OpenCode early-idle question-reply timeout. Its complete 41-test file passed unchanged on retry; no source or test changes were made to the runner.
+
+Round 2 final verification passed: typecheck; all 6,685 tests on the unchanged full-suite retry; unit suites; build/check-pack; all 22 package tests. Real browser QA at 1280x800 in a non-boot project verified scoped TXT/MD/PDF links against exact saved bytes; corresponding unscoped boot-project URLs returned 404. Screenshot inspected: /tmp/cez91-review2-scoped-downloads.png. Logs: /tmp/cez91-review2-{type,vitest-retry,unit,build,package,browser}.log.

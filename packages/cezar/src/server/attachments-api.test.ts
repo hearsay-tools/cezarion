@@ -246,13 +246,15 @@ describe('attachment routes (#950)', () => {
     });
 
     /** The pre-existing catch-all: an `.img` (an SVG paste, historically) keeps answering
-     *  `application/octet-stream`, and now carries the download headers too. */
-    it('keeps the octet-stream default for an extension it does not name', async () => {
+     *  `application/octet-stream` and its original inline response headers. */
+    it('keeps the legacy img octet-stream response inline', async () => {
       const run = store.createRun({ title: 't', workflow: 'w', task: 'x', steps: [] });
       seed(run.id, 'pasted-5.img', 'whatever');
       const res = await apiRequest(app, `/api/v1/runs/${run.id}/images/pasted-5.img`);
       expect(res.headers.get('content-type')).toBe('application/octet-stream');
-      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('x-content-type-options')).toBeNull();
+      expect(res.headers.get('content-disposition')).toBeNull();
+      expect(await res.text()).toBe('whatever');
     });
   });
 });

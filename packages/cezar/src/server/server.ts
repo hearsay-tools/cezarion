@@ -4410,6 +4410,7 @@ export function createApp(deps: ServerDeps) {
   // results and pasted messages (`persistAttachment`). `basename` pins reads inside the
   // run's own dir.
   const IMAGE_TYPES: Record<string, string> = {
+    img: 'application/octet-stream', // Legacy catch-all image uploads retain inline headers.
     png: 'image/png',
     jpg: 'image/jpeg',
     webp: 'image/webp',
