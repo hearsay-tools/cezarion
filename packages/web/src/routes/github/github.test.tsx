@@ -2544,6 +2544,51 @@ describe('cross-state search fallback (#730)', () => {
     expect(sent.filter(r => r.path.includes('/github/search?'))).toHaveLength(1)
   })
 
+  it.each(['unavailable', 'empty'])('reports exact lookup %s alongside local substring rows', async (outcome) => {
+    let finish!: (response: Response) => void
+    const sent = stubFetch({
+      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
+      'GET /api/v1/github/search?kind=pr&q=4507': () => new Promise(resolve => { finish = resolve }),
+    })
+    renderAt('/github/prs')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    fireEvent.change(searchBox(), { target: { value: '4507' } })
+    await waitFor(() => expect(sent.some(r => r.path.includes('/github/search?'))).toBe(true))
+    expect(screen.getByText(/Searching GitHub/)).toBeTruthy()
+    finish(jsonResponse(outcome === 'empty' ? { available: true, items: [] } : { available: false, reason: 'offline' }))
+    await screen.findByText(outcome === 'empty' ? /No additional pull requests/ : /GitHub could not be searched: offline/)
+    expect(rows().map(row => row.dataset.number)).toEqual(['14507'])
+    expect(screen.queryByText(/No open pull requests/)).toBeNull()
+  })
+
+  it.each(['Stream', 'another query', '4508', ''])('hides old hits immediately on change to %s and retains URL-selected detail', async (next) => {
+    const sent = stubFetch({
+      'GET /api/v1/github/search?kind=pr&q=4507': () => jsonResponse({ available: true, items: [MERGED_PR] }),
+    })
+    renderAt('/github/prs')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    fireEvent.change(searchBox(), { target: { value: '4507' } })
+    await waitFor(() => expect(hits()).not.toBeNull(), { timeout: 3000 })
+    fireEvent.click(hits()!.querySelector('a')!)
+    await waitFor(() => expect(detail()?.textContent).toContain(MERGED_PR.title))
+    fireEvent.change(searchBox(), { target: { value: 'intermediate keystrokes' } })
+    fireEvent.change(searchBox(), { target: { value: next } })
+    expect(hits()).toBeNull()
+    expect(detail()?.textContent).toContain(MERGED_PR.title)
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)) })
+    expect(hits()).toBeNull()
+    expect(detail()?.textContent).toContain(MERGED_PR.title)
+    expect(sent.filter(r => r.path.includes('/github/search?')).map(r => r.path)).toEqual([
+      '/api/v1/github/search?kind=pr&q=4507',
+      ...(next === '' || next === 'Stream' ? [] : [`/api/v1/github/search?kind=pr&q=${encodeURIComponent(next).replace(/%20/g, '+')}`]),
+    ])
+    const requestCount = sent.filter(r => r.path.includes('/github/search?')).length
+    fireEvent.change(searchBox(), { target: { value: '4507' } })
+    await waitFor(() => expect(hits()?.textContent).toContain(MERGED_PR.title))
+    expect(detail()?.textContent).toContain(MERGED_PR.title)
+    expect(sent.filter(r => r.path.includes('/github/search?'))).toHaveLength(requestCount)
+  })
+
   it.each([null, 9999])('hydrates searched PR checks within 100 numbers with selected detail %s', async (selected) => {
     const openPrs = Array.from({ length: 105 }, (_, i) => ({ ...MERGED_PR, number: i + 1, title: `Open work ${i}`, url: `https://github.com/acme/demo/pull/${i + 1}`, checks: null }))
     const expectedNumbers = [...(selected === null ? [] : [selected]), MERGED_PR.number, ...openPrs.slice(0, selected === null ? 99 : 98).map(pr => pr.number)]
@@ -2830,8 +2875,7 @@ describe('cross-state search fallback (#730)', () => {
     // The other half of #856, and the reason the `searchWanted` gate alone is not enough: while a
     // freshly typed query debounces, the payload on screen is still the PREVIOUS query's, and
     // `searchWanted` is still derived from that same stale text — so the gate reads true. The hits
-    // deliberately stay put rather than blink out on every keystroke; what must not survive is an
-    // item the list above is already showing.
+    // must disappear immediately, including items the local list now shows.
     const MERGED_STREAM: GithubItem = { ...MERGED_PR, title: 'Stream reconcile' }
     stubFetch({
       // As a real `gh search prs 4507` would: the open #137 comes back beside the merged one.

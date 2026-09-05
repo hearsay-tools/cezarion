@@ -297,16 +297,15 @@ export function GithubRoute({
     }),
     [openItems, debouncedQuery, labelFilter, view, assigneeFilter, activeProject],
   )
-  const searchWanted = gh?.available === true && query.trim() !== '' && shouldSearchForge(debouncedQuery, localMatches)
+  const querySettled = query.trim() === debouncedQuery.trim()
+  const searchWanted = gh?.available === true && querySettled && shouldSearchForge(debouncedQuery, localMatches)
   const forgeSearch = useGithubSearch(view === 'issues' ? 'issue' : 'pr', debouncedQuery, searchWanted)
 
   const allItems = openItems
   const items = filterGithubItems(allItems, { query, labels: labelFilter, ...(view === 'issues' ? { assignees: assigneeFilter, projectId: activeProject } : {}) })
   const filtering = query.trim() !== '' || labelFilter.length > 0 || (view === 'issues' && (assigneeFilter.length > 0 || activeProject !== ''))
-  // Gated on `searchWanted`, not just on the payload: the query key is (kind, text), so flipping
-  // `enabled` off does not evict what a previous run cached under the same text. Reading `data`
-  // alone therefore kept the hits on screen after the local narrow started matching again —
-  // rendering an open item twice, once per list (#856).
+  // Only the settled query may contribute rows, filter metadata or error states. Disabling the
+  // query does not evict its cached data, so never render data solely because it is available.
   const searchPayload = searchWanted && forgeSearch.data?.available ? forgeSearch.data : null
   // Hits are narrowed by the label filter too — it reads as "narrow whatever is on screen". They
   // also drop anything the list above already shows: `gh search` returns OPEN matches alongside
@@ -329,9 +328,25 @@ export function GithubRoute({
       )
     : []
 
+  // Retain one explicitly selected search result independently of visible search rows. Query
+  // edits and filters can hide those rows; the URL still identifies the detail being read.
+  // Scope/kind/number checks prevent a retained item leaking across projects or tabs.
+  const scope = queryKeys.github()[0]
+  const selectedNumber = n === undefined ? null : Number.parseInt(n, 10)
+  const selectedSearchItem = forgeSearch.data?.available
+    ? forgeSearch.data.items.find(item => item.number === selectedNumber)
+    : undefined
+  const [retainedDetail, setRetainedDetail] = useState<{ scope: string; view: GithubView; item: GithubItem } | null>(null)
+  useEffect(() => {
+    if (selectedSearchItem) setRetainedDetail({ scope, view, item: selectedSearchItem })
+  }, [scope, view, selectedSearchItem])
+  const remoteDetail = selectedSearchItem ?? (
+    retainedDetail?.scope === scope && retainedDetail.view === view && retainedDetail.item.number === selectedNumber
+      ? retainedDetail.item : null
+  )
+
   // Pin the selected detail and visible search hits before filling from the open list. The
   // shared hook retains its project scope, cache and view lifetime; every request stays bounded.
-  const selectedNumber = n === undefined ? null : Number.parseInt(n, 10)
   const checkPrNumbers = (() => {
     if (!gh?.available || view !== 'prs') return []
     const nums = new Set<number>()
@@ -408,7 +423,7 @@ export function GithubRoute({
   // the last keystroke and the request firing would render the definitive "nothing anywhere",
   // which is the same lie #730 set out to remove, just half a second long.
   const searching =
-    (query.trim() !== '' && query.trim() !== debouncedQuery.trim()) ||
+    (query.trim() !== '' && !querySettled) ||
     (searchWanted && forgeSearch.isPending)
   // A closed item often wears labels no open one does; its own colors win nothing over the repo
   // map, they only fill the gaps.
@@ -423,7 +438,7 @@ export function GithubRoute({
     number === null
       ? (items[0] ?? searchHits[0] ?? null)
       : (allItems.find((item) => item.number === number) ??
-        searchPayload?.items.find((item) => item.number === number) ??
+        remoteDetail ??
         null)
   // Feed the refresh mutation the thread that is genuinely rendered — including the no-`:n`
   // fallback to items[0], which is what the bare /github and /github/prs routes show.
@@ -457,13 +472,17 @@ export function GithubRoute({
     </p>
   ) : metadataFailure ? (
     <p role="status">Cannot apply the selected filters to GitHub results: {metadataFailure}</p>
-  ) : searchHits.length > 0 ? null : searchFailed ? (
+  ) : searchHits.length > 0 ? null : searchFailed ? (items.length > 0 ? (
+    <p>GitHub could not be searched: {searchFailureReason}.</p>
+  ) : (
     <p>
       No open {view === 'issues' ? 'issues' : 'pull requests'} match your filter, and GitHub could
       not be searched: {searchFailureReason}.
     </p>
-  ) : searchPayload?.truncated ? (
+  )) : searchPayload?.truncated ? (
     <p>No matches within GitHub’s first matches. Narrow your search to check more specific results.</p>
+  ) : searchPayload && items.length > 0 ? (
+    <p>No additional {view === 'issues' ? 'issues' : 'pull requests'} match your filter on GitHub.</p>
   ) : searchPayload ? (
     // Earned, not assumed: only a search that actually answered for THIS narrow licenses the
     // cross-state verdict. A label-only filter never asks the forge at all (`shouldSearchForge`
@@ -589,6 +608,12 @@ export function GithubRoute({
             ))}
           </ul>
         )}
+
+        {items.length > 0 && searchWanted && emptyState ? (
+          <div data-slot="gh-search-status" role="status" className="px-4 py-4 text-sm text-soft-foreground">
+            {emptyState}
+          </div>
+        ) : null}
 
         {/* Cross-state hits (#730) — rendered under their own heading so it is never ambiguous
             whether a row came from the open list or from a search that reached past it. */}
