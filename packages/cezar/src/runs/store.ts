@@ -485,7 +485,8 @@ function eventAgentTextFragments(event: Record<string, unknown>): string[] {
  * a marker-declared number (spec 2026-07-18-task-ref-markers) owns the answer
  * outright — only a candidate URL ending in that number resolves, and a
  * contradiction clears the chip. Without a declaration: one distinct URL is
- * the subject; among several, the one whose number the task prompt names (and
+ * the subject; among several, prefer the exact URL pasted in the prompt, then
+ * the one whose number the task prompt names (and
  * only when exactly one matches); otherwise ambiguous — no chip beats a wrong
  * chip.
  *
@@ -507,10 +508,18 @@ function resolveReferencedRef(
   return isRepoScopedRef(resolved, task, handle) ? resolved : undefined;
 }
 
-/** The pre-#945 resolution rule, unchanged — see `resolveReferencedRef` for the contract. */
+/** Resolve prompt evidence before the repository veto — see `resolveReferencedRef`. */
 function resolveCandidate(candidates: string[], task: string, declared?: number): string | undefined {
   if (declared !== undefined) return candidates.find((url) => url.endsWith(`/${declared}`));
   if (candidates.length === 1) return candidates[0];
+  // Repository-qualified prompt URLs distinguish equal numbers in different repositories.
+  // Extract whole references with the collectors' grammar so /42 cannot match /420.
+  const promptUrls = new Set([
+    ...task.matchAll(new RegExp(PR_URL_RE.source, 'g')),
+    ...task.matchAll(new RegExp(ISSUE_URL_RE.source, 'g')),
+  ].map((match) => match[0]));
+  const exact = candidates.filter((url) => promptUrls.has(url));
+  if (exact.length > 0) return exact.length === 1 ? exact[0] : undefined;
   const named = candidates.filter((url) => {
     const num = url.split('/').pop() ?? '';
     // `\d` boundaries only: they reject `170` inside `4170` yet still match a

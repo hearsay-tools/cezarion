@@ -101,3 +101,7 @@ pretty distinguished"):
   ambiguity preserving an equal prompt-owned number; task-prompt
   disambiguation; declared-issue candidate filtering; marker-owned
   `issueNumber` never overwritten by stray links.
+
+## Prompt-edit reference selection (#86 review)
+
+Edited prompts contribute PR and issue URLs to retained candidate evidence. Without an explicit marker, a unique exact prompt URL wins before numeric disambiguation, so replacing a URL with another repository's same-number URL selects the new subject. Multiple exact URLs remain ambiguous. Repository scoping still vetoes only the resolved result; marker authority and created-PR ownership remain unchanged.

@@ -1295,6 +1295,33 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
       expect(saved.referencedIssueUrl).toBeUndefined();
     });
 
+    it.each(['pull', 'issues'])('selects the exact edited %s URL across repositories sharing a number', (kind) => {
+      const first = `https://github.com/other/repo/${kind}/42`;
+      const second = `https://github.com/acme/service/${kind}/42`;
+      const { store, run } = scopedRun(`review ${first}`);
+      for (const url of [second, first, second]) {
+        store.updateRun(run.id, { task: `review ${url}` });
+        expect(kind === 'pull' ? run.referencedPullRequestUrl : run.referencedIssueUrl).toBe(url);
+      }
+      expect(kind === 'pull' ? run.referencedPrCandidates : run.referencedIssueCandidates).toEqual([first, second]);
+      store.updateRun(run.id, { task: `compare ${first} and ${second}` });
+      expect(kind === 'pull' ? run.referencedPullRequestUrl : run.referencedIssueUrl).toBeUndefined();
+      store.updateRun(run.id, { task: 'review other/repo and acme/service #42' });
+      expect(kind === 'pull' ? run.referencedPullRequestUrl : run.referencedIssueUrl).toBeUndefined();
+      store.flush();
+    });
+
+    it('does not match a prompt URL number prefix or override an explicit marker', () => {
+      const { store, run } = scopedRun('review other/repo');
+      store.appendEvent(run.id, { type: 'result', result: `${foreignPr} https://github.com/other/repo/pull/420` });
+      store.updateRun(run.id, { task: 'review https://github.com/other/repo/pull/420' });
+      expect(run.referencedPullRequestUrl).toBe('https://github.com/other/repo/pull/420');
+      store.applyMarkerRefs(run.id, { pr: 42 });
+      store.updateRun(run.id, { task: 'review https://github.com/other/repo/pull/420 again' });
+      expect(run.referencedPullRequestUrl).toBe(foreignPr);
+      store.flush();
+    });
+
     it('collects newly pasted prompt URLs before notifying readers of a queued edit', () => {
       const { store, run } = scopedRun('fix the bug');
       const seen: Array<Array<string | undefined>> = [];
