@@ -470,16 +470,18 @@ export function GithubRoute({
       <LoaderCircleIcon aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
       Searching GitHub for “{query.trim()}”…
     </p>
-  ) : metadataFailure ? (
-    <p role="status">Cannot apply the selected filters to GitHub results: {metadataFailure}</p>
-  ) : searchHits.length > 0 ? null : searchFailed ? (items.length > 0 ? (
+  ) : searchFailed ? (searchHits.length > 0 ? (
+    <p role="status">Showing previous results. GitHub could not be refreshed: {searchFailureReason}. Use Refresh to try again.</p>
+  ) : items.length > 0 ? (
     <p>GitHub could not be searched: {searchFailureReason}.</p>
   ) : (
     <p>
       No open {view === 'issues' ? 'issues' : 'pull requests'} match your filter, and GitHub could
       not be searched: {searchFailureReason}.
     </p>
-  )) : searchPayload?.truncated ? (
+  )) : metadataFailure ? (
+    <p role="status">Cannot apply the selected filters to GitHub results: {metadataFailure}</p>
+  ) : searchHits.length > 0 ? null : searchPayload?.truncated ? (
     <p>No matches within GitHub’s first matches. Narrow your search to check more specific results.</p>
   ) : searchPayload && items.length > 0 ? (
     <p>No additional {view === 'issues' ? 'issues' : 'pull requests'} match your filter on GitHub.</p>

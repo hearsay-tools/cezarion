@@ -2561,6 +2561,41 @@ describe('cross-state search fallback (#730)', () => {
     expect(screen.queryByText(/No open pull requests/)).toBeNull()
   })
 
+  it.each([false, true])('shows refresh failure beside cached hits and recovers with local matches %s', async (withLocal) => {
+    let outcome: 'success' | 'failure' | 'recovered' = 'success'
+    const listData = { ...GITHUB, prs: withLocal ? [{ ...PR_137, number: 14507 }] : [PR_137] }
+    const sent = stubFetch({
+      'GET /api/v1/github?limit=1000': () => jsonResponse(listData),
+      'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse(listData),
+      'GET /api/v1/github/search?kind=pr&q=4507': () => outcome === 'failure'
+        ? jsonResponse({ error: 'Search refresh unavailable' }, 400)
+        : jsonResponse({ available: true, items: [{ ...MERGED_PR, title: outcome === 'recovered' ? 'Updated remote title' : MERGED_PR.title }] }),
+    })
+    renderAt('/github/prs')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    fireEvent.change(searchBox(), { target: { value: '4507' } })
+    await waitFor(() => expect(hits()).not.toBeNull())
+    fireEvent.click(hits()!.querySelector('a')!)
+    // Reuse the cached hit before refreshing, preserving the URL-selected detail.
+    fireEvent.change(searchBox(), { target: { value: '' } })
+    fireEvent.change(searchBox(), { target: { value: '4507' } })
+    await waitFor(() => expect(hits()).not.toBeNull())
+    expect(sent.filter(r => r.path.includes('/github/search?'))).toHaveLength(1)
+    outcome = 'failure'
+    fireEvent.click(screen.getByTitle('Refresh from GitHub'))
+    await screen.findByText(/Showing previous results.*Search refresh unavailable/)
+    expect(hits()?.textContent).toContain(MERGED_PR.title)
+    expect(detail()?.textContent).toContain(MERGED_PR.title)
+    expect(searchBox().value).toBe('4507')
+    expect(rows().map(row => row.dataset.number)).toEqual(withLocal ? ['14507', '4507'] : ['4507'])
+    outcome = 'recovered'
+    fireEvent.click(screen.getByTitle('Refresh from GitHub'))
+    await waitFor(() => expect(hits()?.textContent).toContain('Updated remote title'))
+    expect(screen.queryByText(/Showing previous results/)).toBeNull()
+    expect(detail()?.textContent).toContain('Updated remote title')
+    expect(searchBox().value).toBe('4507')
+  })
+
   it.each(['Stream', 'another query', '4508', ''])('hides old hits immediately on change to %s and retains URL-selected detail', async (next) => {
     const sent = stubFetch({
       'GET /api/v1/github/search?kind=pr&q=4507': () => jsonResponse({ available: true, items: [MERGED_PR] }),
