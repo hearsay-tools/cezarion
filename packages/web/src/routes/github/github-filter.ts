@@ -40,24 +40,16 @@ export function filterGithubItems(
   })
 }
 
-/**
- * Should the tab stop re-filtering what it already holds and ask the forge instead (#730)?
- *
- * `filterGithubItems` can only ever match the OPEN set the list fetched, so "zero local matches
- * for a non-empty query" is exactly the state where the answer may still exist on GitHub —
- * closed, merged, or simply outside the fetched window. A blank query is never a search (that is
- * the unfiltered list), and a query that already found something locally is not worth a `gh`
- * subprocess.
- *
- * The label filter takes part in this decision, by way of the caller: `github.tsx` derives
- * `localMatches` from `filterGithubItems(openItems, { query, labels })`, so a label filter that
- * narrows the open matches to zero DOES reach for the forge. It can only ever force the fallback,
- * never suppress it — filtering removes matches, it never adds any. That is deliberate: the hits
- * come back re-narrowed by the same label filter before rendering, so a label-filtered empty view
- * is just as legitimate a reason to ask GitHub as an unfiltered one (#837).
- */
-export function shouldSearchForge(query: string, localMatches: number): boolean {
-  return query.trim() !== '' && localMatches === 0
+/** Text queries fall back when the filtered open set is empty. Numeric queries need an exact
+ * number: a substring match such as #14507 must not suppress a lookup for closed #4507.
+ * Callers include active fork filters in localMatches; blank/label-only queries never search. */
+export function shouldSearchForge(query: string, localMatches: readonly GithubItem[]): boolean {
+  const trimmed = query.trim()
+  if (trimmed === '') return false
+  const numeric = trimmed.replace(/^#/, '')
+  return /^\d+$/.test(numeric)
+    ? !localMatches.some(item => item.number === Number(numeric))
+    : localMatches.length === 0
 }
 
 /** Inline style for a label chip tinted like GitHub: the label color as a translucent fill with a

@@ -294,7 +294,7 @@ export function GithubRoute({
   const localMatches = useMemo(
     () => filterGithubItems(openItems, { query: debouncedQuery, labels: labelFilter,
       ...(view === 'issues' ? { assignees: assigneeFilter, projectId: activeProject } : {}),
-    }).length,
+    }),
     [openItems, debouncedQuery, labelFilter, view, assigneeFilter, activeProject],
   )
   const searchWanted = gh?.available === true && query.trim() !== '' && shouldSearchForge(debouncedQuery, localMatches)

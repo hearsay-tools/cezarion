@@ -2531,6 +2531,19 @@ describe('cross-state search fallback (#730)', () => {
   const searchBox = () => document.querySelector<HTMLInputElement>('[data-slot="gh-search"]')!
   const hits = () => document.querySelector('[data-slot="gh-search-hits"]')
 
+  it.each(['4507', '#4507'])('searches exact numeric %s despite an open substring match', async (query) => {
+    const sent = stubFetch({
+      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
+      [`GET /api/v1/github/search?kind=pr&q=${encodeURIComponent(query)}`]: () => jsonResponse({ available: true, items: [MERGED_PR] }),
+    })
+    renderAt('/github/prs')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    fireEvent.change(searchBox(), { target: { value: query } })
+    await waitFor(() => expect(hits()?.textContent).toContain(MERGED_PR.title), { timeout: 3000 })
+    expect(rows().map(row => row.dataset.number)).toEqual(['14507', '4507'])
+    expect(sent.filter(r => r.path.includes('/github/search?'))).toHaveLength(1)
+  })
+
   it.each([null, 9999])('hydrates searched PR checks within 100 numbers with selected detail %s', async (selected) => {
     const openPrs = Array.from({ length: 105 }, (_, i) => ({ ...MERGED_PR, number: i + 1, title: `Open work ${i}`, url: `https://github.com/acme/demo/pull/${i + 1}`, checks: null }))
     const expectedNumbers = [...(selected === null ? [] : [selected]), MERGED_PR.number, ...openPrs.slice(0, selected === null ? 99 : 98).map(pr => pr.number)]

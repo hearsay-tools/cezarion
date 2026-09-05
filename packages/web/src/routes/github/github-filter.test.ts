@@ -103,17 +103,17 @@ describe('issue assignment and project filters', () => {
 describe('shouldSearchForge', () => {
   it('fires when a real query matches nothing locally — the #730 case', () => {
     expect(filterGithubItems(items, { query: '4507' })).toHaveLength(0)
-    expect(shouldSearchForge('4507', 0)).toBe(true)
+    expect(shouldSearchForge('4507', [])).toBe(true)
   })
 
   it('does not fire on a blank query — that is the unfiltered list, not a search', () => {
-    expect(shouldSearchForge('', 0)).toBe(false)
-    expect(shouldSearchForge('   ', 0)).toBe(false)
+    expect(shouldSearchForge('', [])).toBe(false)
+    expect(shouldSearchForge('   ', [])).toBe(false)
   })
 
   it('does not fire when the local filter already found something', () => {
     expect(filterGithubItems(items, { query: '142' }).length).toBeGreaterThan(0)
-    expect(shouldSearchForge('142', filterGithubItems(items, { query: '142' }).length)).toBe(false)
+    expect(shouldSearchForge('142', filterGithubItems(items, { query: '142' }))).toBe(false)
   })
 
   // Locks what the JSDoc promises about the caller (#837): `github.tsx` counts local matches WITH
@@ -122,9 +122,9 @@ describe('shouldSearchForge', () => {
   // rendering — so this asserts the contract rather than guarding against it.
   it('a label filter that empties the local matches does trigger the fallback', () => {
     const countWith = (labels: readonly string[]) =>
-      filterGithubItems(items, { query: '142', labels }).length
+      filterGithubItems(items, { query: '142', labels })
     expect(shouldSearchForge('142', countWith([]))).toBe(false)
-    expect(countWith(['cli'])).toBe(0)
+    expect(countWith(['cli'])).toHaveLength(0)
     expect(shouldSearchForge('142', countWith(['cli']))).toBe(true)
   })
 })
