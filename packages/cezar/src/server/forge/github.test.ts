@@ -1646,6 +1646,18 @@ describe('searchGithubItems (#730)', () => {
     expect(result).toMatchObject({ available: false, items: [], reason: expect.stringContaining('timed out') });
   });
 
+  it.each([
+    ['issue', 'REHYDRATES', [142]],
+    ['pr', 'timing assertion', [128]],
+    ['issue', 'MOCK', [142, 139, 135]],
+    ['pr', 'mock', [128, 124]],
+  ] as const)('dry-run searches %s author/body for %s', async (kind, query, numbers) => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const result = await searchGithubItems('/repo/dry-fields', kind, query);
+    expect(result.items.map(item => item.number)).toEqual(numbers);
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
   it('resolves a bare number through `pr view`, which finds merged and closed PRs alike', async () => {
     const argvs = ghSpy((argv) =>
       argv[0] === 'pr' && argv[1] === 'view'

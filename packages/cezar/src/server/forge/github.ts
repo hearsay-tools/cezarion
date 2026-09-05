@@ -617,13 +617,17 @@ export async function searchGithubItems(
   if (process.env.CEZ_DRY_RUN === '1') {
     const mock = mockGithub();
     const pool = kind === 'issue' ? mock.issues : mock.prs;
-    const needle = trimmed.replace(/^#/, '').toLowerCase();
+    const queryText = trimmed.toLowerCase();
+    const numeric = queryText.replace(/^#/, '');
+    const idOnly = /^\d+$/.test(numeric);
     // The fixture obeys `limit` and flags `truncated` on the live path's own rule (#838). The
     // catalog is a handful of rows, so the cap never bites in the demo itself — but offline mode
     // is the only place anyone developing without `gh` exercises cap-and-truncate at all, and a
     // dry-run that returned the whole pool unflagged would hide a regression in it.
     const items = pool
-      .filter((i) => String(i.number).includes(needle) || i.title.toLowerCase().includes(needle))
+      .filter((item) => idOnly
+        ? String(item.number).includes(numeric)
+        : `#${item.number} ${item.title} ${item.author} ${item.body}`.toLowerCase().includes(queryText))
       .slice(0, capped);
     return { available: true, items, truncated: items.length >= capped };
   }
