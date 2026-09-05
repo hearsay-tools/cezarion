@@ -557,7 +557,7 @@ const ghViewHitSchema = ghIssueSchema.extend({
  *  — so a searched row and a listed row are indistinguishable to the UI. */
 function toSearchItem(
   kind: 'issue' | 'pr',
-  hit: z.infer<typeof ghSearchHitSchema> | z.infer<typeof ghViewHitSchema>,
+  hit: (z.infer<typeof ghSearchHitSchema> | z.infer<typeof ghViewHitSchema>) & { commentsCount: number },
   labelColors: Record<string, string>,
 ): ForgeItem {
   for (const label of hit.labels) {
@@ -572,7 +572,7 @@ function toSearchItem(
     labels: hit.labels.map((l) => l.name),
     body: (hit.body ?? '').slice(0, 8_000),
     url: hit.url,
-    comments: 'commentsCount' in hit ? hit.commentsCount : 0,
+    comments: hit.commentsCount,
     ...(kind === 'issue' && hit.assignees ? { assignees: hit.assignees.map(a => a.login) } : {}),
   };
   if (kind === 'pr') {
@@ -634,6 +634,7 @@ export async function searchGithubItems(
       // `Number()` before interpolation: the regex already guarantees digits, but the number is
       // user input reaching an argv, so it is normalized rather than passed through verbatim.
       const number = Number(numeric);
+      let hit: z.infer<typeof ghViewHitSchema> | undefined;
       try {
         const out = await gh(repoRoot, [
           kind === 'pr' ? 'pr' : 'issue',
@@ -642,10 +643,19 @@ export async function searchGithubItems(
           '--json',
           kind === 'pr' ? `${SEARCH_FIELDS},isDraft,additions,deletions` : `${SEARCH_FIELDS},assignees`,
         ]);
-        const hit = ghViewHitSchema.parse(JSON.parse(out));
-        return await hydrateSearchProjects(repoRoot, kind, { available: true, items: [toSearchItem(kind, hit, labelColors)], labelColors });
+        hit = ghViewHitSchema.parse(JSON.parse(out));
       } catch {
         // Not a number in this repo (or not this kind) — fall through to the text search below.
+      }
+      if (hit) {
+        // `view` exposes comment bodies rather than a count. Read the single issue resource
+        // (PRs share this endpoint) instead of paginating a potentially enormous thread.
+        // gh resolves placeholders in repoRoot, just as it resolves the preceding view call.
+        const commentsCount = z.number().int().nonnegative().parse(JSON.parse(await gh(repoRoot,
+          ['api', `repos/{owner}/{repo}/issues/${number}`, '--jq', '.comments'], 8_000)));
+        return await hydrateSearchProjects(repoRoot, kind, {
+          available: true, items: [toSearchItem(kind, { ...hit, commentsCount }, labelColors)], labelColors,
+        });
       }
     }
     // The memoized handle first (usually a hit). Its `null` is deliberately ambiguous — it swallows

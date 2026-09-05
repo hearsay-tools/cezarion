@@ -1579,6 +1579,7 @@ describe('searchGithubItems (#730)', () => {
 
   it.each(['4507', 'payment'])('hydrates fork filter metadata for %s issue searches', async query => {
     const argvs = ghSpy(argv => {
+      if (argv[1] === 'repos/{owner}/{repo}/issues/4507') return '0';
       if (argv[0] === 'repo') return 'owner/n';
       if (argv[0] === 'api') {
         const query = argv.find(a => a.startsWith('query=')) ?? '';
@@ -1622,6 +1623,29 @@ describe('searchGithubItems (#730)', () => {
     expect(calls.some(argv => argv[0] === 'api')).toBe(false);
   });
 
+  it.each(['issue', 'pr'] as const)('loads exact-number %s comment totals without fetching comment pages', async kind => {
+    const calls = ghSpy(argv => {
+      if (argv[0] === kind && argv[1] === 'view') return JSON.stringify(searchHit({
+        url: `https://github.com/owner/n/${kind === 'issue' ? 'issues' : 'pull'}/4507`,
+      }));
+      if (argv[0] === 'api' && argv[1] === 'repos/{owner}/{repo}/issues/4507') return '137';
+      if (argv[0] === 'repo') return 'owner/n';
+      return new Error('Project metadata unavailable');
+    });
+    const result = await searchGithubItems('/repo/exact-comments', kind, '#4507');
+    expect(result.items[0]?.comments).toBe(137);
+    expect(calls.filter(argv => argv[0] === 'api' && argv[1]?.startsWith('repos/'))).toEqual([
+      ['api', 'repos/{owner}/{repo}/issues/4507', '--jq', '.comments'],
+    ]);
+    expect(calls.some(argv => argv.includes('--paginate') || argv.includes('search'))).toBe(false);
+  });
+
+  it('reports an exact-number count failure instead of inventing zero comments or no matches', async () => {
+    ghSpy(argv => argv[0] === 'pr' ? JSON.stringify(searchHit()) : new Error('count lookup timed out'));
+    const result = await searchGithubItems('/repo/exact-comments-error', 'pr', '4507');
+    expect(result).toMatchObject({ available: false, items: [], reason: expect.stringContaining('timed out') });
+  });
+
   it('resolves a bare number through `pr view`, which finds merged and closed PRs alike', async () => {
     const argvs = ghSpy((argv) =>
       argv[0] === 'pr' && argv[1] === 'view'
@@ -1637,7 +1661,7 @@ describe('searchGithubItems (#730)', () => {
             additions: 3,
             deletions: 1,
           })
-        : '',
+        : argv[1] === 'repos/{owner}/{repo}/issues/4507' ? '0' : '',
     );
 
     const res = await searchGithubItems('/repo/search-num', 'pr', '4507');
@@ -1664,7 +1688,7 @@ describe('searchGithubItems (#730)', () => {
             body: '',
             url: 'https://github.com/owner/n/issues/4507',
           })
-        : '',
+        : argv[1] === 'repos/{owner}/{repo}/issues/4507' ? '0' : '',
     );
 
     const res = await searchGithubItems('/repo/search-hash', 'issue', '#4507');
@@ -1890,7 +1914,8 @@ describe('searchGithubItems (#730)', () => {
           additions: 0,
           deletions: 0,
         });
-      } else stdout = '{}';
+      } else if (argv[1] === 'repos/{owner}/{repo}/issues/4507') stdout = '0';
+      else stdout = '{}';
       cb(null, { stdout, stderr: '' });
     });
 
