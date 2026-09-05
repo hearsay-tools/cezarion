@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFile = promisify(execFileCallback);
@@ -121,4 +121,16 @@ test('a repointed declaration type-checks with skipLibCheck OFF', async () => {
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+});
+
+
+test('the published contract and workflow share the document vocabulary at runtime', async () => {
+  const contract = await import(pathToFileURL(join(dist, 'contract/index.js')).href);
+  const workflow = await import(pathToFileURL(join(dist, 'workflows/run.js')).href);
+  assert.equal(contract.attachmentInputSchema.safeParse({ mediaType: 'application/pdf', data: 'YQ==' }).success, true);
+  assert.equal(contract.attachmentInputSchema.safeParse({ mediaType: 'text/html', data: 'YQ==' }).success, false);
+  assert.equal(contract.attachmentExtension('text/markdown'), 'md');
+  assert.deepEqual(workflow.toPastedContent({ mediaType: 'application/pdf', data: 'YQ==' }), {
+    type: 'file', mediaType: 'application/pdf', data: 'YQ==',
+  });
 });

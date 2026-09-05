@@ -1,11 +1,13 @@
 import { execFile } from 'node:child_process';
 import {
   existsSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -452,6 +454,32 @@ describe('RunManager.continueRun override', () => {
     return record.id;
   }
 
+  it.each([
+    ['immediate', 'account-a', 'account-b'],
+    ['capacity', 'account-a', 'account-b'],
+    ['immediate', 'default', 'account-b'],
+    ['capacity', 'account-a', 'default'],
+  ])('preserves account switching through %s Continue recovery (%s to %s)', async (mode, before, after) => {
+    const id = resumableRun();
+    store.updateRun(id, { agentProfile: before });
+    store.updateStep(id, 's1', { profileId: before, backend: 'claude' });
+    expect(manager.continueRun(id, {
+      text: 'read this with the chosen account', agentProfile: after,
+      images: [{ type: 'file', mediaType: 'application/pdf', data: 'YQ==' }],
+    }, mode === 'capacity')).toEqual({ ok: true });
+    store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
+    manager = new RunManager(store, repoRoot);
+    const internals = manager as unknown as {
+      pump(): Promise<void>;
+      pendingContinuations: Map<string, { sessionId?: string; prompt: string }>;
+    };
+    internals.pump = async () => {};
+    await manager.recover();
+    expect(internals.pendingContinuations.get(id)?.prompt).toContain('read this with the chosen account');
+    expect(internals.pendingContinuations.get(id)?.sessionId).toBeUndefined();
+    expect(store.getRun(id)?.agentProfile).toBe(after);
+  });
+
   it('persists a runner + model override as the run current backend', () => {
     const id = resumableRun();
     expect(manager.continueRun(id, { runner: 'codex', model: 'gpt-5.1-codex' })).toEqual({ ok: true });
@@ -498,6 +526,8 @@ describe('RunManager.continueRun override', () => {
     store.updateRun(id, { effort: 'medium' });
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     expect(store.getRun(id)?.effort).toBe('medium');
+    // The stubbed session must finish before a second Continue is accepted.
+    store.updateRun(id, { status: 'done' });
 
     expect(manager.continueRun(id, { effort: 'xhigh' })).toEqual({ ok: true });
     expect(store.getRun(id)?.effort).toBe('xhigh');
@@ -1455,11 +1485,11 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
 });
 
 /**
- * #472 — `persistImage` must work with no `ActiveRun`, because a queued run has
+ * #472 — `persistAttachment` must work with no `ActiveRun`, because a queued run has
  * none. The counter moved to `RunManager.queuedImageSeq`, seeded from the highest
  * numeric suffix on disk rather than the file count.
  */
-describe('RunManager.persistImage without a session (#472)', () => {
+describe('RunManager.persistAttachment without a session (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
@@ -1472,7 +1502,7 @@ describe('RunManager.persistImage without a session (#472)', () => {
     namePrefix?: string,
   ) => { name: string; url: string; path: string } | null;
   const persist = (id: string, prefix?: string) =>
-    (manager as unknown as { persistImage: PersistFn }).persistImage(id, 'image/png', PNG, prefix);
+    (manager as unknown as { persistAttachment: PersistFn }).persistAttachment(id, 'image/png', PNG, prefix);
   const imagesDir = (id: string) => join(repoRoot, '.ai/cezar', 'runs', `${id}-images`);
 
   beforeEach(() => {
@@ -1582,6 +1612,26 @@ describe('RunManager queued-stack mutators (#472)', () => {
     ]);
   });
 
+  it('notes a document persistence failure instead of silently losing the upload', () => {
+    const r = seedQueued();
+    writeFileSync(imagesDir(r.id), 'not a directory');
+    manager.enqueueMessage(r.id, [{ type: 'file', mediaType: 'application/pdf', data: 'YQ==' }]);
+    expect(store.readEvents(r.id).some((e) => e.type === 'note' && String(e.message).includes('could not be saved'))).toBe(true);
+    store.flush();
+    const reopened = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
+    expect(reopened.getRun(r.id)?.queuedMessages?.[0]?.text).toContain('could not be saved');
+  });
+
+  it('retains a delivery explanation when a document-only queued edit cannot be saved', () => {
+    const r = seedQueued();
+    const message = manager.enqueueMessage(r.id, text('replace me'))!;
+    writeFileSync(imagesDir(r.id), 'not a directory');
+    const edited = manager.editQueuedMessage(r.id, message.id, {
+      text: '', images: [{ type: 'file', mediaType: 'application/pdf', data: 'YQ==' }],
+    });
+    expect(edited?.text).toContain('could not be saved');
+  });
+
   it('persists attached images and records their URLs', () => {
     const r = seedQueued();
     const msg = manager.enqueueMessage(r.id, [image(), { type: 'text', text: 'like this' }]);
@@ -1631,7 +1681,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
 
     expect(manager.editTask(r.id, 'amended recovery goal')).toBe(true);
     expect(
-      manager.enqueueMessage(r.id, [image(), { type: 'text', text: 'also verify the queue' }]),
+      manager.enqueueMessage(r.id, [image(), { type: 'file', mediaType: 'text/markdown', data: Buffer.from('# queued brief').toString('base64') }, { type: 'text', text: 'also verify the queue' }]),
     ).not.toBeNull();
 
     let delivered:
@@ -1668,8 +1718,9 @@ describe('RunManager queued-stack mutators (#472)', () => {
         url: `/api/v1/runs/${r.id}/images/pasted-1.png`,
         path: join(imagesDir(r.id), 'pasted-1.png'),
       },
+      { name: 'pasted-2.md', url: `/api/v1/runs/${r.id}/images/pasted-2.md`, path: join(imagesDir(r.id), 'pasted-2.md') },
     ]);
-    expect(readdirSync(imagesDir(r.id))).toEqual(['pasted-1.png']);
+    expect(readdirSync(imagesDir(r.id)).sort()).toEqual(['pasted-1.png', 'pasted-2.md']);
     expect(internals.pendingContinuations.has(r.id)).toBe(false);
     expect(manager.editTask(r.id, 'too late')).toBe(false);
   });
@@ -1931,6 +1982,34 @@ describe('RunManager.hydrateQueuedInput (#472)', () => {
     });
   });
 
+  it.each(['pasted-1.png', 'pasted-1.pdf'])('excludes outside symlinks from restart hydration: %s', (name) => {
+    const r = store.createRun({ title: 't', workflow: 'w', task: 'keep text', steps: [] });
+    const dir = join(repoRoot, '.ai/cezar/runs', `${r.id}-images`);
+    mkdirSync(dir, { recursive: true });
+    const outside = join(repoRoot, 'outside');
+    writeFileSync(outside, 'outside-secret');
+    symlinkSync(outside, join(dir, name));
+    store.updateRun(r.id, { taskImages: [`/api/v1/runs/${r.id}/images/${name}`] });
+    const hydrated = hydrate(r.id, r.task);
+    expect(hydrated.images).toBeUndefined();
+    expect(hydrated.task).toBe('keep text');
+    expect(store.readEvents(r.id).some((e) => e.type === 'note' && String(e.message).includes(name))).toBe(true);
+  });
+
+  it('notes an unreadable document instead of advertising its path on recovery', () => {
+    const r = store.createRun({ title: 't', workflow: 'w', task: 'keep text', steps: [] });
+    const dir = join(repoRoot, '.ai/cezar/runs', `${r.id}-images`);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'pasted-1.pdf');
+    writeFileSync(path, 'private document');
+    chmodSync(path, 0);
+    try {
+      store.updateRun(r.id, { taskImages: [`/api/v1/runs/${r.id}/images/pasted-1.pdf`] });
+      expect(hydrate(r.id, r.task).task).toBe('keep text');
+      expect(store.readEvents(r.id).some((e) => e.type === 'note' && String(e.message).includes('pasted-1.pdf'))).toBe(true);
+    } finally { chmodSync(path, 0o600); }
+  });
+
   it('re-encodes initial task images from disk after a queued-run restart (#612)', () => {
     const r = store.createRun({ title: 't', workflow: 'w', task: 'look at this', steps: [] });
     const dir = join(repoRoot, '.ai/cezar', 'runs', `${r.id}-images`);
@@ -1950,6 +2029,31 @@ describe('RunManager.hydrateQueuedInput (#472)', () => {
     ]);
   });
 
+  /**
+   * #950 — the re-read branches on the NAME, not on the list. A `.pdf` sitting in the same
+   * `images` list as a screenshot must come back as a path only: re-encoding it into a base64
+   * image block would compose a message no backend can accept, and would put the whole document
+   * into the prompt on the one path (restart) where nobody is watching.
+   */
+  it('never re-encodes a non-image attachment into an image block on restart', () => {
+    const r = store.createRun({ title: 't', workflow: 'w', task: 'read the brief', steps: [] });
+    const dir = join(repoRoot, '.ai/cezar', 'runs', `${r.id}-images`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'pasted-1.png'), 'the-task-bytes');
+    writeFileSync(join(dir, 'pasted-2.pdf'), '%PDF-1.4 the-document-bytes');
+    store.updateRun(r.id, {
+      taskImages: [
+        `/api/v1/runs/${r.id}/images/pasted-1.png`,
+        `/api/v1/runs/${r.id}/images/pasted-2.pdf`,
+      ],
+    });
+
+    const images = hydrate(r.id, r.task).images;
+    expect(images).toHaveLength(1);
+    expect(images?.[0]).toMatchObject({ type: 'image', source: { media_type: 'image/png' } });
+    expect(JSON.stringify(images)).not.toContain(Buffer.from('%PDF-1.4 the-document-bytes').toString('base64'));
+  });
+
   /** Degrade, never fail the boot (AGENTS.md). */
   it('skips an unreadable attachment, notes it, and still starts', () => {
     const r = store.createRun({ title: 't', workflow: 'w', task: 'look at this', steps: [] });
@@ -1959,6 +2063,17 @@ describe('RunManager.hydrateQueuedInput (#472)', () => {
     expect(hydrated.task).toBe('look at this\n\nsee the mock');
     expect(hydrated.stackedImages).toBeUndefined();
     expect(store.readEvents(r.id).some((e) => e.type === 'note' && String(e.message).includes('gone-1.png'))).toBe(true);
+  });
+
+  /** A file has no bytes to fail on — it is only ever `stat`ed — so it needs its own case: a
+   *  deleted `.md` must be dropped and noted, not handed to the agent as a path to nothing. */
+  it('notes a non-image attachment whose file is gone instead of naming a dead path', () => {
+    const r = store.createRun({ title: 't', workflow: 'w', task: 'read the brief', steps: [] });
+    stack(r.id, { text: 'see the brief', images: [`/api/v1/runs/${r.id}/images/pasted-7.md`] });
+
+    const hydrated = hydrate(r.id, r.task);
+    expect(hydrated.stackedImages).toBeUndefined();
+    expect(store.readEvents(r.id).some((e) => e.type === 'note' && String(e.message).includes('pasted-7.md'))).toBe(true);
   });
 });
 

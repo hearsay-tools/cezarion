@@ -50,7 +50,7 @@ import type {
   GithubPrChangesData,
   GroupResponse,
   HealthResponse,
-  ImageInput,
+  AttachmentInput,
   LaunchKeyResponse,
   MessageInput,
   EditQueuedMessageResponse,
@@ -1275,7 +1275,7 @@ export async function finishRun(id: string): Promise<FinishResponse> {
  *  the engine opens with its plain "Continue.". */
 export interface ContinueOptions {
   text?: string
-  images?: ImageInput[]
+  images?: AttachmentInput[]
   runner?: Runner
   model?: string
   /** Reasoning-effort pin (#45). Omitted keeps the run's pin; empty string clears it. */

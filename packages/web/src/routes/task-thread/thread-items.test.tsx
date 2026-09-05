@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 import type { UiToolItem } from '@open-mercato/cezar-api-client'
 
@@ -19,6 +20,7 @@ import {
   ReasoningItem,
   ToolCard,
   ToolStreak,
+  UserBubble,
 } from './thread-items'
 import { reduceThread } from './thread-state'
 import { SessionTranscript } from './session-transcript'
@@ -302,5 +304,58 @@ describe('sub-agent nesting (golden subagent-task fixture, end to end through th
     const nested = document.querySelector('[data-slot="tool-nested"]')!
     expect(nested.querySelector('[data-slot="assistant-message"]')?.textContent).toContain('Scanning the auth middleware')
     expect(nested.querySelectorAll('[data-slot="tool-card"]')).toHaveLength(1)
+  })
+})
+
+
+/**
+ * #950 — images and files share one list of URLs on the record, so the bubble has to tell them
+ * apart by the persisted NAME. Rendering a `.pdf` in an `<img>` is what the user would see as a
+ * broken attachment, on the one screen that is supposed to show them their own message back.
+ */
+describe('UserBubble attachments', () => {
+  it.each(['pdf', 'txt', 'md'])('scopes a %s download to the active non-boot project', (extension) => {
+    setApiScope('second-project')
+    try {
+      render(<MemoryRouter><UserBubble text="brief" images={[`/api/v1/runs/r1/images/pasted-1.${extension}`]} /></MemoryRouter>)
+      expect(screen.getByText(`pasted-1.${extension}`).closest('a')?.getAttribute('href'))
+        .toBe(`/api/v1/p/second-project/runs/r1/images/pasted-1.${extension}`)
+    } finally {
+      setApiScope(null)
+    }
+  })
+
+  it('shows an image inline and a file as a download chip', () => {
+    render(
+      <MemoryRouter>
+        <UserBubble
+          text="read the brief"
+          imageCount={2}
+          images={['/api/v1/runs/r1/images/pasted-1.png', '/api/v1/runs/r1/images/pasted-2.pdf']}
+        />
+      </MemoryRouter>,
+    )
+    const img = screen.getByAltText('attached') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('/api/v1/runs/r1/images/pasted-1.png')
+    const chip = screen.getByText('pasted-2.pdf').closest('a') as HTMLAnchorElement
+    expect(chip.getAttribute('href')).toBe('/api/v1/runs/r1/images/pasted-2.pdf')
+    expect(chip.hasAttribute('download')).toBe(true)
+    // The file must not have been rendered as an image anywhere.
+    expect(screen.queryAllByAltText('attached')).toHaveLength(1)
+  })
+
+  it('renders a .md and a .txt as chips too', () => {
+    render(
+      <MemoryRouter>
+        <UserBubble
+          text="two briefs"
+          imageCount={2}
+          images={['/api/v1/runs/r1/images/pasted-1.md', '/api/v1/runs/r1/images/pasted-2.txt']}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.queryAllByAltText('attached')).toHaveLength(0)
+    expect(screen.getByText('pasted-1.md')).toBeTruthy()
+    expect(screen.getByText('pasted-2.txt')).toBeTruthy()
   })
 })
