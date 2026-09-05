@@ -119,6 +119,23 @@ describe('attachmentMediaType', () => {
     expect(attachmentMediaType(fakeFile({ type: 'application/octet-stream', name: 'a.pdf' }))).toBe('application/pdf')
   })
 
+  it.each([
+    ['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'],
+    ['gif', 'image/gif'], ['webp', 'image/webp'], ['svg', 'image/svg+xml'],
+    ['bmp', 'image/bmp'], ['avif', 'image/avif'],
+  ])('accepts and previews a MIME-less or generic %s image', async (extension, mediaType) => {
+    for (const type of ['', 'application/octet-stream']) {
+      const file = new File(['image bytes'], `shot.${extension.toUpperCase()}`, { type })
+      expect(screenFiles([file], 0)).toEqual({ accepted: [file], rejected: [] })
+      const attachment = await fileToPendingAttachment(file)
+      expect(attachment.mediaType).toBe(mediaType)
+      expect(attachment.isImage).toBe(true)
+      expect(attachment.preview).toBe(`data:${mediaType};base64,${attachment.data}`)
+      expect(screenFiles([file], 4).accepted).toHaveLength(0)
+      expect(screenFiles([fakeFile({ type, name: file.name, size: MAX_ATTACHMENT_BYTES + 1 })], 0).accepted).toHaveLength(0)
+    }
+  })
+
   it('answers null for a file cezar will not take, whatever it is called', () => {
     expect(attachmentMediaType(fakeFile({ type: 'application/zip', name: 'a.zip' }))).toBeNull()
     expect(attachmentMediaType(fakeFile({ type: 'text/html', name: 'a.html' }))).toBeNull()

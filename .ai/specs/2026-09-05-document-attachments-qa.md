@@ -43,3 +43,9 @@ PDF/TXT/MD download chips now resolve their persisted URLs through the same acti
 The first full verification attempt hit an unrelated OpenCode early-idle question-reply timeout. Its complete 41-test file passed unchanged on retry; no source or test changes were made to the runner.
 
 Round 2 final verification passed: typecheck; all 6,685 tests on the unchanged full-suite retry; unit suites; build/check-pack; all 22 package tests. Real browser QA at 1280x800 in a non-boot project verified scoped TXT/MD/PDF links against exact saved bytes; corresponding unscoped boot-project URLs returned 404. Screenshot inspected: /tmp/cez91-review2-scoped-downloads.png. Logs: /tmp/cez91-review2-{type,vitest-retry,unit,build,package,browser}.log.
+
+## PR #101 review round 3
+
+Image intake now infers PNG/JPG/JPEG/GIF/WebP/SVG/BMP/AVIF media types from filenames when the browser MIME is empty or unrecognized, matching document fallback. Eight regressions failed before the fix and cover both empty/octet-stream MIME, uppercase names, image previews, four-attachment limits and oversized rejection. The first full run encountered an unrelated usage-limit auto-resume timing failure; its complete 21-test suite passed unchanged on retry.
+
+Final round 3 checks passed: typecheck; all 6,693 tests on full unchanged retry; unit suites; build/check-pack; 22 package tests. Real browser empty-MIME and octet-stream PNG drops render valid image/png previews (1px natural width). The initial probe targeted the unloaded composer placeholder; waiting for the textarea corrected the probe. Screenshot inspected: /tmp/cez91-review3-mimeless-images.png. Logs: /tmp/cez91-review3-{type,vitest-retry,unit,build,package,browser}.log.

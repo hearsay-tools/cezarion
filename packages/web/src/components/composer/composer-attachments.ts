@@ -24,6 +24,14 @@ export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
  *  because `text/plain` is what the allowlist takes, and a log the browser typed as `text/plain`
  *  is accepted either way — the fallback only decides the TYPELESS case. */
 const EXTENSION_MEDIA_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  bmp: 'image/bmp',
+  avif: 'image/avif',
   md: 'text/markdown',
   markdown: 'text/markdown',
   txt: 'text/plain',
