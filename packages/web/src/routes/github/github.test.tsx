@@ -2531,6 +2531,31 @@ describe('cross-state search fallback (#730)', () => {
   const searchBox = () => document.querySelector<HTMLInputElement>('[data-slot="gh-search"]')!
   const hits = () => document.querySelector('[data-slot="gh-search-hits"]')
 
+  it.each([null, 9999])('hydrates searched PR checks within 100 numbers with selected detail %s', async (selected) => {
+    const openPrs = Array.from({ length: 105 }, (_, i) => ({ ...MERGED_PR, number: i + 1, title: `Open work ${i}`, url: `https://github.com/acme/demo/pull/${i + 1}`, checks: null }))
+    const expectedNumbers = [...(selected === null ? [] : [selected]), MERGED_PR.number, ...openPrs.slice(0, selected === null ? 99 : 98).map(pr => pr.number)]
+    const checksPath = `/api/v1/github/checks?prs=${encodeURIComponent(expectedNumbers.join(','))}`
+    const sent = stubFetch({
+      'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, prs: openPrs }),
+      'GET /api/v1/github/search?kind=pr&q=4507': () => jsonResponse({ available: true, items: [MERGED_PR] }),
+      [`GET ${checksPath}`]: () => jsonResponse({ available: true, checks: { 4507: 'passing' } }),
+    })
+    renderAt(selected === null ? '/github/prs' : `/github/prs/${selected}`)
+    await waitFor(() => expect(rows()).toHaveLength(105))
+    fireEvent.change(searchBox(), { target: { value: '4507' } })
+    await waitFor(() => expect(
+      document.querySelector('[data-slot="gh-row"][data-number="4507"] [data-slot="gh-row-checks"]')?.getAttribute('data-checks'),
+    ).toBe('passing'), { timeout: 3000 })
+    expect(sent.some(r => r.path === checksPath)).toBe(true)
+    const requests = sent.filter(r => r.path.startsWith('/api/v1/github/checks?'))
+    expect(requests.every(r => new URL(r.path, 'http://localhost').searchParams.get('prs')!.split(',').length <= 100)).toBe(true)
+    // Clearing the query restores the already cached open-list window, with no lingering search demand.
+    fireEvent.change(searchBox(), { target: { value: '' } })
+    await waitFor(() => expect(rows()).toHaveLength(105))
+    expect(hits()).toBeNull()
+    expect(sent.filter(r => r.path.startsWith('/api/v1/github/checks?'))).toHaveLength(requests.length)
+  })
+
   it('finds a merged PR the open list never contained — the bug in #730', async () => {
     const sent = stubFetch({
       'GET /api/v1/github/search?kind=pr&q=4507': () =>

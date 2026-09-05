@@ -150,26 +150,6 @@ export function GithubRoute({
   const automationsAvailable = useHealth().data?.capabilities?.automations === true
   const gh = list.data
 
-  // Lazy checks glyphs for the on-screen PR window (#664). Hooks must run before the early
-  // returns below, so derive the PR numbers straight from the list payload rather than the
-  // post-filter `items`. The URL-selected PR is pinned into the window so the detail badge
-  // hydrates even when it sits past the row cap.
-  const selectedNumber = n === undefined ? null : Number.parseInt(n, 10)
-  const checkPrNumbers = useMemo(() => {
-    if (!gh?.available) return []
-    const nums = new Set<number>()
-    if (view === 'prs' && selectedNumber !== null && Number.isInteger(selectedNumber)) {
-      nums.add(selectedNumber)
-    }
-    for (const pr of gh.prs) {
-      if (nums.size >= CHECKS_WINDOW) break
-      nums.add(pr.number)
-    }
-    return [...nums]
-  }, [gh, view, selectedNumber])
-  const checksQuery = useGithubChecks(checkPrNumbers, view === 'prs')
-  const checksMap = checksQuery.data?.available ? checksQuery.data.checks : undefined
-
   const queryClient = useQueryClient()
 
   // Persist the tab choice (#417), mirroring the appearance provider's read-then-write
@@ -299,7 +279,7 @@ export function GithubRoute({
   // Cross-state search fallback (#730). The list tier only ever holds OPEN items, so a closed or
   // merged issue/PR is not "past the fetched window" — it was never fetched, and no amount of
   // in-memory filtering reaches it. When the local narrow comes up empty for a non-empty query we
-  // ask the forge instead. Like the checks window above, these hooks must sit ABOVE the early
+  // ask the forge instead. Like the checks window below, these hooks must sit ABOVE the early
   // returns, so the open set is derived from the payload rather than from the post-filter `items`.
   const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS)
   const openItems = useMemo(
@@ -319,6 +299,51 @@ export function GithubRoute({
   )
   const searchWanted = gh?.available === true && query.trim() !== '' && shouldSearchForge(debouncedQuery, localMatches)
   const forgeSearch = useGithubSearch(view === 'issues' ? 'issue' : 'pr', debouncedQuery, searchWanted)
+
+  const allItems = openItems
+  const items = filterGithubItems(allItems, { query, labels: labelFilter, ...(view === 'issues' ? { assignees: assigneeFilter, projectId: activeProject } : {}) })
+  const filtering = query.trim() !== '' || labelFilter.length > 0 || (view === 'issues' && (assigneeFilter.length > 0 || activeProject !== ''))
+  // Gated on `searchWanted`, not just on the payload: the query key is (kind, text), so flipping
+  // `enabled` off does not evict what a previous run cached under the same text. Reading `data`
+  // alone therefore kept the hits on screen after the local narrow started matching again —
+  // rendering an open item twice, once per list (#856).
+  const searchPayload = searchWanted && forgeSearch.data?.available ? forgeSearch.data : null
+  // Hits are narrowed by the label filter too — it reads as "narrow whatever is on screen". They
+  // also drop anything the list above already shows: `gh search` returns OPEN matches alongside
+  // closed and merged ones, and during the debounce window the payload belongs to the previous
+  // query text, so without this an open item could occupy both lists at once (#856). "Found on
+  // GitHub" only ever means "past the open list", so an overlap is never information.
+  const listedNumbers = new Set(items.map((item) => item.number))
+  const metadataFailure = view === 'issues' && searchPayload
+    ? activeProject && searchPayload.items.some(item => item.projectIds === undefined)
+      ? searchPayload.projectsReason ?? 'Project board data is incomplete. Refresh to try again.'
+      : assigneeFilter.length && searchPayload.items.some(item => item.assignees === undefined)
+        ? 'Assignee data is incomplete. Refresh to try again.'
+        : null
+    : null
+  const searchHits = searchPayload && !metadataFailure
+    ? filterGithubItems(searchPayload.items, { labels: labelFilter,
+        ...(view === 'issues' ? { assignees: assigneeFilter, projectId: activeProject } : {}),
+      }).filter(
+        (item) => !listedNumbers.has(item.number),
+      )
+    : []
+
+  // Pin the selected detail and visible search hits before filling from the open list. The
+  // shared hook retains its project scope, cache and view lifetime; every request stays bounded.
+  const selectedNumber = n === undefined ? null : Number.parseInt(n, 10)
+  const checkPrNumbers = (() => {
+    if (!gh?.available || view !== 'prs') return []
+    const nums = new Set<number>()
+    if (selectedNumber !== null && Number.isInteger(selectedNumber)) nums.add(selectedNumber)
+    for (const pr of [...searchHits, ...gh.prs]) {
+      if (nums.size >= CHECKS_WINDOW) break
+      nums.add(pr.number)
+    }
+    return [...nums]
+  })()
+  const checksQuery = useGithubChecks(checkPrNumbers, view === 'prs')
+  const checksMap = checksQuery.data?.available ? checksQuery.data.checks : undefined
 
   // The bare `/github` restores the remembered sub-tab (#417). It lives HERE rather than in a
   // wrapper component so `/github` and `/github/issues/:n` render the same element type: React
@@ -379,34 +404,6 @@ export function GithubRoute({
     )
   }
 
-  const allItems = openItems
-  const items = filterGithubItems(allItems, { query, labels: labelFilter, ...(view === 'issues' ? { assignees: assigneeFilter, projectId: activeProject } : {}) })
-  const filtering = query.trim() !== '' || labelFilter.length > 0 || (view === 'issues' && (assigneeFilter.length > 0 || activeProject !== ''))
-  // Gated on `searchWanted`, not just on the payload: the query key is (kind, text), so flipping
-  // `enabled` off does not evict what a previous run cached under the same text. Reading `data`
-  // alone therefore kept the hits on screen after the local narrow started matching again —
-  // rendering an open item twice, once per list (#856).
-  const searchPayload = searchWanted && forgeSearch.data?.available ? forgeSearch.data : null
-  // Hits are narrowed by the label filter too — it reads as "narrow whatever is on screen". They
-  // also drop anything the list above already shows: `gh search` returns OPEN matches alongside
-  // closed and merged ones, and during the debounce window the payload belongs to the previous
-  // query text, so without this an open item could occupy both lists at once (#856). "Found on
-  // GitHub" only ever means "past the open list", so an overlap is never information.
-  const listedNumbers = new Set(items.map((item) => item.number))
-  const metadataFailure = view === 'issues' && searchPayload
-    ? activeProject && searchPayload.items.some(item => item.projectIds === undefined)
-      ? searchPayload.projectsReason ?? 'Project board data is incomplete. Refresh to try again.'
-      : assigneeFilter.length && searchPayload.items.some(item => item.assignees === undefined)
-        ? 'Assignee data is incomplete. Refresh to try again.'
-        : null
-    : null
-  const searchHits = searchPayload && !metadataFailure
-    ? filterGithubItems(searchPayload.items, { labels: labelFilter,
-        ...(view === 'issues' ? { assignees: assigneeFilter, projectId: activeProject } : {}),
-      }).filter(
-        (item) => !listedNumbers.has(item.number),
-      )
-    : []
   // "A search is coming or running" — the debounce window counts. Without it, the moment between
   // the last keystroke and the request firing would render the definitive "nothing anywhere",
   // which is the same lie #730 set out to remove, just half a second long.
