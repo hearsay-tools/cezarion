@@ -1295,6 +1295,52 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
       expect(saved.referencedIssueUrl).toBeUndefined();
     });
 
+    it('collects newly pasted prompt URLs before notifying readers of a queued edit', () => {
+      const { store, run } = scopedRun('fix the bug');
+      const seen: Array<Array<string | undefined>> = [];
+      store.on('run', (record: RunRecord) => seen.push([record.referencedPullRequestUrl, record.referencedIssueUrl]));
+      store.updateRun(run.id, { task: `review ${foreignPr} and ${foreignIssue}` });
+      expect(run.referencedPullRequestUrl).toBe(foreignPr);
+      expect(run.referencedIssueUrl).toBe(foreignIssue);
+      expect(run.issueNumber).toBe(43);
+      expect(run.referencedIssueNumberSeeded).toBe(true);
+      expect(run.referencedPrCandidates).toEqual([foreignPr]);
+      expect(run.referencedIssueCandidates).toEqual([foreignIssue]);
+      expect(seen).toEqual([[foreignPr, foreignIssue]]);
+      store.flush();
+    });
+
+    it('collects replacement prompt URLs while retaining old evidence and independent ownership', () => {
+      const { store, run } = scopedRun(`review ${foreignPr} and ${foreignIssue}`);
+      const newPr = 'https://github.com/acme/service/pull/50';
+      const newIssue = 'https://github.com/acme/service/issues/51';
+      store.updateRun(run.id, { prNumber: 7, issueNumber: 8, pullRequestUrl: 'https://github.com/other/repo/pull/99' });
+      for (const task of [`review ${newPr} and ${newIssue}`, `review ${foreignPr} and ${foreignIssue}`]) {
+        store.updateRun(run.id, { task });
+        expect(run.referencedPullRequestUrl).toBe(task.includes(newPr) ? newPr : foreignPr);
+        expect(run.referencedIssueUrl).toBe(task.includes(newIssue) ? newIssue : foreignIssue);
+        expect(run.prNumber).toBe(7);
+        expect(run.issueNumber).toBe(8);
+        expect(run.pullRequestUrl).toBe('https://github.com/other/repo/pull/99');
+      }
+      expect(run.referencedPrCandidates).toEqual([foreignPr, newPr]);
+      expect(run.referencedIssueCandidates).toEqual([foreignIssue, newIssue]);
+      store.flush();
+    });
+
+    it('keeps newly pasted multiple candidates ambiguous without inventing an issue number', () => {
+      const { store, run } = scopedRun('fix the bug');
+      const secondPr = 'https://github.com/other/repo/pull/44';
+      const secondIssue = 'https://github.com/other/repo/issues/45';
+      store.updateRun(run.id, { task: `compare ${foreignPr} ${secondPr} ${foreignIssue} ${secondIssue}` });
+      expect(run.referencedPrCandidates).toEqual([foreignPr, secondPr]);
+      expect(run.referencedIssueCandidates).toEqual([foreignIssue, secondIssue]);
+      expect(run.referencedPullRequestUrl).toBeUndefined();
+      expect(run.referencedIssueUrl).toBeUndefined();
+      expect(run.issueNumber).toBeUndefined();
+      store.flush();
+    });
+
     it('restores references through repeated foreign/local edits without replacing owned numbers', () => {
       const original = `review ${foreignPr} and ${foreignIssue}`;
       const { store, run } = scopedRun(original);

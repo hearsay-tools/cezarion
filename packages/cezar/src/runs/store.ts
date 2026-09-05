@@ -840,6 +840,10 @@ export class RunStore extends EventEmitter {
   /** Prompt edits can both revoke and restore a reference. Resolve the retained working sets
    *  before notifying readers, using the same ambiguity, marker and repository rules as events. */
   private resolveEditedTaskRefs(run: RunRecord): void {
+    // An edited prompt is trusted evidence, just like the initial prompt. Collect its new
+    // URLs without discarding earlier evidence before applying the usual resolution rules.
+    if (PR_URL_RE.test(run.task)) this.trackReferencedPrs(run, run.task);
+    if (ISSUE_URL_RE.test(run.task)) this.trackReferencedIssues(run, run.task);
     if (run.referencedPrCandidates !== undefined) {
       run.referencedPullRequestUrl = resolveReferencedRef(
         run.referencedPrCandidates, run.task, referencedPrDeclaration(run), this.repoHandle,
