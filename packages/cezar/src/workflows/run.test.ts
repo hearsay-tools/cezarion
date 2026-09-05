@@ -1589,6 +1589,19 @@ describe('RunManager queued-stack mutators (#472)', () => {
     writeFileSync(imagesDir(r.id), 'not a directory');
     manager.enqueueMessage(r.id, [{ type: 'file', mediaType: 'application/pdf', data: 'YQ==' }]);
     expect(store.readEvents(r.id).some((e) => e.type === 'note' && String(e.message).includes('could not be saved'))).toBe(true);
+    store.flush();
+    const reopened = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
+    expect(reopened.getRun(r.id)?.queuedMessages?.[0]?.text).toContain('could not be saved');
+  });
+
+  it('retains a delivery explanation when a document-only queued edit cannot be saved', () => {
+    const r = seedQueued();
+    const message = manager.enqueueMessage(r.id, text('replace me'))!;
+    writeFileSync(imagesDir(r.id), 'not a directory');
+    const edited = manager.editQueuedMessage(r.id, message.id, {
+      text: '', images: [{ type: 'file', mediaType: 'application/pdf', data: 'YQ==' }],
+    });
+    expect(edited?.text).toContain('could not be saved');
   });
 
   it('persists attached images and records their URLs', () => {

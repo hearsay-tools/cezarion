@@ -1853,7 +1853,9 @@ export class RunManager {
     const images = this.persistPastedAttachments(runId, content).map((saved) => saved.url);
     return {
       id: randomUUID(),
-      text,
+      text: text.trim() || images.length || !content.some((block) => block.type !== 'text')
+        ? text
+        : 'The user attached a file, but it could not be saved. Ask them to attach it again before discussing its contents.',
       ...(images.length ? { images } : {}),
       createdAt: new Date().toISOString(),
     };
@@ -1886,12 +1888,12 @@ export class RunManager {
     const at = stack.findIndex((m) => m.id === msgId);
     if (at < 0) return null;
     const current = stack[at]!;
-    const replacementImages = edit.images === undefined
-      ? current.images
-      : this.toQueuedMessage(runId, edit.images).images;
+    const uploaded = edit.images === undefined ? undefined : this.toQueuedMessage(runId, edit.images);
+    const replacementImages = uploaded ? uploaded.images : current.images;
+    const replacementText = edit.text ?? current.text;
     const replacement: QueuedMessage = {
       id: msgId,
-      text: edit.text ?? current.text,
+      text: replacementText.trim() ? replacementText : uploaded?.text || replacementText,
       ...(replacementImages?.length ? { images: replacementImages } : {}),
       createdAt: current.createdAt,
     };
