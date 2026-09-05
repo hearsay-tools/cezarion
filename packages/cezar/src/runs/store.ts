@@ -832,11 +832,38 @@ export class RunStore extends EventEmitter {
       normalized.autoResumeAt = undefined;
     }
     Object.assign(run, this.redactPatch(normalized));
-    // Queued-task edits can remove the prompt's corroboration for a foreign reference.
-    // Reuse the subtractive heal before notifying readers; evidence and owned numbers survive.
-    if (normalized.task !== undefined) this.rescopeRun(run);
+    if (normalized.task !== undefined) this.resolveEditedTaskRefs(run);
     this.touch(run);
     return run;
+  }
+
+  /** Prompt edits can both revoke and restore a reference. Resolve the retained working sets
+   *  before notifying readers, using the same ambiguity, marker and repository rules as events. */
+  private resolveEditedTaskRefs(run: RunRecord): void {
+    if (run.referencedPrCandidates !== undefined) {
+      run.referencedPullRequestUrl = resolveReferencedRef(
+        run.referencedPrCandidates, run.task, referencedPrDeclaration(run), this.repoHandle,
+      );
+    }
+    if (run.referencedIssueCandidates !== undefined) {
+      run.referencedIssueUrl = resolveReferencedRef(
+        run.referencedIssueCandidates, run.task, run.markerRefs?.issue, this.repoHandle,
+      );
+      const number = refUrlNumber(run.referencedIssueUrl);
+      if (run.referencedIssueNumberSeeded) {
+        // We may change only the number this janitor owns, including clearing an ambiguous one.
+        run.issueNumber = number;
+        if (number === undefined) delete run.referencedIssueNumberSeeded;
+      } else if (number !== undefined && run.issueNumber === undefined &&
+        run.markerRefs?.issue === undefined && ISSUE_URL_RE.test(run.task)) {
+        // A new seed still needs trusted prompt evidence; retained tool output alone is insufficient.
+        run.issueNumber = number;
+        run.referencedIssueNumberSeeded = true;
+      }
+    }
+    // Legacy records may carry a URL without a candidate array. Preserve that evidence when
+    // allowed, while still revoking a foreign URL the edited prompt no longer corroborates.
+    this.rescopeRun(run);
   }
 
   /**

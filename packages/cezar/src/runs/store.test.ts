@@ -1295,6 +1295,83 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
       expect(saved.referencedIssueUrl).toBeUndefined();
     });
 
+    it('restores references through repeated foreign/local edits without replacing owned numbers', () => {
+      const original = `review ${foreignPr} and ${foreignIssue}`;
+      const { store, run } = scopedRun(original);
+      store.updateRun(run.id, { prNumber: 42, issueNumber: 7, pullRequestUrl: 'https://github.com/other/repo/pull/99' });
+      store.appendEvent(run.id, { type: 'result', result: `${foreignPr} ${foreignIssue}` });
+      for (const task of ['fix the local bug', original, 'review other/repo2', original]) {
+        store.updateRun(run.id, { task });
+        expect(run.referencedPullRequestUrl).toBe(task === original ? foreignPr : undefined);
+        expect(run.referencedIssueUrl).toBe(task === original ? foreignIssue : undefined);
+        expect(run.prNumber).toBe(42);
+        expect(run.issueNumber).toBe(7);
+        expect(run.pullRequestUrl).toBe('https://github.com/other/repo/pull/99');
+      }
+      expect(run.referencedPrCandidates).toEqual([foreignPr]);
+      expect(run.referencedIssueCandidates).toEqual([foreignIssue]);
+      store.flush();
+      expect(JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8'))[0].referencedPullRequestUrl).toBe(foreignPr);
+    });
+
+    it('resolves retained candidates on a newly corroborating prompt without inventing number ownership', () => {
+      const { store, run } = scopedRun('local task');
+      store.appendEvent(run.id, { type: 'result', result: `${foreignPr} ${foreignIssue}` });
+      expect(run.referencedIssueUrl).toBeUndefined();
+      store.updateRun(run.id, { task: 'review other/repo' });
+      expect(run.referencedPullRequestUrl).toBe(foreignPr);
+      expect(run.referencedIssueUrl).toBe(foreignIssue);
+      // A bare repository names no issue; reusing evidence must not invent a trusted number seed.
+      expect(run.issueNumber).toBeUndefined();
+      store.flush();
+    });
+
+    it('reapplies ambiguity before repository scoping after every edit', () => {
+      const localPr = 'https://github.com/open-mercato/cezar/pull/8';
+      const { store, run } = scopedRun('compare references');
+      store.appendEvent(run.id, { type: 'result', result: `${foreignPr} ${localPr}` });
+      for (const task of ['review other/repo #42', 'local task', 'review other/repo #42']) {
+        store.updateRun(run.id, { task });
+        expect(run.referencedPullRequestUrl).toBe(task.includes('#42') ? foreignPr : undefined);
+        expect(run.referencedPrCandidates).toEqual([foreignPr, localPr]);
+      }
+      store.flush();
+    });
+
+    it('updates only janitor-owned issue numbers as the selected candidate changes', () => {
+      const second = 'https://github.com/other/repo/issues/44';
+      const { store, run } = scopedRun('review other/repo #43');
+      store.appendEvent(run.id, { type: 'result', result: `${foreignIssue} ${second}` });
+      expect(run.issueNumber).toBe(43);
+      store.updateRun(run.id, { task: 'review other/repo #44' });
+      expect(run.referencedIssueUrl).toBe(second);
+      expect(run.issueNumber).toBe(44);
+      expect(run.referencedIssueNumberSeeded).toBe(true);
+      store.updateRun(run.id, { task: 'local task' });
+      expect(run.issueNumber).toBeUndefined();
+      store.updateRun(run.id, { task: `review ${second}` });
+      expect(run.referencedIssueUrl).toBe(second);
+      expect(run.issueNumber).toBe(44);
+      expect(run.referencedIssueCandidates).toEqual([foreignIssue, second]);
+      store.flush();
+    });
+
+    it('keeps marker authority separate from the created PR when resolving edited prompts', () => {
+      const secondPr = 'https://github.com/other/repo/pull/44';
+      const { store, run } = scopedRun('review other/repo #42');
+      store.appendEvent(run.id, { type: 'result', result: `${foreignPr} ${secondPr} ${foreignIssue}` });
+      store.updateRun(run.id, { pullRequestUrl: 'https://github.com/other/repo/pull/99' });
+      store.applyMarkerRefs(run.id, { pr: 99, issue: 43 });
+      store.updateRun(run.id, { task: 'local task' });
+      store.updateRun(run.id, { task: 'review other/repo #44' });
+      expect(run.referencedPullRequestUrl).toBe(secondPr);
+      expect(run.referencedIssueUrl).toBe(foreignIssue);
+      expect(run.issueNumber).toBe(43);
+      expect(run.markerRefs).toEqual({ pr: 99, issue: 43 });
+      expect(run.pullRequestUrl).toBe('https://github.com/other/repo/pull/99');
+      store.flush();
+    });
+
     it('preserves created PR ownership and an independently supplied issue number', () => {
       const { store, run } = scopedRun('review other/repo');
       store.appendEvent(run.id, { type: 'result', result: `${foreignPr} ${foreignIssue}` });
