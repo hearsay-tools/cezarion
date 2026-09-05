@@ -392,59 +392,66 @@ async function runCommand(
     }
   }
 
-  const store = openStore(repoRoot);
-  // Headless tasks still appear in the cockpit later, so persist the same
-  // task-local recovery event when a credential expires after the preflight.
-  const providerRuntimeAuth = new ProviderRuntimeAuthObserver(providerAuth, () => {});
-  providerRuntimeAuth.watch(store);
-  // Headless runs enforce the same workspace-level cap/memory limit (step
-  // 2.5) — one refreshed semaphore, even with just one manager in play.
-  const semaphore = new WorkspaceSemaphore();
-  await semaphore.refresh();
-  const manager = new RunManager(store, repoRoot, { semaphore });
+  const repoHandleController = new AbortController();
+  const store = openStore(repoRoot, { repoHandleSignal: repoHandleController.signal });
+  try {
+    // Headless tasks still appear in the cockpit later, so persist the same
+    // task-local recovery event when a credential expires after the preflight.
+    const providerRuntimeAuth = new ProviderRuntimeAuthObserver(providerAuth, () => {});
+    providerRuntimeAuth.watch(store);
+    // Headless runs enforce the same workspace-level cap/memory limit (step
+    // 2.5) — one refreshed semaphore, even with just one manager in play.
+    const semaphore = new WorkspaceSemaphore();
+    await semaphore.refresh();
+    const manager = new RunManager(store, repoRoot, { semaphore });
 
-  store.on('event', ({ event }) => {
-    switch (event.type) {
-      case 'text':
-        console.log(String(event.text ?? ''));
-        break;
-      case 'tool-call':
-        console.log(`  → ${String(event.tool)} ${previewJson(event.input)}`);
-        break;
-      case 'tool-result':
-        console.log(`  ← ${firstLine(String(event.result ?? ''))}`);
-        break;
-      case 'check-output':
-        console.log(String(event.text ?? ''));
-        break;
-      case 'step-start':
-        console.log(`\n── step: ${String(event.name)} ${Number(event.iteration) > 1 ? `(attempt ${event.iteration})` : ''}`);
-        break;
-      case 'note':
-      case 'lifecycle':
-        console.log(`  · ${String(event.message ?? '')}`);
-        break;
-      case 'error':
-        console.error(`  ✗ ${String(event.message ?? '')}`);
-        break;
-    }
-  });
-
-  const run = manager.startRun(workflow, { task, model });
-  // `review` is terminal here too (spec 009) — headless runs must not hang on
-  // the GUI's review gate; the diff waits on the task branch/cockpit instead.
-  const final = await new Promise<string>((resolveStatus) => {
-    store.on('run', (r) => {
-      if (r.id === run.id && ['done', 'review', 'failed', 'cancelled'].includes(r.status)) resolveStatus(r.status);
+    store.on('event', ({ event }) => {
+      switch (event.type) {
+        case 'text':
+          console.log(String(event.text ?? ''));
+          break;
+        case 'tool-call':
+          console.log(`  → ${String(event.tool)} ${previewJson(event.input)}`);
+          break;
+        case 'tool-result':
+          console.log(`  ← ${firstLine(String(event.result ?? ''))}`);
+          break;
+        case 'check-output':
+          console.log(String(event.text ?? ''));
+          break;
+        case 'step-start':
+          console.log(`\n── step: ${String(event.name)} ${Number(event.iteration) > 1 ? `(attempt ${event.iteration})` : ''}`);
+          break;
+        case 'note':
+        case 'lifecycle':
+          console.log(`  · ${String(event.message ?? '')}`);
+          break;
+        case 'error':
+          console.error(`  ✗ ${String(event.message ?? '')}`);
+          break;
+      }
     });
-  });
-  store.flush();
-  const record = store.getRun(run.id);
-  if (final === 'review') {
-    console.log(`\n  changes ready for review on branch ${record?.branch ?? '?'} — inspect them in the cockpit: npx cezarion`);
+
+    const run = manager.startRun(workflow, { task, model });
+    // `review` is terminal here too (spec 009) — headless runs must not hang on
+    // the GUI's review gate; the diff waits on the task branch/cockpit instead.
+    const final = await new Promise<string>((resolveStatus) => {
+      store.on('run', (r) => {
+        if (r.id === run.id && ['done', 'review', 'failed', 'cancelled'].includes(r.status)) resolveStatus(r.status);
+      });
+    });
+    const record = store.getRun(run.id);
+    if (final === 'review') {
+      console.log(`\n  changes ready for review on branch ${record?.branch ?? '?'} — inspect them in the cockpit: npx cezarion`);
+    }
+    console.log(`\nrun ${final} — ${record?.tokensUsed ?? 0} tokens — details in the cockpit: npx cezarion`);
+    process.exitCode = final === 'done' || final === 'review' ? 0 : 1;
+  } finally {
+    // A slow GitHub child must not keep a completed headless task alive. Any handle that
+    // already arrived has repaired the store; an unfinished lookup remains unknown.
+    repoHandleController.abort();
+    store.flush();
   }
-  console.log(`\nrun ${final} — ${record?.tokensUsed ?? 0} tokens — details in the cockpit: npx cezarion`);
-  process.exitCode = final === 'done' || final === 'review' ? 0 : 1;
 }
 
 // ---- server-install / server-uninstall --------------------------------------
@@ -654,12 +661,12 @@ description: House rules the agent should follow in this repo.
 
 // ---- helpers -----------------------------------------------------------------
 
-function openStore(repoRoot: string, opts?: { keepLive?: boolean }): RunStore {
+function openStore(repoRoot: string, opts?: { keepLive?: boolean; repoHandleSignal?: AbortSignal }): RunStore {
   const dataDir = join(repoRoot, '.ai/cezar');
   const store = RunStore.open(dataDir, opts);
   // Repo-scope the referenced tier (#945) — see `armRepoHandle`. Background, never awaited: a
   // `gh`-less or offline machine keeps working exactly as it did, just unscoped.
-  armRepoHandle(store, repoRoot);
+  armRepoHandle(store, repoRoot, opts?.repoHandleSignal);
   ensureDataGitignore(repoRoot);
   return store;
 }

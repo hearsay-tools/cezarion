@@ -18,7 +18,7 @@ import type { RunStore } from './store.ts';
  * rejection here would take down a boot over a cosmetic chip.
  */
 export function armRepoHandle(store: RunStore, repoRoot: string, signal?: AbortSignal): void {
-  void resolveRepoHandle(repoRoot)
+  void resolveRepoHandle(repoRoot, signal)
     .then((handle) => {
       // A disposed context no longer owns this store. The lookup may finish, but must not
       // repair or persist its stale snapshot over a replacement context's records.

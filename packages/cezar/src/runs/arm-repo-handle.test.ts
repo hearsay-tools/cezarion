@@ -37,7 +37,7 @@ describe('armRepoHandle (#945)', () => {
     armRepoHandle(store, '/repo');
     await settle();
 
-    expect(resolveRepoHandleMock).toHaveBeenCalledWith('/repo');
+    expect(resolveRepoHandleMock).toHaveBeenCalledWith('/repo', undefined);
     expect(setRepoHandle).toHaveBeenCalledWith({ owner: 'open-mercato', name: 'cezar' });
   });
 
