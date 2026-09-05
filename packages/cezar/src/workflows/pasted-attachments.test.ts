@@ -528,4 +528,74 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     await waitForStatus(record.id, ['done', 'review']);
   }, 40_000);
 
+  it('keeps a fresh Continue image viewable when its disk write fails', async () => {
+    writeFileSync(stdinFile, '');
+    const record = store.createRun({ title: 'image failure', workflow: 'image failure', task: 'original', steps: [] });
+    store.addStep(record.id, { id: 'work', name: 'work', kind: 'agent' });
+    store.updateStep(record.id, 'work', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
+    store.updateRun(record.id, { status: 'done', worktree: false });
+    writeFileSync(join(dataDir, 'runs', `${record.id}-images`), 'not a directory');
+    expect(manager.continueRun(record.id, {
+      text: 'view this unsaved image',
+      images: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 } }],
+    }).ok).toBe(true);
+    await waitForStatus(record.id, ['waiting']);
+    expect(readStdinLines().find((line) => line.userText.includes('view this unsaved image'))?.imageCount).toBe(1);
+    manager.finish(record.id);
+    await waitForStatus(record.id, ['done', 'review']);
+  }, 30_000);
+
+  it.each(['immediate', 'capacity', 'running', 'missing'] as const)(
+    'recovers fresh mixed Continue attachments after a %s pre-spawn restart', async (mode) => {
+      writeFileSync(stdinFile, '');
+      const record = store.createRun({ title: 'restart', workflow: 'restart', task: 'original', steps: [] });
+      store.addStep(record.id, { id: 'work', name: 'work', kind: 'agent' });
+      store.updateStep(record.id, 'work', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
+      store.updateRun(record.id, { status: 'done', worktree: false });
+      const launcher = new RunManager(store, repoRoot);
+      // Stop at the boundary before any asynchronous startup or runner invocation.
+      (launcher as unknown as { runContinuation(): Promise<void> }).runContinuation = async () => {};
+      expect(launcher.continueRun(record.id, {
+        text: 'read my durable continuation brief',
+        images: [
+          { type: 'file', mediaType: 'application/pdf', data: TINY_PDF_B64 },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 } },
+        ],
+      }, mode === 'capacity').ok).toBe(true);
+      // No shutdown/flush: accepting Continue must itself make the message durable.
+      store = RunStore.open(dataDir, { keepLive: true });
+      expect(store.getRun(record.id)?.status).toBe(mode === 'capacity' ? 'queued' : 'running');
+      const directory = join(dataDir, 'runs', `${record.id}-images`);
+      expect(readdirSync(directory).sort()).toEqual(['pasted-1.pdf', 'pasted-2.png']);
+      if (mode === 'missing') rmSync(join(directory, 'pasted-1.pdf'));
+      if (mode === 'running') {
+        store.updateStep(record.id, 'continue-1', { status: 'running', sessionId: 'new-session', backend: 'claude' });
+        store.flush();
+        store = RunStore.open(dataDir, { keepLive: true });
+      }
+      manager = new RunManager(store, repoRoot);
+      await manager.recover();
+      await waitForStatus(record.id, ['waiting']);
+      const opening = readStdinLines().find((line) => line.userText.includes('read my durable continuation brief'));
+      expect(opening).toBeDefined();
+      expect(opening?.imageCount).toBe(1);
+      expect(opening?.userText).toContain(join(directory, 'pasted-2.png'));
+      if (mode === 'missing') {
+        expect(opening?.userText).not.toContain(join(directory, 'pasted-1.pdf'));
+        expect(store.readEvents(record.id).some((event) => event.type === 'note' && String(event.message).includes('pasted-1.pdf could not be read'))).toBe(true);
+      } else {
+        expect(opening?.userText).toContain(join(directory, 'pasted-1.pdf'));
+        expect(readFileSync(join(directory, 'pasted-1.pdf'), 'utf8')).toBe(TINY_PDF);
+      }
+      expect(readdirSync(directory).filter((name) => name.startsWith('pasted-')).sort()).toEqual(
+        mode === 'missing' ? ['pasted-2.png'] : ['pasted-1.pdf', 'pasted-2.png'],
+      );
+      expect(opening?.userText).not.toContain(TINY_PDF_B64);
+      expect(store.getRun(record.id)?.continuationMessage).toBeUndefined();
+      expect(RunStore.open(dataDir, { keepLive: true }).getRun(record.id)?.continuationMessage).toBeUndefined();
+      manager.finish(record.id);
+      await waitForStatus(record.id, ['done', 'review']);
+    }, 30_000,
+  );
+
 });

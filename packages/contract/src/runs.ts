@@ -145,6 +145,8 @@ export const runRecordSchema = z.object({
   /** Prompt messages stacked onto the run while it waited for a free agent slot (#472). Folded
    *  into the prompt at dequeue — never delivered as their own turns. Absent on pre-#472 runs. */
   queuedMessages: z.array(queuedMessageSchema).optional(),
+  /** Opening Continue message, retained until its first completed turn for crash recovery. */
+  continuationMessage: queuedMessageSchema.optional(),
   /** URLs of images and document attachments on the initial task prompt; branch on isImageAttachmentName. */
   taskImages: z.array(z.string()).optional(),
   model: z.string().optional(),

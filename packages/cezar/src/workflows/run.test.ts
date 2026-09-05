@@ -454,6 +454,32 @@ describe('RunManager.continueRun override', () => {
     return record.id;
   }
 
+  it.each([
+    ['immediate', 'account-a', 'account-b'],
+    ['capacity', 'account-a', 'account-b'],
+    ['immediate', 'default', 'account-b'],
+    ['capacity', 'account-a', 'default'],
+  ])('preserves account switching through %s Continue recovery (%s to %s)', async (mode, before, after) => {
+    const id = resumableRun();
+    store.updateRun(id, { agentProfile: before });
+    store.updateStep(id, 's1', { profileId: before, backend: 'claude' });
+    expect(manager.continueRun(id, {
+      text: 'read this with the chosen account', agentProfile: after,
+      images: [{ type: 'file', mediaType: 'application/pdf', data: 'YQ==' }],
+    }, mode === 'capacity')).toEqual({ ok: true });
+    store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
+    manager = new RunManager(store, repoRoot);
+    const internals = manager as unknown as {
+      pump(): Promise<void>;
+      pendingContinuations: Map<string, { sessionId?: string; prompt: string }>;
+    };
+    internals.pump = async () => {};
+    await manager.recover();
+    expect(internals.pendingContinuations.get(id)?.prompt).toContain('read this with the chosen account');
+    expect(internals.pendingContinuations.get(id)?.sessionId).toBeUndefined();
+    expect(store.getRun(id)?.agentProfile).toBe(after);
+  });
+
   it('persists a runner + model override as the run current backend', () => {
     const id = resumableRun();
     expect(manager.continueRun(id, { runner: 'codex', model: 'gpt-5.1-codex' })).toEqual({ ok: true });
@@ -500,6 +526,8 @@ describe('RunManager.continueRun override', () => {
     store.updateRun(id, { effort: 'medium' });
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     expect(store.getRun(id)?.effort).toBe('medium');
+    // The stubbed session must finish before a second Continue is accepted.
+    store.updateRun(id, { status: 'done' });
 
     expect(manager.continueRun(id, { effort: 'xhigh' })).toEqual({ ok: true });
     expect(store.getRun(id)?.effort).toBe('xhigh');

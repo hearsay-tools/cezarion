@@ -43,5 +43,5 @@ Files: composer-attachments.ts and tests, composer.tsx and tests, thread-items.t
 - [x] Run required commands in order: npm run typecheck; npm test; npm run test:unit; npm run build; npm run test:package.
 - [x] Run npm run test:e2e and manual agent-browser attachment QA at 360x640 and desktop, light/dark and reduced motion; retain concrete evidence.
 - [x] Review diff for fork preservation, obtain code review, fix findings and rerun relevant checks.
-- [ ] Commit, push, create draft PR closing #91 with AC outcomes and verification evidence; move board to In review.
+- [x] Commit, push, create draft PR closing #91 with AC outcomes and verification evidence; move board to In review.
 - [ ] Use pr-checks to handle CI and inline reviews, retain draft and update rolling handoff.

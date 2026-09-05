@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { queuedMessageSchema as continuationMessageSchema } from '@open-mercato/cezar-contract';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -134,6 +135,8 @@ export const runRecordSchema = z.object({
    *  deliberately NOT in `redactPatch`'s field list — scrubbing it would corrupt
    *  the run the same way scrubbing `task` would. */
   queuedMessages: z.array(queuedMessageSchema).optional(),
+  /** Durable Continue opening message; id is its synthetic step id. No base64 in the index. */
+  continuationMessage: continuationMessageSchema.optional(),
   /** URLs of images attached to the initial task prompt, for the thread's first bubble
    *  (#image-display) — persisted like agent screenshots, served from `/images/`. */
   taskImages: z.array(z.string()).optional(),

@@ -1111,11 +1111,13 @@ export class RunManager {
     if (queuedContinuation && sessionStep?.sessionId) {
       const backend = run.runner ?? 'claude';
       const sessionBackend = sessionStep.backend ?? backend;
+      const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
+      const sameAccount = run.agentProfile === undefined || run.agentProfile === sessionAccount;
       this.pendingContinuations.set(run.id, {
         stepId: queuedContinuation.id,
-        sessionId: sessionBackend === backend ? sessionStep.sessionId : undefined,
+        sessionId: sessionBackend === backend && sameAccount ? sessionStep.sessionId : undefined,
         backend,
-        prompt: RESTART_CONTINUATION_PROMPT,
+        prompt: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
         images: [],
       });
       this.queue.push(run.id);
@@ -1224,7 +1226,7 @@ export class RunManager {
       const resumed = this.continueRun(
         run.id,
         {
-          text: RESTART_CONTINUATION_PROMPT,
+          text: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
         },
         true,
       );
@@ -1801,7 +1803,7 @@ export class RunManager {
   private readPersistedAttachments(
     runId: string,
     urls: string[],
-    kind: 'task' | 'queued',
+    kind: 'task' | 'queued' | 'continuation',
   ): PersistedAttachments {
     const blocks: ContentBlock[] = [];
     const attachments: PersistedAttachment[] = [];
@@ -2142,7 +2144,7 @@ export class RunManager {
     // open a fresh conversation while the thread claimed it had resumed. A step that recorded no
     // account predates the feature and therefore ran under the discovered one.
     const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
-    const accountSwitched = opts.agentProfile !== undefined && opts.agentProfile !== sessionAccount;
+    const accountSwitched = (opts.agentProfile ?? run.agentProfile ?? sessionAccount) !== sessionAccount;
     const resume = sessionBackend === targetRunner && !accountSwitched;
 
     // Follow-up runner/model/account override (#401, spec 2026-07-29-agent-profiles): the composer
@@ -2212,8 +2214,24 @@ export class RunManager {
     const continuations = run.steps.filter((s) => s.id.startsWith('continue-')).length;
     const stepId = `continue-${continuations + 1}`;
     this.store.addStep(runId, { id: stepId, name: 'Continue', kind: 'agent' });
-    const prompt = opts.text?.trim() || 'Continue.';
-    const images = opts.images ?? [];
+    const recovered = deferForCapacity ? run.continuationMessage : undefined;
+    const message = recovered ?? this.toQueuedMessage(runId, [
+      ...(opts.text?.trim() ? [{ type: 'text' as const, text: opts.text.trim() }] : []),
+      ...(opts.images ?? []),
+    ]);
+    const prompt = message.text || 'Continue.';
+    // Accepting a continuation is a crash boundary: both its recoverable status
+    // and the original prompt/URLs must reach disk before the first startup await.
+    this.store.updateRun(runId, {
+      continuationMessage: { ...message, id: stepId, text: prompt },
+      status: deferForCapacity ? 'queued' : 'running',
+      error: undefined,
+      finishedAt: undefined,
+      currentStepId: deferForCapacity ? undefined : stepId,
+    });
+    this.store.flush();
+    // Keep fresh viewable images even if persistence failed; recovery uses saved URLs.
+    const images = contentBlocksOf(opts.images ?? []).filter((block) => block.type === 'image');
     if (deferForCapacity) {
       this.pendingContinuations.set(runId, {
         stepId,
@@ -2231,6 +2249,7 @@ export class RunManager {
       });
       return { ok: true };
     }
+    this.starting.add(runId);
     void this.runContinuation(
       runId,
       stepId,
@@ -2246,6 +2265,7 @@ export class RunManager {
           error: `continue crashed: ${message}`,
           finishedAt: new Date().toISOString(),
         });
+        this.starting.delete(runId);
         this.dropActive(runId);
       },
     );
@@ -2339,9 +2359,12 @@ export class RunManager {
     // appended to the prompt (so it can operate on them — and because codex/opencode drop image
     // blocks before they reach the model). An image ALSO rides along as a base64 block so the
     // model can view it; a file (#950) has nothing to view and travels as its path alone.
-    const freshAttachments = this.persistPastedAttachments(runId, images);
-    const openingImages = [...contentBlocksOf(images), ...persistedImages];
-    const attachments = [...freshAttachments, ...persistedAttachments];
+    const checkpoint = record?.continuationMessage;
+    const saved = this.readPersistedAttachments(
+      runId, checkpoint?.id === stepId ? checkpoint.images ?? [] : [], 'continuation',
+    );
+    const openingImages = [...(images.length ? contentBlocksOf(images) : saved.blocks), ...persistedImages];
+    const attachments = [...saved.attachments, ...persistedAttachments];
     this.store.appendEvent(runId, {
       type: 'user-message',
       stepId,
@@ -2386,6 +2409,12 @@ export class RunManager {
       }
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
+        // A completed turn acknowledges the opening payload. Until then a restart
+        // must replay it, including a crash after startSession but before delivery.
+        if (!state.cancelled) {
+          this.store.updateRun(runId, { continuationMessage: undefined });
+          this.store.flush();
+        }
         // Belt-and-braces: v2 `turn.completed` already flushed the delta
         // coalescers; the v1 turn boundary flushes again (idempotent) so no
         // buffered delta can outlive its turn.
@@ -2599,6 +2628,10 @@ export class RunManager {
     try {
       await session.result;
       if (sessionError) throw new Error(sessionError);
+      if (!state.cancelled) {
+        this.store.updateRun(runId, { continuationMessage: undefined });
+        this.store.flush();
+      }
       sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
       if (state.cancelled) {
         this.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: finishedAt() });
