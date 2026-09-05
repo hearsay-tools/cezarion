@@ -19,7 +19,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ZoomableImage } from '@/components/zoomable-image'
 import { Link } from '@/lib/project-router'
-import { isImageAttachmentName, type FileDiff, type ToolKind, type UiToolItem } from '@open-mercato/cezar-api-client'
+import { resolveApiUrl, isImageAttachmentName, type FileDiff, type ToolKind, type UiToolItem } from '@open-mercato/cezar-api-client'
 import { cn } from '@/lib/utils'
 
 import { Markdown } from './markdown'
@@ -212,7 +212,7 @@ export function UserBubble({
             ) : (
               <a
                 key={url}
-                href={url}
+                href={resolveApiUrl(url)}
                 download
                 data-slot="user-file"
                 className="inline-flex min-h-11 min-w-11 max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 py-1 text-xs text-muted-foreground hover:text-foreground"

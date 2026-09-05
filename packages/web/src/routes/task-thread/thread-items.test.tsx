@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 import type { UiToolItem } from '@open-mercato/cezar-api-client'
 
@@ -313,6 +314,17 @@ describe('sub-agent nesting (golden subagent-task fixture, end to end through th
  * broken attachment, on the one screen that is supposed to show them their own message back.
  */
 describe('UserBubble attachments', () => {
+  it.each(['pdf', 'txt', 'md'])('scopes a %s download to the active non-boot project', (extension) => {
+    setApiScope('second-project')
+    try {
+      render(<MemoryRouter><UserBubble text="brief" images={[`/api/v1/runs/r1/images/pasted-1.${extension}`]} /></MemoryRouter>)
+      expect(screen.getByText(`pasted-1.${extension}`).closest('a')?.getAttribute('href'))
+        .toBe(`/api/v1/p/second-project/runs/r1/images/pasted-1.${extension}`)
+    } finally {
+      setApiScope(null)
+    }
+  })
+
   it('shows an image inline and a file as a download chip', () => {
     render(
       <MemoryRouter>
