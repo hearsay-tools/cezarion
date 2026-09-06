@@ -907,6 +907,19 @@ export class RunStore extends EventEmitter {
     this.commitDelegation([{ id, delegation: { ...run.delegation, finishRequestedAt: new Date().toISOString() } }]);
   }
 
+  /** Cancellation supersedes pending Finish in one durable checkpoint. Also
+   * repairs cancelled-plus-intent snapshots left by older controllers. */
+  commitRootFinishCancellation(id: string): boolean {
+    const run = this.runs.get(id);
+    if (run?.delegation?.role !== 'root' || !run.delegation.finishRequestedAt ||
+      !['waiting', 'cancelled'].includes(run.status)) return false;
+    const { finishRequestedAt: _intent, ...delegation } = run.delegation;
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...run, delegation, status: 'cancelled', finishedAt: run.finishedAt ?? new Date().toISOString() });
+    this.commitIndex(proposed, new Set([id]));
+    return true;
+  }
+
   /** Publish terminal success and completed steps only after their atomic checkpoint.
    * A concurrent explicit cancellation is never overwritten by the async diff. */
   commitRootFinishSuccess(id: string, status: 'done' | 'review'): boolean {

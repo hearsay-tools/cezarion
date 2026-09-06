@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,7 +10,7 @@ import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
 import { autosaveCommit, createWorktree } from '../git-worktree.ts';
-import { createOwnedWorkspace, ensureOwnedWorkspace, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, verifyOwnedWorkspace } from './workspace.ts';
+import { createOwnedWorkspace, ensureOwnedWorkspace, planOwnedWorkspace, readOwnedDiff, removeOwnedWorkspace, resolveWorkerBaseline, verifyOwnedWorkspace } from './workspace.ts';
 
 const roots: string[] = [];
 const stores: RunStore[] = [];
@@ -390,5 +390,83 @@ describe('owned workspace continuation and queued recovery', () => {
     await finished(recoveredStore, run.id);
     expect(['done', 'review']).toContain(recoveredStore.getRun(run.id)?.status);
     expect(recoveredStore.getRun(run.id)).toMatchObject({ worktreePath: workspace.path, baseBranch: second, systemPrompt: 'Recovered inherited instruction', startedAt: '2022-01-01T00:00:00.000Z' });
+  });
+});
+
+
+describe('removeOwnedWorkspace verified retryable destruction', () => {
+  it('removes only owned resources, retains the receipt and is idempotent after reopen', async () => {
+    const { root, first, parentPath } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    await writeFile(join(workspace.path, 'tracked.txt'), 'worker commit');
+    git(workspace.path, 'commit', '-qam', 'worker');
+    const result = await removeOwnedWorkspace(root, workspace);
+    expect(result).toEqual({ workerId: workspace.ownerRunId, state: 'complete', remaining: [] });
+    expect(existsSync(workspace.path)).toBe(false);
+    expect(git(root, 'branch', '--list', workspace.branch)).toBe('');
+    expect(existsSync(receiptPath(root, workspace))).toBe(true);
+    expect(await removeOwnedWorkspace(root, workspace)).toEqual(result);
+    expect(await readFile(join(parentPath, 'tracked.txt'), 'utf8')).toBe('dirty');
+  });
+
+  for (const attack of ['symlink', 'moved', 'replacement', 'foreign checkout', 'detached', 'same-tip branch', 'missing identity', 'rewritten reflog', 'symlink reflog', 'resource collision'] as const) {
+    it(`preserves ambiguous resources: ${attack}`, async () => {
+      const { root, first } = await fixture();
+      const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+      const log = join(root, '.git/logs/refs/heads', workspace.branch);
+      if (attack === 'symlink') { await rename(workspace.path, workspace.path + '-moved'); await symlink(workspace.path + '-moved', workspace.path); }
+      if (attack === 'moved') git(root, 'worktree', 'move', workspace.path, workspace.path + '-moved');
+      if (attack === 'replacement') { git(root, 'worktree', 'remove', '--force', workspace.path); git(root, 'worktree', 'add', workspace.path, workspace.branch); }
+      if (attack === 'foreign checkout') git(workspace.path, 'checkout', '-qb', 'unowned');
+      if (attack === 'detached') git(workspace.path, 'checkout', '--detach');
+      if (attack === 'same-tip branch') {
+        git(workspace.path, 'checkout', '--detach'); git(root, 'branch', '-D', workspace.branch);
+        git(root, 'branch', workspace.branch, first); git(workspace.path, 'checkout', workspace.branch);
+      }
+      if (attack === 'missing identity') {
+        const receipt = JSON.parse(await readFile(receiptPath(root, workspace), 'utf8')); delete receipt.branchIdentity;
+        await writeFile(receiptPath(root, workspace), JSON.stringify(receipt));
+      }
+      if (attack === 'rewritten reflog') await writeFile(log, 'changed');
+      if (attack === 'symlink reflog') { await rename(log, log + '-real'); await symlink(log + '-real', log); }
+      const target = attack === 'resource collision' ? { ...workspace, resourceId: randomUUID() } : workspace;
+      expect(await removeOwnedWorkspace(root, target)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+      expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
+      expect(existsSync(attack === 'moved' ? workspace.path + '-moved' : workspace.path)).toBe(true);
+    });
+  }
+
+  it('retries branch-only cleanup after a locked ref; rejects repurposing after partial cleanup', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const lock = join(root, '.git/refs/heads', workspace.branch + '.lock');
+    await writeFile(lock, 'test lock');
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    expect(existsSync(workspace.path)).toBe(false);
+    await rm(lock);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    git(root, 'branch', workspace.branch, first);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
+  });
+
+  it('refuses changed branch tip and checkout elsewhere after partial removal', async () => {
+    const { root, first, second } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const lock = join(root, '.git/refs/heads', workspace.branch + '.lock'); await writeFile(lock, 'lock');
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ remaining: ['branch'] }); await rm(lock);
+    git(root, 'branch', '-f', workspace.branch, second);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    git(root, 'worktree', 'add', join(root, 'other-checkout'), workspace.branch);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    expect(git(root, 'rev-parse', workspace.branch)).toBe(second);
+  });
+
+  it('never recursively removes a locked worktree and can retry after unlock', async () => {
+    const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    git(root, 'worktree', 'lock', workspace.path);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(existsSync(workspace.path)).toBe(true); git(root, 'worktree', 'unlock', workspace.path);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete' });
   });
 });

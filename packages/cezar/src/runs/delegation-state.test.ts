@@ -199,6 +199,32 @@ describe('RunStore durable delegation', () => {
     expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.agentInputs).toEqual([delivered]);
   });
 
+  it('Finish cancellation atomically retires intent, fails closed on write failure and rejects late success', () => {
+    const run = parent();
+    store.updateRun(run.id, { status: 'waiting' });
+    store.commitRootFinishIntent(run.id);
+    const before = readFileSync(join(dataDir, 'runs.json'), 'utf8');
+    const snapshot = structuredClone(store.getRun(run.id));
+    const notifications: unknown[] = []; store.on('run', value => notifications.push(value));
+    mkdirSync(join(dataDir, 'runs.json.tmp'));
+    try {
+      expect(() => store.commitRootFinishCancellation(run.id)).toThrow();
+      expect(store.getRun(run.id)).toEqual(snapshot);
+      expect(readFileSync(join(dataDir, 'runs.json'), 'utf8')).toBe(before);
+      expect(notifications).toEqual([]);
+    } finally { rmSync(join(dataDir, 'runs.json.tmp'), { recursive: true }); }
+    expect(store.commitRootFinishCancellation(run.id)).toBe(true);
+    const cancelled = RunStore.open(dataDir, { keepLive: true }).getRun(run.id);
+    expect(cancelled).toMatchObject({ status: 'cancelled', delegation: root });
+    expect(cancelled?.delegation).not.toHaveProperty('finishRequestedAt');
+    expect(store.commitRootFinishSuccess(run.id, 'done')).toBe(false);
+    expect(store.commitRootFinishCancellation(run.id)).toBe(false);
+    // Even if a human continuation has already parked again, the old diff is obsolete.
+    store.updateRun(run.id, { status: 'waiting' });
+    expect(store.commitRootFinishSuccess(run.id, 'review')).toBe(false);
+    expect(store.getRun(run.id)?.status).toBe('waiting');
+  });
+
   it('publishes the complete durable proposed index before notifying any listener', () => {
     const first = store.createRun(input);
     const second = store.createRun(input);

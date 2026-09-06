@@ -118,7 +118,10 @@ The model records:
 - Inactive-root Finish intent: optional `finishRequestedAt`, atomically persisted before
   accepting explicit human Finish and retained until normal review/done settlement
   checkpoints terminal status and steps. Pending intent blocks new execution/input
-  authority but retains inspection/stop/cleanup and retries after restart.
+  authority (including monitoring wakes) but retains inspection/stop/cleanup and
+  retries after restart. Explicit cancellation atomically retires superseded Finish
+  intent; recovery repairs cancelled-plus-intent records without changing cancellation
+  or treating pending human questions as answered.
 - Spawn receipt: parent-scoped request ID and resulting worker ID, so retrying a
   lost response cannot create another worker.
 

@@ -1825,6 +1825,7 @@ export class RunManager {
   }
 
   cancel(runId: string): boolean {
+    const cancelledFinish = this.store.commitRootFinishCancellation(runId);
     this.withdrawWorkerWait(runId);
     // Still waiting in the queue: just drop it there.
     const queuedAt = this.queue.indexOf(runId);
@@ -1838,6 +1839,7 @@ export class RunManager {
     }
     const state = this.active.get(runId);
     if (!state) {
+      if (cancelledFinish) return true;
       const run = this.store.getRun(runId);
       if (run?.delegation && ['queued', 'running', 'waiting'].includes(run.status)) {
         this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
@@ -2210,6 +2212,9 @@ export class RunManager {
     try {
       for (const parent of this.store.listRuns()) {
         if (parent.delegation?.role !== 'root') continue;
+        if (parent.status === 'cancelled' && parent.delegation.finishRequestedAt) {
+          this.store.commitRootFinishCancellation(parent.id);
+        }
         if (!['queued', 'running', 'waiting'].includes(parent.status)) {
           if (!this.recovering) {
             this.withdrawWorkerWait(parent.id);
@@ -2493,6 +2498,8 @@ export class RunManager {
   private deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean): boolean {
     const state = this.active.get(runId);
     if (!state?.session?.open || state.cancelled) return false;
+    const run = this.store.getRun(runId);
+    if (!userAuthored && (!run || this.executionBlockedByRootFinish(run))) return false;
 
     const text = content
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
@@ -4277,6 +4284,8 @@ export class RunManager {
   }
 
   private armMonitoringWakeTimer(runId: string, state: ActiveRun): void {
+    const run = this.store.getRun(runId);
+    if (!run || this.executionBlockedByRootFinish(run)) return;
     const minutes = this.semaphore.monitoringWakeIntervalMinutes();
     if (minutes === null) {
       this.clearMonitoringWakeTimer(state, runId);
@@ -4301,6 +4310,8 @@ export class RunManager {
     this.store.updateRun(runId, { monitoringWakeAt: new Date(deadline).toISOString() });
     state.monitoringWakeTimer = setTimeout(() => {
       state.monitoringWakeTimer = undefined;
+      const run = this.store.getRun(runId);
+      if (!run || this.executionBlockedByRootFinish(run)) return;
       this.store.updateRun(runId, { monitoringWakeAt: undefined });
       if (!this.monitoring.has(runId) || !state.session?.open || state.cancelled) return;
       const wakeups = state.monitoringWakeups ?? 0;

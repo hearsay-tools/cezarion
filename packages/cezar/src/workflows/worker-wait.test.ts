@@ -349,6 +349,88 @@ describe('worker waits through RunManager', () => {
     });
   }
 
+  it.each([false, true])('monitoring synthetic delivery respects pending Finish=%s before wake bookkeeping', async pending => {
+    const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
+    const w = await worker(p.id, 'mock:monitoring keep going');
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    manager.enqueueOwnedRun(w.id);
+    await until(() => !!store.getRun(w.id)?.monitoringWakeAt);
+    const engine = manager as unknown as {
+      active: Map<string, { monitoringWakeups?: number; session: { sendAgentMessage(...args: unknown[]): boolean } }>;
+      monitoring: Set<string>;
+      settleSuccess(id: string, durable?: boolean): Promise<void>;
+      deliverMessage(id: string, content: { type: 'text'; text: string }[], human: boolean): boolean;
+    };
+    const state = engine.active.get(w.id)!;
+    const send = vi.spyOn(state.session, 'sendAgentMessage');
+    const settle = engine.settleSuccess.bind(manager);
+    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+    let completion: Promise<void> | undefined;
+    engine.settleSuccess = (id, durable) => id === p.id ? completion = gate.then(() => settle(id, durable)) : settle(id, durable);
+    const deadline = store.getRun(w.id)!.monitoringWakeAt!;
+    try {
+      if (pending) expect(manager.finish(p.id)).toBe(true);
+      await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
+      if (pending) {
+        expect(send).not.toHaveBeenCalled();
+        expect(state.monitoringWakeups ?? 0).toBe(0);
+        expect(store.getRun(w.id)).toMatchObject({ status: 'running', activity: 'monitoring', monitoringWakeAt: deadline });
+        expect(engine.monitoring.has(w.id)).toBe(true);
+        expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
+        expect(engine.deliverMessage(w.id, [{ type: 'text', text: 'synthetic retry' }], false)).toBe(false);
+        expect(send).not.toHaveBeenCalled();
+      } else {
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(state.monitoringWakeups).toBe(1);
+        expect(engine.monitoring.has(w.id)).toBe(false);
+        expect(store.getRun(w.id)?.activity).toBeUndefined();
+      }
+    } finally { vi.useRealTimers(); release(); await completion; }
+  });
+
+  it.each(['delayed diff', 'failed diff'])('cancellation retires pending Finish after %s and preserves human Continue across restart', async mode => {
+    const p = await parent('mock:ask'); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
+    const engine = manager as unknown as { settleSuccess(id: string, durable?: boolean): Promise<void> };
+    const settle = engine.settleSuccess.bind(manager);
+    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+    let completion: Promise<void> | undefined;
+    engine.settleSuccess = (id, durable) => completion = (mode === 'delayed diff' ? gate : Promise.resolve()).then(() => settle(id, durable));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      if (mode === 'failed diff') store.updateRun(p.id, { baseBranch: 'nonexistent-ref' });
+      expect(manager.finish(p.id)).toBe(true);
+      if (mode === 'failed diff') await until(() => warn.mock.calls.length > 0);
+      expect(manager.cancel(p.id)).toBe(true);
+      // Read disk without flush: cancellation and retirement are one durable checkpoint.
+      const disk = (JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]).find(run => run.id === p.id)!;
+      expect(disk.status).toBe('cancelled');
+      expect(disk.delegation).not.toHaveProperty('finishRequestedAt');
+      release(); await completion?.catch(() => {});
+      expect(store.getRun(p.id)?.status).toBe('cancelled');
+      expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
+      store.updateRun(p.id, { baseBranch: 'main' });
+      await restart();
+      expect(manager.continueRun(p.id)).toMatchObject({ ok: false, error: 'pending human question requires an explicit answer' });
+      expect(manager.continueRun(p.id, { text: 'actual human answer mock:hold' }).ok).toBe(true);
+      await until(() => store.readEvents(p.id).some(event => event.type === 'human-input-delivered'));
+    } finally { release(); await completion?.catch(() => {}); warn.mockRestore(); }
+  });
+
+  it('restart durably reconciles cancelled roots with superseded Finish intent', async () => {
+    const p = await parent('mock:ask'); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
+    store.commitRootFinishIntent(p.id);
+    store.updateRun(p.id, { status: 'cancelled', finishedAt: new Date().toISOString() });
+    store.flush(); const checkpoint = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
+    await restart(false, checkpoint);
+    expect(store.getRun(p.id)?.status).toBe('cancelled');
+    const disk = (JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]).find(run => run.id === p.id)!;
+    expect(disk.delegation).not.toHaveProperty('finishRequestedAt');
+    expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
+    expect(manager.continueRun(p.id)).toMatchObject({ ok: false, error: 'pending human question requires an explicit answer' });
+    expect(manager.continueRun(p.id, { text: 'actual human answer mock:hold' }).ok).toBe(true);
+    await until(() => store.readEvents(p.id).some(event => event.type === 'human-input-delivered'));
+  });
+
   it('a deadline write failure is contained and retried without losing intent or capacity', async () => {
     const p = await parent(); const w = await worker(p.id);
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
