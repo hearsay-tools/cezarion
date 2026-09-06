@@ -628,7 +628,10 @@ export async function searchGithubItems(
       .filter((item) => idOnly
         ? String(item.number).includes(numeric)
         : `#${item.number} ${item.title} ${item.author} ${item.body}`.toLowerCase().includes(queryText))
-      .slice(0, capped);
+      .slice(0, capped)
+      // Search rows defer checks to the same hydration endpoint as live results. Copy rather
+      // than mutate: the mock checks endpoint still reads the fixture's passing/failing values.
+      .map(item => item.kind === 'pr' ? { ...item, checks: null } : item);
     return { available: true, items, truncated: items.length >= capped };
   }
   const labelColors: Record<string, string> = {};

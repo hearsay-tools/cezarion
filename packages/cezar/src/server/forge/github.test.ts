@@ -31,6 +31,7 @@ import {
   forgetRefStatus,
   refNumberFromUrl,
   fetchGithub,
+  fetchGithubChecks,
   searchGithubItems,
   GH_CHECKS_MAX,
   GH_SEARCH_MAX,
@@ -1655,6 +1656,21 @@ describe('searchGithubItems (#730)', () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     const result = await searchGithubItems('/repo/dry-fields', kind, query);
     expect(result.items.map(item => item.number)).toEqual(numbers);
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('dry-run search defers PR checks to hydration without changing mock glyphs or caps', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const result = await searchGithubItems('/repo/dry-checks', 'pr', 'mock');
+    expect(result.items.map(item => ({ number: item.number, checks: item.checks }))).toEqual([
+      { number: 128, checks: null }, { number: 124, checks: null },
+    ]);
+    expect(await fetchGithubChecks('/repo/dry-checks', [128, 124])).toEqual({
+      available: true, checks: { 128: 'passing', 124: 'failing' },
+    });
+    const capped = await searchGithubItems('/repo/dry-checks', 'pr', 'mock', 1);
+    expect(capped).toMatchObject({ truncated: true, items: [{ number: 128, checks: null }] });
+    expect(capped.items).toHaveLength(1);
     expect(execFileMock).not.toHaveBeenCalled();
   });
 
