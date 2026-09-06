@@ -256,11 +256,12 @@ export function rollupToChecks(rollup: z.infer<typeof ghStatusCheckRollup>): Git
   return 'passing';
 }
 
-async function gh(repoRoot: string, args: string[], timeout = 15_000): Promise<string> {
+async function gh(repoRoot: string, args: string[], timeout = 15_000, signal?: AbortSignal): Promise<string> {
   const { stdout } = await exec('gh', args, {
     cwd: repoRoot,
     timeout,
     maxBuffer: 50 * 1024 * 1024,
+    ...(signal ? { signal } : {}),
   });
   return stdout;
 }
@@ -851,13 +852,14 @@ export function __clearRepoHandleCacheForTests(): void {
  *  slug or `gh` failed — the caller then skips checks entirely and commits render unglyphed. */
 export async function resolveRepoHandle(
   repoRoot: string,
+  signal?: AbortSignal,
 ): Promise<{ owner: string; name: string } | null> {
   const memo = repoHandleCache.get(repoRoot);
   if (memo !== undefined) return memo;
   let handle: { owner: string; name: string } | null;
   try {
     handle = parseOwnerName(
-      await gh(repoRoot, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']),
+      await gh(repoRoot, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], 15_000, signal),
     );
   } catch {
     // Transient — do NOT memoize, so the next thread retries.
