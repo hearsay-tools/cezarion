@@ -176,6 +176,9 @@ export interface SessionOptions {
    *  ALONGSIDE the v1 `AgentEvent`s (additive — v1 keeps flowing unchanged).
    *  RunManager consumption lands in R2 step 2.1. */
   onUiEvent?: (event: UiEvent) => void;
+  /** Readiness hint only, not an acknowledgement or a turn completion. The
+   * caller rechecks session identity, ask state and queue before retrying. */
+  onAgentInputReady?: () => void;
 }
 
 /**
@@ -193,6 +196,9 @@ export interface AgentSession {
   readonly pid?: number;
   /** Write a user message into the live session. False when it is closed. */
   sendMessage(content: ContentBlock[]): boolean;
+  /** Non-human input. False retains caller ownership for retry; NEVER fall back to sendMessage.
+   * Runners refuse pending asks and unsafe turn boundaries without writing an answer. */
+  sendAgentMessage(content: ContentBlock[]): boolean;
   /** Graceful close: end input, then a SIGTERM→SIGKILL watchdog. */
   end(): void;
   /** Hard stop (used by cancel). */

@@ -104,6 +104,7 @@ class CodexSession implements AgentSession {
   private stdinOpen = true;
   private threadId: string | undefined;
   private activeTurnId: string | undefined;
+  private agentInputReady = false;
   private pendingUserInput: PendingUserInput | undefined;
   private readonly toolCalls: AgentToolCallRecord[] = [];
   private readonly textChunks: string[] = [];
@@ -279,7 +280,20 @@ class CodexSession implements AgentSession {
     return this.child.pid;
   }
 
+  sendAgentMessage(content: ContentBlock[]): boolean {
+    if (!this.stdinOpen || !this.agentInputReady || this.pendingUserInput) return false;
+    this.agentInputReady = false;
+    if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
+    this.autoEndTimer = undefined;
+    // No await/ready gap and no native-answer branch: reserve the next turn now.
+    void this.startOrSteerTurn(textOf(content)).catch((err: unknown) => {
+      this.emit({ type: 'error', message: `codex: agent input failed: ${String(err)}` });
+    });
+    return true;
+  }
+
   sendMessage(content: ContentBlock[]): boolean {
+    this.agentInputReady = false;
     if (!this.stdinOpen) return false;
     if (this.autoEndTimer) {
       clearTimeout(this.autoEndTimer);
@@ -376,6 +390,7 @@ class CodexSession implements AgentSession {
 
   private async startOrSteerTurn(text: string): Promise<void> {
     if (!this.threadId) return;
+    this.agentInputReady = false;
     const input = [{ type: 'text', text, text_elements: [] }];
     if (this.activeTurnId) {
       await this.rpc.request('turn/steer', {
@@ -504,6 +519,7 @@ class CodexSession implements AgentSession {
         if (outcome.error !== undefined && !this.terminatedByCezar) {
           this.emit({ type: 'error', message: outcome.error });
         }
+        this.agentInputReady = true;
         this.emit({ type: 'turn-end' });
         if (this.opts.autoEndAfterFirstTurn && this.stdinOpen && !this.autoEndTimer) {
           this.autoEndTimer = setTimeout(() => this.end(), AUTO_END_DELAY_MS);

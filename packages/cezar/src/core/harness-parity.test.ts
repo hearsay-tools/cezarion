@@ -18,13 +18,18 @@
  * `workflows/run.ts` for claude and pi — groups 1, 3 and 6 are only uniform
  * above the seam.
  */
-import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { agentInputEventSchema, type AgentInput } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RUNNER_IDS, type AgentEvent, type RunnerId } from './agent-runner.ts';
 import { appendTurnText } from '../workflows/run.ts';
 import {
+  withOwnedInputRun,
+  promptFor,
   driveRun,
   driveSeam,
   lastIndexWhere,
@@ -290,6 +295,14 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
 const CONTROL_CRITERIA = [
   { id: 'S5', scenario: 'baseline' },
   { id: 'S6', scenario: 'baseline' },
+  { id: 'S11', scenario: 'ask' },
+  { id: 'S12', scenario: 'hold' },
+  { id: 'R6', scenario: 'ask' },
+  { id: 'R7', scenario: 'ask' },
+  { id: 'R8', scenario: 'hold' },
+  { id: 'R9', scenario: 'ask-reply-late' },
+  { id: 'R10', scenario: 'done' },
+  { id: 'R11', scenario: 'baseline' },
 ] as const;
 
 /**
@@ -342,6 +355,36 @@ describe('harness parity — seam tier', () => {
 
 describe('harness parity — seam tier, session control', () => {
   for (const backend of RUNNER_IDS) {
+    it(`${backend} S11 non-human input cannot answer a native or marker ask`, async () => {
+      await driveSeam(backend, 'ask', {
+        whileOpen: async (session, { v1, v2 }) => {
+          await waitFor(() => v2.some(e => e.type === 'ask.requested') || v1.some(e => e.type === 'turn-end'));
+          const ends = v1.filter(e => e.type === 'turn-end').length;
+          expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent steering' }])).toBe(false);
+          await new Promise(resolve => setTimeout(resolve, 150));
+          expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(ends);
+          expect(textEvents(v1).join('\n')).not.toContain('agent steering');
+          expect(session.sendMessage([{ type: 'text', text: 'Vitest' }])).toBe(true);
+          await waitFor(() => v1.filter(e => e.type === 'turn-end').length > ends);
+          expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent steering' }])).toBe(true);
+          await waitFor(() => textEvents(v1).some(text => text.includes('agent steering')));
+        },
+      });
+    }, 45_000);
+
+    it(`${backend} S12 non-human input refuses an unsafe turn and can retry at its boundary`, async () => {
+      await driveSeam(backend, 'hold', {
+        whileOpen: async (session, { v1 }) => {
+          expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).toBe(false);
+          await waitFor(() => v1.some(e => e.type === 'turn-end'));
+          expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).toBe(true);
+          await waitFor(() => textEvents(v1).some(text => text.includes('retried steering')));
+          session.end();
+          expect(session.sendAgentMessage([{ type: 'text', text: 'closed' }])).toBe(false);
+        },
+      });
+    }, 45_000);
+
     // Group 7 — mid-task follow-ups are the whole reason a session outlives a turn.
     it(
       `${backend} S5 accepts a follow-up message and completes a second turn`,
@@ -402,6 +445,281 @@ describe('harness parity — run tier', () => {
       );
     }
   }
+});
+
+const agentInput = (parentRunId: string, text = '/owned-skill mock:agent-echo parent steering'): AgentInput => ({
+  id: randomUUID(), source: 'agent', parentRunId, text, createdAt: new Date().toISOString(),
+});
+
+describe('harness parity — owned input run tier', () => {
+  for (const backend of RUNNER_IDS) {
+    it(`${backend} R6 queues before/during asks and drains only after a human answer`, async () => {
+      await withOwnedInputRun(backend, 'ask', async ({ store, manager, repoRoot, runId, parentRunId }) => {
+        // A real registry entry must NOT expand agent-originated slash text.
+        const skills = join(repoRoot, '.ai/cezar/skills');
+        mkdirSync(skills, { recursive: true });
+        writeFileSync(join(skills, 'owned-skill.md'), '---\nname: owned-skill\n---\nEXPANDED HUMAN SKILL');
+        const first = agentInput(parentRunId);
+        const second = agentInput(parentRunId, 'mock:agent-echo second steering');
+        expect(manager.steerWorker(runId, first)).toBe('queued');
+        expect(store.getRun(runId)?.agentInputs).toEqual([first]);
+        manager.enqueueOwnedRun(runId);
+        await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
+        expect(manager.steerWorker(runId, second)).toBe('queued');
+        await new Promise(resolve => setTimeout(resolve, 150));
+        expect(store.getRun(runId)?.status).toBe('waiting');
+        expect(store.getRun(runId)?.agentInputs?.every(input => !input.deliveredAt)).toBe(true);
+        expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
+        const attributed = store.readEvents(runId).filter(e => e.type === 'agent-input').map(e => agentInputEventSchema.parse(e).input);
+        expect(attributed).toEqual([first, second]);
+        expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+        await waitFor(() => store.getRun(runId)?.agentInputs?.every(input => !!input.deliveredAt) === true);
+        await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('second steering')));
+        const texts = store.readEvents(runId).filter(e => e.type === 'text').map(e => e.text).join('\n');
+        expect(texts).toContain(first.text);
+        expect(texts).not.toContain('EXPANDED HUMAN SKILL');
+        expect(store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text)).toEqual(['Vitest']);
+        expect((manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(false);
+        expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
+        await waitFor(() => store.getRun(runId)?.status === 'waiting');
+        expect(manager.steerWorker(runId, agentInput(parentRunId, 'mock:agent-echo after ask'))).toBe('delivered');
+      });
+    }, 60_000);
+
+    it(`${backend} R7 restart retains pending asks and input; only explicit-answer Continue drains it`, async () => {
+      await withOwnedInputRun(backend, 'ask', async fixture => {
+        const { runId, parentRunId } = fixture;
+        fixture.manager.enqueueOwnedRun(runId);
+        await waitFor(() => fixture.store.readEvents(runId).some(e => e.type === 'ask.requested'));
+        const input = agentInput(parentRunId);
+        expect(fixture.manager.steerWorker(runId, input)).toBe('queued');
+        const { store, manager } = await fixture.restart();
+        expect(store.getRun(runId)?.status).toBe('waiting');
+        expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+        expect(manager.continueRun(runId).ok).toBe(false);
+        expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
+        expect(manager.continueRun(runId, { text: 'Vitest' }).ok).toBe(true);
+        await waitFor(() => store.getRun(runId)?.agentInputs?.[0]?.deliveredAt !== undefined);
+        await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('parent steering')));
+        expect(store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text)).toEqual(['Vitest']);
+      });
+    }, 60_000);
+
+    it(`${backend} refused human delivery retains the ask live and after restart`, async () => {
+      await withOwnedInputRun(backend, 'ask', async fixture => {
+        const { manager, store, runId, parentRunId } = fixture;
+        manager.enqueueOwnedRun(runId);
+        await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
+        const internal = manager as unknown as {
+          active: Map<string, { pendingHumanAsk: boolean; session: import('./agent-runner.ts').AgentSession }>;
+          hasPendingHumanAsk(id: string): boolean;
+        };
+        const state = internal.active.get(runId)!;
+        const refuse = vi.spyOn(state.session, 'sendMessage').mockReturnValueOnce(false);
+        expect(manager.sendMessage(runId, [{ type: 'text', text: 'refused answer' }])).toBe(false);
+        refuse.mockRestore();
+        expect(state.pendingHumanAsk).toBe(true);
+        expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([]);
+        expect(internal.hasPendingHumanAsk(runId)).toBe(true);
+        const input = agentInput(parentRunId);
+        expect(manager.steerWorker(runId, input)).toBe('queued');
+        const recovered = await fixture.restart();
+        expect(recovered.store.getRun(runId)?.status).toBe('waiting');
+        expect(recovered.store.getRun(runId)?.agentInputs).toEqual([input]);
+        expect(recovered.manager.continueRun(runId).ok).toBe(false);
+        expect(recovered.store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text))
+          .toEqual(['refused answer']);
+        expect(recovered.manager.continueRun(runId, { text: 'Vitest' }).ok).toBe(true);
+        await waitFor(() => !!recovered.store.getRun(runId)?.agentInputs?.[0]?.deliveredAt);
+        const replay = recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean };
+        expect(replay.hasPendingHumanAsk(runId)).toBe(false);
+      });
+    }, 60_000);
+
+    it(`${backend} R10 accepted input precedes DONE but explicit termination is never prolonged`, async () => {
+      for (const stop of ['finish', 'cancel', 'destroy'] as const) {
+        await withOwnedInputRun(backend, 'done', async ({ store, manager, runId, parentRunId }) => {
+          const accepted = agentInput(parentRunId, 'mock:hold');
+          expect(manager.steerWorker(runId, accepted)).toBe('queued');
+          manager.enqueueOwnedRun(runId);
+          await waitFor(() => !!store.getRun(runId)?.agentInputs?.[0]?.deliveredAt);
+          const pending = agentInput(parentRunId);
+          expect(manager.steerWorker(runId, pending)).toBe('queued');
+          if (stop === 'destroy') {
+            const delegation = store.getRun(runId)!.delegation!;
+            if (delegation.role !== 'worker') throw new Error('expected worker');
+            store.commitDelegation([{ id: runId, delegation: { ...delegation,
+              destroy: { requestedAt: new Date().toISOString(), phase: 'requested', remaining: ['process', 'worktree', 'branch'] },
+            } }]);
+            expect(() => manager.steerWorker(runId, agentInput(parentRunId))).toThrow(/state/i);
+          }
+          if (stop === 'cancel') manager.cancel(runId);
+          else manager.finish(runId);
+          await waitFor(() => !manager.isActive(runId));
+          expect(store.getRun(runId)?.agentInputs?.[1]).toEqual(pending);
+          expect(['review', 'done', 'cancelled']).toContain(store.getRun(runId)?.status);
+          expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
+        });
+      }
+    }, 60_000);
+
+    it(`${backend} R11 post-send checkpoint failure interrupts and reports failure without dropping input`, async () => {
+      await withOwnedInputRun(backend, 'baseline', async ({ store, manager, repoRoot, runId, parentRunId }) => {
+        manager.enqueueOwnedRun(runId);
+        await waitFor(() => store.getRun(runId)?.status === 'waiting');
+        store.flush();
+        const tmp = join(repoRoot, '.ai/cezar/runs.json.tmp');
+        const failAfterEnqueue = ({ event }: { event: { type: string } }) => {
+          if (event.type === 'agent-input') mkdirSync(tmp);
+        };
+        store.on('event', failAfterEnqueue);
+        const input = agentInput(parentRunId, 'mock:hold');
+        try {
+          expect(() => manager.steerWorker(runId, input)).toThrow(/agent input delivery checkpoint failed/i);
+          expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+        } finally {
+          store.off('event', failAfterEnqueue);
+          rmSync(tmp, { recursive: true, force: true });
+        }
+        await waitFor(() => !manager.isActive(runId));
+        expect(store.getRun(runId)?.status).toBe('failed');
+        expect(store.getRun(runId)?.error).toContain('agent input delivery checkpoint failed');
+        expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+      });
+    }, 60_000);
+
+    it(`${backend} R9 continuation asks keep input queued through delayed native reply acknowledgement`, async () => {
+      await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
+        manager.enqueueOwnedRun(runId);
+        await waitFor(() => store.getRun(runId)?.status === 'waiting');
+        manager.finish(runId);
+        await waitFor(() => !manager.isActive(runId));
+        expect(manager.continueRun(runId, { text: promptFor(backend, 'ask-reply-late') }).ok).toBe(true);
+        await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
+        const input = agentInput(parentRunId);
+        expect(manager.steerWorker(runId, input)).toBe('queued');
+        expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+        await waitFor(() => store.getRun(runId)?.agentInputs?.[0]?.deliveredAt !== undefined);
+        await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes(input.text)));
+        expect(store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text))
+          .toEqual([promptFor(backend, 'ask-reply-late'), 'Vitest']);
+      });
+    }, 60_000);
+
+    it(`${backend} R8 queued restart/starting inputs persist; disk failure emits and delivers nothing`, async () => {
+      await withOwnedInputRun(backend, 'hold', async fixture => {
+        const { runId, parentRunId, repoRoot } = fixture;
+        fixture.store.flush();
+        const tmp = join(repoRoot, '.ai/cezar/runs.json.tmp');
+        mkdirSync(tmp);
+        try {
+          expect(() => fixture.manager.steerWorker(runId, agentInput(parentRunId))).toThrow();
+          expect(fixture.store.getRun(runId)?.agentInputs).toBeUndefined();
+          expect(fixture.store.readEvents(runId).filter(e => e.type === 'agent-input')).toEqual([]);
+        } finally { rmSync(tmp, { recursive: true }); }
+        const input = agentInput(parentRunId);
+        expect(fixture.manager.steerWorker(runId, input)).toBe('queued');
+        const { store, manager } = await fixture.restart();
+        const second = agentInput(parentRunId, 'mock:agent-echo during startup');
+        expect(manager.steerWorker(runId, second)).toBe('queued');
+        await waitFor(() => store.getRun(runId)?.agentInputs?.every(input => !!input.deliveredAt) === true);
+        await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('during startup')));
+        expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
+        manager.finish(runId);
+        await waitFor(() => !manager.isActive(runId));
+        expect(() => manager.steerWorker(runId, agentInput(parentRunId))).toThrow(/state/i);
+      });
+    }, 60_000);
+  }
+});
+
+describe('OpenCode durable input acknowledgements', () => {
+  it.each(['rejected', 'finished', 'cancelled'] as const)('%s opening answer never checkpoints an unanswered ask', async outcome => {
+    await withOwnedInputRun('opencode', 'ask', async fixture => {
+      const { runId, parentRunId } = fixture;
+      fixture.manager.enqueueOwnedRun(runId);
+      await waitFor(() => fixture.store.readEvents(runId).some(e => e.type === 'ask.requested'));
+      const input = agentInput(parentRunId);
+      expect(fixture.manager.steerWorker(runId, input)).toBe('queued');
+      const { store, manager } = await fixture.restart();
+      const before = store.readEvents(runId).at(-1)!.seq;
+      expect(manager.continueRun(runId, { text: outcome === 'rejected' ? 'mock:reject-agent-post' : 'mock:hold' }).ok).toBe(true);
+      if (outcome !== 'rejected') {
+        await waitFor(() => store.readEvents(runId).some(e => e.seq > before && e.type === 'turn.started'));
+        if (outcome === 'finished') expect(manager.finish(runId)).toBe(true);
+        else manager.cancel(runId);
+      }
+      await waitFor(() => !manager.isActive(runId));
+      const events = store.readEvents(runId).filter(e => e.seq > before);
+      if (outcome === 'rejected') {
+        expect(store.getRun(runId)?.status).toBe('failed');
+        expect(events.filter(e => e.type === 'error')).toHaveLength(1);
+        expect(events.findIndex(e => e.type === 'error')).toBeLessThan(events.findIndex(e => e.type === 'turn-end'));
+      }
+      expect(events.filter(e => e.type === 'human-input-delivered')).toEqual([]);
+      expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+      const recovered = await fixture.restart();
+      expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(true);
+      expect(recovered.manager.continueRun(runId).ok).toBe(false);
+      expect(recovered.store.getRun(runId)?.agentInputs).toEqual([input]);
+    });
+  }, 60_000);
+
+  it.each(['fresh', 'continuation'] as const)('%s late reply acknowledgement plus DONE retries accepted input', async mode => {
+    await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId, parentRunId }) => {
+      const prompt = 'mock:ask-reply-late-done';
+      if (mode === 'fresh') store.updateRun(runId, { task: prompt });
+      manager.enqueueOwnedRun(runId);
+      if (mode === 'continuation') {
+        await waitFor(() => store.getRun(runId)?.status === 'waiting');
+        manager.finish(runId);
+        await waitFor(() => !manager.isActive(runId));
+        expect(manager.continueRun(runId, { text: prompt }).ok).toBe(true);
+      }
+      await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
+      const input = agentInput(parentRunId);
+      expect(manager.steerWorker(runId, input)).toBe('queued');
+      expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+      await waitFor(() => !!store.getRun(runId)?.agentInputs?.[0]?.deliveredAt);
+      await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes(input.text)));
+      expect(manager.isActive(runId)).toBe(true);
+    });
+  }, 60_000);
+
+  it('rejected mid-session human POST remains nonfatal', async () => {
+    await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId }) => {
+      manager.enqueueOwnedRun(runId);
+      await waitFor(() => store.getRun(runId)?.status === 'waiting');
+      expect(manager.sendMessage(runId, [{ type: 'text', text: 'mock:reject-agent-post' }])).toBe(true);
+      await waitFor(() => store.readEvents(runId).some(e => e.type === 'note' && String(e.message).includes('prompt failed')));
+      expect(store.readEvents(runId).filter(e => e.type === 'error')).toEqual([]);
+      expect(manager.isActive(runId)).toBe(true);
+      manager.finish(runId);
+      await waitFor(() => !manager.isActive(runId));
+      expect(['done', 'review']).toContain(store.getRun(runId)?.status);
+    });
+  }, 60_000);
+
+  it.each(['fresh', 'continuation'] as const)('%s rejected agent POST fails without draining more accepted input', async mode => {
+    await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId, parentRunId }) => {
+      manager.enqueueOwnedRun(runId);
+      await waitFor(() => store.getRun(runId)?.status === 'waiting');
+      if (mode === 'continuation') {
+        manager.finish(runId);
+        await waitFor(() => !manager.isActive(runId));
+        expect(manager.continueRun(runId, { text: 'mock:baseline' }).ok).toBe(true);
+        await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+      }
+      expect(manager.steerWorker(runId, agentInput(parentRunId, 'mock:reject-agent-post'))).toBe('delivered');
+      const pending = agentInput(parentRunId);
+      expect(manager.steerWorker(runId, pending)).toBe('queued');
+      await waitFor(() => store.readEvents(runId).some(e => e.type === 'error'));
+      await waitFor(() => !manager.isActive(runId));
+      expect(store.getRun(runId)?.status).toBe('failed');
+      expect(store.getRun(runId)?.error).toContain('agent input failed');
+      expect(store.getRun(runId)?.agentInputs?.[1]).toEqual(pending);
+    });
+  }, 60_000);
 });
 
 describe('harness parity — the matrix itself', () => {

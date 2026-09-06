@@ -18,6 +18,7 @@
  *    and a backend with no dry-run short-circuit is driven the same way as one
  *    that has it.
  */
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,6 +31,7 @@ import { createRunner } from './runner-factory.ts';
 import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
+import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import type { WorkflowDef } from '../workflows/types.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -56,6 +58,7 @@ export const SCENARIOS = [
   'provider-error',
   'ask',
   'ask-bad',
+  'ask-reply-late',
   'subagent',
 ] as const;
 export type ScenarioName = (typeof SCENARIOS)[number];
@@ -95,6 +98,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       // Claude's mock has carried an auth-rejection branch since #430.
       'provider-error': 'mock:auth-error',
       ask: 'mock:ask',
+      'ask-reply-late': 'mock:ask',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagents',
     },
@@ -111,6 +115,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       // #83: 0.147 reports provider rejection on turn/completed with turn.error.
       'provider-error': 'mock:provider-error',
       ask: 'mock:native-codex-ask',
+      'ask-reply-late': 'mock:native-codex-ask',
       'ask-bad': 'mock:ask-bad',
       // #600's repro: a child thread's own turn/completed must not end the parent.
       subagent: 'mock:child-turn',
@@ -127,6 +132,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       ask: 'mock:ask',
+      'ask-reply-late': 'mock:ask-reply-late',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagent',
     },
@@ -142,6 +148,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       ask: 'mock:ask',
+      'ask-reply-late': 'mock:ask',
       'ask-bad': 'mock:ask-bad',
       // No `subagent`: see the S9 entry in PARITY_EXEMPTIONS.
     },
@@ -416,4 +423,98 @@ function readRunEvents(repoRoot: string, runId: string): Record<string, unknown>
     }
   }
   return events;
+}
+
+/** Observe, do not replace, the manager's fire-and-forget Git bookkeeping so
+ * test-owned directories outlive every real write. */
+function trackTurnBookkeeping(manager: RunManager): () => Promise<void> {
+  const pending = new Set<Promise<void>>();
+  const record = manager.recordTurnEnd.bind(manager);
+  manager.recordTurnEnd = (runId, text) => {
+    const result = record(runId, text);
+    pending.add(result);
+    void result.finally(() => pending.delete(result));
+    return result;
+  };
+  return async () => { while (pending.size) await Promise.all(pending); };
+}
+
+/** An owned worker, using real disk/Git state and the same four wire mocks. */
+export async function withOwnedInputRun(
+  backend: RunnerId,
+  scenario: ScenarioName,
+  body: (fixture: {
+    repoRoot: string; runId: string; parentRunId: string;
+    store: RunStore; manager: RunManager;
+    restart: () => Promise<{ store: RunStore; manager: RunManager }>;
+  }) => Promise<void>,
+): Promise<void> {
+  const adapter = HARNESS_ADAPTERS[backend];
+  const savedBin = process.env[adapter.binEnv];
+  const savedDry = process.env.CEZ_DRY_RUN;
+  const savedAutoName = process.env.CEZ_AUTONAME;
+  // Naming is a separate auxiliary invocation, not part of input delivery.
+  process.env.CEZ_AUTONAME = '0';
+  process.env[adapter.binEnv] = adapter.mockBin;
+  delete process.env.CEZ_DRY_RUN;
+  const repoRoot = mkdtempSync(join(tmpdir(), `cez-owned-input-${backend}-`));
+  let store: RunStore | undefined;
+  let manager: RunManager | undefined;
+  let runId: string | undefined;
+  let drainBookkeeping = async () => {};
+  try {
+    await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'user.name', 'test'], { cwd: repoRoot });
+    await execFileAsync('git', ['config', 'user.email', 'test@local'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
+    await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
+    await execFileAsync('git', ['commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    const sha = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
+    store = RunStore.open(join(repoRoot, '.ai/cezar'));
+    const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    // This fixture tests worker recovery, not root scheduling (Task 5). A queued
+    // root would itself be launched by recover() and outlive the worker teardown.
+    store.updateRun(parent.id, { status: 'done' });
+    store.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } }]);
+    runId = randomUUID();
+    const workspace = await planOwnedWorkspace(repoRoot, runId, sha);
+    store.createOwnedRun({ title: 'worker', task: promptFor(backend, scenario), workflow: 'quick-task', runner: backend,
+      steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }, parent.id, randomUUID(), {
+      role: 'worker', parentRunId: parent.id, permissions: [], workspace,
+    }, 'a'.repeat(64));
+    manager = new RunManager(store, repoRoot);
+    drainBookkeeping = trackTurnBookkeeping(manager);
+    const restart = async () => {
+      store!.flush();
+      const index = readFileSync(join(repoRoot, '.ai/cezar/runs.json'), 'utf8');
+      // Stop only test-owned processes, then restore the precise pre-crash disk
+      // checkpoint. No fake manager/session: recovery opens a new real store.
+      manager!.cancel(runId!);
+      await waitFor(() => !manager!.isActive(runId!));
+      await drainBookkeeping();
+      manager!.dispose();
+      store!.flush();
+      writeFileSync(join(repoRoot, '.ai/cezar/runs.json'), index);
+      store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
+      manager = new RunManager(store, repoRoot);
+      drainBookkeeping = trackTurnBookkeeping(manager);
+      await manager.recover();
+      return { store, manager };
+    };
+    await body({ repoRoot, runId, parentRunId: parent.id, store, manager, restart });
+  } finally {
+    if (runId && manager) {
+      manager.cancel(runId);
+      await waitFor(() => !manager!.isActive(runId!));
+    }
+    await drainBookkeeping();
+    manager?.dispose();
+    store?.flush();
+    if (savedBin === undefined) delete process.env[adapter.binEnv];
+    else process.env[adapter.binEnv] = savedBin;
+    if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
+    if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
+    else process.env.CEZ_AUTONAME = savedAutoName;
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 }

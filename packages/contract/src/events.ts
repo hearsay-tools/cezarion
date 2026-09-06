@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { agentInputSchema, workerOutcomeSchema } from './delegation.ts';
 
 /**
  * SSE frame payloads — the only shapes in this contract that are NOT derived from a route.
@@ -26,6 +27,28 @@ export const runEventSchema = z.looseObject({
   type: z.string(),
 });
 export type RunEvent = z.infer<typeof runEventSchema>;
+
+/** Non-human input never masquerades as a user-message/ask answer. */
+export const agentInputEventSchema = runEventSchema.extend({
+  type: z.literal('agent-input'),
+  input: agentInputSchema,
+});
+export type AgentInputEvent = z.infer<typeof agentInputEventSchema>;
+
+/** Successful human delivery answers only the durable ask it was sent for.
+ * Transcript user-message entries record attempts, not delivery acknowledgements. */
+export const humanInputDeliveredEventSchema = runEventSchema.extend({
+  type: z.literal('human-input-delivered'),
+  askSeq: z.number().int().nonnegative(),
+});
+export type HumanInputDeliveredEvent = z.infer<typeof humanInputDeliveredEventSchema>;
+
+/** Linked terminal outcomes, rather than completion inferred from assistant prose. */
+export const workerOutcomeEventSchema = runEventSchema.extend({
+  type: z.literal('worker-outcome'),
+  outcome: workerOutcomeSchema,
+});
+export type WorkerOutcomeEvent = z.infer<typeof workerOutcomeEventSchema>;
 
 /** Fixed protocol-level item count for one progressive transcript page. */
 export const RUN_HISTORY_PAGE_ITEMS = 100;

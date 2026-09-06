@@ -49,6 +49,13 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
         pendingMessageCount: 0,
       },
     });
+  } else if (command.type === 'prompt' && command.message.includes('mock:agent-echo')) {
+    // rpc-lifecycle.ndjson's normal prompt/assistant/settled sequence.
+    send({ type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' });
+    send({ type: 'turn_start' });
+    sendText([command.message]);
+    sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:split-text')) {
     // Pi streams one text_delta per token (#2's root cause), so the marker is
     // split across deltas. Only a coalescer reassembles `CEZ:MONITORING`;

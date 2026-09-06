@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { queuedMessageSchema as continuationMessageSchema } from '@open-mercato/cezar-contract';
+import {
+  agentInputSchema, delegationStateSchema, workerCreationReceiptSchema,
+  continuationMessageSchema,
+} from '@open-mercato/cezar-contract';
+import type { AgentInput, DelegationState } from '@open-mercato/cezar-contract';
+import { storedDelegationStateSchema } from './delegation-state.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -137,6 +142,9 @@ export const runRecordSchema = z.object({
   queuedMessages: z.array(queuedMessageSchema).optional(),
   /** Durable Continue opening message; id is its synthetic step id. No base64 in the index. */
   continuationMessage: continuationMessageSchema.optional(),
+  delegation: storedDelegationStateSchema,
+  /** Non-human input must retain attribution through restart, separately from human answers. */
+  agentInputs: z.array(agentInputSchema).optional(),
   /** URLs of images attached to the initial task prompt, for the thread's first bubble
    *  (#image-display) — persisted like agent screenshots, served from `/images/`. */
   taskImages: z.array(z.string()).optional(),
@@ -801,8 +809,17 @@ export class RunStore extends EventEmitter {
     variant?: string;
     steps: Array<Pick<StepState, 'id' | 'name' | 'kind'>>;
   }): RunRecord {
+    const run = this.buildRun(input, randomUUID());
+    this.runs.set(run.id, run);
+    this.pruneOldRuns();
+    this.touch(run);
+    return run;
+  }
+
+  /** Build without publishing: owned creation must commit its receipt and run together. */
+  private buildRun(input: Parameters<RunStore['createRun']>[0], id: string): RunRecord {
     const run: RunRecord = {
-      id: randomUUID(),
+      id,
       // Scrubbed on the way in, exactly as `updateRun` scrubs it on the way
       // through (#456 review) — a token pasted into the prompt otherwise sat
       // verbatim in `runs.json` from creation. `task` is deliberately NOT
@@ -837,10 +854,106 @@ export class RunStore extends EventEmitter {
     // first agent event (#407, #554).
     this.trackReferencedPrs(run, input.task);
     this.trackReferencedIssues(run, input.task);
-    this.runs.set(run.id, run);
-    this.pruneOldRuns();
-    this.touch(run);
     return run;
+  }
+
+  /** Observable atomic input checkpoint: a failed write publishes nothing. */
+  commitAgentInputs(id: string, inputs: readonly AgentInput[]): void {
+    const run = this.runs.get(id);
+    if (!run) throw new Error('missing agent input target');
+    const agentInputs = inputs.map(input => agentInputSchema.parse(input));
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...run, agentInputs });
+    this.commitIndex(proposed, new Set([id]));
+  }
+
+  /** Persist all authority patches before exposing any of them to the engine or subscribers. */
+  commitDelegation(patches: ReadonlyArray<{ id: string; delegation: DelegationState }>): void {
+    if (patches.length === 0) return;
+    const proposed = new Map(this.runs);
+    const changed = new Set<string>();
+    for (const patch of patches) {
+      const run = proposed.get(patch.id);
+      if (!run || changed.has(patch.id)) throw new Error('missing or duplicate delegation patch target');
+      const delegation = delegationStateSchema.parse(patch.delegation);
+      proposed.set(patch.id, { ...run, delegation });
+      changed.add(patch.id);
+    }
+    this.commitIndex(proposed, changed);
+  }
+
+  /**
+   * requestHash is supplied only by the trusted service: hash the ORIGINAL normalized request,
+   * before resolving refs. A retry keeps the original worker and pinned SHA even if HEAD moved.
+   * workspace.ownerRunId is the trusted service's preallocated worker UUID.
+   */
+  createOwnedRun(
+    input: Parameters<RunStore['createRun']>[0],
+    parentId: string,
+    requestId: string,
+    worker: DelegationState,
+    requestHash: string,
+  ): RunRecord {
+    const parent = this.runs.get(parentId);
+    const authority = delegationStateSchema.safeParse(parent?.delegation);
+    if (!parent || !authority.success || authority.data.role !== 'root') {
+      throw new Error('invalid delegation parent');
+    }
+    // Validate retry identity independently of the newly proposed resource.
+    const identity = workerCreationReceiptSchema.pick({ requestId: true, requestHash: true })
+      .parse({ requestId, requestHash });
+    const receipt = authority.data.receipts.find(entry => entry.requestId === identity.requestId);
+    if (receipt) {
+      if (receipt.requestHash !== identity.requestHash) throw new Error('request ID payload conflict');
+      const existing = this.runs.get(receipt.workerId);
+      const metadata = delegationStateSchema.safeParse(existing?.delegation);
+      if (!existing || !metadata.success || metadata.data.role !== 'worker' ||
+        metadata.data.parentRunId !== parentId || metadata.data.workspace.ownerRunId !== existing.id ||
+        existing.id === parentId) throw new Error('invalid request receipt ownership');
+      return existing;
+    }
+    const metadata = delegationStateSchema.parse(worker);
+    if (metadata.role !== 'worker' || metadata.parentRunId !== parentId ||
+      metadata.workspace.ownerRunId === parentId || input.worktree === false) {
+      throw new Error('invalid worker ownership');
+    }
+    const workspace = metadata.workspace;
+    if (this.runs.has(workspace.ownerRunId)) throw new Error('worker run ID collision');
+    for (const run of this.runs.values()) {
+      const owned = run.delegation?.role === 'worker' ? run.delegation.workspace : undefined;
+      if ((owned && (owned.resourceId === workspace.resourceId || owned.path === workspace.path ||
+        owned.branch === workspace.branch)) || run.worktreePath === workspace.path || run.branch === workspace.branch) {
+        throw new Error('worker resource ownership collision');
+      }
+    }
+    const delegation = delegationStateSchema.parse({
+      ...authority.data,
+      receipts: [...authority.data.receipts, { ...identity, workerId: workspace.ownerRunId }],
+    });
+    const run = { ...this.buildRun(input, workspace.ownerRunId), delegation: metadata };
+    const proposed = new Map(this.runs);
+    proposed.set(parentId, { ...parent, delegation });
+    proposed.set(run.id, run);
+    // No pruning here: deleting run history cannot be part of a proposed index transaction.
+    this.commitIndex(proposed, new Set([parentId, run.id]));
+    return run;
+  }
+
+  /** Atomic file replacement is the durability boundary; flush() is deliberately best-effort. */
+  private commitIndex(proposed: Map<string, RunRecord>, changed: ReadonlySet<string>): void {
+    this.writeIndex([...proposed.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    // Preserve existing record references, but expose the entire transaction before its first event.
+    for (const id of changed) {
+      const next = proposed.get(id)!;
+      const current = this.runs.get(id);
+      if (current) Object.assign(current, next);
+      else this.runs.set(id, next);
+    }
+    for (const id of changed) this.emit('run', this.runs.get(id)!);
   }
 
   updateRun(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): RunRecord | undefined {
@@ -1443,12 +1556,16 @@ export class RunStore extends EventEmitter {
     this.saveTimer.unref?.();
   }
 
-  private saveNow(): void {
+  private writeIndex(runs: readonly RunRecord[]): void {
     const indexPath = join(this.dataDir, 'runs.json');
     const tmpPath = `${indexPath}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(runs, null, 2), 'utf8');
+    renameSync(tmpPath, indexPath);
+  }
+
+  private saveNow(): void {
     try {
-      writeFileSync(tmpPath, JSON.stringify(this.listRuns(), null, 2), 'utf8');
-      renameSync(tmpPath, indexPath);
+      this.writeIndex(this.listRuns());
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[cez] failed to save runs.json: ${message}`);

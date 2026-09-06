@@ -356,3 +356,16 @@ describe('ClaudeCliRunner token usage', () => {
     }
   });
 });
+
+it('keeps non-human input out of a Claude turn already queued by a human', async () => {
+  const { driveSeam, waitFor } = await import('./harness-parity.testkit.ts');
+  await driveSeam('claude', 'hold', {
+    whileOpen: async (session, { v1 }) => {
+      expect(session.sendMessage([{ type: 'text', text: 'mock:ask' }])).toBe(true);
+      await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 1);
+      expect(session.sendAgentMessage([{ type: 'text', text: 'must stay queued' }])).toBe(false);
+      await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 2);
+      expect(session.sendAgentMessage([{ type: 'text', text: 'must not answer the ask' }])).toBe(false);
+    },
+  });
+});

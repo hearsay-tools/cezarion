@@ -165,6 +165,13 @@ async function respond(userText, imageCount) {
     return;
   }
 
+  // Same assistant/result envelopes as the baseline stream-json fixture.
+  if (userText.includes('mock:agent-echo')) {
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: userText }] } });
+    emit({ type: 'result', subtype: 'success', result: userText, usage: { input_tokens: 20, output_tokens: 10 } });
+    return;
+  }
+
   // `mock:hold` → pause, THEN stream the content and the terminal `result`.
   // The harness parity matrix's S2 row asserts turn-end follows the last
   // content event, so the pause has to sit BEFORE the content: a runner that

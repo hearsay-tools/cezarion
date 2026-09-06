@@ -76,7 +76,8 @@ A live session over one spawned process, alive between turns:
 interface AgentSession {
   result: Promise<AgentRunResult>;   // resolves when the process exits
   readonly pid?: number;             // root of the run's process tree (resource telemetry, #348)
-  sendMessage(content: ContentBlock[]): boolean;  // false when closed
+  sendMessage(content: ContentBlock[]): boolean;  // human input; false when closed
+  sendAgentMessage(content: ContentBlock[]): boolean; // non-human; false when unsafe
   end(): void;                       // graceful: end input, SIGTERM→SIGKILL watchdog
   interrupt(): void;                 // hard stop (cancel)
   readonly open: boolean;
@@ -98,10 +99,52 @@ signal — keeps running, and the escalation written for exactly that case is
 skipped. Use `trackChildExit(child)` (`packages/cezar/src/core/agent-runner.ts`),
 which seeds from `exitCode`/`signalCode` and listens for `exit`.
 
+**Non-human input (owned workers, 2026-09-06).** `sendAgentMessage` must never
+resolve a native question or a portable marker ask. False means the caller still
+owns the input and must retry at a later safe boundary, NEVER fall back to
+`sendMessage`. All four runners conservatively accept it at idle turn boundaries;
+existing human mid-turn steering and native answer routing are unchanged. Already
+queued human turns have priority: Claude counts outstanding prompt results and
+OpenCode counts queued human prompts through their HTTP acknowledgements. Pi's
+autonomously resumed turns are active too. OpenCode preserves its immediate v1
+SSE-idle boundary; when a question-reply or queued-prompt HTTP acknowledgement
+settles later, it emits an in-process readiness hint instead.
+
+RunManager persists an attributed `AgentInput` before calling this seam, retains
+it on false, and records `deliveredAt` only after true. The `agent-input` event
+carries `{input: {id, source: 'agent'|'lifecycle', parentRunId, text, createdAt,
+deliveredAt?}}`; it is not a `user-message`, does not resolve an ask card, and
+never expands registry slash skills. The queue cap is 32 **undelivered** inputs.
+Fresh, queued, starting, parked and continuation sessions read the same durable
+queue. Owned workers with pending asks recover without synthetic answers; only
+explicit human-answer Continue can reopen them. Bare Continue cannot consume an ask.
+`user-message` remains the legacy transcript of human attempts, including refused
+sends; ask recovery instead replays validated `human-input-delivered` checkpoints
+with the answered `askSeq`. Live sends checkpoint only on true; continuation opening
+answers checkpoint at their first successful, open-session turn boundary (never
+a fatal, cancelled or shutdown boundary). A checkpoint for an older
+ask cannot clear a newer question; absent checkpoints retain the ask conservatively.
+
+Already accepted input precedes automatic `CEZ:DONE` closure at a safe boundary,
+not explicit Finish, cancellation, destruction or fatal failure. Empty queues
+preserve ordinary completion. A temporary refusal during a late OpenCode HTTP ack
+keeps accepted input queued even when the completed turn declares DONE. Rejected
+OpenCode agent-input POSTs emit a fatal error before any synthetic turn boundary,
+stop further delivery, and fail the run. Opening POST failure is also fatal before
+its synthetic boundary, reported once; human follow-up rejection stays nonfatal.
+Disk and stdin are not transactional: a failed
+post-send checkpoint interrupts the invocation and reports a persistence failure,
+retaining the same input ID. Recovery may replay that identified context (at-least-once,
+not exactly-once delivery); it must never silently drop it or claim success.
+
 `SessionOptions`:
 
 - `autoEndAfterFirstTurn?` — single-turn behavior for non-interactive workflow
   steps; interactive sessions control `end()` themselves.
+- `onAgentInputReady?: () => void` — optional in-process retry hint, NOT delivery
+  acknowledgement or completion. Only a successful late reply/prompt at an idle,
+  open session with no queued human prompt emits it. The manager checks current session identity, pending asks,
+  lifecycle and reentrant/duplicate drains; stale/disposed sessions are ignored.
 - `onUiEvent?: (e: UiEvent) => void` — the **v2 channel**. It receives the
   normalized `UiEvent` stream emitted alongside the v1 `AgentEvent`s passed to
   `onEvent`. A runner that omits `onUiEvent` support degrades to v1-only — but a
@@ -381,7 +424,15 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | `provider-error` | a runtime provider rejection in its own native error shape |
 | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
 | `ask-bad` | a malformed ask, and then still end the turn |
+| `ask-reply-late` | the same ask, with OpenCode SSE idle preceding the independent reply HTTP acknowledgement |
 | `subagent` | child work, and a child terminal signal the parent turn must survive |
+
+Owned-input rows S11/S12 pin ask separation and false/retry/closed-session delivery
+on all four real runners. R6–R11 exercise durable queued/startup input, before/during/
+after asks, restart with an unanswered ask, continuation asks, delayed native replies,
+DONE/explicit-stop precedence and post-send checkpoint failure. Echo probes use the
+same documented assistant/item and terminal frames as each mock's baseline, with
+unique item IDs across turns; no new vendor wire event is invented.
 
 New scenarios are **wire-faithful** on the same terms as the golden fixtures
 (§8): derive the shape from that backend's real transcripts and cite the source.

@@ -2,6 +2,7 @@ import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:ch
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
+import { parseAskMarker } from './ask.ts';
 import type {
   AgentEvent,
   AgentRunResult,
@@ -125,8 +126,16 @@ export class ClaudeCliRunner implements AgentRunner {
       }
     };
 
+    const textChunks: string[] = [];
+    let agentInputReady = false;
+    let pendingPromptTurns = 0;
+    let pendingMarkerAsk = false;
+    let turnTextStart = 0;
     const sendMessage = (content: ContentBlock[]): boolean => {
       if (!stdinOpen) return false;
+      agentInputReady = false;
+      pendingMarkerAsk = false;
+      turnTextStart = textChunks.length;
       // A follow-up inside the reopen window cancels the scheduled close.
       if (autoEndTimer) {
         clearTimeout(autoEndTimer);
@@ -139,6 +148,7 @@ export class ClaudeCliRunner implements AgentRunner {
       });
       try {
         child.stdin.write(`${line}\n`);
+        pendingPromptTurns += 1;
         // Each user message written to stdin begins a turn (§7.1).
         emitUi(claudeTurnStarted);
         return true;
@@ -192,7 +202,6 @@ export class ClaudeCliRunner implements AgentRunner {
     sendMessage([...(spec.images ?? []), { type: 'text', text: spec.userPrompt }]);
 
     const toolCalls: AgentToolCallRecord[] = [];
-    const textChunks: string[] = [];
     let tokensUsed = 0;
     let sawUsage = false;
     let spawnFailed: Error | null = null;
@@ -261,6 +270,10 @@ export class ClaudeCliRunner implements AgentRunner {
             if (typeof msg.total_cost_usd === 'number' && msg.total_cost_usd > 0) {
               onEvent?.({ type: 'cost', usd: msg.total_cost_usd });
             }
+            pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
+            pendingPromptTurns = Math.max(0, pendingPromptTurns - 1);
+            // A result is not idle if human stdin messages already queued later turns.
+            agentInputReady = pendingPromptTurns === 0;
             onEvent?.({ type: 'turn-end' });
             if (opts.autoEndAfterFirstTurn && stdinOpen && !autoEndTimer) {
               autoEndTimer = setTimeout(end, AUTO_END_DELAY_MS);
@@ -325,6 +338,10 @@ export class ClaudeCliRunner implements AgentRunner {
     const session: AgentSession = {
       result,
       sendMessage,
+      sendAgentMessage: (content) => {
+        if (!agentInputReady || pendingMarkerAsk) return false;
+        return sendMessage(content);
+      },
       end,
       interrupt,
       pid: child.pid,

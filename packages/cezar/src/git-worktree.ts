@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, realpathSync, type Dirent } from 'node:fs';
-import { readdir, readFile, rm, stat } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { lstat, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { resolveTaskDiffBase } from './git-diff-base.ts';
 import { isSafeGitRef } from './git-refs.ts';
 
@@ -17,7 +17,7 @@ import { isSafeGitRef } from './git-refs.ts';
 /** Repo-relative home of all task worktrees (gitignored via .ai/cezar/.gitignore). */
 export const WORKTREES_DIR = '.ai/cezar/worktrees';
 
-const DIFF_CAP = 400_000;
+export const DIFF_CAP = 400_000;
 
 interface GitResult {
   ok: boolean;
@@ -31,12 +31,12 @@ interface RegisteredWorktree {
 }
 
 /** Run git, never throw — degradation is the caller's policy. */
-function git(cwd: string, args: string[]): Promise<GitResult> {
+function git(cwd: string, args: string[], timeout?: number): Promise<GitResult> {
   return new Promise((resolve) => {
     execFile(
       'git',
       args,
-      { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8' },
+      { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8', timeout },
       (err, stdout, stderr) => resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
     );
   });
@@ -137,6 +137,7 @@ export async function createWorktree(
   repoRoot: string,
   runId: string,
   baseBranch: string,
+  options: { freshOnly?: boolean } = {},
 ): Promise<WorktreeInfo> {
   let base = baseBranch;
   if (!base || base === 'HEAD') {
@@ -152,6 +153,29 @@ export async function createWorktree(
   const branch = branchFor(runId);
   const absolutePath = join(canonicalPath(repoRoot), WORKTREES_DIR, runId);
   const branchRef = `refs/heads/${branch}`;
+
+  if (options.freshOnly) {
+    // Owned workers cannot inherit the legacy adoption/prune behavior. Even a stale
+    // registration or an empty directory is a collision, not proof of ownership.
+    const listed = await git(repoRoot, ['worktree', 'list', '--porcelain', '-z'], 30_000);
+    if (!listed.ok) throw new Error('cannot verify existing worktree registrations');
+    const paths = listed.stdout.split('\0').filter((entry) => entry.startsWith('worktree '));
+    if (paths.some((entry) => canonicalPath(entry.slice(9)) === canonicalPath(absolutePath))) {
+      throw new Error('owned worktree registration already exists');
+    }
+    const pathExists = await lstat(absolutePath).then(() => true, (err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return false;
+      throw err;
+    });
+    const branchExists = await git(repoRoot, ['show-ref', '--verify', '--quiet', branchRef], 30_000);
+    if (pathExists || branchExists.ok) throw new Error('owned worktree path or branch already exists');
+    await mkdir(dirname(absolutePath), { recursive: true });
+    // Reserve the previously absent path exclusively; Git accepts our empty directory.
+    await mkdir(absolutePath);
+    const created = await git(repoRoot, ['worktree', 'add', '-b', branch, absolutePath, base], 30_000);
+    if (!created.ok) throw new Error(`git worktree add failed: ${created.stderr.trim()}`);
+    return worktreeInfo(absolutePath, branch, base);
+  }
 
   // A missing directory can leave stale administrative metadata behind.
   // Prune first so the checks below describe the filesystem as it exists now.

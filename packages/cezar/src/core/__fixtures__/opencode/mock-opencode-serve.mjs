@@ -28,6 +28,9 @@ const send = (event) => {
  *  resolve the id through `GET /question` before answering (see
  *  `opencode-server-runner.ts`), so a native ask needs an entry here. */
 const pendingQuestions = [];
+let echoSerial = 0;
+let lateQuestionReply = false;
+let answerDone = false;
 
 /** The question tool arrives as a `tool` part whose state.input holds it —
  *  the shape `opencode-server-runner.test.ts`'s sendQuestion helper drives. */
@@ -77,9 +80,19 @@ const server = createServer((req, res) => {
   req.on('data', (chunk) => (body += chunk));
   req.on('end', () => {
     if (req.method === 'POST' && /^\/question\/[^/]+\/(reply|reject)$/.test(url)) {
+      // Native question reply resumes the held turn, then its own session.idle
+      // ends it (same SSE lifecycle shape as the baseline; never the HTTP ack).
+      const answered = pendingQuestions.some(question => question.id === 'q_mock_1');
       pendingQuestions.length = 0;
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end('{}');
+      if (answered && url.endsWith('/reply')) setTimeout(() => {
+        send({ type: 'message.part.updated', properties: { part: {
+          id: 'prt_answer', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: `human answer: ${body}${answerDone ? '\n\nCEZ:DONE' : ''}`,
+        } } });
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+      }, 30);
+      const acknowledge = () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); };
+      if (lateQuestionReply) setTimeout(acknowledge, 250);
+      else acknowledge();
       return;
     }
     if (req.method === 'POST' && url === '/session') {
@@ -91,11 +104,25 @@ const server = createServer((req, res) => {
       req.method === 'POST' &&
       (url === `/session/${SESSION_ID}/prompt_async` || url === `/session/${SESSION_ID}/message`)
     ) {
+      if (body.includes('mock:reject-agent-post')) {
+        res.writeHead(503, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'agent prompt rejected' }));
+        return;
+      }
       // `prompt_async` semantics: acknowledge now, stream the turn over SSE.
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ info: info({}), parts: [] }));
       // The raw body is enough to spot a `mock:` marker — the prompt text is
       // inside it whatever part shape the runner used to wrap it.
+      if (body.includes('mock:agent-echo')) {
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: {
+          id: `prt_echo_${++echoSerial}`, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text',
+          text: JSON.parse(body).parts.map(part => part.text ?? '').join('\n'),
+        } } });
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+        return;
+      }
       if (body.includes('mock:subagent')) {
         // Wire shape from `__fixtures__/opencode/subtask-nested.ndjson`: a
         // `subtask` part on the parent message, then a child message whose info
@@ -179,6 +206,8 @@ const server = createServer((req, res) => {
         return;
       }
       if (body.includes('mock:ask')) {
+        lateQuestionReply = body.includes('mock:ask-reply-late');
+        answerDone = body.includes('mock:ask-reply-late-done');
         // The native question tool (#6). No `session.idle` follows: a real ask
         // holds the turn open until the answer is routed back.
         send({ type: 'message.updated', properties: { info: info({}) } });

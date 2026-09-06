@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { agentInputSchema, delegationStateSchema } from './delegation.ts';
 import { runnerSchema } from './health.ts';
 import { referenceStatusSchema } from './github.ts';
 // The chain shapes belong to the workflows family; the run record embeds one, so this file
@@ -116,6 +117,11 @@ export const queuedMessageSchema = z.object({
 });
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 
+/** Optional for legacy records; only explicit human origin can acknowledge a delegated ask. */
+export const continuationMessageSchema = queuedMessageSchema.extend({
+  origin: z.enum(['human', 'lifecycle']).optional(),
+});
+
 /** One aggregated sample of a run's live process tree (`src/core/process-usage.ts`). */
 export const processUsageSchema = z.object({
   /** Sum of `%cpu` across the tree — can exceed 100 on multi-core work. */
@@ -146,7 +152,11 @@ export const runRecordSchema = z.object({
    *  into the prompt at dequeue — never delivered as their own turns. Absent on pre-#472 runs. */
   queuedMessages: z.array(queuedMessageSchema).optional(),
   /** Opening Continue message, retained until its first completed turn for crash recovery. */
-  continuationMessage: queuedMessageSchema.optional(),
+  continuationMessage: continuationMessageSchema.optional(),
+  /** Owned-run authority; absence is legacy, invalid is explicitly quarantined. */
+  delegation: delegationStateSchema.optional(),
+  /** Durable non-human input, kept separate from human prompt/answer queues. */
+  agentInputs: z.array(agentInputSchema).optional(),
   /** URLs of images and document attachments on the initial task prompt; branch on isImageAttachmentName. */
   taskImages: z.array(z.string()).optional(),
   model: z.string().optional(),

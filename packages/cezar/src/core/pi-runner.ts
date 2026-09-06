@@ -2,6 +2,7 @@ import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:ch
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
+import { parseAskMarker } from './ask.ts';
 import type {
   AgentEvent,
   AgentRunResult,
@@ -125,7 +126,14 @@ export class PiRunner implements AgentRunner {
         return false;
       }
     };
+    let agentInputReady = false;
+    let pendingMarkerAsk = false;
+    let turnTextStart = 0;
     const sendMessage = (content: ContentBlock[]): boolean => {
+      if (!open) return false;
+      agentInputReady = false;
+      pendingMarkerAsk = false;
+      turnTextStart = textChunks.length;
       const { message, images } = toPiPrompt(content);
       if (autoEndTimer) {
         clearTimeout(autoEndTimer);
@@ -263,6 +271,8 @@ export class PiRunner implements AgentRunner {
             }
           } else if (value.type === 'agent_settled') {
             flushText();
+            pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
+            agentInputReady = true;
             onEvent?.({ type: 'turn-end' });
             if (opts.autoEndAfterFirstTurn && open && !autoEndTimer) {
               autoEndTimer = setTimeout(end, AUTO_END_DELAY_MS);
@@ -310,6 +320,10 @@ export class PiRunner implements AgentRunner {
     const session: AgentSession = {
       result,
       sendMessage,
+      sendAgentMessage: (content) => {
+        if (!agentInputReady || piUi.turnId || pendingMarkerAsk) return false;
+        return sendMessage(content);
+      },
       end,
       interrupt,
       pid: child.pid,
