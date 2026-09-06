@@ -12,6 +12,7 @@ import {
   finishRun,
   getGithub,
   getGithubChecks,
+  getGithubSearch,
   getGithubRefStatus,
   getGroup,
   getHealth,
@@ -364,6 +365,19 @@ describe('project scope (multi-project spec, step 3.1)', () => {
     // The non-send() site scopes the same way — the <img> URL it hands out must hit the
     // scoped route or another project's cockpit would render this project's bytes as a 404.
     expect(runFileRawUrl('run-1', 'x.png')).toBe('/api/v1/p/proj-a/runs/run-1/files?path=x.png&raw=1')
+  })
+
+  it('scopes and encodes cross-state searches, including after switching repositories', async () => {
+    for (const project of ['proj-a', 'proj-b']) {
+      setApiScope(project)
+      reply({ available: true, items: [] })
+      await getGithubSearch('issue', '#90 & text', { limit: 5 })
+      const url = new URL(lastCall().path, 'http://localhost')
+      expect(url.pathname).toBe(`/api/v1/p/${project}/github/search`)
+      expect(url.searchParams.get('q')).toBe('#90 & text')
+      expect(url.searchParams.get('kind')).toBe('issue')
+      expect(url.searchParams.get('limit')).toBe('5')
+    }
   })
 
   it('keeps workspace-level routes unprefixed under a scope — health is single-mount', async () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { GithubItem } from '@open-mercato/cezar-api-client'
 
-import { allLabels, filterGithubItems, labelChipStyle } from './github-filter'
+import { allLabels, filterGithubItems, labelChipStyle, shouldSearchForge } from './github-filter'
 
 const item = (over: Partial<GithubItem> & Pick<GithubItem, 'number' | 'title'>): GithubItem => ({
   kind: 'issue',
@@ -91,5 +91,40 @@ describe('issue assignment and project filters', () => {
   })
   it('keeps legacy and unassigned rows with no filters', () => {
     expect(filterGithubItems(rows)).toEqual(rows)
+  })
+})
+
+/**
+ * The fallback trigger (#730). `filterGithubItems` can only ever match the OPEN set the list
+ * fetched, so "non-empty query, zero local matches" is precisely the state where the answer may
+ * still exist on GitHub — closed, merged, or past the fetched window. Getting this predicate wrong
+ * is either a search that never fires (the bug) or a `gh` subprocess on every keystroke.
+ */
+describe('shouldSearchForge', () => {
+  it('fires when a real query matches nothing locally — the #730 case', () => {
+    expect(filterGithubItems(items, { query: '4507' })).toHaveLength(0)
+    expect(shouldSearchForge('4507', [])).toBe(true)
+  })
+
+  it('does not fire on a blank query — that is the unfiltered list, not a search', () => {
+    expect(shouldSearchForge('', [])).toBe(false)
+    expect(shouldSearchForge('   ', [])).toBe(false)
+  })
+
+  it('does not fire when the local filter already found something', () => {
+    expect(filterGithubItems(items, { query: '142' }).length).toBeGreaterThan(0)
+    expect(shouldSearchForge('142', filterGithubItems(items, { query: '142' }))).toBe(false)
+  })
+
+  // Locks what the JSDoc promises about the caller (#837): `github.tsx` counts local matches WITH
+  // the label filter applied, so a label filter that empties an otherwise-matching query does reach
+  // for the forge. Documented as intentional — the hits are re-narrowed by the same labels before
+  // rendering — so this asserts the contract rather than guarding against it.
+  it('a label filter that empties the local matches does trigger the fallback', () => {
+    const countWith = (labels: readonly string[]) =>
+      filterGithubItems(items, { query: '142', labels })
+    expect(shouldSearchForge('142', countWith([]))).toBe(false)
+    expect(countWith(['cli'])).toHaveLength(0)
+    expect(shouldSearchForge('142', countWith(['cli']))).toBe(true)
   })
 })

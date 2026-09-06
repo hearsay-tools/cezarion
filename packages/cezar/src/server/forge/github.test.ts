@@ -31,7 +31,10 @@ import {
   forgetRefStatus,
   refNumberFromUrl,
   fetchGithub,
+  fetchGithubChecks,
+  searchGithubItems,
   GH_CHECKS_MAX,
+  GH_SEARCH_MAX,
   ghCheckRunSchema,
   ghTimelineEventSchema,
   mergeThread,
@@ -1524,6 +1527,431 @@ describe('fetchGithub omits statusCheckRollup from the list call (#664)', () => 
     expect(prJsonArg).not.toContain('statusCheckRollup');
     expect(prJsonArg).toContain('isDraft');
     expect(data.prs[0]?.checks).toBeNull();
+  });
+});
+
+/**
+ * Cross-state search (#730).
+ *
+ * The bug this covers: `fetchGithub` lists the OPEN set only (`gh issue/pr list` defaults to
+ * `--state open`) and the tab's search is an in-memory filter over exactly that payload — so a
+ * merged or closed item is unreachable no matter what the user types. `searchGithubItems` is the
+ * path that asks GitHub instead, and these tests pin the three things that make it work: the
+ * numeric lookup is state-agnostic, the text search does not constrain state, and every failure
+ * degrades quietly instead of throwing into the tab.
+ */
+describe('searchGithubItems (#730)', () => {
+  /** Capture every `gh` argv while answering with `answer(argv)`. */
+  const ghSpy = (answer: (argv: string[]) => string | Error) => {
+    const argvs: string[][] = [];
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const argv = args[1] as string[];
+      argvs.push(argv);
+      const cb = args[args.length - 1] as (e: unknown, r: unknown) => void;
+      const out = answer(argv);
+      if (out instanceof Error) cb(out, null);
+      else cb(null, { stdout: out, stderr: '' });
+    });
+    return argvs;
+  };
+
+  const searchHit = (over: Record<string, unknown> = {}) => ({
+    number: 4507,
+    title: 'reconcile payment-session amount with order total',
+    author: { login: 'wojciechszyjka' },
+    createdAt: '2026-07-25T07:08:17Z',
+    labels: [{ name: 'security', color: 'D93F0B' }],
+    body: 'body',
+    url: `https://github.com/owner/n/pull/${over.number ?? 4507}`,
+    isDraft: false,
+    commentsCount: 20,
+    ...over,
+  });
+
+  beforeEach(() => {
+    vi.stubEnv('CEZ_DRY_RUN', '');
+    execFileMock.mockReset();
+    __clearRepoHandleCacheForTests();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each(['4507', 'payment'])('hydrates fork filter metadata for %s issue searches', async query => {
+    const argvs = ghSpy(argv => {
+      if (argv[1] === 'repos/{owner}/{repo}/issues/4507') return '0';
+      if (argv[0] === 'repo') return 'owner/n';
+      if (argv[0] === 'api') {
+        const query = argv.find(a => a.startsWith('query=')) ?? '';
+        if (query.includes('projectsV2')) return JSON.stringify({ data: { repository: { projectsV2: {
+          nodes: [{ id: 'P2', title: 'Delivery', url: 'https://github.com/users/owner/projects/2' }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        } } } });
+        return JSON.stringify({ data: { repository: { i4507: { projectItems: {
+          nodes: [{ project: { id: 'P2' } }], pageInfo: { hasNextPage: false, endCursor: null },
+        } } } } });
+      }
+      const fields = argv[argv.indexOf('--json') + 1]?.split(',') ?? [];
+      const hit = searchHit({ url: 'https://github.com/owner/n/issues/4507',
+        ...(fields.includes('assignees') ? { assignees: [{ login: 'Alice' }] } : {}) });
+      return JSON.stringify(argv[0] === 'search' ? [hit] : hit);
+    });
+    const result = await searchGithubItems('/repo/fork-metadata', 'issue', query);
+    expect(result.items[0]).toMatchObject({ assignees: ['Alice'], projectIds: ['P2'] });
+    expect(argvs.filter(argv => argv[0] === 'api').some(argv => argv.some(a => a.includes('issue(number:4507)')))).toBe(true);
+  });
+
+  it('keeps membership unknown when project lookup fails, without discarding issue hits', async () => {
+    ghSpy(argv => {
+      if (argv[0] === 'repo') return 'owner/n';
+      if (argv[0] === 'api') return new Error('INSUFFICIENT_SCOPES read:project');
+      return JSON.stringify([searchHit({ url: 'https://github.com/owner/n/issues/4507', assignees: [{ login: 'alice' }] })]);
+    });
+    const result = await searchGithubItems('/repo/fork-no-projects', 'issue', 'payment');
+    expect(result.available).toBe(true);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.projectIds).toBeUndefined();
+    expect(result).toHaveProperty('projectsReason', expect.stringContaining('read access'));
+  });
+
+  it('rejects foreign repository hits before attaching local metadata', async () => {
+    const calls = ghSpy(argv => argv[0] === 'repo' ? 'owner/n' : JSON.stringify([
+      searchHit({ url: 'https://github.com/other/repo/issues/4507' }),
+    ]));
+    const result = await searchGithubItems('/repo/scope', 'issue', 'repo:other/repo payment');
+    expect(result).toMatchObject({ available: false, items: [], reason: expect.stringContaining('outside this repository') });
+    expect(calls.some(argv => argv[0] === 'api')).toBe(false);
+  });
+
+  it.each(['issue', 'pr'] as const)('loads exact-number %s comment totals without fetching comment pages', async kind => {
+    const calls = ghSpy(argv => {
+      if (argv[0] === kind && argv[1] === 'view') return JSON.stringify(searchHit({
+        url: `https://github.com/owner/n/${kind === 'issue' ? 'issues' : 'pull'}/4507`,
+      }));
+      if (argv[0] === 'api' && argv[1] === 'repos/{owner}/{repo}/issues/4507') return '137';
+      if (argv[0] === 'repo') return 'owner/n';
+      return new Error('Project metadata unavailable');
+    });
+    const result = await searchGithubItems('/repo/exact-comments', kind, '#4507');
+    expect(result.items[0]?.comments).toBe(137);
+    expect(calls.filter(argv => argv[0] === 'api' && argv[1]?.startsWith('repos/'))).toEqual([
+      ['api', 'repos/{owner}/{repo}/issues/4507', '--jq', '.comments'],
+    ]);
+    expect(calls.some(argv => argv.includes('--paginate') || argv.includes('search'))).toBe(false);
+  });
+
+  it('reports an exact-number count failure instead of inventing zero comments or no matches', async () => {
+    ghSpy(argv => argv[0] === 'pr' ? JSON.stringify(searchHit()) : new Error('count lookup timed out'));
+    const result = await searchGithubItems('/repo/exact-comments-error', 'pr', '4507');
+    expect(result).toMatchObject({ available: false, items: [], reason: expect.stringContaining('timed out') });
+  });
+
+  it.each([
+    ['issue', 'REHYDRATES', [142]],
+    ['pr', 'timing assertion', [128]],
+    ['issue', 'MOCK', [142, 139, 135]],
+    ['pr', 'mock', [128, 124]],
+  ] as const)('dry-run searches %s author/body for %s', async (kind, query, numbers) => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const result = await searchGithubItems('/repo/dry-fields', kind, query);
+    expect(result.items.map(item => item.number)).toEqual(numbers);
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('dry-run search defers PR checks to hydration without changing mock glyphs or caps', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const result = await searchGithubItems('/repo/dry-checks', 'pr', 'mock');
+    expect(result.items.map(item => ({ number: item.number, checks: item.checks }))).toEqual([
+      { number: 128, checks: null }, { number: 124, checks: null },
+    ]);
+    expect(await fetchGithubChecks('/repo/dry-checks', [128, 124])).toEqual({
+      available: true, checks: { 128: 'passing', 124: 'failing' },
+    });
+    const capped = await searchGithubItems('/repo/dry-checks', 'pr', 'mock', 1);
+    expect(capped).toMatchObject({ truncated: true, items: [{ number: 128, checks: null }] });
+    expect(capped.items).toHaveLength(1);
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('resolves a bare number through `pr view`, which finds merged and closed PRs alike', async () => {
+    const argvs = ghSpy((argv) =>
+      argv[0] === 'pr' && argv[1] === 'view'
+        ? JSON.stringify({
+            number: 4507,
+            title: 'a merged pr',
+            author: { login: 'someone' },
+            createdAt: '2026-07-25T07:08:17Z',
+            labels: [],
+            body: 'b',
+            url: 'https://github.com/owner/n/pull/4507',
+            isDraft: false,
+            additions: 3,
+            deletions: 1,
+          })
+        : argv[1] === 'repos/{owner}/{repo}/issues/4507' ? '0' : '',
+    );
+
+    const res = await searchGithubItems('/repo/search-num', 'pr', '4507');
+
+    expect(res.available).toBe(true);
+    expect(res.items.map((i) => i.number)).toEqual([4507]);
+    expect(res.items[0]?.kind).toBe('pr');
+    // A view lookup carries no state filter at all — that is exactly why it reaches a merged PR.
+    const view = argvs.find((a) => a[0] === 'pr' && a[1] === 'view');
+    expect(view).toBeDefined();
+    expect(view).toContain('4507');
+    expect(view?.join(' ')).not.toContain('--state');
+  });
+
+  it('accepts the `#4507` spelling the search box invites', async () => {
+    ghSpy((argv) =>
+      argv[0] === 'issue' && argv[1] === 'view'
+        ? JSON.stringify({
+            number: 4507,
+            title: 'an issue',
+            author: { login: 'someone' },
+            createdAt: '2026-07-25T07:08:17Z',
+            labels: [],
+            body: '',
+            url: 'https://github.com/owner/n/issues/4507',
+          })
+        : argv[1] === 'repos/{owner}/{repo}/issues/4507' ? '0' : '',
+    );
+
+    const res = await searchGithubItems('/repo/search-hash', 'issue', '#4507');
+    expect(res.items.map((i) => i.number)).toEqual([4507]);
+  });
+
+  it('searches text with NO --state flag, so closed and merged hits are included', async () => {
+    const argvs = ghSpy((argv) => {
+      if (argv[0] === 'repo') return 'owner/n\n';
+      if (argv[0] === 'search') return JSON.stringify([searchHit()]);
+      return '';
+    });
+
+    const res = await searchGithubItems('/repo/search-text', 'pr', 'payment-session');
+
+    expect(res.available).toBe(true);
+    expect(res.items[0]?.number).toBe(4507);
+    // `commentsCount` is the search API's spelling of the list tier's `comments`.
+    expect(res.items[0]?.comments).toBe(20);
+    expect(res.items[0]?.checks).toBeNull();
+    expect(res.labelColors).toEqual({ security: 'D93F0B' });
+    const search = argvs.find((a) => a[0] === 'search');
+    expect(search?.slice(0, 2)).toEqual(['search', 'prs']);
+    expect(search).toContain('--repo');
+    expect(search).toContain('owner/n');
+    // `gh search --state` only accepts open|closed; omitting it is what searches every state.
+    expect(search?.join(' ')).not.toContain('--state');
+  });
+
+  it('routes the issues view to `gh search issues`', async () => {
+    const argvs = ghSpy((argv) => {
+      if (argv[0] === 'repo') return 'owner/n\n';
+      if (argv[0] === 'search') return JSON.stringify([searchHit({ number: 12, url: 'https://github.com/owner/n/issues/12' })]);
+      return '';
+    });
+
+    await searchGithubItems('/repo/search-kind', 'issue', 'flaky');
+    expect(argvs.find((a) => a[0] === 'search')?.slice(0, 2)).toEqual(['search', 'issues']);
+  });
+
+  /**
+   * The query must sit behind an end-of-flags `--` (#836). Ahead of it, `gh` parses a query that
+   * starts with `-`/`--` as a flag: `--foo` answers `unknown flag: --foo`, which the quiet degrade
+   * turns into the tab's "GitHub could not be searched" — an infrastructure failure reported for
+   * ordinary search text — and the exact query `--web` matches `gh search`'s own `-w, --web` and
+   * opens a browser on the machine hosting the cockpit. A stub cannot reproduce the CLI's parser,
+   * so what is pinned is the argv shape that decides it: `--` immediately before the query, last.
+   */
+  it('sends the query behind `--`, so a flag-shaped query stays search text', async () => {
+    const argvs = ghSpy((argv) => {
+      if (argv[0] === 'repo') return 'owner/n\n';
+      if (argv[0] === 'search') return JSON.stringify([searchHit()]);
+      return '';
+    });
+
+    const res = await searchGithubItems('/repo/search-flagish', 'pr', '--web');
+
+    expect(res.available).toBe(true);
+    const search = argvs.find((a) => a[0] === 'search');
+    expect(search?.at(-1)).toBe('--web');
+    expect(search?.at(-2)).toBe('--');
+    // Nothing flag-shaped may precede the terminator either — the query is the only trailing arg.
+    expect(search?.slice(0, -2)).not.toContain('--web');
+  });
+
+  /**
+   * `gh search issues` does not define `isDraft` and rejects the whole call with
+   * `Unknown JSON field: "isDraft"` — so asking for it made EVERY text query on the Issues tab
+   * degrade to "GitHub could not be searched", leaving a closed issue reachable by number only.
+   * Stubbing `gh` cannot reproduce the CLI's own rejection, so what is pinned here is the input
+   * that provokes it: the field list this path sends, per kind.
+   */
+  it('never asks `gh search issues` for the PR-only isDraft field', async () => {
+    const argvs = ghSpy((argv) => {
+      if (argv[0] === 'repo') return 'owner/n\n';
+      // The real CLI omits the key entirely for issues; the hit must still parse.
+      if (argv[0] === 'search') {
+        const { isDraft: _drop, ...issueHit } = searchHit({ number: 797, url: 'https://github.com/owner/n/issues/797' });
+        return JSON.stringify([issueHit]);
+      }
+      return '';
+    });
+
+    const res = await searchGithubItems('/repo/search-issue-fields', 'issue', 'lease timing');
+
+    const search = argvs.find((a) => a[0] === 'search');
+    const fields = search?.[search.indexOf('--json') + 1];
+    expect(fields).not.toContain('isDraft');
+    expect(fields).toContain('commentsCount');
+    expect(res.available).toBe(true);
+    expect(res.items.map((i) => i.number)).toEqual([797]);
+    // Issues have no draft concept — the flag must not leak onto the row or its labels.
+    expect(res.items[0]?.isDraft).toBeUndefined();
+    expect(res.items[0]?.labels).not.toContain('draft');
+  });
+
+  it('still asks `gh search prs` for isDraft, which that search does define', async () => {
+    const argvs = ghSpy((argv) => {
+      if (argv[0] === 'repo') return 'owner/n\n';
+      if (argv[0] === 'search') return JSON.stringify([searchHit({ isDraft: true })]);
+      return '';
+    });
+
+    const res = await searchGithubItems('/repo/search-pr-fields', 'pr', 'payment-session');
+
+    const search = argvs.find((a) => a[0] === 'search');
+    expect(search?.[search.indexOf('--json') + 1]).toContain('isDraft');
+    expect(res.items[0]?.isDraft).toBe(true);
+    expect(res.items[0]?.labels).toContain('draft');
+  });
+
+  it('falls back to a text search when the number resolves to nothing', async () => {
+    const argvs = ghSpy((argv) => {
+      if (argv[0] === 'repo') return 'owner/n\n';
+      if (argv[0] === 'pr' && argv[1] === 'view') return new Error('no pull requests found for 4507');
+      if (argv[0] === 'search') return JSON.stringify([searchHit({ title: 'mentions 4507' })]);
+      return '';
+    });
+
+    const res = await searchGithubItems('/repo/search-fallthrough', 'pr', '4507');
+
+    expect(res.available).toBe(true);
+    expect(res.items[0]?.title).toBe('mentions 4507');
+    expect(argvs.some((a) => a[0] === 'search')).toBe(true);
+  });
+
+  it('marks the hit list truncated when it fills the cap', async () => {
+    ghSpy((argv) => {
+      if (argv[0] === 'repo') return 'owner/n\n';
+      if (argv[0] === 'search') {
+        return JSON.stringify(Array.from({ length: 3 }, (_, i) => searchHit({ number: i + 1 })));
+      }
+      return '';
+    });
+
+    const res = await searchGithubItems('/repo/search-cap', 'pr', 'anything', 3);
+    expect(res.truncated).toBe(true);
+    expect(res.items).toHaveLength(3);
+  });
+
+  it('caps the requested limit at GH_SEARCH_MAX', async () => {
+    const argvs = ghSpy((argv) => {
+      if (argv[0] === 'repo') return 'owner/n\n';
+      if (argv[0] === 'search') return '[]';
+      return '';
+    });
+
+    await searchGithubItems('/repo/search-limit', 'pr', 'anything', 10_000);
+    const search = argvs.find((a) => a[0] === 'search');
+    expect(search?.[search.indexOf('--limit') + 1]).toBe(String(GH_SEARCH_MAX));
+  });
+
+  it('honours `limit` and flags `truncated` in CEZ_DRY_RUN too, on the live rule (#838)', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+
+    // '1' appears in every fixture issue number (142 / 139 / 135), so the cap has something to bite
+    // on. Before #838 the dry-run branch returned ahead of `capped` and shipped all three unflagged
+    // — offline mode is the only place cap-and-truncate is exercised without `gh`.
+    const capped = await searchGithubItems('/repo/dry-cap', 'issue', '1', 2);
+    expect(capped.items.map((i) => i.number)).toEqual([142, 139]);
+    expect(capped.truncated).toBe(true);
+
+    const whole = await searchGithubItems('/repo/dry-cap', 'issue', '1');
+    expect(whole.items).toHaveLength(3);
+    expect(whole.truncated).toBe(false);
+
+    // Still entirely offline — the fixture path must never reach the CLI.
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('degrades to {available:false, reason} instead of throwing when gh fails', async () => {
+    ghSpy((argv) => (argv[0] === 'repo' ? 'owner/n\n' : new Error('HTTP 403: rate limit exceeded')));
+
+    const res = await searchGithubItems('/repo/search-fail', 'pr', 'anything');
+    expect(res.available).toBe(false);
+    expect(res.reason).toContain('rate limit');
+    expect(res.items).toEqual([]);
+  });
+
+  it('reports a missing gh CLI with the same hint the list tier uses', async () => {
+    ghSpy(() => Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }));
+
+    const res = await searchGithubItems('/repo/search-enoent', 'pr', 'anything');
+    expect(res.available).toBe(false);
+    expect(res.reason).toContain('gh CLI not found');
+  });
+
+  it('degrades when the repo handle is not parseable, without attempting a search', async () => {
+    const argvs = ghSpy((argv) => (argv[0] === 'repo' ? 'not-a-slug/with/too/many/parts\n' : ''));
+
+    const res = await searchGithubItems('/repo/search-nohandle', 'pr', 'anything');
+    expect(res.available).toBe(false);
+    expect(res.reason).toContain('no GitHub remote');
+    expect(argvs.some((a) => a[0] === 'search')).toBe(false);
+  });
+
+  it('never shells out for an empty query', async () => {
+    const argvs = ghSpy(() => '');
+    const res = await searchGithubItems('/repo/search-empty', 'pr', '   ');
+    expect(res).toEqual({ available: true, items: [] });
+    expect(argvs).toEqual([]);
+  });
+
+  it('finds a merged PR that the open-only list never returns — the bug in #730', async () => {
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const argv = args[1] as string[];
+      const cb = args[args.length - 1] as (e: unknown, r: unknown) => void;
+      let stdout = '';
+      if (argv[0] === 'repo') stdout = 'owner/n\n';
+      // The list tier: `gh pr list` without --state returns OPEN PRs only, and #4507 is merged.
+      else if (argv[0] === 'pr' && argv[1] === 'list') stdout = '[]';
+      else if (argv[0] === 'issue' && argv[1] === 'list') stdout = '[]';
+      else if (argv[0] === 'pr' && argv[1] === 'view') {
+        stdout = JSON.stringify({
+          number: 4507,
+          title: 'a merged pr',
+          author: { login: 'someone' },
+          createdAt: '2026-07-25T07:08:17Z',
+          labels: [],
+          body: '',
+          url: 'https://github.com/owner/n/pull/4507',
+          isDraft: false,
+          additions: 0,
+          deletions: 0,
+        });
+      } else if (argv[1] === 'repos/{owner}/{repo}/issues/4507') stdout = '0';
+      else stdout = '{}';
+      cb(null, { stdout, stderr: '' });
+    });
+
+    const list = await fetchGithub('/repo/search-regression');
+    expect(list.prs.find((p) => p.number === 4507)).toBeUndefined();
+
+    const found = await searchGithubItems('/repo/search-regression', 'pr', '4507');
+    expect(found.items.map((i) => i.number)).toEqual([4507]);
   });
 });
 
