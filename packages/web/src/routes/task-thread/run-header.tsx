@@ -4,6 +4,7 @@ import {
   ArchiveRestoreIcon,
   BotIcon,
   CheckIcon,
+  ChevronDownIcon,
   CircleStopIcon,
   CopyIcon,
   EllipsisVerticalIcon,
@@ -16,8 +17,8 @@ import {
   SquareTerminalIcon,
   Trash2Icon,
 } from 'lucide-react'
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from '@/lib/project-router'
+import { Fragment, useId, useMemo, useReducer, useState, type ReactNode } from 'react'
+import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
 
 import { ApiError, archiveRun, cancelRun, continueRun, deleteRun, openRunIn, openRunInCli } from '@/api/client'
 import {
@@ -78,7 +79,7 @@ import {
   workflowLabel,
 } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
-import { isHttpUrl } from '@/lib/utils'
+import { cn, isHttpUrl } from '@/lib/utils'
 
 import { Markdown } from './markdown'
 import { useContinuationProvider } from './continuation-provider'
@@ -89,7 +90,9 @@ import { useFinishRun } from './use-finish-run'
 /**
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
  * the Session | Changes | Files tabs with the action bar, the workflow step rail and the plan
- * mirror — the whole sticky region above the thread.
+ * mirror — the whole header region above the thread. It scrolls away on phones so the transcript
+ * owns the small viewport, and stays sticky from `md` upward where there is room for persistent
+ * run context.
  *
  * Two deliberate omissions, both seams rather than gaps:
  *  - **VS Code** (spec: `POST /api/runs/:id/open-in-editor`) — the endpoint does not exist yet;
@@ -102,6 +105,16 @@ import { useFinishRun } from './use-finish-run'
 /** Which run-detail tab this header instance sits above — drives the active underline.
  *  A prop rather than a route match so the header stays testable with a bare render. */
 export type RunTab = 'session' | 'changes' | 'commits' | 'files'
+
+/** Which project/run pairs the reader has expanded the phone-width meta row for (#765). A module-level map for
+ *  the same reason `WorkflowSteps` keeps one (`openByRun` in step-rail.tsx) — and it has to be BOTH
+ *  module-level and run-keyed, because the two navigations a reader makes here remount the header
+ *  in opposite ways. A Session → Changes hop resolves a different route element, so it DOES remount
+ *  and plain `useState` would throw the expand away; run A → run B stays on `/tasks/:id`, so React
+ *  reconciles the same element and does NOT remount — the docks below it key themselves by `run.id`
+ *  for exactly this reason — so even lazily-initialized `useState` would carry run A's expansion
+ *  into run B. Session-lifetime only; no server persistence invented for it. */
+const detailsOpenByRun = new Map<string, boolean>()
 
 export function RunHeader({
   run,
@@ -123,6 +136,18 @@ export function RunHeader({
   const [notesOpen, setNotesOpen] = useState(false)
   const actions = useRunActions(run, onMarkedUnread)
 
+  // The phone-width meta disclosure (#765). The map is the state — a re-render bump rather than a
+  // mirrored `useState` — so switching runs reads that run's own answer instead of the last one's.
+  const [, bumpDetails] = useReducer((n: number) => n + 1, 0)
+  const detailsId = useId()
+  const projectId = useActiveProjectId()
+  const detailsKey = JSON.stringify([projectId, run.id])
+  const detailsOpen = detailsOpenByRun.get(detailsKey) ?? false
+  const toggleDetails = () => {
+    detailsOpenByRun.set(detailsKey, !detailsOpen)
+    bumpDetails()
+  }
+
   // The queue position a parked run shows in its pill ("queued #2"). Reads the shared runs-list
   // query — already warm from the sidebar quick-list — because position is a property of the
   // whole queue, not of this record.
@@ -135,16 +160,17 @@ export function RunHeader({
   return (
     <header
       data-slot="run-header"
-      className="sticky top-0 z-20 border-b border-border bg-background/95 px-4 pt-3 backdrop-blur md:px-6"
+      className="relative z-20 border-b border-border bg-background/95 px-3 pt-2 backdrop-blur md:sticky md:top-0 md:px-6 md:pt-3"
     >
       <div className="mx-auto w-full max-w-[var(--measure)]">
         <div className="flex min-w-0 items-center gap-2">
           <EditableTitle run={run} />
-          <span className="ml-auto flex shrink-0 items-center gap-2.5">
+          <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">
             {planTally ? (
               // The plan dock's compact mirror (spec: "mirrored as a compact progress line in
-              // the run header").
-              <span data-slot="plan-mirror" className="text-[11px] text-soft-foreground tabular-nums">
+              // the run header"). Desktop only since #764: on a phone the dock it mirrors is
+              // itself on screen, so the mirror would spend the tightest row here restating it.
+              <span data-slot="plan-mirror" className="hidden text-[11px] text-soft-foreground tabular-nums md:inline">
                 Plan {planTally.done}/{planTally.total}
               </span>
             ) : null}
@@ -152,23 +178,51 @@ export function RunHeader({
               {attention.label}
               {queuePosition !== undefined ? ` #${queuePosition}` : ''}
             </Pill>
+            {/* Phone-width only: above `md` the meta row never collapses, so a control to expand
+                it would be a permanently disabled-looking chevron next to always-visible content.
+                On the Session tab of a run with a plan it lands in the slot #764 freed by hiding
+                the plan mirror here; on the three `task-git` tabs no tally is passed at all, so
+                there the row does grow by one control — the price of the collapse. */}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="size-11 md:hidden"
+              aria-label={detailsOpen ? 'Hide run details' : 'Show run details'}
+              aria-controls={detailsId}
+              aria-expanded={detailsOpen}
+              onClick={toggleDetails}
+            >
+              <ChevronDownIcon
+                aria-hidden="true"
+                className={cn('transition-transform motion-reduce:transition-none', detailsOpen && 'rotate-180')}
+              />
+            </Button>
             <ActionsKebab run={run} actions={actions} onToggleNotes={() => setNotesOpen((open) => !open)} />
           </span>
         </div>
 
-        <MetaRow
-          run={run}
-          showTokens={metricVisibility.tokens}
-          showCost={metricVisibility.cost}
-          // `capabilities?.` like `usageMetricVisibility` above it: this header is rendered
-          // against minimal health payloads (a `{defaultRunner}`-only answer is pinned by its
-          // own test), so every capability read here tolerates an absent object. Absent stays
-          // fail-closed — the chip degrades to text rather than linking into a disabled view.
-          automationsAvailable={health.data?.capabilities?.automations === true}
-        />
+        {/* #765: workflow, branch, tracker refs, diff, tokens and cost wrap across several rows on
+            a phone. `hidden` rather than a visual-only class so the collapsed rows leave the
+            accessibility tree instead of lingering as invisible-but-focusable chips. `md:block`
+            keeps the desktop header exactly as it was — this is a narrow-viewport fix, and a
+            desktop reader who has always seen these at a glance should not have to click for them. */}
+        <div id={detailsId} data-slot="run-details" className={cn(detailsOpen ? 'block' : 'hidden', 'md:block')}>
+          <MetaRow
+            run={run}
+            showTokens={metricVisibility.tokens}
+            showCost={metricVisibility.cost}
+            // `capabilities?.` like `usageMetricVisibility` above it: this header is rendered
+            // against minimal health payloads (a `{defaultRunner}`-only answer is pinned by its
+            // own test), so every capability read here tolerates an absent object. Absent stays
+            // fail-closed — the chip degrades to text rather than linking into a disabled view.
+            automationsAvailable={health.data?.capabilities?.automations === true}
+          />
+        </div>
+        {/* Outside the disclosure on purpose: "this run wakes itself up at 14:20" is status, not
+            metadata — it belongs with the pill above, not behind a tap with the diff stats. */}
         <MonitoringSchedule run={run} />
 
-        <div data-slot="run-tabs" className="mt-2.5 flex items-end gap-1">
+        <div data-slot="run-tabs" className="mt-1.5 flex items-end gap-1 md:mt-2.5 max-md:[&>a]:min-h-11">
           <TabLink to={`/tasks/${run.id}`} active={tab === 'session'}>
             Session
           </TabLink>
@@ -265,7 +319,7 @@ export function RunHeader({
         </div>
 
         {run.steps.length > 0 ? (
-          <div className="border-t border-border pt-2 pb-1">
+          <div className="border-t border-border pt-1 pb-0 md:pt-2 md:pb-1">
             <WorkflowSteps runId={run.id} steps={run.steps} />
           </div>
         ) : null}
@@ -542,13 +596,13 @@ function MetaRow({
   )
   // `workflowLabel` so an inline chain shows its first step's name, not the bare "(planned)"
   // placeholder — which reads like a status next to the live status pill.
-  const parts: ReactNode[] = [<span key="workflow">{workflowLabel(run)}</span>]
+  const parts: ReactNode[] = [<span key="workflow" className="max-md:max-w-full max-md:break-all">{workflowLabel(run)}</span>]
   if (run.branch) {
     parts.push(
       <span
         key="branch"
         data-slot="branch-chip"
-        className="rounded-sm border border-border bg-card px-1.5 py-px font-mono text-[11px] font-medium"
+        className="rounded-sm border border-border bg-card px-1.5 py-px font-mono text-[11px] font-medium max-md:max-w-full max-md:break-all"
       >
         {run.branch}
       </span>,
@@ -657,7 +711,7 @@ function MetaRow({
     <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
       <div
         data-slot="run-meta"
-        className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+        className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground md:mt-1.5 md:gap-y-1"
       >
         {parts.map((part, index) => (
           <Fragment key={index}>
@@ -669,7 +723,7 @@ function MetaRow({
             {part}
           </Fragment>
         ))}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 max-md:min-w-0 max-md:max-w-full">
           {usage.map((part, index) => (
             <Fragment key={index}>
               {index > 0 ? (
@@ -774,7 +828,7 @@ function AgentBadge({ run }: { run: ApiRun }) {
           data-slot="agent-badge"
           title={summary}
           aria-label={`Agent: ${runner}, ${account ? `account ${account}, ` : ''}model ${model}${effort ? `, effort ${effort}` : ''}`}
-          className="flex min-w-0 shrink items-center gap-1.5 rounded-sm px-1 py-1 text-soft-foreground hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="flex min-w-0 shrink items-center max-md:min-h-11 gap-1.5 rounded-sm px-1 py-1 text-soft-foreground hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
         >
           <BotIcon className="size-3.5 shrink-0" aria-hidden="true" />
           {/* READ, not just reachable. This was an icon alone, and "which agent, account and model
@@ -787,7 +841,7 @@ function AgentBadge({ run }: { run: ApiRun }) {
           </span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[9rem]">
+      <DropdownMenuContent align="end" className="min-w-[9rem] max-md:max-w-[calc(100vw-2rem)] max-md:break-all">
         <DropdownMenuLabel className="font-mono text-[11px] font-normal text-muted-foreground">
           runner: {runner}
         </DropdownMenuLabel>
@@ -840,7 +894,7 @@ function ActionsKebab({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label="Run actions" className="md:hidden">
+        <Button variant="ghost" size="icon-sm" className="size-11 md:hidden" aria-label="Run actions">
           <EllipsisVerticalIcon aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>

@@ -19,7 +19,7 @@ import { RUNNERS } from '@/routes/new-task-form'
 
 /** The mockup's `.chip`: a quiet bordered pill that darkens on hover. */
 export const chipClass =
-  'inline-flex h-[26px] items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-55'
+  'inline-flex h-[26px] min-w-0 max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-55'
 
 export const chevron = (
   <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
@@ -63,7 +63,7 @@ export function PickerPill({
         title={disabledHint ?? hint}
         className={`${chipClass} cursor-default hover:bg-card hover:text-muted-foreground`}
       >
-        {label}
+        <span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{label}</span>
       </span>
     )
   }
@@ -76,7 +76,7 @@ export function PickerPill({
       title={disabled ? disabledHint : hint}
       className={chipClass}
     >
-      {label}
+      <span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{label}</span>
       {chevron}
     </button>
   )

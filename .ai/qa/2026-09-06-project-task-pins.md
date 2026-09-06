@@ -40,3 +40,9 @@ The first additional browser smoke run found six stale expectations, all reprodu
 Merged `origin/main` at `a35377431e6360b398c7f8aa417c317208f01414` (PR #100) after parent approval of the original pinning head. The only conflict was the server's contract import block: keep both `pinRunInputSchema` and `githubSearchQuerySchema`. Routes, contracts, client hooks and tests retain both features; no further production changes.
 
 Combined-tree verification on 2026-09-06: `npm run typecheck` passed; `npm test` passed 344 files / 6,878 tests; `npm run test:unit` passed; `npm run build` passed including check:pack; `npm run test:package` passed 22 tests; the same quick-list/thread browser command passed 44 tests. Parent has marked PR #104 ready and retains final merge authority.
+
+## Reconciliation with mobile task reading
+
+Merged main `5a91db4f` (PR103) after the search reconciliation. Production header merged without conflict, retaining phone-only details disclosure, 44px disclosure/actions controls, responsive reading space and the pin checkbox action. Resolved overlapping browser assertions with one step-rail toggle and the complete action list including Pin.
+
+All five required gates pass on the integrated tree: typecheck, 6,889 Vitest tests, core unit checks, build and 22 package tests. Four browser suites (quick-list, task-thread, task-changes, composer) pass 62 tests. Added a 360×640 keyboard regression that expands details, pins/unpins with Space, checks 44px menu/control geometry, preserves expanded details and clears persisted pin fields. The test waits for menu close animations before reopening. Existing coverage verifies selected composer draft/documents, responsive disclosure persistence, long metadata, light/dark themes and task tabs. Inspected fresh light/dark phone screenshots. No additional production behavior changes.

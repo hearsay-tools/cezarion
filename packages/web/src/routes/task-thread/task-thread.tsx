@@ -2,7 +2,7 @@ import { MessageSquareTextIcon, SearchXIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useParams } from 'react-router'
 
-import { Link } from '@/lib/project-router'
+import { Link, useActiveProjectId } from '@/lib/project-router'
 
 import { ApiError } from '@/api/client'
 import {
@@ -175,6 +175,7 @@ export function ThreadView({
    *  header's other three tabs, have no such effect to suppress. */
   onMarkedUnread?: (runId: string) => void
 }) {
+  const projectId = useActiveProjectId()
   const footer = threadFooter(run.status, run.error)
   // The dock's data: the latest plan snapshot across turns (full replacement — an emptied
   // plan hides the dock and the header mirror alike).
@@ -304,7 +305,7 @@ export function ThreadView({
 
       {/* Row spacing lives on each thread row (pb-2.5, both render modes measure alike);
           this gap only separates the sections — rows, empty state, footer, review panel. */}
-      <div className="mx-auto flex w-full max-w-[var(--measure)] flex-1 flex-col gap-3.5 px-4 py-5 md:px-6">
+      <div className="mx-auto flex w-full max-w-[var(--measure)] flex-1 flex-col gap-2.5 px-3 py-3 md:gap-3.5 md:px-6 md:py-5">
         {history ? (
           <HistoryBoundary
             hasOlder={history.hasOlder}
@@ -405,7 +406,7 @@ export function ThreadView({
           publishes an inset. */}
       <div
         data-slot="thread-dock"
-        className="sticky bottom-[var(--kb,0px)] z-10 bg-background px-4 pt-1.5 pb-3 max-md:border-t max-md:border-border md:px-6 md:pb-4"
+        className="sticky bottom-[var(--kb,0px)] z-10 bg-background px-3 pt-1 pb-2 max-md:border-t max-md:border-border md:px-6 md:pt-1.5 md:pb-4"
       >
         {/* The jump pill floats over the thread, just above the dock, centered. */}
         {scroll.pillVisible ? (
@@ -413,7 +414,7 @@ export function ThreadView({
             <JumpToLatestPill onJump={scroll.jumpToLatest} />
           </div>
         ) : null}
-        <div className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-2.5">
+        <div className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-1.5 md:gap-2.5">
           {/* Agents above the plan: the fan-out is the more urgent "what is happening now",
               and it is transient — the plan outlives it. Keyed by run id like the plan dock. */}
           <AgentsDock key={`agents:${run.id}`} runId={run.id} agents={agents} onSelect={setOpenAgentId} />
@@ -448,6 +449,8 @@ export function ThreadView({
           ) : null}
 
           <Composer
+            mobileCollapsible={!providerBlocked}
+            mobileDisclosureKey={JSON.stringify([projectId, run.id])}
             onSubmit={
               continuable
                 ? (text, images) => continueAction.continueWith(text, images)

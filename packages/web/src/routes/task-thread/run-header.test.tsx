@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { ProjectScopeContext } from '@/api/project-scope-context'
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
@@ -83,12 +84,19 @@ function stubFetch(overrides: Record<string, () => Response> = {}): SentRequest[
   return sent
 }
 
-function renderHeader(record: ApiRun, onMarkedUnread?: () => void) {
+function renderHeader(
+  record: ApiRun,
+  onMarkedUnread?: () => void,
+  planTally?: { done: number; total: number },
+) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={[`/tasks/${record.id}`]}>
         <Routes>
-          <Route path="/tasks/:id" element={<RunHeader run={record} onMarkedUnread={onMarkedUnread} />} />
+          <Route
+            path="/tasks/:id"
+            element={<RunHeader run={record} onMarkedUnread={onMarkedUnread} planTally={planTally} />}
+          />
           <Route path="/" element={<div data-slot="home-probe" />} />
         </Routes>
         <Toaster />
@@ -706,7 +714,131 @@ describe('notes panel', () => {
   })
 })
 
+/** A run id no other test has touched. The expand memory is a module-level map keyed by run id
+ *  (the same shape `WorkflowSteps` keeps), so a test that toggles it must not poison the shared
+ *  `r1` fixture every other test in this file renders. */
+let detailsRunSeq = 0
+const freshRunId = () => `details-r${++detailsRunSeq}`
+
+describe('dense run details (#765)', () => {
+  it('collapses the meta row at phone width, and leaves the desktop header as it was', () => {
+    stubFetch()
+    renderHeader(
+      run('done', {
+        id: freshRunId(),
+        branch: 'cez/r1',
+        diffStat: { adds: 42, dels: 7, files: 3 },
+        costUsd: 0.04,
+      }),
+    )
+
+    const details = document.querySelector('[data-slot="run-details"]') as HTMLElement
+    const toggle = screen.getByRole('button', { name: 'Show run details' })
+    expect(details.className).toContain('hidden')
+    // The point of the fix: `md:block` means a desktop reader still sees branch, diff, tokens and
+    // cost at a glance, and the control that would ask them to click for it is `md:hidden`.
+    expect(details.className).toContain('md:block')
+    expect(toggle.className).toContain('md:hidden')
+    // A real disclosure relationship, not a visual-only one.
+    expect(details.id).not.toBe('')
+    expect(toggle.getAttribute('aria-controls')).toBe(details.id)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(toggle)
+
+    expect(details.className).not.toContain('hidden')
+    expect(screen.getByRole('button', { name: 'Hide run details' }).getAttribute('aria-expanded')).toBe('true')
+    expect(details.textContent).toContain('cez/r1')
+    expect(details.textContent).toContain('IN 24.6k · OUT 2.4k')
+  })
+
+  it('remembers the expand for that run across a tab switch, and does not leak it to another run', () => {
+    stubFetch()
+    const id = freshRunId()
+    const first = renderHeader(run('done', { id }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show run details' }))
+    first.unmount()
+
+    // Same run, remounted by another task route's header: still expanded, because re-opening it on
+    // every Session → Changes hop is the chore this map exists to avoid.
+    const second = renderHeader(run('done', { id }))
+    expect(screen.queryByRole('button', { name: 'Hide run details' })).not.toBeNull()
+    second.unmount()
+
+    renderHeader(run('done', { id: freshRunId() }))
+    expect(screen.queryByRole('button', { name: 'Show run details' })).not.toBeNull()
+  })
+
+  it('keeps the monitoring schedule out of the disclosure — a self-resuming run is status', () => {
+    stubFetch()
+    renderHeader(
+      run('running', {
+        id: freshRunId(),
+        activity: 'monitoring',
+        monitoringWakeAt: '2026-07-25T10:15:00.000Z',
+      }),
+    )
+
+    const schedule = document.querySelector('[data-slot="monitoring-schedule"]')
+    const details = document.querySelector('[data-slot="run-details"]') as HTMLElement
+    expect(schedule).not.toBeNull()
+    expect(details.contains(schedule)).toBe(false)
+  })
+
+  it('drops the plan mirror at phone width — the dock it mirrors is already on screen there', () => {
+    stubFetch()
+    renderHeader(run('running', { id: freshRunId() }), undefined, { done: 1, total: 3 })
+
+    const mirror = document.querySelector('[data-slot="plan-mirror"]') as HTMLElement
+    expect(mirror.textContent).toBe('Plan 1/3')
+    expect(mirror.className).toContain('hidden')
+    expect(mirror.className).toContain('md:inline')
+  })
+})
+
 describe('meta line, tabs, pill and resume hint', () => {
+  it('scrolls the run header on phones but restores sticky context on desktop', () => {
+    stubFetch()
+    renderHeader(run('done'))
+
+    const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
+    const classes = header.className.split(/\s+/)
+    expect(classes).toContain('relative')
+    expect(classes).not.toContain('sticky')
+    expect(classes).not.toContain('top-0')
+    expect(classes).toContain('md:sticky')
+    expect(classes).toContain('md:top-0')
+    expect(classes).toContain('px-3')
+    expect(classes).toContain('md:px-6')
+  })
+
+  // The plan mirror hides on phones so the title row keeps its space for the status pill and
+  // the kebab. It switches at `md`, the same breakpoint as the sticky header, the tabs, the
+  // composer and the dock — an `sm:` here would reveal it between 640-768px in a header that
+  // is still not sticky, a state the responsive pass never designed for.
+  it('hides the plan mirror on phones and reveals it at the same md breakpoint as the rest of the header', () => {
+    stubFetch()
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter initialEntries={['/tasks/r1']}>
+          <Routes>
+            <Route
+              path="/tasks/:id"
+              element={<RunHeader run={run('running')} planTally={{ done: 2, total: 5 }} />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    const mirror = document.querySelector('[data-slot="plan-mirror"]') as HTMLElement
+    expect(mirror.textContent).toContain('Plan 2/5')
+    const classes = mirror.className.split(/\s+/)
+    expect(classes).toContain('hidden')
+    expect(classes).toContain('md:inline')
+    expect(classes).not.toContain('sm:inline')
+  })
+
   it('meta shows workflow · branch chip · ± · input/output · cost, with the agent summary in the badge', () => {
     stubFetch()
     renderHeader(
@@ -1202,4 +1334,26 @@ describe('meta line, tabs, pill and resume hint', () => {
     renderHeader(run('running'))
     expect(document.querySelector('[data-slot="resume-hint"]')).toBeNull()
   })
+})
+
+
+it('isolates details by project and run on a mounted header, and remembers each on return', () => {
+  stubFetch()
+  const client = createQueryClient()
+  const id = freshRunId()
+  const view = (projectId: string, runId: string) => (
+    <QueryClientProvider client={client}>
+      <ProjectScopeContext.Provider value={{ projectId, apiBase: `/api/v1/p/${projectId}` }}>
+        <MemoryRouter><RunHeader run={run('done', { id: runId })} /></MemoryRouter>
+      </ProjectScopeContext.Provider>
+    </QueryClientProvider>
+  )
+  const { rerender } = render(view('project-a', id))
+  fireEvent.click(screen.getByRole('button', { name: 'Show run details' }))
+  rerender(view('project-a', `${id}-other`))
+  expect(screen.getByRole('button', { name: 'Show run details' }).getAttribute('aria-expanded')).toBe('false')
+  rerender(view('project-b', id))
+  expect(screen.getByRole('button', { name: 'Show run details' }).getAttribute('aria-expanded')).toBe('false')
+  rerender(view('project-a', id))
+  expect(screen.getByRole('button', { name: 'Hide run details' }).getAttribute('aria-expanded')).toBe('true')
 })

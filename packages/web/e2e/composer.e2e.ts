@@ -205,6 +205,13 @@ describe('the thread composer against a live waiting session', () => {
     browser.waitForFunction(
       `document.querySelector('[data-slot="dictation-transcript"]').textContent === 'summarize what you did'`,
     )
+    browser.setViewport(360, 640)
+    for (const label of ['Cancel dictation', 'Insert transcription', 'Insert transcription and send']) {
+      expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return [r.width, r.height] })()`)).toEqual([44, 44])
+    }
+    expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    browser.setViewport(1440, 900)
+    expect(browser.evaluate(`document.querySelector('[aria-label="Cancel dictation"]').getBoundingClientRect().width`)).toBe(32)
     browser.screenshot(`${artifactsDir}/composer-dictation.png`)
   })
 

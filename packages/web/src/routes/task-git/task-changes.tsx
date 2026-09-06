@@ -190,7 +190,7 @@ function ChangesView({ run }: { run: ApiRun }) {
           subtitle="The worktree matches its base branch. Changes appear here as the agent works."
         />
       ) : (
-        <div className="flex min-h-0 flex-1 items-start gap-5 px-4 py-4 [--diff-sticky-top:10rem] md:px-6">
+        <div className="flex min-h-0 flex-1 items-start gap-5 px-4 py-4 [--diff-sticky-top:0px] md:[--diff-sticky-top:10rem] md:px-6">
           {/* The tree column: sticky under the header so long diffs scroll beside it, and its OWN
               scroller. Sticky alone is not enough — a tree taller than the viewport grows the page
               instead, so the only way to reach its last file was to drag the shared `main` scroller

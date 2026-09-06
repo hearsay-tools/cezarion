@@ -245,6 +245,11 @@ export class AgentBrowser {
     this.run(['set', 'viewport', String(width), String(height)])
   }
 
+  /** Emulate the accessibility preference in the real browser, including CSS media queries. */
+  setReducedMotion(): void {
+    this.run(['set', 'media', 'reduced-motion'])
+  }
+
   /** operation: interact (`click`). */
   click(selector: string): void {
     this.run(['click', selector])
