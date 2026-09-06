@@ -80,11 +80,24 @@ describe('live repository identity recovery', () => {
     execFileMock.mockImplementation(reply(error));
     armRepoHandle(store, root, controller.signal);
     await vi.advanceTimersByTimeAsync(60_000);
-    await resolveRepoHandle(root);
     expect(execFileMock).toHaveBeenCalledTimes(1);
     const run = create(store);
     store.appendEvent(run.id, { type: 'result', result: foreignPr });
     expect(store.getRun(run.id)?.referencedPullRequestUrl).toBe(foreignPr);
+  });
+
+  it.each([
+    Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }),
+    new Error('no git remotes found'),
+  ])('lets a later cold-index caller discover identity after local absence: %s', async (error) => {
+    execFileMock.mockImplementation(reply(error));
+    armRepoHandle(store, root, controller.signal);
+    await vi.advanceTimersByTimeAsync(0);
+    execFileMock.mockImplementation(reply(null)); // gh installed or a remote added
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(execFileMock).toHaveBeenCalledTimes(1); // live background discovery has stopped
+    expect(await resolveRepoHandle(root)).toEqual({ owner: 'acme', name: 'service' });
+    expect(execFileMock).toHaveBeenCalledTimes(2); // demand-driven cold lookup can recover
   });
 
   it('does not retry malformed identity and reuses the permanent negative for another store', async () => {

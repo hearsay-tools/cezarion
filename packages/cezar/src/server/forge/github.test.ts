@@ -3126,21 +3126,20 @@ describe('fetchGithubRefStatus', () => {
     expect(out.reason).toContain('gh CLI not found');
   });
 
-  it('recovers ref-status after gh is installed despite permanent background absence', async () => {
+  it('recovers ref-status after gh is installed following background absence', async () => {
     execFileMock.mockImplementation((...args: unknown[]) => {
       const cb = args.at(-1) as (error: unknown, result: unknown) => void;
       cb(Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }), null);
     });
     const root = '/repo/install-gh-after-startup';
     expect(await resolveRepoHandle(root)).toBeNull();
-    expect(await resolveRepoHandle(root)).toBeNull();
-    expect(execFileMock).toHaveBeenCalledTimes(1); // background consumers do not keep probing
+    expect(execFileMock).toHaveBeenCalledTimes(1);
     stubGh(JSON.stringify({ data: { repository: { r0: { __typename: 'PullRequest', state: 'MERGED', isDraft: false, reviewDecision: null, commits: { nodes: [] } } } } }));
     const out = await fetchGithubRefStatus(root, { prs: [7] });
     expect(out.available && out.prs[7]).toBe('merged');
     const calls = execFileMock.mock.calls.length;
     expect(await resolveRepoHandle(root)).toEqual({ owner: 'owner', name: 'n' });
-    expect(execFileMock).toHaveBeenCalledTimes(calls); // a later success supersedes local absence
+    expect(execFileMock).toHaveBeenCalledTimes(calls); // a later success is shared with background discovery
   });
 
   it('degrades in the payload when gh is not installed', async () => {
