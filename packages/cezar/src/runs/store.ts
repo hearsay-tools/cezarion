@@ -867,6 +867,63 @@ export class RunStore extends EventEmitter {
     this.commitIndex(proposed, new Set([id]));
   }
 
+  /** Retire exactly one wait together with any human message that superseded it. */
+  commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage): void {
+    const run = this.runs.get(id);
+    if (run?.delegation?.role !== 'root' || run.delegation.wait?.id !== waitId) {
+      throw new Error('worker wait changed before withdrawal');
+    }
+    const { wait, ...delegation } = run.delegation;
+    const message = acceptedHumanMessage ? queuedMessageSchema.parse(acceptedHumanMessage) : undefined;
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...run, delegation,
+      ...(run.agentInputs ? { agentInputs: run.agentInputs.filter(input => input.id !== wait.wakeId || input.deliveredAt) } : {}),
+      ...(message ? {
+        queuedMessages: [...(run.queuedMessages ?? []), message],
+        ...(run.continuationMessage ? { continuationMessage: {
+          ...run.continuationMessage, origin: 'human' as const,
+          text: run.continuationMessage.origin === 'lifecycle' ? '' : run.continuationMessage.text,
+        } } : {}),
+      } : {}),
+    });
+    this.commitIndex(proposed, new Set([id]));
+  }
+
+  /** Successful deferred human delivery consumes only its persisted queue ID.
+   * A crash before this checkpoint may replay that same message on recovery. */
+  commitQueuedMessageDelivery(id: string, messageId: string): void {
+    const run = this.runs.get(id);
+    if (!run) throw new Error('missing queued message target');
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...run, queuedMessages: (run.queuedMessages ?? []).filter(message => message.id !== messageId) });
+    this.commitIndex(proposed, new Set([id]));
+  }
+
+  /** An acknowledged inactive-root Finish must survive the async diff and restart. */
+  commitRootFinishIntent(id: string): void {
+    const run = this.runs.get(id);
+    if (run?.status !== 'waiting' || run.delegation?.role !== 'root') throw new Error('root is not waiting');
+    if (run.delegation.finishRequestedAt) return;
+    this.commitDelegation([{ id, delegation: { ...run.delegation, finishRequestedAt: new Date().toISOString() } }]);
+  }
+
+  /** Publish terminal success and completed steps only after their atomic checkpoint.
+   * A concurrent explicit cancellation is never overwritten by the async diff. */
+  commitRootFinishSuccess(id: string, status: 'done' | 'review'): boolean {
+    const run = this.runs.get(id);
+    if (run?.status !== 'waiting' || run.delegation?.role !== 'root' || !run.delegation.finishRequestedAt) return false;
+    const { finishRequestedAt: _intent, ...delegation } = run.delegation;
+    const finishedAt = new Date().toISOString();
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...run, delegation, status, finishedAt, currentStepId: undefined, autoResumeAttempts: undefined,
+      activity: undefined, monitoringWakeAt: undefined, monitoringWakeCapReached: undefined,
+      steps: run.steps.map(step => step.status === 'waiting' || step.status === 'running'
+        ? { ...step, status: 'done' as const, finishedAt } : step),
+    });
+    this.commitIndex(proposed, new Set([id]));
+    return true;
+  }
+
   /** Persist all authority patches before exposing any of them to the engine or subscribers. */
   commitDelegation(patches: ReadonlyArray<{ id: string; delegation: DelegationState }>): void {
     if (patches.length === 0) return;

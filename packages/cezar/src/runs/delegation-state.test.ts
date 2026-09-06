@@ -71,6 +71,8 @@ describe('delegation schemas', () => {
     expect(workerOperationSchema.options).toEqual(['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait']);
     expect(workerOperationSchema.safeParse('merge').success).toBe(false);
     expect(delegationStateSchema.parse(root)).toEqual(root);
+    expect(delegationStateSchema.parse({ ...root, finishRequestedAt: now })).toMatchObject({ finishRequestedAt: now });
+    expect(delegationStateSchema.safeParse({ ...root, finishRequestedAt: 'tomorrow' }).success).toBe(false);
     expect(delegationStateSchema.parse(worker())).toMatchObject({ role: 'worker', permissions: [] });
     expect(delegationStateSchema.parse({ role: 'invalid' })).toEqual({ role: 'invalid' });
     for (const value of [{ role: 'other' }, { ...root, permissions: ['merge'] }, { role: 'worker', permissions: [] }]) {
@@ -154,6 +156,48 @@ describe('RunStore durable delegation', () => {
     return run;
   }
   function disk() { return JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8')); }
+
+  it('atomically withdraws only the selected wait and preserves human FIFO, attachments and other inputs', () => {
+    const run = parent(); const wakeId = randomUUID();
+    const selected = workerWaitSchema.parse({ ...wait, phase: 'wake-pending', wakeId });
+    store.commitDelegation([{ id: run.id, delegation: { ...root, wait: selected } }]);
+    const old = { id: randomUUID(), text: 'earlier update', images: ['earlier.png'], createdAt: now };
+    const next = { id: randomUUID(), text: 'new update', images: ['new.pdf'], createdAt: now };
+    store.updateRun(run.id, { queuedMessages: [old], continuationMessage: { id: 'continue-1', text: 'human opening', origin: 'human', images: ['opening.png'], createdAt: now } });
+    const wake = { id: wakeId, source: 'lifecycle' as const, parentRunId: run.id, text: 'wake', createdAt: now };
+    const unrelated = { ...wake, id: randomUUID(), deliveredAt: now };
+    store.commitAgentInputs(run.id, [wake, unrelated]);
+    const before = JSON.stringify(store.getRun(run.id));
+    expect(() => store.commitWorkerWaitWithdrawal(run.id, randomUUID(), next)).toThrow();
+    expect(JSON.stringify(store.getRun(run.id))).toBe(before);
+    store.commitWorkerWaitWithdrawal(run.id, selected.id, next);
+    const reopened = RunStore.open(dataDir, { keepLive: true }).getRun(run.id);
+    expect(reopened?.delegation).toEqual(root);
+    expect(reopened?.agentInputs).toEqual([unrelated]);
+    expect(reopened?.queuedMessages).toEqual([old, next]);
+    expect(reopened?.continuationMessage).toMatchObject({ text: 'human opening', images: ['opening.png'], origin: 'human' });
+    store.commitQueuedMessageDelivery(run.id, next.id);
+    expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.queuedMessages).toEqual([old]);
+  });
+
+  it('retains a delivered wake receipt and publishes nothing if human withdrawal cannot persist', () => {
+    const run = parent(); const wakeId = randomUUID();
+    const selected = workerWaitSchema.parse({ ...wait, phase: 'wake-pending', wakeId });
+    store.commitDelegation([{ id: run.id, delegation: { ...root, wait: selected } }]);
+    const delivered = { id: wakeId, source: 'lifecycle' as const, parentRunId: run.id, text: 'wake', createdAt: now, deliveredAt: now };
+    store.commitAgentInputs(run.id, [delivered]);
+    const before = readFileSync(join(dataDir, 'runs.json'), 'utf8');
+    const notifications: unknown[] = []; store.on('run', value => notifications.push(value));
+    mkdirSync(join(dataDir, 'runs.json.tmp'));
+    try {
+      expect(() => store.commitWorkerWaitWithdrawal(run.id, selected.id, { id: randomUUID(), text: 'new', createdAt: now })).toThrow();
+      expect(notifications).toEqual([]);
+      expect(readFileSync(join(dataDir, 'runs.json'), 'utf8')).toBe(before);
+      expect(store.getRun(run.id)?.delegation).toEqual({ ...root, wait: selected });
+    } finally { rmSync(join(dataDir, 'runs.json.tmp'), { recursive: true }); }
+    store.commitWorkerWaitWithdrawal(run.id, selected.id);
+    expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.agentInputs).toEqual([delivered]);
+  });
 
   it('publishes the complete durable proposed index before notifying any listener', () => {
     const first = store.createRun(input);

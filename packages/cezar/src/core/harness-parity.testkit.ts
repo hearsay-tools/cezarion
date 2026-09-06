@@ -472,10 +472,14 @@ export async function withOwnedInputRun(
     const sha = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    // This fixture tests worker recovery, not root scheduling (Task 5). A queued
-    // root would itself be launched by recover() and outlive the worker teardown.
-    store.updateRun(parent.id, { status: 'done' });
+    // A live root with its own unanswered question survives recovery without
+    // launching a parent process. A terminal root correctly cancels its workers.
+    store.updateRun(parent.id, { status: 'waiting' });
     store.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } }]);
+    store.appendEvent(parent.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
+      header: 'Parent', question: 'Which parent task should follow?',
+      options: [{ label: 'First task' }, { label: 'Second task' }],
+    }] });
     runId = randomUUID();
     const workspace = await planOwnedWorkspace(repoRoot, runId, sha);
     store.createOwnedRun({ title: 'worker', task: promptFor(backend, scenario), workflow: 'quick-task', runner: backend,

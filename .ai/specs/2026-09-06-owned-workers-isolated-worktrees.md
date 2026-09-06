@@ -115,6 +115,10 @@ The model records:
   (registered, parked, wake-pending), and durable outcome/delivery receipts.
 - Destruction: requested timestamp, phase, last bounded error, and resources
   still requiring cleanup. A completed tombstone retains run history.
+- Inactive-root Finish intent: optional `finishRequestedAt`, atomically persisted before
+  accepting explicit human Finish and retained until normal review/done settlement
+  checkpoints terminal status and steps. Pending intent blocks new execution/input
+  authority but retains inspection/stop/cleanup and retries after restart.
 - Spawn receipt: parent-scoped request ID and resulting worker ID, so retrying a
   lost response cannot create another worker.
 
@@ -227,6 +231,16 @@ clears its wait, and requests cancellation of all unfinished workers. Preserve
 artifacts. A controller shutdown/restart is not parent terminal success and must
 not cascade-cancel recoverable work. Workers needing human input remain visible
 and retain their ask; the parent's bounded wait may expire normally.
+
+Task 5 review ruling: ordinary parked delegated roots remain `waiting` across
+restart even after their children finish. Inactive roots retain explicit human
+Continue (actual answer content required for an ask) and Finish through the normal
+review gate. Finish acknowledges only after durable intent; failure to compute the
+diff or checkpoint settlement retains visible retryable intent, never an answer
+receipt or permission to delete artifacts. Persisted human-answer continuations
+interrupted before their first boundary recover through capacity admission; an
+unresumable ask stays waiting rather than becoming terminal failure.
+
 
 ## Steering and human questions
 

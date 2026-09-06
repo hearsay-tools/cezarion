@@ -37,6 +37,9 @@ export function authorizeWorker(caller: Caller, target: RunRecord | undefined, o
   if (!parsed.success || parsed.data.role !== 'worker' ||
       parsed.data.parentRunId !== parent.id || parsed.data.workspace.ownerRunId !== target.id) denyScope();
   requireActiveParent(parent);
+  if (parent.delegation?.role === 'root' && parent.delegation.finishRequestedAt && (operation === 'steer' || operation === 'wait')) {
+    throw new DelegationPolicyError('incompatible_state', 'Parent finish is pending');
+  }
   if (operation === 'steer' && (parsed.data.destroy || !['queued', 'running', 'waiting'].includes(target.status))) {
     throw new DelegationPolicyError('incompatible_state', 'Worker no longer accepts steering');
   }
@@ -49,6 +52,9 @@ export function authorizeSpawnReplay(caller: Caller, parent: RunRecord | undefin
   requireRootAuthority(caller, parent, projectId, 'spawn');
   if (!parent) denyScope();
   requireActiveParent(parent);
+  if (parent.delegation?.role === 'root' && parent.delegation.finishRequestedAt) {
+    throw new DelegationPolicyError('incompatible_state', 'Parent finish is pending');
+  }
 }
 
 /** Authorizes a NEW creation. The service resolves existing idempotency receipts before this cap. */

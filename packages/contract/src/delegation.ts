@@ -66,6 +66,7 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
       new Set(receipts.map(receipt => receipt.requestId)).size === receipts.length &&
       new Set(receipts.map(receipt => receipt.workerId)).size === receipts.length),
     wait: workerWaitSchema.optional(),
+    finishRequestedAt: z.iso.datetime().optional(),
   }).strict(),
   z.object({
     role: z.literal('worker'),

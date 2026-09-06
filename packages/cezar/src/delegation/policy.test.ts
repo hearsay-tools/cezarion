@@ -44,6 +44,15 @@ function denied(action: () => void, code = 'denied_scope'): void {
 }
 
 describe('parent-only delegation policy', () => {
+  it.each(operations)('pending parent finish gates %s without blocking inspection or cleanup', operation => {
+    const parent = root();
+    if (parent.delegation?.role !== 'root') throw Error('fixture');
+    parent.delegation.finishRequestedAt = now;
+    if (['spawn', 'steer', 'wait'].includes(operation)) {
+      denied(() => authorize(operation, caller(), parent), 'incompatible_state');
+    } else expect(() => authorize(operation, caller(), parent)).not.toThrow();
+  });
+
   it.each(operations)('permits owner %s using the authenticated identity, not CEZ_TASK_ID', operation => {
     vi.stubEnv('CEZ_TASK_ID', otherId);
     expect(() => authorize(operation, caller(), root())).not.toThrow();
