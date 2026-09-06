@@ -237,6 +237,21 @@ describe('the Changes tab against a live dry run', () => {
     ).toBe('Files')
   })
 
+  it('task Changes and commit diffs reserve sticky header space only on desktop', () => {
+    const sha = execFileSync('git', ['-C', worktreePath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    for (const tab of ['changes', `commits/${sha}`]) {
+      browser.setViewport(360, 640)
+      browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/${tab}`)}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="diff-file"] > header') !== null`)
+      const stickyTop = `getComputedStyle(document.querySelector('[data-slot="diff-file"] > header')).top`
+      expect(browser.evaluate(stickyTop)).toBe('0px')
+      expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('relative')
+      browser.setViewport(1440, 900)
+      expect(browser.evaluate(stickyTop)).toBe('160px')
+      expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('sticky')
+    }
+  })
+
   it('below md the segments stay tappable and the diff forces unified+wrap (toggles gone)', () => {
     browser.setViewport(390, 844)
     browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/changes`)}`)
