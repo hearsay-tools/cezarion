@@ -1,8 +1,14 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { RunsIndexResponse } from '@open-mercato/cezar-contract';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runsIndexResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract';
+const resolveRepoHandle = vi.hoisted(() => vi.fn());
+vi.mock('./forge/github.ts', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./forge/github.ts')>(),
+  resolveRepoHandle,
+}));
+
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { clearProjectProbeCache, listProjects, registerProject } from '../workspace/projects.ts';
@@ -44,6 +50,7 @@ describe('workspace runs index API', () => {
   let store: RunStore;
 
   beforeEach(() => {
+    resolveRepoHandle.mockReset().mockResolvedValue(null);
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-runs-index-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-runs-index-boot-'));
     otherRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-runs-index-other-'));
@@ -112,6 +119,59 @@ describe('workspace runs index API', () => {
     expect(contexts.peek(other.id)).toBeUndefined();
     expect(contexts.ids()).toEqual([]);
     contexts.disposeAll();
+  });
+
+  it('scopes cold rows after delayed discovery without opening or writing their project', async () => {
+    await registerProject(repoRoot);
+    const other = await registerProject(otherRoot);
+    const foreignPr = 'https://github.com/foreign/repo/pull/42';
+    const foreignIssue = 'https://github.com/foreign/repo/issues/43';
+    seedColdProject(otherRoot, [storedRun({
+      id: 'cold', title: 'Research', referencedPullRequestUrl: foreignPr,
+      referencedIssueUrl: foreignIssue, issueNumber: 43, referencedIssueNumberSeeded: true,
+      referencedPrCandidates: [foreignPr], referencedIssueCandidates: [foreignIssue],
+    })]);
+    const indexPath = join(otherRoot, '.ai/cezar/runs.json');
+    const original = readFileSync(indexPath, 'utf8');
+    let finish!: (handle: { owner: string; name: string }) => void;
+    resolveRepoHandle.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const contexts = new ProjectContexts({ listProjects });
+    const app = makeApp({ contexts });
+    const request = async () => runsIndexResponseSchema.parse(
+      await (await apiRequest(app, '/api/v1/workspace/runs-index')).json(),
+    );
+
+    // Both responses finish while the lookup is still pending; the second must not spawn again.
+    expect((await request()).runs[0]?.referencedPullRequestUrl).toBe(foreignPr);
+    await request();
+    expect(resolveRepoHandle).toHaveBeenCalledTimes(1);
+    expect(resolveRepoHandle.mock.calls[0]?.[0]).toBe(otherRoot);
+    finish({ owner: 'local', name: 'repo' });
+    await new Promise((resolve) => setImmediate(resolve));
+    const row = (await request()).runs[0];
+    expect(row?.referencedPullRequestUrl).toBeUndefined();
+    expect(row?.referencedIssueUrl).toBeUndefined();
+    expect(row?.issueNumber).toBeUndefined();
+    expect(contexts.peek(other.id)).toBeUndefined();
+    expect(contexts.ids()).toEqual([]);
+    expect(existsSync(join(otherRoot, '.ai/cezar/runs'))).toBe(false);
+    expect(readFileSync(indexPath, 'utf8')).toBe(original);
+    contexts.disposeAll();
+  });
+
+  it.each(['unavailable', 'rejected'])('keeps cold references when identity is %s', async (failure) => {
+    await registerProject(repoRoot);
+    await registerProject(otherRoot);
+    const url = 'https://github.com/foreign/repo/pull/42';
+    seedColdProject(otherRoot, [storedRun({ id: 'cold', title: 'Research', referencedPullRequestUrl: url })]);
+    if (failure === 'rejected') resolveRepoHandle.mockRejectedValue(new Error('offline'));
+    const app = makeApp();
+    for (let i = 0; i < 2; i++) {
+      const response = await apiRequest(app, '/api/v1/workspace/runs-index');
+      expect(response.status).toBe(200);
+      expect(runsIndexResponseSchema.parse(await response.json()).runs[0]?.referencedPullRequestUrl).toBe(url);
+    }
+    expect(resolveRepoHandle).toHaveBeenCalledTimes(1);
   });
 
   it('sends the slim row — no steps, and optional keys absent rather than null', async () => {

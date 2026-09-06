@@ -312,9 +312,19 @@ painted — which is both a round trip and a visible flash of un-coloured chips.
 knows which references exist is the same thing that serves the rows.
 
 So `GET /workspace/runs-index` now answers with `referenceStatuses` too: a `{projectId: {prs,
-issues}}` map of whatever the server ALREADY had cached. Read from cache only, so the route never
-touches `gh` and never gets slower; a reference nothing has looked up yet is simply absent, and
+issues}}` map of whatever the server ALREADY had cached. Status hydration reads from cache only, so it never
+waits on `gh`; a reference nothing has looked up yet is simply absent, and
 `/github/ref-status` stays the route that actually goes and asks.
+
+Cold-row repository scoping (#97) discovers identity separately in the background. The index
+returns immediately with the known identity, or keeps existing references while identity is
+unknown. Discovery is deduplicated per root, capped at four active lookups with a five-second
+abort deadline; failed lookups retry only on later index demand after a one-minute cooldown.
+Queued work drains within those bounds and removed or opened projects leave the cold cache.
+Subsequent reads apply the store's existing scoping rule to freshly parsed records after load
+reconciliation, retaining candidate evidence, prompt corroboration, declared numbers, and
+independently owned issue numbers. The index never opens a store/context, recovers agents,
+prunes worktrees, or persists those scoped records. Cross-repository status hydration is unchanged.
 
 Being free is what lets it be a SUPERSET. The server looks up every number a run mentions rather
 than re-deriving which one the cockpit will display — that rule (#407, #526) lives client-side, and

@@ -91,6 +91,7 @@ import {
   validateLiveCursor,
 } from '../runs/event-history.ts';
 import { readRunIndexFromDisk } from '../runs/run-index.ts';
+import { ColdRepoHandles } from './cold-repo-handles.ts';
 import { isV2WireEventType } from '../runs/ui-event-sink.ts';
 import {
   runEventsQuerySchema,
@@ -5470,6 +5471,7 @@ export function createApp(deps: ServerDeps) {
    * which would build a context, prune worktrees and `recover()` running agents. Typing in a
    * search box must not resume work; see `runs/run-index.ts`.
    */
+  const coldRepoHandles = new ColdRepoHandles();
   const runsIndexRoutes = new Hono()
     .get('/workspace/runs-index', async (c) => {
       let projects: ProjectListEntry[] = [];
@@ -5483,6 +5485,9 @@ export function createApp(deps: ServerDeps) {
         // active project's own run list, which it holds either way.
       }
       const bootId = await resolveBootProject(projects);
+      coldRepoHandles.retainRoots(new Set(projects
+        .filter((project) => project.status !== 'missing' && project.id !== bootId && !contexts.peek(project.id))
+        .map((project) => project.root)));
       const runs: RunIndexEntry[] = [];
       const truncated: string[] = [];
       // Statuses the server already holds, shipped WITH the rows that carry the references. The
@@ -5503,7 +5508,9 @@ export function createApp(deps: ServerDeps) {
         // is findable while you stand in its project and vanishes the moment you leave — the
         // exact asymmetry a cross-project finder exists to remove.
         const recent = (
-          owned ? owned.store.listRuns() : readRunIndexFromDisk(join(project.root, '.ai/cezar'))
+          owned ? owned.store.listRuns() : readRunIndexFromDisk(
+            join(project.root, '.ai/cezar'), coldRepoHandles.get(project.root),
+          )
         ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         if (recent.length > RUNS_INDEX_PER_PROJECT) truncated.push(project.id);
         const mentioned: number[] = [];
