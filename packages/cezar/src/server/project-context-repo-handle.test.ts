@@ -3,14 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const resolveRepoHandle = vi.hoisted(() => vi.fn());
+const discoverRepoHandle = vi.hoisted(() => vi.fn());
 vi.mock('./forge/github.ts', async (importOriginal) => ({
   ...await importOriginal<typeof import('./forge/github.ts')>(),
-  resolveRepoHandle,
+  discoverRepoHandle,
 }));
 
 import { ProjectContexts } from './project-context.ts';
-import type { RepoHandle } from '../runs/store.ts';
+import type { RepoHandleDiscovery } from './forge/github.ts';
 
 const handle = { owner: 'acme', name: 'service' };
 const foreignPr = 'https://github.com/other/repo/pull/42';
@@ -22,16 +22,16 @@ describe('project repository discovery lifetime', () => {
   afterEach(() => {
     contexts?.disposeAll();
     if (root) rmSync(root, { recursive: true, force: true });
-    resolveRepoHandle.mockReset();
+    discoverRepoHandle.mockReset();
   });
 
   it.each(['dispose', 'disposeAll'] as const)(
     '%s prevents a late lookup from overwriting a reopened project',
     async (dispose) => {
       root = mkdtempSync(join(tmpdir(), 'cez-ctx-repo-lifetime-'));
-      let release!: (value: RepoHandle) => void;
-      resolveRepoHandle.mockReturnValueOnce(new Promise<RepoHandle>((resolve) => { release = resolve; }));
-      resolveRepoHandle.mockResolvedValue(handle);
+      let release!: (value: RepoHandleDiscovery) => void;
+      discoverRepoHandle.mockReturnValueOnce(new Promise<RepoHandleDiscovery>((resolve) => { release = resolve; }));
+      discoverRepoHandle.mockResolvedValue({ status: 'resolved', handle });
       contexts = new ProjectContexts({
         listProjects: async () => [{ id: 'project', root, status: 'not-git' }],
       });
@@ -52,7 +52,7 @@ describe('project repository discovery lifetime', () => {
       const indexPath = join(current.dataDir, 'runs.json');
       const beforeLateLookup = readFileSync(indexPath, 'utf8');
 
-      release(handle);
+      release({ status: 'resolved', handle });
       await new Promise((resolve) => setImmediate(resolve));
 
       expect(readFileSync(indexPath, 'utf8')).toBe(beforeLateLookup);
