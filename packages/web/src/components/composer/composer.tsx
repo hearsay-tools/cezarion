@@ -750,7 +750,7 @@ function DictationBar({
         variant="ghost"
         size="icon-sm"
         aria-label="Cancel dictation"
-        className="size-8 text-muted-foreground"
+        className="size-11 text-muted-foreground md:size-8"
         onClick={onCancel}
       >
         <XIcon aria-hidden="true" />
