@@ -1073,9 +1073,9 @@ const TIMELINE_PER_PAGE = 100;
 
 // The repo handle for the per-commit checks query (#525 Phase 2). Memoized per repoRoot — stable
 // in practice, and keyed per root rather than globally for multi-project forward-compatibility.
-// `null` is a cached PERMANENT negative (the slug isn't a clean two-part name, so retrying cannot
-// help). A *thrown* gh failure is transient and deliberately NOT cached: caching it would disable
-// glyphs until process restart on one network blip.
+// `null` is a cached permanent negative for malformed identity. Local absence is not cached (#102).
+// Network, authentication and timeout failures are deliberately NOT cached: caching them would
+// disable glyphs until process restart on one transient failure.
 const repoHandleCache = new Map<string, { owner: string; name: string } | null>();
 
 /** Test-only: drop the memoized repo handles. */
@@ -1083,25 +1083,56 @@ export function __clearRepoHandleCacheForTests(): void {
   repoHandleCache.clear();
 }
 
-/** The `owner/name` for `repoRoot`, memoized. Returns null when the handle isn't a clean two-part
- *  slug or `gh` failed — the caller then skips checks entirely and commits render unglyphed. */
+/** Internal discovery outcome: callers that own a lifecycle can retry only transient failures. */
+export type RepoHandleDiscovery =
+  | { status: 'resolved'; handle: { owner: string; name: string } }
+  | { status: 'unknown' }
+  | { status: 'retryable' }
+  | { status: 'cancelled' };
+
+/** Local absence cannot improve through network retries. Authentication, timeouts and remote
+ * errors deliberately stay retryable, including 404s for temporarily inaccessible repositories. */
+function isPermanentRepoFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if ('code' in error && error.code === 'ENOENT') return true;
+  const stderr = 'stderr' in error && typeof error.stderr === 'string' ? error.stderr : '';
+  return /not a git repository|no git remotes found|none of the git remotes configured for this repository point to a known GitHub host/i.test(`${error.message}\n${stderr}`);
+}
+
+/** Share the existing memo with ordinary discovery, but retain failure classification (#102).
+ * An aborted owner must never publish its late result into this shared cache. */
+export async function discoverRepoHandle(repoRoot: string, signal?: AbortSignal): Promise<RepoHandleDiscovery> {
+  if (signal?.aborted) return { status: 'cancelled' };
+  const memo = repoHandleCache.get(repoRoot);
+  if (memo !== undefined) return memo ? { status: 'resolved', handle: memo } : { status: 'unknown' };
+  try {
+    const handle = parseOwnerName(
+      await gh(repoRoot, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], 15_000, signal),
+    );
+    if (signal?.aborted) return { status: 'cancelled' };
+    repoHandleCache.set(repoRoot, handle);
+    return handle ? { status: 'resolved', handle } : { status: 'unknown' };
+  } catch (error) {
+    if (signal?.aborted) return { status: 'cancelled' };
+    if (isPermanentRepoFailure(error)) {
+      // Do not replace a successful discovery another caller completed while this one failed.
+      const recovered = repoHandleCache.get(repoRoot);
+      if (recovered) return { status: 'resolved', handle: recovered };
+      // The live arming loop stops on unknown. Do not memoize local failures here: later cold
+      // index/status requests must still discover an installed gh or a newly added remote.
+      return { status: 'unknown' };
+    }
+    return { status: 'retryable' };
+  }
+}
+
+/** Compatible fail-open lookup for existing API and cold-index callers. */
 export async function resolveRepoHandle(
   repoRoot: string,
   signal?: AbortSignal,
 ): Promise<{ owner: string; name: string } | null> {
-  const memo = repoHandleCache.get(repoRoot);
-  if (memo !== undefined) return memo;
-  let handle: { owner: string; name: string } | null;
-  try {
-    handle = parseOwnerName(
-      await gh(repoRoot, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], 15_000, signal),
-    );
-  } catch {
-    // Transient — do NOT memoize, so the next thread retries.
-    return null;
-  }
-  repoHandleCache.set(repoRoot, handle); // includes the permanent negative
-  return handle;
+  const result = await discoverRepoHandle(repoRoot, signal);
+  return result.status === 'resolved' ? result.handle : null;
 }
 
 /** What the bounded timeline page loop returns. `stoppedShort` means "the timeline may have more
@@ -2072,7 +2103,7 @@ function refStatusGraphql(repoRoot: string): GraphqlRunner {
 async function resolveRepoHandleStrict(repoRoot: string): Promise<{ owner: string; name: string } | null> {
   const memo = repoHandleCache.get(repoRoot);
   if (memo !== undefined) return memo;
-  // A throw here is transient and deliberately NOT memoized, exactly as in `resolveRepoHandle`.
+  // Failures here stay uncached: demand-driven status reads retain the diagnostic and may recover.
   const handle = parseOwnerName(
     await gh(repoRoot, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']),
   );

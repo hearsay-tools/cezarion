@@ -8,7 +8,7 @@ import { expect, it } from 'vitest';
 
 const exec = promisify(execFile);
 
-it('headless completion cancels a slow repository lookup instead of waiting for its timeout', async () => {
+it.each(['slow', 'retry-delay'] as const)('headless completion cancels %s repository discovery promptly', async (mode) => {
   const root = mkdtempSync(join(tmpdir(), 'cez-headless-repo-'));
   const bin = join(root, 'bin');
   const pidFile = join(root, 'gh.pid');
@@ -20,6 +20,11 @@ it('headless completion cancels a slow repository lookup instead of waiting for 
 const fs = require('node:fs');
 if (!process.argv.includes('nameWithOwner')) process.exit(1);
 fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+if (${JSON.stringify(mode)} === 'retry-delay') {
+  fs.writeFileSync(${JSON.stringify(stopped)}, 'transient failure');
+  process.stderr.write('network is unreachable');
+  process.exit(1);
+}
 process.on('SIGTERM', () => {
   fs.writeFileSync(${JSON.stringify(stopped)}, 'cancelled');
   process.exit(0);

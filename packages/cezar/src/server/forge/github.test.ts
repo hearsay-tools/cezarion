@@ -3113,6 +3113,35 @@ describe('fetchGithubRefStatus', () => {
     expect(askedFor).not.toContain('issueOrPullRequest(number: 8)');
   });
 
+  it('preserves the actionable missing-gh diagnostic after background discovery', async () => {
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const cb = args.at(-1) as (error: unknown, result: unknown) => void;
+      cb(Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }), null);
+    });
+    const root = '/repo/background-nogh';
+    expect(await resolveRepoHandle(root)).toBeNull();
+    const out = await fetchGithubRefStatus(root, { prs: [7] });
+    expect(out.available).toBe(false);
+    if (out.available) throw new Error('expected unavailable');
+    expect(out.reason).toContain('gh CLI not found');
+  });
+
+  it('recovers ref-status after gh is installed following background absence', async () => {
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const cb = args.at(-1) as (error: unknown, result: unknown) => void;
+      cb(Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }), null);
+    });
+    const root = '/repo/install-gh-after-startup';
+    expect(await resolveRepoHandle(root)).toBeNull();
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    stubGh(JSON.stringify({ data: { repository: { r0: { __typename: 'PullRequest', state: 'MERGED', isDraft: false, reviewDecision: null, commits: { nodes: [] } } } } }));
+    const out = await fetchGithubRefStatus(root, { prs: [7] });
+    expect(out.available && out.prs[7]).toBe('merged');
+    const calls = execFileMock.mock.calls.length;
+    expect(await resolveRepoHandle(root)).toEqual({ owner: 'owner', name: 'n' });
+    expect(execFileMock).toHaveBeenCalledTimes(calls); // a later success is shared with background discovery
+  });
+
   it('degrades in the payload when gh is not installed', async () => {
     execFileMock.mockImplementation((...args: unknown[]) => {
       const cb = args[args.length - 1] as (e: unknown, r: unknown) => void;
