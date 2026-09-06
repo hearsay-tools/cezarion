@@ -708,6 +708,30 @@ describe('phone composer disclosure', () => {
     expect(document.querySelector(`label[for="${textarea.id}"]`)?.textContent).toBe('Reply to the agent')
   })
 
+  it('keeps disclosure separate for project/run identities without remounting the draft', () => {
+    stubSkillsFetch({})
+    const client = createQueryClient()
+    const view = (project: string, run: string) => (
+      <QueryClientProvider client={client}>
+        <Composer onSubmit={vi.fn()} mobileCollapsible mobileDisclosureKey={JSON.stringify([project, run])} />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view('p1', 'a'))
+    const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
+    type(textarea, 'retained draft')
+    textarea.setSelectionRange(2, 8)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand composer' }))
+    for (const [project, run] of [['p1', 'b'], ['p2', 'a']] as const) {
+      rerender(view(project, run))
+      expect(screen.getByRole('button', { name: 'Expand composer' }).getAttribute('aria-expanded')).toBe('false')
+      expect(screen.getByLabelText('Reply to the agent')).toBe(textarea)
+      expect(textarea.value).toBe('retained draft')
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([2, 8])
+    }
+    rerender(view('p1', 'a'))
+    expect(screen.getByRole('button', { name: 'Collapse composer' }).getAttribute('aria-expanded')).toBe('true')
+  })
+
   it('leaves the shared new-task composer fully available by default', () => {
     renderComposer()
     expect(screen.queryByRole('button', { name: 'Expand composer' })).toBeNull()

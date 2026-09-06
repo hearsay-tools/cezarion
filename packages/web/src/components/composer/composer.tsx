@@ -8,6 +8,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useReducer,
   useState,
   type ClipboardEvent,
   type DragEvent,
@@ -50,6 +51,9 @@ import { formatElapsed, useDictation } from './dictation'
  * Visual contract: docs/mockups/thread.html `.composer` — card, borderless textarea, footer
  * bar with paperclip · spacer · labeled Dictation · lime send.
  */
+// Session memory, matching run details: task tab navigation may remount the composer.
+const mobileOpenByTask = new Map<string, boolean>()
+
 export interface ComposerProps {
   /** Deliver the message. Rejection = the message did NOT land: the composer toasts the error
    *  and restores the draft (nothing the user typed is ever lost). */
@@ -65,6 +69,8 @@ export interface ComposerProps {
   autoFocus?: boolean
   /** Phone reading mode for task threads; /new retains its full composer. */
   mobileCollapsible?: boolean
+  /** Project/run identity: disclosure changes must not remount draft or attachment state. */
+  mobileDisclosureKey?: string
   /** Rendered in the footer bar after the paperclip — the /new picker pill row. */
   footerStart?: ReactNode
   /** Rendered between Dictation and the send button — the /new mode segment + kbd hint. */
@@ -116,6 +122,7 @@ export function Composer({
   onValueChange,
   autoFocus = false,
   mobileCollapsible = false,
+  mobileDisclosureKey,
   footerStart,
   footerEnd,
   sendAriaLabel = 'Send',
@@ -155,7 +162,11 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const textareaId = useId()
   const optionsId = useId()
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const localMobileDisclosures = useRef(new Map<string, boolean>())
+  const mobileDisclosures = mobileDisclosureKey === undefined ? localMobileDisclosures.current : mobileOpenByTask
+  const disclosureKey = mobileDisclosureKey ?? 'default'
+  const [, bumpMobileDisclosure] = useReducer((n: number) => n + 1, 0)
+  const mobileOpen = mobileDisclosures.get(disclosureKey) ?? false
   const mobileCompact = mobileCollapsible && !mobileOpen
   const rootRef = useRef<HTMLDivElement>(null)
   const pendingCaretRef = useRef<number | null>(null)
@@ -538,7 +549,10 @@ export function Composer({
                     aria-label={mobileOpen ? 'Collapse composer' : 'Expand composer'}
                     aria-expanded={mobileOpen}
                     aria-controls={footerEnd ? `${textareaId} ${optionsId}` : textareaId}
-                    onClick={() => setMobileOpen((open) => !open)}
+                    onClick={() => {
+                      mobileDisclosures.set(disclosureKey, !mobileOpen)
+                      bumpMobileDisclosure()
+                    }}
                   >
                     <ChevronDownIcon aria-hidden="true" className={cn('transition-transform motion-reduce:transition-none', !mobileOpen && 'rotate-180')} />
                   </Button>

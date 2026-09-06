@@ -549,6 +549,7 @@ describe('task thread', () => {
       expect(browser.isVisible('[aria-label="Run actions"]')).toBe(true)
       expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     }
+    browser.click('[aria-label="Expand composer"]')
     // Navigate through the real phone drawer; a full browser.goto would reset module memory.
     for (const [id, label] of [[RUN_ID, 'Show run details'], [LONG_RUN.id, 'Hide run details']]) {
       browser.click('[aria-label="Open menu"]')
@@ -557,8 +558,8 @@ describe('task thread', () => {
       browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
       browser.waitForFunction(`document.querySelector('[data-run-id="${id}"] [aria-label="${label}"]') !== null`)
       expect(browser.isVisible('[data-slot="run-details"]')).toBe(id === LONG_RUN.id)
+      expect(browser.isVisible('[aria-label="' + (id === LONG_RUN.id ? 'Collapse composer' : 'Expand composer') + '"]')).toBe(true)
     }
-    browser.evaluate(`document.querySelector('[aria-label="Expand composer"]').click()`)
     expect(browser.evaluate(`(() => { const el = document.querySelector('[data-slot="follow-up-model-pill"]'); return el.scrollHeight <= el.clientHeight })()`)).toBe(true)
     expect(browser.evaluate(`(() => { const el = document.querySelector('[data-slot="main"]'); return el.scrollWidth <= el.clientWidth })()`)).toBe(true)
     browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)

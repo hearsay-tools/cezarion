@@ -2,7 +2,7 @@ import { MessageSquareTextIcon, SearchXIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useParams } from 'react-router'
 
-import { Link } from '@/lib/project-router'
+import { Link, useActiveProjectId } from '@/lib/project-router'
 
 import { ApiError } from '@/api/client'
 import {
@@ -175,6 +175,7 @@ export function ThreadView({
    *  header's other three tabs, have no such effect to suppress. */
   onMarkedUnread?: (runId: string) => void
 }) {
+  const projectId = useActiveProjectId()
   const footer = threadFooter(run.status, run.error)
   // The dock's data: the latest plan snapshot across turns (full replacement — an emptied
   // plan hides the dock and the header mirror alike).
@@ -449,6 +450,7 @@ export function ThreadView({
 
           <Composer
             mobileCollapsible={!providerBlocked}
+            mobileDisclosureKey={JSON.stringify([projectId, run.id])}
             onSubmit={
               continuable
                 ? (text, images) => continueAction.continueWith(text, images)
