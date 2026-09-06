@@ -641,14 +641,45 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
       undefined,
     );
   }
-  // Deliberately UNSCOPED by repo (#945), unlike every other `resolveReferencedRef` call. Neither
-  // caller has a handle to pass: `RunStore.open` is synchronous and the handle costs a `gh` spawn
-  // (which is why it is armed afterwards, by `setRepoHandle`), and the read-only index reader
-  // (`./run-index.ts`) has no repo root at all. Passing `undefined` here is not a gap — it is the
-  // no-handle path the guard is specified to take. The foreign-URL heal runs in `setRepoHandle`'s
-  // sweep the moment the handle lands, and the index reader picks the healed values up from
-  // `runs.json` on its next read.
+  // Repository scoping follows reconciliation: stores arm a handle asynchronously, while
+  // the read-only index applies its cached handle to these fresh records (#97). This ordering
+  // also scopes any referenced PR restored above without filtering candidate evidence first.
   return run;
+}
+
+/**
+ * Drop this run's referenced PR/issue if the project's handle proves it foreign and the prompt
+ * does not corroborate it (#945). Returns whether anything changed.
+ *
+ * One-directional by construction: it only ever clears fields, so a record written by an older
+ * cezar — or read by one after this ran — is never worse off, and a downgrade sees a record whose
+ * format is untouched and whose cleared fields were already optional.
+ */
+export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean {
+  let changed = false;
+  if (
+    run.referencedPullRequestUrl &&
+    !isRepoScopedRef(run.referencedPullRequestUrl, run.task, handle)
+  ) {
+    run.referencedPullRequestUrl = undefined;
+    changed = true;
+  }
+  if (
+    run.referencedIssueUrl &&
+    !isRepoScopedRef(run.referencedIssueUrl, run.task, handle)
+  ) {
+    run.referencedIssueUrl = undefined;
+    changed = true;
+    // Take back the number this janitor seeded from that very URL — the same revoke
+    // `trackReferencedIssues` performs when ambiguity clears a resolution. A `prNumber`-style
+    // number the prompt, namer or a marker owns is NOT ours to touch, which is exactly what
+    // `referencedIssueNumberSeeded` records.
+    if (run.referencedIssueNumberSeeded) {
+      run.issueNumber = undefined;
+      run.referencedIssueNumberSeeded = undefined;
+    }
+  }
+  return changed;
 }
 
 /**
@@ -712,7 +743,7 @@ export class RunStore extends EventEmitter {
     // chip has to reach the open page over SSE, not just the next `runs.json` write.
     let healed = false;
     for (const run of this.runs.values()) {
-      if (this.rescopeRun(run)) {
+      if (rescopeRun(run, this.repoHandle)) {
         this.touch(run);
         healed = true;
       }
@@ -720,41 +751,6 @@ export class RunStore extends EventEmitter {
     // Discovery may finish after headless shutdown's final flush. Persist repairs now: the
     // debounced save is unref'd, so it cannot keep the CLI alive once the lookup completes.
     if (healed) this.flush();
-  }
-
-  /**
-   * Drop this run's referenced PR/issue if the project's handle proves it foreign and the prompt
-   * does not corroborate it (#945). Returns whether anything changed.
-   *
-   * One-directional by construction: it only ever clears fields, so a record written by an older
-   * cezar — or read by one after this ran — is never worse off, and a downgrade sees a record whose
-   * format is untouched and whose cleared fields were already optional.
-   */
-  private rescopeRun(run: RunRecord): boolean {
-    let changed = false;
-    if (
-      run.referencedPullRequestUrl &&
-      !isRepoScopedRef(run.referencedPullRequestUrl, run.task, this.repoHandle)
-    ) {
-      run.referencedPullRequestUrl = undefined;
-      changed = true;
-    }
-    if (
-      run.referencedIssueUrl &&
-      !isRepoScopedRef(run.referencedIssueUrl, run.task, this.repoHandle)
-    ) {
-      run.referencedIssueUrl = undefined;
-      changed = true;
-      // Take back the number this janitor seeded from that very URL — the same revoke
-      // `trackReferencedIssues` performs when ambiguity clears a resolution. A `prNumber`-style
-      // number the prompt, namer or a marker owns is NOT ours to touch, which is exactly what
-      // `referencedIssueNumberSeeded` records.
-      if (run.referencedIssueNumberSeeded) {
-        run.issueNumber = undefined;
-        run.referencedIssueNumberSeeded = undefined;
-      }
-    }
-    return changed;
   }
 
   listRuns(): RunRecord[] {
@@ -879,7 +875,7 @@ export class RunStore extends EventEmitter {
     }
     // Legacy records may carry a URL without a candidate array. Preserve that evidence when
     // allowed, while still revoking a foreign URL the edited prompt no longer corroborates.
-    this.rescopeRun(run);
+    rescopeRun(run, this.repoHandle);
   }
 
   /**

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 
-import { reconcileLoadedRun, runRecordSchema, type RunRecord } from './store.ts';
+import { reconcileLoadedRun, rescopeRun, runRecordSchema, type RepoHandle, type RunRecord } from './store.ts';
 
 /**
  * The READ-ONLY half of `runs.json`, for the workspace-level run index (`GET
@@ -21,7 +21,7 @@ import { reconcileLoadedRun, runRecordSchema, type RunRecord } from './store.ts'
  * were opened for real. A second, subtly different parse of that field would show a task as
  * running in the palette and failed the moment you clicked it.
  */
-export function readRunIndexFromDisk(dataDir: string): RunRecord[] {
+export function readRunIndexFromDisk(dataDir: string, handle?: RepoHandle | null): RunRecord[] {
   const indexPath = join(dataDir, 'runs.json');
   if (!existsSync(indexPath)) return [];
   try {
@@ -31,7 +31,11 @@ export function readRunIndexFromDisk(dataDir: string): RunRecord[] {
     // `reconcileLoadedRun` mutates, which is safe here in a way it is not in the store: these
     // records were just parsed into fresh objects that nothing else holds a reference to.
     // Never `keepLive` — this reader has no RunManager, so there is nothing to recover into.
-    return parsed.data.map((run) => reconcileLoadedRun(run));
+    return parsed.data.map((run) => {
+      reconcileLoadedRun(run);
+      rescopeRun(run, handle);
+      return run;
+    });
   } catch {
     // Corrupt or unreadable index. A project that cannot be read contributes nothing to the
     // index rather than failing the whole workspace's search — the same degrade-quietly rule
