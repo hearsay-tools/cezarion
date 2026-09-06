@@ -1,6 +1,6 @@
 {
   "name": "cezarion",
-  "version": "0.11.8",
+  "version": "0.11.9",
   "description": "Alias for @wjarka/cezarion — so `npx cezarion` just works. Local cockpit for running and tracking AI agent tasks in your repo.",
   "license": "MIT",
   "type": "module",
@@ -9,7 +9,7 @@
     "cez": "bin.js"
   },
   "dependencies": {
-    "@wjarka/cezarion": "^0.11.8"
+    "@wjarka/cezarion": "^0.11.9"
   },
   "publishConfig": {
     "access": "public"
