@@ -227,6 +227,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     await expectParity('/workflows/parse', json('POST', { yaml: '' }));
     // 404: unknown ids.
     await expectParity('/runs/no-such-run/archive', json('POST', {}));
+    await expectParity('/runs/no-such-run/pin', json('POST', {}));
     await expectParity('/runs/no-such-run', json('PATCH', { title: 't' }));
     await expectParity('/workflows/no-such-workflow', () => ({
       method: 'DELETE',
@@ -236,6 +237,25 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     await expectParity('/todos/t1/start', json('POST', {}));
     // 200 non-GET without observable side effects (no worktrees exist).
     await expectParity('/worktrees/reclaim', json('POST', {}));
+  });
+
+  it('pins through every boot alias and isolates colliding IDs in another project', async () => {
+    store.updateRun(runId, { status: 'done' });
+    store.flush();
+    writeFileSync(join(otherRoot, '.ai/cezar/runs.json'), JSON.stringify([store.getRun(runId)]));
+    const other = await registerProject(otherRoot);
+    for (const path of spellings(bootId, `/runs/${runId}/pin`)) {
+      const response = await apiRequest(app, path, { method: 'POST' });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ id: runId, pinned: true });
+      store.setPinned(runId, false);
+    }
+    const response = await apiRequest(app, `/api/v1/p/${other.id}/runs/${runId}/pin`, { method: 'POST' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id: runId, pinned: true });
+    expect(store.getRun(runId)).not.toHaveProperty('pinned');
+    const otherRun = await apiRequest(app, `/api/v1/p/${other.id}/runs/${runId}`);
+    expect(await otherRun.json()).toMatchObject({ id: runId, pinned: true });
   });
 
   /** Read one SSE response until its first ping, then hang up. */

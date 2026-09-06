@@ -24,6 +24,7 @@ import {
   useMarkRunSeen,
   useMarkRunUnseen,
   usePatchRun,
+  usePinRun,
   usePutAgentConfigFile,
   useRun,
   useRunChanges,
@@ -1217,5 +1218,32 @@ describe('refStatusRecheckAfter', () => {
     // Still loading, or errored out — `retry` owns the immediate attempt; this is the backstop
     // that keeps the query from going silent forever.
     expect(refStatusRecheckAfter(undefined)).toBeGreaterThan(0)
+  })
+})
+
+
+describe('usePinRun scope ownership', () => {
+  it('invalidates the originating cache after navigation while preserving newer SSE fields', async () => {
+    setApiScope('alpha')
+    const pending = deferredResponse()
+    fetchMock.mockReturnValue(pending.promise)
+    const client = createQueryClient()
+    const current = { id: 'same-id', pinned: true, activity: 'monitoring' }
+    client.setQueryData(['alpha', 'runs'], [current])
+    client.setQueryData(['beta', 'runs'], [current])
+    const { result } = renderHook(() => usePinRun(), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    act(() => result.current.mutate({ id: 'same-id', pinned: false }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/v1/p/alpha/runs/same-id/pin')
+    setApiScope('beta')
+    client.setQueryData(['alpha', 'runs'], [{ ...current, monitoringWakeCapReached: true }])
+    await act(async () => pending.resolve(json({ id: 'same-id' })))
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(client.getQueryState(['alpha', 'runs'])?.isInvalidated).toBe(true)
+    expect(client.getQueryState(['beta', 'runs'])?.isInvalidated).toBe(false)
+    expect(client.getQueryData(['alpha', 'runs'])).toEqual([{ ...current, monitoringWakeCapReached: true }])
+    setApiScope(null)
   })
 })

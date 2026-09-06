@@ -227,10 +227,10 @@ describe('task quick-list', () => {
     // tile, not two rows — so "Needs you" holds two things, not three.
     // Both are `review`, so the tie breaks on recency: the variant group started 30 minutes ago,
     // the PR review 40 — newest first. The PR row reads title (the auto-SUMMARY, not the raw
-    // fixture title), then its `+128 −14` diff pair, then the PR chip.
+    // fixture title), with its repository reference chip leading and its diff pair trailing.
     expect(rowsIn('Needs you')).toEqual([
       'Add skills autocomplete to composer×2',
-      'Structured changes endpoint for the git view+128 −14PR',
+      '#396Structured changes endpoint for the git view+128 −14',
     ])
     // fix-done recorded a diff on its last turn; fix-failed predates diffStat and shows none.
     expect(rowsIn('Recent')).toEqual(['README parallel-agents tagline+9 −22h', 'Bump zod to v43h'])
@@ -298,9 +298,9 @@ describe('task quick-list', () => {
 
     browser.click(TILE)
     browser.waitForFunction(`document.querySelector('${ROW}[data-run-id="fix-var-a"]') !== null`)
-    // What actually differs between A and B — the backend and the spend.
-    expect(textOf(`${ROW}[data-run-id="fix-var-a"]`)).toBe('Aclaude · 96.2k')
-    expect(textOf(`${ROW}[data-run-id="fix-var-b"]`)).toBe('Bcodex · 41.8k')
+    // Historical fixtures have no directional counters: show each backend, never invent usage.
+    expect(textOf(`${ROW}[data-run-id="fix-var-a"]`)).toBe('Aclaude')
+    expect(textOf(`${ROW}[data-run-id="fix-var-b"]`)).toBe('Bcodex')
     // Each variant is still its own deep link.
     expect(
       browser.evaluate(`document.querySelector('${ROW}[data-run-id="fix-var-b"] a').getAttribute('href')`)
@@ -385,7 +385,8 @@ describe('tasks table overview', () => {
       const pr = tr.querySelector('[data-slot="pr-chip"]')
       return { text: tr.textContent, prHref: pr.href, prTarget: pr.target }
     })()`) as { text: string; prHref: string; prTarget: string }
-    expect(reviewRow.text).toContain('128.4k')
+    // Historical fixtures have only tokensUsed; directional usage stays explicitly unknown.
+    expect(browser.evaluate(`document.querySelector('[data-run-id="fix-review-pr"] [aria-label="Input tokens: unknown; output tokens: unknown"]') !== null`)).toBe(true)
     expect(reviewRow.text).toContain('Structured changes endpoint for the git view')
     expect(reviewRow.text).not.toContain('add a structured changes endpoint plz')
     expect(reviewRow.prHref).toBe('https://github.com/open-mercato/cezar/pull/396')
@@ -793,5 +794,37 @@ describe('empty quick-list', () => {
     expect(browser.count('[data-slot="quick-list-bucket"]')).toBe(0)
 
     browser.screenshot(`${artifactsDir}/quick-list-empty.png`)
+  })
+})
+
+
+describe('persistent task pins (#93)', () => {
+  it('pins a visible variant group once from a 44px phone control and preserves siblings on reload', async () => {
+    browser.setViewport(360, 640)
+    browser.goto(`${baseUrl}${scoped('/')}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="task-card"][data-run-id="fix-var-b"]') !== null`)
+    const pin = '[data-slot="task-card"][data-run-id="fix-var-b"] [data-slot="pin-toggle"]'
+    const target = browser.evaluate(`(() => { const x = document.querySelector('${pin}'); const r = x.getBoundingClientRect(); return { width: r.width, height: r.height, pressed: x.getAttribute('aria-pressed') } })()`) as { width: number; height: number; pressed: string }
+    expect(target.width).toBeGreaterThanOrEqual(44)
+    expect(target.height).toBeGreaterThanOrEqual(44)
+    expect(target.pressed).toBe('false')
+    browser.click(pin)
+    browser.waitForFunction(`document.querySelector('${pin}').getAttribute('aria-pressed') === 'true'`)
+    expect(browser.url()).toContain(scoped('/'))
+    browser.setViewport(1280, 800)
+    browser.goto(`${baseUrl}${scoped('/')}`)
+    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"] [data-slot="group-tile"]') !== null`)
+    expect(browser.count('[data-slot="group-tile"][data-group-id="fix-group-1"]')).toBe(1)
+    browser.click('[data-bucket="Pinned"] [data-slot="group-tile"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"] [data-run-id="fix-var-a"]') !== null`)
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-bucket="Pinned"] [data-slot="task-row"]')].map(x => x.dataset.runId)`)).toEqual(['fix-var-a', 'fix-var-b'])
+    const runs = await (await fetch(`${baseUrl}/api/v1/runs`)).json() as Array<{ id: string; pinned?: boolean; pinnedAt?: string }>
+    expect(runs.find(r => r.id === 'fix-var-a')).not.toHaveProperty('pinned')
+    expect(runs.find(r => r.id === 'fix-var-b')).toMatchObject({ pinned: true, pinnedAt: expect.any(String) })
+    browser.click('[data-bucket="Pinned"] [data-run-id="fix-var-b"] [data-slot="pin-toggle"]')
+    browser.waitForFunction(`document.querySelector('[data-bucket="Pinned"]') === null`)
+    const unpinned = await (await fetch(`${baseUrl}/api/v1/runs/fix-var-b`)).json()
+    expect(unpinned).not.toHaveProperty('pinned')
+    expect(unpinned).not.toHaveProperty('pinnedAt')
   })
 })

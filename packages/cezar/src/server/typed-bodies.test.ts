@@ -1,6 +1,6 @@
 import type { ExtractSchema } from 'hono/types';
 import { describe, expect, it } from 'vitest';
-import { setWorkspaceUiStateInputSchema } from '@open-mercato/cezar-contract';
+import { pinRunInputSchema, setWorkspaceUiStateInputSchema } from '@open-mercato/cezar-contract';
 import type { z } from 'zod';
 import type { AppType } from './app-type.ts';
 
@@ -60,6 +60,7 @@ describe('every mutating route carries a typed body into AppType', () => {
     Assert<HasTypedBody<'/api/v1/config', '$put'>>,
     Assert<HasTypedBody<'/api/v1/runs/:id', '$patch'>>,
     Assert<HasTypedBody<'/api/v1/runs/:id/archive', '$post'>>,
+    Assert<HasTypedBody<'/api/v1/runs/:id/pin', '$post'>>,
     Assert<HasTypedBody<'/api/v1/runs/:id/continue', '$post'>>,
     Assert<HasTypedBody<'/api/v1/runs/:id/messages', '$post'>>,
     Assert<HasTypedBody<'/api/v1/runs/:id/open-in', '$post'>>,
@@ -77,6 +78,11 @@ describe('every mutating route carries a typed body into AppType', () => {
     Mutual<z.infer<typeof setWorkspaceUiStateInputSchema>, WorkspaceUiStatePutBody>
   >;
 
+  type _PinInputChecks = [
+    Assert<Mutual<z.infer<typeof pinRunInputSchema>, Schema['/api/v1/runs/:id/pin']['$post']['input']['json']>>,
+    Assert<Mutual<z.infer<typeof pinRunInputSchema>, Schema['/api/v1/p/:projectId/runs/:id/pin']['$post']['input']['json']>>,
+  ];
+
   /** Same idea for the routes that validate a path param or the query string. */
   type HasTypedInput<
     Path extends keyof Schema,
@@ -85,6 +91,7 @@ describe('every mutating route carries a typed body into AppType', () => {
   > = Schema[Path] extends Record<Method, { input: Record<Target, unknown> }> ? true : false;
 
   type _InputChecks = [
+    Assert<HasTypedInput<'/api/v1/runs/:id/pin', '$post', 'param'>>,
     Assert<HasTypedInput<'/api/v1/providers/:provider/enabled', '$put', 'param'>>,
     Assert<HasTypedInput<'/api/v1/providers/:provider/retry', '$post', 'param'>>,
     Assert<HasTypedInput<'/api/v1/github/prs/:number/merge', '$post', 'param'>>,

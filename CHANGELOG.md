@@ -5,6 +5,8 @@
 - Recover structured questions missing only closing brackets, with a persistent warning to check options and selection count; preserve fork monitoring and Claude wakeups (#88).
 
 ## ✨ Features
+- Pin tasks from project sidebars, task tables, mobile cards and thread actions. A visible pinned variant promotes its entire group once; pins keep status/attention indicators and spend no recent-row budget. Pins persist per project, archive clears them, and failed updates retain the prior state with retry feedback. (#93; port of upstream #938)
+
 - ✨ **Claude permission mode is an env var, not a wrapper.** Agent runs still default to
   `--permission-mode dontAsk`. Set `CEZ_CLAUDE_PERMISSION_MODE` to `dontAsk`, `acceptEdits`, or
   `bypass` (`bypass` drops `--permission-mode` and passes `--dangerously-skip-permissions`).

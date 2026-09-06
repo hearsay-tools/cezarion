@@ -252,6 +252,8 @@ describe('task thread', () => {
   })
 
   it('the step rail maps the record steps to checklist rows over the progress bar', () => {
+    browser.click('[data-slot="workflow-steps"] [data-slot="collapsible-trigger"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="step-progress"] > div') !== null`)
     const rail = browser.evaluate(`(() => {
       const rows = [...document.querySelectorAll('[data-slot="step-row"]')]
       return {
@@ -267,6 +269,7 @@ describe('task thread', () => {
     expect(rail.rows[1]!.text).toContain('Verify')
     expect(rail.rows[1]!.text).toContain('check · step 2 of 2')
     expect(rail.bar).toBe('100%') // both steps terminal — (1 + 1) / 2
+    browser.click('[data-slot="workflow-steps"] [data-slot="collapsible-trigger"]')
   })
 
   it('the plan dock shows the LATEST snapshot (2/4), expanded on desktop, mirrored in the header', () => {
@@ -332,10 +335,11 @@ describe('task thread', () => {
     expect(meta).toContain('quick-task')
     expect(meta).toContain('cez/fcd519dd')
     expect(meta).toContain('+1 −0')
-    expect(meta).toContain('3.6k tokens')
+    // This historical record has no input/output counters; do not guess from tokensUsed.
+    expect(meta).not.toContain('3.6k tokens')
     expect(meta).toContain('$0.04')
-    // The fixture is a claude run — the runner stays out of the line, like the mockup.
-    expect(meta).not.toContain('claude')
+    // The fork keeps the backend/model badge in the header.
+    expect(meta).toContain('claude · auto')
     // Branch renders as the mono chip, not plain text.
     expect(
       browser.evaluate(`document.querySelector('[data-slot="branch-chip"]').textContent`),
@@ -358,7 +362,7 @@ describe('task thread', () => {
     const actions = browser.evaluate(
       `[...document.querySelectorAll('[data-slot="run-actions"] button')].map((b) => b.textContent.trim())`,
     ) as string[]
-    expect(actions).toEqual(['Continue', 'Open in…', 'Notes', 'Archive', 'Delete'])
+    expect(actions).toEqual(['Continue', 'Open in…', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
 
     // The take-over hint, per-backend (the fixture's last agent session, in its worktree).
     const hint = browser.evaluate(

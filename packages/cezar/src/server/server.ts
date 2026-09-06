@@ -27,6 +27,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import {
   repoPullInputSchema,
+  pinRunInputSchema,
   setWorkspaceUiStateInputSchema,
   type GroupResponse,
   type GroupVariant,
@@ -3508,6 +3509,16 @@ export function createApp(deps: ServerDeps) {
       // 2026-08-03-auto-resume-after-usage-limit).
       const parsed = { data: c.req.valid('json') };
       const run = store.setArchived(id, parsed.data.archived !== false);
+      return run ? c.json(run) : c.json({ error: 'not found' }, 404);
+    })
+
+    // Pin one task to the top of this project's list, or unpin it (#935). The archive route's
+    // twin in every respect: an absent body pins (the common case), the answer is the updated
+    // record, and the change rides the existing `run` SSE because `setPinned` touches. No new
+    // event and no new response shape.
+    .post('/runs/:id/pin', paramZodValidator(runIdParamSchema), jsonZodValidator(pinRunInputSchema, { absent: {}, malformed: null }), (c) => {
+      const { store } = c.get('project');
+      const run = store.setPinned(c.req.valid('param').id, c.req.valid('json').pinned !== false);
       return run ? c.json(run) : c.json({ error: 'not found' }, 404);
     })
 

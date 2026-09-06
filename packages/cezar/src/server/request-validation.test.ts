@@ -65,6 +65,27 @@ describe('request validation bounds (#429)', () => {
       body: JSON.stringify(body),
     });
 
+  it('rejects malformed pin JSON and invalid run paths without mutating', async () => {
+    const run = store.createRun({ title: 't', workflow: 'w', task: 't', steps: [] });
+    const response = await apiRequest(app, `/api/v1/runs/${run.id}/pin`, {
+      method: 'POST', body: '{"pinned":', headers: { 'content-type': 'application/json' },
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toHaveProperty('error');
+    expect(store.getRun(run.id)).not.toHaveProperty('pinned');
+    expect((await postJson('/api/v1/runs/bad%20id/pin', {})).status).toBe(400);
+  });
+
+  it('ignores pin attempts on an archived run over the API', async () => {
+    const run = store.createRun({ title: 't', workflow: 'w', task: 't', steps: [] });
+    store.setArchived(run.id, true);
+    const response = await postJson(`/api/v1/runs/${run.id}/pin`, { pinned: true });
+    expect(response.status).toBe(200);
+    expect(await response.json()).not.toHaveProperty('pinned');
+    store.setArchived(run.id, false);
+    expect(store.getRun(run.id)).not.toHaveProperty('pinnedAt');
+  });
+
   // ---- startRunSchema.task -------------------------------------------------
   const stepsBody = { steps: [{ id: 'work', prompt: '{{task}}' }] };
 
@@ -142,6 +163,36 @@ describe('request validation bounds (#429)', () => {
     const run = store.createRun({ title: 't', workflow: 'w', task: 't', steps: [] });
     const res = await postJson(`/api/v1/runs/${run.id}/archive`, { archived: 'nope' });
     expect(res.status).toBe(400);
+  });
+
+  // ---- pin schema (#935) — the archive route's twin, so the same three cases ---------------
+  it('pins with no body, and answers the updated record', async () => {
+    const run = store.createRun({ title: 't', workflow: 'w', task: 't', steps: [] });
+    const res = await apiRequest(app, `/api/v1/runs/${run.id}/pin`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { pinned?: boolean }).toMatchObject({ id: run.id, pinned: true });
+    expect(store.getRun(run.id)?.pinned).toBe(true);
+  });
+
+  it('unpins on {pinned:false}, leaving the record with no pin keys at all', async () => {
+    const run = store.createRun({ title: 't', workflow: 'w', task: 't', steps: [] });
+    await apiRequest(app, `/api/v1/runs/${run.id}/pin`, { method: 'POST' });
+    const res = await postJson(`/api/v1/runs/${run.id}/pin`, { pinned: false });
+    expect(res.status).toBe(200);
+    // Absent, not `false`: the shape a cezar that never heard of pins would have written.
+    expect(await res.json()).not.toHaveProperty('pinned');
+    expect(store.getRun(run.id)).not.toHaveProperty('pinned');
+  });
+
+  it('rejects a wrong-typed pinned flag with a 400', async () => {
+    const run = store.createRun({ title: 't', workflow: 'w', task: 't', steps: [] });
+    const res = await postJson(`/api/v1/runs/${run.id}/pin`, { pinned: 'nope' });
+    expect(res.status).toBe(400);
+  });
+
+  it('answers 404 for a run that does not exist', async () => {
+    const res = await apiRequest(app, '/api/v1/runs/no-such-run/pin', { method: 'POST' });
+    expect(res.status).toBe(404);
   });
 
   // ---- open-in schema ------------------------------------------------------
