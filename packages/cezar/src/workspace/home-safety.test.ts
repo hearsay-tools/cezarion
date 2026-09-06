@@ -113,8 +113,19 @@ describe('cezar home write safety', () => {
     // any single defence is removed.
     const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
     const vitestBin = join(packageRoot, '..', '..', 'node_modules', '.bin', 'vitest');
-    const env: NodeJS.ProcessEnv = { ...process.env, HOME: fakeUserHome };
+    const summary = join(pinned, 'github-step-summary.md');
+    writeFileSync(summary, 'outer suite report\n');
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      GITHUB_ACTIONS: 'true',
+      GITHUB_STEP_SUMMARY: summary,
+      GITHUB_REPOSITORY: 'wjarka/cezar',
+      GITHUB_SHA: 'testsha',
+      GITHUB_WORKSPACE: packageRoot,
+      HOME: fakeUserHome,
+    };
     delete env.CEZ_HOME;
+    delete env.GITHUB_STEP_SUMMARY;
     delete env.VITEST;
 
     const run = spawnSync(
@@ -126,6 +137,7 @@ describe('cezar home write safety', () => {
     // The nested suite is EXPECTED to fail — 15ms cannot finish a `git init`.
     // What matters is what it left behind outside its sandbox.
     expect(run.error).toBeUndefined();
+    expect(readFileSync(summary, 'utf8')).toBe('outer suite report\n');
     expect(existsSync(join(fakeUserHome, '.cezar'))).toBe(false);
   }, 180_000);
 
