@@ -261,8 +261,8 @@ describe('task thread', () => {
   })
 
   it('the step rail maps the record steps to checklist rows over the progress bar', () => {
-    browser.click('[data-slot="workflow-steps"] > button')
-    browser.waitForFunction(`document.querySelector('[data-slot="step-progress"]') !== null`)
+    browser.click('[data-slot="workflow-steps"] [data-slot="collapsible-trigger"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="step-progress"] > div') !== null`)
     const rail = browser.evaluate(`(() => {
       const rows = [...document.querySelectorAll('[data-slot="step-row"]')]
       return {
@@ -277,8 +277,8 @@ describe('task thread', () => {
     expect(rail.rows[1]).toMatchObject({ visual: 'done' })
     expect(rail.rows[1]!.text).toContain('Verify')
     expect(rail.rows[1]!.text).toContain('check · step 2 of 2')
-    browser.click('[data-slot="workflow-steps"] > button')
     expect(rail.bar).toBe('100%') // both steps terminal — (1 + 1) / 2
+    browser.click('[data-slot="workflow-steps"] [data-slot="collapsible-trigger"]')
   })
 
   it('the plan dock shows the LATEST snapshot (2/4), expanded on desktop, mirrored in the header', () => {
@@ -344,10 +344,10 @@ describe('task thread', () => {
     expect(meta).toContain('quick-task')
     expect(meta).toContain('cez/fcd519dd')
     expect(meta).toContain('+1 −0')
-    // Aggregate-only legacy fixtures have no directional token counts.
+    // This historical record has no input/output counters; do not guess from tokensUsed.
     expect(meta).not.toContain('3.6k tokens')
     expect(meta).toContain('$0.04')
-    // The fixture is a claude run — the runner stays out of the line, like the mockup.
+    // The fork keeps the backend/model badge in the header.
     expect(meta).toContain('claude · auto')
     // Branch renders as the mono chip, not plain text.
     expect(
@@ -371,7 +371,7 @@ describe('task thread', () => {
     const actions = browser.evaluate(
       `[...document.querySelectorAll('[data-slot="run-actions"] button')].map((b) => b.textContent.trim())`,
     ) as string[]
-    expect(actions).toEqual(['Continue', 'Open in…', 'Notes', 'Mark unread', 'Archive', 'Delete'])
+    expect(actions).toEqual(['Continue', 'Open in…', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
 
     // The take-over hint, per-backend (the fixture's last agent session, in its worktree).
     const hint = browser.evaluate(
@@ -472,6 +472,37 @@ describe('task thread', () => {
     expect(browser.evaluate(`document.querySelector('[data-slot="pill"]').textContent`)).toBe('done')
 
     browser.screenshot(`${artifactsDir}/thread-header-mobile.png`)
+    browser.setViewport(1440, 900)
+  })
+
+  it('phone header keeps disclosure state while pinning and unpinning with keyboard controls', async () => {
+    browser.setViewport(360, 640)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
+    browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
+    expect(browser.isVisible('[data-slot="run-details"]')).toBe(false)
+    browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
+    browser.press('Enter')
+    expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
+    for (const label of ['Hide run details', 'Run actions']) {
+      expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
+    }
+    for (const wasPinned of [false, true]) {
+      browser.click('[aria-label="Run actions"]')
+      browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"] [data-slot="pin-run"]') !== null`)
+      const pin = '[data-slot="run-actions-menu"] [data-slot="pin-run"]'
+      browser.waitForFunction(`document.querySelector('${pin}').getBoundingClientRect().height >= 44`)
+      expect(browser.evaluate(`document.querySelector('${pin}').getAttribute('aria-checked')`)).toBe(String(wasPinned))
+      browser.evaluate(`document.querySelector('${pin}').focus()`)
+      browser.press('Space')
+      browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') === null`)
+      browser.waitForFunction(`document.querySelector('[data-slot="run-actions"] [data-slot="pin-run"]').getAttribute('aria-pressed') === '${!wasPinned}'`)
+      expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
+      expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    }
+    const record = await (await fetch(`${baseUrl}/api/v1/runs/${RUN_ID}`)).json()
+    expect(record).not.toHaveProperty('pinned')
+    expect(record).not.toHaveProperty('pinnedAt')
+    browser.click('[aria-label="Hide run details"]')
     browser.setViewport(1440, 900)
   })
 
