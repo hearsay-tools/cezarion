@@ -40,6 +40,18 @@ export function filterGithubItems(
   })
 }
 
+/** Text queries fall back when the filtered open set is empty. Numeric queries need an exact
+ * number: a substring match such as #14507 must not suppress a lookup for closed #4507.
+ * Callers include active fork filters in localMatches; blank/label-only queries never search. */
+export function shouldSearchForge(query: string, localMatches: readonly GithubItem[]): boolean {
+  const trimmed = query.trim()
+  if (trimmed === '') return false
+  const numeric = trimmed.replace(/^#/, '')
+  return /^\d+$/.test(numeric)
+    ? !localMatches.some(item => item.number === Number(numeric))
+    : localMatches.length === 0
+}
+
 /** Inline style for a label chip tinted like GitHub: the label color as a translucent fill with a
  *  matching border, and readable text. Falls back to neutral tokens when no color is known. */
 export function labelChipStyle(color: string | undefined): CSSProperties {

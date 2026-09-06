@@ -119,6 +119,12 @@ export interface ForgeListOptions {
   limit?: number;
 }
 
+/** The `GET /api/github/search` payload (#730). The list tier (`listIssues`/`listPRs`) only ever
+ *  returns OPEN items, so the tab's in-memory filter structurally cannot find a closed or merged
+ *  item — this is the seam that asks the forge instead of re-filtering what we already have.
+ *  Mirrors the tab's quiet-degrade contract (`available: false` + a hint, never a throw/5xx). */
+export type ForgeSearchData = import('@open-mercato/cezar-contract').GithubSearchData;
+
 /** Where an existing branch's PR stands — feeds the Create PR → View PR flip. */
 export interface ForgePrStatus {
   number: number;
@@ -228,6 +234,14 @@ export interface ForgeDriver {
   detectCached(): ForgeAvailability | null;
   listIssues(opts?: ForgeListOptions): Promise<ForgeItem[]>;
   listPRs(opts?: ForgeListOptions): Promise<ForgeItem[]>;
+  /** Search the forge for issues/PRs in ANY state (#730) — the escape hatch from the open-only
+   *  list tier. Optional so the seam stays additive: a driver without it simply has no search
+   *  fallback, and the route degrades to `available: false`. Never throws. */
+  searchItems?(
+    kind: 'issue' | 'pr',
+    query: string,
+    opts?: { limit?: number },
+  ): Promise<ForgeSearchData>;
   /** Draft-PR creation for the review gate (spec 009). Never throws. */
   createPR(input: DraftPrInput): Promise<DraftPrOutcome>;
   /** The branch's open/merged PR, or null when none (or the forge is down). */

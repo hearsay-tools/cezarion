@@ -34,3 +34,9 @@ Built service + assets; agent-browser 0.36.0 and Chrome for Testing 151. Disposa
 Screenshots remain local artifacts under `.ai/qa/artifacts_e2e/`: `pins-phone-light.png`, `pins-phone-dark.png`, `pins-desktop-light.png`, `pins-desktop-dark.png`. UI was visually inspected, not inferred from class names.
 
 The first additional browser smoke run found six stale expectations, all reproduced on the unchanged baseline (six failures / 37 passes): legacy PR-chip wording, aggregate-token assumptions in historical fixtures without directional counters, a now-collapsed step rail, and the action list missing Mark unread. Tests now exercise the current fork UI: reference chip first, unknown directional usage, explicit workflow expansion, backend badge, and Mark unread plus the new Pin action. No production behavior was changed to satisfy those old assertions. The added browser pin case verifies 44px controls, group promotion, reload, sibling flags and pin-field deletion.
+
+## Reconciliation with merged GitHub search
+
+Merged `origin/main` at `a35377431e6360b398c7f8aa417c317208f01414` (PR #100) after parent approval of the original pinning head. The only conflict was the server's contract import block: keep both `pinRunInputSchema` and `githubSearchQuerySchema`. Routes, contracts, client hooks and tests retain both features; no further production changes.
+
+Combined-tree verification on 2026-09-06: `npm run typecheck` passed; `npm test` passed 344 files / 6,878 tests; `npm run test:unit` passed; `npm run build` passed including check:pack; `npm run test:package` passed 22 tests; the same quick-list/thread browser command passed 44 tests. Parent has marked PR #104 ready and retains final merge authority.
