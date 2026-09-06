@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowUpIcon, CheckIcon, MicIcon, PaperclipIcon, XIcon } from 'lucide-react'
+import { ArrowUpIcon, CheckIcon, ChevronDownIcon, MicIcon, PaperclipIcon, XIcon } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -8,6 +8,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useReducer,
   useState,
   type ClipboardEvent,
   type DragEvent,
@@ -50,6 +51,9 @@ import { formatElapsed, useDictation } from './dictation'
  * Visual contract: docs/mockups/thread.html `.composer` — card, borderless textarea, footer
  * bar with paperclip · spacer · labeled Dictation · lime send.
  */
+// Session memory, matching run details: task tab navigation may remount the composer.
+const mobileOpenByTask = new Map<string, boolean>()
+
 export interface ComposerProps {
   /** Deliver the message. Rejection = the message did NOT land: the composer toasts the error
    *  and restores the draft (nothing the user typed is ever lost). */
@@ -63,6 +67,10 @@ export interface ComposerProps {
   onValueChange?: (text: string) => void
   /** Focus the textarea on mount — the /new hero, where typing is the whole point of arriving. */
   autoFocus?: boolean
+  /** Phone reading mode for task threads; /new retains its full composer. */
+  mobileCollapsible?: boolean
+  /** Project/run identity: disclosure changes must not remount draft or attachment state. */
+  mobileDisclosureKey?: string
   /** Rendered in the footer bar after the paperclip — the /new picker pill row. */
   footerStart?: ReactNode
   /** Rendered between Dictation and the send button — the /new mode segment + kbd hint. */
@@ -113,6 +121,8 @@ export function Composer({
   value,
   onValueChange,
   autoFocus = false,
+  mobileCollapsible = false,
+  mobileDisclosureKey,
   footerStart,
   footerEnd,
   sendAriaLabel = 'Send',
@@ -151,6 +161,13 @@ export function Composer({
   const [skillsWanted, setSkillsWanted] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const textareaId = useId()
+  const optionsId = useId()
+  const localMobileDisclosures = useRef(new Map<string, boolean>())
+  const mobileDisclosures = mobileDisclosureKey === undefined ? localMobileDisclosures.current : mobileOpenByTask
+  const disclosureKey = mobileDisclosureKey ?? 'default'
+  const [, bumpMobileDisclosure] = useReducer((n: number) => n + 1, 0)
+  const mobileOpen = mobileDisclosures.get(disclosureKey) ?? false
+  const mobileCompact = mobileCollapsible && !mobileOpen
   const rootRef = useRef<HTMLDivElement>(null)
   const pendingCaretRef = useRef<number | null>(null)
 
@@ -262,14 +279,14 @@ export function Composer({
     }
   }, [text])
 
-  // ---- sizing (mockup: min 54px, grows with content, never past ~1/3 screen) ----------------
+  // ---- sizing (44px phone / 54px desktop; CSS caps reading mode without remounting) ----------
 
   useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`
-  }, [text])
+  }, [text, mobileOpen])
 
   // ---- attachments ---------------------------------------------------------------------------
 
@@ -486,13 +503,17 @@ export function Composer({
             ref={textareaRef}
             id={textareaId}
             autoComplete="off"
-            rows={2}
+            // One intrinsic row on phones; desktop minimum and autosize retain the full input.
+            rows={1}
             value={text}
             disabled={disabled}
             aria-label={ariaLabel}
             placeholder={disabled ? disabledReason : placeholder}
             // 16px on touch widths — iOS zooms any focused input below 16px (spec mobile rule).
-            className="block max-h-[220px] min-h-[54px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-base leading-normal outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed md:text-sm"
+            className={cn(
+              'block min-h-11 w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-base leading-normal outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed md:min-h-[54px] md:px-4 md:pt-3 md:text-sm',
+              mobileCompact ? 'max-h-11 md:max-h-[220px]' : 'max-h-[220px]',
+            )}
             onChange={(event) => {
               setText(event.target.value)
               syncTrigger()
@@ -512,16 +533,33 @@ export function Composer({
             />
           ) : (
             // The footer may WRAP (the /new pill row on narrow widths), but the trailing
-            // controls stay one unbreakable group so the send button never strands alone.
-            <div className="flex flex-wrap items-center gap-1 gap-y-1.5 px-2 pt-1.5 pb-2">
+            // controls wrap on phones to keep long model/account labels inside the viewport.
+            <div className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pt-1 pb-1.5 md:gap-y-1.5 md:px-2 md:pt-1.5 md:pb-2">
               {/* The paperclip shares ONE wrapping row with the footer pills — otherwise the
                   pill group is a single flex item that wraps as a block, stranding the
                   paperclip alone on the line above it (#composer-attach-line). */}
               <div data-slot="composer-footer-start" className="flex min-w-0 flex-wrap items-center gap-1">
                 <AttachButton disabled={disabled} onFiles={addFiles} />
+                {mobileCollapsible ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-11 md:hidden"
+                    aria-label={mobileOpen ? 'Collapse composer' : 'Expand composer'}
+                    aria-expanded={mobileOpen}
+                    aria-controls={footerEnd ? `${textareaId} ${optionsId}` : textareaId}
+                    onClick={() => {
+                      mobileDisclosures.set(disclosureKey, !mobileOpen)
+                      bumpMobileDisclosure()
+                    }}
+                  >
+                    <ChevronDownIcon aria-hidden="true" className={cn('transition-transform motion-reduce:transition-none', !mobileOpen && 'rotate-180')} />
+                  </Button>
+                ) : null}
                 {footerStart}
               </div>
-              <div className="ml-auto flex items-center gap-1">
+              <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap">
                 {dictation.supported ? (
                   <Button
                     type="button"
@@ -530,7 +568,7 @@ export function Composer({
                     disabled={disabled}
                     aria-label="Start dictation"
                     title="Dictation"
-                    className="h-8 gap-1.5 px-2.5 text-xs font-medium text-muted-foreground"
+                    className={cn('h-11 gap-1.5 px-2.5 text-xs font-medium text-muted-foreground md:h-8', mobileCompact && 'hidden md:inline-flex')}
                     onClick={dictation.start}
                   >
                     <MicIcon aria-hidden="true" className="size-3.5" />
@@ -538,7 +576,7 @@ export function Composer({
                   </Button>
                 ) : null}
                 {footerEnd ? (
-                  <div data-slot="composer-footer-end" className="flex items-center gap-1.5">
+                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
                     {footerEnd}
                   </div>
                 ) : null}
@@ -549,7 +587,7 @@ export function Composer({
                   disabled={
                     disabled || busy || (text.trim() === '' && images.length === 0 && !allowEmptySubmit)
                   }
-                  className="size-8"
+                  className="size-11 md:size-8"
                   onClick={submitDraft}
                 >
                   <ArrowUpIcon aria-hidden="true" />
@@ -712,7 +750,7 @@ function DictationBar({
         variant="ghost"
         size="icon-sm"
         aria-label="Cancel dictation"
-        className="size-8 text-muted-foreground"
+        className="size-11 text-muted-foreground md:size-8"
         onClick={onCancel}
       >
         <XIcon aria-hidden="true" />
@@ -722,7 +760,7 @@ function DictationBar({
         variant="outline"
         size="icon-sm"
         aria-label="Insert transcription"
-        className="size-8"
+        className="size-11 md:size-8"
         onClick={onInsert}
       >
         <CheckIcon aria-hidden="true" />
@@ -731,7 +769,7 @@ function DictationBar({
         type="button"
         size="icon-sm"
         aria-label="Insert transcription and send"
-        className="size-8"
+        className="size-11 md:size-8"
         onClick={onInsertAndSend}
       >
         <ArrowUpIcon aria-hidden="true" />

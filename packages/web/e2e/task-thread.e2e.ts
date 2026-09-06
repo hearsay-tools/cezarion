@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -29,6 +29,12 @@ const sessionId = `e2e-thread-${process.pid}`
  *  assertions cover the edited-title path rather than echoing the raw auto-summary. */
 const RUN = { ...record, titleSummary: 'Explain what cezar does' }
 const RUN_ID: string = RUN.id
+const LONG_RUN = {
+  ...RUN, id: 'phone-long-metadata', titleSummary: 'A task with a very long title for the narrow phone header',
+  workflow: 'workflow-' + 'unbroken'.repeat(12), branch: 'cez/' + 'long-branch-'.repeat(18),
+  model: 'fork-model-' + 'long-model-'.repeat(10), effort: 'high',
+  steps: RUN.steps.map((step) => ({ ...step, profileId: 'default' })),
+}
 
 function freePort(): Promise<number> {
   return new Promise((done, fail) => {
@@ -67,11 +73,14 @@ const scoped = (path: string) => `/p/${bootProject}${path}`
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-thread-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN], null, 2), 'utf8')
+  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, LONG_RUN], null, 2), 'utf8')
   copyFileSync(
     resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'),
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
   )
+  writeFileSync(join(dataRoot, '.ai/cezar/runs', `${LONG_RUN.id}.ndjson`),
+    readFileSync(resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'), 'utf8')
+      .split('\n').filter((line) => !/plan\.updated|TodoWrite|toolu_mock_todo|\"type\":\"plan\"/.test(line)).join('\n'))
   // The agent screenshot the transcript's `image` line points at (served by the run itself).
   cpSync(
     resolve(import.meta.dirname, 'fixtures/thread-run-images'),
@@ -252,6 +261,8 @@ describe('task thread', () => {
   })
 
   it('the step rail maps the record steps to checklist rows over the progress bar', () => {
+    browser.click('[data-slot="workflow-steps"] > button')
+    browser.waitForFunction(`document.querySelector('[data-slot="step-progress"]') !== null`)
     const rail = browser.evaluate(`(() => {
       const rows = [...document.querySelectorAll('[data-slot="step-row"]')]
       return {
@@ -266,6 +277,7 @@ describe('task thread', () => {
     expect(rail.rows[1]).toMatchObject({ visual: 'done' })
     expect(rail.rows[1]!.text).toContain('Verify')
     expect(rail.rows[1]!.text).toContain('check · step 2 of 2')
+    browser.click('[data-slot="workflow-steps"] > button')
     expect(rail.bar).toBe('100%') // both steps terminal — (1 + 1) / 2
   })
 
@@ -332,10 +344,11 @@ describe('task thread', () => {
     expect(meta).toContain('quick-task')
     expect(meta).toContain('cez/fcd519dd')
     expect(meta).toContain('+1 −0')
-    expect(meta).toContain('3.6k tokens')
+    // Aggregate-only legacy fixtures have no directional token counts.
+    expect(meta).not.toContain('3.6k tokens')
     expect(meta).toContain('$0.04')
     // The fixture is a claude run — the runner stays out of the line, like the mockup.
-    expect(meta).not.toContain('claude')
+    expect(meta).toContain('claude · auto')
     // Branch renders as the mono chip, not plain text.
     expect(
       browser.evaluate(`document.querySelector('[data-slot="branch-chip"]').textContent`),
@@ -358,7 +371,7 @@ describe('task thread', () => {
     const actions = browser.evaluate(
       `[...document.querySelectorAll('[data-slot="run-actions"] button')].map((b) => b.textContent.trim())`,
     ) as string[]
-    expect(actions).toEqual(['Continue', 'Open in…', 'Notes', 'Archive', 'Delete'])
+    expect(actions).toEqual(['Continue', 'Open in…', 'Notes', 'Mark unread', 'Archive', 'Delete'])
 
     // The take-over hint, per-backend (the fixture's last agent session, in its worktree).
     const hint = browser.evaluate(
@@ -461,4 +474,110 @@ describe('task thread', () => {
     browser.screenshot(`${artifactsDir}/thread-header-mobile.png`)
     browser.setViewport(1440, 900)
   })
+
+  it('phone disclosures preserve a selected draft and documents and restore desktop access', () => {
+    browser.setViewport(360, 640)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
+    browser.waitForFunction(`document.querySelector('[aria-label="Expand composer"]') !== null`)
+    const input = '[aria-label="Reply to the agent"]'
+    browser.fill(input, 'first line\nsecond line\nthird line')
+    browser.evaluate(`(() => {
+      const el = document.querySelector('${input}'); window.__phoneTextarea = el; el.setSelectionRange(2, 8);
+      const files = new DataTransfer();
+      for (const [name, type] of [['notes.pdf','application/pdf'], ['notes.txt','text/plain'], ['notes.md','text/markdown']]) files.items.add(new File(['notes'], name, {type}));
+      el.dispatchEvent(new ClipboardEvent('paste', {bubbles:true, clipboardData: files}));
+    })()`)
+    browser.waitForFunction(`document.querySelectorAll('[data-slot="composer-thumbs"] button').length === 3`)
+    expect(browser.evaluate(`document.querySelector('${input}').getBoundingClientRect().height`)).toBe(44)
+    browser.evaluate(`document.querySelector('[aria-label="Expand composer"]').focus()`)
+    browser.press('Enter')
+    expect(browser.evaluate(`document.querySelector('[aria-label="Collapse composer"]').getAttribute('aria-expanded')`)).toBe('true')
+    expect(browser.evaluate(`document.querySelector('${input}').getBoundingClientRect().height`)).toBeGreaterThan(44)
+    expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(true)
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="follow-up-engine"] button')].every(el => {const r=el.getBoundingClientRect(); return r.width >=44 && r.height >=44})`)).toBe(true)
+    browser.press('Space')
+    expect(browser.evaluate(`document.querySelector('[aria-label="Expand composer"]').getAttribute('aria-expanded')`)).toBe('false')
+    expect(browser.evaluate(`(() => { const el = document.querySelector('${input}'); return [el === window.__phoneTextarea, el.value, el.selectionStart, el.selectionEnd] })()`))
+      .toEqual([true, 'first line\nsecond line\nthird line', 2, 8])
+    expect(browser.count('[data-slot="composer-thumbs"] button')).toBe(3)
+    expect(browser.isVisible('[aria-label="Attach files"]')).toBe(true)
+    expect(browser.isVisible('[aria-label="Continue"]')).toBe(true)
+    expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    for (const label of ['Expand composer', 'Show run details', 'Run actions']) {
+      expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
+    }
+    // At the start of the transcript, the header and bottom dock still leave reading space.
+    browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
+    const room = browser.evaluate(`(() => {
+      const main = document.querySelector('[data-slot="main"]');
+      const header = document.querySelector('[data-slot="run-header"]').getBoundingClientRect();
+      const dock = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect();
+      return { height: dock.top - header.bottom, scrollable: main.scrollHeight > main.clientHeight };
+    })()`) as { height: number; scrollable: boolean }
+    expect(room.scrollable).toBe(true)
+    expect(room.height).toBeGreaterThanOrEqual(120)
+    browser.evaluate(`document.documentElement.classList.add('light')`)
+    browser.screenshot(`${artifactsDir}/phone-reading-light.png`, { viewport: true })
+    browser.setViewport(1440, 900)
+    expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
+    expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(true)
+    expect(browser.isVisible('[aria-label="Expand composer"]')).toBe(false)
+    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('sticky')
+    browser.setViewport(360, 640)
+    expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(false)
+    expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('first line\nsecond line\nthird line')
+  })
+
+  it('keeps long metadata inside a phone viewport across task tabs and run switches', () => {
+    browser.setViewport(360, 640)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
+    browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
+    expect(browser.count('[data-slot="plan-dock"]')).toBe(0)
+    browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
+    browser.press('Space')
+    expect(browser.evaluate(`document.querySelector('[aria-label="Hide run details"]').getAttribute('aria-expanded')`)).toBe('true')
+    expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="run-header"] *')].filter(el => el.getBoundingClientRect().right > innerWidth).map(el => ({slot:el.dataset.slot, text:el.textContent?.slice(0,60), width:el.getBoundingClientRect().width}))`)).toEqual([])
+    for (const tab of ['changes', 'commits', 'files', '']) {
+      const tabSelector = `[data-slot="run-tabs"] a[href="${scoped(`/tasks/${LONG_RUN.id}${tab ? '/' + tab : ''}`)}"]`
+      browser.evaluate(`document.querySelector('${tabSelector}').scrollIntoView({block: 'start'})`)
+      browser.evaluate(`document.querySelector('${tabSelector}').focus()`)
+      browser.press('Enter')
+      browser.waitForFunction(`document.querySelector('[data-slot="run-tabs"] a[aria-current="page"]')?.getAttribute('href') === '${scoped(`/tasks/${LONG_RUN.id}${tab ? '/' + tab : ''}`)}'`)
+      browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
+      expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
+      expect(browser.isVisible('[aria-label="Run actions"]')).toBe(true)
+      expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    }
+    browser.click('[aria-label="Expand composer"]')
+    // Navigate through the real phone drawer; a full browser.goto would reset module memory.
+    for (const [id, label] of [[RUN_ID, 'Show run details'], [LONG_RUN.id, 'Hide run details']]) {
+      browser.click('[aria-label="Open menu"]')
+      browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left >= 0`)
+      browser.click(`[data-slot="mobile-nav-drawer"] a[href="${scoped(`/tasks/${id}`)}"]`)
+      browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
+      browser.waitForFunction(`document.querySelector('[data-run-id="${id}"] [aria-label="${label}"]') !== null`)
+      expect(browser.isVisible('[data-slot="run-details"]')).toBe(id === LONG_RUN.id)
+      expect(browser.isVisible('[aria-label="' + (id === LONG_RUN.id ? 'Collapse composer' : 'Expand composer') + '"]')).toBe(true)
+    }
+    expect(browser.evaluate(`(() => { const el = document.querySelector('[data-slot="follow-up-model-pill"]'); return el.scrollHeight <= el.clientHeight })()`)).toBe(true)
+    expect(browser.evaluate(`(() => { const el = document.querySelector('[data-slot="main"]'); return el.scrollWidth <= el.clientWidth })()`)).toBe(true)
+    browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
+    browser.click('[data-slot="agent-badge"]')
+    expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    expect(browser.evaluate(`(() => { const r = document.querySelector('[data-slot="dropdown-menu-content"]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth })()`)).toBe(true)
+    expect(browser.text('[data-slot="dropdown-menu-content"]')).toContain('effort: high')
+    expect(browser.text('[data-slot="dropdown-menu-content"]')).toContain('account: default')
+    browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[data-slot="dropdown-menu-content"]') === null`)
+    browser.setReducedMotion()
+    expect(browser.evaluate(`matchMedia('(prefers-reduced-motion: reduce)').matches`)).toBe(true)
+    expect(browser.evaluate(`getComputedStyle(document.querySelector('[aria-label="Hide run details"] svg')).transitionProperty`)).toBe('none')
+    browser.click('[aria-label="Hide run details"]')
+    expect(browser.evaluate(`document.querySelector('[aria-label="Show run details"]').getAttribute('aria-expanded')`)).toBe('false')
+    browser.evaluate(`document.documentElement.classList.remove('light')`)
+    browser.screenshot(`${artifactsDir}/phone-long-details-dark.png`, { viewport: true })
+    browser.setViewport(1440, 900)
+  })
+
 })

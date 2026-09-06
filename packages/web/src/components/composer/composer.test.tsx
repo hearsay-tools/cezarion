@@ -102,6 +102,17 @@ const paste = (textarea: HTMLTextAreaElement, files: File[]) =>
   })
 
 describe('submit shortcuts', () => {
+  it('starts as a compact one-row phone input and restores the desktop minimum at md', () => {
+    const { textarea } = renderComposer()
+    const classes = textarea.className.split(/\s+/)
+
+    expect(textarea.rows).toBe(1)
+    expect(classes).toContain('min-h-11')
+    expect(classes).toContain('md:min-h-[54px]')
+    expect(classes).toContain('text-base')
+    expect(classes).toContain('md:text-sm')
+  })
+
   it('Enter sends the trimmed text and clears optimistically', async () => {
     const { onSubmit, textarea } = renderComposer()
     type(textarea, '  hello agent  ')
@@ -671,5 +682,58 @@ describe('host seams (R4: the /new hero)', () => {
   it('without autoFocus the composer never steals focus', () => {
     const { textarea } = renderComposer()
     expect(document.activeElement).not.toBe(textarea)
+  })
+})
+
+
+describe('phone composer disclosure', () => {
+  it('keeps the draft, selection and document attachments mounted across disclosure', async () => {
+    const { textarea } = renderComposer({ mobileCollapsible: true, footerEnd: <button>Model and effort</button> })
+    type(textarea, 'first line\nsecond line')
+    textarea.setSelectionRange(2, 8)
+    paste(textarea, [textFile('notes.md', 'text/markdown'), textFile('notes.txt', 'text/plain'), textFile('notes.pdf', 'application/pdf')])
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Remove notes.pdf' })).not.toBeNull())
+    const toggle = screen.getByRole('button', { name: 'Expand composer' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.getAttribute('aria-controls')?.split(' ')).toContain(textarea.id)
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: 'Collapse composer' }).getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse composer' }))
+    expect(screen.getByLabelText('Reply to the agent')).toBe(textarea)
+    expect(textarea.value).toBe('first line\nsecond line')
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([2, 8])
+    for (const name of ['notes.md', 'notes.txt', 'notes.pdf']) expect(screen.getByRole('button', { name: `Remove ${name}` })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Send' }).closest('[hidden]')).toBeNull()
+    expect(textarea.getAttribute('autocomplete')).toBe('off')
+    expect(document.querySelector(`label[for="${textarea.id}"]`)?.textContent).toBe('Reply to the agent')
+  })
+
+  it('keeps disclosure separate for project/run identities without remounting the draft', () => {
+    stubSkillsFetch({})
+    const client = createQueryClient()
+    const view = (project: string, run: string) => (
+      <QueryClientProvider client={client}>
+        <Composer onSubmit={vi.fn()} mobileCollapsible mobileDisclosureKey={JSON.stringify([project, run])} />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view('p1', 'a'))
+    const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
+    type(textarea, 'retained draft')
+    textarea.setSelectionRange(2, 8)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand composer' }))
+    for (const [project, run] of [['p1', 'b'], ['p2', 'a']] as const) {
+      rerender(view(project, run))
+      expect(screen.getByRole('button', { name: 'Expand composer' }).getAttribute('aria-expanded')).toBe('false')
+      expect(screen.getByLabelText('Reply to the agent')).toBe(textarea)
+      expect(textarea.value).toBe('retained draft')
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([2, 8])
+    }
+    rerender(view('p1', 'a'))
+    expect(screen.getByRole('button', { name: 'Collapse composer' }).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('leaves the shared new-task composer fully available by default', () => {
+    renderComposer()
+    expect(screen.queryByRole('button', { name: 'Expand composer' })).toBeNull()
   })
 })

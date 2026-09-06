@@ -165,6 +165,7 @@ describe('the dictation overlay (paseo pattern)', () => {
     fireEvent.change(textarea, { target: { value: 'my draft' } })
     const recognition = startDictation()
     act(() => recognition.onresult!(result('noise', false)))
+    expect(screen.getByLabelText('Cancel dictation').className).toContain('size-11 text-muted-foreground md:size-8')
     fireEvent.click(screen.getByLabelText('Cancel dictation'))
 
     expect(recognition.aborted).toBe(true)

@@ -154,7 +154,7 @@ export function useContinueAction(run: ApiRun): ContinueAction {
     reason: continuation.reason,
     providerPending: continuation.providerPending,
     pills: (
-      <div data-slot="follow-up-engine" className="flex flex-wrap items-center gap-1.5">
+      <div data-slot="follow-up-engine" className="flex flex-wrap items-center gap-1.5 max-md:min-w-0 max-md:max-w-full">
         {/* Shown when there is a choice to make: more than one runner, or more than one login for
             one of them. A host with neither sees no pill, exactly as before. */}
         {runners.length > 1 || runners.some((id) => hasAccountChoice(accounts, id)) ? (
