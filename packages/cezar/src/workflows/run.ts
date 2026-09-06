@@ -108,22 +108,12 @@ const MONITORING_MARKER_RE = /CEZ:MONITORING\s*$/;
 function isClaudeScheduleWakeup(event: AgentEvent, backend: RunnerId): boolean {
   return backend === 'claude' && event.type === 'tool-call' && event.tool === 'ScheduleWakeup';
 }
-/** Events that prove a parked backend has resumed work on its own. Session
- * diagnostics and completed-turn metadata are passive and must not disarm the
- * only wake source for a truly parked monitor. */
+/** A parked backend has resumed only when the parent owns a new turn.
+ * Nested Codex/Pi subagent `item.*` streams are not a parent turn — treating
+ * them as activity cancelled the only on-by-default wake (#121). Session
+ * diagnostics and completed-turn metadata stay passive for the same reason. */
 function isRunnerActivity(event: UiEvent): boolean {
-  switch (event.type) {
-    case 'turn.started':
-    case 'item.started':
-    case 'item.delta':
-    case 'item.updated':
-    case 'item.completed':
-    case 'plan.updated':
-    case 'image':
-      return true;
-    default:
-      return false;
-  }
+  return event.type === 'turn.started';
 }
 /**
  * Preserve boundaries between complete assistant text blocks while a turn is
@@ -3311,9 +3301,9 @@ export class RunManager {
       this.releaseSlot();
       return;
     }
-    // Pi can resume autonomously when an async subagent completes. Work-producing
-    // events prove the backend owns an active turn again, so cancel its stale
-    // scheduler wake and restore active slot accounting.
+    // Pi can resume autonomously when an async subagent completes — the mapper
+    // synthesizes a parent `turn.started` for that work (#61). Nested child
+    // items without a parent turn must not unpark (#121).
     if (this.monitoring.has(runId) && isRunnerActivity(event)) this.resumeParkedRun(runId, state);
   }
 

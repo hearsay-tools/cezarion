@@ -1250,6 +1250,138 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     });
   }, 30_000);
 
+  /**
+   * #121 — Codex nested subagent items ride the parent session after
+   * `CEZ:MONITORING` with no parent `turn.started`. Treating those as
+   * `isRunnerActivity` unparked the monitor, cancelled the wake timer, and
+   * left the cockpit on Working… . Fail this test by counting nested
+   * `item.started` / `item.completed` as parent resume.
+   */
+  it('nested Codex subagent items after park do not unpark monitoring (#121)', async () => {
+    manager.dispose();
+    const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.01 } });
+    manager = new RunManager(store, repoRoot, { semaphore });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (r) => r?.activity === 'monitoring' && Boolean(r.monitoringWakeAt));
+
+    const internals = manager as unknown as {
+      active: Map<string, Record<string, unknown>>;
+      waiting: Set<string>;
+      monitoring: Set<string>;
+      busySlots(): number;
+      makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
+      handleRunnerUiEvent(
+        runId: string,
+        state: Record<string, unknown>,
+        sink: { handle(event: UiEvent): void },
+        event: UiEvent,
+      ): void;
+    };
+    const state = internals.active.get(record.id);
+    if (!state) throw new Error('active run state missing');
+    const wakeTimer = state.monitoringWakeTimer;
+    const deadline = store.getRun(record.id)?.monitoringWakeAt;
+    const sink = internals.makeUiSink(record.id, 'task');
+    const inject = (event: UiEvent) => internals.handleRunnerUiEvent(record.id, state, sink, event);
+
+    inject({
+      type: 'item.completed',
+      item: { kind: 'message', id: 'compact-1', role: 'assistant', text: 'Compacted context' },
+    });
+    inject({
+      type: 'item.started',
+      item: {
+        kind: 'tool',
+        id: 'child-bash',
+        name: 'commandExecution',
+        toolKind: 'execute',
+        title: 'Ran ls',
+        status: 'running',
+        parentItemId: 'task6',
+      },
+    });
+    inject({
+      type: 'item.completed',
+      item: {
+        kind: 'tool',
+        id: 'child-bash',
+        name: 'commandExecution',
+        toolKind: 'execute',
+        title: 'Ran ls',
+        status: 'completed',
+        parentItemId: 'task6',
+      },
+    });
+    inject({
+      type: 'item.started',
+      item: { kind: 'reasoning', id: 'child-think', text: 'working', parentItemId: 'task6' },
+    });
+    inject({
+      type: 'item.completed',
+      item: {
+        kind: 'tool',
+        id: 'task6',
+        name: 'subAgentActivity',
+        toolKind: 'task',
+        title: 'task6',
+        status: 'completed',
+      },
+    });
+
+    expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: 'monitoring' });
+    expect(store.getRun(record.id)?.monitoringWakeAt).toBe(deadline);
+    expect(state.monitoringWakeTimer).toBe(wakeTimer);
+    expect(internals.waiting.has(record.id)).toBe(true);
+    expect(internals.monitoring.has(record.id)).toBe(true);
+    expect(internals.busySlots()).toBe(0);
+    expect(semaphore.busy()).toBe(0);
+
+    await waitFor(record.id, () => {
+      const events = readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
+      return events.includes('automatic monitoring wake-up (1/40)');
+    });
+  }, 30_000);
+
+  it('parent turn.started after park still unparks monitoring (#61, #121)', async () => {
+    manager.dispose();
+    const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.02 } });
+    manager = new RunManager(store, repoRoot, { semaphore });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (r) => r?.activity === 'monitoring' && Boolean(r.monitoringWakeAt));
+
+    const internals = manager as unknown as {
+      active: Map<string, Record<string, unknown>>;
+      waiting: Set<string>;
+      monitoring: Set<string>;
+      busySlots(): number;
+      makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
+      handleRunnerUiEvent(
+        runId: string,
+        state: Record<string, unknown>,
+        sink: { handle(event: UiEvent): void },
+        event: UiEvent,
+      ): void;
+    };
+    const state = internals.active.get(record.id);
+    if (!state) throw new Error('active run state missing');
+    internals.handleRunnerUiEvent(
+      record.id,
+      state,
+      internals.makeUiSink(record.id, 'task'),
+      { type: 'turn.started', turnId: 'turn_parent_resume' },
+    );
+
+    expect(store.getRun(record.id)).toMatchObject({ status: 'running', activity: undefined });
+    expect(store.getRun(record.id)?.monitoringWakeAt).toBeUndefined();
+    expect(state.monitoringWakeTimer).toBeUndefined();
+    expect(internals.waiting.has(record.id)).toBe(false);
+    expect(internals.monitoring.has(record.id)).toBe(false);
+    expect(internals.busySlots()).toBe(1);
+    expect(semaphore.busy()).toBe(1);
+  }, 30_000);
+
   it('a markerless turn-end still parks as waiting with no activity', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'just do the thing', worktree: false });
     currentId = record.id;
