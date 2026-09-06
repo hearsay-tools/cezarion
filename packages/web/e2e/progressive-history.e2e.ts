@@ -198,13 +198,32 @@ describe('progressive long-session history', () => {
     browser.screenshot(join(artifactsDir, 'progressive-history-tail.png'), { viewport: true })
   })
 
-  it('loads exactly one page from the accessible control and preserves a bounded page count', async () => {
+  it('loads exactly one page, preserves the visible anchor, and bounds retained pages', async () => {
+    const before = browser.evaluate(`(() => {
+      const main = document.querySelector('[data-slot="main"]')
+      main.scrollTop = 0
+      main.dispatchEvent(new Event('scroll', { bubbles: true }))
+      const row = main.querySelector('[data-slot="thread-row"][data-row-key]')
+      if (!row) throw new Error('missing visible thread row')
+      return { key: row.dataset.rowKey, top: row.getBoundingClientRect().top }
+    })()`) as { key: string; top: number }
+
     activateHistoryBoundary()
     browser.waitForFunction(`${cursorRequestCount} === 1`)
     browser.waitForFunction(
       `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '2'`,
     )
     expect(Number(browser.evaluate(cursorRequestCount))).toBe(1)
+
+    const after = browser.evaluate(`(() => {
+      const row = document.querySelector(
+        ${JSON.stringify(`[data-slot="thread-row"][data-row-key="${before.key}"]`)},
+      )
+      if (!row) throw new Error('visible anchor row was not retained')
+      return { top: row.getBoundingClientRect().top }
+    })()`) as { top: number }
+    expect(Math.abs(after.top - before.top)).toBeLessThan(2)
+
     browser.screenshot(join(artifactsDir, 'progressive-history-earlier-page.png'), { viewport: true })
     // Let the prepend anchor's requestAnimationFrame settle before the next test supplies
     // a genuinely fresh upward gesture.

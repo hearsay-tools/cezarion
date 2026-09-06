@@ -161,6 +161,10 @@ export function useThreadScroll(
   const loadOlder = useCallback(() => {
     const scroller = scrollElRef.current
     if (!scroller || !onLoadOlder || loadingOlderRef.current) return
+    // The explicit history button reaches this path without a gesture handler. Mark the reader
+    // as browsing history before the page grows, so ResizeObserver cannot re-pin it to the tail.
+    pendingRestoreRef.current = null
+    stuckRef.current = false
     loadingOlderRef.current = true
     const beforeHeight = scroller.scrollHeight
     const beforeTop = scroller.scrollTop
@@ -463,12 +467,13 @@ function VirtualRows({
       data-slot="thread-rows"
       data-virtualized="true"
     >
-      {/* No `shift`: the transcript only ever appends (the SSE replay starts from seq 1 —
-          there is no prepend pagination), so start-anchored offsets stay correct as-is. */}
+      {/* Older history prepends rows. `shift` keeps the existing viewport anchored while virtua
+          measures the new start, and the thread scroll owner applies the stable-row correction. */}
       <Virtualizer
         ref={attachHandle}
         scrollRef={controls.scrollElRef}
         startMargin={startMargin}
+        shift
         {...(measurements !== undefined ? { cache: measurements } : {})}
       >
         {rows.map((row) => (
