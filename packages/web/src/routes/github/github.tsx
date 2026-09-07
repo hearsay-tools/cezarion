@@ -17,7 +17,17 @@ import {
   TagIcon,
   TriangleAlertIcon,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react'
 import { useParams } from 'react-router'
 
 import { Link, Navigate } from '@/lib/project-router'
@@ -52,6 +62,15 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { shortAge } from '@/lib/format'
+import {
+  DEFAULT_GITHUB_LIST_WIDTH,
+  GITHUB_LIST_WIDTH_STEP,
+  MAX_GITHUB_LIST_WIDTH,
+  MIN_GITHUB_LIST_WIDTH,
+  clampGithubListWidth,
+  readStoredGithubListWidth,
+  writeStoredGithubListWidth,
+} from '@/lib/github-list-width'
 import { githubTaskPrompt } from '@/lib/github-task'
 import { orderSkillsByUsage } from '@/lib/skills'
 import { cn, isHttpUrl } from '@/lib/utils'
@@ -99,6 +118,74 @@ const CHECKS_WINDOW = 100
  *  search is a `gh` subprocess against GitHub's rate-limited search API, so this is a cost
  *  control, not a polish detail. */
 const SEARCH_DEBOUNCE_MS = 350
+
+type GithubListResize = {
+  width: number
+  onWidthChange: (width: number) => void
+}
+
+function GithubListResizeHandle({ width, onWidthChange }: GithubListResize) {
+  const origin = useRef<{ x: number; width: number } | null>(null)
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    origin.current = { x: event.clientX, width }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    event.preventDefault()
+    event.currentTarget.focus()
+  }
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const start = origin.current
+    if (!start) return
+    onWidthChange(clampGithubListWidth(start.width + (event.clientX - start.x)))
+  }
+
+  const endDrag = (event: PointerEvent<HTMLDivElement>) => {
+    if (!origin.current) return
+    origin.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const next =
+      event.key === 'ArrowLeft'
+        ? width - GITHUB_LIST_WIDTH_STEP
+        : event.key === 'ArrowRight'
+          ? width + GITHUB_LIST_WIDTH_STEP
+          : event.key === 'Home'
+            ? MIN_GITHUB_LIST_WIDTH
+            : event.key === 'End'
+              ? MAX_GITHUB_LIST_WIDTH
+              : null
+    if (next === null) return
+    event.preventDefault()
+    onWidthChange(clampGithubListWidth(next))
+  }
+
+  return (
+    <div
+      data-slot="gh-list-resize-handle"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the GitHub list"
+      aria-valuenow={width}
+      aria-valuemin={MIN_GITHUB_LIST_WIDTH}
+      aria-valuemax={MAX_GITHUB_LIST_WIDTH}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onKeyDown={onKeyDown}
+      onDoubleClick={() => onWidthChange(DEFAULT_GITHUB_LIST_WIDTH)}
+      title="Drag to resize the GitHub list — double-click to reset"
+      className="absolute inset-y-0 -right-[2px] z-20 hidden w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-violet/40 focus-visible:bg-violet/60 focus-visible:outline-none md:block"
+    />
+  )
+}
 
 /** `value`, but only after it has stopped changing for `delay` ms. Local to this route — the
  *  search fallback is the one place in the cockpit that pays a subprocess per keystroke. */
@@ -234,6 +321,12 @@ export function GithubRoute({
   // The agent account rides along on the same footing: a per-hand-off choice, route state rather
   // than a persisted one, exactly like the runner and the model beside it.
   const [engine, setEngine] = useState<EnginePick>({ runner: null, model: null, effort: null, account: null })
+  const [githubListWidth, setGithubListWidth] = useState(readStoredGithubListWidth)
+  const changeGithubListWidth = (next: number) => {
+    const width = clampGithubListWidth(next)
+    setGithubListWidth(width)
+    writeStoredGithubListWidth(width)
+  }
   useEffect(() => {
     writeFollowupSelection({ workflow, skills: [...selectedSkills] })
   }, [workflow, selectedSkills])
@@ -508,8 +601,9 @@ export function GithubRoute({
           to the detail when one is — the same two-surfaces-one-URL rule the git tabs use. */}
       <section
         data-slot="gh-list"
+        style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
         className={cn(
-          'w-full min-h-0 flex-col overflow-y-auto overscroll-contain border-border md:flex md:w-[360px] md:shrink-0 md:border-r',
+          'relative w-full min-h-0 flex-col overflow-y-auto overscroll-contain border-border md:flex md:w-[var(--github-list-width)] md:shrink-0 md:border-r',
           n === undefined ? 'flex' : 'hidden',
         )}
       >
@@ -639,6 +733,7 @@ export function GithubRoute({
             </ul>
           </div>
         ) : null}
+        <GithubListResizeHandle width={githubListWidth} onWidthChange={changeGithubListWidth} />
       </section>
 
       {/* Detail pane. Hidden below md until an item is in the URL. */}

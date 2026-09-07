@@ -18,6 +18,7 @@ import type {
   ApiRun,
   HealthResponse,
   ProcessUsage,
+  ProjectsResponse,
   ProviderStatusResponse,
 } from '@open-mercato/cezar-api-client'
 
@@ -34,9 +35,9 @@ import type {
  * run) comes back.
  *
  * Multi-project (spec, step 3.1): the one stream carries EVERY project's events, each stamped
- * with its owner. This layer unwraps the envelope (events.ts) and applies only the active
- * project's events — the mounted scope's, or the boot project's when unscoped — so the caches
- * (which are keyed by that same scope, queries.ts) never see another project's data. One
+ * with its owner. Run lists are patched by stamp (boot → `'default'`, else the registry id) so
+ * a sidebar group never receives another project's row (#129). Todos, usage and detail stay
+ * active-scope-only — the mounted scope's, or the boot project's when unscoped. One
  * connection for the whole workspace, not one per project: same per-origin socket-budget
  * argument as ever, and a project switch changes the filter, not the socket.
  *
@@ -151,8 +152,17 @@ function createRunsIndexRefresher(queryClient: QueryClient): {
  * the rest stale for whenever it next mounts. A background tab with fifty cached runs should not
  * fetch fifty runs to come back.
  */
+function isRunListQueryKey(queryKey: readonly unknown[]): boolean {
+  return queryKey[1] === 'runs' && queryKey[2] === 'list'
+}
+
 function reconcile(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
+  // Sidebar groups keep per-project list caches. `queryKeys.runs.all` is scope-led, so a
+  // reconnect would otherwise leave an expanded non-active group's patched list stale (#129).
+  void queryClient.invalidateQueries({
+    predicate: (query) => isRunListQueryKey(query.queryKey),
+  })
   // Events happened while we were disconnected, and the index is cross-project — nothing else
   // here covers it.
   void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
@@ -171,7 +181,37 @@ function reconcile(queryClient: QueryClient): void {
  * the reducers refuse to invent caches from stream messages anyway.
  */
 function activeProject(queryClient: QueryClient): string | undefined {
-  return getApiScope() ?? (queryClient.getQueryData(queryKeys.health) as HealthResponse | undefined)?.bootProject
+  return getApiScope() ?? bootProjectOf(queryClient)
+}
+
+function bootProjectOf(queryClient: QueryClient): string | undefined {
+  // Registry first: sidebar groups key boot as `'default'` from `projects.bootProject`, and
+  // that cache is workspace-led. Health is scope-led, so a mounted non-boot project reads a
+  // different entry than the unscoped bootstrap — fall back to `'default'` health last.
+  const registry = queryClient.getQueryData<ProjectsResponse>(workspaceQueryKeys.projects)
+  const fromRegistry = registry?.bootProject
+  if (typeof fromRegistry === 'string' && fromRegistry !== '') return fromRegistry
+  return (
+    queryClient.getQueryData<HealthResponse>(queryKeys.health)?.bootProject ??
+    queryClient.getQueryData<HealthResponse>(['default', 'health'])?.bootProject
+  )
+}
+
+/** Sidebar groups key the boot project as `'default'` (`useProjectRuns(..., boot)`); every other
+ *  group uses its registry id. A stamped run must land in that same entry, not in whatever
+ *  scope is currently mounted (#129). */
+function runListCacheKey(project: string, bootProject: string | undefined): readonly [string, 'runs', 'list'] {
+  return [project === bootProject ? 'default' : project, 'runs', 'list'] as const
+}
+
+function applyStampedRunList(queryClient: QueryClient, project: string, event: GlobalEvent): void {
+  if (event.type !== 'run' && event.type !== 'run-deleted') return
+  const key = runListCacheKey(project, bootProjectOf(queryClient))
+  if (event.type === 'run') {
+    queryClient.setQueryData<ApiRun[]>(key, (list) => applyRunEvent(list, event.run))
+    return
+  }
+  queryClient.setQueryData<ApiRun[]>(key, (list) => applyRunDeleted(list, event.id))
 }
 
 /** Fold one stream message into the cache. The reducers it calls are pure and table-tested in
@@ -182,6 +222,9 @@ function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: Gl
       // A changed worker may be absent from the visible list. Refresh this project's mounted
       // relationship readers without discarding their last successful data.
       void queryClient.invalidateQueries({ queryKey: [...queryKeys.runs.all, 'relationships'] })
+      // Stamp-addressed write already hit the owner's sidebar key. Also patch this scope's
+      // list: when the boot project is mounted under its real id (registry unavailable),
+      // that key is `[bootId, 'runs', 'list']`, not `'default'`.
       queryClient.setQueryData<ApiRun[]>(queryKeys.runs.list(), (list) => applyRunEvent(list, event.run))
       // Only a detail cache that exists: `setQueryData` would happily create one, leaving an entry
       // for a run nobody opened — and, worse, one built from a summary rather than from
@@ -304,9 +347,12 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           // the namer had rewritten stayed stale until the next tick, and the tick does not run
           // in a background tab, so coming back to one showed yesterday's rows until a reload.
           runsIndexRefresher.onEvent(parsed.event)
-          // Another project's news patches nothing SCOPED: this scope's caches hold this
-          // project's data only, and the reconcile-on-switch (3.2's provider swap) refetches
-          // the rest. `ping` (project null) always passes — liveness is not project-owned.
+          // Run lists are per-project sidebar caches, so a stamped run patches its OWNER's
+          // list even when that project is not the mounted scope (#129). Todos/usage/detail
+          // stay active-scope-only: those caches are the current project's, and the
+          // reconcile-on-switch (3.2's provider swap) refetches the rest.
+          // `ping` (project null) always passes — liveness is not project-owned.
+          if (parsed.project !== null) applyStampedRunList(queryClient, parsed.project, parsed.event)
           if (parsed.project !== null && parsed.project !== activeProject(queryClient)) return
           applyGlobalEvent(queryClient, usage, parsed.event)
         })

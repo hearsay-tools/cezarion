@@ -146,6 +146,9 @@ class OpencodeSession implements AgentSession {
   /** User text submitted while a question reply POST is unsettled. It is not
    * another answer; deliver it as ordinary prompts only after reply success. */
   private readonly queuedQuestionMessages: string[] = [];
+  /** Bumped by `discardQueuedMessages` so a `prompt()` waiter that captured
+   * the previous generation returns instead of posting after idle. */
+  private queuedPromptGeneration = 0;
   private autoEndTimer: NodeJS.Timeout | undefined;
   private spawnFailed: Error | null = null;
   private timedOut = false;
@@ -292,6 +295,11 @@ class OpencodeSession implements AgentSession {
     return true;
   }
 
+  discardQueuedMessages(): void {
+    this.queuedPromptGeneration += 1;
+    this.queuedQuestionMessages.length = 0;
+  }
+
   private deliverPrompt(text: string): void {
     this.pendingPromptRequests += 1;
     void this.ready.then(() => this.prompt(text)).then(() => {
@@ -428,7 +436,9 @@ class OpencodeSession implements AgentSession {
     // with the running turn and let that turn's idle close this one. Waiters
     // resume in FIFO order; a teardown (`finishTurn` runs on every exit
     // path) releases them into the `serverOpen` check below.
+    const generation = this.queuedPromptGeneration;
     while (this.turnActive) await this.turnFinished;
+    if (generation !== this.queuedPromptGeneration) return;
     // A queued prompt may have started waiting before the preceding idle armed
     // auto-end. Cancel at actual delivery time, not only at sendMessage time.
     this.cancelAutoEnd();

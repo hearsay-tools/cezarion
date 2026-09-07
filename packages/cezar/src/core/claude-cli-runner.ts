@@ -345,6 +345,7 @@ export class ClaudeCliRunner implements AgentRunner {
         if (!agentInputReady || pendingMarkerAsk) return false;
         return sendMessage(content);
       },
+      discardQueuedMessages: () => undefined,
       end,
       interrupt,
       pid: child.pid,

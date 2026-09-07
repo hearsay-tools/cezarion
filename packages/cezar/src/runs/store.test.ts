@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from './store.ts';
 
 import type { RunRecord } from './store.ts';
@@ -19,6 +19,89 @@ const LEGACY_RUN = {
   archived: false,
   steps: [],
 };
+
+describe('RunStore save lifecycle (#124)', () => {
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cez-store-'));
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it.each(['timer', 'flush'] as const)('silently skips a %s save after the data directory is removed', (trigger) => {
+    const store = RunStore.open(dataDir);
+    store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    rmSync(dataDir, { recursive: true });
+
+    if (trigger === 'timer') vi.advanceTimersByTime(300);
+    else store.flush();
+
+    expect(error).not.toHaveBeenCalled();
+    expect(existsSync(dataDir)).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('logs non-ENOENT write failures while the data directory exists', () => {
+    const store = RunStore.open(dataDir);
+    store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    mkdirSync(join(dataDir, 'runs.json.tmp'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    vi.advanceTimersByTime(300);
+
+    expect(existsSync(dataDir)).toBe(true);
+    expect(error).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(
+      /\[cez\] failed to save runs\.json: (EISDIR|EACCES|EPERM)/,
+    ));
+  });
+
+  it('logs ENOENT write failures when only the temporary-file target is missing', () => {
+    const store = RunStore.open(dataDir);
+    store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    symlinkSync(join(dataDir, 'missing', 'tmp'), join(dataDir, 'runs.json.tmp'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    store.flush();
+
+    expect(existsSync(dataDir)).toBe(true);
+    expect(error).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(
+      '[cez] failed to save runs.json: ENOENT',
+    ));
+  });
+
+  it('coalesces usage updates without postponing persistence or scheduling idle writes', () => {
+    const store = RunStore.open(dataDir);
+    const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
+    vi.advanceTimersByTime(200);
+    for (let tokensUsed = 1; tokensUsed <= 100; tokensUsed++) {
+      store.updateRun(run.id, { tokensUsed });
+    }
+    expect(vi.getTimerCount()).toBe(1);
+    expect(existsSync(join(dataDir, 'runs.json'))).toBe(false);
+
+    vi.advanceTimersByTime(100);
+
+    expect(JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8'))).toMatchObject([
+      { id: run.id, tokensUsed: 100 },
+    ]);
+    expect(vi.getTimerCount()).toBe(0);
+    store.updateRun(run.id, { tokensUsed: 101 });
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(300);
+    expect(JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8'))).toMatchObject([
+      { id: run.id, tokensUsed: 101 },
+    ]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 describe('RunStore — directional usage persistence', () => {
   let dataDir: string;

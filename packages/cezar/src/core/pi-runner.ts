@@ -327,6 +327,7 @@ export class PiRunner implements AgentRunner {
         if (!agentInputReady || piUi.turnId || pendingMarkerAsk) return false;
         return sendMessage(content);
       },
+      discardQueuedMessages: () => undefined,
       end,
       interrupt,
       pid: child.pid,

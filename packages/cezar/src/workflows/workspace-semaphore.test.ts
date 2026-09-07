@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -308,6 +308,38 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     );
     expect(a.store.getRun(a2.id)?.status).toBe('done');
   }, 60_000);
+
+  it('applies the owning project cap when the manager runs from a cezar task worktree', async () => {
+    const ownerRoot = fixtureRepo('cez-wsem-owner-cap-', roots);
+    const taskRoot = join(ownerRoot, '.ai/cezar/worktrees/task-run');
+    mkdirSync(taskRoot, { recursive: true });
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: taskRoot });
+    execFileSync('git', [...GIT_ID, 'commit', '--allow-empty', '-q', '-m', 'base'], { cwd: taskRoot });
+
+    const semaphore = new WorkspaceSemaphore({
+      initial: {
+        maxParallel: 10,
+        projectLimits: new Map([[realpathSync(ownerRoot), 4]]),
+      },
+    });
+    const store = RunStore.open(join(taskRoot, '.ai/cezar'));
+    const manager = new RunManager(store, taskRoot, { semaphore });
+    stores.push(store);
+    managers.push(manager);
+
+    const runs = Array.from({ length: 5 }, (_, index) =>
+      manager.startRun(SLOW, { task: `task-worktree slot ${index + 1}` }),
+    );
+    await waitFor(
+      () => runs.slice(0, 4).every((run) => store.getRun(run.id)?.status === 'running'),
+      'four runs to fill the owning project cap',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(runs.slice(0, 4).every((run) => store.getRun(run.id)?.status === 'running')).toBe(true);
+    expect(store.getRun(runs[4]!.id)?.status).toBe('queued');
+    expect(semaphore.busy()).toBe(4);
+  }, 45_000);
 
   it('restart recovery queues interrupted continuations behind the per-project cap', async () => {
     const root = fixtureRepo('cez-wsem-recover-cap-', roots);

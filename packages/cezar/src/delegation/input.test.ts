@@ -75,6 +75,7 @@ it('readiness hints ignore stale/disposed sessions and guard duplicate/reentrant
     const session: AgentSession = {
       open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
       sendMessage: () => { throw new Error('non-human input used human seam'); },
+      discardQueuedMessages: () => {},
       sendAgentMessage: () => {
         sends++;
         if (sends < 2) internal.handleAgentInputReady(record.id, state, session);

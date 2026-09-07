@@ -191,7 +191,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', interrupt: async () => undefined,
       run: async () => { throw Error('unused'); }, startSession: () => {
         expect(manager.deferMessage(w.id, [{ type: 'text', text: 'buffered during startup' }])).toBe(true);
-        return { pid: child.pid, result: closed, open: true, sendMessage: () => true, sendAgentMessage: () => true,
+        return { pid: child.pid, result: closed, open: true, sendMessage: () => true, sendAgentMessage: () => true, discardQueuedMessages: () => {},
           interrupt: () => { child.kill('SIGTERM'); }, end: () => { child.kill('SIGTERM'); } };
       } });
     if (mode === 'fresh') manager.enqueueOwnedRun(w.id);
@@ -216,7 +216,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"], { stdio: ['ignore', 'pipe', 'pipe'] });
       child.stdout!.once('data', () => { ready = true; if (phase === 'parked') emit?.({ type: 'turn-end' }); });
       const result = new Promise<never>((_resolve, reject) => child!.once('close', () => reject(Error('stopped'))));
-      return { pid: child.pid, result, open: true, sendMessage: () => false, sendAgentMessage: () => false, interrupt: () => { child!.kill('SIGTERM'); }, end: () => { child!.kill('SIGTERM'); } };
+      return { pid: child.pid, result, open: true, sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => {}, interrupt: () => { child!.kill('SIGTERM'); }, end: () => { child!.kill('SIGTERM'); } };
     } });
     releases.push(() => child?.kill('SIGKILL'));
     manager.enqueueOwnedRun(w.id); await until(() => ready);
@@ -242,12 +242,12 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', interrupt: async () => undefined,
       run: async () => { throw Error('unused'); }, startSession: () => {
         if (++launches > 1) return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }), open: false,
-          sendMessage: () => false, sendAgentMessage: () => false, interrupt() {}, end() {} };
+          sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => {}, interrupt() {}, end() {} };
         child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"],
           { cwd: workspace(w).path, stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout!.once('data', () => { ready = true; });
         const result = new Promise<{ text: string; toolCalls: []; tokensUsed: number }>(resolve => child!.once('close', () => resolve({ text: '', toolCalls: [], tokensUsed: 0 })));
-        return { pid: child.pid, result, open: true, sendMessage: () => true, sendAgentMessage: () => true,
+        return { pid: child.pid, result, open: true, sendMessage: () => true, sendAgentMessage: () => true, discardQueuedMessages: () => {},
           interrupt: () => { child!.kill('SIGTERM'); }, end: () => { child!.kill('SIGTERM'); } };
       } });
     releases.push(() => child?.kill('SIGKILL'));

@@ -78,6 +78,7 @@ interface AgentSession {
   readonly pid?: number;             // root of the run's process tree (resource telemetry, #348)
   sendMessage(content: ContentBlock[]): boolean;  // human input; false when closed
   sendAgentMessage(content: ContentBlock[]): boolean; // non-human; false when unsafe
+  discardQueuedMessages(): void;     // drop mid-turn follow-ups; CEZ:ASK park calls this
   end(): void;                       // graceful: end input, SIGTERM→SIGKILL watchdog
   interrupt(): void;                 // hard stop (cancel)
   readonly open: boolean;
@@ -300,7 +301,9 @@ multiple-choice question by ending a turn with a `CEZ:ASK <json>` control marker
 *assembled* turn text — uniform across claude, codex and opencode with no mapper
 work — validates the payload (`packages/cezar/src/core/ask.ts`, modeled on Claude Code's
 `AskUserQuestion`: 1–4 questions, 2–4 options each, `header` ≤12 chars), emits
-`ask.requested` and parks the run `waiting`. The cockpit renders clickable option
+  `ask.requested` and parks the run `waiting`. A mid-turn `sendMessage` that a
+  backend queued until idle is dropped (`AgentSession.discardQueuedMessages`) so
+  that waiter cannot start a new turn after the question. The cockpit renders clickable option
 chips; the user's pick (or a free-form reply) rides the normal reply seam
 (`POST /api/runs/:id/messages`), and the card resolves client-side when that
 message lands (no `ask.resolved` event). Codex additionally bridges its native
@@ -522,7 +525,7 @@ typecheck-enforced rather than hand-tracked.
 To be first-class:
 
 1. **Runner** — `packages/cezar/src/core/pi-runner.ts` implementing `AgentRunner` /
-   `AgentSession` (persistent process; `pid`; `sendMessage`/`end`/`interrupt`;
+    `AgentSession` (persistent process; `pid`; `sendMessage`/`discardQueuedMessages`/`end`/`interrupt`;
    `result`). Honor `AgentRunSpec` uniformly — use `prependSystemPrompt` if the
    backend has no native system-prompt channel.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and

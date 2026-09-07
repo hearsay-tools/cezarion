@@ -7,13 +7,17 @@ import { createQueryClient } from '@/api/query-client'
 import { queryKeys } from '@/api/queries'
 import type { ApiRun, RunEvent } from '@open-mercato/cezar-api-client'
 
-import { settledSessionSeq, STALE_RECORD_GRACE_MS, useRunRecordReconcile } from './run-reconcile'
+import {
+  parkedTurnSeq,
+  settledSessionSeq,
+  STALE_RECORD_GRACE_MS,
+  useRunRecordReconcile,
+} from './run-reconcile'
 
 /**
- * The stale-record healer (run-reconcile.ts): the transcript's `session.ended` arbitrates a
- * record still claiming a live session. The reported shape: the thread shows "goal achieved —
- * session closed" / "run finished" while the record says `running`, so Working… spins forever
- * and the composer sends into a session that 409s.
+ * The stale-record healer (run-reconcile.ts): persisted session and turn boundaries arbitrate a
+ * record still claiming a live session. The reported shape: the transcript is parked or closed
+ * while the record says `running`, so Working… spins forever and the composer targets stale state.
  */
 
 const line = (seq: number, type: string, extra: Record<string, unknown> = {}): RunEvent => ({
@@ -80,6 +84,32 @@ describe('settledSessionSeq', () => {
   })
 })
 
+describe('parkedTurnSeq', () => {
+  it('a latest turn-end is the parked-turn signal', () => {
+    expect(parkedTurnSeq([line(7, 'turn.completed'), line(8, 'turn-end')])).toBe(8)
+  })
+
+  it('turn.started after the end makes the parked turn history', () => {
+    expect(parkedTurnSeq([line(8, 'turn-end'), line(9, 'turn.started')])).toBe(0)
+  })
+
+  it('a user message after the end opens a new turn', () => {
+    expect(parkedTurnSeq([line(8, 'turn-end'), line(9, 'user-message')])).toBe(0)
+  })
+
+  it('a check step after the end does not hide the parked agent turn', () => {
+    expect(parkedTurnSeq([line(8, 'turn-end'), line(9, 'step-start', { kind: 'check' })])).toBe(8)
+  })
+
+  it('an agent step after the end opens a new turn', () => {
+    expect(parkedTurnSeq([line(8, 'turn-end'), line(9, 'step-start', { kind: 'agent' })])).toBe(0)
+  })
+
+  it('session.started after the end opens a new turn', () => {
+    expect(parkedTurnSeq([line(8, 'turn-end'), line(9, 'session.started')])).toBe(0)
+  })
+})
+
 function renderReconcile(record: ApiRun | undefined, events: RunEvent[]) {
   const client = createQueryClient()
   const invalidate = vi.spyOn(client, 'invalidateQueries')
@@ -94,6 +124,39 @@ function renderReconcile(record: ApiRun | undefined, events: RunEvent[]) {
 }
 
 describe('useRunRecordReconcile', () => {
+  it('a latest parked turn refetches a record still claiming plain running', () => {
+    vi.useFakeTimers()
+    const { invalidate } = renderReconcile(run(), [line(8, 'turn-end')])
+    vi.advanceTimersByTime(STALE_RECORD_GRACE_MS)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.detail('r1') })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.list() })
+  })
+
+  it('the workspace waiting update cancels parked-turn reconciliation', () => {
+    vi.useFakeTimers()
+    const events = [line(8, 'turn-end')]
+    const { rerender, invalidate } = renderReconcile(run(), events)
+    rerender({ r: run({ status: 'waiting' }), e: events })
+    vi.advanceTimersByTime(STALE_RECORD_GRACE_MS * 2)
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it('a monitoring record is already consistent with a parked turn', () => {
+    vi.useFakeTimers()
+    const { invalidate } = renderReconcile(run({ activity: 'monitoring' }), [line(8, 'turn-end')])
+    vi.advanceTimersByTime(STALE_RECORD_GRACE_MS * 2)
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it('a later turn.started cancels pending parked-turn reconciliation', () => {
+    vi.useFakeTimers()
+    const events = [line(8, 'turn-end')]
+    const { rerender, invalidate } = renderReconcile(run(), events)
+    rerender({ r: run(), e: [...events, line(9, 'turn.started')] })
+    vi.advanceTimersByTime(STALE_RECORD_GRACE_MS * 2)
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
   it('a record still claiming `running` over a settled transcript refetches after the grace', () => {
     vi.useFakeTimers()
     const { invalidate } = renderReconcile(run(), [line(8, 'session.ended')])

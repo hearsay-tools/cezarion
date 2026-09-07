@@ -425,3 +425,58 @@ then stopped with `.ai/scripts/test-env-down.sh` (exit 0,
 QA-home or `/tmp/cezar-e2e-*` home matches. No real Cezar instance or unrelated
 process was stopped. Final review disposition, commit, draft PR and CI remain
 controller-owned.
+
+
+## PR138 integration verification — 2026-09-07
+
+The draft PR's feature commit `eab2310e` was integrated with main `6077025e`
+(six commits after `ab6d076a`) through a normal, uncommitted merge. Seven
+conflicts were composed additively: owned-worker execution proofs, accepted
+grants, human-ask precedence, durable queues, capacity accounting and dynamic
+four-runner auto-end vetoes remain alongside upstream portable-ASK transport
+queue discard, immediate waiting persistence and project-owned sidebar updates.
+The scoped integration review found no introduced findings on source tree
+`93b059637ee4662e8d83e4794507616fe470e7c9`.
+
+Affected checks passed **896 tests across 15 files**. All five ordered gates
+passed on that merged source, with `TMPDIR=TEMP=TMP=/tmp`:
+
+1. `npm run typecheck` — exit 0.
+2. `npm test -- --maxWorkers=1` — **367 files / 7,543 tests passed**, exit 0,
+   903.91s. Every test and existing assertion/budget was retained.
+3. `npm run test:unit` — **37 service / 60 repository-script tests passed**,
+   exit 0.
+4. `npm run build` — exit 0; package inventory **540 files / 84 web assets**.
+5. `npm run test:package` — **24 passed**, exit 0, including the actual installed
+   CLI delegation lifecycle.
+
+The actual browser command `npm test -- --config
+packages/web/e2e/vitest.config.ts worker-relationships.e2e.ts` passed **8/8**,
+exit 0, 13.28s. This is a direct focused browser run, not a new full-suite verdict.
+The previously documented full-browser result remains **222 pass / 2 fail /
+6 conditional skips**, with unrelated baseline investigations tracked separately
+in [#136](https://github.com/wjarka/cezar/issues/136) and
+[#137](https://github.com/wjarka/cezar/issues/137). Neither received further fixes
+or a broad browser retry during integration.
+
+Six fresh real screenshots were inspected: 1440×900 and 360×640 in both themes,
+preserved human question, and offline relationships. All four tabs retain 32
+scoped worker links; keyboard focus reaches the final worker below the sticky
+header, targets remain at least 44px, horizontal overflow is absent, and reduced
+motion is enabled. Measured list scroll is 1304px desktop / 1836px mobile.
+The pending question retains the “needs you” header and “waiting for your reply”
+dock beside attributed agent input. Retry/reconnect and global Tasks/palette
+checks passed. Screenshots, observations and server log are preserved privately
+under `native-pr138-integration-browser-artifacts/` with timestamps and hashes.
+The actual native browser adapter and canonical-root fixture guard described
+above were used, with inherited Git redirection removed.
+
+Shared fixture PID411066 was verified by start ticks, cwd and CEZ_HOME before
+`.ai/scripts/test-env-down.sh` returned exit 0 / `TEST_ENV_STATUS=stopped`.
+The final audit found that PID absent and no accessible process environment
+matching the shared QA home or `/tmp/cezar-e2e-*`; 198 process environments were
+unreadable, so this is explicitly an accessible-process audit. No unrelated
+process was stopped. All integration logs and exact attribution are recorded
+in the private `native-pr138-integration-report.md`. This QA addition is the
+only document change after the tested/reviewed source snapshot. Merge commit,
+push and CI remain controller-owned.

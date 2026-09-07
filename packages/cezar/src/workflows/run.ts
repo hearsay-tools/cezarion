@@ -207,6 +207,12 @@ function resolveAskTurn(turnText: string, enabled: boolean): AskTurnOutcome {
   if (recovery) notes.push({ message: recovery, tone: 'danger' });
   return { ask: result.kind === 'valid' ? result.request : null, notes };
 }
+/** A trailing ASK marker — valid card or rejected payload — means the user
+ *  must answer. Drop follow-ups queued mid-turn so they cannot start a new
+ *  turn the moment idle fires (OpenCode serializes `sendMessage` that way). */
+function discardQueuedMessagesOnAsk(session: AgentSession | undefined, outcome: AskTurnOutcome): void {
+  if (outcome.ask || outcome.notes.length) session?.discardQueuedMessages();
+}
 /** Periodic "cezar autosave" commit in the task worktree (spec 006). */
 export const AUTOSAVE_INTERVAL_MS = 90_000;
 
@@ -3157,7 +3163,9 @@ export class RunManager {
         const done = sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
         // `CEZ:ASK` → the user is genuinely blocked; wins over `CEZ:MONITORING`
         // (a pending question is always attention), loses to `CEZ:DONE` (#473).
-        const { ask, notes: askNotes } = resolveAskTurn(turnText, Boolean(sessionOpen) && !done);
+        const askTurn = resolveAskTurn(turnText, Boolean(sessionOpen) && !done);
+        const { ask, notes: askNotes } = askTurn;
+        discardQueuedMessagesOnAsk(state.session, askTurn);
         const monitoring =
           sessionOpen &&
           !done &&
@@ -3212,6 +3220,7 @@ export class RunManager {
             } else {
               this.store.updateRun(runId, { status: 'waiting', activity: undefined });
               this.store.updateStep(runId, stepId, { status: 'waiting' });
+              this.store.flush();
               this.monitoring.delete(runId);
               this.clearMonitoringWakeTimer(state, runId);
             }
@@ -3906,7 +3915,9 @@ export class RunManager {
         const done = interactive && sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
         // `CEZ:ASK` → the user is blocked; wins over `CEZ:MONITORING`, loses to
         // `CEZ:DONE` (#473).
-        const { ask, notes: askNotes } = resolveAskTurn(turnText, Boolean((interactive || this.workerWait(runId)) && sessionOpen) && !done);
+        const askTurn = resolveAskTurn(turnText, Boolean((interactive || this.workerWait(runId)) && sessionOpen) && !done);
+        const { ask, notes: askNotes } = askTurn;
+        discardQueuedMessagesOnAsk(state.session, askTurn);
         const monitoring =
           interactive &&
           sessionOpen &&
@@ -3946,6 +3957,7 @@ export class RunManager {
           } else {
             this.store.updateRun(runId, { status: 'waiting', activity: undefined });
             this.store.updateStep(runId, step.id, { status: 'waiting' });
+            this.store.flush();
             this.monitoring.delete(runId);
             this.clearMonitoringWakeTimer(state, runId);
           }

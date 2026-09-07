@@ -203,6 +203,13 @@ export interface AgentSession {
   /** Non-human input. False retains caller ownership for retry; NEVER fall back to sendMessage.
    * Runners refuse pending asks and unsafe turn boundaries without writing an answer. */
   sendAgentMessage(content: ContentBlock[]): boolean;
+  /**
+   * Drop follow-ups queued while a turn was still in flight. A `CEZ:ASK` park
+   * must call this so a mid-turn `sendMessage` cannot start a new turn after
+   * the question. Backends that never queue (they write or steer immediately)
+   * no-op.
+   */
+  discardQueuedMessages(): void;
   /** Graceful close: end input, then a SIGTERM→SIGKILL watchdog. */
   end(): void;
   /** Hard stop (used by cancel). */
