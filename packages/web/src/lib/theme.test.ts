@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_THEME,
   THEME_STORAGE_KEY,
+  applyFaviconTheme,
   applyResolvedTheme,
+  faviconHrefFor,
   normalizeTheme,
   readStoredTheme,
   resolveTheme,
@@ -148,5 +150,31 @@ describe('applyResolvedTheme', () => {
     applyResolvedTheme(root, 'light' as ResolvedTheme)
 
     expect(root.classList.contains('js-enabled')).toBe(true)
+  })
+})
+
+describe('favicon theming (#143)', () => {
+  it('maps the resolved theme to the served mark path', () => {
+    expect(faviconHrefFor('light')).toBe('/cezarion-mark-light.svg')
+    expect(faviconHrefFor('dark')).toBe('/cezarion-mark-dark.svg')
+  })
+
+  it('points the tab icon at the resolved theme’s mark', () => {
+    const link = document.createElement('link')
+    link.rel = 'icon'
+    link.href = '/cezarion-mark-dark.svg'
+    document.head.append(link)
+    try {
+      applyFaviconTheme('light')
+      expect(link.getAttribute('href')).toBe('/cezarion-mark-light.svg')
+      applyFaviconTheme('dark')
+      expect(link.getAttribute('href')).toBe('/cezarion-mark-dark.svg')
+    } finally {
+      link.remove()
+    }
+  })
+
+  it('is a no-op when the document has no icon link', () => {
+    expect(() => applyFaviconTheme('light')).not.toThrow()
   })
 })

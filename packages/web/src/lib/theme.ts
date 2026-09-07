@@ -65,3 +65,19 @@ export function applyResolvedTheme(root: HTMLElement, resolved: ResolvedTheme): 
   root.classList.toggle('light', resolved === 'light')
   root.style.colorScheme = resolved
 }
+
+/** The tab icon is a pair of themed files (#143), not one theme-blind SVG. The service serves
+ *  each at exactly this path (`GET /cezarion-mark-<resolved>.svg`), so the favicon and the
+ *  sidebar lockup share one URL per picture. */
+export function faviconHrefFor(resolved: ResolvedTheme): string {
+  return `/cezarion-mark-${resolved}.svg`
+}
+
+/** Point the tab icon at the resolved theme's mark. Called by ThemeProvider after it stamps the
+ *  root, so ThemeToggle swaps the favicon without a reload — a `<link media="(prefers-color-scheme)">
+ *  pair would follow the OS, which the stored preference can disagree with. No-op wherever
+ *  index.html's link is absent (tests, exotic embeds). */
+export function applyFaviconTheme(resolved: ResolvedTheme): void {
+  const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  if (link) link.href = faviconHrefFor(resolved)
+}

@@ -2,6 +2,7 @@ import * as React from 'react'
 
 import {
   LIGHT_MEDIA_QUERY,
+  applyFaviconTheme,
   applyResolvedTheme,
   readStoredTheme,
   resolveTheme,
@@ -43,6 +44,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // Layout effect, not effect: the class must land before the browser paints the mounted tree.
   React.useLayoutEffect(() => {
     applyResolvedTheme(document.documentElement, resolvedTheme)
+    // Same resolved value drives the tab icon (#143), so ThemeToggle swaps it without a reload.
+    applyFaviconTheme(resolvedTheme)
   }, [resolvedTheme])
 
   const setTheme = React.useCallback((next: Theme) => {

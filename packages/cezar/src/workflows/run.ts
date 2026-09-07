@@ -142,6 +142,19 @@ export function appendTurnText(current: string, next: string): string {
   if (!next) return current;
   return `${current}\n${next}`;
 }
+/** The v2 item is the complete assistant message the cockpit persists. Keep it
+ * as a fallback when a runner's legacy v1 text omitted a trailing CEZ:ASK. */
+function appendCompletedAssistantText(current: string, event: UiEvent): string {
+  if (
+    event.type !== 'item.completed' ||
+    event.item.kind !== 'message' ||
+    event.item.role !== 'assistant' ||
+    event.item.parentItemId !== undefined
+  ) {
+    return current;
+  }
+  return appendTurnText(current, event.item.text);
+}
 /** Strip a trailing marker from one text event so transcripts stay free of
  *  protocol noise. Delta backends may split the marker across events — then
  *  it stays visible; detection above is unaffected. */
@@ -197,9 +210,12 @@ type AskTurnOutcome = {
  * exactly that kind of change. `enabled` is the caller's own precondition (the
  * session is open, the turn is not a `CEZ:DONE`, and for an agent step, the run
  * is interactive); when false there is no marker to look for. */
-function resolveAskTurn(turnText: string, enabled: boolean): AskTurnOutcome {
+function resolveAskTurn(turnText: string, completedAssistantText: string, enabled: boolean): AskTurnOutcome {
   if (!enabled) return { ask: null, notes: [] };
-  const result = parseAskMarkerResult(turnText);
+  const v1Result = parseAskMarkerResult(turnText);
+  // v1 is authoritative whenever it carries an ASK marker. Claude can omit
+  // the trailing marker from v1 while v2 retains the complete message.
+  const result = v1Result.kind === 'none' ? parseAskMarkerResult(completedAssistantText) : v1Result;
   const notes: AskTurnOutcome['notes'] = [];
   const rejection = askMarkerRejection(result);
   if (rejection) notes.push({ message: rejection, tone: 'danger' });
@@ -3165,6 +3181,7 @@ export class RunManager {
 
     let stepCost = 0;
     let turnText = '';
+    let completedAssistantText = '';
     let sawClaudeScheduleWakeup = false;
     let sessionError: string | undefined;
     const sink = this.makeUiSink(runId, stepId);
@@ -3226,7 +3243,7 @@ export class RunManager {
         const done = sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
         // `CEZ:ASK` → the user is genuinely blocked; wins over `CEZ:MONITORING`
         // (a pending question is always attention), loses to `CEZ:DONE` (#473).
-        const askTurn = resolveAskTurn(turnText, Boolean(sessionOpen) && !done);
+        const askTurn = resolveAskTurn(turnText, completedAssistantText, Boolean(sessionOpen) && !done);
         const { ask, notes: askNotes } = askTurn;
         discardQueuedMessagesOnAsk(state.session, askTurn);
         const monitoring =
@@ -3235,6 +3252,7 @@ export class RunManager {
           !ask &&
           (MONITORING_MARKER_RE.test(turnText.trimEnd()) || sawClaudeScheduleWakeup);
         turnText = '';
+        completedAssistantText = '';
         sawClaudeScheduleWakeup = false;
         for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', ...note, stepId });
         if (ask) this.prepareHumanAsk(runId, state);
@@ -3449,7 +3467,10 @@ export class RunManager {
       },
       onEvent,
       {
-        onUiEvent: (event) => this.handleRunnerUiEvent(runId, state, sink, event),
+        onUiEvent: (event) => {
+          completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
+          this.handleRunnerUiEvent(runId, state, sink, event);
+        },
         onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
       },
     );
@@ -3932,6 +3953,7 @@ export class RunManager {
     const startTokens = stepRecord?.tokensUsed ?? 0;
     let stepCost = stepRecord?.costUsd ?? 0;
     let turnText = '';
+    let completedAssistantText = '';
     let sawClaudeScheduleWakeup = false;
     let sessionError: string | undefined;
     const sink = this.makeUiSink(runId, step.id);
@@ -3983,7 +4005,7 @@ export class RunManager {
         const done = interactive && sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
         // `CEZ:ASK` → the user is blocked; wins over `CEZ:MONITORING`, loses to
         // `CEZ:DONE` (#473).
-        const askTurn = resolveAskTurn(turnText, Boolean((interactive || this.workerWait(runId)) && sessionOpen) && !done);
+        const askTurn = resolveAskTurn(turnText, completedAssistantText, Boolean((interactive || this.workerWait(runId)) && sessionOpen) && !done);
         const { ask, notes: askNotes } = askTurn;
         discardQueuedMessagesOnAsk(state.session, askTurn);
         const monitoring =
@@ -3993,6 +4015,7 @@ export class RunManager {
           !ask &&
           (MONITORING_MARKER_RE.test(turnText.trimEnd()) || sawClaudeScheduleWakeup);
         turnText = '';
+        completedAssistantText = '';
         sawClaudeScheduleWakeup = false;
         for (const note of askNotes) emit({ type: 'note', stepId: step.id, ...note });
         if (ask) this.prepareHumanAsk(runId, state);
@@ -4139,7 +4162,10 @@ export class RunManager {
           autoEndAfterFirstTurn: !interactive,
           shouldAutoEnd: () => this.active.get(runId) !== state || state.session !== session ||
             (!this.workerWait(runId) && state.workerWakeTurn !== session && !state.agentInputFlight),
-          onUiEvent: (event) => this.handleRunnerUiEvent(runId, state, sink, event),
+          onUiEvent: (event) => {
+            completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
+            this.handleRunnerUiEvent(runId, state, sink, event);
+          },
           onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
         },
       );

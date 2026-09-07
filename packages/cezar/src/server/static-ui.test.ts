@@ -55,7 +55,11 @@ describe('resolveGetRequest', () => {
 
     // The static routes registered before the catch-all keep their files.
     { name: '/assets/index-abc123.js → passthrough', path: '/assets/index-abc123.js', target: 'passthrough' },
-    { name: '/cezarion-mark.svg (favicon) → passthrough', path: '/cezarion-mark.svg', target: 'passthrough' },
+    { name: '/cezarion-lockup-light.svg (sidebar lockup, light) → passthrough', path: '/cezarion-lockup-light.svg', target: 'passthrough' },
+    { name: '/cezarion-lockup-dark.svg (sidebar lockup, dark) → passthrough', path: '/cezarion-lockup-dark.svg', target: 'passthrough' },
+    { name: '/cezarion-mark-light.svg (favicon, light) → passthrough', path: '/cezarion-mark-light.svg', target: 'passthrough' },
+    { name: '/cezarion-mark-dark.svg (favicon, dark) → passthrough', path: '/cezarion-mark-dark.svg', target: 'passthrough' },
+    { name: '/cezarion-mark.svg → the shell (retired single-file favicon)', path: '/cezarion-mark.svg', target: 'dist' },
     { name: '/open-mercato.svg → the shell (retired favicon path)', path: '/open-mercato.svg', target: 'dist' },
     // Passthrough is about ownership, not about the build being there.
     { name: '/assets/x.js with no build → still passthrough', path: '/assets/x.js', distExists: false, target: 'passthrough' },

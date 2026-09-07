@@ -1390,11 +1390,11 @@ export function createApp(deps: ServerDeps) {
   const staticFile = (name: string, type: string) => (c: Context): Response => {
     // Read per request — the files are tiny and this keeps dev iteration live.
     //
-    // Served out of the Vite build: the file is a `public/` asset of the web package, which the
-    // build copies verbatim into `web/dist`. One home, one URL — the same bytes this route
-    // hands out are what the bundle's own `<img src="/cezarion-mark.svg">` asks for.
-    // Without a build there is nothing to serve, which is a 404 rather than a crash (the shell
-    // route answers the same dev-only state with its build hint).
+    // Served out of the Vite build: the files are `public/` assets of the web package, which the
+    // build copies verbatim into `web/dist`. One home, one URL — the same bytes these routes
+    // hand out are what the bundle's `<img src>` and `<link rel="icon">` ask for by those exact
+    // paths. Without a build there is nothing to serve, which is a 404 rather than a crash (the
+    // shell route answers the same dev-only state with its build hint).
     const path = join(distDir, name);
     if (!existsSync(path)) return c.json({ error: 'not found' }, 404);
     return new Response(readFileSync(path), { headers: { 'content-type': type } });
@@ -1444,8 +1444,13 @@ export function createApp(deps: ServerDeps) {
     });
   });
 
-  // The favicon packages/web/index.html points at (`/cezarion-mark.svg`).
-  app.get('/cezarion-mark.svg', staticFile('cezarion-mark.svg', 'image/svg+xml'));
+  // The themed brand SVGs (#143): the sidebar lockup pair and the favicon pair. The cockpit
+  // picks light or dark by its RESOLVED theme, so both files of each pair must be served —
+  // a `<link media>` pair would follow the OS, which the stored theme can disagree with.
+  app.get('/cezarion-lockup-light.svg', staticFile('cezarion-lockup-light.svg', 'image/svg+xml'));
+  app.get('/cezarion-lockup-dark.svg', staticFile('cezarion-lockup-dark.svg', 'image/svg+xml'));
+  app.get('/cezarion-mark-light.svg', staticFile('cezarion-mark-light.svg', 'image/svg+xml'));
+  app.get('/cezarion-mark-dark.svg', staticFile('cezarion-mark-dark.svg', 'image/svg+xml'));
 
   // ---- meta ----------------------------------------------------------------
   // CORS — deliberately for /api/health ONLY (spec 011): the bookmarklets

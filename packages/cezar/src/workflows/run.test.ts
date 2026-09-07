@@ -14,8 +14,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { ContentBlock } from '../core/agent-runner.ts';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentRunResult, AgentRunner, AgentSession, ContentBlock, SessionOptions } from '../core/agent-runner.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { RunStore, type RunRecord, type StepState } from '../runs/store.ts';
@@ -23,6 +23,16 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { parseTaskMarkers } from '../runs/task-markers.ts';
 import { appendTurnText, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
+
+const runnerHook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined }));
+
+vi.mock('../core/runner-factory.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
+  return {
+    ...actual,
+    createRunner: (...args: Parameters<typeof actual.createRunner>) => runnerHook.runner ?? actual.createRunner(...args),
+  };
+});
 
 type UsageAccountingHarness = {
   beginUsageInvocation(runId: string, state: Record<string, unknown>, stepId: string): void;
@@ -1516,6 +1526,7 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
   });
 
   afterEach(() => {
+    runnerHook.runner = undefined;
     if (currentId) manager.cancel(currentId);
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key];
@@ -1539,6 +1550,47 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
       .split('\n')
       .map((l) => JSON.parse(l));
 
+  const v2OnlyAskRunner = (marker: string, parentItemId?: string): AgentRunner => ({
+    backend: 'claude',
+    run: async () => ({ text: 'Choose an option.', toolCalls: [], tokensUsed: 0 }),
+    interrupt: async () => undefined,
+    startSession(_spec, onEvent, opts: SessionOptions = {}): AgentSession {
+      let open = true;
+      let finish: (result: AgentRunResult) => void = () => undefined;
+      const result = new Promise<AgentRunResult>((resolve) => {
+        finish = resolve;
+      });
+      queueMicrotask(() => {
+        opts.onUiEvent?.({ type: 'session.started', sessionId: 'v2-only', backend: 'claude' });
+        opts.onUiEvent?.({ type: 'turn.started', turnId: 'turn-1' });
+        opts.onUiEvent?.({
+          type: 'item.completed',
+          item: {
+            kind: 'message', id: 'message-1', role: 'assistant', text: `Choose an option.\n${marker}`,
+            ...(parentItemId !== undefined ? { parentItemId } : {}),
+          },
+        });
+        onEvent?.({ type: 'text', text: 'Choose an option.' });
+        onEvent?.({ type: 'turn-end' });
+      });
+      return {
+        result,
+        sendMessage: () => false,
+        sendAgentMessage: () => false,
+        discardQueuedMessages: () => undefined,
+        end: () => {
+          open = false;
+          finish({ text: 'Choose an option.', toolCalls: [], tokensUsed: 0 });
+        },
+        interrupt: () => {
+          open = false;
+          finish({ text: 'Choose an option.', toolCalls: [], tokensUsed: 0 });
+        },
+        get open() { return open; },
+      };
+    },
+  });
+
   it('a CEZ:ASK turn-end parks the run as waiting (attention) and emits ask.requested', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask which library?', worktree: false });
     currentId = record.id;
@@ -1552,6 +1604,56 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
     const questions = asks[0]!.questions as Array<{ header: string; options: unknown[] }>;
     expect(questions[0]!.header).toBe('Library');
     expect(questions[0]!.options).toHaveLength(2);
+  }, 30_000);
+
+  it('parks when only Claude\'s completed v2 message contains a valid CEZ:ASK marker', async () => {
+    runnerHook.runner = v2OnlyAskRunner(
+      'CEZ:ASK {"questions":[{"header":"Library","question":"Which library?","options":[{"label":"date-fns"},{"label":"Luxon"}]}]}',
+    );
+    const record = manager.startRun(SINGLE_STEP, { task: 'v2-only ask', runner: 'claude', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (run) => run?.status === 'waiting');
+
+    expect(readEvents(record.id).filter((event) => event.type === 'ask.requested')).toHaveLength(1);
+  });
+
+  it('keeps Claude parked and records the rejection when only its completed v2 message has an invalid CEZ:ASK marker', async () => {
+    runnerHook.runner = v2OnlyAskRunner('CEZ:ASK {not valid json');
+    const record = manager.startRun(SINGLE_STEP, { task: 'v2-only invalid ask', runner: 'claude', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (run) => run?.status === 'waiting');
+
+    const events = readEvents(record.id);
+    expect(events.filter((event) => event.type === 'ask.requested')).toHaveLength(0);
+    expect(events.filter((event) => event.type === 'note' && String(event.message).includes('not valid JSON'))).toHaveLength(1);
+  });
+
+  it('does not park a parent run for a nested Claude v2 message marker', async () => {
+    runnerHook.runner = v2OnlyAskRunner(
+      'CEZ:ASK {"questions":[{"header":"Library","question":"Which library?","options":[{"label":"date-fns"},{"label":"Luxon"}]}]}',
+      'nested-agent',
+    );
+    const record = manager.startRun(SINGLE_STEP, { task: 'nested v2 ask', runner: 'claude', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (run) => run?.status === 'waiting');
+
+    expect(readEvents(record.id).filter((event) => event.type === 'ask.requested')).toHaveLength(0);
+  });
+
+  it('parks a continuation when only Claude\'s completed v2 message contains a valid CEZ:ASK marker', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'first turn', runner: 'claude', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (run) => run?.status === 'waiting');
+    expect(manager.finish(record.id)).toBe(true);
+    await waitFor(record.id, (run) => ['done', 'review'].includes(run?.status ?? ''));
+
+    runnerHook.runner = v2OnlyAskRunner(
+      'CEZ:ASK {"questions":[{"header":"Library","question":"Which library?","options":[{"label":"date-fns"},{"label":"Luxon"}]}]}',
+    );
+    expect(manager.continueRun(record.id, { text: 'continue' })).toEqual({ ok: true });
+    await waitFor(record.id, (run) => run?.status === 'waiting');
+
+    expect(readEvents(record.id).filter((event) => event.type === 'ask.requested')).toHaveLength(1);
   }, 30_000);
 
   it('strips the CEZ:ASK marker from server-emitted v1 text events', async () => {
