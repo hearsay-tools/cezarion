@@ -34,6 +34,7 @@ describe('clampGithubListWidth', () => {
   it('parses localStorage strings and returns the default for junk', () => {
     expect(clampGithubListWidth('340.6')).toBe(341)
     expect(clampGithubListWidth('wide')).toBe(DEFAULT_GITHUB_LIST_WIDTH)
+    expect(clampGithubListWidth('   ')).toBe(DEFAULT_GITHUB_LIST_WIDTH)
     expect(clampGithubListWidth(null)).toBe(DEFAULT_GITHUB_LIST_WIDTH)
     expect(clampGithubListWidth(NaN)).toBe(DEFAULT_GITHUB_LIST_WIDTH)
   })

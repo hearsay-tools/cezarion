@@ -12,6 +12,7 @@ export const GITHUB_LIST_WIDTH_STEP = 16
 /** Convert any drag or storage value into a width the desktop layout can paint. */
 export function clampGithubListWidth(raw: unknown): number {
   if (raw === null || raw === undefined || raw === '') return DEFAULT_GITHUB_LIST_WIDTH
+  if (typeof raw === 'string' && raw.trim() === '') return DEFAULT_GITHUB_LIST_WIDTH
   const width = typeof raw === 'number' ? raw : Number(raw)
   if (!Number.isFinite(width)) return DEFAULT_GITHUB_LIST_WIDTH
   return Math.min(MAX_GITHUB_LIST_WIDTH, Math.max(MIN_GITHUB_LIST_WIDTH, Math.round(width)))
