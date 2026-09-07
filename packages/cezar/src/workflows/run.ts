@@ -129,7 +129,12 @@ export function appendTurnText(current: string, next: string): string {
 /** The v2 item is the complete assistant message the cockpit persists. Keep it
  * as a fallback when a runner's legacy v1 text omitted a trailing CEZ:ASK. */
 function appendCompletedAssistantText(current: string, event: UiEvent): string {
-  if (event.type !== 'item.completed' || event.item.kind !== 'message' || event.item.role !== 'assistant') {
+  if (
+    event.type !== 'item.completed' ||
+    event.item.kind !== 'message' ||
+    event.item.role !== 'assistant' ||
+    event.item.parentItemId !== undefined
+  ) {
     return current;
   }
   return appendTurnText(current, event.item.text);

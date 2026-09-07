@@ -1550,7 +1550,7 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
       .split('\n')
       .map((l) => JSON.parse(l));
 
-  const v2OnlyAskRunner = (marker: string): AgentRunner => ({
+  const v2OnlyAskRunner = (marker: string, parentItemId?: string): AgentRunner => ({
     backend: 'claude',
     run: async () => ({ text: 'Choose an option.', toolCalls: [], tokensUsed: 0 }),
     interrupt: async () => undefined,
@@ -1565,7 +1565,10 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
         opts.onUiEvent?.({ type: 'turn.started', turnId: 'turn-1' });
         opts.onUiEvent?.({
           type: 'item.completed',
-          item: { kind: 'message', id: 'message-1', role: 'assistant', text: `Choose an option.\n${marker}` },
+          item: {
+            kind: 'message', id: 'message-1', role: 'assistant', text: `Choose an option.\n${marker}`,
+            ...(parentItemId !== undefined ? { parentItemId } : {}),
+          },
         });
         onEvent?.({ type: 'text', text: 'Choose an option.' });
         onEvent?.({ type: 'turn-end' });
@@ -1622,6 +1625,18 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
     const events = readEvents(record.id);
     expect(events.filter((event) => event.type === 'ask.requested')).toHaveLength(0);
     expect(events.filter((event) => event.type === 'note' && String(event.message).includes('not valid JSON'))).toHaveLength(1);
+  });
+
+  it('does not park a parent run for a nested Claude v2 message marker', async () => {
+    runnerHook.runner = v2OnlyAskRunner(
+      'CEZ:ASK {"questions":[{"header":"Library","question":"Which library?","options":[{"label":"date-fns"},{"label":"Luxon"}]}]}',
+      'nested-agent',
+    );
+    const record = manager.startRun(SINGLE_STEP, { task: 'nested v2 ask', runner: 'claude', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (run) => run?.status === 'waiting');
+
+    expect(readEvents(record.id).filter((event) => event.type === 'ask.requested')).toHaveLength(0);
   });
 
   it('parks a continuation when only Claude\'s completed v2 message contains a valid CEZ:ASK marker', async () => {
