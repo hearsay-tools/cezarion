@@ -104,6 +104,88 @@ function activateHistoryBoundary(): void {
   browser.press('Enter')
 }
 
+type HistoryAnchor = {
+  key: string
+  top: number
+  scrollTop: number
+  maxTop: number
+  virtualized: string | null
+  mountedRows: number
+}
+
+const MAIN = `document.querySelector('[data-slot="main"]')`
+
+function historyAnchorSample(rowExpr: string): string {
+  return `(() => {
+    const main = ${MAIN}
+    const rows = document.querySelector('[data-slot="thread-rows"]')
+    const row = ${rowExpr}
+    if (!main || !row) return null
+    return {
+      key: row.dataset.rowKey,
+      top: row.getBoundingClientRect().top,
+      scrollTop: main.scrollTop,
+      maxTop: main.scrollHeight - main.clientHeight,
+      virtualized: rows?.dataset.virtualized ?? null,
+      mountedRows: main.querySelectorAll('[data-slot="thread-row"]').length,
+    }
+  })()`
+}
+
+function settleHistoryAnchor(rowExpr: string, holdAtStart = false): HistoryAnchor {
+  browser.evaluate(`(() => {
+    window.__cezHistoryAnchor = null
+    window.__cezSettledHistoryAnchor = null
+  })()`)
+  const holdStart = holdAtStart
+    ? `if (main.scrollTop > 2) {
+      main.scrollTop = 0
+      main.dispatchEvent(new Event('scroll', { bubbles: true }))
+      window.__cezHistoryAnchor = null
+      return false
+    }`
+    : ''
+  browser.waitForFunction(`(() => {
+    const main = ${MAIN}
+    if (!main) return false
+    ${holdStart}
+    const sample = ${historyAnchorSample(rowExpr)}
+    if (!sample) return false
+    const prev = window.__cezHistoryAnchor
+    if (
+      prev &&
+      prev.key === sample.key &&
+      Math.abs(prev.top - sample.top) < 0.5 &&
+      Math.abs(prev.scrollTop - sample.scrollTop) < 0.5
+    ) {
+      prev.hits += 1
+      if (prev.hits >= 3) {
+        window.__cezSettledHistoryAnchor = sample
+        return true
+      }
+      return false
+    }
+    window.__cezHistoryAnchor = { ...sample, hits: 1 }
+    return false
+  })()`)
+  return browser.evaluate(`window.__cezSettledHistoryAnchor`) as HistoryAnchor
+}
+
+function parkAndSettleHistoryStart(): HistoryAnchor {
+  browser.evaluate(`(() => {
+    const main = ${MAIN}
+    // Unpin while still at the live tail so a later wheel at the boundary cannot load a page.
+    main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }))
+  })()`)
+  return settleHistoryAnchor(`main.querySelector('[data-slot="thread-row"][data-row-key]')`, true)
+}
+
+function settleNamedHistoryAnchor(key: string): HistoryAnchor {
+  return settleHistoryAnchor(
+    `main.querySelector(${JSON.stringify(`[data-slot="thread-row"][data-row-key="${key}"]`)})`,
+  )
+}
+
 type ArrivalSample = { top: number; maxTop: number }
 
 /** Capture every destination-transcript animation frame around a client-side task switch. */
@@ -199,14 +281,9 @@ describe('progressive long-session history', () => {
   })
 
   it('loads exactly one page, preserves the visible anchor, and bounds retained pages', async () => {
-    const before = browser.evaluate(`(() => {
-      const main = document.querySelector('[data-slot="main"]')
-      main.scrollTop = 0
-      main.dispatchEvent(new Event('scroll', { bubbles: true }))
-      const row = main.querySelector('[data-slot="thread-row"][data-row-key]')
-      if (!row) throw new Error('missing visible thread row')
-      return { key: row.dataset.rowKey, top: row.getBoundingClientRect().top }
-    })()`) as { key: string; top: number }
+    const before = parkAndSettleHistoryStart()
+    expect(before.key).toBeTruthy()
+    expect(before.scrollTop).toBeLessThanOrEqual(2)
 
     activateHistoryBoundary()
     browser.waitForFunction(`${cursorRequestCount} === 1`)
@@ -215,14 +292,11 @@ describe('progressive long-session history', () => {
     )
     expect(Number(browser.evaluate(cursorRequestCount))).toBe(1)
 
-    const after = browser.evaluate(`(() => {
-      const row = document.querySelector(
-        ${JSON.stringify(`[data-slot="thread-row"][data-row-key="${before.key}"]`)},
-      )
-      if (!row) throw new Error('visible anchor row was not retained')
-      return { top: row.getBoundingClientRect().top }
-    })()`) as { top: number }
-    expect(Math.abs(after.top - before.top)).toBeLessThan(2)
+    const after = settleNamedHistoryAnchor(before.key)
+    expect(
+      Math.abs(after.top - before.top),
+      `anchor jumped ${Math.abs(after.top - before.top)}px ${JSON.stringify({ before, after })}`,
+    ).toBeLessThan(2)
 
     browser.screenshot(join(artifactsDir, 'progressive-history-earlier-page.png'), { viewport: true })
     // Let the prepend anchor's requestAnimationFrame settle before the next test supplies
