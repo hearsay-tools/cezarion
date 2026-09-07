@@ -3,6 +3,7 @@ import * as React from 'react'
 import { useNavigate as useRouterNavigate } from 'react-router'
 import { useHealth, useProjects, useRuns, useRunsIndex, useSkills, useUiState } from '@/api/queries'
 import { scopeTo, useActiveProjectId, useNavigate } from '@/lib/project-router'
+import { runDelegationSummarySchema } from '@open-mercato/cezar-api-client'
 import type { ProjectListEntry, RunIndexEntry, RunRecord } from '@open-mercato/cezar-api-client'
 import { visibleNavItems } from '@/components/nav-items'
 import { StatusDot } from '@/components/status-dot'
@@ -135,6 +136,8 @@ export function mergeTasks(
     seenAt: run.seenAt,
     archived: run.archived,
     autoResumeAt: run.autoResumeAt,
+    ...(run.hasPendingHumanAsk !== undefined ? { hasPendingHumanAsk: run.hasPendingHumanAsk } : {}),
+    ...(run.delegation ? { delegation: runDelegationSummarySchema.parse(run.delegation) } : {}),
     workflow: run.workflow,
     branch: run.branch,
     startedAt: run.startedAt,
@@ -275,6 +278,7 @@ function TaskItem({
       onSelect={() => onSelect(task)}
     >
       <StatusDot tone={attention.tone} pulse={attention.pulse} aria-label={attention.label} role="img" />
+      {task.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {/* Only in a multi-project workspace: with one project the label would name the only
           place a task could possibly be. */}

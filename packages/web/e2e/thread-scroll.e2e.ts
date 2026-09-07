@@ -110,10 +110,35 @@ function parkAt(target: string) {
 /** Load the thread and wait until the SSE replay has finished growing it (the last turn's
  *  note is rendered) — every measurement below is over the complete transcript. */
 function openThread(query = '') {
-  browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}${query}`)
+  browser.goto(`${baseUrl}${scoped('/')}`)
+  browser.waitForFunction(`document.querySelector('[data-route="tasks"]') !== null`)
+  // This suite measures complete-session virtualization. Exercise the supported
+  // full-replay fallback; progressive-history.e2e.ts covers the paginated default.
+  // Only the optimized history request fails; actual server/SSE replay stays real.
+  browser.evaluate(`(() => {
+    const original = window.fetch.bind(window);
+    window.fetch = (input, options) => new URL(String(input), location.href).pathname.endsWith('/history')
+      ? Promise.resolve(new Response('{"error":"fixture optimized history unavailable"}', { status: 404 }))
+      : original(input, options);
+    history.pushState({}, '', '${scoped(`/tasks/${RUN_ID}`)}${query}');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  })()`)
+  browser.waitForFunction(`document.querySelector('[data-slot="history-fallback"]') !== null`)
   browser.waitForFunction(
     `document.querySelector('[data-slot="thread-rows"]') !== null && document.body.textContent.includes('goal achieved — session closed')`,
   )
+}
+
+function captureScrollState(name: string) {
+  const state = browser.evaluate(`(() => {
+    const main = ${MAIN}; return { url: location.href, top: main.scrollTop, height: main.scrollHeight, viewport: main.clientHeight,
+      loading: !!document.querySelector('[data-slot="centered-state"]'), fallback: !!document.querySelector('[data-slot="history-fallback"]'),
+      rows: document.querySelectorAll('[data-slot="thread-row"]').length, tail: document.body.textContent.includes('goal achieved — session closed'),
+      pill: !!document.querySelector('[data-slot="jump-to-latest"]'), text: main.textContent.slice(0, 3000),
+      requests: performance.getEntriesByType('resource').map(e => ({ name: e.name, duration: e.duration })) };
+  })()`)
+  writeFileSync(join(artifactsDir, name + '.json'), JSON.stringify(state, null, 2))
+  browser.screenshot(join(artifactsDir, name + '.png'), { viewport: true })
 }
 
 beforeAll(async () => {
@@ -208,6 +233,13 @@ describe('thread virtualization on a 1,000-row transcript', () => {
     browser.screenshot(`${artifactsDir}/thread-jump-pill.png`, { viewport: true })
 
     browser.click('[data-slot="jump-to-latest"]')
+    // A full replay remains mounted during Jump; an empty view is also geometrically at bottom.
+    try {
+      browser.waitForFunction(`document.querySelector('[data-slot="history-fallback"]') !== null && document.querySelector('[data-slot="thread-rows"]') !== null && document.body.textContent.includes('goal achieved — session closed')`)
+    } catch (error) {
+      captureScrollState('thread-jump-timeout')
+      throw error
+    }
     browser.waitForFunction(nearBottom)
     browser.waitForFunction(`document.querySelector('[data-slot="jump-to-latest"]') === null`)
     // Let the smooth scroll LAND, not merely enter the near-bottom slack — the next test
@@ -220,6 +252,14 @@ describe('thread virtualization on a 1,000-row transcript', () => {
   it('restores the scroll position across a client-side leave and return', () => {
     // Park mid-thread (a position the arrival logic would never pick on its own).
     parkAt(`Math.round((m.scrollHeight - m.clientHeight) / 2)`)
+    const parkSamples = browser.evaluate(`new Promise(resolve => {
+      const samples = []; let count = 0; const sample = () => {
+        const m = ${MAIN}; samples.push({ top: m.scrollTop, height: m.scrollHeight, viewport: m.clientHeight, pill: !!document.querySelector('[data-slot="jump-to-latest"]') });
+        if (++count === 10) resolve(samples); else requestAnimationFrame(sample);
+      }; requestAnimationFrame(sample);
+    })`)
+    writeFileSync(join(artifactsDir, 'thread-park-samples.json'), JSON.stringify(parkSamples, null, 2))
+    browser.screenshot(join(artifactsDir, 'thread-park-before-restore.png'), { viewport: true })
     browser.waitForFunction(`document.querySelector('[data-slot="jump-to-latest"]') !== null`)
     const parked = Number(browser.evaluate(`${MAIN}.scrollTop`))
     expect(parked).toBeGreaterThan(1000)
@@ -234,7 +274,12 @@ describe('thread virtualization on a 1,000-row transcript', () => {
     browser.click(`a[href="${scoped(`/tasks/${RUN_ID}`)}"]`)
     browser.waitForFunction(`document.querySelector('[data-slot="thread-rows"]') !== null`)
     // The replay re-grows the thread; the cached offset is re-applied until reachable.
-    browser.waitForFunction(`Math.abs(${MAIN}.scrollTop - ${parked}) < 200`)
+    try {
+      browser.waitForFunction(`Math.abs(${MAIN}.scrollTop - ${parked}) < 200`)
+    } catch (error) {
+      captureScrollState('thread-restore-timeout')
+      throw error
+    }
     expect(browser.evaluate(nearBottom)).toBe(false) // back where the reader parked, not the tail
   }, 90_000)
 })

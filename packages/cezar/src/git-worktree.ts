@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
+import { workerWorkspaceSchema } from '@open-mercato/cezar-contract';
 import { existsSync, realpathSync, type Dirent } from 'node:fs';
-import { readdir, readFile, rm, stat } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { lstat, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { resolveTaskDiffBase } from './git-diff-base.ts';
 import { isSafeGitRef } from './git-refs.ts';
 
@@ -17,7 +18,7 @@ import { isSafeGitRef } from './git-refs.ts';
 /** Repo-relative home of all task worktrees (gitignored via .ai/cezar/.gitignore). */
 export const WORKTREES_DIR = '.ai/cezar/worktrees';
 
-const DIFF_CAP = 400_000;
+export const DIFF_CAP = 400_000;
 
 interface GitResult {
   ok: boolean;
@@ -31,12 +32,12 @@ interface RegisteredWorktree {
 }
 
 /** Run git, never throw — degradation is the caller's policy. */
-function git(cwd: string, args: string[]): Promise<GitResult> {
+function git(cwd: string, args: string[], timeout?: number): Promise<GitResult> {
   return new Promise((resolve) => {
     execFile(
       'git',
       args,
-      { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8' },
+      { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8', timeout },
       (err, stdout, stderr) => resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
     );
   });
@@ -137,6 +138,7 @@ export async function createWorktree(
   repoRoot: string,
   runId: string,
   baseBranch: string,
+  options: { freshOnly?: boolean } = {},
 ): Promise<WorktreeInfo> {
   let base = baseBranch;
   if (!base || base === 'HEAD') {
@@ -153,9 +155,34 @@ export async function createWorktree(
   const absolutePath = join(canonicalPath(repoRoot), WORKTREES_DIR, runId);
   const branchRef = `refs/heads/${branch}`;
 
+  if (options.freshOnly) {
+    // Owned workers cannot inherit the legacy adoption/prune behavior. Even a stale
+    // registration or an empty directory is a collision, not proof of ownership.
+    const listed = await git(repoRoot, ['worktree', 'list', '--porcelain', '-z'], 30_000);
+    if (!listed.ok) throw new Error('cannot verify existing worktree registrations');
+    const paths = listed.stdout.split('\0').filter((entry) => entry.startsWith('worktree '));
+    if (paths.some((entry) => canonicalPath(entry.slice(9)) === canonicalPath(absolutePath))) {
+      throw new Error('owned worktree registration already exists');
+    }
+    const pathExists = await lstat(absolutePath).then(() => true, (err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return false;
+      throw err;
+    });
+    const branchExists = await git(repoRoot, ['show-ref', '--verify', '--quiet', branchRef], 30_000);
+    if (pathExists || branchExists.ok) throw new Error('owned worktree path or branch already exists');
+    await mkdir(dirname(absolutePath), { recursive: true });
+    // Reserve the previously absent path exclusively; Git accepts our empty directory.
+    await mkdir(absolutePath);
+    const created = await git(repoRoot, ['worktree', 'add', '-b', branch, absolutePath, base], 30_000);
+    if (!created.ok) throw new Error(`git worktree add failed: ${created.stderr.trim()}`);
+    return worktreeInfo(absolutePath, branch, base);
+  }
+
+  const protection = await ownedCleanupProtection(repoRoot);
+  if (protection.uncertain || protection.paths.has(absolutePath) || protection.branches.has(branch)) throw new Error('Owned worktree requires verified provisioning');
   // A missing directory can leave stale administrative metadata behind.
   // Prune first so the checks below describe the filesystem as it exists now.
-  await git(repoRoot, ['worktree', 'prune']);
+  if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
   const canonicalTarget = canonicalPath(absolutePath);
   let registered = await registeredWorktrees(repoRoot);
   let atPath = registered.find((item) => canonicalPath(item.path) === canonicalTarget);
@@ -236,14 +263,65 @@ export function worktreeSizeBytes(path: string): Promise<number | null> {
 }
 
 /** Remove a task worktree and its branch. Best effort — never throws. */
+/** Ownership receipts survive a missing run index and a replaced directory.
+ * Unreadable/malformed evidence disables generic deletion instead of granting it. */
+async function ownedCleanupProtection(repoRoot: string): Promise<{ paths: Set<string>; branches: Set<string>; uncertain: boolean }> {
+  const paths = new Set<string>(); const branches = new Set<string>();
+  try {
+    const common = await git(repoRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    if (!common.ok) return { paths, branches, uncertain: true };
+    const root = common.stdout.trim();
+    const receipts = join(root, 'cezar-owned-workspaces');
+    const directory = await lstat(receipts).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined; throw error;
+    });
+    if (directory && (!directory.isDirectory() || directory.isSymbolicLink())) return { paths, branches, uncertain: true };
+    const entries = await readdir(receipts).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return []; throw error;
+    });
+    for (const entry of entries) {
+      if (!entry.endsWith('.json')) continue;
+      const path = join(receipts, entry); const info = await lstat(path);
+      if (!info.isFile() || info.isSymbolicLink() || info.size > 16_384) return { paths, branches, uncertain: true };
+      const receipt: unknown = JSON.parse(await readFile(path, 'utf8'));
+      if (!receipt || typeof receipt !== 'object' || !('workspace' in receipt)) return { paths, branches, uncertain: true };
+      const parsed = workerWorkspaceSchema.safeParse(receipt.workspace);
+      if (!parsed.success) return { paths, branches, uncertain: true };
+      const workspace = parsed.data;
+      if (workspace.branch !== branchFor(workspace.ownerRunId) ||
+          !workspace.path.endsWith(join(WORKTREES_DIR, workspace.ownerRunId)) ||
+          entry.replace(/(?:\.cleanup)?\.json$/, '') !== workspace.resourceId) return { paths, branches, uncertain: true };
+      paths.add(workspace.path); branches.add(workspace.branch);
+    }
+    // A provisioning crash can leave the administrative marker before its receipt.
+    const admins = await readdir(join(root, 'worktrees')).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return []; throw error;
+    });
+    for (const admin of admins) {
+      const dir = join(root, 'worktrees', admin);
+      const marker = await lstat(join(dir, 'cezar-owned-resource')).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined; throw error;
+      });
+      if (marker) {
+        paths.add(dirname((await readFile(join(dir, 'gitdir'), 'utf8')).trim()));
+        const head = (await readFile(join(dir, 'HEAD'), 'utf8')).trim();
+        if (head.startsWith('ref: refs/heads/')) branches.add(head.slice('ref: refs/heads/'.length));
+      }
+    }
+    return { paths, branches, uncertain: false };
+  } catch { return { paths, branches, uncertain: true }; }
+}
+
 export async function removeWorktree(
   repoRoot: string,
   worktreePath: string,
   branch?: string,
 ): Promise<void> {
+  const protection = await ownedCleanupProtection(repoRoot);
+  if (protection.uncertain || protection.paths.has(worktreePath) || (branch !== undefined && protection.branches.has(branch))) return;
   await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
   await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
-  await git(repoRoot, ['worktree', 'prune']);
+  if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
   if (branch) await git(repoRoot, ['branch', '-D', branch]);
 }
 
@@ -573,7 +651,9 @@ export async function pruneOrphans(
   repoRoot: string,
   validIds: ReadonlySet<string>,
 ): Promise<string[]> {
-  await git(repoRoot, ['worktree', 'prune']);
+  const protection = await ownedCleanupProtection(repoRoot);
+  if (protection.uncertain) return [];
+  if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
   let entries: Dirent[];
   try {
     entries = await readdir(join(repoRoot, WORKTREES_DIR), { withFileTypes: true });
@@ -582,7 +662,7 @@ export async function pruneOrphans(
   }
   const removed: string[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || validIds.has(entry.name)) continue;
+    if (!entry.isDirectory() || validIds.has(entry.name) || protection.paths.has(worktreePathFor(repoRoot, entry.name))) continue;
     await removeWorktree(repoRoot, worktreePathFor(repoRoot, entry.name), branchFor(entry.name));
     removed.push(entry.name);
   }

@@ -52,6 +52,8 @@ export interface ProjectContextSource {
 }
 
 export interface ProjectContextDeps {
+  /** Install controller session capabilities before recovery starts any backend. */
+  prepareManager?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager'>) => (() => void) | void;
   /** Registry lookup — the workspace `listProjects()` in production. */
   listProjects: () => Promise<readonly ProjectContextSource[]>;
   /** Resolve the one automation store owned by this project. Production
@@ -93,6 +95,7 @@ export class ProjectContextError extends Error {
  */
 export class ProjectContexts {
   private readonly contexts = new Map<string, ProjectContext>();
+  private readonly managerCleanups = new WeakMap<RunManager, () => void>();
   private readonly building = new Map<string, Promise<ProjectContext>>();
   private readonly repoHandleControllers = new WeakMap<RunStore, AbortController>();
   /** Live store-created subscribers; invoked before RunManager recovery. */
@@ -194,6 +197,8 @@ export class ProjectContexts {
     this.contexts.delete(projectId);
     this.repoHandleControllers.get(ctx.store)?.abort();
     this.repoHandleControllers.delete(ctx.store);
+    this.managerCleanups.get(ctx.manager)?.();
+    this.managerCleanups.delete(ctx.manager);
     teardown(ctx);
     return true;
   }
@@ -219,6 +224,8 @@ export class ProjectContexts {
     this.notifyStoreCreated(store);
     const manager = new RunManager(store, project.root, { semaphore: this.semaphore });
     try {
+      const cleanup = this.deps.prepareManager?.({ id: project.id, root: project.root, store, manager });
+      if (cleanup) this.managerCleanups.set(manager, cleanup);
       const launchKey = ensureLaunchKey(dataDir);
       // Startup reconcile (spec 006) + count-based retention (#483) — the same
       // best-effort sweeps serveCommand runs for the boot project, gated on the
@@ -247,6 +254,8 @@ export class ProjectContexts {
       return { id: project.id, root: project.root, dataDir, store, manager, automationStore, launchKey };
     } catch (err) {
       // A failed build must not leak the half-built context's subscriptions.
+      this.managerCleanups.get(manager)?.();
+      this.managerCleanups.delete(manager);
       teardown({ store, manager });
       throw err;
     }

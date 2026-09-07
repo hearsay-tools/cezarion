@@ -31,6 +31,8 @@ import type { z } from 'zod';
 type ErrorOptions = {
   /** Fixed 400 text, for routes that answer one instead of the zod issues. */
   message?: string;
+  /** Stable typed code for the dedicated delegation API. */
+  code?: 'invalid_input';
 };
 
 type JsonOptions = ErrorOptions & {
@@ -62,11 +64,11 @@ type JsonOptions = ErrorOptions & {
  * WHICH field to fix. That is the same information `z.prettifyError` adds, minus its multi-line
  * `✖ …\n  → at task` layout — this string is rendered verbatim in a toast, so it stays one line.
  */
-function reject(c: Context, error: z.ZodError, override: string | undefined) {
+function reject(c: Context, error: z.ZodError, override: string | undefined, code?: 'invalid_input') {
   const detail = error.issues
     .map((issue) => (issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message))
     .join('; ');
-  return c.json({ error: override ?? detail }, 400);
+  return c.json({ error: override ?? detail, ...(code ? { code } : {}) }, 400);
 }
 
 /**
@@ -103,13 +105,13 @@ export function jsonZodValidator<
   // `= null` default would silently overwrite exactly that case.
   const absent = 'absent' in options ? options.absent : null;
   const malformed = 'malformed' in options ? options.malformed : absent;
-  const { message } = options;
+  const { message, code } = options;
   const check = (input: unknown, c: Context) => {
     const resolved = typeof schema === 'function' ? schema() : schema;
     const parsed = resolved.safeParse(input);
     return parsed.success
       ? ({ ok: true, data: parsed.data as z.infer<S> } as const)
-      : ({ ok: false, response: reject(c, parsed.error, message) } as const);
+      : ({ ok: false, response: reject(c, parsed.error, message, code) } as const);
   };
 
   const validate = validator('json', (value, c) => {
@@ -149,17 +151,17 @@ export function jsonZodValidator<
  * content-type to gate on and no malformed-input path — Hono's own behaviour is already right.
  * The schema receives the whole param object (`{ provider: 'codex' }`), not a single value.
  */
-export function paramZodValidator<S extends z.ZodType>(schema: S, { message }: ErrorOptions = {}) {
+export function paramZodValidator<S extends z.ZodType>(schema: S, { message, code }: ErrorOptions = {}) {
   return validator('param', (value, c) => {
     const parsed = schema.safeParse(value);
-    return parsed.success ? (parsed.data as z.infer<S>) : reject(c, parsed.error, message);
+    return parsed.success ? (parsed.data as z.infer<S>) : reject(c, parsed.error, message, code);
   });
 }
 
 /** Query string, on the same terms as {@link paramZodValidator}. */
-export function queryZodValidator<S extends z.ZodType>(schema: S, { message }: ErrorOptions = {}) {
+export function queryZodValidator<S extends z.ZodType>(schema: S, { message, code }: ErrorOptions = {}) {
   return validator('query', (value, c) => {
     const parsed = schema.safeParse(value);
-    return parsed.success ? (parsed.data as z.infer<S>) : reject(c, parsed.error, message);
+    return parsed.success ? (parsed.data as z.infer<S>) : reject(c, parsed.error, message, code);
   });
 }

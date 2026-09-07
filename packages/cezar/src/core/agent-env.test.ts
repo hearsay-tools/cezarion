@@ -6,6 +6,38 @@ import { buildChildEnv, looksSecret } from './agent-env.ts';
  * gets a curated allowlist — safe shell/toolchain vars + the backend's own
  * auth + gh + cezar's `CEZ_*` — and nothing else.
  */
+describe('buildChildEnv — delegation session isolation', () => {
+  for (const backend of ['claude', 'claude-cli', 'codex', 'opencode', 'pi'] as const) {
+    for (const full of ['0', '1']) {
+      it(`${backend} strips inherited delegation authority with CEZ_AGENT_ENV_FULL=${full}, even when passed through`, () => {
+        const source = {
+          PATH: '/usr/bin', CEZ_TASK_ID: 'parent', CEZ_AGENT_ENV_FULL: full,
+          CEZ_ENV_PASSTHROUGH: 'CEZ_DELEGATION_TOKEN,CEZ_DELEGATION_URL',
+          CEZ_DELEGATION_TOKEN: 'parent-secret', cez_delegation_token: 'lower-secret',
+          Cez_Delegation_Token: 'mixed-secret', CEZ_DELEGATION_URL: 'http://127.0.0.1:1234',
+          cez_delegation_url: 'http://127.0.0.1:2345', Cez_Delegation_Url: 'http://127.0.0.1:3456',
+        };
+        const env = buildChildEnv({ backend, source });
+        expect(Object.keys(env).filter(name => /^CEZ_DELEGATION_(TOKEN|URL)$/i.test(name))).toEqual([]);
+        expect(env.PATH).toBe('/usr/bin');
+        expect(env.CEZ_TASK_ID).toBe('parent'); // context is not delegation authority
+        expect(source.CEZ_DELEGATION_TOKEN).toBe('parent-secret');
+      });
+
+      it(`${backend} merges only controller-generated credentials with CEZ_AGENT_ENV_FULL=${full}`, () => {
+        const env = buildChildEnv({ backend, source: {
+          CEZ_AGENT_ENV_FULL: full, cez_delegation_token: 'parent-secret',
+          Cez_Delegation_Url: 'http://127.0.0.1:1234',
+        }, extraEnv: { CEZ_DELEGATION_TOKEN: 'child-secret', CEZ_DELEGATION_URL: 'http://127.0.0.1:5678' } });
+        expect(env.CEZ_DELEGATION_TOKEN).toBe('child-secret');
+        expect(env.CEZ_DELEGATION_URL).toBe('http://127.0.0.1:5678');
+        expect(env.cez_delegation_token).toBeUndefined();
+        expect(env.Cez_Delegation_Url).toBeUndefined();
+      });
+    }
+  }
+});
+
 describe('buildChildEnv — least-privilege child env (#427)', () => {
   const HOST: NodeJS.ProcessEnv = {
     PATH: '/usr/bin:/bin',

@@ -22,6 +22,8 @@ import type {
   runRecordSchema,
 } from '@open-mercato/cezar-contract';
 import type { AppType } from './app-type.ts';
+import type { AgentInput, DelegationState } from '@open-mercato/cezar-contract';
+import type { RunRecord as StoredRunRecord } from '../runs/store.ts';
 
 /**
  * `src/contract/runs.ts` must describe EXACTLY what the runs routes send — no wider, no narrower.
@@ -72,6 +74,11 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
   type DeleteRun200 = InferResponseType<Run['$delete'], 200>;
 
   type _Checks = [
+    // Authority and attributed input must survive both the stored and wire record, unchanged.
+    Assert<Exact<DelegationState | undefined, StoredRunRecord['delegation']>>,
+    Assert<Exact<DelegationState | undefined, RunGet200['delegation']>>,
+    Assert<Exact<AgentInput[] | undefined, StoredRunRecord['agentInputs']>>,
+    Assert<Exact<AgentInput[] | undefined, RunGet200['agentInputs']>>,
     // the record, in both of its two forms
     Assert<Exact<z.infer<typeof apiRunSchema>[], RunsList200[number][]>>,
     Assert<Exact<z.infer<typeof apiRunSchema>, RunGet200>>,

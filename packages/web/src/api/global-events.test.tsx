@@ -969,3 +969,19 @@ describe('GlobalEventsProvider', () => {
     expect(view.getByTestId('probe').textContent).toBe('0')
   })
 })
+
+it.each(['run', 'run-deleted', 'reconnect'] as const)('invalidates relationships for an invisible worker on %s without crossing projects', event => {
+  const key = ['default', 'runs', 'relationships', 'parent']
+  const otherKey = ['other', 'runs', 'relationships', 'parent']
+  client.setQueryData(key, { workers: [] }); client.setQueryData(otherKey, { workers: [] })
+  client.setQueryData(queryKeys.runs.list(), [])
+  const { source } = mount()
+  source.open()
+  // Opening reconciles; establish a fresh snapshot before the event being tested.
+  client.setQueryData(key, { workers: [] }); client.setQueryData(otherKey, { workers: [] })
+  if (event === 'run') source.emit('run', stampedRun(runRecord('off-page')))
+  else if (event === 'run-deleted') source.emit('run-deleted', JSON.stringify({ id: 'off-page', project: BOOT }))
+  else { source.drop(); source.open() }
+  expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+  expect(client.getQueryState(otherKey)?.isInvalidated).toBe(false)
+})

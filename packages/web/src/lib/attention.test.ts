@@ -211,3 +211,16 @@ describe('tone vocabulary', () => {
     expect([...tones].sort()).toEqual(['danger', 'neutral', 'pending', 'success', 'violet'])
   })
 })
+
+it.each(['registered', 'parked', 'wake-pending'] as const)('distinguishes worker wait %s without masking human attention', phase => {
+  const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })
+  expect(deriveAttention(record).label).toBe(phase === 'parked' ? 'waiting on workers' : 'needs you')
+  expect(wantsAttention(record)).toBe(phase !== 'parked')
+  if (phase === 'parked') expect(deriveAttention(record).pulse).toBe(false)
+})
+
+it('keeps a parked parent with a pending human ask in list attention without transcript context', () => {
+  const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+  expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', pulse: true, label: 'needs you' })
+  expect(wantsAttention(record)).toBe(true)
+})

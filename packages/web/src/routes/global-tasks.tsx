@@ -787,6 +787,7 @@ function TaskRow({
           dropping Branch gave up 140 of them. A cross-project list is read by TITLE. */}
       <td className={cn(TD_BASE, 'min-w-[320px] max-w-0')}>
         <span className="flex min-w-0 items-center gap-1.5">
+          {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
           <Link
             to={to}
             title={runTitle(run)}

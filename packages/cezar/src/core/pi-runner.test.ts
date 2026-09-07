@@ -407,6 +407,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
         onUiEvent: (event) => {
           uiEvents.push(event);
           if (event.type !== 'item.delta' || event.delta !== 'autonomous work' || followUpSent) return;
+          expect(session?.sendAgentMessage([{ type: 'text', text: 'non-human follow-up' }])).toBe(false);
           followUpSent = session?.sendMessage([{ type: 'text', text: 'user follow-up' }]) ?? false;
         },
       },

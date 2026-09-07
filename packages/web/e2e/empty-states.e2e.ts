@@ -133,7 +133,7 @@ describe('the 404 route', () => {
 
   it('walks back to the tasks overview through the action', () => {
     browser.click(`[data-route="not-found"] a[href="${scoped('/')}"]`)
-    browser.waitForFunction(`location.pathname === '${scoped('/')}'`)
+    browser.waitForFunction(`location.pathname === '${scoped('/')}' && document.querySelector('[data-route="tasks"]') !== null`)
     expect(browser.count('[data-route="tasks"]')).toBe(1)
   })
 })

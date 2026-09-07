@@ -310,3 +310,22 @@ describe('live cursor replay and compact context', () => {
     expect(context.contextEvents.at(-1)).toMatchObject({ seq: 9, type: 'plan.updated', entries: [] });
   });
 });
+
+const question = { seq: 10, type: 'ask.requested', requestId: 'pending-question', questions: [{ header: 'Choice', question: 'Choose a path?', options: [{ label: 'First' }, { label: 'Second' }] }] };
+it.each(['agent-input', 'user-message', 'turn.started', 'lifecycle'])('compact context retains a pending human ask through %s without an answer receipt', async type => {
+  const context = await deriveRunContextEvents(fixture([question, { seq: 11, type, text: 'not a successful human answer' },
+    ...Array.from({ length: 1000 }, (_, i) => ({ seq: i + 12, type: 'note', message: 'later history' })),
+  ]));
+  expect(context.contextEvents.find(event => event.type === 'ask.requested')).toMatchObject({ seq: 10, requestId: 'pending-question' });
+  expect(context.contextEvents.length).toBeLessThan(4);
+});
+it('compact context retires only the matched delivered ask and excludes answered history', async () => {
+  const file = fixture([question, { seq: 11, type: 'human-input-delivered', askSeq: 9 }]);
+  expect((await deriveRunContextEvents(file)).contextEvents).toContainEqual(expect.objectContaining({ seq: 10 }));
+  appendFileSync(file, JSON.stringify({ seq: 12, ts: '2026-09-07T00:00:00.000Z', type: 'human-input-delivered', askSeq: 10 }) + '\n');
+  expect((await deriveRunContextEvents(file)).contextEvents.some(event => event.type === 'ask.requested')).toBe(false);
+});
+it('compact context keeps the latest valid pending ask when a malformed ask follows', async () => {
+  const context = await deriveRunContextEvents(fixture([question, { ...question, seq: 11, requestId: 'new-question' }, { seq: 12, type: 'ask.requested', requestId: 'invalid', questions: [] }]));
+  expect(context.contextEvents.filter(event => event.type === 'ask.requested').map(event => event.requestId)).toEqual(['new-question']);
+});

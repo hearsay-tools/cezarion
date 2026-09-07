@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -75,8 +75,12 @@ beforeAll(async () => {
   server = spawn(
     process.execPath,
     [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
-    { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
+    { env: fixtureServeEnv(dataRoot), stdio: ['ignore', 'pipe', 'pipe'] },
   )
+  mkdirSync(artifactsDir, { recursive: true })
+  writeFileSync(join(artifactsDir, 'plan-mode-server.log'), `root=${dataRoot} url=${baseUrl} pid=${server.pid}\n`)
+  server.stdout?.on('data', chunk => appendFileSync(join(artifactsDir, 'plan-mode-server.log'), chunk))
+  server.stderr?.on('data', chunk => appendFileSync(join(artifactsDir, 'plan-mode-server.log'), chunk))
   await waitForHealth(baseUrl)
   bootProject = await bootProjectId(baseUrl)
 
@@ -124,17 +128,42 @@ describe('plan mode against a live dry-run server', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="mode-plan"]') !== null`)
     // Sources must have LOADED before submitting — a plan submit races the workflows/skills
     // queries otherwise and is (correctly) rejected with the "still loading" toast. The pill
-    // dropping its loading ellipsis is the ready signal (same trick as new-task.e2e): a
+    // dropping its loading ellipsis plus the provider-enabled composer are ready signals: a
     // resolved composer picks nothing, so there is no name to wait for.
     browser.waitForFunction(
-      `!document.querySelector('[data-slot="source-pill"]')?.textContent.includes('…')`,
+      `(() => { const source = document.querySelector('[data-slot="source-pill"]');
+        const input = document.querySelector('[data-slot="composer"] textarea');
+        return source !== null && !source.textContent.includes('…') && input !== null && !input.disabled; })()`,
     )
 
-    expect(browser.evaluate(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked')`)).toBe('false')
+    expect(browser.evaluate(`(() => {
+      window.__planTrace = [];
+      for (const name of ['pointerdown', 'click']) document.addEventListener(name, e => {
+        const button = document.querySelector('[data-slot="mode-plan"]');
+        window.__planTrace.push({ type: name, target: e.target.outerHTML.slice(0, 700), x: e.clientX, y: e.clientY,
+          plan: button?.getAttribute('aria-checked'), rect: button?.getBoundingClientRect().toJSON() });
+      }, true);
+      const original = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const response = await original(...args);
+        window.__planTrace.push({ type: 'response', url: String(args[0]), status: response.status });
+        return response;
+      };
+      return document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked');
+    })()`)).toBe('false')
     browser.click('[data-slot="mode-plan"]')
-    browser.waitForFunction(
-      `document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked') === 'true'`,
-    )
+    try {
+      browser.waitForFunction(
+        `document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked') === 'true'`,
+      )
+    } finally {
+      writeFileSync(join(artifactsDir, 'plan-mode-toggle.json'), JSON.stringify(browser.evaluate(`({
+        url: location.href, trace: window.__planTrace, text: document.body.textContent.slice(-6000),
+        textarea: { value: document.querySelector('textarea')?.value, disabled: document.querySelector('textarea')?.disabled },
+        mode: document.querySelector('[data-slot="mode-plan"]')?.outerHTML
+      })`), null, 2))
+      browser.screenshot(join(artifactsDir, 'plan-mode-toggle.png'), { viewport: true })
+    }
     // The unmistakable selected state: the segment took the contrast fill (mockup .plan-active).
     expect(
       browser.evaluate(
@@ -146,6 +175,7 @@ describe('plan mode against a live dry-run server', () => {
 
     browser.click('[data-slot="composer"] textarea')
     browser.fill('[data-slot="composer"] textarea', 'Tighten the flaky suite end to end.')
+    browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea').value === 'Tighten the flaky suite end to end.' && document.querySelector('[aria-label="Plan task"]:not(:disabled)') !== null`)
     browser.click('[aria-label="Plan task"]')
 
     // The overlay arrives with the mock planner's canned chain; no run was started.

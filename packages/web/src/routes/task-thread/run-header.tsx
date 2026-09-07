@@ -84,6 +84,7 @@ import { cn, isHttpUrl } from '@/lib/utils'
 import { Markdown } from './markdown'
 import { useContinuationProvider } from './continuation-provider'
 import { cliTargetResumes, cliTargetRunner, finishTitle, resumeHint, runActionFlags } from './run-actions'
+import { RunRelationshipsPanel } from './run-relationships'
 import { WorkflowSteps } from './step-rail'
 import { useFinishRun } from './use-finish-run'
 
@@ -120,17 +121,19 @@ export function RunHeader({
   run,
   planTally,
   tab = 'session',
+  hasPendingHumanAsk = false,
   onMarkedUnread,
 }: {
   run: ApiRun
   planTally?: { done: number; total: number }
   tab?: RunTab
+  hasPendingHumanAsk?: boolean
   /** Fired the moment "Mark unread" is invoked, BEFORE the mutation — the Session tab uses it
    *  to suppress its auto-mark-read effect for the rest of the visit (#775). Optional because
    *  the three `task-git` tabs render this same header and run no such effect. */
   onMarkedUnread?: () => void
 }) {
-  const attention = deriveAttention(run)
+  const attention = deriveAttention(run, hasPendingHumanAsk)
   const flags = runActionFlags(run)
   const hint = resumeHint(run)
   const [notesOpen, setNotesOpen] = useState(false)
@@ -317,6 +320,8 @@ export function RunHeader({
             ) : null}
           </div>
         </div>
+
+        <RunRelationshipsPanel run={run} />
 
         {run.steps.length > 0 ? (
           <div className="border-t border-border pt-1 pb-0 md:pt-2 md:pb-1">

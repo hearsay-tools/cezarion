@@ -49,12 +49,19 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
         pendingMessageCount: 0,
       },
     });
+  } else if (command.type === 'prompt' && command.message.includes('mock:agent-echo')) {
+    // rpc-lifecycle.ndjson's normal prompt/assistant/settled sequence.
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' });
+    send({ type: 'turn_start' });
+    sendText([command.message]);
+    sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:split-text')) {
     // Pi streams one text_delta per token (#2's root cause), so the marker is
     // split across deltas. Only a coalescer reassembles `CEZ:MONITORING`;
     // one v1 `text` per delta joins them with a newline and the park is lost
     // (harness parity S8).
-    send({ type: 'response', command: 'prompt', success: true });
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
     sendText(['parity split text', '\n\n', 'CEZ:', 'MONITORING']);
@@ -65,7 +72,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     // `src/core/__fixtures__/pi/provider-error.ndjson`. #54: this arrived
     // before `agent_settled` and the run parked as "Needs You" instead of
     // failing (harness parity S7).
-    send({ type: 'response', command: 'prompt', success: true });
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
     send({ type: 'message_end', message: {
@@ -84,7 +91,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     // Declares the task complete so the run reaches cezar's review gate; a
     // markerless turn-end correctly parks as `waiting` instead (harness
     // parity R1).
-    send({ type: 'response', command: 'prompt', success: true });
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
     sendText(['parity done: the task is complete\n\nCEZ:DONE']);
@@ -93,7 +100,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     // A marker whose JSON body is invalid. `parseAskMarker` must render no card
     // and the turn must still end (harness parity R4) — pi has no native ask
     // wire, so the `CEZ:ASK` marker is its only ask path, same as claude's.
-    send({ type: 'response', command: 'prompt', success: true });
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
     sendText(['Pick one.\n\nCEZ:ASK {not valid json']);
@@ -102,7 +109,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     // A well-formed `CEZ:ASK` marker, split so the marker and its JSON body land
     // in separate deltas — the #2 boundary that used to break assembly, and the
     // reason an ask row is worth driving through the real coalescer.
-    send({ type: 'response', command: 'prompt', success: true });
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
     sendText(['Pick one.\n\n', 'CEZ:ASK', ' ', ASK_MARKER_BODY]);
@@ -112,7 +119,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     // quartet behind it is what makes harness parity S2 meaningful: a runner
     // deriving turn-end from the ack reports it before this content arrives
     // (the #4 failure mode on pi's wire).
-    send({ type: 'response', command: 'prompt', success: true });
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
     await sleep(250);
@@ -122,7 +129,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
   } else if (command.type === 'prompt') {
     const monitoringMarker = command.message.includes('mock:monitoring') ? '\n\nCEZ:MONITORING' : '';
     const responseText = `Investigating: ${command.message}${monitoringMarker}`;
-    send({ type: 'response', command: 'prompt', success: true });
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
     send({

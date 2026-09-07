@@ -281,3 +281,19 @@ describe('SessionTranscript', () => {
     expect(document.querySelector('[data-slot="codex-empty"]')?.textContent).toBe('No attributed output')
   })
 })
+
+it.each(['agent', 'lifecycle'] as const)('renders attributed %s input without answering a pending ask', source => {
+  const parentRunId = '10000000-0000-4000-8000-000000000001'
+  const input = { id: parentRunId, source, parentRunId, text: 'Continue investigating', createdAt: '2026-09-06T00:00:00.000Z' }
+  const events = asRunEvents([
+    { type: 'ask.requested', requestId: 'ask-1', questions: [{ header: 'Decision', question: 'Proceed?', options: [{ label: 'Yes', description: 'Proceed' }] }] },
+    { type: 'agent-input', input },
+  ])
+  const state = reduceThread(events)
+  expect(state.turns.flatMap(turn => turn.items).find(item => item.kind === 'ask')).toMatchObject({ resolved: false })
+  const view = render(<SessionTranscript runId="r1" viewId="main" sections={mainTranscriptSections(run(), state)} mode="document" />)
+  expect(view.getByText(source === 'agent' ? `Agent input from parent ${parentRunId}` : `Worker lifecycle context for parent ${parentRunId}`)).toBeTruthy()
+  expect(view.getByText(input.text, { exact: false })).toBeTruthy()
+  const answered = reduceThread([...events, ...asRunEvents([{ type: 'user-message', text: 'Human answer' }]).map(event => ({ ...event, seq: 3 }))])
+  expect(answered.turns.flatMap(turn => turn.items).find(item => item.kind === 'ask')).toMatchObject({ resolved: true, answer: 'Human answer' })
+})

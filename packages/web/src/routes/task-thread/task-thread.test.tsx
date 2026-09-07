@@ -49,6 +49,7 @@ function renderView(
         path === '/api/v1/models?runner=claude' ? { runner: 'claude', models: [], source: 'unavailable', stale: false }
         : path === '/api/v1/providers/status' ? providerStatus
         : path === '/api/v1/health' ? health
+        : path.endsWith('/relationships') ? { workers: [] }
         : []
       return Promise.resolve(
         new Response(JSON.stringify(body), {
@@ -1081,4 +1082,33 @@ describe('TaskThreadRoute — read receipts', () => {
     await waitFor(() => expect(posted(sent, '/api/v1/runs/r1/read')).toBe(1))
     expect(await screen.findByRole('button', { name: 'Mark unread' })).not.toBeNull()
   })
+})
+
+it.each(['registered', 'parked', 'wake-pending'] as const)('uses honest dock copy for %s worker waits', phase => {
+  renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })} thread={reduceThread([])} />)
+  const hint = document.querySelector('[data-slot="paused-hint"]')
+  expect(hint?.textContent).toContain(phase === 'parked' ? 'Waiting on workers' : 'waiting for your reply')
+})
+it('keeps a visible human ask above parked worker context in the header and dock', () => {
+  const thread = reduceThread([line(1, 'ask.requested', { requestId: 'ask', questions: [{ header: 'Choice', question: 'Choose a path', options: [{ label: 'Proceed', description: 'Continue' }] }] })])
+  renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })} thread={thread} />)
+  expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain('waiting for your reply')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain('needs you')
+  expect(screen.getByText('Choose a path')).toBeTruthy()
+})
+
+it.each([false, true].flatMap(fallback => (['pending', 'refused-human-attempt', 'stale-receipt', 'agent-input', 'matched-answer', 'old-history'] as const).map(mode => ({ fallback, mode }))))('history attention (fallback=$fallback) handles $mode separately from visible historical asks', ({ fallback, mode }) => {
+  const ask = line(10, 'ask.requested', { requestId: 'compact-ask', questions: [{ header: 'Choice', question: 'Choose a current path', options: [{ label: 'First' }, { label: 'Second' }] }] })
+  const visibleEvents = [ask]
+  const currentEvents = mode === 'old-history' ? [] : [ask,
+    ...(mode === 'refused-human-attempt' ? [line(11, 'user-message', { text: 'backend refused this attempt' })] : []),
+    ...(mode === 'stale-receipt' ? [line(11, 'human-input-delivered', { askSeq: 9 })] : []),
+    ...(mode === 'agent-input' ? [line(11, 'agent-input', { input: { text: 'worker finished' } })] : []),
+    ...(mode === 'matched-answer' ? [line(12, 'human-input-delivered', { askSeq: 10 })] : []),
+  ]
+  const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents, isPending: false, contextPending: false, fallback, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
+  renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-07T12:00:00.000Z', phase: 'parked', outcomes: [] } } })} thread={reduceThread(visibleEvents)} currentThread={reduceThread(currentEvents)} history={history} />)
+  const expectedPending = mode !== 'matched-answer' && mode !== 'old-history'
+  expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(expectedPending ? 'waiting for your reply' : 'Waiting on workers')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(expectedPending ? 'needs you' : 'waiting on workers')
 })

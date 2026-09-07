@@ -1576,6 +1576,7 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
       return {
         result,
         sendMessage: () => false,
+        sendAgentMessage: () => false,
         discardQueuedMessages: () => undefined,
         end: () => {
           open = false;

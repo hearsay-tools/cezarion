@@ -327,6 +327,45 @@ describe('workspace runs index API', () => {
     expect(body.runs.at(-1)?.id).toBe('r-010');
   });
 
+  it('keeps worker labels and wait phases in a slim live/cold index without ownership resources', async () => {
+    await registerProject(repoRoot); await registerProject(otherRoot);
+    const workerId = '10000000-0000-4000-8000-000000000002';
+    const live = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    const wait = { id: workerId, workerIds: [workerId], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked' as const, outcomes: [] };
+    store.updateRun(live.id, { status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait } });
+    seedColdProject(otherRoot, [storedRun({ id: workerId, title: 'Worker', delegation: { role: 'worker', permissions: [], parentRunId: live.id, workspace: { kind: 'owned-isolated', ownerRunId: workerId, resourceId: workerId, path: '/managed/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), storedRun({ id: 'ordinary', title: 'Ordinary' })]);
+    const body = await getIndex();
+    expect(body.runs.find(run => run.id === live.id)).toHaveProperty('delegation', { role: 'root', wait: { phase: 'parked' } });
+    expect(body.runs.find(run => run.id === workerId)).toHaveProperty('delegation', { role: 'worker' });
+    expect(body.runs.find(run => run.id === 'ordinary')).not.toHaveProperty('delegation');
+    expect(runsIndexResponseSchema.parse(body)).toEqual(body);
+    expect(JSON.stringify(body)).not.toMatch(/receipts|outcomes|workspace|permissions|parentRunId|managed/);
+  });
+
+  it('carries pending human attention for hot and cold parked roots without opening the cold project', async () => {
+    await registerProject(repoRoot);
+    const other = await registerProject(otherRoot);
+    const live = store.createRun({ title: 'Hot question', workflow: 'quick-task', task: 'task', steps: [] });
+    const delegation = { role: 'root' as const, permissions: [], receipts: [], wait: { id: live.id, workerIds: [live.id], deadline: '2026-09-09T00:00:00.000Z', phase: 'parked' as const, outcomes: [] } };
+    const question = { type: 'ask.requested', requestId: 'question', questions: [{ header: 'Choice', question: 'Which option?', options: [{ label: 'First' }, { label: 'Second' }] }] };
+    store.updateRun(live.id, { status: 'waiting', delegation });
+    store.appendEvent(live.id, question);
+    seedColdProject(otherRoot, [storedRun({ id: 'cold-question', title: 'Cold question', status: 'waiting', delegation, hasPendingHumanAsk: false })]);
+    mkdirSync(join(otherRoot, '.ai/cezar/runs'));
+    writeFileSync(join(otherRoot, '.ai/cezar/runs/cold-question.ndjson'), JSON.stringify({ ...question, seq: 1, ts: new Date().toISOString() }) + '\n');
+    const before = readFileSync(join(otherRoot, '.ai/cezar/runs.json'), 'utf8');
+    const contexts = new ProjectContexts({ listProjects });
+    const app = makeApp({ contexts });
+    try {
+      const body = runsIndexResponseSchema.parse(await (await apiRequest(app, '/api/v1/workspace/runs-index')).json());
+      for (const id of [live.id, 'cold-question']) expect(body.runs.find(run => run.id === id)).toHaveProperty('hasPendingHumanAsk', true);
+      const full = await (await apiRequest(app, `/api/v1/runs/${live.id}`)).json();
+      expect(full).toHaveProperty('hasPendingHumanAsk', true);
+      expect(contexts.peek(other.id)).toBeUndefined();
+      expect(readFileSync(join(otherRoot, '.ai/cezar/runs.json'), 'utf8')).toBe(before);
+    } finally { contexts.disposeAll(); }
+  });
+
   it('carries `autoResumeAt`, so a usage-limit park does not read as a failure', async () => {
     await registerProject(repoRoot);
     await registerProject(otherRoot);

@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, statSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdirSync, readFileSync, statSync, realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
 /**
@@ -61,20 +61,36 @@ export function fixtureServeEnv(
   dataRoot: string,
   extra: Record<string, string> = {},
 ): NodeJS.ProcessEnv {
+  const fixtureRoot = realpathSync(dataRoot)
+  // Git has multiple redirection mechanisms (including numbered config entries).
+  // None belongs to a disposable fixture. Use this exact environment for discovery
+  // and the child; otherwise a safe preflight can precede an unsafe CLI boot.
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra }
+  for (const key of Object.keys(env)) if (key.toUpperCase().startsWith('GIT_')) delete env[key]
+  const discovery = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+    cwd: fixtureRoot, env: { ...env, LC_ALL: 'C' }, encoding: 'utf8', timeout: 5_000,
+  })
+  if (discovery.status === 0 && !discovery.error) {
+    if (realpathSync(discovery.stdout.trim()) !== fixtureRoot) {
+      throw new Error(`cezar e2e: Git resolves outside fixture ${fixtureRoot}; refusing server boot`)
+    }
+  } else if (discovery.error || discovery.status !== 128 ||
+    !discovery.stderr.startsWith('fatal: not a git repository (or any of the parent directories): .git')) {
+    throw new Error(`cezar e2e: cannot verify fixture repository ${fixtureRoot}; refusing server boot`, { cause: discovery.error })
+  }
   return {
-    ...process.env,
+    ...env,
     // One line on purpose: the `fixture-serve-must-pin-cez-home` design guardian reads these
     // two together, and a CEZ_DRY_RUN without CEZ_HOME beside it is exactly the mistake it
     // exists to catch.
-    CEZ_DRY_RUN: '1', CEZ_HOME: resolve(dataRoot, '.cez-home'),
+    CEZ_DRY_RUN: '1', CEZ_HOME: resolve(fixtureRoot, '.cez-home'),
     // A fixture repo must hold exactly the skills the fixture wrote. Open Mercato skill updates
     // are default-on (AGENTS.md § Zero config), so a boot inside the six-hour window installs the
     // whole `om-*` collection INTO the fixture and every "these are the project skills"
     // assertion starts depending on the machine's cache and network. The shared test env
     // (`skills-update.e2e.ts` attaches to it) is where that behaviour is exercised on purpose;
     // `extra` can still turn it back on for a spec that wants it.
-    CEZ_SKILLS_AUTO_UPDATE: '0',
-    ...extra,
+    CEZ_SKILLS_AUTO_UPDATE: extra.CEZ_SKILLS_AUTO_UPDATE ?? '0',
   }
 }
 
@@ -243,6 +259,11 @@ export class AgentBrowser {
    *  able to ask for an iPhone-sized window rather than assume the default one. */
   setViewport(width: number, height: number): void {
     this.run(['set', 'viewport', String(width), String(height)])
+  }
+
+  /** Actual browser network emulation, including online/offline events. */
+  setOffline(offline: boolean): void {
+    this.run(['set', 'offline', offline ? 'on' : 'off'])
   }
 
   /** Emulate the accessibility preference in the real browser, including CSS media queries. */

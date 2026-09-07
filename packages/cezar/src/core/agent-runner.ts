@@ -172,10 +172,17 @@ export interface SessionOptions {
    *  behavior, used for non-interactive workflow steps). Interactive
    *  sessions omit this and control `end()` themselves. */
   autoEndAfterFirstTurn?: boolean;
+  /** Internal synchronous veto, checked when the auto-end timer fires. A held
+   * turn stays open; a later turn may auto-end normally. Explicit end/interrupt
+   * and provider failure still close the session. */
+  shouldAutoEnd?: () => boolean;
   /** Protocol-v2 channel: receives the normalized `UiEvent` stream emitted
    *  ALONGSIDE the v1 `AgentEvent`s (additive — v1 keeps flowing unchanged).
    *  RunManager consumption lands in R2 step 2.1. */
   onUiEvent?: (event: UiEvent) => void;
+  /** Readiness hint only, not an acknowledgement or a turn completion. The
+   * caller rechecks session identity, ask state and queue before retrying. */
+  onAgentInputReady?: () => void;
 }
 
 /**
@@ -193,6 +200,10 @@ export interface AgentSession {
   readonly pid?: number;
   /** Write a user message into the live session. False when it is closed. */
   sendMessage(content: ContentBlock[]): boolean;
+  /** Synchronous non-human reservation: false refuses without writing; a Promise
+   * confirms transport acceptance, not turn completion. Reject retains caller
+   * ownership for replay. Never fall back to the human-answer seam. */
+  sendAgentMessage(content: ContentBlock[]): false | Promise<void>;
   /**
    * Drop follow-ups queued while a turn was still in flight. A `CEZ:ASK` park
    * must call this so a mid-turn `sendMessage` cannot start a new turn after

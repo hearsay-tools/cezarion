@@ -1,3 +1,4 @@
+import { deriveAttention } from '@/lib/attention'
 import { MessageSquareTextIcon, SearchXIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useParams } from 'react-router'
@@ -16,7 +17,7 @@ import {
   useSendMessage,
 } from '@/api/queries'
 import { useRunHistory, type RunHistoryState } from '@/api/run-history'
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import { pendingHumanAsk, type ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { Composer } from '@/components/composer/composer'
 import { StatusDot } from '@/components/status-dot'
@@ -176,6 +177,10 @@ export function ThreadView({
   onMarkedUnread?: (runId: string) => void
 }) {
   const projectId = useActiveProjectId()
+  const hasPendingHumanAsk = history
+    ? pendingHumanAsk(history.currentEvents) !== undefined
+    : currentThread.turns.some(turn => turn.items.some(item => item.kind === 'ask' && !item.resolved))
+  const attention = deriveAttention(run, hasPendingHumanAsk)
   const footer = threadFooter(run.status, run.error)
   // The dock's data: the latest plan snapshot across turns (full replacement — an emptied
   // plan hides the dock and the header mirror alike).
@@ -301,7 +306,7 @@ export function ThreadView({
 
   return (
     <div data-route="task-thread" data-run-id={run.id} className="flex min-h-full flex-col">
-      <RunHeader run={run} planTally={planTally} onMarkedUnread={() => onMarkedUnread?.(run.id)} />
+      <RunHeader run={run} hasPendingHumanAsk={hasPendingHumanAsk} planTally={planTally} onMarkedUnread={() => onMarkedUnread?.(run.id)} />
 
       {/* Row spacing lives on each thread row (pb-2.5, both render modes measure alike);
           this gap only separates the sections — rows, empty state, footer, review panel. */}
@@ -433,8 +438,8 @@ export function ThreadView({
               data-slot="paused-hint"
               className="flex items-center gap-2 px-1 text-xs text-muted-foreground"
             >
-              <StatusDot tone="pending" pulse />
-              The agent is paused, waiting for your reply
+              <StatusDot tone={attention.tone} pulse={attention.pulse} />
+              {attention.bucket === 'waiting' ? 'The agent is paused, waiting for your reply' : 'Waiting on workers — you can send a message to resume'}
             </div>
           ) : null}
 

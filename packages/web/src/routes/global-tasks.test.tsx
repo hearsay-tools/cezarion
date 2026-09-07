@@ -1081,3 +1081,26 @@ describe('global tasks page', () => {
     ).toBeTruthy()
   })
 })
+
+it('identifies indexed workers and parked parents while preserving human waiting phases', async () => {
+  const runs = [
+    { ...RUNS[0]!, id: 'worker', delegation: { role: 'worker' as const } },
+    ...(['registered', 'parked', 'wake-pending'] as const).map(phase => ({ ...RUNS[0]!, id: phase, status: 'waiting' as const, delegation: { role: 'root' as const, wait: { phase } } })),
+  ]
+  stubFetch({ runs }); renderPage()
+  await screen.findByText('Worker')
+  for (const phase of ['registered', 'parked', 'wake-pending']) {
+    const row = document.querySelector(`[data-slot="global-task-row"][data-run-id="${phase}"]`)
+    expect(row?.textContent).toContain(phase === 'parked' ? 'waiting on workers' : 'needs you')
+  }
+  expect(document.querySelector('[data-run-id="worker"] a a')).toBeNull()
+})
+
+it('shows a parked parent human question from the slim workspace index', async () => {
+  stubFetch({ runs: [{ ...RUNS[0]!, id: 'asking-parent', status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', wait: { phase: 'parked' } } }] })
+  renderPage()
+  await waitFor(() => expect(document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')).not.toBeNull())
+  const row = document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')
+  expect(row?.textContent).toContain('needs you')
+  expect(row?.textContent).not.toContain('waiting on workers')
+})

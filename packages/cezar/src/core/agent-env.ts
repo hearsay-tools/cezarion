@@ -315,7 +315,13 @@ export function buildChildEnv(opts: BuildChildEnvOptions): NodeJS.ProcessEnv {
   // in the child env hands the backend the host value under one of them. That
   // is exactly the temp-directory bug #785 fixes, so the override has to be
   // total. `extra` is cezar's own, never a host secret, and always wins.
-  const overridden = upperSet(Object.keys(extra));
+  const overridden = upperSet([
+    ...Object.keys(extra),
+    // Session authority may only come from controller-generated spec.env, never
+    // inherited from a parent agent — even through passthrough or full-env mode.
+    'CEZ_DELEGATION_TOKEN',
+    'CEZ_DELEGATION_URL',
+  ]);
 
   // Escape hatch: restore legacy full-inheritance (opt-in, off by default).
   // Parsed with the same `isTruthy` the Bedrock/Vertex toggles use (#456

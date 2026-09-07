@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import {
   RUN_HISTORY_PAGE_ITEMS,
+  advancePendingHumanAsk,
   type RunEvent,
   type RunHistoryContext,
   type RunHistoryEvent,
@@ -489,6 +490,7 @@ const isSettledContextStatus = (status: string | undefined) =>
 /** One forward pass retaining the latest Plan snapshot and only the selector-equivalent agent episode. */
 export async function deriveRunContextEvents(filePath: string): Promise<RunHistoryContext> {
   let latestPlan: RunHistoryEvent | undefined;
+  let pendingAsk: RunHistoryEvent | undefined;
   let asOfSeq = 0;
   let turn = 0;
   const boundaries: RunHistoryEvent[] = [];
@@ -540,6 +542,9 @@ export async function deriveRunContextEvents(filePath: string): Promise<RunHisto
       const event = parseLine(line);
       if (!event) continue;
       asOfSeq = Math.max(asOfSeq, event.seq);
+      // Match manager delivery receipts: agent/lifecycle input and refused human
+      // attempts do not answer a question. Retain one current ask, not its history.
+      pendingAsk = advancePendingHumanAsk(pendingAsk, event);
       if (event.type === 'plan.updated' || (event.type === 'tool-call' && stringField(event, 'tool') === 'TodoWrite')) {
         latestPlan = event;
         continue;
@@ -604,6 +609,7 @@ export async function deriveRunContextEvents(filePath: string): Promise<RunHisto
   );
   const contextEvents = new Map<number, RunHistoryEvent>();
   if (latestPlan) contextEvents.set(latestPlan.seq, latestPlan);
+  if (pendingAsk) contextEvents.set(pendingAsk.seq, pendingAsk);
   for (const event of boundaries) contextEvents.set(event.seq, event);
   for (const item of [...roots.values(), ...relevantChildren]) {
     contextEvents.set(item.first.seq, item.first);

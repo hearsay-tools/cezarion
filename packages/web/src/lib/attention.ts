@@ -1,4 +1,4 @@
-import type { RunRecord } from '@open-mercato/cezar-api-client'
+import type { RunRecord, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
 /**
  * The one canonical attention function (spec, "Design system" → status grammar).
@@ -75,8 +75,9 @@ function isUnseen(_run: AttentionInput): boolean {
 /** What attention derivation actually reads. `Pick`ed rather than the full `RunRecord` so
  *  surfaces that only have a status — the compare view's `GroupVariant` columns — can use the
  *  same canonical function instead of inventing a second status-to-tone mapping. `activity` is
- *  optional (#490), so status-only callers keep working unchanged. */
-export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt'>
+ *  optional (#490), so status-only callers keep working unchanged. Delegation uses the slim
+ *  contract projection: both full run records and workspace index rows carry this context. */
+export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt' | 'hasPendingHumanAsk'> & Pick<RunIndexEntry, 'delegation'>
 
 /**
  * `RunRecord` → attention.
@@ -91,7 +92,7 @@ export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResume
  *  - `queued` → neutral and still: parked, not transitioning. Its row shows `#2` instead.
  *  - `done`/`failed` → the green/red outcome, still.
  */
-export function deriveAttention(run: AttentionInput): Attention {
+export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false): Attention {
   if (hasPendingPermission(run)) {
     return { bucket: 'permission', tone: 'violet', pulse: true, label: 'needs permission' }
   }
@@ -106,6 +107,9 @@ export function deriveAttention(run: AttentionInput): Attention {
   }
   if (run.status === 'failed') {
     return { bucket: 'error', tone: 'danger', pulse: false, label: 'failed' }
+  }
+  if (!hasPendingHumanAsk && !run.hasPendingHumanAsk && run.status === 'waiting' && run.delegation?.role === 'root' && run.delegation.wait?.phase === 'parked') {
+    return { bucket: 'none', tone: 'violet', pulse: false, label: 'waiting on workers' }
   }
   if (run.status === 'waiting') {
     return { bucket: 'waiting', tone: 'pending', pulse: true, label: 'needs you' }

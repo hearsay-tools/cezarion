@@ -966,3 +966,30 @@ describe('the pure ordering helpers', () => {
     expect(input.map((entry) => entry.id)).toEqual(['old', 'here', 'recent'])
   })
 })
+
+it('preserves worker roles and wait phases from both live and indexed palette tasks', async () => {
+  const workerId = '10000000-0000-4000-8000-000000000002'
+  const live = run({ id: 'live-parent', title: 'Live parent', status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: workerId, workerIds: [workerId], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+  renderPalette({ projects: [project({ id: 'cezar' }), project({ id: 'other' })], runs: [live], indexed: [
+    { ...live, id: 'indexed-parent', title: 'Indexed parent', projectId: 'other', delegation: { role: 'root', wait: { phase: 'parked' } } },
+    { ...live, id: 'indexed-worker', title: 'Indexed worker', status: 'running', projectId: 'other', delegation: { role: 'worker' } },
+  ] })
+  openWith({ metaKey: true })
+  await screen.findByText('Indexed worker')
+  for (const id of ['live-parent', 'indexed-parent']) {
+    expect(document.querySelector(`[data-slot="palette-task"][data-run-id="${id}"] [data-slot="status-dot"]`)?.getAttribute('aria-label')).toBe('waiting on workers')
+  }
+  expect(document.querySelector('[data-slot="palette-task"][data-run-id="indexed-worker"]')?.textContent).toContain('Worker')
+})
+
+it('preserves pending human attention in live and indexed palette rows', async () => {
+  const live = run({ id: 'live-asking', title: 'Live question', status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+  renderPalette({ projects: [project({ id: 'cezar' }), project({ id: 'other' })], runs: [live], indexed: [
+    { ...live, id: 'indexed-asking', title: 'Indexed question', projectId: 'other', delegation: { role: 'root', wait: { phase: 'parked' } } },
+  ] })
+  openWith({ metaKey: true })
+  await screen.findByText('Indexed question')
+  for (const id of ['live-asking', 'indexed-asking']) {
+    expect(document.querySelector(`[data-slot="palette-task"][data-run-id="${id}"] [data-slot="status-dot"]`)?.getAttribute('aria-label')).toBe('needs you')
+  }
+})

@@ -1,6 +1,7 @@
 import type { RunEvent, RunStatus } from '@open-mercato/cezar-api-client'
 import {
   toolDisplay,
+  agentInputEventSchema,
   type PlanEntry,
   type PlanStatus,
   type StopReason,
@@ -40,6 +41,7 @@ export interface ThreadNote {
   id: string
   text: string
   tone: 'dim' | 'danger'
+  attribution?: { source: 'agent' | 'lifecycle'; parentRunId: string }
 }
 
 /** An image the run persisted (v1 `image` line: served from `/api/runs/:id/images/…`). */
@@ -376,6 +378,17 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
   for (const event of events) {
     switch (event.type) {
       // ---- turn boundaries ------------------------------------------------------------
+      case 'agent-input': {
+        const parsed = agentInputEventSchema.safeParse(event)
+        if (!parsed.success) break
+        const { input } = parsed.data
+        currentTurn().entries.push({ origin: 'meta', entry: {
+          kind: 'note', id: `agent-input:${input.id}`, text: input.text, tone: 'dim',
+          attribution: { source: input.source, parentRunId: input.parentRunId },
+        } })
+        // This context is never a human turn or an ask acknowledgement.
+        break
+      }
       case 'user-message': {
         const text = str(event.text) ?? ''
         // Client-side resolution of the pending AskUser card (#473): the reply

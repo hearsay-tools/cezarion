@@ -104,6 +104,9 @@ class CodexSession implements AgentSession {
   private stdinOpen = true;
   private threadId: string | undefined;
   private activeTurnId: string | undefined;
+  private agentInputReady = false;
+  private agentSubmissionPending = false;
+  private turnBoundaryVersion = 0;
   private pendingUserInput: PendingUserInput | undefined;
   private readonly toolCalls: AgentToolCallRecord[] = [];
   private readonly textChunks: string[] = [];
@@ -279,7 +282,36 @@ class CodexSession implements AgentSession {
     return this.child.pid;
   }
 
+  sendAgentMessage(content: ContentBlock[]): false | Promise<void> {
+    if (!this.stdinOpen || !this.agentInputReady || this.pendingUserInput || this.agentSubmissionPending) return false;
+    this.agentInputReady = false;
+    this.agentSubmissionPending = true;
+    if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
+    this.autoEndTimer = undefined;
+    // Reserve synchronously; only the matching RPC result acknowledges delivery.
+    return this.startOrSteerTurn(textOf(content)).catch((err: unknown) => {
+      if (this.stdinOpen) this.emit({ type: 'error', message: `codex: agent input failed: ${String(err)}` });
+      throw err;
+    }).finally(() => {
+      this.agentSubmissionPending = false;
+      if (this.stdinOpen && this.agentInputReady && !this.pendingUserInput) {
+        this.opts.onAgentInputReady?.();
+        this.scheduleAutoEnd();
+      }
+    });
+  }
+
+  private scheduleAutoEnd(): void {
+    if (!this.opts.autoEndAfterFirstTurn || !this.stdinOpen || this.autoEndTimer || this.agentSubmissionPending) return;
+    this.autoEndTimer = setTimeout(() => {
+      this.autoEndTimer = undefined;
+      if (this.opts.shouldAutoEnd?.() !== false) this.end();
+    }, AUTO_END_DELAY_MS);
+    this.autoEndTimer.unref?.();
+  }
+
   sendMessage(content: ContentBlock[]): boolean {
+    this.agentInputReady = false;
     if (!this.stdinOpen) return false;
     if (this.autoEndTimer) {
       clearTimeout(this.autoEndTimer);
@@ -378,6 +410,7 @@ class CodexSession implements AgentSession {
 
   private async startOrSteerTurn(text: string): Promise<void> {
     if (!this.threadId) return;
+    this.agentInputReady = false;
     const input = [{ type: 'text', text, text_elements: [] }];
     if (this.activeTurnId) {
       await this.rpc.request('turn/steer', {
@@ -391,12 +424,13 @@ class CodexSession implements AgentSession {
     // with its default (no summary), so the reasoning thread stays empty even
     // though the mapper and UI can render it. The override persists for this
     // turn and every subsequent turn, so seeding it on turn/start is enough.
+    const boundaryVersion = this.turnBoundaryVersion;
     const res = await this.rpc.request('turn/start', {
       threadId: this.threadId,
       input,
       ...codexTurnStartExtras(this.spec),
     });
-    this.activeTurnId = turnIdOf(res) ?? this.activeTurnId;
+    if (this.turnBoundaryVersion === boundaryVersion) this.activeTurnId = turnIdOf(res) ?? this.activeTurnId;
   }
 
   private dispatch(msg: CodexAppServerMessage): void {
@@ -448,6 +482,7 @@ class CodexSession implements AgentSession {
   private handleNotification(method: string, params: Record<string, unknown>): void {
     switch (method) {
       case 'turn/started': {
+        if (!this.isForeignThreadTurn(params)) this.turnBoundaryVersion += 1;
         if (this.isForeignThreadTurn(params)) break; // sub-agent child thread — not our turn (#600)
         this.activeTurnId = turnIdOf(params) ?? this.activeTurnId;
         break;
@@ -497,6 +532,7 @@ class CodexSession implements AgentSession {
       case 'turn/completed':
       case 'turn/failed': {
         if (this.isForeignThreadTurn(params)) break; // don't end the parent turn on a child turn (#600)
+        this.turnBoundaryVersion += 1;
         this.pendingUserInput = undefined;
         this.activeTurnId = undefined;
         // An interrupted/failed item never sees item/completed — surface its
@@ -506,11 +542,9 @@ class CodexSession implements AgentSession {
         if (outcome.error !== undefined && !this.terminatedByCezar) {
           this.emit({ type: 'error', message: outcome.error });
         }
+        this.agentInputReady = true;
         this.emit({ type: 'turn-end' });
-        if (this.opts.autoEndAfterFirstTurn && this.stdinOpen && !this.autoEndTimer) {
-          this.autoEndTimer = setTimeout(() => this.end(), AUTO_END_DELAY_MS);
-          this.autoEndTimer.unref?.();
-        }
+        this.scheduleAutoEnd();
         break;
       }
       default:

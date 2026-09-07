@@ -297,7 +297,12 @@ function ThreadEntryRenderer({
     case 'tool':
       return <ToolCard item={entry} cacheKey={`${scope}:${entry.id}`} />
     case 'note':
-      return <NoteLine note={entry} />
+      return entry.attribution ? <div className="min-w-0 rounded-md border border-border px-4 py-3 text-sm">
+        <p className="mb-2 break-all text-xs text-muted-foreground">{entry.attribution.source === 'agent'
+          ? `Agent input from parent ${entry.attribution.parentRunId}`
+          : `Worker lifecycle context for parent ${entry.attribution.parentRunId}`}</p>
+        <NoteLine note={entry} />
+      </div> : <NoteLine note={entry} />
     case 'image':
       return <ImageItem image={entry} />
     case 'ask':

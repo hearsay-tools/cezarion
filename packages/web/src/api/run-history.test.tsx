@@ -108,6 +108,46 @@ describe('useRunHistory', () => {
     expect(result.current.hasOlder).toBe(false)
   })
 
+  it.each(['history', 'context'] as const)('fallback jump preserves full replay and its live SSE when %s is unavailable', async unavailable => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    if (unavailable === 'history') {
+      mockHistory.mockRejectedValue(new Error('optimized history unavailable'))
+      mockContext.mockResolvedValue(context())
+    } else {
+      mockHistory.mockResolvedValue(page(100))
+      mockContext.mockRejectedValue(new Error('optimized context unavailable'))
+    }
+    const { client, wrapper } = harness()
+    let observe = false
+    const transitions: Array<{ pending: boolean; seqs: number[] }> = []
+    const { result, unmount } = renderHook(() => {
+      const state = useRunHistory('fallback-jump')
+      if (observe) transitions.push({ pending: state.isPending, seqs: state.visibleEvents.map(event => event.seq) })
+      return state
+    }, { wrapper })
+    try {
+      await waitFor(() => expect(result.current.fallback).toBe(true), { timeout: 3_000 })
+      const source = FakeEventSource.instances.at(-1)!
+      await act(() => source.emit('run-event', JSON.stringify(page(1).events[0])))
+      expect(result.current.visibleEvents.map(event => event.seq)).toEqual([1])
+      const requestCount = mockHistory.mock.calls.length
+      const streamCount = FakeEventSource.instances.length
+      observe = true
+      await act(() => result.current.jumpToLatest())
+      expect(mockHistory).toHaveBeenCalledTimes(requestCount)
+      expect(FakeEventSource.instances).toHaveLength(streamCount)
+      expect(source.readyState).not.toBe(2)
+      expect(transitions.every(state => !state.pending && state.seqs[0] === 1)).toBe(true)
+      expect(result.current.currentEvents.map(event => event.seq)).toEqual([1])
+      await act(() => source.emit('run-event', JSON.stringify(page(2).events[0])))
+      expect(result.current.visibleEvents.map(event => event.seq)).toEqual([1, 2])
+      expect(result.current.currentEvents.map(event => event.seq)).toEqual([1, 2])
+    } finally {
+      unmount(); client.clear(); vi.unstubAllGlobals()
+    }
+  })
+
   it('jump-to-latest clears retained older pages and refetches the cursorless tail', async () => {
     mockHistory.mockImplementation(async (_id, cursor) =>
       cursor === 'older-100'

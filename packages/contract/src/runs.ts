@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema } from './delegation.ts';
 import { runnerSchema } from './health.ts';
 import { referenceStatusSchema } from './github.ts';
 // The chain shapes belong to the workflows family; the run record embeds one, so this file
@@ -116,6 +117,11 @@ export const queuedMessageSchema = z.object({
 });
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 
+/** Optional for legacy records; only explicit human origin can acknowledge a delegated ask. */
+export const continuationMessageSchema = queuedMessageSchema.extend({
+  origin: z.enum(['human', 'lifecycle']).optional(),
+});
+
 /** One aggregated sample of a run's live process tree (`src/core/process-usage.ts`). */
 export const processUsageSchema = z.object({
   /** Sum of `%cpu` across the tree — can exceed 100 on multi-core work. */
@@ -146,7 +152,11 @@ export const runRecordSchema = z.object({
    *  into the prompt at dequeue — never delivered as their own turns. Absent on pre-#472 runs. */
   queuedMessages: z.array(queuedMessageSchema).optional(),
   /** Opening Continue message, retained until its first completed turn for crash recovery. */
-  continuationMessage: queuedMessageSchema.optional(),
+  continuationMessage: continuationMessageSchema.optional(),
+  /** Owned-run authority; absence is legacy, invalid is explicitly quarantined. */
+  delegation: delegationStateSchema.optional(),
+  /** Durable non-human input, kept separate from human prompt/answer queues. */
+  agentInputs: z.array(agentInputSchema).optional(),
   /** URLs of images and document attachments on the initial task prompt; branch on isImageAttachmentName. */
   taskImages: z.array(z.string()).optional(),
   model: z.string().optional(),
@@ -188,6 +198,9 @@ export const runRecordSchema = z.object({
   /** `monitoring` while `status === 'running'` and the agent is working on downstream work.
    *  Absent on old runs; cleared on resume/end. */
   activity: runActivitySchema.optional(),
+  /** Derived from valid human questions and matching delivery receipts in durable history.
+   * List attention only; never authorization to deliver an answer or wake a worker. */
+  hasPendingHumanAsk: z.boolean().optional(),
   /** Exact ISO-8601 deadline for the next automatic monitoring check. */
   monitoringWakeAt: z.string().optional(),
   /** The current live monitoring epoch exhausted its 40 automatic checks. */
@@ -319,6 +332,9 @@ export const runIndexEntrySchema = z.object({
   titleOrigin: z.enum(['user', 'auto', 'marker']).optional(),
   status: runStatusSchema,
   activity: runActivitySchema.optional(),
+  hasPendingHumanAsk: runRecordSchema.shape.hasPendingHumanAsk,
+  /** Only the relationship role and wait phase used by list attention. */
+  delegation: runDelegationSummarySchema.optional(),
   createdAt: z.string(),
   finishedAt: z.string().optional(),
   /** With `status`/`finishedAt`/`archived`, the four inputs `isUnread` reads — what lets the

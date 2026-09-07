@@ -20,6 +20,7 @@ import type {
   UpdateAutomationInput,
   AgentConfigListing,
   ApiRun,
+  RunRelationships,
   ArchiveFinishedResponse,
   MarkAllReadResponse,
   CancelAutoResumeResponse,
@@ -115,6 +116,7 @@ import {
   getApiScope,
   queryScope,
   runHistoryContextSchema,
+  runRelationshipsSchema,
   runHistoryPageSchema,
   repoPullBranchesResponseSchema,
   repoPullConfirmationSchema,
@@ -500,6 +502,15 @@ export async function getProjectRuns(projectId: string, opts?: ReadOptions): Pro
  *  project-scoped spelling and never takes `queryScope()`. */
 export async function getRunsIndex(opts?: ReadOptions): Promise<RunsIndexResponse> {
   return unwrap(await cez.api.v1.workspace['runs-index'].$get({}, init(opts)), '/workspace/runs-index')
+}
+
+export async function getRunRelationships(id: string, opts?: ReadOptions): Promise<RunRelationships> {
+  return unwrapValidated(
+    await cez.api.v1.p[':projectId'].runs[':id'].relationships.$get(
+      { param: { projectId: queryScope(), id: encodeURIComponent(id) }, query: {} }, init(opts),
+    ),
+    `${runPath(id)}/relationships`, runRelationshipsSchema,
+  )
 }
 
 export async function getRun(id: string, opts?: ReadOptions): Promise<ApiRun> {

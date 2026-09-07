@@ -209,3 +209,21 @@ describe('RunNotifications', () => {
 // Type-level guard: the statuses this suite drives are real RunStatus members.
 const _statuses: RunStatus[] = ['running', 'waiting', 'review', 'failed']
 void _statuses
+
+it('notifies once when a parked worker wait gains a human ask without changing status', () => {
+  const constructed = stubNotification('granted')
+  hideTab()
+  const parked = run({ status: 'waiting', hasPendingHumanAsk: false, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+  const { patch } = mount({ notifications: { enabled: true } }, [parked])
+  patch([{ ...parked, tokensUsed: 10 }])
+  expect(constructed).toHaveLength(0)
+  const asking = { ...parked, hasPendingHumanAsk: true }
+  patch([asking])
+  expect(constructed.map(n => n.options?.body)).toEqual(['Task needs you'])
+  patch([{ ...asking, tokensUsed: 20 }])
+  expect(constructed).toHaveLength(1)
+  patch([parked])
+  expect(constructed).toHaveLength(1)
+  patch([asking])
+  expect(constructed).toHaveLength(2)
+})

@@ -726,6 +726,7 @@ function TitleCell({
 
   return (
     <span className="flex min-w-0 items-center gap-1.5">
+      {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
       <Link
         to={to}
         title={title}
@@ -868,6 +869,7 @@ function TaskCard({
             unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
           )}
         >
+          {run.delegation?.role === 'worker' ? <span className="mr-2 text-xs text-muted-foreground">Worker</span> : null}
           {runTitle(run)}
         </Link>
         {/* The unread marker — trailing violet dot, as on the desktop row. */}

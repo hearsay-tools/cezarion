@@ -121,6 +121,10 @@ class OpencodeSession implements AgentSession {
   private lastCost = 0;
   /** A prompt was posted and its `session.idle` has not arrived yet. */
   private turnActive = false;
+  private agentInputReady = false;
+  private agentRequest: AbortController | undefined;
+  /** Human prompts scheduled behind the active turn, through their HTTP ack. */
+  private pendingPromptRequests = 0;
   /** `finishTurn` ran for the current turn — repeats and stray idles no-op. */
   private turnEnded = false;
   /** Monotonic identity used to reject async work completed by an older turn. */
@@ -149,6 +153,7 @@ class OpencodeSession implements AgentSession {
   private autoEndTimer: NodeJS.Timeout | undefined;
   private spawnFailed: Error | null = null;
   private timedOut = false;
+  private openingPromptFailed = false;
   /** One teardown per session — see `terminate()`. */
   private signalled = false;
 
@@ -209,7 +214,7 @@ class OpencodeSession implements AgentSession {
         // Live for the whole session; the SSE loop runs until end()/interrupt.
         await this.exited;
       } catch (err) {
-        if (!this.timedOut) {
+        if (!this.timedOut && !this.openingPromptFailed) {
           const message = err instanceof Error ? err.message : String(err);
           this.emit({ type: 'error', message: `opencode: ${message}` });
         }
@@ -218,6 +223,7 @@ class OpencodeSession implements AgentSession {
         if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
         this.sse.abort();
         this.serverOpen = false;
+        this.agentRequest?.abort();
         this.terminate();
       }
 
@@ -255,7 +261,23 @@ class OpencodeSession implements AgentSession {
     return this.child.pid;
   }
 
+  sendAgentMessage(content: ContentBlock[]): false | Promise<void> {
+    if (!this.serverOpen || !this.agentInputReady || this.turnActive || this.pendingQuestion || this.questionReply || this.pendingPromptRequests > 0 || this.agentRequest) return false;
+    this.agentInputReady = false;
+    const request = new AbortController();
+    this.agentRequest = request;
+    return this.prompt(textOf(content), 'agent', request.signal).finally(() => {
+      if (this.agentRequest === request) this.agentRequest = undefined;
+      if (this.serverOpen && !this.turnActive && !this.pendingQuestion && !this.questionReply) {
+        this.agentInputReady = true;
+        this.opts.onAgentInputReady?.();
+        this.scheduleAutoEnd();
+      }
+    });
+  }
+
   sendMessage(content: ContentBlock[]): boolean {
+    this.agentInputReady = false;
     if (!this.serverOpen) return false;
     this.cancelAutoEnd();
     const text = textOf(content);
@@ -270,6 +292,7 @@ class OpencodeSession implements AgentSession {
       this.questionReply = reply;
       const clearReply = () => {
         if (this.questionReply === reply) this.questionReply = undefined;
+        this.notifyAgentInputReady();
       };
       void reply.then(clearReply, clearReply);
       return true;
@@ -287,7 +310,21 @@ class OpencodeSession implements AgentSession {
   }
 
   private deliverPrompt(text: string): void {
-    void this.ready.then(() => this.prompt(text)).catch(() => undefined);
+    this.pendingPromptRequests += 1;
+    void this.ready.then(() => this.prompt(text)).then(() => {
+      this.pendingPromptRequests -= 1;
+      this.notifyAgentInputReady();
+    }, () => {
+      this.pendingPromptRequests -= 1;
+    });
+  }
+
+  private notifyAgentInputReady(): void {
+    if (this.serverOpen && this.turnEnded && !this.turnActive && !this.pendingQuestion &&
+      !this.questionReply && this.pendingPromptRequests === 0) {
+      this.agentInputReady = true;
+      this.opts.onAgentInputReady?.();
+    }
   }
 
   private cancelAutoEnd(): void {
@@ -297,20 +334,25 @@ class OpencodeSession implements AgentSession {
   }
 
   private scheduleAutoEnd(): void {
-    if (!this.opts.autoEndAfterFirstTurn || !this.serverOpen || this.autoEndTimer) return;
-    this.autoEndTimer = setTimeout(() => this.end(), AUTO_END_DELAY_MS);
+    if (!this.opts.autoEndAfterFirstTurn || !this.serverOpen || this.autoEndTimer || this.agentRequest) return;
+    this.autoEndTimer = setTimeout(() => {
+            this.autoEndTimer = undefined;
+            if (this.opts.shouldAutoEnd?.() !== false) this.end();
+          }, AUTO_END_DELAY_MS);
     this.autoEndTimer.unref?.();
   }
 
   end(): void {
     if (!this.serverOpen) return;
     this.serverOpen = false;
+    this.agentRequest?.abort();
     this.sse.abort();
     this.terminate();
   }
 
   interrupt(): void {
     this.serverOpen = false;
+    this.agentRequest?.abort();
     if (this.baseUrl && this.sessionId) {
       void this.http('POST', `/session/${this.sessionId}/abort`, undefined).catch(() => undefined);
     }
@@ -395,10 +437,10 @@ class OpencodeSession implements AgentSession {
     await this.consumeEvents();
 
     const first = prependSystemPrompt(this.spec.systemPrompt, this.spec.userPrompt);
-    await this.prompt(first);
+    await this.prompt(first, 'opening');
   }
 
-  private async prompt(text: string): Promise<void> {
+  private async prompt(text: string, origin: 'opening' | 'human' | 'agent' = 'human', signal?: AbortSignal): Promise<void> {
     // One turn at a time. `prompt_async` acknowledges before the turn runs,
     // so `ready` no longer serializes prompts the way the long-poll did — a
     // follow-up posted mid-turn would share the turnActive/turnEnded pair
@@ -413,6 +455,7 @@ class OpencodeSession implements AgentSession {
     this.cancelAutoEnd();
     if (!this.sessionId || !this.serverOpen) return;
     this.turnActive = true;
+    this.agentInputReady = false;
     this.turnEnded = false;
     this.turnSerial += 1;
     this.turnFinished = new Promise((resolve) => {
@@ -433,19 +476,31 @@ class OpencodeSession implements AgentSession {
     const effort = parseEffort(this.spec.effort);
     if (effort) body.variant = effort;
     try {
-      await this.http('POST', `/session/${this.sessionId}/prompt_async`, body);
+      await this.http('POST', `/session/${this.sessionId}/prompt_async`, body, signal);
     } catch (err) {
       // No turn started server-side, so no `session.idle` will ever close it —
       // surface the failure and end the turn here instead of parking the run.
       const message = err instanceof Error ? err.message : String(err);
-      this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
+      if (origin === 'agent') {
+        // Fatal BEFORE the synthetic boundary: the rejected submission stays
+        // queued and must not drain more input or settle DONE.
+        if (this.serverOpen) {
+          this.emit({ type: 'error', message: `opencode: agent input failed: ${message}` });
+          this.interrupt();
+        }
+      } else {
+        this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
+        if (origin === 'opening') {
+          // Opening failure was always fatal. Report it before the synthetic
+          // boundary, and do not emit it again from the bootstrap result catch.
+          this.openingPromptFailed = true;
+          if (!this.timedOut) this.emit({ type: 'error', message: `opencode: ${message}` });
+          this.interrupt();
+        }
+      }
       this.finishTurn();
-      // Rethrow so `bootstrap` still rejects when the FIRST prompt cannot be
-      // posted: the run's result path turns that into a v1 `error`, which is
-      // the only event run.ts records failure from — a swallowed rejection
-      // would let an empty result mark the step successful. `sendMessage`
-      // discards the rethrow (the note + turn-end above already told the
-      // session's user), so a mid-session failure stays non-fatal, as before.
+      // Bootstrap still rejects; its result catch suppresses the already
+      // reported opening error. Human follow-ups keep their nonfatal note.
       throw err;
     }
   }
@@ -465,6 +520,7 @@ class OpencodeSession implements AgentSession {
     // A part that never saw `time.end` (abort, server quirk) still surfaces
     // its prose before the turn boundary (run.ts reads markers there).
     this.textCoalescer.flush();
+    this.agentInputReady = true;
     this.emit({ type: 'turn-end' });
     if (!this.questionReply) this.scheduleAutoEnd();
   }
@@ -794,12 +850,14 @@ class OpencodeSession implements AgentSession {
     method: string,
     path: string,
     body: unknown,
+    signal?: AbortSignal,
   ): Promise<Record<string, unknown>> {
     if (!this.baseUrl) throw new Error('opencode server not ready');
     // Plain fetch is fine here: every call is a short round-trip now that
     // prompts go through `prompt_async` — nothing long-polls anymore.
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
+      signal,
       headers: body !== undefined ? { 'content-type': 'application/json' } : {},
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
