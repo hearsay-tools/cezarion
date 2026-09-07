@@ -1022,15 +1022,11 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     }
   };
 
-  const publishedWaiting = (id: string): Promise<RunRecord> =>
+  const publishedWaiting = (id: string, ready = () => true): Promise<RunRecord> =>
     new Promise((resolve) => {
-      // A continuation's synchronous turn.started checkpoint can republish the previous park.
-      let sawRunning = store.getRun(id)?.status === 'running';
       const onRun = (record: RunRecord) => {
         const current = record.steps.find((step) => step.id === record.currentStepId);
-        if (record.id !== id) return;
-        if (record.status === 'running' && current?.status === 'running') sawRunning = true;
-        if (!sawRunning || record.status !== 'waiting' || current?.status !== 'waiting') return;
+        if (!ready() || record.id !== id || record.status !== 'waiting' || current?.status !== 'waiting') return;
         store.off('run', onRun);
         resolve(structuredClone(record));
       };
@@ -1070,9 +1066,12 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
     store.flush();
 
-    const published = publishedWaiting(record.id);
+    // Delivery publishes turn.started before resumeParkedRun; ignore that prior parked snapshot.
+    let resumed = false;
+    const published = publishedWaiting(record.id, () => resumed);
     expect(manager.sendMessage(record.id, [{ type: 'text', text: 'mock:hold second markerless turn' }])).toBe(true);
     store.flush();
+    resumed = true;
     await published;
     await new Promise<void>((resolve) => setImmediate(resolve));
 
