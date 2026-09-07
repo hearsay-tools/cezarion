@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { queuedMessageSchema as continuationMessageSchema } from '@open-mercato/cezar-contract';
@@ -1450,6 +1450,14 @@ export class RunStore extends EventEmitter {
       writeFileSync(tmpPath, JSON.stringify(this.listRuns(), null, 2), 'utf8');
       renameSync(tmpPath, indexPath);
     } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        try {
+          statSync(this.dataDir);
+        } catch (dirErr) {
+          // A pending save may outlive its directory; never recreate it or hide live-directory failures.
+          if ((dirErr as NodeJS.ErrnoException)?.code === 'ENOENT') return;
+        }
+      }
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[cez] failed to save runs.json: ${message}`);
     }
