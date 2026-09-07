@@ -17,11 +17,11 @@ import type { ApiRun, RunEvent } from '@open-mercato/cezar-api-client'
  * the Working… spinner keeps spinning and the composer stays in live-session mode — whose sends
  * then 409 against the closed session.
  *
- * The transcript itself carries the truth, so use it: when the latest session boundary in the
- * event list is a `session.ended` and the record still claims a live session, the record is
- * stale — refetch it (the reconcile-on-reconnect doctrine, applied to the one seam reconnect
- * cannot see). A grace period keeps the healthy path quiet: `session.ended` always lands
- * moments before the workspace stream's own record update, and that update cancels the timer.
+ * The transcript itself carries the truth, so use it: a latest `session.ended` contradicts a
+ * record claiming a live session, while a latest `turn-end` contradicts a plain-running record.
+ * Refetch either stale record (the reconcile-on-reconnect doctrine, applied to the one seam
+ * reconnect cannot see). A grace period keeps the healthy path quiet: the workspace stream's
+ * own record update normally arrives moments later and cancels the timer.
  */
 
 /** How long the workspace stream gets to deliver the record update on its own before the
@@ -54,19 +54,40 @@ export function settledSessionSeq(events: RunEvent[]): number {
   return lastEnd > lastStart ? lastEnd : 0
 }
 
+/** The latest persisted parked-turn boundary, unless a later event opened another agent turn. */
+export function parkedTurnSeq(events: RunEvent[]): number {
+  let lastEnd = 0
+  let lastOpen = 0
+  for (const event of events) {
+    if (typeof event.seq !== 'number') continue
+    if (event.type === 'turn-end' && event.seq > lastEnd) lastEnd = event.seq
+    if (
+      (event.type === 'turn.started' ||
+        event.type === 'session.started' ||
+        event.type === 'user-message' ||
+        (event.type === 'step-start' && event.kind === 'agent')) &&
+      event.seq > lastOpen
+    ) {
+      lastOpen = event.seq
+    }
+  }
+  return lastEnd > lastOpen ? lastEnd : 0
+}
+
 /** Reconcile the run record against the transcript (see module doc). Mounted by the thread
  *  route, next to the two feeds it reconciles. */
 export function useRunRecordReconcile(run: ApiRun | undefined, events: RunEvent[]): void {
   const queryClient = useQueryClient()
   const settledSeq = useMemo(() => settledSessionSeq(events), [events])
+  const parkedSeq = useMemo(() => parkedTurnSeq(events), [events])
   const runId = run?.id
   const status = run?.status
+  const activity = run?.activity
 
   useEffect(() => {
-    if (settledSeq === 0 || runId === undefined) return
-    // Only a record that claims a live session can be stale in the reported way. Every settled
-    // status is what the transcript predicts, and `queued` has no session to have ended.
-    if (status !== 'running' && status !== 'waiting') return
+    const staleSettled = settledSeq !== 0 && (status === 'running' || status === 'waiting')
+    const stalePark = parkedSeq !== 0 && status === 'running' && activity !== 'monitoring'
+    if ((!staleSettled && !stalePark) || runId === undefined) return
     const timer = setTimeout(() => {
       // The list gets the same refresh: the sidebar buckets ("Working") read from it.
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail(runId) })
@@ -75,5 +96,5 @@ export function useRunRecordReconcile(run: ApiRun | undefined, events: RunEvent[
     // The healthy path's exit: the workspace stream patches the record, `status` flips to a
     // settled one, and this cleanup cancels the refetch before it fires.
     return () => clearTimeout(timer)
-  }, [settledSeq, runId, status, queryClient])
+  }, [settledSeq, parkedSeq, runId, status, activity, queryClient])
 }
