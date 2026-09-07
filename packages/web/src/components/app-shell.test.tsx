@@ -57,6 +57,14 @@ describe('AppShell', () => {
     expect(within(screen.getByRole('main')).getByText('route content')).toBeTruthy()
   })
 
+  it('renders the Cezarion mark on the 26px brand tile', () => {
+    renderShell()
+    const tile = document.querySelector('[data-slot="brand-tile"]') as HTMLImageElement
+    expect(tile).toBeTruthy()
+    expect(tile.getAttribute('src')).toBe('/cezarion-mark.svg')
+    expect(tile.className).toContain('size-[26px]')
+  })
+
   it('resets the main scroller to the top on navigation (#mobile-scroll-top)', () => {
     renderShell('/')
     const main = screen.getByRole('main')
