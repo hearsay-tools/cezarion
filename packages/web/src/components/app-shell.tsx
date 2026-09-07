@@ -17,8 +17,10 @@ import { CloneProjectDialog } from '@/components/clone-project-dialog'
 import { openCommandPalette } from '@/components/command-palette'
 import { GithubIcon } from '@/components/icons'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
+import type { ResolvedTheme } from '@/lib/theme'
 import { Link, stripProjectPrefix } from '@/lib/project-router'
 import { StatusDot } from '@/components/status-dot'
+import { useTheme } from '@/components/theme-provider'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import {
@@ -40,11 +42,11 @@ import {
   writeStoredSidebarWidth,
 } from '@/lib/sidebar-width'
 import { cn } from '@/lib/utils'
-// The Cezarion square mark. A `public/` asset, not a bundled import: the service serves the
-// same file at this exact path (`GET /cezarion-mark.svg` — the favicon index.html points at), so
-// a second, hashed URL for the same picture would be one cache entry too many. Vite serves
-// `public/` at the root in dev and copies it into the build, so the path holds in both.
-const brandLogoUrl = '/cezarion-mark.svg'
+// The Cezarion wordmark lockup, one file per resolved theme (#143). `public/` assets, not
+// bundled imports: the service serves the same files at these exact paths, so a second, hashed
+// URL for the same picture would be one cache entry too many. Vite serves `public/` at the root
+// in dev and copies it into the build, so the paths hold in both.
+const brandLockupUrl = (resolved: ResolvedTheme) => `/cezarion-lockup-${resolved}.svg`
 
 /** Tailwind's `md`. The drawer is the `<md` affordance, so this must stay in step with the
  *  `md:hidden` / `md:flex` classes below — they are the same breakpoint expressed twice, once
@@ -477,6 +479,9 @@ function SidebarContent({
   /** The drawer's close button. Absent on desktop, which has nothing to close. */
   headerAction?: ReactNode
 }) {
+  // The lockup follows the RESOLVED theme (the same value ThemeProvider stamps on <html>), not
+  // the OS preference: ThemeToggle can disagree with the OS, and the swap must not need a reload.
+  const { resolvedTheme } = useTheme()
   return (
     <div
       data-slot="sidebar-content"
@@ -487,8 +492,16 @@ function SidebarContent({
       className="@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
       <div className="flex items-center gap-[9px] px-3.5 pt-3.5 pb-2.5">
-        <BrandTile />
-        <span className="text-[15px] font-semibold">cezar</span>
+        {/* The wordmark lockup IS the brand (issue #143) — no tile-plus-label pairing beside it.
+            26px tall, like the tile it replaced: ~64px wide at the kit's aspect, inside the
+            264px column with room for the repo chip. The alt carries the name the old text
+            label used to, so screen readers say "Cezarion" once. */}
+        <img
+          src={brandLockupUrl(resolvedTheme)}
+          alt="Cezarion"
+          data-slot="brand-lockup"
+          className="h-[26px] w-auto shrink-0"
+        />
         {/* With project groups mounted the boot repo/branch is one group header among many —
             a chip repeating it up here would just be the first group's header said twice. */}
         {repo && !projectGroups ? (
@@ -820,19 +833,6 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
       {updateAvailable ? <StatusDot tone="pending" pulse className="size-[5px] shrink-0" /> : null}
       <span className="truncate">v{version}</span>
     </span>
-  )
-}
-
-/** The Cezarion square mark. The SVG carries its own dark fill, so it is the tile. */
-function BrandTile() {
-  return (
-    <img
-      src={brandLogoUrl}
-      alt=""
-      aria-hidden="true"
-      data-slot="brand-tile"
-      className="size-[26px] shrink-0 rounded-sm"
-    />
   )
 }
 

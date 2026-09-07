@@ -9,11 +9,15 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <link rel="icon" href="/cezarion-mark.svg" />
+    <!-- The dark mark by default (the app's default palette); the script below repoints it at
+         the light mark before first paint when the resolved theme is light. ThemeProvider keeps
+         it in sync after that (applyFaviconTheme) — the swap must not need a reload. -->
+    <link rel="icon" href="/cezarion-mark-dark.svg" />
     <title>cezar</title>
-    <!-- Theme before first paint — no flash. Mirrors resolveTheme()/applyResolvedTheme() in
-         src/lib/theme.ts; keep the two in sync. Shares the legacy cockpit's `cez-theme` key
-         ('light' | 'dark' | 'system'); anything else falls back to dark, as legacy does. -->
+    <!-- Theme before first paint — no flash. Mirrors resolveTheme()/applyResolvedTheme() +
+         applyFaviconTheme() in src/lib/theme.ts; keep the two in sync. Shares the legacy
+         cockpit's `cez-theme` key ('light' | 'dark' | 'system'); anything else falls back to
+         dark, as legacy does. -->
     <script>
       (function () {
         try {
@@ -23,6 +27,9 @@
             (pref === 'system' && matchMedia('(prefers-color-scheme: light)').matches)
           document.documentElement.classList.toggle('light', light)
           document.documentElement.style.colorScheme = light ? 'light' : 'dark'
+          // The themed tab icon (#143) — same resolved value as the class above.
+          var icon = document.querySelector('link[rel="icon"]')
+          if (icon) icon.href = light ? '/cezarion-mark-light.svg' : '/cezarion-mark-dark.svg'
         } catch (e) {
           // Storage or matchMedia unavailable — the default dark tokens already apply.
         }

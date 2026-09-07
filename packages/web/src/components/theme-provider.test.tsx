@@ -218,3 +218,48 @@ describe('useTheme', () => {
     expect(() => render(<Probe />)).toThrow(/useTheme\(\) must be called inside <ThemeProvider>/)
   })
 })
+
+describe('the themed tab icon (#143)', () => {
+  const icon = () => document.querySelector('link[rel="icon"]') as HTMLLinkElement
+
+  beforeEach(() => {
+    // index.html ships the link; jsdom ships nothing, so the document gets the same one.
+    const link = document.createElement('link')
+    link.rel = 'icon'
+    link.href = '/cezarion-mark-dark.svg'
+    document.head.append(link)
+  })
+
+  afterEach(() => icon()?.remove())
+
+  it('mounts with the favicon already matching the resolved theme', () => {
+    localStorage.setItem(THEME_STORAGE_KEY, 'light')
+    mockMatchMedia(false)
+    renderProvider()
+
+    expect(icon().getAttribute('href')).toBe('/cezarion-mark-light.svg')
+  })
+
+  it('swaps the favicon when the user toggles themes — no reload', () => {
+    mockMatchMedia(false)
+    renderProvider()
+    expect(icon().getAttribute('href')).toBe('/cezarion-mark-dark.svg')
+
+    act(() => setTheme('light'))
+    expect(icon().getAttribute('href')).toBe('/cezarion-mark-light.svg')
+
+    act(() => setTheme('dark'))
+    expect(icon().getAttribute('href')).toBe('/cezarion-mark-dark.svg')
+  })
+
+  it('follows a live OS flip while system is selected', () => {
+    localStorage.setItem(THEME_STORAGE_KEY, 'system')
+    const media = mockMatchMedia(false)
+    renderProvider()
+    expect(icon().getAttribute('href')).toBe('/cezarion-mark-dark.svg')
+
+    media.flipOsTo(true)
+
+    expect(icon().getAttribute('href')).toBe('/cezarion-mark-light.svg')
+  })
+})
