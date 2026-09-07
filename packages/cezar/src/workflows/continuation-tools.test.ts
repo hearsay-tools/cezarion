@@ -27,6 +27,7 @@ vi.mock('../core/runner-factory.ts', () => ({
       return {
         result: Promise.resolve({ text: 'ok', toolCalls: [], tokensUsed: 0 }),
         sendMessage: () => false,
+        discardQueuedMessages: () => {},
         end: () => {},
         interrupt: () => {},
         open: false,

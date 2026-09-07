@@ -642,6 +642,27 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     });
   });
 
+  it('drops a mid-turn queued prompt when discardQueuedMessages runs before idle', async () => {
+    await withSession({}, async ({ events, mock, session }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+
+      session.sendMessage([{ type: 'text', text: 'follow-up' }]);
+      await sleep(80);
+      expect(mock.promptPosts).toHaveLength(1);
+
+      session.discardQueuedMessages();
+
+      mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
+      await sleep(80);
+      expect(mock.promptPosts).toHaveLength(1);
+      expect(count(events, 'turn-end')).toBe(1);
+
+      session.sendMessage([{ type: 'text', text: 'after ask' }]);
+      await waitFor(() => mock.promptPosts.length === 2);
+      expect(mock.promptBodies[1]).toEqual({ parts: [{ type: 'text', text: 'after ask' }] });
+    });
+  });
+
   it('maps a native question to ask.requested and sends selected answers to its reply endpoint', async () => {
     await withSession({}, async ({ events, uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);

@@ -11,7 +11,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ContentBlock } from '../core/agent-runner.ts';
@@ -1523,6 +1524,36 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting');
     expect(readEvents(record.id).some((e) => e.type === 'ask.requested')).toBe(false);
+  }, 30_000);
+
+  it('a mid-turn follow-up does not resume past a CEZ:ASK park', async () => {
+    savedEnv.CEZ_OPENCODE_BIN = process.env.CEZ_OPENCODE_BIN;
+    process.env.CEZ_OPENCODE_BIN = join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../core/__fixtures__/opencode/mock-opencode-serve.mjs',
+    );
+    delete process.env.CEZ_DRY_RUN;
+
+    const record = manager.startRun(SINGLE_STEP, {
+      task: 'mock:hold-ask choose',
+      runner: 'opencode',
+      worktree: false,
+    });
+    currentId = record.id;
+    await waitFor(record.id, () => {
+      try {
+        return readEvents(record.id).some((e) => e.type === 'turn.started');
+      } catch {
+        return false;
+      }
+    });
+    expect(manager.sendMessage(record.id, [{ type: 'text', text: 'just resolve it' }])).toBe(true);
+    await waitFor(record.id, (r) => r?.status === 'waiting');
+
+    const events = readEvents(record.id);
+    expect(events.filter((e) => e.type === 'ask.requested')).toHaveLength(1);
+    expect(store.getRun(record.id)?.activity).toBeUndefined();
+    expect(events.filter((e) => e.type === 'turn.started')).toHaveLength(1);
   }, 30_000);
 
   it('a malformed CEZ:ASK degrades gracefully: parks waiting, no ask card', async () => {

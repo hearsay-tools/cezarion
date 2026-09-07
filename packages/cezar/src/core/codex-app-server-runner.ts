@@ -303,6 +303,8 @@ class CodexSession implements AgentSession {
     return true;
   }
 
+  discardQueuedMessages(): void {}
+
   end(): void {
     if (!this.stdinOpen) return;
     this.rejectPendingUserInput('session ended');
