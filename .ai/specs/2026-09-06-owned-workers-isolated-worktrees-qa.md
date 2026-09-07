@@ -551,3 +551,22 @@ fixture processes; 199 process environments were unreadable. Eight fresh
 artifacts and command/process evidence are retained privately under
 `native-pr138-review2-recovery2-*`. Only this QA appendix follows the tested
 source; the controller owns upstream integration, commits, push and CI.
+
+
+## Final upstream integration — 2026-09-07
+
+Integrated source `f7ad825aeff7c33aebf5d3ce58902087ae84e57a` passed typechecking,
+all six selected package/static-route/relationship/app-shell suites (**152 tests**,
+13.08s), unit **37 + 60**, build (**540 files / 84 web assets**) and packaged CLI
+**24 tests**, 36.06s. All commands exited 0. The full **7,599-test** result above
+covers the unchanged worker implementation; this upstream-only merge was checked
+with the affected suites, so no new full-suite pass is claimed.
+
+A fresh build with the upstream logo passed actual focused worker browser
+verification **8/8**, exit 0, 28.85s. Six fresh screenshots were inspected;
+32 links/four tabs, mobile/desktop theme and keyboard checks, the preserved human
+question, retry/offline and global status remain correct. Exact shared fixture
+PID265103 was verified and stopped; the final accessible-process audit found no
+matching fixture, with 206 environments unreadable. The source and staged merge
+tree remained identical throughout. Evidence is retained privately under
+`native-pr138-final-merge-*`; broader historical browser results remain unchanged.
