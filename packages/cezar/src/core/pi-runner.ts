@@ -310,6 +310,7 @@ export class PiRunner implements AgentRunner {
     const session: AgentSession = {
       result,
       sendMessage,
+      discardQueuedMessages: () => undefined,
       end,
       interrupt,
       pid: child.pid,

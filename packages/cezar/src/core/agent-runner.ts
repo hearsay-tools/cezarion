@@ -193,6 +193,13 @@ export interface AgentSession {
   readonly pid?: number;
   /** Write a user message into the live session. False when it is closed. */
   sendMessage(content: ContentBlock[]): boolean;
+  /**
+   * Drop follow-ups queued while a turn was still in flight. A `CEZ:ASK` park
+   * must call this so a mid-turn `sendMessage` cannot start a new turn after
+   * the question. Backends that never queue (they write or steer immediately)
+   * no-op.
+   */
+  discardQueuedMessages(): void;
   /** Graceful close: end input, then a SIGTERM→SIGKILL watchdog. */
   end(): void;
   /** Hard stop (used by cancel). */
