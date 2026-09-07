@@ -164,6 +164,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     sseStatus?: number;
     questionReplyStatus?: number;
     questionReplyDelayMs?: number;
+    questionGetDelayMs?: number;
   }
 
   /** In-process stand-in for `opencode serve`: just the endpoints the runner
@@ -199,7 +200,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       if (req.method === 'GET' && url === '/question') {
         questionGets.push(Date.now());
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(pendingQuestions));
+        if (opts.questionGetDelayMs) setTimeout(() => res.end(JSON.stringify(pendingQuestions)), opts.questionGetDelayMs);
+        else res.end(JSON.stringify(pendingQuestions));
         return;
       }
       let body = '';
@@ -1206,8 +1208,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
   it('defers auto-end while an early-idle reply still owns queued prompt delivery', async () => {
     await withSession(
-      { autoEndAfterFirstTurn: true, questionReplyDelayMs: AUTO_END_DELAY_MS + 180 },
-      async ({ events, mock, session }) => {
+      { autoEndAfterFirstTurn: true, questionReplyDelayMs: AUTO_END_DELAY_MS + 180, questionGetDelayMs: 75 },
+      async ({ events, uiEvents, mock, session }) => {
         await waitFor(() => mock.promptPosts.length === 1);
         mock.pendingQuestions.push({ id: 'q_idle_auto_end', sessionID: 'ses_test' });
         sendQuestion(mock, {
@@ -1219,7 +1221,11 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
             },
           ],
         });
-        await waitFor(() => mock.questionGets.length === 1);
+        await waitFor(() => uiEvents.some(event => event.type === 'ask.requested'));
+        expect(mock.questionGets).toHaveLength(1);
+        // Receiving GET is not receiving its response: a human can answer only after
+        // the runner publishes the question, including over a delayed local response.
+        expect(uiEvents.find(event => event.type === 'ask.requested')).toMatchObject({ requestId: 'q_idle_auto_end' });
 
         session.sendMessage([{ type: 'text', text: 'Choice: One' }]);
         await waitFor(() => mock.questionReplies.length === 1);

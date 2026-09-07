@@ -331,7 +331,8 @@ describe('RunStore durable delegation', () => {
     expect(store.listRuns()).toHaveLength(3);
   });
 
-  it('keeps the lifetime creation cap across restart, including destroyed workers and retries', () => {
+  // Exercise all 32 real durable creations; this is not a 5s filesystem throughput assertion.
+  it('keeps the lifetime creation cap across restart, including destroyed workers and retries', { timeout: 30_000 }, () => {
     const run = parent();
     for (let i = 0; i < 32; i++) {
       const id = randomUUID();

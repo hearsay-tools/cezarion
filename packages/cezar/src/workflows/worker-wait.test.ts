@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
@@ -16,12 +16,23 @@ const terminal = ['review', 'done', 'failed', 'cancelled'];
 async function until(predicate: () => boolean) { await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 }); }
 const waitOf = (run: RunRecord | undefined) => run?.delegation?.role === 'root' ? run.delegation.wait : undefined;
 
-describe('worker waits through RunManager', () => {
+// Real Git, durable fsync checkpoints and process shutdown share this outer budget.
+// Keep the separate 15s state/termination assertions and actual runner timers intact.
+describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   let root: string;
   let store: RunStore;
   let manager: RunManager;
   let semaphore: WorkspaceSemaphore;
   let saved: NodeJS.ProcessEnv;
+  let phase = 'setup';
+  let checkpoints: Array<{ phase: string; ms: number }> = [];
+  let began = 0;
+  let failureState: unknown;
+  function checkpoint(value: string) { phase = value; checkpoints.push({ phase, ms: Math.round(performance.now() - began) }); }
+  function captureState() { return { root, phase, checkpoints: checkpoints.map(entry => ({ ...entry })), elapsedMs: Math.round(performance.now() - began), busy: semaphore?.busy(),
+    runs: store?.listRuns().map(run => ({ id: run.id, status: run.status, error: run.error, step: run.currentStepId, wait: waitOf(run)?.phase,
+      events: store.readEvents(run.id).slice(-6).map(event => ({ type: event.type, seq: event.seq, ...('message' in event ? { message: String(event.message).slice(0, 256) } : {}) })) })),
+  }; }
   const bookkeeping: Promise<unknown>[] = [];
   const executions: Promise<unknown>[] = [];
   function track() {
@@ -35,7 +46,8 @@ describe('worker waits through RunManager', () => {
     internals.recordTurnEnd = (...args) => { const result = real(...args); bookkeeping.push(result); return result; };
   }
   beforeEach(() => {
-    saved = { ...process.env };
+    saved = { ...process.env }; began = performance.now(); checkpoints = []; failureState = undefined; checkpoint('setup');
+    onTestFailed(() => console.error('WORKER_WAIT_FAILURE_STATE', JSON.stringify(failureState ?? captureState())));
     process.env.CEZ_DRY_RUN = '1'; process.env.CEZ_AUTONAME = '0';
     root = mkdtempSync(join(tmpdir(), 'cez-worker-wait-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
@@ -45,6 +57,7 @@ describe('worker waits through RunManager', () => {
     manager = new RunManager(store, root, { semaphore }); track();
   });
   afterEach(async () => {
+    failureState = captureState();
     vi.useRealTimers();
     // Cancellation during the dequeue/spawn gap is covered by Task 6's barrier;
     // this fixture waits for its real runner handles before stopping processes.
@@ -59,46 +72,142 @@ describe('worker waits through RunManager', () => {
     manager.dispose(); store.flush();
     rmSync(root, { recursive: true, force: true });
     process.env = saved;
-  });
+  }, 30_000);
+  function controlledWire(options: { firstResultGate?: string; humanAnswerGate?: string } = {}) {
+    const wire = join(root, 'controlled-claude.cjs'); const received = join(root, 'human-answer-received.ndjson'); const initial = join(root, 'first-input-received');
+    writeFileSync(wire, String.raw`#!/usr/bin/env node
+const fs = require('node:fs'); const rl = require('node:readline').createInterface({ input: process.stdin });
+const emit = value => console.log(JSON.stringify(value)); let first = true; let queue = Promise.resolve();
+const options = ${JSON.stringify(options)}; const received = ${JSON.stringify(received)};
+const wait = async path => { while (path && !fs.existsSync(path)) await new Promise(resolve => setTimeout(resolve, 5)); };
+const args = process.argv.slice(2); const sessionIndex = args.indexOf('--session-id');
+emit({ type: 'system', subtype: 'init', session_id: sessionIndex >= 0 ? args[sessionIndex + 1] : 'controlled-session' });
+rl.on('line', line => { queue = queue.then(async () => {
+  const message = JSON.parse(line); const content = message.message?.content ?? [];
+  const text = typeof content === 'string' ? content : content.filter(part => part.type === 'text').map(part => part.text).join('\n');
+  if (first) { first = false; fs.writeFileSync(${JSON.stringify(initial)}, 'received'); await wait(options.firstResultGate); }
+  const humanAnswer = text.includes('human answer mock:hold');
+  if (humanAnswer && options.humanAnswerGate) { fs.appendFileSync(received, JSON.stringify({ text }) + '\n'); await wait(options.humanAnswerGate); }
+  const ask = !humanAnswer && text.includes('mock:ask') ? '\nCEZ:ASK ' + JSON.stringify({ questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Other' }] }] }) : '';
+  const reply = 'controlled wire reply' + ask;
+  emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
+  emit({ type: 'result', subtype: 'success', result: reply, usage: { input_tokens: 1, output_tokens: 1 } });
+}); });
+rl.on('close', () => process.exit(0));
+`); chmodSync(wire, 0o755);
+    process.env.CEZ_DRY_RUN = '0'; process.env.CEZ_CLAUDE_BIN = wire;
+    return { initialReceived: () => existsSync(initial), received: () => existsSync(received) ? readFileSync(received, 'utf8').trim().split('\n').length : 0 };
+  }
+
   async function parent(task = 'mock:hold') {
+    checkpoint('parent-start');
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task, runner: 'claude' });
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
     await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(run.id)?.sessionEverOpened === true);
-    return run;
+    checkpoint('parent-session-open'); return run;
   }
   async function worker(parentId: string, task = 'mock:hold') {
+    checkpoint('worker-plan-start');
     const id = randomUUID();
     const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
     const workspace = await planOwnedWorkspace(root, id, sha);
-    return store.createOwnedRun({ title: 'worker', task, workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', kind: 'agent', name: 'Task' }] }, parentId, randomUUID(), {
+    checkpoint('worker-planned');
+    const run = store.createOwnedRun({ title: 'worker', task, workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', kind: 'agent', name: 'Task' }] }, parentId, randomUUID(), {
       role: 'worker', permissions: [], parentRunId: parentId, workspace,
     }, 'a'.repeat(64));
+    checkpoint('worker-created'); return run;
   }
   function register(parentId: string, ids: string[], seconds = 600) {
     return manager.registerWorkerWait(parentId, workerWaitRequestSchema.parse({ workerIds: ids, timeoutSeconds: seconds }));
   }
-  async function restart(fakeClock = false, checkpoint?: string) {
-    store.flush(); const disk = checkpoint ?? readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
+  async function restart(fakeClock = false, diskCheckpoint?: string) {
+    checkpoint('restart-stop-start');
+    store.flush(); const disk = diskCheckpoint ?? readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
     for (const run of store.listRuns()) manager.cancel(run.id);
     await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
     await Promise.all(executions.splice(0));
-    await Promise.all(bookkeeping.splice(0)); manager.dispose(); store.flush();
+    await Promise.all(bookkeeping.splice(0)); manager.dispose(); store.flush(); checkpoint('restart-stopped');
     writeFileSync(join(root, '.ai/cezar/runs.json'), disk);
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
     if (fakeClock) vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-    manager = new RunManager(store, root, { semaphore }); track();
-    await manager.recover();
+    manager = new RunManager(store, root, { semaphore }); track(); checkpoint('restart-recover-start');
+    await manager.recover(); checkpoint('restart-recovered');
   }
+
+  it.each(['agent', 'check'].flatMap(next => ['early', 'late'].map(timing => ({ next, timing }))))('holds a nonfinal agent session and the following $next behind $timing admitted worker wake at cap one', async ({ next, timing }) => {
+    const run = manager.startRun({ name: 'multi-step wait', source: 'built-in', steps: [
+      { id: 'first', prompt: 'mock:hold' },
+      next === 'agent' ? { id: 'next', prompt: 'mock:hold' } : { id: 'next', command: 'echo checked' },
+    ] }, { task: 'parent', runner: 'claude' });
+    store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+    const engine = manager as unknown as { workerWaiting: Set<string>; active: Map<string, { sessionEverOpened?: boolean; session?: { open: boolean } }> };
+    await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
+    const first = engine.active.get(run.id)!.session;
+    const w = await worker(run.id, 'mock:slow');
+    if (timing === 'late') await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
+    register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
+    await until(() => engine.workerWaiting.has(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
+    await new Promise(resolve => setTimeout(resolve, 400)); // Observe past the real 250ms runner auto-end timer.
+    expect.soft(engine.active.get(run.id)?.session).toBe(first);
+    expect.soft(first?.open).toBe(true);
+    expect.soft(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
+    expect.soft(semaphore.busy()).toBe(1);
+    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
+    await until(() => !!store.getRun(run.id)?.agentInputs?.some(input => input.source === 'lifecycle' && input.deliveredAt));
+    expect(engine.workerWaiting.has(run.id)).toBe(false); expect(semaphore.busy()).toBe(1);
+    await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status !== 'pending');
+    expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')?.status).toBe('done');
+    expect(engine.workerWaiting.has(run.id)).toBe(false);
+  });
+
+  it('an actual session close during a nonfinal wait cannot advance a check or retain a capacity exemption', async () => {
+    const run = manager.startRun({ name: 'closed chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:hold' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
+    store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+    const engine = manager as unknown as { workerWaiting: Set<string>; active: Map<string, { sessionEverOpened?: boolean; session?: { end(): void } }> };
+    await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
+    const w = await worker(run.id, 'mock:slow'); register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
+    await until(() => engine.workerWaiting.has(run.id));
+    engine.active.get(run.id)!.session!.end();
+    await until(() => terminal.includes(store.getRun(run.id)!.status));
+    expect(store.getRun(run.id)).toMatchObject({ status: 'failed', error: expect.stringContaining('worker wait') });
+    expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
+    expect(engine.workerWaiting.has(run.id)).toBe(false);
+    await until(() => !manager.isActive(w.id)); expect(semaphore.busy()).toBe(0);
+  });
+
+  it('a portable human ask still takes precedence over an accepted nonfinal worker wait', async () => {
+    const run = manager.startRun({ name: 'ask chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:ask' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
+    store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+    const engine = manager as unknown as { workerWaiting: Set<string>; active: Map<string, { sessionEverOpened?: boolean }> };
+    await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
+    const w = await worker(run.id); register(run.id, [w.id]);
+    await until(() => store.getRun(run.id)?.status === 'waiting');
+    expect(store.readEvents(run.id).some(event => event.type === 'ask.requested')).toBe(true);
+    expect(engine.workerWaiting.has(run.id)).toBe(false);
+    manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15000);
+    expect(store.getRun(run.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
+    expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+    await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status === 'done');
+    expect(store.readEvents(run.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
+  });
+
+  it('ordinary nonfinal auto-end still advances to the next check without a worker wait', async () => {
+    const run = manager.startRun({ name: 'ordinary chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:hold' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
+    await until(() => terminal.includes(store.getRun(run.id)!.status));
+    expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['done', 'done']);
+    expect(semaphore.busy()).toBe(0);
+  });
 
   async function queuedWake() {
     const p = await parent(); const w = await worker(p.id, 'mock:slow');
-    const wait = register(p.id, [w.id]);
+    const wait = register(p.id, [w.id]); checkpoint('queued-wake-registered');
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     const delegation = store.getRun(p.id)!.delegation!;
     if (delegation.role !== 'root') throw Error('fixture');
     store.commitDelegation([{ id: p.id, delegation: { ...delegation, wait: { ...wait, deadline: new Date().toISOString() } } }]);
-    await restart();
-    await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(w.id)?.sessionEverOpened === true);
+    await restart(); checkpoint('queued-wake-restarted');
+    await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(w.id)?.sessionEverOpened === true); checkpoint('queued-wake-child-open');
     expect(store.getRun(p.id)?.status).toBe('queued');
     return { p, w, wait };
   }
@@ -136,6 +245,7 @@ describe('worker waits through RunManager', () => {
 
   for (const role of ['root', 'worker'] as const) {
     it(`${role}: restart re-admits a persisted human answer before its first boundary`, async () => {
+      const replyGate = join(root, 'release-human-reply'); const wire = controlledWire({ humanAnswerGate: replyGate });
       const p = await parent('mock:ask');
       await until(() => store.getRun(p.id)?.status === 'waiting');
       const w = await worker(p.id, 'mock:ask');
@@ -152,7 +262,8 @@ describe('worker waits through RunManager', () => {
       store.flush(); const checkpoint = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
       expect(store.getRun(target.id)?.continuationMessage?.origin).toBe('human');
       await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(target.id)?.sessionEverOpened === true);
-      // Interrupt before the mock's delayed first boundary: acceptance is not a receipt.
+      // The real wire received the accepted input but cannot reply until released.
+      await until(() => wire.received() === 1);
       manager.cancel(target.id);
       await until(() => !manager.isActive(target.id));
       expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
@@ -160,6 +271,9 @@ describe('worker waits through RunManager', () => {
       expect(store.getRun(target.id)?.status).not.toBe('failed');
       expect(store.getRun(w.id)?.status).not.toBe('cancelled');
       expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
+      await until(() => wire.received() === 2);
+      expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
+      writeFileSync(replyGate, 'release');
       await until(() => store.readEvents(target.id).some(event => event.type === 'human-input-delivered'));
       expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
       expect(store.readEvents(target.id).filter(event => event.type === 'user-message').at(-1)?.text).toContain('human answer');
@@ -432,7 +546,9 @@ describe('worker waits through RunManager', () => {
   });
 
   it('a deadline write failure is contained and retried without losing intent or capacity', async () => {
-    const p = await parent(); const w = await worker(p.id);
+    // This fault exercises only deadline persistence, never an unrelated live turn.
+    const release = join(root, 'release-deadline-turn'); const wire = controlledWire({ firstResultGate: release });
+    const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const wait = register(p.id, [w.id], 1); // registered: still counts as an executing turn
     const busy = semaphore.busy(); const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -582,12 +698,12 @@ describe('worker waits through RunManager', () => {
     });
   }
   it('delivers all 32 terminal outcomes within the input bound without dropping durable summaries', async () => {
-    const p = await parent(); const ids: string[] = [];
+    const p = await parent(); checkpoint('32-parent-open'); const ids: string[] = [];
     for (let i = 0; i < 32; i++) {
-      const w = await worker(p.id); ids.push(w.id);
+      const w = await worker(p.id); ids.push(w.id); checkpoint(`32-created-${i + 1}`);
       store.updateRun(w.id, { status: 'failed', error: '\u0000'.repeat(4_000) });
     }
-    const wait = register(p.id, ids);
+    checkpoint('32-before-register'); const wait = register(p.id, ids); checkpoint('32-registered');
     expect(wait.outcomes).toHaveLength(32);
     expect(wait.outcomes.every(outcome => outcome.summary?.length === 4_000)).toBe(true);
     await until(() => !waitOf(store.getRun(p.id)));
@@ -598,13 +714,17 @@ describe('worker waits through RunManager', () => {
   });
 
   it('observes completion between registration and park and reports every selected status', async () => {
-    const p = await parent();
+    // Hold the real wire's first result until every real Git fixture exists.
+    // A fixed playback delay cannot establish this ordering on a loaded host.
+    const release = join(root, 'release-first-turn'); const wire = controlledWire({ firstResultGate: release });
+    const p = await parent(); await until(wire.initialReceived);
     const statuses = ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'] as const;
     const children = [];
     for (const status of statuses) children.push({ run: await worker(p.id), status });
     const wait = register(p.id, children.map(child => child.run.id));
     expect(wait.phase).toBe('registered');
     for (const child of children) store.updateRun(child.run.id, { status: child.status });
+    writeFileSync(release, 'release');
     await until(() => !waitOf(store.getRun(p.id)));
     const input = store.getRun(p.id)?.agentInputs?.[0];
     for (const child of children) expect(input?.text).toContain(JSON.stringify({ workerId: child.run.id, status: child.status }));
@@ -675,13 +795,13 @@ describe('worker waits through RunManager', () => {
     expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
   });
   it('rebuilds a parked deadline on restart, expires without cancelling the queued child', async () => {
-    const p = await parent(); const w = await worker(p.id);
+    const p = await parent(); checkpoint('deadline-parent-open'); const w = await worker(p.id); checkpoint('deadline-worker-created');
     const wait = register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    await restart(true);
+    checkpoint('deadline-before-restart'); await restart(true); checkpoint('deadline-recovered');
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
-    await vi.advanceTimersByTimeAsync(600_000);
+    await vi.advanceTimersByTimeAsync(600_000); checkpoint('deadline-timer-fired');
     expect(waitOf(store.getRun(p.id))?.phase).toBe('wake-pending');
     vi.useRealTimers();
     await until(() => !waitOf(store.getRun(p.id)));

@@ -1096,3 +1096,19 @@ it('keeps a visible human ask above parked worker context in the header and dock
   expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain('needs you')
   expect(screen.getByText('Choose a path')).toBeTruthy()
 })
+
+it.each([false, true].flatMap(fallback => (['pending', 'refused-human-attempt', 'stale-receipt', 'agent-input', 'matched-answer', 'old-history'] as const).map(mode => ({ fallback, mode }))))('history attention (fallback=$fallback) handles $mode separately from visible historical asks', ({ fallback, mode }) => {
+  const ask = line(10, 'ask.requested', { requestId: 'compact-ask', questions: [{ header: 'Choice', question: 'Choose a current path', options: [{ label: 'First' }, { label: 'Second' }] }] })
+  const visibleEvents = [ask]
+  const currentEvents = mode === 'old-history' ? [] : [ask,
+    ...(mode === 'refused-human-attempt' ? [line(11, 'user-message', { text: 'backend refused this attempt' })] : []),
+    ...(mode === 'stale-receipt' ? [line(11, 'human-input-delivered', { askSeq: 9 })] : []),
+    ...(mode === 'agent-input' ? [line(11, 'agent-input', { input: { text: 'worker finished' } })] : []),
+    ...(mode === 'matched-answer' ? [line(12, 'human-input-delivered', { askSeq: 10 })] : []),
+  ]
+  const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents, isPending: false, contextPending: false, fallback, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
+  renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-07T12:00:00.000Z', phase: 'parked', outcomes: [] } } })} thread={reduceThread(visibleEvents)} currentThread={reduceThread(currentEvents)} history={history} />)
+  const expectedPending = mode !== 'matched-answer' && mode !== 'old-history'
+  expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(expectedPending ? 'waiting for your reply' : 'Waiting on workers')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(expectedPending ? 'needs you' : 'waiting on workers')
+})

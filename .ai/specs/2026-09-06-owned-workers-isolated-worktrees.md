@@ -165,7 +165,12 @@ Missing/malformed private evidence, unavailable homes, conflicting model locks,
 or incompatible native environment layout explicitly refuse execution/Continue.
 Unshipped intermediate owned records without this evidence are not migrated.
 The internal primitive has an explicit compatibility marker; service acceptance
-always supplies concrete identity. No credentials or configuration contents are
+always supplies concrete identity, including an independently validated private
+snapshot of effective tool and Bash grants. Explicit empty lists remain empty;
+deliberately absent grants remain absent. Public workflow-definition salvage
+cannot broaden accepted permissions on queued execution, recovery or Continue.
+Missing/malformed private grants refuse execution rather than fall back to
+ordinary defaults. No credentials or configuration contents are
 snapshotted, and inspection/history/stop/verified cleanup remain available.
 
 Use fixed service limits rather than new configuration: at most 32 accepted
@@ -225,6 +230,13 @@ shell open while waiting for a queued child.
 6. Deliver attributed lifecycle context at a safe turn boundary, consume the
    wait receipt, and clear the wait. No automatic re-wait. The parent chooses
    what to do next. Timeout does not cancel children.
+
+Accepted waits also hold nonfinal agent steps (agent→agent and agent→check).
+All four runners check an internal auto-end veto at timer execution; the manager
+holds the exact current session until admitted wake delivery and its reply turn.
+An actual session close before wait completion fails that step rather than
+advancing the workflow with a stale capacity exemption. Ordinary no-wait steps
+retain automatic completion.
 
 Durable wait deadlines also expire registered intents whose parent never yields;
 they must not silently remove an executing parent's capacity accounting. Deliver
@@ -305,6 +317,13 @@ Destroy is serialized per worker and durable:
    calls join or retry the same operation. Already absent verified resources
    count as cleaned. Preserve run records and NDJSON events.
 
+Execution admission requires a valid private queued checkpoint or a completed
+prior generation. Only the manager that owns an exact deferred starting
+generation can admit it without rotation. Missing/malformed evidence or an
+unowned starting generation refuses queued recovery and Continue; no subsequent
+execution may overwrite unknown termination evidence to authorize destruction.
+History, stop and explicit verified-cleanup attempts remain reachable.
+
 Each Git/process operation has a bounded timeout. A failed cleanup never gets a
 success response just because cancellation was sent. Partial cleanup survives
 restart and permits a later retry; no autonomous destructive retry after a
@@ -341,7 +360,16 @@ wait phase to the existing slim workspace run index. Its actual producer and
 live palette constructor project the same fields, so global Tasks and the
 palette use the same parked-only attention decision as project lists. Receipts,
 workspace references and private execution identity stay out of that projection.
-A visible human question takes priority over worker-wait presentation.
+A visible human question takes priority over worker-wait presentation. The
+compact current-history producer retains the latest valid unanswered ask, and
+the header/dock derive attention from that current context rather than paginated
+historical cards. Full-replay fallback uses its authoritative current events through
+the same scan; only views without history retain legacy attention inference.
+Manager delivery, compact context and cockpit attention share
+one pure acknowledgement reducer and the existing strict question schemas:
+only a matching successful `human-input-delivered` receipt retires that ask.
+Queued/refused human attempts, agent input and lifecycle events do not. Historical
+transcript rendering retains its existing compatibility behavior.
 
 No artwork is needed for operational links/statuses; deliberate no-art decision.
 Use existing status and motion tokens, no new animation. Check keyboard focus,
@@ -418,3 +446,15 @@ The owner approved this complete spec, including its transport, command,
 finite-limit, persistence and retention details. The implementation plan is
 `.ai/specs/2026-09-06-owned-workers-isolated-worktrees-plan.md`; execution follows
 the plan's TDD and verification gates.
+
+
+### Recorded verification outcome (2026-09-07)
+
+The final corrected implementation passed all five ordered local gates and all
+eight issue-specific real-browser cases. The full browser aggregate remains
+222passed/two failed/six conditional skips; unrelated baseline failures are
+tracked separately in [#136](https://github.com/wjarka/cezar/issues/136) and
+[#137](https://github.com/wjarka/cezar/issues/137), following the user's instruction
+to keep further work scoped to #111. Exact commands, observations, incident
+limitations and artifact references are in the adjacent QA report. Publication
+and CI are controller-owned and pending.

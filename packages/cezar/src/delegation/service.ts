@@ -66,7 +66,9 @@ export class DelegationService {
       }
       authorizeSpawn(caller, parent, project.id);
       const settings = project.manager.delegationExecutionSettings(parent.id);
-      const identity = acceptedWorkerIdentitySchema.parse({ kind: 'accepted', account: settings.accountBinding, model: settings.model, effort: settings.effort });
+      const identity = acceptedWorkerIdentitySchema.parse({ kind: 'accepted', account: settings.accountBinding, model: settings.model, effort: settings.effort,
+        grants: { ...(settings.allowedTools === undefined ? {} : { allowedTools: [...settings.allowedTools] }),
+          ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: [...settings.bashAllowlist] }) } });
       const baselineSha = await resolveWorkerBaseline(project.root, settings.cwd, request.baseline);
       const workspace = await planOwnedWorkspace(project.root, randomUUID(), baselineSha);
       // Ref resolution yields to Finish, revocation and project disposal; recheck before acceptance.

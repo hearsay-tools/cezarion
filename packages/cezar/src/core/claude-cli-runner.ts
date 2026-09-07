@@ -276,7 +276,10 @@ export class ClaudeCliRunner implements AgentRunner {
             agentInputReady = pendingPromptTurns === 0;
             onEvent?.({ type: 'turn-end' });
             if (opts.autoEndAfterFirstTurn && stdinOpen && !autoEndTimer) {
-              autoEndTimer = setTimeout(end, AUTO_END_DELAY_MS);
+              autoEndTimer = setTimeout(() => {
+                autoEndTimer = undefined;
+                if (opts.shouldAutoEnd?.() !== false) end();
+              }, AUTO_END_DELAY_MS);
               autoEndTimer.unref?.();
             }
           }

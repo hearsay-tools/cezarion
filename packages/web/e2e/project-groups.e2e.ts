@@ -52,10 +52,10 @@ function expectedNavHrefs(projectId: string): string[] {
     scoped(projectId, '/'),
     ...(followupsAvailable ? [scoped(projectId, '/inbox')] : []),
     scoped(projectId, '/git'),
-    ...(forgeAvailable ? [scoped(projectId, '/github')] : []),
+    ...(projectId === bootProject && forgeAvailable ? [scoped(projectId, '/github')] : []),
     // #801: the automations opt-in is workspace-wide, the forge gate is per project — the item
     // needs both.
-    ...(forgeAvailable && automationsAvailable ? [scoped(projectId, '/automations')] : []),
+    ...(projectId === bootProject && forgeAvailable && automationsAvailable ? [scoped(projectId, '/automations')] : []),
     scoped(projectId, '/skills'),
     scoped(projectId, '/workflows'),
     scoped(projectId, '/settings'),
@@ -231,11 +231,11 @@ describe('the grouped multi-project sidebar', () => {
     if (singleProject) skip()
     gotoGrouped(scoped(bootProject, '/git'))
     setGroupExpanded(ALPHA.id, true)
-    // The GitHub row waits on the health answer — settle it before sampling any group's nav,
-    // exactly as the flat-shell specs do.
+    // Only the boot repository has a GitHub remote. The empty Alpha fixture
+    // must not inherit the boot project's forge navigation (#698).
     if (forgeAvailable) {
       browser.waitForFunction(
-        `document.querySelector('${groupBody(ALPHA.id)} a[href="${scoped(ALPHA.id, '/github')}"]') !== null`
+        `document.querySelector('${groupBody(bootProject)} a[href="${scoped(bootProject, '/github')}"]') !== null`
       )
     }
 

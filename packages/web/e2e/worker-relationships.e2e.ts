@@ -135,6 +135,8 @@ it('shows unavailable parent with retry, successful empty state, worker wait and
   open(askId)
   browser.waitForFunction(`document.body.textContent.includes('Which implementation should I use?')`)
   expect(browser.snapshot()).toContain('Minimal')
+  expect(browser.text('[data-slot="paused-hint"]')).toContain('waiting for your reply')
+  expect(browser.text('header [data-slot="pill"]')).toContain('needs you')
   expect(browser.text('body')).toContain('Agent input')
   expect(browser.count('[data-slot="user-bubble"]')).toBe(1) // the original human task, never an agent-input bubble
   expect(browser.text('[data-slot="user-bubble"]')).not.toContain('Preserve the human question')

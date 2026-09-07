@@ -6,7 +6,6 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
-  askRequestSchema,
   parseAskMarkerResult,
   stripAskMarker,
   type AskMarkerParseResult,
@@ -45,7 +44,7 @@ import {
   workerWaitRequestSchema,
   attachmentExtension,
   delegationStateSchema,
-  humanInputDeliveredEventSchema,
+  pendingHumanAsk,
   isImageAttachmentName,
   isImageMediaType,
 } from '@open-mercato/cezar-contract';
@@ -249,6 +248,10 @@ interface ActiveRun {
   pendingHumanAsk: boolean;
   agentInputError?: string;
   agentInputDraining?: boolean;
+  /** A delivered worker wake must receive its own turn before nonfinal auto-end. */
+  workerWakeTurn?: AgentSession;
+  /** Last completed boundary belongs to exactly this still-open session. */
+  atTurnBoundary?: AgentSession;
   currentStepId?: string;
   idleTimer?: NodeJS.Timeout;
   monitoringWakeTimer?: NodeJS.Timeout;
@@ -629,7 +632,10 @@ export class RunManager {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') return;
     const existing = this.executions.get(runId);
     if (existing) {
-      if (!existing.admitted && admitted) { existing.admitted = true; return; }
+      const proof = this.store.readWorkerExecution(runId);
+      if (!existing.admitted && admitted && proof?.generation === existing.generation && proof.phase === 'starting') {
+        existing.admitted = true; return;
+      }
       throw new Error('Worker execution is still finalizing');
     }
     const generation = this.store.commitWorkerExecutionStart(runId);
@@ -667,7 +673,10 @@ export class RunManager {
   private persistWorkerCompletion(runId: string, generation: string): void {
     try {
       if (this.stoppedWorkers.has(runId)) this.store.commitWorkerCancellation(runId);
-      if (this.store.commitWorkerExecutionComplete(runId, generation)) this.finalizedWorkers.delete(runId);
+      if (this.store.commitWorkerExecutionComplete(runId, generation)) {
+        this.finalizedWorkers.delete(runId);
+        removeAgentTmpDir(this.dataDir, runId);
+      }
     } catch { /* Finalized in this process; preserve exact generation for an explicit retry. */ }
   }
 
@@ -1112,9 +1121,10 @@ export class RunManager {
         delegation.data.workspace.ownerRunId !== run.id || delegation.data.destroy) {
       throw new DelegationPolicyError('incompatible_state', 'Run is not an executable owned creation');
     }
-    // The persisted definition carries grants, never executable worker workflow authority.
-    // Rebuild the bundled single step: old/mutated records must not inject commands or chains.
-    const grants = run.workflowDef?.steps.find(step => step.id === QUICK_TASK_WORKFLOW.steps[0]!.id);
+    // Accepted permissions are private immutable evidence. Only explicit internal
+    // primitive records retain the public-definition compatibility path.
+    const grants = this.workerIdentity(run.id)?.grants
+      ?? run.workflowDef?.steps.find(step => step.id === QUICK_TASK_WORKFLOW.steps[0]!.id);
     return {
       workflow: { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
         ...(grants?.allowedTools === undefined ? {} : { allowedTools: [...grants.allowedTools] }),
@@ -1463,7 +1473,11 @@ export class RunManager {
     // A crash never reaches `dropActive`, so its temp directory (#785) outlived the run.
     // Startup is the one moment we know which runs are still live, so sweep every other
     // per-run directory here — bounded to `<dataDir>/tmp`, never a sibling.
-    sweepAgentTmpDirs(this.dataDir, live.map((r) => r.id));
+    // An owned process can survive its controller, including behind terminal
+    // public status. Unknown private termination retains that process's scratch.
+    const retained = this.store.listRuns().filter(run => run.delegation?.role === 'worker' &&
+      this.store.readWorkerExecution(run.id)?.phase !== 'complete');
+    sweepAgentTmpDirs(this.dataDir, [...live, ...retained].map(run => run.id));
     for (const run of live) {
       if (this.isActive(run.id)) continue;
       if (this.workerExecutionStopped(run.id)) continue;
@@ -1611,10 +1625,11 @@ export class RunManager {
     // the lifecycle.
     void this.enforceRetention();
     // The run's temp directory (#785) goes on the same terminal transition, and
-    // unconditionally — it is scratch, not an artifact, so unlike a worktree
+    // for ordinary runs. Owned scratch waits for private execution completion.
+    // It is scratch, not an artifact, so unlike a worktree
     // there is no keep-count to respect and nothing left to recover from it. A
     // Continue (or an auto-resume) re-creates it through `agentEnv`.
-    removeAgentTmpDir(this.dataDir, runId);
+    if (this.store.getRun(runId)?.delegation?.role !== 'worker') removeAgentTmpDir(this.dataDir, runId);
   }
 
   // ---- usage-limit auto-resume (spec 2026-08-03-auto-resume-after-usage-limit) --------------
@@ -2365,7 +2380,7 @@ export class RunManager {
       deadline: new Date(Date.now() + parsed.timeoutSeconds * 1000).toISOString(), phase: 'registered', outcomes: [] };
     this.store.commitDelegation([{ id: parentId, delegation: { ...run.delegation, wait } }]);
     this.reconcileWorkerWaits();
-    if (this.waiting.has(parentId)) this.parkWorkerWait(parentId, state);
+    if (this.waiting.has(parentId) || state.atTurnBoundary === state.session) this.parkWorkerWait(parentId, state);
     return this.workerWait(parentId)!;
   }
 
@@ -2567,16 +2582,7 @@ export class RunManager {
   /** Transcript bubbles include refused sends. Only a successful delivery
    * checkpoint can answer the specific ask observed before that send. */
   private pendingHumanAskSeq(runId: string): number | undefined {
-    let pending: number | undefined;
-    for (const event of this.store.readEvents(runId)) {
-      if (event.type === 'ask.requested' && typeof event.requestId === 'string' &&
-        askRequestSchema.safeParse({ questions: event.questions }).success) pending = event.seq;
-      else if (event.type === 'human-input-delivered') {
-        const delivered = humanInputDeliveredEventSchema.safeParse(event);
-        if (delivered.success && delivered.data.askSeq === pending) pending = undefined;
-      }
-    }
-    return pending;
+    return pendingHumanAsk(this.store.readEvents(runId))?.seq;
   }
 
   private hasPendingHumanAsk(runId: string): boolean {
@@ -2623,6 +2629,7 @@ export class RunManager {
         return false;
       }
       this.resumeParkedRun(runId, state);
+      if (this.workerWait(runId)?.wakeId === input.id) state.workerWakeTurn = state.session;
       // Retiring the wait commits the resumed status too, closing the crash
       // window where a delivered wake otherwise still looks like idle success.
       if (this.workerWait(runId)?.wakeId === input.id) this.withdrawWorkerWait(runId);
@@ -2679,6 +2686,7 @@ export class RunManager {
   /** Restore active lifecycle/accounting when either Cezar or the backend
    * resumes work in a parked session. */
   private resumeParkedRun(runId: string, state: ActiveRun): void {
+    state.atTurnBoundary = undefined;
     this.workerWaiting.delete(runId);
     this.clearIdleTimer(state);
     this.clearMonitoringWakeTimer(state, runId);
@@ -3128,6 +3136,8 @@ export class RunManager {
       }
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
+        state.workerWakeTurn = undefined;
+        state.atTurnBoundary = state.session;
         // A completed turn acknowledges the opening payload. Until then a restart
         // must replay it, including a crash after startSession but before delivery.
         if (!state.cancelled) {
@@ -3291,11 +3301,14 @@ export class RunManager {
     // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
     // keeps today's defaults.
     const defSteps = record?.workflowDef?.steps;
-    const toolsStep =
+    const toolsStep = (
       defSteps === undefined || (sessionId !== undefined && owningStep === undefined)
         ? undefined
         : defSteps.find((s) => s.id === owningStep?.id)
-          ?? [...defSteps].reverse().find((s) => stepKind(s) === 'agent');
+          ?? [...defSteps].reverse().find((s) => stepKind(s) === 'agent'));
+    const grants = this.workerIdentity(runId)?.grants ?? {
+      allowedTools: allowedToolsForStep(toolsStep, continueBackend), bashAllowlist: toolsStep?.bashAllowlist,
+    };
     // The temp-directory preflight (#785) rides along with the account resolution: a resumed
     // turn hits the same broken `/tmp` a fresh one would, and an agent whose shell silently
     // returns nothing is worse than a turn that refuses to start and says why.
@@ -3321,7 +3334,7 @@ export class RunManager {
 
     state.delegationSettings = { cwd: state.cwd, runner: continueBackend, model: continueModel,
       effort: agentModelsLocked(this.repoRoot) ? undefined : record?.effort, agentProfile: continueProfile.profileId, accountBinding: continueProfile.accountBinding,
-      systemPrompt: record?.systemPrompt, allowedTools: allowedToolsForStep(toolsStep, continueBackend), bashAllowlist: toolsStep?.bashAllowlist };
+      systemPrompt: record?.systemPrompt, allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
     const runner = createRunner(continueBackend);
     state.currentStepId = stepId;
     this.beginUsageInvocation(runId, state, stepId);
@@ -3349,8 +3362,8 @@ export class RunManager {
           : openingPrompt,
         ...(openingImages.length ? { images: openingImages } : {}),
         cwd: state.cwd,
-        allowedTools: allowedToolsForStep(toolsStep, continueBackend),
-        bashAllowlist: toolsStep?.bashAllowlist,
+        allowedTools: grants.allowedTools,
+        bashAllowlist: grants.bashAllowlist,
         additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), continueProfile.env),
         env: { ...continueProfile.env, ...delegation?.env },
         model: continueModel,
@@ -3883,6 +3896,8 @@ export class RunManager {
       }
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
+        state.workerWakeTurn = undefined;
+        state.atTurnBoundary = state.session;
         // v2 `turn.completed` already flushed the coalescers; the v1 turn
         // boundary flushes again (idempotent) as a backstop.
         sink.flushAll();
@@ -3891,7 +3906,7 @@ export class RunManager {
         const done = interactive && sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
         // `CEZ:ASK` → the user is blocked; wins over `CEZ:MONITORING`, loses to
         // `CEZ:DONE` (#473).
-        const { ask, notes: askNotes } = resolveAskTurn(turnText, Boolean(interactive && sessionOpen) && !done);
+        const { ask, notes: askNotes } = resolveAskTurn(turnText, Boolean((interactive || this.workerWait(runId)) && sessionOpen) && !done);
         const monitoring =
           interactive &&
           sessionOpen &&
@@ -3913,7 +3928,7 @@ export class RunManager {
           state.session?.end();
           return;
         }
-        const waiting = interactive && sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId);
+        const waiting = (interactive || !!ask) && sessionOpen && !agentInputDelivered && !workerWaitParked && !this.workerWakeAdmitted.has(runId);
         if (waiting) {
           // Turn over, session open. Either the ball is in the user's court
           // (`waiting`) — optionally with a structured `CEZ:ASK` question the
@@ -3994,10 +4009,13 @@ export class RunManager {
     if (state.cancelled || (beforeSpawn && this.executionBlockedByRootFinish(beforeSpawn))) return null;
     this.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
 
+    const grants = this.workerIdentity(runId)?.grants ?? {
+      allowedTools: allowedToolsForStep(step, stepBackend), bashAllowlist: step.bashAllowlist,
+    };
     state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: backendModel,
       effort: agentModelsLocked(this.repoRoot) ? undefined : this.store.getRun(runId)?.effort ?? input.effort,
       agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: composeSystemPrompt(systemPrompt, extraSystemPrompt),
-      allowedTools: allowedToolsForStep(step, stepBackend), bashAllowlist: step.bashAllowlist };
+      allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
     const runner = createRunner(stepBackend);
     let session: AgentSession | undefined;
     state.currentStepId = step.id;
@@ -4020,8 +4038,8 @@ export class RunManager {
           userPrompt,
           images,
           cwd: state.cwd,
-          allowedTools: allowedToolsForStep(step, stepBackend),
-          bashAllowlist: step.bashAllowlist,
+          allowedTools: grants.allowedTools,
+          bashAllowlist: grants.bashAllowlist,
           // The handoff file lives outside the worktree — grant access.
           additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), stepProfile.env),
           env: { ...stepProfile.env, ...delegation?.env },
@@ -4036,6 +4054,8 @@ export class RunManager {
         onEvent,
         {
           autoEndAfterFirstTurn: !interactive,
+          shouldAutoEnd: () => this.active.get(runId) !== state || state.session !== session ||
+            (!this.workerWait(runId) && state.workerWakeTurn !== session),
           onUiEvent: (event) => this.handleRunnerUiEvent(runId, state, sink, event),
           onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
         },
@@ -4058,7 +4078,8 @@ export class RunManager {
       setupComplete = true;
       const result = await session.result;
       if (this.isDisposedDelegatedRun(runId)) return null;
-      const inputOrSessionError = sessionError ?? state.agentInputError;
+      const inputOrSessionError = sessionError ?? state.agentInputError ??
+        (!state.cancelled && this.workerWait(runId) ? 'Agent session ended before its accepted worker wait completed' : undefined);
       if (inputOrSessionError) {
         sink.sessionEnded('error', inputOrSessionError);
         return inputOrSessionError;
@@ -4085,6 +4106,13 @@ export class RunManager {
       this.monitoring.delete(runId);
       this.waiting.delete(runId);
       this.clearMonitoringWakeTimer(state, runId);
+      this.workerWaiting.delete(runId);
+      this.workerWakeAdmitted.delete(runId);
+      if (this.workerWakeQueuedAt.delete(runId)) {
+        const at = this.queue.indexOf(runId); if (at >= 0) this.queue.splice(at, 1);
+      }
+      state.workerWakeTurn = undefined;
+      state.atTurnBoundary = undefined;
       state.session = undefined;
       state.currentStepId = undefined;
       state.interrupt = () => undefined;
@@ -4125,6 +4153,7 @@ export class RunManager {
     this.recordUsageUiEvent(runId, state, event);
     sink.handle(event);
     if (state.cancelled) return;
+    if (isRunnerActivity(event)) state.atTurnBoundary = undefined;
     if (event.type === 'ask.requested') {
       this.prepareHumanAsk(runId, state);
       this.clearIdleTimer(state);

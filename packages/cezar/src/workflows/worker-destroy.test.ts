@@ -12,11 +12,14 @@ import * as config from '../config.ts';
 import * as worktrees from '../git-worktree.ts';
 import * as runners from '../core/runner-factory.ts';
 import { RunManager } from './run.ts';
+import { DelegationService } from '../delegation/service.ts';
 
 const until = async (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
 function gate() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; }
 
-describe('worker termination barrier', () => {
+// Real Git, durable fsync checkpoints and process shutdown share this outer budget.
+// Keep the separate 15s state/termination assertions and actual runner timers intact.
+describe('worker termination barrier', { timeout: 30_000 }, () => {
   let root: string, store: RunStore, manager: RunManager, parent: RunRecord;
   const releases: Array<() => void> = [];
   const executions: Promise<unknown>[] = [];
@@ -42,7 +45,7 @@ describe('worker termination barrier', () => {
     await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
     manager.dispose(); store.flush(); vi.restoreAllMocks(); vi.unstubAllEnvs();
     rmSync(root, { recursive: true, force: true });
-  });
+  }, 30_000);
   async function worker(task = 'mock:hold') {
     const id = randomUUID(); const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
     const workspace = await planOwnedWorkspace(root, id, sha);
@@ -234,6 +237,53 @@ describe('worker termination barrier', () => {
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(false);
   });
 
+  it.each(['running', 'queued', 'failed', 'cancelled'] as const)('refuses %s recovery and Continue over a surviving prior process, then refuses real destroy', async status => {
+    const w = await worker(); let child: ReturnType<typeof spawn> | undefined; let ready = false; let launches = 0;
+    vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', interrupt: async () => undefined,
+      run: async () => { throw Error('unused'); }, startSession: () => {
+        if (++launches > 1) return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }), open: false,
+          sendMessage: () => false, sendAgentMessage: () => false, interrupt() {}, end() {} };
+        child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"],
+          { cwd: workspace(w).path, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout!.once('data', () => { ready = true; });
+        const result = new Promise<{ text: string; toolCalls: []; tokensUsed: number }>(resolve => child!.once('close', () => resolve({ text: '', toolCalls: [], tokensUsed: 0 })));
+        return { pid: child.pid, result, open: true, sendMessage: () => true, sendAgentMessage: () => true,
+          interrupt: () => { child!.kill('SIGTERM'); }, end: () => { child!.kill('SIGTERM'); } };
+      } });
+    releases.push(() => child?.kill('SIGKILL'));
+    manager.enqueueOwnedRun(w.id); await until(() => ready);
+    const prior = store.readWorkerExecution(w.id)!;
+    const scratch = join(root, '.ai/cezar/tmp', w.id, 'retained.txt'); writeFileSync(scratch, 'old process scratch');
+    manager.dispose(); store.updateRun(w.id, { status }); store.flush();
+    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+    try {
+      await other.recover();
+      await until(() => !other.isActive(w.id) && reopened.getRun(w.id)?.status !== 'queued');
+      expect.soft(reopened.readWorkerExecution(w.id)).toEqual(prior);
+      expect.soft(existsSync(scratch)).toBe(true);
+      expect.soft(other.continueRun(w.id, { text: 'try again' })).toMatchObject({ ok: false, error: expect.stringContaining('checkpoint') });
+      await until(() => !other.isActive(w.id));
+      const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
+      expect.soft(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process', 'worktree', 'branch']) });
+      expect.soft(launches).toBe(1); expect.soft(existsSync(workspace(w).path)).toBe(true);
+      expect.soft(existsSync(scratch)).toBe(true);
+      expect.soft(child!.exitCode).toBeNull(); expect.soft(child!.signalCode).toBeNull();
+      expect.soft(reopened.readWorkerExecution(w.id)).toEqual(prior);
+      expect(reopened.getRun(w.id)).toBeDefined(); expect(reopened.readEvents(w.id).length).toBeGreaterThan(0);
+    } finally { other.dispose(); reopened.flush(); child?.kill('SIGKILL'); }
+  });
+
+  it.each(['missing', 'malformed', 'starting'] as const)('cannot replace %s private execution evidence with a fresh generation', async shape => {
+    const w = await worker(); const path = join(root, '.ai/cezar/runs', `${w.id}.execution.json`);
+    if (shape === 'missing') rmSync(path);
+    else if (shape === 'malformed') writeFileSync(path, '{broken');
+    else store.commitWorkerExecutionStart(w.id);
+    const before = existsSync(path) ? readFileSync(path, 'utf8') : undefined;
+    expect(() => store.commitWorkerExecutionStart(w.id)).toThrow(/checkpoint/);
+    expect(existsSync(path) ? readFileSync(path, 'utf8') : undefined).toBe(before);
+    expect(await manager.awaitRunTermination(w.id, 10)).toBe(false);
+  });
+
   it('completion rotates on Continue; stale completion cannot authorize a newer execution', async () => {
     const w = await worker(); manager.enqueueOwnedRun(w.id); await until(() => store.getRun(w.id)?.status === 'waiting');
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
@@ -339,6 +389,17 @@ describe('worker termination barrier', () => {
     manager.requestWorkerStop(w.id);
     expect(await manager.awaitRunTermination(w.id, 100)).toBe(false);
     hold.release(); expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
+  });
+
+  it('admits the same manager deferred Continue without rotating its exact owned generation', async () => {
+    const w = await worker(); manager.enqueueOwnedRun(w.id); await until(() => store.getRun(w.id)?.status === 'waiting');
+    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
+    expect(manager.continueRun(w.id, { text: 'mock:hold' }, true).ok).toBe(true);
+    const deferred = store.readWorkerExecution(w.id)!;
+    await until(() => store.getRun(w.id)?.status === 'waiting');
+    expect(store.readWorkerExecution(w.id)).toEqual(deferred);
+    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
+    expect(store.readWorkerExecution(w.id)).toEqual({ generation: deferred.generation, phase: 'complete' });
   });
 
   it('capacity-deferred Continue invalidates prior completion before queueing and cancels without launching', async () => {

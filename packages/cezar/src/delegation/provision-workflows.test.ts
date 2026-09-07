@@ -46,10 +46,11 @@ describe('manager session delegation lifecycle', () => {
     await controller.close(); sessions.length = 0; f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
   });
   // Real acceptance/store/manager and account registry; only the external agent wire is fake.
-  async function acceptIdentityWorker(settings: { model?: string; effort?: string } = { model: 'haiku', effort: 'high' }) {
+  async function acceptIdentityWorker(settings: { model?: string; effort?: string } = { model: 'haiku', effort: 'high' }, grants?: { allowedTools: string[]; bashAllowlist: string[] }) {
     const home = join(f.root, 'account-a'); mkdirSync(home);
     await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'account-a', provider: 'claude', configDir: home, label: 'A', addedAt: '' }]; });
-    const parent = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', ...settings, agentProfile: 'account-a', worktree: false });
+    const workflow = grants ? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, ...grants }] } : QUICK_TASK_WORKFLOW;
+    const parent = f.manager.startRun(workflow, { task: 'parent', runner: 'claude', ...settings, agentProfile: 'account-a', worktree: false });
     await until(() => sessions.length === 1);
     const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
     const pump = vi.spyOn(f.manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
@@ -69,6 +70,53 @@ describe('manager session delegation lifecycle', () => {
     accepted.pump.mockRestore(); await (f.manager as unknown as { pump(): Promise<void> }).pump();
     return { manager: f.manager, store: f.store };
   }
+  it.each(['restart', 'continue'].flatMap(mode => ['missing', 'malformed', 'missing-step'].flatMap(damage => [[], ['Read']].map(allowedTools => ({ mode: mode as 'restart' | 'continue', damage, allowedTools })))))('pins accepted $allowedTools grants across $damage workflow on $mode', async ({ mode, damage, allowedTools }) => {
+    const grants = { allowedTools, bashAllowlist: ['git status'] };
+    const a = await acceptIdentityWorker(undefined, grants);
+    if (mode === 'continue') {
+      await launchAccepted(a, mode); await until(() => sessions.length === 2);
+      sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    }
+    // Simulate exactly the public on-disk salvage boundary, keeping private identity intact.
+    f.store.flush(); const path = join(f.root, '.ai/cezar/runs.json');
+    const records = JSON.parse(readFileSync(path, 'utf8'));
+    const record = records.find((r: { id: string }) => r.id === a.child.workerId);
+    if (damage === 'missing') delete record.workflowDef;
+    else if (damage === 'malformed') record.workflowDef.name = 42;
+    else record.workflowDef.steps = [{ id: 'different', prompt: '{{task}}' }];
+    writeFileSync(path, JSON.stringify(records));
+    f.manager.dispose(); sessions[0]!.finish();
+    const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    const manager = new RunManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
+    // Keep root live without restarting its old session; this case concerns only the worker.
+    store.updateRun(a.parent.id, { status: 'waiting' });
+    controller.attachProject({ id: 'grants-reopened', root: f.root, store, manager });
+    if (mode === 'continue') expect(manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
+    else await manager.recover();
+    await until(() => sessions.length === (mode === 'continue' ? 3 : 2));
+    expect(sessions.at(-1)!.spec.allowedTools).toEqual(grants.allowedTools);
+    expect(sessions.at(-1)!.spec.bashAllowlist).toEqual(grants.bashAllowlist);
+  });
+
+  it.each(['queued', 'restart', 'continue'].flatMap(mode => ['missing', 'malformed'].map(damage => ({ mode: mode as 'queued' | 'restart' | 'continue', damage }))))('refuses $damage private accepted grants on $mode', async ({ mode, damage }) => {
+    const a = await acceptIdentityWorker(undefined, { allowedTools: [], bashAllowlist: [] });
+    if (mode === 'continue') {
+      await launchAccepted(a, mode); await until(() => sessions.length === 2);
+      sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    }
+    const path = join(f.root, '.ai/cezar/runs', `${a.child.workerId}.identity.json`);
+    const identity = JSON.parse(readFileSync(path, 'utf8'));
+    if (damage === 'missing') delete identity.grants; else identity.grants = { allowedTools: 'Read' };
+    writeFileSync(path, JSON.stringify(identity));
+    if (mode === 'continue') expect(f.manager.continueRun(a.child.workerId, { text: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('identity') });
+    else {
+      const { store } = await launchAccepted(a, mode);
+      await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length > 1);
+      expect(store.getRun(a.child.workerId)).toMatchObject({ status: 'failed', error: expect.stringContaining('identity') });
+    }
+    expect(sessions).toHaveLength(mode === 'continue' ? 2 : 1);
+  });
+
   async function acceptClaudeLayout(layout: 'native' | 'override' | 'named') {
     const nativeHome = join(f.root, 'native-home'); const home = join(nativeHome, '.claude'); mkdirSync(home, { recursive: true });
     vi.stubEnv('HOME', nativeHome); vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);

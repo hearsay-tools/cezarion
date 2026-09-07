@@ -17,7 +17,7 @@ import {
   useSendMessage,
 } from '@/api/queries'
 import { useRunHistory, type RunHistoryState } from '@/api/run-history'
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import { pendingHumanAsk, type ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { Composer } from '@/components/composer/composer'
 import { StatusDot } from '@/components/status-dot'
@@ -177,7 +177,9 @@ export function ThreadView({
   onMarkedUnread?: (runId: string) => void
 }) {
   const projectId = useActiveProjectId()
-  const hasPendingHumanAsk = currentThread.turns.some(turn => turn.items.some(item => item.kind === 'ask' && !item.resolved))
+  const hasPendingHumanAsk = history
+    ? pendingHumanAsk(history.currentEvents) !== undefined
+    : currentThread.turns.some(turn => turn.items.some(item => item.kind === 'ask' && !item.resolved))
   const attention = deriveAttention(run, hasPendingHumanAsk)
   const footer = threadFooter(run.status, run.error)
   // The dock's data: the latest plan snapshot across turns (full replacement — an emptied

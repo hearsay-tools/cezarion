@@ -275,7 +275,10 @@ export class PiRunner implements AgentRunner {
             agentInputReady = true;
             onEvent?.({ type: 'turn-end' });
             if (opts.autoEndAfterFirstTurn && open && !autoEndTimer) {
-              autoEndTimer = setTimeout(end, AUTO_END_DELAY_MS);
+              autoEndTimer = setTimeout(() => {
+                autoEndTimer = undefined;
+                if (opts.shouldAutoEnd?.() !== false) end();
+              }, AUTO_END_DELAY_MS);
               autoEndTimer.unref?.();
             }
           } else if (value.type === 'extension_error') {

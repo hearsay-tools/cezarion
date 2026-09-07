@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, cezarCli } from './agent-browser'
+import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 
 /**
  * Stacking, editing and removing a queued run's prompt (#472), end-to-end against a LIVE
@@ -122,7 +122,7 @@ beforeAll(async () => {
   server = spawn(
     process.execPath,
     [cezarCli, 'serve', '--repo', dataRoot, '--port', String(port), '--no-open'],
-    { env: { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: cezHome }, stdio: 'ignore' },
+    { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
   await waitForHealth(baseUrl)
 
@@ -193,6 +193,8 @@ describe('a queued run’s prompt is amendable (#472)', () => {
     expect(record.queuedMessages?.map((m) => m.text)).toEqual([
       'also update the changelog and the README',
     ])
+    // The API acknowledgement precedes mutation invalidation and closing the editor.
+    browser.waitForFunction(`document.querySelector('[data-editing="true"]') === null && document.querySelector('[aria-label="Remove message"]') !== null`)
   })
 
   it('removes the stacked message', async () => {

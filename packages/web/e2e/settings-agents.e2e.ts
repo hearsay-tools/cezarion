@@ -80,8 +80,8 @@ describe('settings → agents against the live dry-run server', () => {
   it('renders every knob, agent-agnostically named', () => {
     gotoAgents()
     browser.waitForFunction(`document.querySelector('[data-slot="agents-base-branch"]') !== null`)
-    expect(browser.count('[data-slot="agents-runner"] [role="radio"]')).toBe(3)
-    expect(browser.count('[data-slot="agents-model"]')).toBe(3)
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="agents-runner"] [role="radio"]')].map(el => el.dataset.value).sort()`)).toEqual(['claude', 'codex', 'opencode', 'pi'])
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="agents-model"]')].map(el => el.dataset.runner).sort()`)).toEqual(['claude', 'codex', 'opencode', 'pi'])
     expect(browser.count('[data-slot="agents-system-prompt"]')).toBe(1)
     // The dry-run repo is a git checkout, so the base-branch picker is the real control.
     expect(browser.count('[data-slot="agents-base-branch"]')).toBe(1)
@@ -95,10 +95,10 @@ describe('settings → agents against the live dry-run server', () => {
   })
 
   it('per-runner model preset: select writes the runner key, others untouched', async () => {
+    const before = await waitForConfig(() => true)
     setSelect('[data-slot="agents-model"][data-runner="claude"]', 'opus')
     const config = await waitForConfig((c) => c.defaultModels.claude === 'opus')
-    expect(config.defaultModels.codex).toBeUndefined()
-    expect(config.defaultModels.opencode).toBeUndefined()
+    expect(config.defaultModels).toEqual({ ...before.defaultModels, claude: 'opus' })
   })
 
   it('system prompt: explicit save persists the trimmed text', async () => {

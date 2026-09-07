@@ -34,7 +34,7 @@ describe('delegation service durable authority', () => {
     const request = input(); let publishedIdentity: unknown;
     f.store.on('run', run => { if (run.delegation?.role === 'worker') publishedIdentity = f.store.readWorkerIdentity(run.id); });
     const worker = await f.service.spawn(f.caller, request);
-    expect(publishedIdentity).toEqual({ kind: 'accepted', account: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } }, model: 'opus', effort: 'high' });
+    expect(publishedIdentity).toEqual({ kind: 'accepted', grants: {}, account: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } }, model: 'opus', effort: 'high' });
     const path = join(f.root, '.ai/cezar/runs', `${worker.workerId}.identity.json`);
     const before = readFileSync(path, 'utf8');
     vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', agentProfile: 'other', accountBinding: { provider: 'claude', profileId: 'other', homePath: '/different', claudeLayout: { kind: 'relocated' } } });
@@ -110,7 +110,8 @@ describe('delegation service durable authority', () => {
     f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, permissions: ['spawn'] } }]);
     expect(await f.service.spawn(f.caller, request)).toEqual(result);
   });
-  it('caps accepted creations at 32 including destroyed workers; replay does not consume a creation', async () => {
+  // Exercise all 32 real durable creations; this is not a 5s filesystem throughput assertion.
+  it('caps accepted creations at 32 including destroyed workers; replay does not consume a creation', { timeout: 30_000 }, async () => {
     const first = input(); const result = await f.service.spawn(f.caller, first);
     await f.service.destroy(f.caller, { workerId: result.workerId });
     for (let n = 1; n < 32; n++) await f.service.spawn(f.caller, input());

@@ -172,6 +172,10 @@ export interface SessionOptions {
    *  behavior, used for non-interactive workflow steps). Interactive
    *  sessions omit this and control `end()` themselves. */
   autoEndAfterFirstTurn?: boolean;
+  /** Internal synchronous veto, checked when the auto-end timer fires. A held
+   * turn stays open; a later turn may auto-end normally. Explicit end/interrupt
+   * and provider failure still close the session. */
+  shouldAutoEnd?: () => boolean;
   /** Protocol-v2 channel: receives the normalized `UiEvent` stream emitted
    *  ALONGSIDE the v1 `AgentEvent`s (additive — v1 keeps flowing unchanged).
    *  RunManager consumption lands in R2 step 2.1. */

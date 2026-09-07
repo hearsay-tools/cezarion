@@ -215,6 +215,8 @@ describe('progressive long-session history', () => {
     )
     expect(Number(browser.evaluate(cursorRequestCount))).toBe(1)
 
+    // Page state commits before the browser's prepend-anchor animation frame.
+    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
     const after = browser.evaluate(`(() => {
       const row = document.querySelector(
         ${JSON.stringify(`[data-slot="thread-row"][data-row-key="${before.key}"]`)},

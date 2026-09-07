@@ -468,9 +468,14 @@ existing suite discovers only that suffix. The successful package test uses an
 installed release tarball, real Git/store/manager/controller and a Claude
 stream-json process fixture. Review assertions explicitly enable the existing
 `CEZ_REVIEW_GATE=1`; its default remains off. Current `main` through `ab6d076a`
-(v0.11.10) is integrated without a commit; final gates cover that tree. The sole
-monitoring conflict preserves upstream parent-turn activity recognition for
-both monitoring and owned worker waits. No task commit or publication is implied.
+(v0.11.10) was integrated without an agent-issued commit. The first full browser
+attempt escaped its temporary fixture through ambient Git discovery; recovery
+autosaved the pending merge as `3e5b6fdf`. The controller retained that tree and
+incident history after containment. See the QA report for known effects and
+limits. Final gates cover the integrated tree plus the shared pre-spawn fixture
+guard and canonical pending-human-ask reducer. The sole monitoring conflict
+preserves upstream parent-turn activity recognition for both monitoring and
+owned worker waits. Publication remains controller-owned and pending.
 
 
 **Files:** Extend `packages/cezar/src/delegation/service.test.ts`,
@@ -479,22 +484,22 @@ both monitoring and owned worker waits. No task commit or publication is implied
 add `packages/web/e2e/worker-relationships.e2e.ts` using the existing provider;
 write `.ai/specs/2026-09-06-owned-workers-isolated-worktrees-qa.md` after observations.
 
-- [ ] Add a complete parent lifecycle test through the real provisioned CLI:
+- [x] Add a complete parent lifecycle test through the real provisioned CLI:
   spawn pinned worker -> wait/yield -> inspect -> steer -> diff -> stop -> destroy
   -> repeated destroy. Use real temp Git/store/manager and offline runner mocks,
   not a service whose methods only return canned results. Include lost-spawn
   response/idempotency and maxParallel=1. Assert no automatic review acceptance.
-- [ ] Run this test red if any cross-layer connection is missing, repair the
+- [x] Run this test red if any cross-layer connection is missing, repair the
   smallest boundary and re-run all affected lower-layer tests green.
-- [ ] Review the source diff against the spec acceptance table. Explicitly check
+- [x] Review the source diff against the spec acceptance table. Explicitly check
   inherited env full/passthrough, disabled default, malformed ownership quarantine,
   shutdown vs parent termination, all construction sites, human deletion paths,
   cleanup crash ambiguity and route inventory. Fix gaps with red/green tests.
-- [ ] Run in order, preserving logs and actual exit codes:
+- [x] Run in order, preserving logs and actual exit codes:
 
 ```bash
 npm run typecheck
-npm test
+npm test -- --maxWorkers=1
 npm run test:unit
 npm run build
 npm run test:package
@@ -502,13 +507,13 @@ npm run test:package
 
   Stop on the first failure and load systematic-debugging; no PR on red. Re-run
   affected and full gates after fixes. Do not suppress or reinterpret test output.
-- [ ] Read `.ai/browsers/agent-browser.md`, then run `npm run test:e2e`. Inspect
+- [x] Read `.ai/browsers/agent-browser.md`, then run `npm run test:e2e`. Inspect
   the actual TEST_E2E_STATUS marker; skipped is not passed. Use the healthy
   fixture environment for 360×640 and desktop, light/dark, reduced-motion,
   keyboard, >=44px target checks, loading/error/offline relationships and ask
   preservation. Write observed viewport/theme/results in the QA file; stop
   the fixture environment with `.ai/scripts/test-env-down.sh` when finished.
-- [ ] Request review according to the selected execution protocol and review
+- [x] Request review according to the selected execution protocol and review
   skill. Resolve findings with evidence. Load verification-before-completion.
 - [ ] After the full gate is green, commit the logical change (including spec,
   plan and QA) with `feat(delegation): add owned workers in isolated worktrees`.
@@ -535,6 +540,22 @@ npm run test:package
 - No task bypasses TDD, ordinary-run guards, full pre-commit gates or human review.
 - Spec and sequential task execution were approved. Tasks 1–8 are implemented
   and independently approved; their retained task reports record red/green and
-  source-removal evidence. Task 9 acceptance is in progress. Final independent
-  review, commit, draft PR, project-board update and CI remain controller-owned
-  and pending until their actual results are recorded.
+  source-removal evidence. Task 9 implementation and scoped local verification are complete. All five
+  ordered gates and eight issue-specific browser cases passed. The full browser
+  aggregate retains two baseline failures tracked as #136/#137; no pass is
+  inferred from those failures. Final review disposition, commit, draft PR,
+  project-board update and CI remain controller-owned.
+
+
+Consolidated whole-feature review correction (implemented and scoped-reviewed): strict
+private execution admission rejects unknown prior generations and retains owned
+scratch until proven completion; accepted private identity now requires effective
+tool/Bash evidence; nonfinal agent steps use the internal all-runner auto-end veto
+through admitted wake replies, preserving human attention and capacity accounting.
+The final scoped review found C1/I1/I2 addressed with no introduced findings.
+Corrected-source five gates passed; actual browser results are recorded in QA.
+The controller approved explicit 30s outer budgets only for the two real-manager
+integration suites/their cleanup and three named 32-creation cases; existing
+15s state/termination assertions and product timers remain unchanged.
+Per the user’s final scope direction, unrelated baseline browser failures are
+filed separately as #136/#137, with no further unrelated fix or broad retry.

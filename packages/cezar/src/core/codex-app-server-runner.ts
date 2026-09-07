@@ -522,7 +522,10 @@ class CodexSession implements AgentSession {
         this.agentInputReady = true;
         this.emit({ type: 'turn-end' });
         if (this.opts.autoEndAfterFirstTurn && this.stdinOpen && !this.autoEndTimer) {
-          this.autoEndTimer = setTimeout(() => this.end(), AUTO_END_DELAY_MS);
+          this.autoEndTimer = setTimeout(() => {
+            this.autoEndTimer = undefined;
+            if (this.opts.shouldAutoEnd?.() !== false) this.end();
+          }, AUTO_END_DELAY_MS);
           this.autoEndTimer.unref?.();
         }
         break;

@@ -28,6 +28,11 @@ export type WorkerAccountBinding = z.infer<typeof workerAccountBindingSchema>;
 export const acceptedWorkerIdentitySchema = z.object({
   kind: z.literal('accepted'),
   account: workerAccountBindingSchema,
+  // Required private evidence; absent properties and explicit empty grants differ.
+  grants: z.object({
+    allowedTools: z.array(z.string()).optional(),
+    bashAllowlist: z.array(z.string()).optional(),
+  }).strict(),
   model: z.string().min(1).max(512).optional(),
   effort: z.string().min(1).max(128).optional(),
 }).strict();

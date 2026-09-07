@@ -139,8 +139,12 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
   }, [history.fetchPreviousPage])
 
   const jumpToLatest = useCallback(async () => {
+    // Full replay already includes the tail and remains subscribed to live SSE.
+    // Resetting an unavailable optimization would discard it and unmount the
+    // thread, losing the caller's scroll intent while the same failure retries.
+    if (fallback) return
     await queryClient.resetQueries({ queryKey: historyKey, exact: true })
-  }, [historyKey, queryClient])
+  }, [fallback, historyKey, queryClient])
 
   return {
     visibleEvents,

@@ -141,6 +141,12 @@ not exactly-once delivery); it must never silently drop it or claim success.
 
 - `autoEndAfterFirstTurn?` — single-turn behavior for non-interactive workflow
   steps; interactive sessions control `end()` themselves.
+- `shouldAutoEnd?: () => boolean` — internal synchronous veto checked when the
+  auto-end timer executes, including waits accepted after it was armed. False
+  holds that auto-end; a later turn may auto-end normally. RunManager holds the
+  exact current session across accepted worker waits and the admitted wake's
+  reply turn, including nonfinal agent steps. Explicit end/interrupt and provider
+  failures keep their existing semantics; a timer is never termination proof.
 - `onAgentInputReady?: () => void` — optional in-process retry hint, NOT delivery
   acknowledgement or completion. Only a successful late reply/prompt at an idle,
   open session with no queued human prompt emits it. The manager checks current session identity, pending asks,
@@ -604,3 +610,5 @@ breaking change requiring the documented deprecation path.
 ### Bounded structured-question recovery (#88)
 
 A CEZ:ASK payload missing only closing braces/brackets after a complete structural value gets one bounded repair, then the existing schema validation. Mid-string truncation, mismatched delimiters and invalid question structures remain rejected. Fresh and continuation turns persist a danger note for recovery or rejection; a recovered card warns users to check the options and how many they may pick, since repair cannot restore missing meaning. The raw recovered marker stays in the audit stream until the cockpit hides it alongside a validated card, preserving rejected split-stream fallback. Existing and unknown note tones stay dim. DONE/ASK precedence, Claude wakeups and monitoring serialization are unchanged.
+
+Harness row S13 verifies the late auto-end veto and subsequent reply completion against all four real offline runner wires.

@@ -297,6 +297,7 @@ const CONTROL_CRITERIA = [
   { id: 'S6', scenario: 'baseline' },
   { id: 'S11', scenario: 'ask' },
   { id: 'S12', scenario: 'hold' },
+  { id: 'S13', scenario: 'hold' },
   { id: 'R6', scenario: 'ask' },
   { id: 'R7', scenario: 'ask' },
   { id: 'R8', scenario: 'hold' },
@@ -355,6 +356,25 @@ describe('harness parity — seam tier', () => {
 
 describe('harness parity — seam tier, session control', () => {
   for (const backend of RUNNER_IDS) {
+    it(`${backend} S13 auto-end checks a late hold at execution and resumes after the next admitted turn`, async () => {
+      let hold = false; let checks = 0;
+      await driveSeam(backend, 'hold', {
+        sessionOptions: { autoEndAfterFirstTurn: true, shouldAutoEnd: () => { checks++; return !hold; } },
+        whileOpen: async (session, { v1 }) => {
+          await waitFor(() => v1.some(e => e.type === 'turn-end'));
+          // The runner has already armed its timer. The new wait must still veto it.
+          hold = true;
+          await new Promise(resolve => setTimeout(resolve, 400));
+          expect(checks).toBeGreaterThan(0); expect(session.open).toBe(true);
+          hold = false;
+          expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo admitted wake' }])).toBe(true);
+          await waitFor(() => v1.filter(e => e.type === 'turn-end').length >= 2);
+          await session.result;
+          expect(session.open).toBe(false); expect(checks).toBeGreaterThan(1);
+        },
+      });
+    }, 45_000);
+
     it(`${backend} S11 non-human input cannot answer a native or marker ask`, async () => {
       await driveSeam(backend, 'ask', {
         whileOpen: async (session, { v1, v2 }) => {

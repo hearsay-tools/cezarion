@@ -1606,6 +1606,10 @@ export class RunStore extends EventEmitter {
   commitWorkerExecutionStart(id: string): string {
     const run = this.runs.get(id);
     if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new Error('Worker cannot start');
+    const prior = this.readWorkerExecution(id);
+    if (!prior || (prior.phase !== 'queued' && prior.phase !== 'complete')) {
+      throw new Error('Worker execution checkpoint does not prove safe admission');
+    }
     const generation = randomUUID();
     this.writeWorkerExecution(id, { generation, phase: 'starting' });
     return generation;
