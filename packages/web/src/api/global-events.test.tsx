@@ -739,12 +739,33 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
       'theirs',
     ])
   })
+
+  it('writes a boot-stamped run to both default and the boot id when the boot project is scoped', () => {
+    // Registry error path: `/p/<boot>` mounts scoped under the real id, so the main view
+    // reads `[bootId, 'runs', 'list']` while sidebar groups (when present) still alias boot
+    // to `'default'`. Both entries must receive the event.
+    setApiScope(BOOT)
+    client.setQueryData<ApiRun[]>(['default', 'runs', 'list'], [])
+    client.setQueryData<ApiRun[]>([BOOT, 'runs', 'list'], [])
+    const { source } = mount()
+
+    source.emit('run', stampedRun(runRecord('boot-run'), BOOT))
+
+    expect(client.getQueryData<ApiRun[]>(['default', 'runs', 'list'])?.map((r) => r.id)).toEqual([
+      'boot-run',
+    ])
+    expect(client.getQueryData<ApiRun[]>([BOOT, 'runs', 'list'])?.map((r) => r.id)).toEqual([
+      'boot-run',
+    ])
+  })
 })
 
 describe('useGlobalEvents — reconcile doctrine', () => {
   /** The keys a reconcile must reach. */
   function invalidatedKeys(spy: { mock: { calls: unknown[][] } }): unknown[] {
-    return spy.mock.calls.map((call) => (call[0] as { queryKey: unknown }).queryKey)
+    return spy.mock.calls
+      .map((call) => (call[0] as { queryKey?: unknown }).queryKey)
+      .filter((key) => key !== undefined)
   }
 
   it('does not reconcile on the first open — the queries are already fetching', () => {
@@ -776,6 +797,25 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       queryKeys.worktrees, // the Resources panel's list/total (#483)
       workspaceQueryKeys.providerStatus,
     ])
+  })
+
+  it('marks every cached run list stale on reconnect, not only the active scope', () => {
+    setApiScope('other-project')
+    const { source } = mount()
+    source.open()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    source.drop()
+    source.open()
+
+    const predicates = invalidate.mock.calls
+      .map((call) => (call[0] as { predicate?: (query: { queryKey: unknown[] }) => boolean }).predicate)
+      .filter((predicate): predicate is (query: { queryKey: unknown[] }) => boolean => typeof predicate === 'function')
+    expect(predicates.some((predicate) => predicate({ queryKey: ['default', 'runs', 'list'] }))).toBe(true)
+    expect(predicates.some((predicate) => predicate({ queryKey: ['shop', 'runs', 'list'] }))).toBe(true)
+    expect(predicates.every((predicate) => !predicate({ queryKey: ['shop', 'runs', 'detail', 'r1'] }))).toBe(
+      true,
+    )
   })
 
   it('refetches when a hidden tab comes back', () => {

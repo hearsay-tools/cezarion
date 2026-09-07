@@ -151,8 +151,17 @@ function createRunsIndexRefresher(queryClient: QueryClient): {
  * the rest stale for whenever it next mounts. A background tab with fifty cached runs should not
  * fetch fifty runs to come back.
  */
+function isRunListQueryKey(queryKey: readonly unknown[]): boolean {
+  return queryKey[1] === 'runs' && queryKey[2] === 'list'
+}
+
 function reconcile(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
+  // Sidebar groups keep per-project list caches. `queryKeys.runs.all` is scope-led, so a
+  // reconnect would otherwise leave an expanded non-active group's patched list stale (#129).
+  void queryClient.invalidateQueries({
+    predicate: (query) => isRunListQueryKey(query.queryKey),
+  })
   // Events happened while we were disconnected, and the index is cross-project — nothing else
   // here covers it.
   void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
@@ -206,8 +215,10 @@ function applyStampedRunList(queryClient: QueryClient, project: string, event: G
 function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: GlobalEvent): void {
   switch (event.type) {
     case 'run': {
-      // The run list is patched by `applyStampedRunList` against the stamp's cache key, not
-      // this scope's — so a boot run cannot land in another project's sidebar (#129).
+      // Stamp-addressed write already hit the owner's sidebar key. Also patch this scope's
+      // list: when the boot project is mounted under its real id (registry unavailable),
+      // that key is `[bootId, 'runs', 'list']`, not `'default'`.
+      queryClient.setQueryData<ApiRun[]>(queryKeys.runs.list(), (list) => applyRunEvent(list, event.run))
       // Only a detail cache that exists: `setQueryData` would happily create one, leaving an entry
       // for a run nobody opened — and, worse, one built from a summary rather than from
       // `GET /api/runs/:id`, which the next reader would then be served as if it were fetched.
@@ -230,7 +241,7 @@ function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: Gl
       return
     }
     case 'run-deleted': {
-      // List eviction is stamp-addressed in `applyStampedRunList` (same seam as `run`).
+      queryClient.setQueryData<ApiRun[]>(queryKeys.runs.list(), (list) => applyRunDeleted(list, event.id))
       // Removed, not set to undefined: the run is gone server-side, so its detail and diff caches
       // are garbage. Anything still mounted on them refetches and gets the server's 404 — the
       // truth — instead of rendering a record that no longer exists.
