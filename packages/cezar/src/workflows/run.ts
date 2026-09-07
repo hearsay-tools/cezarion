@@ -3125,7 +3125,8 @@ export class RunManager {
       }
       this.store.appendEvent(runId, { ...event, stepId });
       if (event.type === 'error') {
-        sessionError ??= event.message;
+        // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
+        sessionError ??= state.agentInputError ?? event.message;
         state.session?.interrupt();
         return;
       }
@@ -3887,7 +3888,8 @@ export class RunManager {
       }
       emit({ ...event, stepId: step.id });
       if (event.type === 'error') {
-        sessionError ??= event.message;
+        // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
+        sessionError ??= state.agentInputError ?? event.message;
         state.session?.interrupt();
         return;
       }

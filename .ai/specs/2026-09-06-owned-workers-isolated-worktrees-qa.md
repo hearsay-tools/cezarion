@@ -480,3 +480,32 @@ process was stopped. All integration logs and exact attribution are recorded
 in the private `native-pr138-integration-report.md`. This QA addition is the
 only document change after the tested/reviewed source snapshot. Merge commit,
 push and CI remain controller-owned.
+
+
+## PR138 CI checkpoint follow-up — 2026-09-07
+
+CI34116258086 exposed an initiating-error race: an input checkpoint failed,
+interruption broke OpenCode's pending HTTP request, and its later fetch error
+replaced the checkpoint diagnostic. Real-wire fresh/Continue regressions fail
+without the two manager error-latch corrections and pass with them; two
+provider-first guards preserve the opposite ordering. Every error remains in
+history and the undelivered durable input remains queued. Scoped review passed
+source `197b2f063aec4277b8f817fa81c11916b79e33ef`.
+
+Fresh ordered gates all exited 0: `npm run typecheck`; `npm test --
+--maxWorkers=1` (**368 files / 7,547 tests**, 891.72s); `npm run test:unit`
+(**37 + 60 tests**); `npm run build` (**540 files / 84 web assets**);
+`npm run test:package` (**24 tests**). Direct actual worker browser verification
+passed **8/8**, exit 0, 16.25s, using the same guarded native browser setup.
+Six fresh screenshots were inspected; 32 links/four tabs, desktop/mobile
+light/dark keyboard focus, 44px targets, pending human ask, retry/offline and
+global status checks remain correct. No new full-browser verdict is claimed;
+#136/#137 remain separate.
+
+Exact fixture PID512776 was stopped through the required script after identity
+verification. Final audit found it absent and no accessible matching test-home
+or checkpoint-process paths (200 environments unreadable). Fresh artifacts and
+all RED/GREEN, compile-failure and final gate logs are retained privately under
+`native-pr138-ci-checkpoint-*`; the diagnosis report records exact commands,
+restoration hashes and cleanup. Only this QA appendix follows the tested source.
+Controller owns commit, push and CI reconciliation.
