@@ -1385,7 +1385,7 @@ export function createApp(deps: ServerDeps) {
     //
     // Served out of the Vite build: the file is a `public/` asset of the web package, which the
     // build copies verbatim into `web/dist`. One home, one URL — the same bytes this route
-    // hands out are what the bundle's own `<img src="/open-mercato.svg">` asks for.
+    // hands out are what the bundle's own `<img src="/cezarion-mark.svg">` asks for.
     // Without a build there is nothing to serve, which is a 404 rather than a crash (the shell
     // route answers the same dev-only state with its build hint).
     const path = join(distDir, name);
@@ -1437,8 +1437,8 @@ export function createApp(deps: ServerDeps) {
     });
   });
 
-  // The favicon packages/web/index.html points at (`/open-mercato.svg`).
-  app.get('/open-mercato.svg', staticFile('open-mercato.svg', 'image/svg+xml'));
+  // The favicon packages/web/index.html points at (`/cezarion-mark.svg`).
+  app.get('/cezarion-mark.svg', staticFile('cezarion-mark.svg', 'image/svg+xml'));
 
   // ---- meta ----------------------------------------------------------------
   // CORS — deliberately for /api/health ONLY (spec 011): the bookmarklets
