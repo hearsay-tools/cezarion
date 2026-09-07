@@ -369,3 +369,57 @@ it('keeps non-human input out of a Claude turn already queued by a human', async
     },
   });
 });
+
+describe('Claude non-human stdin acknowledgement boundary', () => {
+  it.each(['acknowledged', 'write error', 'closed'] as const)('%s settles only the reserved write and never a mere turn-end', async outcome => {
+    const { Writable } = await import('node:stream');
+    let completeWrite: ((error?: Error | null) => void) | undefined;
+    let writes = 0;
+    const emitter = new EventEmitter();
+    const stdout = new PassThrough();
+    const stdin = new Writable({ write(_chunk, _encoding, callback) {
+      writes++;
+      if (writes === 1) callback();
+      else completeWrite = callback;
+    } });
+    const child = Object.assign(emitter, { stdin, stdout, stderr: new PassThrough(),
+      exitCode: null as number | null, signalCode: null as NodeJS.Signals | null, killed: false,
+      kill: () => { close(); return true; },
+    }) as unknown as ChildProcessWithoutNullStreams;
+    const close = () => {
+      if (child.exitCode !== null) return;
+      Object.assign(child, { exitCode: 0 }); stdout.end();
+      emitter.emit('exit', 0, null); emitter.emit('close', 0, null);
+    };
+    stdin.on('finish', close);
+    spawnHook.override = () => child;
+    const events: AgentEvent[] = [];
+    const runner = new ClaudeCliRunner({ bin: 'unused-pipe-fixture' });
+    const session = runner.startSession({ userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 }, event => events.push(event), { autoEndAfterFirstTurn: true });
+    const resultFrame = () => stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'turn complete', usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
+    try {
+      resultFrame();
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));
+      const ack = session.sendAgentMessage([{ type: 'text', text: 'reserved' }]);
+      expect(ack).toBeInstanceOf(Promise);
+      if (!ack) throw new Error('expected reserved write');
+      let settlement: 'pending' | 'accepted' | 'rejected' = 'pending';
+      const observed = ack.then(() => { settlement = 'accepted'; }, () => { settlement = 'rejected'; });
+      resultFrame();
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(2));
+      await new Promise(resolve => setTimeout(resolve, 400));
+      expect(settlement).toBe('pending'); expect(session.open).toBe(true);
+      expect(session.sendAgentMessage([{ type: 'text', text: 'duplicate' }])).toBe(false);
+      expect(writes).toBe(2);
+      if (outcome === 'closed') close();
+      else completeWrite?.(outcome === 'write error' ? new Error('pipe refused') : undefined);
+      await observed;
+      expect(settlement).toBe(outcome === 'acknowledged' ? 'accepted' : 'rejected');
+      if (outcome === 'acknowledged') await vi.waitFor(() => expect(session.open).toBe(false));
+    } finally {
+      session.interrupt(); close();
+      await session.result;
+      spawnHook.override = null;
+    }
+  });
+});

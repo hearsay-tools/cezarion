@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
+import { OpencodeServerRunner } from './opencode-server-runner.ts';
 import type { AgentSession } from './agent-runner.ts';
-import { HARNESS_ADAPTERS, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 
 type Fixture = Parameters<Parameters<typeof withOwnedInputRun>[2]>[0];
 
@@ -26,73 +26,52 @@ function activeState({ manager, runId }: Fixture) {
   }).active.get(runId)!;
 }
 
-/** Real HTTP fails on interruption before the real process exits. Normal mock
- * behavior is unchanged until armed; the runner's existing SIGKILL escalation
- * still bounds cleanup if the expected observation never arrives. */
-async function withInterruptedHttp(body: (arm: () => void, acknowledge: () => void) => Promise<void>): Promise<void> {
-  const root = mkdtempSync(join(tmpdir(), 'cez-checkpoint-wire-'));
-  const armed = join(root, 'armed'), observed = join(root, 'observed');
-  // Narrow mutable test view; restored in finally within this isolated test file.
-  const adapter = HARNESS_ADAPTERS.opencode as { mockBin: string };
-  const original = adapter.mockBin;
-  const mock = join(root, 'mock-opencode.mjs');
-  const source = readFileSync(original, 'utf8');
-  const importAnchor = "import { createServer } from 'node:http';";
-  const exitAnchor = "process.on('SIGTERM', () => process.exit(0));";
-  expect(source.split(importAnchor)).toHaveLength(2);
-  expect(source.split(exitAnchor)).toHaveLength(2);
-  writeFileSync(mock, source.replace(importAnchor, `${importAnchor}\nimport { existsSync } from 'node:fs';`)
-    .replace(exitAnchor, `process.on('SIGTERM', () => {
-      if (!existsSync(${JSON.stringify(armed)})) process.exit(0);
-      server.closeAllConnections(); server.close();
-      const timer = setInterval(() => {
-        if (existsSync(${JSON.stringify(observed)})) { clearInterval(timer); process.exit(0); }
-      }, 5);
-    });`), { mode: 0o755 });
-  adapter.mockBin = mock;
-  try { await body(() => writeFileSync(armed, ''), () => writeFileSync(observed, '')); }
-  finally {
-    adapter.mockBin = original;
-    rmSync(root, { recursive: true, force: true });
-  }
-}
-
-it.each(['fresh', 'continuation'] as const)('%s checkpoint failure remains primary after interruption causes real OpenCode HTTP failure', async mode => {
-  await withInterruptedHttp(async (arm, acknowledge) => {
+/** The checkpoint now follows the real HTTP ACK, so the previous fixture's
+ * same-request fetch failure is impossible. Inject a secondary callback at the
+ * observed interrupt instead; the ACK and disk fault themselves remain real. */
+it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint remains primary over a later session error', async mode => {
+  const start = OpencodeServerRunner.prototype.startSession;
+  let emitError: (() => void) | undefined;
+  const spy = vi.spyOn(OpencodeServerRunner.prototype, 'startSession').mockImplementation(function (this: OpencodeServerRunner, spec, onEvent, opts) {
+    emitError = () => onEvent?.({ type: 'error', message: 'opencode: agent input failed: later transport failure' });
+    return start.call(this, spec, onEvent, opts);
+  });
+  try {
     await withOwnedInputRun('opencode', 'baseline', async fixture => {
       await openSession(fixture, mode);
       const { store, manager, runId, repoRoot, parentRunId } = fixture;
       const state = activeState(fixture), checkpointsAtInterrupt: Array<string | undefined> = [];
       const interrupt = state.session.interrupt.bind(state.session);
+      let injected = false;
       vi.spyOn(state.session, 'interrupt').mockImplementation(() => {
         checkpointsAtInterrupt.push(state.agentInputError);
+        if (!injected) { injected = true; emitError?.(); }
         interrupt();
       });
       store.flush();
       const tmp = join(repoRoot, '.ai/cezar/runs.json.tmp');
-      const observe = ({ event }: { event: { type: string; message?: string } }) => {
+      const observe = ({ event }: { event: { type: string } }) => {
         if (event.type === 'agent-input') mkdirSync(tmp);
-        if (event.type === 'error' && event.message === 'opencode: agent input failed: fetch failed') acknowledge();
       };
       const input = { id: randomUUID(), source: 'agent' as const, parentRunId, text: 'mock:hold', createdAt: new Date().toISOString() };
-      arm(); store.on('event', observe);
+      store.on('event', observe);
       try {
-        try { expect(() => manager.steerWorker(runId, input)).toThrow(/agent input delivery checkpoint failed/); }
-        finally { rmSync(tmp, { recursive: true, force: true }); }
+        expect(manager.steerWorker(runId, input)).toBe('queued');
+        await waitFor(() => injected);
+        rmSync(tmp, { recursive: true, force: true });
         await waitFor(() => !manager.isActive(runId));
         const errors = store.readEvents(runId).filter(event => event.type === 'error').map(event => event.message);
         expect(checkpointsAtInterrupt[0]).toContain('agent input delivery checkpoint failed');
-        expect(errors[0]).toContain('agent input delivery checkpoint failed');
-        expect(errors).toContain('opencode: agent input failed: fetch failed');
+        expect(errors).toContain('opencode: agent input failed: later transport failure');
         expect(store.getRun(runId)?.status).toBe('failed');
         expect(store.getRun(runId)?.agentInputs).toEqual([input]);
         expect(store.getRun(runId)?.error).toContain('agent input delivery checkpoint failed');
       } finally {
-        acknowledge(); store.off('event', observe);
+        store.off('event', observe);
         rmSync(tmp, { recursive: true, force: true });
       }
     });
-  });
+  } finally { spy.mockRestore(); }
 }, 60_000);
 
 it.each(['fresh', 'continuation'] as const)('%s earlier provider failure remains primary over a later checkpoint error', async mode => {

@@ -200,9 +200,10 @@ export interface AgentSession {
   readonly pid?: number;
   /** Write a user message into the live session. False when it is closed. */
   sendMessage(content: ContentBlock[]): boolean;
-  /** Non-human input. False retains caller ownership for retry; NEVER fall back to sendMessage.
-   * Runners refuse pending asks and unsafe turn boundaries without writing an answer. */
-  sendAgentMessage(content: ContentBlock[]): boolean;
+  /** Synchronous non-human reservation: false refuses without writing; a Promise
+   * confirms transport acceptance, not turn completion. Reject retains caller
+   * ownership for replay. Never fall back to the human-answer seam. */
+  sendAgentMessage(content: ContentBlock[]): false | Promise<void>;
   /**
    * Drop follow-ups queued while a turn was still in flight. A `CEZ:ASK` park
    * must call this so a mid-turn `sendMessage` cannot start a new turn after

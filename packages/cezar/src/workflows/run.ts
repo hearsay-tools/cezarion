@@ -253,7 +253,10 @@ interface ActiveRun {
   session?: AgentSession;
   pendingHumanAsk: boolean;
   agentInputError?: string;
-  agentInputDraining?: boolean;
+  agentInputFlight?: { session: AgentSession; inputId?: string; settled?: Promise<void> };
+  agentSessionError?: string;
+  doneAtBoundary?: AgentSession;
+  parkAfterAck?: { session: AgentSession; monitoring: boolean };
   /** A delivered worker wake must receive its own turn before nonfinal auto-end. */
   workerWakeTurn?: AgentSession;
   /** Last completed boundary belongs to exactly this still-open session. */
@@ -629,7 +632,7 @@ export class RunManager {
   // covers the window between shifting a run off the queue and the run
   // registering in `active`, so parallel-slot counting is never racy.
   private readonly queue: string[] = [];
-  private readonly executions = new Map<string, { generation: string; admitted: boolean; promise: Promise<void>; resolve: () => void; sessions: Set<Promise<void>>; turns: Set<Promise<void>> }>();
+  private readonly executions = new Map<string, { generation: string; admitted: boolean; promise: Promise<void>; resolve: () => void; sessions: Set<Promise<void>>; turns: Set<Promise<void>>; deliveries: Set<Promise<void>> }>();
   private readonly finalizedWorkers = new Map<string, string>();
   private readonly stoppedWorkers = new Set<string>();
   private readonly terminationWaiters = new Set<() => void>();
@@ -647,7 +650,7 @@ export class RunManager {
     const generation = this.store.commitWorkerExecutionStart(runId);
     let resolve!: () => void;
     const promise = new Promise<void>(done => { resolve = done; });
-    this.executions.set(runId, { generation, admitted, promise, resolve, sessions: new Set(), turns: new Set() });
+    this.executions.set(runId, { generation, admitted, promise, resolve, sessions: new Set(), turns: new Set(), deliveries: new Set() });
     this.finalizedWorkers.delete(runId);
     this.stoppedWorkers.delete(runId);
   }
@@ -657,6 +660,7 @@ export class RunManager {
     if (!execution) return;
     await Promise.allSettled([...execution.sessions]);
     await Promise.allSettled([...execution.turns]);
+    await Promise.allSettled([...execution.deliveries]);
     // Every wrapper settles after runner result, workflow and final filesystem work.
     // A disposed manager cannot attest to the recovered generation's state.
     if (!this.disposed) {
@@ -2609,40 +2613,95 @@ export class RunManager {
     if (session && this.active.get(runId) === state && state.session === session) this.flushAgentInputs(runId);
   }
 
+  /** Reservation is synchronous; only an acknowledged transport may checkpoint delivery. */
+  private submitAgentInput(runId: string, state: ActiveRun, content: ContentBlock[], inputId?: string): boolean {
+    const session = state.session;
+    if (!session?.open || state.agentInputFlight || state.cancelled || state.finishRequested || state.agentInputError || state.pendingHumanAsk) return false;
+    const flight: NonNullable<ActiveRun['agentInputFlight']> = { session, inputId };
+    state.agentInputFlight = flight;
+    const current = (): boolean => !this.disposed && this.active.get(runId) === state && state.session === session &&
+      state.agentInputFlight === flight && !state.cancelled && !state.finishRequested && !this.workerExecutionStopped(runId) &&
+      !!this.store.getRun(runId) && !this.executionBlockedByRootFinish(this.store.getRun(runId)!);
+    const fail = (error: unknown, checkpoint: boolean): void => {
+      if (!current() || state.agentSessionError || state.agentInputError) return;
+      state.agentInputError = `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`;
+      // Latch before interrupt: a transport failure caused by interruption is secondary.
+      try { session.interrupt(); } finally {
+        try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
+        catch { console.error(`[cez] ${state.agentInputError}`); }
+      }
+    };
+    let acknowledgement: false | Promise<void>;
+    try { acknowledgement = session.sendAgentMessage(content); }
+    catch (error) { fail(error, false); state.agentInputFlight = undefined; return false; }
+    if (!acknowledgement) { state.agentInputFlight = undefined; return false; }
+    // Attach rejection handling before any persistence/capacity work can throw.
+    flight.settled = acknowledgement.then(() => {
+      // A positive command ACK can precede a provider-close frame in the same
+      // read batch. Closing the transport afterwards does not revoke that ACK;
+      // explicit stop/disposal/replacement still revoke authority via current().
+      if (!current()) return;
+      try {
+        if (inputId) {
+          const queue = this.store.getRun(runId)?.agentInputs ?? [];
+          if (!queue.some(input => input.id === inputId && !input.deliveredAt)) return;
+          this.store.commitAgentInputs(runId, queue.map(input => input.id === inputId
+            ? { ...input, deliveredAt: new Date().toISOString() } : input));
+          if (this.workerWait(runId)?.wakeId === inputId) this.withdrawWorkerWait(runId);
+        }
+      } catch (error) { fail(error, true); }
+    }, error => fail(error, false)).then(() => {
+      if (state.agentInputFlight !== flight) return;
+      const authorized = current();
+      state.agentInputFlight = undefined;
+      if (!authorized || !session.open || state.agentSessionError || state.agentInputError) return;
+      if (this.flushAgentInputs(runId)) return;
+      if (state.atTurnBoundary !== session || state.pendingHumanAsk || this.workerWait(runId) || this.hasQueuedAgentInputs(runId)) return;
+      if (state.doneAtBoundary === session) {
+        this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed' });
+        appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — goal achieved, session closed');
+        session.end();
+      } else if (state.parkAfterAck?.session === session && !this.waiting.has(runId) && !this.monitoring.has(runId)) {
+        // A wake turn can finish before its HTTP/RPC acknowledgement. Retiring
+        // that wait must release its completed turn, not invent another turn.
+        if (state.parkAfterAck.monitoring) {
+          this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
+          this.monitoring.add(runId);
+          this.clearIdleTimer(state);
+          this.armMonitoringWakeTimer(runId, state);
+        } else {
+          this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+          if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+          this.store.flush(); // Match ordinary turn-end durability before releasing capacity.
+          this.armIdleTimer(runId, state);
+        }
+        this.waiting.add(runId);
+        this.releaseSlot();
+      }
+    }).catch(error => {
+      // Bookkeeping failures cannot become unhandled promise rejections.
+      if (state.agentInputFlight === undefined) state.agentInputFlight = flight;
+      try { fail(error, true); } finally { if (state.agentInputFlight === flight) state.agentInputFlight = undefined; }
+    });
+    const deliveries = this.executions.get(runId)?.deliveries;
+    deliveries?.add(flight.settled);
+    void flight.settled.then(() => deliveries?.delete(flight.settled!));
+    this.resumeParkedRun(runId, state);
+    if (inputId && this.workerWait(runId)?.wakeId === inputId) state.workerWakeTurn = session;
+    return true;
+  }
+
   /** False leaves the durable entry untouched. No human-answer/slash-expansion fallback. */
   private flushAgentInputs(runId: string): boolean {
     const state = this.active.get(runId);
     const run = this.store.getRun(runId);
-    if (!state?.session?.open || state.cancelled || state.agentInputError || state.agentInputDraining || !run ||
+    if (!state?.session?.open || state.cancelled || state.agentInputError || state.agentInputFlight || !run ||
       !['queued', 'running', 'waiting'].includes(run.status) || this.executionBlockedByRootFinish(run) ||
       (run.delegation?.role === 'worker' && run.delegation.destroy) || this.workerWaiting.has(runId) ||
       (this.workerWait(runId)?.phase === 'registered') ||
       (this.workerWait(runId)?.phase === 'wake-pending' && !this.workerWakeAdmitted.has(runId))) return false;
-    state.agentInputDraining = true;
-    try {
-      const input = nextAgentInput(run.agentInputs ?? [], state.pendingHumanAsk);
-      if (!input || !state.session.sendAgentMessage([{ type: 'text', text: input.text }])) return false;
-      try {
-        this.store.commitAgentInputs(runId, (run.agentInputs ?? []).map(entry => entry.id === input.id
-          ? { ...entry, deliveredAt: new Date().toISOString() } : entry));
-      } catch (error) {
-        // Stdin and disk are not transactional. Retain the same input ID for
-        // possible replay, but stop this invocation before it sends anything else.
-        state.agentInputError = `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
-        state.session.interrupt();
-        try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
-        catch { console.error(`[cez] ${state.agentInputError}`); }
-        return false;
-      }
-      this.resumeParkedRun(runId, state);
-      if (this.workerWait(runId)?.wakeId === input.id) state.workerWakeTurn = state.session;
-      // Retiring the wait commits the resumed status too, closing the crash
-      // window where a delivered wake otherwise still looks like idle success.
-      if (this.workerWait(runId)?.wakeId === input.id) this.withdrawWorkerWait(runId);
-      return true;
-    } finally {
-      state.agentInputDraining = false;
-    }
+    const input = nextAgentInput(run.agentInputs ?? [], state.pendingHumanAsk);
+    return !!input && this.submitAgentInput(runId, state, [{ type: 'text', text: input.text }], input.id);
   }
 
   /** Deliver anything `deferMessage` buffered, once the session is live. */
@@ -2693,6 +2752,8 @@ export class RunManager {
    * resumes work in a parked session. */
   private resumeParkedRun(runId: string, state: ActiveRun): void {
     state.atTurnBoundary = undefined;
+    state.doneAtBoundary = undefined;
+    state.parkAfterAck = undefined;
     this.workerWaiting.delete(runId);
     this.clearIdleTimer(state);
     this.clearMonitoringWakeTimer(state, runId);
@@ -2742,7 +2803,7 @@ export class RunManager {
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];
     const answeringAskSeq = userAuthored ? this.pendingHumanAskSeq(runId) : undefined;
     const delivered = userAuthored ? state.session.sendMessage(deliverable)
-      : !state.pendingHumanAsk && state.session.sendAgentMessage(deliverable);
+      : this.submitAgentInput(runId, state, deliverable);
     if (delivered) {
       if (userAuthored) {
         if (answeringAskSeq !== undefined) {
@@ -3127,6 +3188,7 @@ export class RunManager {
       if (event.type === 'error') {
         // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
         sessionError ??= state.agentInputError ?? event.message;
+        state.agentSessionError = sessionError;
         state.session?.interrupt();
         return;
       }
@@ -3177,9 +3239,11 @@ export class RunManager {
         for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', ...note, stepId });
         if (ask) this.prepareHumanAsk(runId, state);
         const workerWaitParked = !!sessionOpen && this.parkWorkerWait(runId, state);
+        state.doneAtBoundary = done ? state.session : undefined;
+        state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring: !!monitoring } : undefined;
         const agentInputDelivered = !ask && !workerWaitParked && this.flushAgentInputs(runId);
         if (state.agentInputError) return;
-        if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !this.hasQueuedAgentInputs(runId)) {
+        if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347) — same as in runAgentStep.
           this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed' });
           appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — goal achieved, session closed');
@@ -3196,7 +3260,7 @@ export class RunManager {
             (state.autoContinues ?? 0) < MAX_AUTO_CONTINUES &&
             !state.cancelled &&
             (() => {
-              const sent = state.session?.sendAgentMessage([{ type: 'text', text: AUTONOMOUS_NUDGE }]);
+              const sent = this.submitAgentInput(runId, state, [{ type: 'text', text: AUTONOMOUS_NUDGE }]);
               if (!sent) return false;
               state.autoContinues = (state.autoContinues ?? 0) + 1;
               this.store.appendEvent(runId, {
@@ -3353,6 +3417,7 @@ export class RunManager {
     // live path applies (#811). Delivery-only: the `user-message` event above already
     // persisted the user's original text, and the transcript must keep showing that.
     const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []);
+    state.agentSessionError = undefined;
     let session: AgentSession | undefined;
     if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
     const delegation = this.provisionSession(runId, state);
@@ -3400,7 +3465,7 @@ export class RunManager {
       this.flushAgentInputs(runId);
       if (session.pid !== undefined) registerRunProcess(runId, session.pid);
       setupComplete = true;
-      await session.result;
+      await session.result.finally(() => state.agentInputFlight?.settled);
       if (this.preserveRunAfterDisposal(runId, state)) return;
       if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
       if (!state.cancelled) {
@@ -3890,6 +3955,7 @@ export class RunManager {
       if (event.type === 'error') {
         // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
         sessionError ??= state.agentInputError ?? event.message;
+        state.agentSessionError = sessionError;
         state.session?.interrupt();
         return;
       }
@@ -3931,9 +3997,11 @@ export class RunManager {
         for (const note of askNotes) emit({ type: 'note', stepId: step.id, ...note });
         if (ask) this.prepareHumanAsk(runId, state);
         const workerWaitParked = !!sessionOpen && this.parkWorkerWait(runId, state);
+        state.doneAtBoundary = done ? state.session : undefined;
+        state.parkAfterAck = interactive && sessionOpen && state.session ? { session: state.session, monitoring: !!monitoring } : undefined;
         const agentInputDelivered = !ask && !workerWaitParked && this.flushAgentInputs(runId);
         if (state.agentInputError) return;
-        if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !this.hasQueuedAgentInputs(runId)) {
+        if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347): close the session instead
           // of parking at `waiting` — the run completes and frees its slot.
           emit({ type: 'lifecycle', message: 'goal achieved — session closed' });
@@ -4031,6 +4099,7 @@ export class RunManager {
       agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: composeSystemPrompt(systemPrompt, extraSystemPrompt),
       allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
     const runner = createRunner(stepBackend);
+    state.agentSessionError = undefined;
     let session: AgentSession | undefined;
     state.currentStepId = step.id;
     this.beginUsageInvocation(runId, state, step.id);
@@ -4069,7 +4138,7 @@ export class RunManager {
         {
           autoEndAfterFirstTurn: !interactive,
           shouldAutoEnd: () => this.active.get(runId) !== state || state.session !== session ||
-            (!this.workerWait(runId) && state.workerWakeTurn !== session),
+            (!this.workerWait(runId) && state.workerWakeTurn !== session && !state.agentInputFlight),
           onUiEvent: (event) => this.handleRunnerUiEvent(runId, state, sink, event),
           onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
         },
@@ -4090,7 +4159,7 @@ export class RunManager {
       this.flushAgentInputs(runId);
       if (session.pid !== undefined) registerRunProcess(runId, session.pid);
       setupComplete = true;
-      const result = await session.result;
+      const result = await session.result.finally(() => state.agentInputFlight?.settled);
       if (this.isDisposedDelegatedRun(runId)) return null;
       const inputOrSessionError = sessionError ?? state.agentInputError ??
         (!state.cancelled && this.workerWait(runId) ? 'Agent session ended before its accepted worker wait completed' : undefined);
@@ -4127,6 +4196,8 @@ export class RunManager {
       }
       state.workerWakeTurn = undefined;
       state.atTurnBoundary = undefined;
+      state.doneAtBoundary = undefined;
+      state.parkAfterAck = undefined;
       state.session = undefined;
       state.currentStepId = undefined;
       state.interrupt = () => undefined;
@@ -4167,7 +4238,7 @@ export class RunManager {
     this.recordUsageUiEvent(runId, state, event);
     sink.handle(event);
     if (state.cancelled) return;
-    if (isRunnerActivity(event)) state.atTurnBoundary = undefined;
+    if (isRunnerActivity(event)) { state.atTurnBoundary = undefined; state.doneAtBoundary = undefined; state.parkAfterAck = undefined; }
     if (event.type === 'ask.requested') {
       this.prepareHumanAsk(runId, state);
       this.clearIdleTimer(state);

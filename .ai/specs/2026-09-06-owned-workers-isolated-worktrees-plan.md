@@ -212,8 +212,19 @@ modify `packages/cezar/src/core/agent-runner.ts`, `claude-cli-runner.ts`,
 `workflows/run.ts`, `core/harness-parity.test.ts`, `harness-parity.testkit.ts`,
 their existing four wire-faithful mocks, `AGENT_PROTOCOL.md`.
 
-**Interfaces:** Add `AgentSession.sendAgentMessage(content: ContentBlock[]): boolean`.
-False means not safely deliverable now, not permission to use sendMessage instead.
+**Interfaces (controller-approved review refinement, 2026-09-07):**
+`AgentSession.sendAgentMessage(content: ContentBlock[]): false | Promise<void>`.
+The method synchronously reserves one submission or refuses with false. The
+Promise resolves only at the backend's transport acceptance boundary; rejection
+retains the same durable input for replay. False never permits sendMessage fallback.
+Codex/OpenCode/Pi use their real correlated RPC/HTTP ACK; Claude uses successful
+stdin write completion, which does not prove model execution. Manager checkpoints
+only at ACK, merges the current queue, counts pending ACK in the 32 cap, acquires
+wake capacity on reservation, and retires a wait only after ACK plus checkpoint.
+Exact session/lifecycle guards reject stale ACK; finalization awaits bookkeeping.
+DONE and nonfinal auto-end preserve a completed boundary while ACK is pending.
+This explicitly replaces the earlier boolean-true-as-delivered interpretation;
+public input/response shapes and the human API are unchanged.
 Export `enqueueAgentInput(run: RunRecord, input: AgentInput): AgentInput[]` and
 `nextAgentInput(queue: readonly AgentInput[], pendingHumanAsk: boolean): AgentInput | undefined`.
 Manager exposes `steerWorker(runId: string, input: AgentInput): 'queued'|'delivered'`.

@@ -127,11 +127,21 @@ export class ClaudeCliRunner implements AgentRunner {
     };
 
     const textChunks: string[] = [];
+    child.stdin.on('error', (error: Error) => { onEvent?.({ type: 'note', message: `claude: stdin write failed: ${error.message}` }); });
     let agentInputReady = false;
+    let agentWritePending = false;
+    const scheduleAutoEnd = () => {
+      if (!opts.autoEndAfterFirstTurn || !stdinOpen || autoEndTimer || agentWritePending) return;
+      autoEndTimer = setTimeout(() => {
+        autoEndTimer = undefined;
+        if (opts.shouldAutoEnd?.() !== false) end();
+      }, AUTO_END_DELAY_MS);
+      autoEndTimer.unref?.();
+    };
     let pendingPromptTurns = 0;
     let pendingMarkerAsk = false;
     let turnTextStart = 0;
-    const sendMessage = (content: ContentBlock[]): boolean => {
+    const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void): boolean => {
       if (!stdinOpen) return false;
       agentInputReady = false;
       pendingMarkerAsk = false;
@@ -147,7 +157,7 @@ export class ClaudeCliRunner implements AgentRunner {
         session_id: spec.sessionId,
       });
       try {
-        child.stdin.write(`${line}\n`);
+        child.stdin.write(`${line}\n`, acknowledge);
         pendingPromptTurns += 1;
         // Each user message written to stdin begins a turn (§7.1).
         emitUi(claudeTurnStarted);
@@ -275,13 +285,7 @@ export class ClaudeCliRunner implements AgentRunner {
             // A result is not idle if human stdin messages already queued later turns.
             agentInputReady = pendingPromptTurns === 0;
             onEvent?.({ type: 'turn-end' });
-            if (opts.autoEndAfterFirstTurn && stdinOpen && !autoEndTimer) {
-              autoEndTimer = setTimeout(() => {
-                autoEndTimer = undefined;
-                if (opts.shouldAutoEnd?.() !== false) end();
-              }, AUTO_END_DELAY_MS);
-              autoEndTimer.unref?.();
-            }
+            scheduleAutoEnd();
           }
         }
       } catch (err) {
@@ -342,8 +346,23 @@ export class ClaudeCliRunner implements AgentRunner {
       result,
       sendMessage,
       sendAgentMessage: (content) => {
-        if (!agentInputReady || pendingMarkerAsk) return false;
-        return sendMessage(content);
+        if (!stdinOpen || !agentInputReady || pendingMarkerAsk || agentWritePending) return false;
+        let resolve!: () => void, reject!: (error: Error) => void;
+        const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+        agentWritePending = true;
+        const closed = () => { agentWritePending = false; reject(new Error('claude closed before stdin delivery completed')); };
+        child.once('close', closed);
+        const sent = sendMessage(content, error => {
+          child.off('close', closed);
+          agentWritePending = false;
+          if (error) reject(error);
+          else resolve();
+          if (stdinOpen && agentInputReady) { opts.onAgentInputReady?.(); scheduleAutoEnd(); }
+        });
+        if (!sent) { agentWritePending = false; child.off('close', closed); return false; }
+        // Claude has no per-prompt RPC receipt: successful pipe write is the
+        // transport boundary, not a promise that the model executed the input.
+        return acknowledged;
       },
       discardQueuedMessages: () => undefined,
       end,

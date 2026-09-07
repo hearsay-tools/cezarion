@@ -367,7 +367,7 @@ describe('harness parity — seam tier, session control', () => {
           await new Promise(resolve => setTimeout(resolve, 400));
           expect(checks).toBeGreaterThan(0); expect(session.open).toBe(true);
           hold = false;
-          expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo admitted wake' }])).toBe(true);
+          await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo admitted wake' }])).resolves.toBeUndefined();
           await waitFor(() => v1.filter(e => e.type === 'turn-end').length >= 2);
           await session.result;
           expect(session.open).toBe(false); expect(checks).toBeGreaterThan(1);
@@ -386,7 +386,7 @@ describe('harness parity — seam tier, session control', () => {
           expect(textEvents(v1).join('\n')).not.toContain('agent steering');
           expect(session.sendMessage([{ type: 'text', text: 'Vitest' }])).toBe(true);
           await waitFor(() => v1.filter(e => e.type === 'turn-end').length > ends);
-          expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent steering' }])).toBe(true);
+          await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent steering' }])).resolves.toBeUndefined();
           await waitFor(() => textEvents(v1).some(text => text.includes('agent steering')));
         },
       });
@@ -397,7 +397,7 @@ describe('harness parity — seam tier, session control', () => {
         whileOpen: async (session, { v1 }) => {
           expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).toBe(false);
           await waitFor(() => v1.some(e => e.type === 'turn-end'));
-          expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).toBe(true);
+          await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).resolves.toBeUndefined();
           await waitFor(() => textEvents(v1).some(text => text.includes('retried steering')));
           session.end();
           expect(session.sendAgentMessage([{ type: 'text', text: 'closed' }])).toBe(false);
@@ -502,7 +502,9 @@ describe('harness parity — owned input run tier', () => {
         expect((manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(false);
         expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
-        expect(manager.steerWorker(runId, agentInput(parentRunId, 'mock:agent-echo after ask'))).toBe('delivered');
+        const afterAsk = agentInput(parentRunId, 'mock:agent-echo after ask');
+        expect(manager.steerWorker(runId, afterAsk)).toBe('queued');
+        await waitFor(() => !!store.getRun(runId)?.agentInputs?.find(input => input.id === afterAsk.id)?.deliveredAt);
       });
     }, 60_000);
 
@@ -595,7 +597,8 @@ describe('harness parity — owned input run tier', () => {
         store.on('event', failAfterEnqueue);
         const input = agentInput(parentRunId, 'mock:hold');
         try {
-          expect(() => manager.steerWorker(runId, input)).toThrow(/agent input delivery checkpoint failed/i);
+          expect(manager.steerWorker(runId, input)).toBe('queued');
+          await waitFor(() => store.readEvents(runId).some(event => event.type === 'error' && String(event.message).includes('agent input delivery checkpoint failed')));
           expect(store.getRun(runId)?.agentInputs).toEqual([input]);
         } finally {
           store.off('event', failAfterEnqueue);
@@ -730,7 +733,8 @@ describe('OpenCode durable input acknowledgements', () => {
         expect(manager.continueRun(runId, { text: 'mock:baseline' }).ok).toBe(true);
         await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
       }
-      expect(manager.steerWorker(runId, agentInput(parentRunId, 'mock:reject-agent-post'))).toBe('delivered');
+      const rejected = agentInput(parentRunId, 'mock:reject-agent-post');
+      expect(manager.steerWorker(runId, rejected)).toBe('queued');
       const pending = agentInput(parentRunId);
       expect(manager.steerWorker(runId, pending)).toBe('queued');
       await waitFor(() => store.readEvents(runId).some(e => e.type === 'error'));

@@ -58,7 +58,7 @@ describe('attributed input queue', () => {
 });
 
 
-it('readiness hints ignore stale/disposed sessions and guard duplicate/reentrant drains', () => {
+it('readiness hints ignore stale/disposed sessions and guard duplicate/reentrant drains', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-input-ready-'));
   const store = RunStore.open(dir);
   const manager = new RunManager(store, dir);
@@ -79,12 +79,14 @@ it('readiness hints ignore stale/disposed sessions and guard duplicate/reentrant
       sendAgentMessage: () => {
         sends++;
         if (sends < 2) internal.handleAgentInputReady(record.id, state, session);
-        return true;
+        return Promise.resolve();
       },
       end: () => {}, interrupt: () => {},
     };
     const state = { session, pendingHumanAsk: true, cancelled: false };
     internal.active.set(record.id, state);
+    internal.handleAgentInputReady(record.id, state, undefined); // Synchronous startup hint before session assignment.
+    expect(sends).toBe(0);
     internal.handleAgentInputReady(record.id, state, session);
     expect(sends).toBe(0);
     state.pendingHumanAsk = false;
@@ -93,6 +95,8 @@ it('readiness hints ignore stale/disposed sessions and guard duplicate/reentrant
     internal.handleAgentInputReady(record.id, state, session);
     internal.handleAgentInputReady(record.id, state, session);
     expect(sends).toBe(1);
+    await Promise.resolve();
+    await Promise.resolve();
     expect(store.getRun(record.id)?.agentInputs?.[0]?.deliveredAt).toBeDefined();
     store.commitAgentInputs(record.id, [{ ...input, id: randomUUID() }]);
     internal.active.set(record.id, { ...state });
@@ -125,5 +129,99 @@ it('ask replay requires a validated successful-delivery checkpoint for the curre
     expect(replay.hasPendingHumanAsk(record.id)).toBe(true);
     store.appendEvent(record.id, { type: 'human-input-delivered', askSeq: second.seq });
     expect(replay.hasPendingHumanAsk(record.id)).toBe(false);
+  } finally { manager.dispose(); store.flush(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+it.each(['cancelled', 'finish requested', 'disposed', 'replacement session', 'replacement state'] as const)(
+  'a late transport ACK has no authority after %s', async transition => {
+    const dir = mkdtempSync(join(tmpdir(), 'cez-input-stale-ack-'));
+    const store = RunStore.open(dir), manager = new RunManager(store, dir);
+    const internal = manager as unknown as {
+      active: Map<string, object>;
+      handleAgentInputReady(id: string, state: object, session: AgentSession | undefined): void;
+    };
+    let acknowledge!: () => void;
+    const ack = new Promise<void>(resolve => { acknowledge = resolve; });
+    const session: AgentSession = { open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+      sendMessage: () => false, sendAgentMessage: () => ack, discardQueuedMessages() {}, end() {}, interrupt() {} };
+    const state = { session, pendingHumanAsk: false, cancelled: false, finishRequested: false,
+      agentInputFlight: undefined as { settled?: Promise<void> } | undefined };
+    try {
+      const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
+      store.commitAgentInputs(run.id, [input]);
+      internal.active.set(run.id, state);
+      internal.handleAgentInputReady(run.id, state, session);
+      const settled = state.agentInputFlight?.settled;
+      expect(settled).toBeInstanceOf(Promise);
+      expect(store.getRun(run.id)?.agentInputs).toEqual([input]);
+      if (transition === 'cancelled') state.cancelled = true;
+      if (transition === 'finish requested') state.finishRequested = true;
+      if (transition === 'disposed') manager.dispose();
+      if (transition === 'replacement session') state.session = { ...session };
+      if (transition === 'replacement state') internal.active.set(run.id, { ...state });
+      const before = JSON.stringify(store.getRun(run.id));
+      acknowledge(); await settled;
+      expect(JSON.stringify(store.getRun(run.id))).toBe(before);
+      expect(store.getRun(run.id)?.agentInputs).toEqual([input]);
+    } finally { manager.dispose(); store.flush(); rmSync(dir, { recursive: true, force: true }); }
+  },
+);
+
+it('ACK cannot answer a newly visible human ask or drain its queued successor', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cez-input-ack-ask-'));
+  const store = RunStore.open(dir), manager = new RunManager(store, dir);
+  const internal = manager as unknown as {
+    active: Map<string, object>;
+    handleAgentInputReady(id: string, state: object, session: AgentSession): void;
+    hasPendingHumanAsk(id: string): boolean;
+  };
+  let acknowledge!: () => void, sends = 0;
+  const ack = new Promise<void>(resolve => { acknowledge = resolve; });
+  const session: AgentSession = { open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+    sendMessage: () => { throw new Error('ACK used human seam'); },
+    sendAgentMessage: () => { sends++; return ack; }, discardQueuedMessages() {}, end() {}, interrupt() {} };
+  const state = { session, pendingHumanAsk: false, cancelled: false,
+    agentInputFlight: undefined as { settled?: Promise<void> } | undefined };
+  try {
+    const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
+    store.commitAgentInputs(run.id, [input]); internal.active.set(run.id, state);
+    internal.handleAgentInputReady(run.id, state, session);
+    const settled = state.agentInputFlight?.settled;
+    const second = { ...input, id: randomUUID() };
+    store.commitAgentInputs(run.id, [input, second]);
+    store.appendEvent(run.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
+      header: 'Choice', question: 'Choose?', options: [{ label: 'One' }, { label: 'Two' }],
+    }] });
+    state.pendingHumanAsk = true;
+    acknowledge(); await settled;
+    expect(store.getRun(run.id)?.agentInputs).toEqual([{ ...input, deliveredAt: expect.any(String) }, second]);
+    expect(sends).toBe(1); expect(internal.hasPendingHumanAsk(run.id)).toBe(true);
+    expect(store.readEvents(run.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
+  } finally { manager.dispose(); store.flush(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+it.each(['accepted', 'rejected'] as const)('%s ACK settles before a later provider-close frame in the same read batch', async outcome => {
+  const dir = mkdtempSync(join(tmpdir(), 'cez-input-ack-provider-'));
+  const store = RunStore.open(dir), manager = new RunManager(store, dir);
+  const internal = manager as unknown as { active: Map<string, object>;
+    handleAgentInputReady(id: string, state: object, session: AgentSession): void };
+  let open = true;
+  const session: AgentSession = { get open() { return open; }, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+    sendMessage: () => false, sendAgentMessage: () => outcome === 'accepted' ? Promise.resolve() : Promise.reject(new Error('command rejected')),
+    discardQueuedMessages() {}, end() { open = false; }, interrupt() { open = false; } };
+  const state = { session, pendingHumanAsk: false, cancelled: false, agentSessionError: undefined as string | undefined,
+    agentInputFlight: undefined as { settled?: Promise<void> } | undefined };
+  try {
+    const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
+    store.commitAgentInputs(run.id, [input]); internal.active.set(run.id, state);
+    internal.handleAgentInputReady(run.id, state, session);
+    const settled = state.agentInputFlight?.settled;
+    expect(settled).toBeInstanceOf(Promise);
+    // The RPC dispatcher has settled the exact command Promise; another frame
+    // can synchronously close the session before Promise callbacks get a turn.
+    state.agentSessionError = 'later provider failure'; session.interrupt();
+    await settled;
+    expect(store.getRun(run.id)?.agentInputs).toEqual(outcome === 'accepted' ? [{ ...input, deliveredAt: expect.any(String) }] : [input]);
+    expect(state.agentSessionError).toBe('later provider failure'); expect(session.open).toBe(false);
   } finally { manager.dispose(); store.flush(); rmSync(dir, { recursive: true, force: true }); }
 });

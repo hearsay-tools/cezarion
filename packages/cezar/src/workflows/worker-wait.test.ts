@@ -10,6 +10,9 @@ import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from './run.ts';
 import { currentUsage } from '../core/process-usage.ts';
+import type { AgentSession } from '../core/agent-runner.ts';
+import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { withDelayedCommand } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 const terminal = ['review', 'done', 'failed', 'cancelled'];
@@ -160,6 +163,93 @@ rl.on('close', () => process.exit(0));
     expect(engine.workerWaiting.has(run.id)).toBe(false);
   });
 
+  it.each(['codex', 'opencode', 'pi'].flatMap(backend => ['agent', 'check'].map(next => ({ backend: backend as 'codex' | 'opencode' | 'pi', next }))))(
+    '$backend keeps a completed wake and following $next held until its real transport ACK at cap one', async ({ backend, next }) => {
+      await withDelayedCommand(backend, async release => {
+        process.env.CEZ_DRY_RUN = '0';
+        process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
+        process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
+        const run = manager.startRun({ name: 'ACK held chain', source: 'built-in', steps: [
+          { id: 'first', prompt: 'mock:hold' },
+          next === 'agent' ? { id: 'next', prompt: 'mock:done' } : { id: 'next', command: 'echo checked' },
+        ] }, { task: 'parent', runner: backend });
+        store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+        const engine = manager as unknown as { workerWaiting: Set<string>; workerWakeAdmitted: Set<string>;
+          active: Map<string, { sessionEverOpened?: boolean; session?: AgentSession }> };
+        await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
+        const session = engine.active.get(run.id)!.session!;
+        const w = await worker(run.id, 'mock:slow');
+        register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
+        try {
+          await until(() => engine.workerWaiting.has(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
+          expect(semaphore.busy()).toBe(1);
+          manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
+          await until(() => store.readEvents(run.id).some(event => event.type === 'text' && String(event.text).includes('Worker wait')));
+          await new Promise(resolve => setTimeout(resolve, 400));
+          const wake = store.getRun(run.id)?.agentInputs?.find(input => input.source === 'lifecycle');
+          expect(wake).toBeDefined(); expect(wake?.deliveredAt).toBeUndefined();
+          expect(waitOf(store.getRun(run.id))?.wakeId).toBe(wake?.id);
+          expect(engine.workerWaiting.has(run.id)).toBe(false);
+          expect(engine.workerWakeAdmitted.has(run.id)).toBe(true);
+          expect(engine.active.get(run.id)?.session).toBe(session); expect(session.open).toBe(true);
+          expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
+          expect(semaphore.busy()).toBe(1);
+          release();
+          await until(() => !!store.getRun(run.id)?.agentInputs?.find(input => input.id === wake?.id)?.deliveredAt);
+          expect(waitOf(store.getRun(run.id))).toBeUndefined();
+          expect(semaphore.busy()).toBe(1); // Nonfinal auto-end/next step still owns capacity.
+          await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status !== 'pending');
+          expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')?.status).toBe('done');
+          await until(() => !manager.isActive(run.id));
+          expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['done', 'done']);
+        } finally {
+          failureState = captureState();
+          release();
+          for (const record of store.listRuns()) manager.cancel(record.id);
+          await until(() => store.listRuns().every(record => !manager.isActive(record.id)));
+        }
+      }, 'Worker wait');
+    },
+  );
+
+  it('interactive markerless wake persists run and step waiting immediately after its held HTTP ACK', async () => {
+    await withDelayedCommand('opencode', async release => {
+      process.env.CEZ_DRY_RUN = '0';
+      process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
+      process.env.CEZ_OPENCODE_BIN = HARNESS_ADAPTERS.opencode.mockBin;
+      const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: 'opencode' });
+      store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      const w = await worker(p.id, 'mock:slow');
+      register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
+      const engine = manager as unknown as { active: Map<string, {
+        sessionEverOpened?: boolean; agentInputFlight?: { settled?: Promise<void> }
+      }> };
+      try {
+        await until(() => !!engine.active.get(w.id)?.sessionEverOpened);
+        manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
+        await until(() => store.readEvents(p.id).some(event => event.type === 'text' && String(event.text).includes('Worker wait')));
+        await Promise.all(bookkeeping);
+        store.flush(); // Earlier turn bookkeeping/debounce cannot satisfy the measured ACK checkpoint.
+        const settled = engine.active.get(p.id)?.agentInputFlight?.settled;
+        expect(settled).toBeInstanceOf(Promise);
+        const wake = store.getRun(p.id)?.agentInputs?.find(input => input.source === 'lifecycle');
+        expect(wake?.deliveredAt).toBeUndefined();
+        release(); await settled;
+        // Read synchronously at settlement, before the store's 300ms debounce.
+        const disk = (JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]).find(run => run.id === p.id)!;
+        expect.soft(disk.status).toBe('waiting');
+        expect.soft(disk.steps.find(step => step.id === 'task')?.status).toBe('waiting');
+        expect(waitOf(disk)).toBeUndefined();
+        expect(disk.agentInputs?.find(input => input.id === wake?.id)?.deliveredAt).toEqual(expect.any(String));
+      } finally {
+        release();
+        for (const run of store.listRuns()) manager.cancel(run.id);
+        await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
+      }
+    }, 'Worker wait');
+  });
+
   it('an actual session close during a nonfinal wait cannot advance a check or retain a capacity exemption', async () => {
     const run = manager.startRun({ name: 'closed chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:hold' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
@@ -222,7 +312,7 @@ rl.on('close', () => process.exit(0));
         await until(() => store.getRun(p.id)?.status === 'waiting');
       }
       const engine = manager as unknown as { workerWakeAdmitted: Set<string>; active: Map<string, {
-        session: { sendAgentMessage(content: unknown[]): boolean; sendMessage(content: unknown[]): boolean }
+        session: { sendAgentMessage(content: unknown[]): false | Promise<void>; sendMessage(content: unknown[]): boolean }
       }> };
       const session = engine.active.get(p.id)!.session;
       // A backend opening/ack window legitimately refuses non-human input.
@@ -470,7 +560,7 @@ rl.on('close', () => process.exit(0));
     manager.enqueueOwnedRun(w.id);
     await until(() => !!store.getRun(w.id)?.monitoringWakeAt);
     const engine = manager as unknown as {
-      active: Map<string, { monitoringWakeups?: number; session: { sendAgentMessage(...args: unknown[]): boolean } }>;
+      active: Map<string, { monitoringWakeups?: number; session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
       monitoring: Set<string>;
       settleSuccess(id: string, durable?: boolean): Promise<void>;
       deliverMessage(id: string, content: { type: 'text'; text: string }[], human: boolean): boolean;

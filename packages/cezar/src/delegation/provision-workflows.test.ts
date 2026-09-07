@@ -30,7 +30,7 @@ describe('manager session delegation lifecycle', () => {
       let resolve!: (value: AgentRunResult) => void; let open = true;
       const result = new Promise<AgentRunResult>(done => { resolve = done; });
       const finish = () => { open = false; resolve({ text: '', toolCalls: [], tokensUsed: 0 }); };
-      const session: AgentSession = { result, get open() { return open; }, sendMessage: () => open, sendAgentMessage: () => open, discardQueuedMessages: () => {}, interrupt: finish, end: finish };
+      const session: AgentSession = { result, get open() { return open; }, sendMessage: () => open, sendAgentMessage: () => open ? Promise.resolve() : false, discardQueuedMessages: () => {}, interrupt: finish, end: finish };
       sessions.push({ spec, session, emit: event => emit?.(event), finish }); return session;
     } }));
     controller = await DelegationController.start(); controller.attachProject({ id: 'project', root: f.root, manager: f.manager, store: f.store });

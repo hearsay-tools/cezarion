@@ -191,7 +191,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', interrupt: async () => undefined,
       run: async () => { throw Error('unused'); }, startSession: () => {
         expect(manager.deferMessage(w.id, [{ type: 'text', text: 'buffered during startup' }])).toBe(true);
-        return { pid: child.pid, result: closed, open: true, sendMessage: () => true, sendAgentMessage: () => true, discardQueuedMessages: () => {},
+        return { pid: child.pid, result: closed, open: true, sendMessage: () => true, sendAgentMessage: () => Promise.resolve(), discardQueuedMessages: () => {},
           interrupt: () => { child.kill('SIGTERM'); }, end: () => { child.kill('SIGTERM'); } };
       } });
     if (mode === 'fresh') manager.enqueueOwnedRun(w.id);
@@ -247,7 +247,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
           { cwd: workspace(w).path, stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout!.once('data', () => { ready = true; });
         const result = new Promise<{ text: string; toolCalls: []; tokensUsed: number }>(resolve => child!.once('close', () => resolve({ text: '', toolCalls: [], tokensUsed: 0 })));
-        return { pid: child.pid, result, open: true, sendMessage: () => true, sendAgentMessage: () => true, discardQueuedMessages: () => {},
+        return { pid: child.pid, result, open: true, sendMessage: () => true, sendAgentMessage: () => Promise.resolve(), discardQueuedMessages: () => {},
           interrupt: () => { child!.kill('SIGTERM'); }, end: () => { child!.kill('SIGTERM'); } };
       } });
     releases.push(() => child?.kill('SIGKILL'));

@@ -509,3 +509,45 @@ all RED/GREEN, compile-failure and final gate logs are retained privately under
 `native-pr138-ci-checkpoint-*`; the diagnosis report records exact commands,
 restoration hashes and cleanup. Only this QA appendix follows the tested source.
 Controller owns commit, push and CI reconciliation.
+
+
+## PR138 review round 2 — 2026-09-07
+
+Reviewed source `36a1a3b2c20d43b653a0f1335421a0838e48a707` passed all five
+ordered gates without a source change: typecheck; full Vitest **7,599 tests /
+369 files**, 984.02s; unit **37 + 60 tests**; build with **540 packaged files /
+84 web assets**; and packaged CLI **24 tests**, 13.62s. Every command exited 0.
+This includes the four-runner acknowledgement boundary, same-ID rejected-input
+replay, late completion/capacity guards, and immediate waiting-state persistence
+regression. Scoped review and the persistence supplement rereview are clean.
+Cleanup retains its proof requirement: unobserved external removal remains
+incomplete because absence alone cannot distinguish a surviving moved worktree
+or repurposed branch. Three preservation regressions cover that tradeoff.
+
+The first corrected-source run was interrupted by an environment restart.
+Its replacement was also interrupted and recorded ENOSPC writes; neither is
+claimed as a pass. The user confirmed disk capacity was resolved while the
+completed run above was active. An initial recovery wrapper also exited before
+invoking any gate because
+its optional disk telemetry treated an inaccessible `/tmp` path as fatal; only
+that scratch wrapper was corrected. All earlier logs remain preserved privately.
+
+Actual focused native browser verification passed **8/8**, exit 0, 37.89s.
+The direct Vitest command emits no `TEST_E2E_STATUS`; this is no new full-browser
+verdict. Six fresh screenshots were inspected: desktop/mobile in both themes,
+offline relationships and the preserved human question. All four tabs retain
+32 scoped worker links; keyboard focus reaches the final worker, targets are
+44px, horizontal overflow is absent, and reduced motion is enabled. Scroll
+measurements remain 1304px desktop / 1836px mobile. The pending question keeps
+its needs-you status beside attributed agent input; retry/reconnect and global
+Tasks/palette checks pass. Broader baseline failures #136/#137 remain separately
+attributed; their historical failed-run evidence above is unchanged.
+
+The browser used sanitized Git variables, external `/tmp`, the actual native
+adapter and the canonical-root guard. Exact shared fixture PID124367 was checked
+by start ticks, cwd, home and argv before the required shutdown script exited 0.
+The final audit found it absent and no accessible matching QA-home or relationship
+fixture processes; 199 process environments were unreadable. Eight fresh
+artifacts and command/process evidence are retained privately under
+`native-pr138-review2-recovery2-*`. Only this QA appendix follows the tested
+source; the controller owns upstream integration, commits, push and CI.

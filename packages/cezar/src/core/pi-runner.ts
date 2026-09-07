@@ -127,9 +127,29 @@ export class PiRunner implements AgentRunner {
       }
     };
     let agentInputReady = false;
+    let promptSerial = 0;
+    let humanPromptAcks = 0;
+    let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
+    const rejectAgentAck = () => {
+      const pending = agentAck; agentAck = undefined;
+      pending?.reject(new Error('pi closed before prompt acknowledgement'));
+    };
+    const scheduleAutoEnd = () => {
+      if (!opts.autoEndAfterFirstTurn || !open || autoEndTimer || agentAck || humanPromptAcks) return;
+      autoEndTimer = setTimeout(() => {
+        autoEndTimer = undefined;
+        if (opts.shouldAutoEnd?.() !== false) end();
+      }, AUTO_END_DELAY_MS);
+      autoEndTimer.unref?.();
+    };
+    const readyAfterAck = () => {
+      if (open && agentInputReady && !piUi.turnId && !agentAck && !humanPromptAcks) {
+        opts.onAgentInputReady?.(); scheduleAutoEnd();
+      }
+    };
     let pendingMarkerAsk = false;
     let turnTextStart = 0;
-    const sendMessage = (content: ContentBlock[]): boolean => {
+    const sendMessage = (content: ContentBlock[], requestId?: string): boolean => {
       if (!open) return false;
       agentInputReady = false;
       pendingMarkerAsk = false;
@@ -142,6 +162,7 @@ export class PiRunner implements AgentRunner {
       if (
         !write({
           type: 'prompt',
+          ...(requestId ? { id: requestId } : {}),
           message,
           ...(images.length > 0 ? { images } : {}),
           ...(piUi.turnId ? { streamingBehavior: 'steer' } : {}),
@@ -149,6 +170,7 @@ export class PiRunner implements AgentRunner {
       ) {
         return false;
       }
+      if (!requestId) humanPromptAcks += 1;
       if (!piUi.turnId) {
         const mapped = piTurnStarted(piUi);
         piUi = mapped.state;
@@ -159,6 +181,7 @@ export class PiRunner implements AgentRunner {
     const end = (): void => {
       if (!open) return;
       open = false;
+      rejectAgentAck();
       child.stdin.end();
       killTimer = setTimeout(() => {
         if (child.exitCode !== null || child.signalCode !== null) return;
@@ -171,6 +194,7 @@ export class PiRunner implements AgentRunner {
       if (!open) return;
       write({ type: 'abort' });
       open = false;
+      rejectAgentAck();
       terminatedByCezar = true;
       child.kill('SIGTERM');
     };
@@ -227,6 +251,21 @@ export class PiRunner implements AgentRunner {
               sessionId = discovered;
               onEvent?.({ type: 'session', sessionId: discovered });
             }
+          } else if (value.type === 'response' && value.command === 'prompt') {
+            const pending = agentAck;
+            if (pending && value.id === pending.id) {
+              agentAck = undefined;
+              if (value.success === true) pending.resolve();
+              else {
+                const message = rpcError(value);
+                if (open) onEvent?.({ type: 'error', message });
+                pending.reject(new Error(message));
+              }
+            } else if (value.id === undefined) {
+              humanPromptAcks = Math.max(0, humanPromptAcks - 1);
+              if (value.success === false) onEvent?.({ type: 'error', message: rpcError(value) });
+            }
+            readyAfterAck();
           } else if (value.type === 'response' && value.success === false) {
             onEvent?.({ type: 'error', message: rpcError(value) });
           } else if (value.type === 'message_update' && isRecord(value.assistantMessageEvent)) {
@@ -274,13 +313,7 @@ export class PiRunner implements AgentRunner {
             pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
             agentInputReady = true;
             onEvent?.({ type: 'turn-end' });
-            if (opts.autoEndAfterFirstTurn && open && !autoEndTimer) {
-              autoEndTimer = setTimeout(() => {
-                autoEndTimer = undefined;
-                if (opts.shouldAutoEnd?.() !== false) end();
-              }, AUTO_END_DELAY_MS);
-              autoEndTimer.unref?.();
-            }
+            scheduleAutoEnd();
           } else if (value.type === 'extension_error') {
             onEvent?.({ type: 'note', message: string(value.error) ?? 'pi extension error' });
           }
@@ -290,6 +323,7 @@ export class PiRunner implements AgentRunner {
         if (autoEndTimer) clearTimeout(autoEndTimer);
         if (killTimer) clearTimeout(killTimer);
         open = false;
+        rejectAgentAck();
       }
 
       flushText();
@@ -324,8 +358,13 @@ export class PiRunner implements AgentRunner {
       result,
       sendMessage,
       sendAgentMessage: (content) => {
-        if (!agentInputReady || piUi.turnId || pendingMarkerAsk) return false;
-        return sendMessage(content);
+        if (!open || !agentInputReady || piUi.turnId || pendingMarkerAsk || agentAck || humanPromptAcks) return false;
+        const id = `cezar-agent-${++promptSerial}`;
+        let resolve!: () => void, reject!: (error: Error) => void;
+        const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+        agentAck = { id, resolve, reject };
+        if (!sendMessage(content, id)) { agentAck = undefined; return false; }
+        return acknowledged;
       },
       discardQueuedMessages: () => undefined,
       end,

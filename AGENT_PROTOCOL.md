@@ -77,7 +77,7 @@ interface AgentSession {
   result: Promise<AgentRunResult>;   // resolves when the process exits
   readonly pid?: number;             // root of the run's process tree (resource telemetry, #348)
   sendMessage(content: ContentBlock[]): boolean;  // human input; false when closed
-  sendAgentMessage(content: ContentBlock[]): boolean; // non-human; false when unsafe
+  sendAgentMessage(content: ContentBlock[]): false | Promise<void>; // reserve now, acknowledge asynchronously
   discardQueuedMessages(): void;     // drop mid-turn follow-ups; CEZ:ASK park calls this
   end(): void;                       // graceful: end input, SIGTERM→SIGKILL watchdog
   interrupt(): void;                 // hard stop (cancel)
@@ -112,10 +112,24 @@ SSE-idle boundary; when a question-reply or queued-prompt HTTP acknowledgement
 settles later, it emits an in-process readiness hint instead.
 
 RunManager persists an attributed `AgentInput` before calling this seam, retains
-it on false, and records `deliveredAt` only after true. The `agent-input` event
+it on false or rejection, and records `deliveredAt` only after the returned Promise
+resolves. The method remains synchronous: false refuses without a write; a Promise
+reserves one submission immediately, but is not a delivery receipt. Codex resolves
+at the matching turn/start or turn/steer RPC result, OpenCode at successful prompt
+HTTP acknowledgement, and Pi at the matching prompt response id. Claude has no
+per-prompt RPC receipt: its write callback proves only successful pipe delivery,
+not model execution. A transport rejection remains replayable; a successfully
+accepted command followed by a provider failure retains its transport receipt.
+Human `sendMessage` keeps its existing synchronous semantics. The `agent-input` event
 carries `{input: {id, source: 'agent'|'lifecycle', parentRunId, text, createdAt,
 deliveredAt?}}`; it is not a `user-message`, does not resolve an ask card, and
-never expands registry slash skills. The queue cap is 32 **undelivered** inputs.
+never expands registry slash skills. The queue cap is 32 **undelivered** inputs, including the in-flight reservation.
+Only one exact current state/session/input can be in flight. ACK merges into the
+current durable queue, preserving concurrent enqueues; duplicate readiness hints
+cannot submit it again. Synchronous steer reports queued until that checkpoint.
+Finish, cancellation, disposal and replacement revoke callback authority; a late
+ACK cannot stamp a replacement generation or reopen a stopped run. Pending delivery
+bookkeeping settles before execution finalization; it is never process-exit proof.
 Fresh, queued, starting, parked and continuation sessions read the same durable
 queue. Owned workers with pending asks recover without synthetic answers; only
 explicit human-answer Continue can reopen them. Bare Continue cannot consume an ask.
@@ -128,13 +142,17 @@ ask cannot clear a newer question; absent checkpoints retain the ask conservativ
 
 Already accepted input precedes automatic `CEZ:DONE` closure at a safe boundary,
 not explicit Finish, cancellation, destruction or fatal failure. Empty queues
-preserve ordinary completion. A temporary refusal during a late OpenCode HTTP ack
+preserve ordinary completion. A completed turn with an outstanding ACK retains its
+DONE intent and nonfinal auto-end hold; acknowledgement rechecks that exact idle
+boundary, without requiring a phantom turn. Worker-wake reservation acquires real
+capacity immediately, while only positive ACK plus checkpoint retires the durable
+wait. A wake turn completed before ACK does not become running again at ACK. A temporary refusal during a late OpenCode HTTP ack
 keeps accepted input queued even when the completed turn declares DONE. Rejected
 OpenCode agent-input POSTs emit a fatal error before any synthetic turn boundary,
 stop further delivery, and fail the run. Opening POST failure is also fatal before
 its synthetic boundary, reported once; human follow-up rejection stays nonfatal.
 Disk and stdin are not transactional: a failed
-post-send checkpoint interrupts the invocation and reports a persistence failure,
+post-acknowledgement checkpoint interrupts the invocation and reports a persistence failure,
 retaining the same input ID. Recovery may replay that identified context (at-least-once,
 not exactly-once delivery); it must never silently drop it or claim success.
 
@@ -146,7 +164,7 @@ not exactly-once delivery); it must never silently drop it or claim success.
   auto-end timer executes, including waits accepted after it was armed. False
   holds that auto-end; a later turn may auto-end normally. RunManager holds the
   exact current session across accepted worker waits and the admitted wake's
-  reply turn, including nonfinal agent steps. Explicit end/interrupt and provider
+  reply turn and pending delivery acknowledgement, including nonfinal agent steps. Explicit end/interrupt and provider
   failures keep their existing semantics; a timer is never termination proof.
 - `onAgentInputReady?: () => void` — optional in-process retry hint, NOT delivery
   acknowledgement or completion. Only a successful late reply/prompt at an idle,

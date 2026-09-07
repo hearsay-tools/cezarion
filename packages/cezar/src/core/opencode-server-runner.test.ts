@@ -1097,7 +1097,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await waitFor(() => count(events, 'turn-end') === 2);
       expect(session.sendAgentMessage([{ type: 'text', text: 'agent later turn' }])).toBe(false);
       await waitFor(() => ready === 1);
-      expect(session.sendAgentMessage([{ type: 'text', text: 'agent later turn' }])).toBe(true);
+      await expect(session.sendAgentMessage([{ type: 'text', text: 'agent later turn' }])).resolves.toBeUndefined();
       await waitFor(() => mock.promptPosts.length === 3);
     });
   });
@@ -1109,7 +1109,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       // The v1 callback is the manager's drain boundary: run it synchronously,
       // before promise waiters can begin the already queued human prompt.
       const push = events.push.bind(events);
-      let attempted: boolean | undefined;
+      let attempted: false | Promise<void> | undefined;
       events.push = (...incoming) => {
         const length = push(...incoming);
         if (incoming.some(event => event.type === 'turn-end') && attempted === undefined) {
@@ -1124,7 +1124,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       expect(mock.promptBodies[1]).toEqual({ parts: [{ type: 'text', text: 'human next turn' }] });
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => count(events, 'turn-end') === 2);
-      expect(session.sendAgentMessage([{ type: 'text', text: 'agent later turn' }])).toBe(true);
+      await expect(session.sendAgentMessage([{ type: 'text', text: 'agent later turn' }])).resolves.toBeUndefined();
       await waitFor(() => mock.promptPosts.length === 3);
       expect(mock.promptBodies[2]).toEqual({ parts: [{ type: 'text', text: 'agent later turn' }] });
     });
@@ -1147,7 +1147,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       mock.setQuestionReplyStatus(200);
       session.sendMessage([{ type: 'text', text: 'Choice: Two' }]);
       await waitFor(() => ready === 1);
-      expect(session.sendAgentMessage([{ type: 'text', text: 'agent instruction' }])).toBe(true);
+      await expect(session.sendAgentMessage([{ type: 'text', text: 'agent instruction' }])).resolves.toBeUndefined();
       await waitFor(() => mock.promptPosts.length === 2);
       expect(mock.promptBodies[1]).toEqual({ parts: [{ type: 'text', text: 'agent instruction' }] });
       expect(mock.questionReplies).toHaveLength(2);

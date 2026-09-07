@@ -291,6 +291,20 @@ Restart preserves attribution and undelivered input. Bound queues and reject
 excess input explicitly. Human answers and existing ordinary-run behavior remain
 unchanged on all four backends.
 
+The controller-approved 2026-09-07 review refinement makes transport reservation
+and acceptance explicit: the internal synchronous `sendAgentMessage` returns
+false or a Promise. A Promise reserves the submission; `deliveredAt` is committed
+only after positive transport ACK, with rejection retaining the same input id.
+Codex/OpenCode/Pi use their RPC/HTTP acceptance response; Claude's available
+boundary is the stdin write callback, not model execution. Accepted commands that
+subsequently fail at the provider remain distinct from rejected submissions.
+Pending ACK counts against the 32 undelivered cap, excludes duplicate admission,
+and merges into the current queue. Human priority and public wire shapes remain
+unchanged. Explicit stop/disposal/replacement revoke callback authority; delivery
+bookkeeping settles before execution proof. Wake reservation acquires capacity,
+ACK plus checkpoint retires the wait, and a completed wake/DONE/nonfinal step
+resumes completion after ACK without inventing a later turn.
+
 ## Stop, destruction, and retention
 
 Cancellation requested is not proof of process termination. Add a manager
