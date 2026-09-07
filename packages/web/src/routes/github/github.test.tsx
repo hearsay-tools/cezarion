@@ -16,6 +16,11 @@ import type {
   WorkflowsResponse,
 } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
+import {
+  GITHUB_LIST_WIDTH_STORAGE_KEY,
+  MAX_GITHUB_LIST_WIDTH,
+  MIN_GITHUB_LIST_WIDTH,
+} from '@/lib/github-list-width'
 import { githubTaskRef } from '@/lib/github-task'
 
 import { GithubRoute, groupCommitRuns, type ThreadRow } from './github'
@@ -276,9 +281,21 @@ function renderAt(entry: string) {
 
 const rows = () => [...document.querySelectorAll<HTMLElement>('[data-slot="gh-row"]')]
 const detail = () => document.querySelector('[data-slot="gh-detail-inner"]')
+const ghList = () => document.querySelector<HTMLElement>('[data-slot="gh-list"]')!
+const ghListHandle = () => document.querySelector<HTMLElement>('[data-slot="gh-list-resize-handle"]')!
 const promptField = () =>
   document.querySelector<HTMLTextAreaElement>('[data-slot="gh-custom-prompt"]')!
 const promptValue = () => promptField().value
+
+function dragGithubList(from: number, to: number) {
+  const handle = ghListHandle()
+  handle.setPointerCapture = vi.fn()
+  handle.releasePointerCapture = vi.fn()
+  handle.hasPointerCapture = vi.fn(() => true)
+  fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: from })
+  fireEvent.pointerMove(handle, { pointerId: 1, clientX: to })
+  fireEvent.pointerUp(handle, { pointerId: 1, clientX: to })
+}
 
 it('/github/prs/:n/changes renders PR-only file review navigation and completeness', async () => {
   stubFetch()
@@ -299,6 +316,82 @@ const baseWith = (extra: string) => `${BASE}\n\n${extra}`
 // ---- lists + detail ---------------------------------------------------------------------------
 
 describe('the GitHub tab lists', () => {
+  it('restores one stored width for Issues and PRs', async () => {
+    localStorage.setItem(GITHUB_LIST_WIDTH_STORAGE_KEY, '400')
+    stubFetch()
+    renderAt('/github')
+    await screen.findByRole('heading', { name: 'GitHub' })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('400px')
+
+    cleanup()
+    stubFetch()
+    renderAt('/github/prs')
+    await screen.findByRole('heading', { name: 'GitHub' })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('400px')
+  })
+
+  it('exposes the separator range and persists pointer changes', async () => {
+    stubFetch()
+    renderAt('/github')
+    await screen.findByRole('heading', { name: 'GitHub' })
+    const handle = ghListHandle()
+    expect(handle.getAttribute('role')).toBe('separator')
+    expect(handle.getAttribute('aria-orientation')).toBe('vertical')
+    expect(handle.getAttribute('aria-label')).toBe('Resize the GitHub list')
+    expect(handle.getAttribute('aria-valuemin')).toBe(String(MIN_GITHUB_LIST_WIDTH))
+    expect(handle.getAttribute('aria-valuemax')).toBe(String(MAX_GITHUB_LIST_WIDTH))
+    expect(handle.className).toContain('touch-none')
+
+    dragGithubList(360, 440)
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('440px')
+    expect(handle.getAttribute('aria-valuenow')).toBe('440')
+    expect(localStorage.getItem(GITHUB_LIST_WIDTH_STORAGE_KEY)).toBe('440')
+    expect(document.activeElement).toBe(handle)
+
+    dragGithubList(440, 2_000)
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('520px')
+    dragGithubList(520, -2_000)
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('280px')
+  })
+
+  it('supports keyboard bounds and reset while ignoring non-primary pointer input', async () => {
+    stubFetch()
+    renderAt('/github')
+    await screen.findByRole('heading', { name: 'GitHub' })
+    const handle = ghListHandle()
+    fireEvent.keyDown(handle, { key: 'ArrowRight' })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('376px')
+    fireEvent.keyDown(handle, { key: 'End' })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('520px')
+    fireEvent.keyDown(handle, { key: 'Home' })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('280px')
+    fireEvent.doubleClick(handle)
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('360px')
+
+    handle.setPointerCapture = vi.fn()
+    fireEvent.pointerDown(handle, { button: 2, pointerId: 1, clientX: 360 })
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 500 })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('360px')
+    expect(handle.setPointerCapture).not.toHaveBeenCalled()
+  })
+
+  it('keeps the mobile structure and hides the resize handle below md', async () => {
+    stubFetch()
+    renderAt('/github')
+    await screen.findByRole('heading', { name: 'GitHub' })
+    expect(ghList().className).toContain('w-full')
+    expect(ghList().className).toContain('md:w-[var(--github-list-width)]')
+    expect(ghListHandle().className).toContain('hidden')
+    expect(ghListHandle().className).toContain('md:block')
+
+    cleanup()
+    stubFetch()
+    renderAt('/github/issues/142')
+    await screen.findByRole('heading', { name: 'GitHub' })
+    expect(ghList().className).toContain('hidden')
+    expect(document.querySelector('[data-slot="gh-detail"]')?.className).toContain('flex')
+  })
+
   it('/github renders the header, both count tabs, the issue rows, and the first issue’s detail', async () => {
     stubFetch()
     renderAt('/github')
