@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { DEFAULT_MONITORING_WAKE_MINUTES, loadWorkspaceConfig } from './config.ts';
 
 /**
@@ -66,6 +66,16 @@ function normalizeRootSync(root: string): string {
   } catch {
     return resolve(root);
   }
+}
+
+/** A cockpit booted from one of cezar's own task worktrees still belongs to
+ *  the registry project that owns `.ai/cezar/worktrees/`. Auto-registration
+ *  intentionally suppresses those worktrees, so the owner root is the only
+ *  registry key their manager can inherit a project ceiling from. */
+function taskWorktreeOwnerRoot(root: string): string | undefined {
+  const marker = `${sep}.ai${sep}cezar${sep}worktrees${sep}`;
+  const markerAt = `${root}${sep}`.indexOf(marker);
+  return markerAt === -1 ? undefined : root.slice(0, markerAt);
 }
 
 /**
@@ -282,7 +292,11 @@ export class WorkspaceSemaphore {
    * override and inherits the workspace cap.
    */
   projectMaxParallel(repoRoot: string): number {
-    const override = this.limits.projectLimits?.get(normalizeRootSync(repoRoot));
+    const normalized = normalizeRootSync(repoRoot);
+    const projectLimits = this.limits.projectLimits;
+    const direct = projectLimits?.get(normalized);
+    const ownerRoot = direct === undefined ? taskWorktreeOwnerRoot(normalized) : undefined;
+    const override = direct ?? (ownerRoot === undefined ? undefined : projectLimits?.get(ownerRoot));
     return override ?? this.maxParallel();
   }
 
