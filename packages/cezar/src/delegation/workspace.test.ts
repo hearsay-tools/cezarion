@@ -395,6 +395,26 @@ describe('owned workspace continuation and queued recovery', () => {
 
 
 describe('removeOwnedWorkspace verified retryable destruction', () => {
+  it.each(['externally removed', 'moved and pruned', 'externally advanced'] as const)(
+    '%s without a cleanup checkpoint cannot authorize resource deletion', async shape => {
+      const { root, first, second } = await fixture();
+      const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+      const moved = join(root, 'manually-moved-worker');
+      if (shape === 'moved and pruned') {
+        await rename(workspace.path, moved);
+        git(root, 'worktree', 'prune', '--expire', 'now');
+      } else git(root, 'worktree', 'remove', workspace.path);
+      if (shape === 'externally advanced') git(root, 'update-ref', `refs/heads/${workspace.branch}`, second);
+      const branchBefore = git(root, 'rev-parse', workspace.branch);
+      const receiptBefore = await readFile(receiptPath(root, workspace), 'utf8');
+      expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+      expect(git(root, 'rev-parse', workspace.branch)).toBe(branchBefore);
+      expect(await readFile(receiptPath(root, workspace), 'utf8')).toBe(receiptBefore);
+      expect(existsSync(receiptPath(root, workspace).replace(/\.json$/, '.cleanup.json'))).toBe(false);
+      if (shape === 'moved and pruned') expect(await readFile(join(moved, 'tracked.txt'), 'utf8')).toBe('base');
+    },
+  );
+
   it('preserves the owned directory on the first cleanup attempt when its branch is checked out elsewhere', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
