@@ -57,12 +57,23 @@ describe('AppShell', () => {
     expect(within(screen.getByRole('main')).getByText('route content')).toBeTruthy()
   })
 
-  it('renders the Cezarion mark on the 26px brand tile', () => {
+  it('renders the themed Cezarion lockup, not a tile plus a label (#143)', () => {
     renderShell()
-    const tile = document.querySelector('[data-slot="brand-tile"]') as HTMLImageElement
-    expect(tile).toBeTruthy()
-    expect(tile.getAttribute('src')).toBe('/cezarion-mark.svg')
-    expect(tile.className).toContain('size-[26px]')
+    const lockup = document.querySelector('[data-slot="brand-lockup"]') as HTMLImageElement
+    expect(lockup).toBeTruthy()
+    // Dark is the default palette (the matchMedia stub reports no light preference).
+    expect(lockup.getAttribute('src')).toBe('/cezarion-lockup-dark.svg')
+    // The image carries the accessible name; the decorative `cezar` span is gone so the
+    // name is not spoken twice.
+    expect(lockup.getAttribute('alt')).toBe('Cezarion')
+    expect(within(sidebar()).queryByText(/^cezar$/i)).toBeNull()
+  })
+
+  it('swaps the lockup with the resolved theme (#143)', () => {
+    localStorage.setItem('cez-theme', 'light')
+    renderShell()
+    const lockup = document.querySelector('[data-slot="brand-lockup"]') as HTMLImageElement
+    expect(lockup.getAttribute('src')).toBe('/cezarion-lockup-light.svg')
   })
 
   it('resets the main scroller to the top on navigation (#mobile-scroll-top)', () => {
