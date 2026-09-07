@@ -1,3 +1,7 @@
+import { DelegationService } from '../delegation/service.ts';
+import { CredentialRegistry } from '../delegation/credentials.ts';
+import { createDelegationRoutes } from '../delegation/routes.ts';
+import { createDelegationApp } from '../delegation/transport.ts';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -127,6 +131,15 @@ describe('BACKWARD_COMPATIBILITY.md §2 route inventory', () => {
         `BACKWARD_COMPATIBILITY.md. §2 calls this surface protected, so an unlisted route is a ` +
         `contract nobody agreed to keep. Add them to the "Routes:" list.`,
     ).toEqual([]);
+  });
+
+  it('inventories the private listener separately from cockpit authority', () => {
+    const privateApp = createDelegationApp(createDelegationRoutes(new DelegationService(), new CredentialRegistry()));
+    const paths = registeredApiRoutes(privateApp.routes);
+    const inventory = inventoriedApiRoutes(doc);
+    expect(paths.size).toBe(7);
+    expect([...paths].filter(path => !inventory.has(path))).toEqual([]);
+    expect([...paths].every(path => path.startsWith('/api/v1/delegation/'))).toBe(true);
   });
 
   it('finds a non-trivial number of routes on both sides — guards against a vacuous pass', () => {

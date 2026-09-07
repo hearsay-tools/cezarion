@@ -111,6 +111,56 @@ describe('useThreadScroll — outside a shell scroller (jsdom, tests, storybook-
     })
     expect(onLoadOlder).toHaveBeenCalledTimes(2)
   })
+
+  it('does not re-pin to the live tail after an explicit older-page load', async () => {
+    let resize: (() => void) | undefined
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resize = () => callback([], this as unknown as ResizeObserver)
+      }
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', TestResizeObserver)
+
+    let resolveLoad!: () => void
+    const onLoadOlder = vi.fn(() => new Promise<void>((resolve) => { resolveLoad = resolve }))
+    let loadOlder: (() => void) | undefined
+    const Harness = () => {
+      const controls = useThreadScroll('r1', { onLoadOlder })
+      loadOlder = controls.loadOlder
+      return (
+        <main
+          ref={(element) => {
+            if (element) {
+              Object.defineProperties(element, {
+                scrollTop: { value: 600, writable: true, configurable: true },
+                clientHeight: { value: 400, configurable: true },
+                scrollHeight: { value: 1_000, configurable: true },
+              })
+            }
+          }}
+          data-slot="main"
+        >
+          <div ref={controls.attachContent} />
+        </main>
+      )
+    }
+
+    render(<Harness />)
+    const scroller = document.querySelector<HTMLElement>('[data-slot="main"]')!
+    scroller.scrollTop = 0
+    act(() => loadOlder?.())
+    expect(onLoadOlder).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveLoad()
+      await Promise.resolve()
+    })
+    act(() => resize?.())
+
+    expect(scroller.scrollTop).toBe(0)
+  })
 })
 
 describe('useThreadScroll — route arrival (#761)', () => {

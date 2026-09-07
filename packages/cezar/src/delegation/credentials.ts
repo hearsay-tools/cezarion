@@ -54,9 +54,9 @@ export class CredentialRegistry {
     return credential.caller;
   }
 
-  revoke(runId: string): void {
+  revoke(runId: string, generation?: string): void {
     for (const [key, credential] of this.#credentials) {
-      if (credential.runId !== runId) continue;
+      if (credential.runId !== runId || (generation !== undefined && credential.generation !== generation)) continue;
       if (credential.caller) authenticatedCallers.delete(credential.caller);
       this.#credentials.delete(key);
     }

@@ -80,6 +80,16 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
 ]);
 export type DelegationState = z.infer<typeof delegationStateSchema>;
 
+/** Slim list/palette projection. Never copies resource paths, permissions or receipts. */
+export const runDelegationSummarySchema = z.discriminatedUnion('role', [
+  delegationStateSchema.options[0].pick({ role: true }).strip().extend({
+    wait: workerWaitSchema.pick({ phase: true }).strip().optional(),
+  }),
+  delegationStateSchema.options[1].pick({ role: true }).strip(),
+  delegationStateSchema.options[2].strip(),
+]);
+export type RunDelegationSummary = z.infer<typeof runDelegationSummarySchema>;
+
 export const workerSpawnRequestSchema = z.object({
   task: z.string().min(1).max(100_000),
   baseline: z.string().min(1).max(1_024),
@@ -157,3 +167,13 @@ export const delegationErrorResponseSchema = z.object({
   error: errorSchema,
 });
 export type DelegationErrorResponse = z.infer<typeof delegationErrorResponseSchema>;
+
+export const workerParamsSchema = z.object({ workerId: z.uuid() }).strict();
+export type WorkerParams = z.infer<typeof workerParamsSchema>;
+export const workerSpawnResultSchema = z.object({ workerId: z.uuid(), baselineSha: commitShaSchema }).strict();
+export type WorkerSpawnResult = z.infer<typeof workerSpawnResultSchema>;
+export const workerSteerResultSchema = z.object({ workerId: z.uuid(), state: z.enum(['queued', 'delivered']) }).strict();
+export type WorkerSteerResult = z.infer<typeof workerSteerResultSchema>;
+export const workerWaitResultSchema = z.object({ wait: workerWaitSchema, instruction: z.string().min(1).max(1_000) }).strict();
+export type WorkerWaitResult = z.infer<typeof workerWaitResultSchema>;
+export const workerEmptyRequestSchema = z.object({}).strict();

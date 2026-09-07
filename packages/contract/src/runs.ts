@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { agentInputSchema, delegationStateSchema } from './delegation.ts';
+import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema } from './delegation.ts';
 import { runnerSchema } from './health.ts';
 import { referenceStatusSchema } from './github.ts';
 // The chain shapes belong to the workflows family; the run record embeds one, so this file
@@ -329,6 +329,8 @@ export const runIndexEntrySchema = z.object({
   titleOrigin: z.enum(['user', 'auto', 'marker']).optional(),
   status: runStatusSchema,
   activity: runActivitySchema.optional(),
+  /** Only the relationship role and wait phase used by list attention. */
+  delegation: runDelegationSummarySchema.optional(),
   createdAt: z.string(),
   finishedAt: z.string().optional(),
   /** With `status`/`finishedAt`/`archived`, the four inputs `isUnread` reads — what lets the

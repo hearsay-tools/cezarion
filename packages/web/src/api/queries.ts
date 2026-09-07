@@ -39,6 +39,7 @@ import {
   getRepoChanges,
   getRepoCommit,
   getRun,
+  getRunRelationships,
   getRunChanges,
   getRunDiff,
   getRunFile,
@@ -129,6 +130,7 @@ export const queryKeys = {
     get all() {
       return [queryScope(), 'runs'] as const
     },
+    relationships: (id: string) => [queryScope(), 'runs', 'relationships', id] as const,
     list: () => [queryScope(), 'runs', 'list'] as const,
     detail: (id: string) => [queryScope(), 'runs', 'detail', id] as const,
     diff: (id: string) => [queryScope(), 'runs', 'diff', id] as const,
@@ -847,6 +849,14 @@ export function useProjectRuns(projectId: string, enabled = true, boot = false) 
     queryKey: [boot ? 'default' : projectId, 'runs', 'list'] as const,
     queryFn: ({ signal }) => getProjectRuns(projectId, { signal }),
     enabled,
+  })
+}
+
+/** Complete relationship context, refreshed through the existing global run stream. */
+export function useRunRelationships(runId: string) {
+  return useQuery({
+    queryKey: queryKeys.runs.relationships(runId),
+    queryFn: ({ signal }) => getRunRelationships(runId, { signal }),
   })
 }
 

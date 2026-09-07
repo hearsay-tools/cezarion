@@ -1,3 +1,7 @@
+import { DelegationService } from '../delegation/service.ts';
+import type { DelegationController } from '../delegation/provision.ts';
+import { delegationFailure } from '../delegation/routes.ts';
+import { workerEmptyRequestSchema, runRelationshipsSchema, runDelegationSummarySchema } from '@open-mercato/cezar-contract';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
@@ -195,6 +199,8 @@ import {
 } from './static-ui.ts';
 
 export interface ServerDeps {
+  /** Same-process optional private listener; attached to managers before recovery. */
+  delegation?: DelegationController;
   repoRoot: string;
   store: RunStore;
   manager: RunManager;
@@ -1200,6 +1206,7 @@ export function createApp(deps: ServerDeps) {
       return listProjects(selector);
     },
     semaphore: deps.semaphore,
+    prepareManager: project => deps.delegation?.attachProject(project),
   });
   // Workspace-level SSE bus (step 2.8) — the registry mutators and the
   // checkout flow (Phase 4) emit here; /api/workspace/events relays.
@@ -3490,8 +3497,36 @@ export function createApp(deps: ServerDeps) {
   };
 
   // ---- chained family: runs lifecycle + artifacts (project-scoped) ----
+  const delegationService = deps.delegation?.service ?? new DelegationService();
   const runsRoutes = new Hono<ProjectApiEnv>()
     .get('/runs', (c) => c.json(c.get('project').store.listRuns().map(withUsage)))
+    .get('/runs/:id/relationships', paramZodValidator(runIdParamSchema), queryZodValidator(workerEmptyRequestSchema), (c) => {
+      const { store } = c.get('project');
+      const run = store.getRun(c.req.valid('param').id);
+      if (!run) return c.json({ error: 'not found' }, 404);
+      // Full project store: archived/off-page workers still belong to this parent.
+      // Human reads use the bound project, never agent credentials or private evidence.
+      const workers = store.listRuns().flatMap(worker => {
+        const owned = worker.delegation;
+        if (owned?.role !== 'worker' || owned.parentRunId !== run.id) return [];
+        return [{ workerId: worker.id, parentRunId: run.id, status: worker.status, workspace: owned.workspace,
+          ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
+          ...(worker.activity === undefined ? {} : { activity: worker.activity }),
+          ...(owned.destroy ? { destroy: owned.destroy } : {}),
+        }];
+      }).slice(0, 32);
+      return c.json(runRelationshipsSchema.parse({
+        ...(run.delegation?.role === 'worker' ? { parentRunId: run.delegation.parentRunId } : {}), workers,
+      }));
+    })
+    .post('/runs/:id/worker-destroy', queryZodValidator(workerEmptyRequestSchema, { code: 'invalid_input', message: 'Invalid cleanup query' }), paramZodValidator(runIdParamSchema, { code: 'invalid_input', message: 'Invalid worker ID' }), jsonZodValidator(workerEmptyRequestSchema, { absent: {}, malformed: null, code: 'invalid_input', message: 'Invalid cleanup input' }), async c => {
+      const project = c.get('project');
+      delegationService.registerProject(project);
+      try {
+        const result = await delegationService.destroyForHuman(project.id, c.req.valid('param').id);
+        return result.state === 'incomplete' ? c.json(result, 409) : c.json(result, 200);
+      } catch (error) { const failure = delegationFailure(error); return c.json(failure.body, failure.status); }
+    })
 
     // Registered before the `/:id/...` routes so "archive-finished" and "read-all"
     // never match as a run id.
@@ -4279,6 +4314,7 @@ export function createApp(deps: ServerDeps) {
       const run = store.getRun(id);
       if (!run) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
+      if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
       if (run.worktreePath) await removeWorktree(repoRoot, run.worktreePath, run.branch);
       store.updateRun(id, { worktreePath: undefined, branch: undefined });
       return c.json({ removed: true });
@@ -4291,6 +4327,7 @@ export function createApp(deps: ServerDeps) {
       const run = store.getRun(id);
       if (!run) return c.json({ error: 'not found' }, 404);
       // Delete cleans up after itself: worktree + branch go with the run (spec 006).
+      if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
       if (run.worktreePath) await removeWorktree(repoRoot, run.worktreePath, run.branch);
       return store.deleteRun(id) ? c.json({ deleted: true }) : c.json({ error: 'not found' }, 404);
     });
@@ -4373,6 +4410,7 @@ export function createApp(deps: ServerDeps) {
 
       for (const loser of losers) {
         if (manager.isActive(loser.id)) manager.cancel(loser.id);
+        if (!store.canDeleteRun(loser.id)) continue;
         if (loser.worktreePath) await removeWorktree(repoRoot, loser.worktreePath, loser.branch);
         store.updateRun(loser.id, { worktreePath: undefined, branch: undefined });
         store.setArchived(loser.id, true);
@@ -5432,6 +5470,7 @@ export function createApp(deps: ServerDeps) {
     ...(run.titleSummary !== undefined ? { titleSummary: run.titleSummary } : {}),
     ...(run.titleOrigin !== undefined ? { titleOrigin: run.titleOrigin } : {}),
     status: run.status,
+    ...(run.delegation ? { delegation: runDelegationSummarySchema.parse(run.delegation) } : {}),
     ...(run.activity !== undefined ? { activity: run.activity } : {}),
     createdAt: run.createdAt,
     ...(run.finishedAt !== undefined ? { finishedAt: run.finishedAt } : {}),
@@ -5594,6 +5633,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType {
     listProjects,
     semaphore: deps.semaphore,
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
+    prepareManager: project => deps.delegation?.attachProject(project),
   });
   // #801: GitHub automations are opt-in. Off, the flag must remove the BEHAVIOR and not merely
   // the UI — no scheduler, no GitHub polling, no launched runs — so every entry point into the
@@ -5701,7 +5741,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType {
       })).then(() => automationScheduler.start()).catch(() => undefined);
     }).catch(() => undefined);
   });
-  server.once('close', () => { unsubscribe(); coordinator.stop(); automationScheduler.stop(); });
+  server.once('close', () => { unsubscribe(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close(); });
   socketHub.attach(server, (req) => verifyWsUpgrade(req, deps.bindHost));
   return server;
 }

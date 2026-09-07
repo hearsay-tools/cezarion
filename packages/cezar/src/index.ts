@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { DelegationController } from './delegation/provision.ts';
 import { parseArgs } from 'node:util';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -78,6 +79,11 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repo
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
+  if (process.argv[2] === 'worker') {
+    const { runWorkerCommand } = await import('./delegation/cli.ts');
+    process.exitCode = await runWorkerCommand(process.argv.slice(3), process.env);
+    return;
+  }
   const { values, positionals } = parseArgs({
     options: {
       port: { type: 'string', short: 'p', default: '4321' },
@@ -214,6 +220,8 @@ async function serveCommand(
   // the previous process exited are re-queued or resumed instead of failed.
   const store = openStore(repoRoot, { keepLive: true });
   const manager = new RunManager(store, repoRoot, { semaphore });
+  const delegation = await DelegationController.start();
+  delegation.attachProject({ id: bootProjectId ?? 'default', root: repoRoot, store, manager });
   const providerAuth = new ProviderAuthService();
   const workspaceEvents = new WorkspaceEventBus();
   const providerRuntimeAuth = new ProviderRuntimeAuthObserver(providerAuth, (status) => {
@@ -274,7 +282,8 @@ async function serveCommand(
         `    and make sure this interface is not reachable from the internet.\n`,
     );
   }
-  startServer({
+  const server = startServer({
+    delegation,
     repoRoot,
     store,
     manager,
@@ -302,8 +311,11 @@ async function serveCommand(
   await printSkillsBanner(repoRoot);
 
   const shutdown = () => {
-    store.flush();
-    process.exit(0);
+    void delegation.close().finally(() => {
+      server.close();
+      store.flush();
+      process.exit(0);
+    });
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
@@ -394,6 +406,7 @@ async function runCommand(
 
   const repoHandleController = new AbortController();
   const store = openStore(repoRoot, { repoHandleSignal: repoHandleController.signal });
+  const delegation = await DelegationController.start();
   try {
     // Headless tasks still appear in the cockpit later, so persist the same
     // task-local recovery event when a credential expires after the preflight.
@@ -404,6 +417,7 @@ async function runCommand(
     const semaphore = new WorkspaceSemaphore();
     await semaphore.refresh();
     const manager = new RunManager(store, repoRoot, { semaphore });
+    delegation.attachProject({ id: 'headless', root: repoRoot, store, manager });
 
     store.on('event', ({ event }) => {
       switch (event.type) {
@@ -447,6 +461,7 @@ async function runCommand(
     console.log(`\nrun ${final} — ${record?.tokensUsed ?? 0} tokens — details in the cockpit: npx cezarion`);
     process.exitCode = final === 'done' || final === 'review' ? 0 : 1;
   } finally {
+    await delegation.close();
     // A slow GitHub child must not keep a completed headless task alive. Any handle that
     // already arrived has repaired the store; an unfinished lookup remains unknown.
     repoHandleController.abort();

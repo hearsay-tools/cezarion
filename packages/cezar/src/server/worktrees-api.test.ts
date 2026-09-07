@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -5,6 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createOwnedWorkspace } from '../delegation/workspace.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -39,7 +41,7 @@ describe('the worktrees API', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    app = createApp({ repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' });
   });
 
   afterEach(() => {
@@ -154,4 +156,30 @@ describe('the worktrees API', () => {
     expect(existsSync(wtPath)).toBe(false);
     expect((await getWorktrees()).worktrees.map((w) => w.runId)).not.toContain(id);
   });
+  it('human deletion and worktree removal preserve worker and parent ownership evidence', async () => {
+    const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    store.updateRun(parent.id, { status: 'done', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    const sha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
+    const workspace = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
+    const worker = store.createOwnedRun({ title: 'worker', task: 'worker', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(),
+      { role: 'worker', parentRunId: parent.id, permissions: [], workspace }, 'a'.repeat(64));
+    store.updateRun(worker.id, { status: 'cancelled', worktreePath: workspace.path, branch: workspace.branch });
+    store.appendEvent(worker.id, { type: 'note', message: 'preserved worker history' });
+    for (const id of [worker.id, parent.id]) {
+      expect((await apiRequest(app, `/api/v1/runs/${id}`, { method: 'DELETE' })).status).toBe(409);
+      expect((await apiRequest(app, `/api/v1/runs/${id}/remove-worktree`, { method: 'POST' })).status).toBe(409);
+    }
+    expect(existsSync(workspace.path)).toBe(true);
+    expect(store.readEvents(worker.id)).toEqual(expect.arrayContaining([expect.objectContaining({ message: 'preserved worker history' })]));
+    store.updateRun(worker.id, { delegation: { role: 'invalid' } });
+    expect((await apiRequest(app, `/api/v1/runs/${worker.id}`, { method: 'DELETE' })).status).toBe(409);
+    expect(existsSync(workspace.path)).toBe(true);
+  });
+
+  it('human deletion still cleans an ordinary terminal run', async () => {
+    const id = await seed(randomUUID(), 'done'); const path = store.getRun(id)!.worktreePath!;
+    expect((await apiRequest(app, `/api/v1/runs/${id}`, { method: 'DELETE' })).status).toBe(200);
+    expect(store.getRun(id)).toBeUndefined(); expect(existsSync(path)).toBe(false);
+  });
+
 });

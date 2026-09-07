@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
   agentInputSchema, delegationStateSchema, workerCreationReceiptSchema,
@@ -9,6 +9,7 @@ import {
 } from '@open-mercato/cezar-contract';
 import type { AgentInput, DelegationState } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
+import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -794,6 +795,8 @@ export class RunStore extends EventEmitter {
 
   createRun(input: {
     title: string;
+    systemPrompt?: string;
+    workflowDef?: z.infer<typeof workflowDefSchema>;
     workflow: string;
     task: string;
     model?: string;
@@ -830,6 +833,8 @@ export class RunStore extends EventEmitter {
       workflow: input.workflow,
       task: input.task,
       model: input.model,
+      systemPrompt: input.systemPrompt,
+      workflowDef: input.workflowDef === undefined ? undefined : workflowDefSchema.parse(input.workflowDef),
       effort: input.effort,
       runner: input.runner,
       agentProfile: input.agentProfile,
@@ -963,6 +968,7 @@ export class RunStore extends EventEmitter {
     requestId: string,
     worker: DelegationState,
     requestHash: string,
+    executionIdentity: WorkerExecutionIdentity = { kind: 'internal' },
   ): RunRecord {
     const parent = this.runs.get(parentId);
     const authority = delegationStateSchema.safeParse(parent?.delegation);
@@ -1004,6 +1010,10 @@ export class RunStore extends EventEmitter {
     const proposed = new Map(this.runs);
     proposed.set(parentId, { ...parent, delegation });
     proposed.set(run.id, run);
+    // This transaction precedes materialization. Every launch must rotate this
+    // generation to starting before touching the workspace or a session.
+    this.writeWorkerIdentity(run.id, workerExecutionIdentitySchema.parse(executionIdentity));
+    this.writeWorkerExecution(run.id, { generation: randomUUID(), phase: 'queued' }, true);
     // No pruning here: deleting run history cannot be part of a proposed index transaction.
     this.commitIndex(proposed, new Set([parentId, run.id]));
     return run;
@@ -1488,21 +1498,27 @@ export class RunStore extends EventEmitter {
 
   /** Lazily-collected concrete secret values from the host env (#427). */
   private secretValues: readonly string[] | null = null;
+  /** Controller-issued tokens never persist, including when host-secret redaction is disabled. */
+  private readonly sessionSecrets = new Set<string>();
+  registerSessionSecret(value: string): void { this.sessionSecrets.add(value); }
+  containsSessionSecret(value: string): boolean { return [...this.sessionSecrets].some(secret => value.includes(secret)); }
 
   /**
    * Scrub known credential values / token shapes from an event before it is
    * persisted or fanned out. On by default; `CEZ_REDACT_SECRETS=0` opts out.
    */
   private redact(event: RunEvent): RunEvent {
-    if (process.env.CEZ_REDACT_SECRETS === '0') return event;
-    return redactDeep(event, this.hostSecrets());
+    const safe = this.sessionSecrets.size ? redactDeep(event, [...this.sessionSecrets]) : event;
+    if (process.env.CEZ_REDACT_SECRETS === '0') return safe;
+    return redactDeep(safe, this.hostSecrets());
   }
 
   /** Best-effort scrub of one free-text string bound for `runs.json`. Honors
    *  the `CEZ_REDACT_SECRETS=0` opt-out itself so every caller inherits it. */
   private redactText(text: string): string {
-    if (process.env.CEZ_REDACT_SECRETS === '0') return text;
-    return redactSecrets(text, this.hostSecrets());
+    const safe = this.sessionSecrets.size ? redactSecrets(text, [...this.sessionSecrets]) : text;
+    if (process.env.CEZ_REDACT_SECRETS === '0') return safe;
+    return redactSecrets(safe, this.hostSecrets());
   }
 
   private hostSecrets(): readonly string[] {
@@ -1529,7 +1545,115 @@ export class RunStore extends EventEmitter {
     }
   }
 
+  /** Private process-generation evidence; never part of run JSON or SSE. */
+  private identityPath(id: string): string {
+    return this.executionPath(id).replace(/\.execution\.json$/, '.identity.json');
+  }
+
+  readWorkerIdentity(id: string): WorkerExecutionIdentity | undefined {
+    try {
+      const fd = openSync(this.identityPath(id), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        const info = fstatSync(fd);
+        if (!info.isFile() || info.size > 16384 || (info.mode & 0o077)) return undefined;
+        const buffer = Buffer.alloc(16385); const count = readSync(fd, buffer, 0, buffer.length, 0);
+        return workerExecutionIdentitySchema.parse(JSON.parse(buffer.subarray(0, count).toString('utf8')));
+      } finally { closeSync(fd); }
+    } catch { return undefined; }
+  }
+
+  private writeWorkerIdentity(id: string, identity: WorkerExecutionIdentity): void {
+    // Immutable acceptance evidence. An orphan from failed index publication cannot be adopted.
+    const fd = openSync(this.identityPath(id), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    try { writeFileSync(fd, JSON.stringify(identity)); fsyncSync(fd); } finally { closeSync(fd); }
+  }
+
+  private executionPath(id: string): string {
+    z.string().uuid().parse(id);
+    const dir = join(this.dataDir, 'runs');
+    mkdirSync(dir, { recursive: true });
+    if (lstatSync(dir).isSymbolicLink() || realpathSync(dir) !== resolve(dir)) throw new Error('Unsafe execution directory');
+    return join(dir, `${id}.execution.json`);
+  }
+
+  readWorkerExecution(id: string): { generation: string; phase: 'queued' | 'starting' | 'complete'; neverMaterialized?: true } | undefined {
+    try {
+      const path = this.executionPath(id);
+      const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        const info = fstatSync(fd);
+        if (!info.isFile() || info.size > 1024 || (info.mode & 0o077)) return undefined;
+        const buffer = Buffer.alloc(1025); const count = readSync(fd, buffer, 0, buffer.length, 0);
+        return z.object({ generation: z.string().uuid(), phase: z.enum(['queued', 'starting', 'complete']), neverMaterialized: z.literal(true).optional() }).strict()
+          .refine(proof => !proof.neverMaterialized || proof.phase === 'complete')
+          .parse(JSON.parse(buffer.subarray(0, count).toString('utf8')));
+      } finally { closeSync(fd); }
+    } catch { return undefined; }
+  }
+
+  private writeWorkerExecution(id: string, proof: { generation: string; phase: 'queued' | 'starting' | 'complete'; neverMaterialized?: true }, fresh = false): void {
+    const path = this.executionPath(id);
+    try {
+      const existing = lstatSync(path);
+      if (fresh || !existing.isFile() || existing.isSymbolicLink()) throw new Error('Unsafe execution checkpoint');
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    try { writeFileSync(fd, JSON.stringify(proof)); fsyncSync(fd); } finally { closeSync(fd); }
+    try { renameSync(temporary, path); } finally { rmSync(temporary, { force: true }); }
+  }
+
+  commitWorkerExecutionStart(id: string): string {
+    const run = this.runs.get(id);
+    if (run?.delegation?.role !== 'worker' || run.delegation.destroy) throw new Error('Worker cannot start');
+    const generation = randomUUID();
+    this.writeWorkerExecution(id, { generation, phase: 'starting' });
+    return generation;
+  }
+
+  commitWorkerExecutionComplete(id: string, generation: string): boolean {
+    const proof = this.readWorkerExecution(id);
+    if (!proof || proof.generation !== generation) return false;
+    if (proof.phase === 'queued' && this.runs.get(id)?.status !== 'cancelled') return false;
+    try {
+      const run = this.runs.get(id);
+      if (run?.delegation?.role !== 'worker') return false;
+      this.commitIndex(new Map(this.runs), new Set([id]));
+      if (this.readWorkerExecution(id)?.generation !== generation) return false;
+      this.writeWorkerExecution(id, { generation, phase: 'complete',
+        ...(proof.phase === 'queued' || proof.neverMaterialized ? { neverMaterialized: true as const } : {}) });
+      return true;
+    } catch { return false; }
+  }
+
+  /** Cancellation must hit disk before queued no-start evidence authorizes cleanup. */
+  commitWorkerCancellation(id: string): void {
+    const run = this.runs.get(id);
+    if (run?.delegation?.role !== 'worker') throw new Error('Worker not found');
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...run, status: 'cancelled', finishedAt: new Date().toISOString() });
+    this.commitIndex(proposed, new Set([id]));
+  }
+
+  /** Worker history is a tombstone. Parents retain evidence while resources/descendants remain. */
+  canDeleteRun(id: string): boolean {
+    const run = this.runs.get(id);
+    if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'invalid') return false;
+    if (run?.delegation?.role === 'root') {
+      if (run.delegation.finishRequestedAt) return false;
+      const children = new Set([...run.delegation.receipts.map(receipt => receipt.workerId),
+        ...[...this.runs.values()].filter(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === id).map(child => child.id)]);
+      return [...children].every(workerId => {
+        const child = this.runs.get(workerId);
+        return child?.delegation?.role === 'worker' && child.delegation.parentRunId === id &&
+          child.delegation.destroy?.phase === 'complete' && !['queued', 'running', 'waiting'].includes(child.status);
+      });
+    }
+    return ![...this.runs.values()].some(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === id);
+  }
+
   deleteRun(id: string): boolean {
+    if (!this.canDeleteRun(id)) return false;
     const existed = this.runs.delete(id);
     if (existed) {
       try {
@@ -1605,6 +1729,7 @@ export class RunStore extends EventEmitter {
       ...all.filter((r) => r.archived).slice(MAX_ARCHIVED_KEPT),
     ];
     for (const stale of stalePool) {
+      if (!this.canDeleteRun(stale.id)) continue;
       this.runs.delete(stale.id);
       try {
         rmSync(this.eventsPath(stale.id), { force: true });

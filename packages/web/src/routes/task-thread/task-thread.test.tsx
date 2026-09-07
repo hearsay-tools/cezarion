@@ -49,6 +49,7 @@ function renderView(
         path === '/api/v1/models?runner=claude' ? { runner: 'claude', models: [], source: 'unavailable', stale: false }
         : path === '/api/v1/providers/status' ? providerStatus
         : path === '/api/v1/health' ? health
+        : path.endsWith('/relationships') ? { workers: [] }
         : []
       return Promise.resolve(
         new Response(JSON.stringify(body), {
@@ -1081,4 +1082,17 @@ describe('TaskThreadRoute — read receipts', () => {
     await waitFor(() => expect(posted(sent, '/api/v1/runs/r1/read')).toBe(1))
     expect(await screen.findByRole('button', { name: 'Mark unread' })).not.toBeNull()
   })
+})
+
+it.each(['registered', 'parked', 'wake-pending'] as const)('uses honest dock copy for %s worker waits', phase => {
+  renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })} thread={reduceThread([])} />)
+  const hint = document.querySelector('[data-slot="paused-hint"]')
+  expect(hint?.textContent).toContain(phase === 'parked' ? 'Waiting on workers' : 'waiting for your reply')
+})
+it('keeps a visible human ask above parked worker context in the header and dock', () => {
+  const thread = reduceThread([line(1, 'ask.requested', { requestId: 'ask', questions: [{ header: 'Choice', question: 'Choose a path', options: [{ label: 'Proceed', description: 'Continue' }] }] })])
+  renderView(<ThreadView run={run('waiting', { delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })} thread={thread} />)
+  expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain('waiting for your reply')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain('needs you')
+  expect(screen.getByText('Choose a path')).toBeTruthy()
 })

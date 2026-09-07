@@ -9,7 +9,7 @@ import { workerDiffSchema } from '@open-mercato/cezar-contract';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
-import { autosaveCommit, createWorktree } from '../git-worktree.ts';
+import { autosaveCommit, createWorktree, pruneOrphans, removeWorktree } from '../git-worktree.ts';
 import { createOwnedWorkspace, ensureOwnedWorkspace, planOwnedWorkspace, readOwnedDiff, removeOwnedWorkspace, resolveWorkerBaseline, verifyOwnedWorkspace } from './workspace.ts';
 
 const roots: string[] = [];
@@ -395,6 +395,35 @@ describe('owned workspace continuation and queued recovery', () => {
 
 
 describe('removeOwnedWorkspace verified retryable destruction', () => {
+  it('preserves the owned directory on the first cleanup attempt when its branch is checked out elsewhere', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const other = join(root, 'other-checkout');
+    git(root, 'worktree', 'add', '--force', other, workspace.branch);
+    expect.soft(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect.soft(existsSync(workspace.path)).toBe(true);
+    expect(existsSync(other)).toBe(true);
+    expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
+    git(root, 'worktree', 'remove', other);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete' });
+  });
+
+  it.each(['planned', 'moved and renamed'])('missing receipt cannot prove cleanup with absent planned resources: %s', async kind => {
+    const { root, first } = await fixture();
+    const workspace = kind === 'planned' ? await planOwnedWorkspace(root, randomUUID(), first) : await createOwnedWorkspace(root, randomUUID(), first);
+    const moved = workspace.path + '-moved';
+    if (kind !== 'planned') {
+      git(root, 'worktree', 'move', workspace.path, moved);
+      git(moved, 'branch', '-m', 'renamed-worker');
+      await rm(receiptPath(root, workspace));
+    }
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    if (kind !== 'planned') {
+      expect(existsSync(moved)).toBe(true);
+      expect(git(root, 'branch', '--list', 'renamed-worker')).not.toBe('');
+    }
+  });
+
   it('removes only owned resources, retains the receipt and is idempotent after reopen', async () => {
     const { root, first, parentPath } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
@@ -462,6 +491,26 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     expect(git(root, 'rev-parse', workspace.branch)).toBe(second);
   });
 
+  it.each(['prepared', 'worktree-removed'])('replays a durable %s checkpoint after directory removal', async phase => {
+    const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const lock = join(root, '.git/refs/heads', workspace.branch + '.lock'); await writeFile(lock, 'lock');
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ remaining: ['branch'] }); await rm(lock);
+    const path = receiptPath(root, workspace).replace(/\.json$/, '.cleanup.json');
+    const checkpoint = JSON.parse(await readFile(path, 'utf8')); checkpoint.phase = phase;
+    await writeFile(path, JSON.stringify(checkpoint));
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+  });
+
+  it.each(['malformed', 'symlink'])('refuses a %s private cleanup checkpoint before deletion', async shape => {
+    const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const path = receiptPath(root, workspace).replace(/\.json$/, '.cleanup.json');
+    if (shape === 'malformed') await writeFile(path, '{}', { mode: 0o600 });
+    else { const target = join(root, 'outside-checkpoint'); await writeFile(target, '{}'); await symlink(target, path); }
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(existsSync(workspace.path)).toBe(true);
+  });
+
   it('never recursively removes a locked worktree and can retry after unlock', async () => {
     const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
     git(root, 'worktree', 'lock', workspace.path);
@@ -469,4 +518,54 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     expect(existsSync(workspace.path)).toBe(true); git(root, 'worktree', 'unlock', workspace.path);
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete' });
   });
+});
+
+
+describe('owned resources bypass generic cleanup', () => {
+  it('preserves an owned orphan and receipt even when its run index is absent', async () => {
+    const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    expect(await pruneOrphans(root, new Set())).not.toContain(workspace.ownerRunId);
+    expect(existsSync(workspace.path)).toBe(true);
+    await removeWorktree(root, workspace.path, workspace.branch);
+    expect(existsSync(workspace.path)).toBe(true);
+    expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
+  });
+  it('preserves receipt-owned substituted paths from generic recursive removal', async () => {
+    const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    git(root, 'worktree', 'remove', '--force', workspace.path);
+    await mkdir(workspace.path); await writeFile(join(workspace.path, 'unrelated'), 'keep');
+    expect(await pruneOrphans(root, new Set())).not.toContain(workspace.ownerRunId);
+    expect(await readFile(join(workspace.path, 'unrelated'), 'utf8')).toBe('keep');
+  });
+  it('does not let a short branch collision adopt a partially removed worker branch', async () => {
+    const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const lock = join(root, '.git/refs/heads', workspace.branch + '.lock'); await writeFile(lock, 'lock');
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ remaining: ['branch'] }); await rm(lock);
+    const collidingId = workspace.ownerRunId.slice(0, 8) + randomUUID().slice(8);
+    await expect(createWorktree(root, collidingId, first)).rejects.toThrow();
+    expect(existsSync(join(root, '.ai/cezar/worktrees', collidingId))).toBe(false);
+  });
+
+  it('does not infer permission from a symlinked receipt directory', async () => {
+    const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    git(root, 'worktree', 'remove', '--force', workspace.path); await mkdir(workspace.path);
+    await writeFile(join(workspace.path, 'keep'), 'unrelated');
+    const receipts = join(root, '.git/cezar-owned-workspaces'); await rename(receipts, receipts + '-saved');
+    const empty = join(root, 'empty'); await mkdir(empty); await symlink(empty, receipts);
+    expect(await pruneOrphans(root, new Set())).toEqual([]);
+    expect(await readFile(join(workspace.path, 'keep'), 'utf8')).toBe('unrelated');
+  });
+
+  it('malformed logical receipt ownership cannot authorize generic deletion of a replacement', async () => {
+    const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    git(root, 'worktree', 'remove', '--force', workspace.path); await mkdir(workspace.path);
+    await writeFile(join(workspace.path, 'keep'), 'unrelated');
+    const path = receiptPath(root, workspace); const receipt = JSON.parse(await readFile(path, 'utf8'));
+    receipt.workspace.path = join(root, 'elsewhere'); receipt.workspace.branch = 'unowned';
+    await writeFile(path, JSON.stringify(receipt));
+    expect(await pruneOrphans(root, new Set())).toEqual([]);
+    expect(await readFile(join(workspace.path, 'keep'), 'utf8')).toBe('unrelated');
+    expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
+  });
+
 });

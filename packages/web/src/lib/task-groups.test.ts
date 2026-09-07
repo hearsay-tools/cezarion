@@ -622,3 +622,9 @@ describe('pin promotion preserves visible variant membership (#93)', () => {
     expect(shape(capBuckets(groupRuns([b, { ...a, pinned: true }], 'active'), 0))).toEqual(['Pinned: a'])
   })
 })
+
+it.each(['registered', 'parked', 'wake-pending'] as const)('keeps %s worker waits in the appropriate existing group/count', phase => {
+  const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })
+  expect(bucketOf(record, 'active')).toBe(phase === 'parked' ? 'Working' : 'Needs you')
+  expect(listCounts([record, run({ status: 'waiting' })])).toEqual({ active: 2, archived: 0, waiting: phase === 'parked' ? 1 : 2 })
+})

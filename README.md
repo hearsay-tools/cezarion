@@ -457,6 +457,33 @@ segment.
 
 ---
 
+## Owned workers (opt-in)
+
+Start the cockpit or a headless task with `CEZ_DELEGATION=1`. Each eligible parent session receives the absolute bundled Node/CLI invocation and its own environment credentials; no `cez` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the private listener cannot start, ordinary tasks keep working without delegation tools. `.env` is never loaded automatically.
+
+The provisioned command has these forms (the session instructions supply the absolute invocation):
+
+```sh
+cez worker spawn --baseline parent-head --request-id <UUID> 'Implement the assigned change'
+cez worker inspect <worker-id>
+cez worker steer <worker-id> 'Consider this additional constraint'
+cez worker diff <worker-id>
+cez worker wait <worker-id> --timeout-seconds 600
+cez worker stop <worker-id>
+cez worker destroy <worker-id>
+```
+
+Commands return bounded JSON and a nonzero exit on failure or incomplete cleanup. Spawn requires a committed baseline (`parent-head` or an explicit ref) and pins its SHA at acceptance. It excludes dirty parent edits. Reuse a request ID only with the exact same task and baseline when retrying a lost response; the original worker and SHA are returned. Workers inherit the parent's active session execution settings and own isolated worktrees. There are at most 32 accepted creations per parent, counting destroyed workers, and 32 undelivered steering messages per worker.
+
+Wait registers immediately. End the parent turn to release scheduler capacity; Cezar resumes it on the first selected terminal outcome or the deadline. The default is 600 seconds, with 1–1800 accepted. A timeout does not cancel workers, and Cezar does not automatically re-wait. Steering remains attributed agent input and cannot answer a pending human question.
+
+Accepted workers keep the parent session's supported account home and explicit model/effort settings across queuing, restart, and Continue. Changing or deleting an account registry entry does not rebind that worker. Missing account homes or private identity evidence, and a later model lock that conflicts with accepted settings, cause an explicit refusal to start. Native Claude workers retain the native state-file layout; incompatible later home or override environment changes also refuse execution. Credentials and vendor configuration are never copied; unspecified native models stay unspecified.
+
+Stop requests cancellation; `stopping` does not prove termination. Destroy records intent, waits up to 30 seconds for proven termination, then removes only verified owned resources. An `incomplete` response lists remaining resources; retry explicitly after resolving the cause. Run history and cleanup tombstones remain. The human cleanup endpoint `POST /api/v1/p/<projectId>/runs/<worker-id>/worker-destroy` stays available when delegation is disabled. The CLI bounds each HTTP request to 45 seconds and rejects endpoint/auth/origin overrides and redirects.
+
+The delegation listener is always bound to `127.0.0.1`, including hosted cockpit mode. Its credentials authorize only the parent's own workers through that listener. This is cooperative local-agent supervision, not process isolation: same-user agents can access other local resources and existing human APIs. Workers cannot delegate or message peers. Review remains a human gate; there is no automatic merge or automatic review acceptance. Never read, echo, forward, or persist the generated token.
+
+
 ## Workflow format
 
 A workflow is a small YAML file in `.ai/cezar/workflows/`:
@@ -513,6 +540,8 @@ Useful environment variables:
 
 | Var | Effect |
 |---|---|
+| `CEZ_DELEGATION=1` | Enable owned workers and the private loopback listener for this controller. Off by default; works with the cockpit and headless `cez run`. Session instructions and credentials are automatic. |
+| `CEZ_DELEGATION_URL`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
 | `CEZ_DRY_RUN=1` | Use the bundled mock instead of the real `claude` CLI — the entire cockpit works offline, for demos and development. |
 | `CEZ_AGENT_MODELS_LOCKED=1` | Globally lock each runner to the model configured in its native Claude/Codex/OpenCode settings while keeping runner selection available. Exact `1` also delegates authentication and provider enablement to those native agents, so Cezar skips its credential probes and provider-disable preferences. Existing Cezar presets are preserved but ignored, and an environment change requires a restart. The config-file equivalent is `"modelsLocked": true` in global `~/.cezar/config.json` or one repository's `.ai/cezar/config.json`; config-file locks do not disable provider checks. |
 | `CEZ_APPROVAL_GATE=1` | Opt into Claude's interactive approval UI; by default, unapproved tools are denied without interrupting the run. Ignored when `CEZ_CLAUDE_PERMISSION_MODE` is a recognized value (`dontAsk`, `acceptEdits`, or `bypass`). |
@@ -540,7 +569,7 @@ Useful environment variables:
 | `CEZ_ENV_PASSTHROUGH=A,B` | Forward these extra host env vars to spawned agents. By default agents get a least-privilege env (safe shell/toolchain vars + the backend's own auth + `GITHUB_TOKEN` + `CEZ_*`), not your full environment — use this to add a var an agent needs. |
 | `CEZ_AGENT_ENV_FULL=1` | Escape hatch: give spawned agents the full host environment (pre-hardening behavior). Off by default; only set it if you understand that this hands every host secret to the agent process. |
 | `CEZ_AGENT_TMPDIR=0` | Stop giving each task its own temp directory and hand agents the host `TMPDIR` again (pre-#785 behavior). On by default: every run gets `TMPDIR`/`TEMP`/`TMP` pointing at `.ai/cezar/tmp/<task-id>`, created and write-probed before the agent spawns and reaped when the run ends, so concurrent tasks stop sharing one directory and a task refuses to start rather than run against a temp directory that silently swallows its shell output (see Troubleshooting below). Only an exact `0` disables it, and it disables the whole thing — the pre-spawn check included, so this stays an escape hatch you can actually take. |
-| `CEZ_REDACT_SECRETS=0` | Disable scrubbing of credential values/token shapes from the on-disk state (the NDJSON transcript and the free-text fields of `runs.json`). On by default; leave it on. Best-effort defense-in-depth, not a guarantee: it catches known token shapes and the values of your own secret-named env vars, so a credential in neither category can still get through. |
+| `CEZ_REDACT_SECRETS=0` | Disable scrubbing of credential values/token shapes from the on-disk state (the NDJSON transcript and the free-text fields of `runs.json`). On by default; leave it on. Controller-generated delegation tokens are always scrubbed. Best-effort defense-in-depth, not a guarantee: it catches known token shapes and the values of your own secret-named env vars, so a credential in neither category can still get through. |
 | `CEZ_TITLE_UPDATES=0` | Turn off the live task-title refresh (namer re-runs on each turn end). The Settings → Agents toggle overrides this default. |
 | `CEZ_AUTONAME=0` | Disable ALL LLM task naming (creation + live) — titles stay heuristic (`437: /om-auto-review-pr`). Under `CEZ_DRY_RUN=1` naming is already off unless forced with `CEZ_AUTONAME=1`. |
 | `CEZ_REVIEW_GATE=1` | Turn ON the optional diff-first review gate (#489): a successful, non-autonomous run with changes parks at `review` (Accept / Send back / Draft PR) instead of finishing. Off by default — changed runs settle to `done` with the diff left in the worktree. Only `1` enables. The Settings → Agents toggle overrides this; autonomous runs always skip it. |

@@ -152,7 +152,21 @@ The service rechecks ownership for every targeted operation, including reads.
 Stage-one spawn uses the bundled ordinary quick-task workflow and inherits the
 parent's resolved runner/model/account and execution settings. It does not accept
 arbitrary environment, filesystem paths, permission elevation, or workspace modes.
-Review gates and ordinary workflow execution remain intact.
+Review gates and ordinary workflow execution remain intact. The existing
+review gate remains opt-in (`CEZ_REVIEW_GATE=1`); worker delegation does not
+change its default or accept a review automatically.
+
+Implementation refinement approved during Task 7 review: acceptance writes a
+private concrete execution-identity record before publication/enqueue. Supported
+Claude/Codex homes remain bound across registry deletion/repointing; OpenCode/pi
+remain default-only. Claude native state-file layout is preserved without adding
+an override, while explicit/named relocated homes retain their override layout.
+Missing/malformed private evidence, unavailable homes, conflicting model locks,
+or incompatible native environment layout explicitly refuse execution/Continue.
+Unshipped intermediate owned records without this evidence are not migrated.
+The internal primitive has an explicit compatibility marker; service acceptance
+always supplies concrete identity. No credentials or configuration contents are
+snapshotted, and inspection/history/stop/verified cleanup remain available.
 
 Use fixed service limits rather than new configuration: at most 32 accepted
 worker creations per parent, including destroyed workers; bound task/steering
@@ -321,6 +335,13 @@ provide retry and distinguish unavailable/deleted records from an empty worker
 list. Show waiting-on-workers and cleanup-incomplete context without calling them
 human questions or completed cleanup. Agent steering is labeled as agent input,
 not as a human answer, in transcripts.
+
+Task 8's approved index refinement adds only optional delegation role and root
+wait phase to the existing slim workspace run index. Its actual producer and
+live palette constructor project the same fields, so global Tasks and the
+palette use the same parked-only attention decision as project lists. Receipts,
+workspace references and private execution identity stay out of that projection.
+A visible human question takes priority over worker-wait presentation.
 
 No artwork is needed for operational links/statuses; deliberate no-art decision.
 Use existing status and motion tokens, no new animation. Check keyboard focus,

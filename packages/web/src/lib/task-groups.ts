@@ -1,3 +1,4 @@
+import { deriveAttention } from './attention'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 
 /**
@@ -91,7 +92,8 @@ export interface QuickListBucket {
 export function bucketOf(run: RunRecord, view: ListView): BucketLabel {
   if (view === 'archived') return 'Archived'
   if (run.pinned) return 'Pinned'
-  if (run.status === 'waiting' || run.status === 'review') return 'Needs you'
+  if (deriveAttention(run).bucket === 'waiting') return 'Needs you'
+  if (run.status === 'waiting') return 'Working'
   if (run.status === 'running' || run.status === 'queued') return 'Working'
   // A run waiting out a provider usage limit is `failed` on the record but has an appointment to
   // resume itself (spec 2026-08-03-auto-resume-after-usage-limit) — it belongs with the work in
@@ -325,7 +327,7 @@ export function listCounts(runs: readonly RunRecord[]): {
       continue
     }
     active += 1
-    if (run.status === 'waiting' || run.status === 'review') waiting += 1
+    if (deriveAttention(run).bucket === 'waiting') waiting += 1
   }
   return { active, archived, waiting }
 }

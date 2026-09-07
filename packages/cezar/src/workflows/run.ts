@@ -1,3 +1,6 @@
+import { captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding } from '../delegation/execution-identity.ts';
+import { buildChildEnv } from '../core/agent-env.ts';
+import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -36,6 +39,7 @@ import { todosPath } from '../todos.ts';
 // wire and the disk can never disagree about what counts as an image (#950).
 import {
   type AgentInput,
+  type WorkerStopResult,
   type WorkerWait,
   type WorkerWaitRequest,
   workerWaitRequestSchema,
@@ -53,7 +57,7 @@ import { readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
 import { autosaveCommit, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
-import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
+import { ensureOwnedWorkspace, verifyOwnedWorkspace, type WorkerNoMaterializationProof } from '../delegation/workspace.ts';
 import { enqueueAgentInput, nextAgentInput } from '../delegation/input.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
@@ -121,22 +125,12 @@ const MONITORING_MARKER_RE = /CEZ:MONITORING\s*$/;
 function isClaudeScheduleWakeup(event: AgentEvent, backend: RunnerId): boolean {
   return backend === 'claude' && event.type === 'tool-call' && event.tool === 'ScheduleWakeup';
 }
-/** Events that prove a parked backend has resumed work on its own. Session
- * diagnostics and completed-turn metadata are passive and must not disarm the
- * only wake source for a truly parked monitor. */
+/** A parked backend has resumed only when the parent owns a new turn.
+ * Nested Codex/Pi subagent `item.*` streams are not a parent turn — treating
+ * them as activity cancelled the only on-by-default wake (#121). Session
+ * diagnostics and completed-turn metadata stay passive for the same reason. */
 function isRunnerActivity(event: UiEvent): boolean {
-  switch (event.type) {
-    case 'turn.started':
-    case 'item.started':
-    case 'item.delta':
-    case 'item.updated':
-    case 'item.completed':
-    case 'plan.updated':
-    case 'image':
-      return true;
-    default:
-      return false;
-  }
+  return event.type === 'turn.started';
 }
 /**
  * Preserve boundaries between complete assistant text blocks while a turn is
@@ -239,7 +233,11 @@ export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env)
 const REPOSITORY_ROOT_LOCK_DISABLED_NOTE =
   'repository-root lock disabled by CEZ_DISABLE_REPO_LOCK=1 (shared checkout is unsafe)';
 
+export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string; effort?: string; agentProfile: string; accountBinding?: WorkerAccountBinding; systemPrompt?: string; allowedTools?: string[]; bashAllowlist?: string[] };
+
 interface ActiveRun {
+  delegationSettings?: DelegationExecutionSettings;
+  revokeDelegation?: () => void;
   cancelled: boolean;
   /** Explicit human Finish survives disposal; shutdown-only result callbacks do not settle. */
   finishRequested?: boolean;
@@ -622,6 +620,114 @@ export class RunManager {
   // covers the window between shifting a run off the queue and the run
   // registering in `active`, so parallel-slot counting is never racy.
   private readonly queue: string[] = [];
+  private readonly executions = new Map<string, { generation: string; admitted: boolean; promise: Promise<void>; resolve: () => void; sessions: Set<Promise<void>>; turns: Set<Promise<void>> }>();
+  private readonly finalizedWorkers = new Map<string, string>();
+  private readonly stoppedWorkers = new Set<string>();
+  private readonly terminationWaiters = new Set<() => void>();
+
+  private beginWorkerExecution(runId: string, admitted = true): void {
+    if (this.store.getRun(runId)?.delegation?.role !== 'worker') return;
+    const existing = this.executions.get(runId);
+    if (existing) {
+      if (!existing.admitted && admitted) { existing.admitted = true; return; }
+      throw new Error('Worker execution is still finalizing');
+    }
+    const generation = this.store.commitWorkerExecutionStart(runId);
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    this.executions.set(runId, { generation, admitted, promise, resolve, sessions: new Set(), turns: new Set() });
+    this.finalizedWorkers.delete(runId);
+    this.stoppedWorkers.delete(runId);
+  }
+
+  private async finishWorkerExecution(runId: string): Promise<void> {
+    const execution = this.executions.get(runId);
+    if (!execution) return;
+    await Promise.allSettled([...execution.sessions]);
+    await Promise.allSettled([...execution.turns]);
+    // Every wrapper settles after runner result, workflow and final filesystem work.
+    // A disposed manager cannot attest to the recovered generation's state.
+    if (!this.disposed) {
+      this.finalizedWorkers.set(runId, execution.generation);
+      this.persistWorkerCompletion(runId, execution.generation);
+    }
+    if (this.executions.get(runId) === execution) this.executions.delete(runId);
+    execution.resolve();
+    if (!this.disposed) this.releaseSlot();
+  }
+
+  /** Capture every returned process result before setup can throw. A setup
+   * exception or an interrupt request cannot stand in for session termination. */
+  private trackWorkerSessionResult(runId: string, session: AgentSession): Promise<void> {
+    const closed = session.result.then(() => undefined, () => undefined);
+    this.executions.get(runId)?.sessions.add(closed);
+    return closed;
+  }
+
+  private persistWorkerCompletion(runId: string, generation: string): void {
+    try {
+      if (this.stoppedWorkers.has(runId)) this.store.commitWorkerCancellation(runId);
+      if (this.store.commitWorkerExecutionComplete(runId, generation)) this.finalizedWorkers.delete(runId);
+    } catch { /* Finalized in this process; preserve exact generation for an explicit retry. */ }
+  }
+
+  private trackTurnEnd(runId: string, text: string): void {
+    const task = this.recordTurnEnd(runId, text);
+    const turns = this.executions.get(runId)?.turns;
+    turns?.add(task);
+    void task.catch(() => undefined).finally(() => turns?.delete(task));
+  }
+
+  requestWorkerStop(runId: string): WorkerStopResult {
+    if (this.store.getRun(runId)?.delegation?.role !== 'worker') throw new Error('Worker not found');
+    if (!this.executions.has(runId) && !this.isActive(runId) && ['done', 'failed', 'cancelled', 'review'].includes(this.store.getRun(runId)!.status) && this.store.readWorkerExecution(runId)?.phase === 'complete') return { workerId: runId, state: 'terminated' };
+    this.cancel(runId);
+    return { workerId: runId, state: !this.executions.has(runId) && this.store.readWorkerExecution(runId)?.phase === 'complete' ? 'terminated' : 'stopping' };
+  }
+
+  async awaitRunTermination(runId: string, timeoutMs: number): Promise<boolean> {
+    const execution = this.executions.get(runId);
+    if (!execution) {
+      const generation = this.finalizedWorkers.get(runId);
+      if (!this.disposed && generation) this.persistWorkerCompletion(runId, generation);
+      return this.store.readWorkerExecution(runId)?.phase === 'complete';
+    }
+    if (this.disposed) return false;
+    await new Promise<void>(resolve => {
+      const settle = () => { clearTimeout(timer); this.terminationWaiters.delete(settle); resolve(); };
+      const timer = setTimeout(settle, Math.min(30_000, Math.max(0, Number.isFinite(timeoutMs) ? timeoutMs : 0)));
+      this.terminationWaiters.add(settle);
+      void execution.promise.then(settle);
+    });
+    return !this.executions.has(runId) && this.store.readWorkerExecution(runId)?.phase === 'complete';
+  }
+
+  /** Private cleanup capability, never serialized. Obtain after stop/termination
+   * under the service's destroy lock; each invocation rechecks the same generation. */
+  getWorkerNoMaterializationProof(runId: string): WorkerNoMaterializationProof | undefined {
+    const initial = this.store.readWorkerExecution(runId);
+    const recorded = this.store.getRun(runId)?.delegation;
+    if (!initial?.neverMaterialized || initial.phase !== 'complete' || recorded?.role !== 'worker') return undefined;
+    const workspace = { ...recorded.workspace };
+    const verify: WorkerNoMaterializationProof = candidate => {
+      const run = this.store.getRun(runId);
+      const current = this.store.readWorkerExecution(runId);
+      const delegation = run?.delegation;
+      return !this.disposed && !this.isActive(runId) && run?.status === 'cancelled' &&
+        delegation?.role === 'worker' && !!delegation.destroy &&
+        current?.generation === initial.generation && current.phase === 'complete' && current.neverMaterialized === true &&
+        (Object.keys(workspace) as Array<keyof typeof workspace>).every(key =>
+          candidate[key] === workspace[key] && delegation.workspace[key] === workspace[key]);
+    };
+    return verify(workspace) ? verify : undefined;
+  }
+
+  private workerExecutionStopped(runId: string): boolean {
+    const run = this.store.getRun(runId);
+    return run?.delegation?.role === 'invalid' || (run?.delegation?.role === 'worker' &&
+      (!!run.delegation.destroy || this.stoppedWorkers.has(runId)));
+  }
+
   private readonly starting = new Set<string>();
   // Runs parked at `waiting` (open session, ball in the user's court). They
   // don't consume a `maxParallel` slot (#347) — an idle claude process costs
@@ -640,6 +746,7 @@ export class RunManager {
   private recovering = false;
   private disposed = false;
   private readonly onDelegationRun = (run: RunRecord): void => {
+    if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     if (this.disposed || this.recovering || this.reconcilingWorkers) return;
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.reconcileWorkerWaits();
   };
@@ -736,6 +843,9 @@ export class RunManager {
    */
   dispose(): void {
     this.disposed = true;
+    this.delegationProvisioner = undefined;
+    this.finalizedWorkers.clear();
+    for (const settle of this.terminationWaiters) settle();
     this.store.off('run', this.onDelegationRun);
     for (const timer of this.workerWaitTimers.values()) clearTimeout(timer);
     this.workerWaitTimers.clear();
@@ -746,6 +856,7 @@ export class RunManager {
     this.offSemaphore();
     clearInterval(this.queueWatchdog);
     for (const [runId, state] of this.active) {
+      state.revokeDelegation?.(); state.revokeDelegation = undefined;
       this.clearIdleTimer(state);
       this.clearMonitoringWakeTimer(state, runId);
       this.clearAutosaveTimer(state);
@@ -850,19 +961,68 @@ export class RunManager {
    * spawning a CLI. Never throws: an unreadable home degrades to the default profile, which is
    * exactly the behaviour that predates profiles.
    */
+  /** Ordinary runs retain mutable discovery; owned runs require explicit durable evidence. */
+  private workerIdentity(runId: string) {
+    const run = this.store.getRun(runId);
+    if (run?.delegation?.role !== 'worker') return undefined;
+    const identity = this.store.readWorkerIdentity(runId);
+    if (!identity) throw new WorkerIdentityError('Worker execution identity evidence is unavailable');
+    if (identity.kind === 'internal') return undefined;
+    if (agentModelsLocked(this.repoRoot) && (identity.model !== undefined || identity.effort !== undefined)) {
+      throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
+    }
+    if (run.runner !== identity.account.provider || run.agentProfile !== identity.account.profileId ||
+        run.model !== identity.model || run.effort !== identity.effort) {
+      throw new WorkerIdentityError('Accepted worker execution identity does not match its run');
+    }
+    boundWorkerAccountEnv(identity.account, buildChildEnv({ backend: identity.account.provider }));
+    return identity;
+  }
+
   private async agentEnvForStep(
     runId: string,
     backend: RunnerId,
     options: { generateFollowups?: boolean; recordedProfileId?: string } = {},
-  ): Promise<{ env: Record<string, string>; profileId: string }> {
+  ): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding }> {
+    const identity = this.workerIdentity(runId);
+    if (identity) {
+      if (backend !== identity.account.provider) throw new WorkerIdentityError('Accepted worker provider identity cannot change');
+      const env = this.agentEnv(runId, options.generateFollowups);
+      return { env: { ...env, ...boundWorkerAccountEnv(identity.account, buildChildEnv({ backend, extraEnv: env })) },
+        profileId: identity.account.profileId, accountBinding: identity.account };
+    }
     const run = this.store.getRun(runId);
     const profileId = options.recordedProfileId
       ?? (backend === (run?.runner ?? 'claude') ? run?.agentProfile : undefined);
     const resolved = await resolveProfileEnvForRoot(this.repoRoot, backend, profileId);
+    const env = { ...this.agentEnv(runId, options.generateFollowups), ...resolved.env };
     return {
-      env: { ...this.agentEnv(runId, options.generateFollowups), ...resolved.env },
+      env,
       profileId: resolved.profile.id,
+      accountBinding: process.env.CEZ_DELEGATION === '1' ? captureWorkerAccount(resolved.profile, buildChildEnv({ backend, extraEnv: env })) : undefined,
     };
+  }
+
+  private delegationProvisioner?: DelegationProvisioner;
+  setDelegationProvisioner(provisioner: DelegationProvisioner): () => void {
+    this.delegationProvisioner = provisioner;
+    return () => {
+      if (this.delegationProvisioner === provisioner) this.delegationProvisioner = undefined;
+      for (const state of this.active.values()) { state.revokeDelegation?.(); state.revokeDelegation = undefined; }
+    };
+  }
+  private provisionSession(runId: string, state: ActiveRun) {
+    state.revokeDelegation?.(); state.revokeDelegation = undefined;
+    const session = this.delegationProvisioner?.(runId);
+    state.revokeDelegation = session?.revoke;
+    return session;
+  }
+
+  /** Snapshot of the actual active session, never guessed from partial run settings. */
+  delegationExecutionSettings(runId: string): DelegationExecutionSettings {
+    const state = this.active.get(runId);
+    if (!state?.session?.open || !state.delegationSettings) throw new DelegationPolicyError('incompatible_state', 'Parent session settings unavailable');
+    return structuredClone(state.delegationSettings);
   }
 
   startRun(
@@ -952,8 +1112,14 @@ export class RunManager {
         delegation.data.workspace.ownerRunId !== run.id || delegation.data.destroy) {
       throw new DelegationPolicyError('incompatible_state', 'Run is not an executable owned creation');
     }
+    // The persisted definition carries grants, never executable worker workflow authority.
+    // Rebuild the bundled single step: old/mutated records must not inject commands or chains.
+    const grants = run.workflowDef?.steps.find(step => step.id === QUICK_TASK_WORKFLOW.steps[0]!.id);
     return {
-      workflow: QUICK_TASK_WORKFLOW,
+      workflow: { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
+        ...(grants?.allowedTools === undefined ? {} : { allowedTools: [...grants.allowedTools] }),
+        ...(grants?.bashAllowlist === undefined ? {} : { bashAllowlist: [...grants.bashAllowlist] }),
+      }] },
       input: {
         task: run.task, runner: run.runner, model: run.model, effort: run.effort,
         agentProfile: run.agentProfile, systemPrompt: run.systemPrompt,
@@ -1087,10 +1253,20 @@ export class RunManager {
           // than being dequeued and re-queued (which would churn its position and its record).
           const next = this.queue.findIndex((id) => {
             const queued = this.store.getRun(id);
-            return !queued || (!this.executionBlockedByRootFinish(queued) &&
+            return !queued || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
               (!anyHold || !accountHeldFor(queued, holds, defaultRunner ?? 'claude')));
           });
           if (next === -1) break; // every queued run has a durable reason to remain held
+          const candidate = this.queue[next]!;
+          if (this.workerExecutionStopped(candidate)) { this.cancel(candidate); continue; }
+          if (!this.active.has(candidate) && (this.pendingJobs.has(candidate) || this.pendingContinuations.has(candidate))) {
+            try { this.beginWorkerExecution(candidate); }
+            catch {
+              this.queue.splice(next, 1); this.pendingJobs.delete(candidate); this.pendingContinuations.delete(candidate);
+              this.store.updateRun(candidate, { status: 'failed', error: 'worker execution checkpoint unavailable', finishedAt: new Date().toISOString() });
+              continue;
+            }
+          }
           const runId = this.queue.splice(next, 1)[0];
           if (!runId) break;
           if (this.workerWakeQueuedAt.has(runId) && this.active.has(runId)) {
@@ -1114,17 +1290,19 @@ export class RunManager {
           if (!job && !continuation) continue;
           this.starting.add(runId);
           if (continuation) {
-            const hydrated = this.hydrateQueuedContinuation(runId, continuation);
-            void this.runContinuation(
-              runId,
-              hydrated.stepId,
-              hydrated.sessionId,
-              hydrated.backend,
-              hydrated.prompt,
-              hydrated.images,
-              hydrated.persistedImages,
-              hydrated.persistedAttachments,
-            ).catch((err: unknown) => {
+            void (async () => {
+              const hydrated = this.hydrateQueuedContinuation(runId, continuation);
+              await this.runContinuation(
+                runId,
+                hydrated.stepId,
+                hydrated.sessionId,
+                hydrated.backend,
+                hydrated.prompt,
+                hydrated.images,
+                hydrated.persistedImages,
+                hydrated.persistedAttachments,
+              );
+            })().catch((err: unknown) => {
               const message = err instanceof Error ? err.message : String(err);
               this.store.updateRun(runId, {
                 status: 'failed',
@@ -1133,7 +1311,7 @@ export class RunManager {
               });
               this.starting.delete(runId);
               this.dropActive(runId);
-            });
+            }).finally(() => this.finishWorkerExecution(runId));
             continue;
           }
           if (!job) continue;
@@ -1141,8 +1319,10 @@ export class RunManager {
           // or a stacked message that landed while the run waited is honored. Entered
           // in the same synchronous tick as the `pendingJobs.delete` above, so no
           // handler can observe a half-dequeued run.
-          const input = this.hydrateQueuedInput(runId, job.input);
-          void this.execute(runId, job.workflow, input).catch((err: unknown) => {
+          void (async () => {
+            const input = this.hydrateQueuedInput(runId, job.input);
+            await this.execute(runId, job.workflow, input);
+          })().catch((err: unknown) => {
             const message = err instanceof Error ? err.message : String(err);
             this.store.updateRun(runId, {
               status: 'failed',
@@ -1156,7 +1336,7 @@ export class RunManager {
             }
             this.starting.delete(runId);
             this.dropActive(runId);
-          });
+          }).finally(() => this.finishWorkerExecution(runId));
         }
       } while (this.pumpAgain);
     } finally {
@@ -1286,6 +1466,7 @@ export class RunManager {
     sweepAgentTmpDirs(this.dataDir, live.map((r) => r.id));
     for (const run of live) {
       if (this.isActive(run.id)) continue;
+      if (this.workerExecutionStopped(run.id)) continue;
       if (run.delegation?.role === 'worker') {
         const parent = this.store.getRun(run.delegation.parentRunId);
         if (parent?.delegation?.role === 'root') {
@@ -1394,7 +1575,11 @@ export class RunManager {
   private dropActive(runId: string): void {
     const state = this.active.get(runId);
     state?.releaseRepoRoot?.();
-    if (state) state.releaseRepoRoot = undefined;
+    if (state) {
+      state.releaseRepoRoot = undefined;
+      this.clearIdleTimer(state);
+      this.clearAutosaveTimer(state);
+    }
     this.waiting.delete(runId);
     this.monitoring.delete(runId);
     this.workerWaiting.delete(runId);
@@ -1825,6 +2010,14 @@ export class RunManager {
   }
 
   cancel(runId: string): boolean {
+    if (this.store.getRun(runId)?.delegation?.role === 'worker') {
+      const proof = this.store.readWorkerExecution(runId);
+      this.store.commitWorkerCancellation(runId);
+      this.stoppedWorkers.add(runId);
+      if (!this.executions.has(runId) && !this.active.has(runId) && !this.starting.has(runId) && proof?.phase === 'queued') {
+        this.store.commitWorkerExecutionComplete(runId, proof.generation);
+      }
+    }
     const cancelledFinish = this.store.commitRootFinishCancellation(runId);
     this.withdrawWorkerWait(runId);
     // Still waiting in the queue: just drop it there.
@@ -1835,6 +2028,7 @@ export class RunManager {
       this.pendingContinuations.delete(runId);
       this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
+      if (this.executions.get(runId)?.admitted === false) void this.finishWorkerExecution(runId);
       return true;
     }
     const state = this.active.get(runId);
@@ -1848,13 +2042,14 @@ export class RunManager {
       return false;
     }
     state.cancelled = true;
+    state.revokeDelegation?.(); state.revokeDelegation = undefined;
     this.clearIdleTimer(state);
     state.interrupt();
     return true;
   }
 
   isActive(runId: string): boolean {
-    return this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId);
+    return this.executions.has(runId) || this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId);
   }
 
   /**
@@ -2020,7 +2215,7 @@ export class RunManager {
   enqueueMessage(runId: string, content: PastedContent[]): QueuedMessage | null {
     if (!this.isQueued(runId)) return null;
     const run = this.store.getRun(runId);
-    if (!run) return null;
+    if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return null;
     const message = this.toQueuedMessage(runId, content);
     if (this.workerWait(runId)) this.withdrawWorkerWait(runId, message);
     else this.store.updateRun(runId, { queuedMessages: [...(run.queuedMessages ?? []), message] });
@@ -2133,6 +2328,8 @@ export class RunManager {
    * `ActiveRun` does not exist yet for part of this window.
    */
   deferMessage(runId: string, content: PastedContent[]): boolean {
+    const run = this.store.getRun(runId);
+    if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
     // The window spans two sub-states: `starting` (no `ActiveRun` yet) and the
     // longer stretch where the `ActiveRun` exists but the backend is still being
     // spawned. `execute()` deletes the run from `starting` as soon as it builds
@@ -2499,7 +2696,7 @@ export class RunManager {
     const state = this.active.get(runId);
     if (!state?.session?.open || state.cancelled) return false;
     const run = this.store.getRun(runId);
-    if (!userAuthored && (!run || this.executionBlockedByRootFinish(run))) return false;
+    if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
 
     const text = content
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
@@ -2599,11 +2796,21 @@ export class RunManager {
     if (agentModelsLocked(this.repoRoot) && (opts.model?.trim() || opts.effort?.trim())) {
       return { ok: false, error: AGENT_MODELS_LOCKED_ERROR };
     }
-    if (this.active.has(runId)) return { ok: false, error: 'run is still active' };
+    if (this.active.has(runId) || this.executions.has(runId)) return { ok: false, error: 'run is still active' };
     const run = this.store.getRun(runId);
     if (!run) return { ok: false, error: 'not found' };
+    try {
+      const identity = this.workerIdentity(runId);
+      if (identity && ((opts.runner !== undefined && opts.runner !== identity.account.provider) ||
+          (opts.agentProfile !== undefined && opts.agentProfile !== identity.account.profileId) ||
+          (opts.model !== undefined && opts.model !== identity.model) ||
+          (opts.effort !== undefined && opts.effort !== identity.effort))) {
+        return { ok: false, error: 'Accepted worker execution identity cannot change' };
+      }
+    } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
     if (run.delegation?.role === 'root' && this.isActive(runId)) return { ok: false, error: 'run is still active' };
     const pendingOwnedAsk = !!run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(runId);
+    if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && run.delegation.destroy)) return { ok: false, error: 'worker cannot continue' };
     if (this.executionBlockedByRootFinish(run)) return { ok: false, error: 'parent finish is pending' };
     const answers = deferForCapacity ? [run.continuationMessage, ...(run.queuedMessages ?? [])] : [opts];
     if (pendingOwnedAsk && ((deferForCapacity && run.continuationMessage?.origin !== 'human') ||
@@ -2689,6 +2896,8 @@ export class RunManager {
       });
     }
 
+    try { this.beginWorkerExecution(runId, !deferForCapacity); }
+    catch { return { ok: false, error: 'worker execution checkpoint unavailable' }; }
     // Everything that could refuse this continuation has now passed, so a pending usage-limit
     // resume is superseded either way: this IS that resume (it re-stamps its own counter), or a
     // human got there first — and then the counter starts over, because the cap only exists to
@@ -2754,7 +2963,7 @@ export class RunManager {
         this.starting.delete(runId);
         this.dropActive(runId);
       },
-    );
+    ).finally(() => this.finishWorkerExecution(runId));
     return { ok: true };
   }
 
@@ -2782,7 +2991,9 @@ export class RunManager {
     // for retention again — otherwise it keeps a dir on disk while staying
     // invisible to the enforcer forever. Ordinary runs retain their best-effort
     // repoRoot fallback; owned workers must never adopt/recreate an unverified resource.
+    if (this.workerExecutionStopped(runId)) { this.starting.delete(runId); return; }
     if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images })) return;
+    this.workerIdentity(runId);
     const record = this.store.getRun(runId);
     let cwd: string;
     if (record?.delegation?.role === 'worker') {
@@ -2806,7 +3017,7 @@ export class RunManager {
     // The env is a live ceiling: a run created while the inbox was on must not keep writing
     // follow-ups after it is switched off.
     const generateFollowups = followupsEnabled() && record?.generateFollowups !== false;
-    const state: ActiveRun = { cancelled: false, interrupt: () => undefined, cwd, pendingHumanAsk: this.hasPendingHumanAsk(runId) };
+    const state: ActiveRun = { delegationSettings: undefined, revokeDelegation: undefined, cancelled: false, interrupt: () => undefined, cwd, pendingHumanAsk: this.hasPendingHumanAsk(runId) };
     this.active.set(runId, state);
     this.starting.delete(runId);
     if (state.cwd === this.repoRoot) {
@@ -2832,7 +3043,7 @@ export class RunManager {
         }
       }
     }
-    this.armAutosave(state);
+    this.armAutosave(runId, state);
     if (record) seedHandoffFile(this.dataDir, record); // idempotent — normally already there
     // Registry snapshot for `/skill` expansion. `execute` loads this for the workflow's own
     // sessions; a continuation builds its OWN ActiveRun, and without this the resumed session
@@ -2931,7 +3142,7 @@ export class RunManager {
         // coalescers; the v1 turn boundary flushes again (idempotent) so no
         // buffered delta can outlive its turn.
         sink.flushAll();
-        void this.recordTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
+        this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
         const sessionOpen = !state.cancelled && state.session?.open;
         const done = sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
         // `CEZ:ASK` → the user is genuinely blocked; wins over `CEZ:MONITORING`
@@ -3088,7 +3299,7 @@ export class RunManager {
     // The temp-directory preflight (#785) rides along with the account resolution: a resumed
     // turn hits the same broken `/tmp` a fresh one would, and an agent whose shell silently
     // returns nothing is worse than a turn that refuses to start and says why.
-    let continueProfile: { env: Record<string, string>; profileId: string };
+    let continueProfile: Awaited<ReturnType<RunManager['agentEnvForStep']>>;
     try {
       continueProfile = await this.agentEnvForStep(runId, continueBackend, {
         generateFollowups,
@@ -3108,6 +3319,9 @@ export class RunManager {
     if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images }, state)) return;
     this.store.updateStep(runId, stepId, { profileId: continueProfile.profileId });
 
+    state.delegationSettings = { cwd: state.cwd, runner: continueBackend, model: continueModel,
+      effort: agentModelsLocked(this.repoRoot) ? undefined : record?.effort, agentProfile: continueProfile.profileId, accountBinding: continueProfile.accountBinding,
+      systemPrompt: record?.systemPrompt, allowedTools: allowedToolsForStep(toolsStep, continueBackend), bashAllowlist: toolsStep?.bashAllowlist };
     const runner = createRunner(continueBackend);
     state.currentStepId = stepId;
     this.beginUsageInvocation(runId, state, stepId);
@@ -3117,6 +3331,9 @@ export class RunManager {
     // persisted the user's original text, and the transcript must keep showing that.
     const openingPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []);
     let session: AgentSession | undefined;
+    if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
+    const delegation = this.provisionSession(runId, state);
+    try {
     session = runner.startSession(
       {
         // The Continue step is a fresh agent session on the same run — the
@@ -3124,6 +3341,7 @@ export class RunManager {
         // echoed on the record) rides along with the handoff contract.
         systemPrompt: composeSystemPrompt(
           record?.systemPrompt,
+          delegation?.instructions,
           generateFollowups ? HANDOFF_INSTRUCTIONS : HANDOFF_ONLY_INSTRUCTIONS,
         ),
         userPrompt: attachments.length
@@ -3134,7 +3352,7 @@ export class RunManager {
         allowedTools: allowedToolsForStep(toolsStep, continueBackend),
         bashAllowlist: toolsStep?.bashAllowlist,
         additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), continueProfile.env),
-        env: continueProfile.env,
+        env: { ...continueProfile.env, ...delegation?.env },
         model: continueModel,
         effort: agentModelsLocked(this.repoRoot) ? undefined : record?.effort,
         sessionId,
@@ -3147,15 +3365,18 @@ export class RunManager {
         onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
       },
     );
+    } catch (error) { delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
+    const sessionClosed = this.trackWorkerSessionResult(runId, session);
     state.session = session;
     state.sessionEverOpened = true;
-    this.flushDeferred(runId);
-    this.flushAgentInputs(runId);
     state.interrupt = () => session?.interrupt();
-    if (session.pid !== undefined) registerRunProcess(runId, session.pid);
-
+    let setupComplete = false;
     const finishedAt = () => new Date().toISOString();
     try {
+      this.flushDeferred(runId);
+      this.flushAgentInputs(runId);
+      if (session.pid !== undefined) registerRunProcess(runId, session.pid);
+      setupComplete = true;
       await session.result;
       if (this.preserveRunAfterDisposal(runId, state)) return;
       if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
@@ -3176,6 +3397,10 @@ export class RunManager {
         appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
       }
     } catch (err) {
+      if (!setupComplete) {
+        try { session.interrupt(); } catch { /* Still wait for actual termination. */ }
+        await sessionClosed;
+      }
       if (this.preserveRunAfterDisposal(runId, state)) return;
       // Keep the provider failure that triggered teardown, even if teardown rejects.
       const message = sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
@@ -3190,6 +3415,7 @@ export class RunManager {
       });
       this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
     } finally {
+      delegation?.revoke(); state.revokeDelegation = undefined;
       this.recordUsagePeaks(runId);
       this.clearIdleTimer(state);
       this.clearAutosaveTimer(state);
@@ -3201,7 +3427,10 @@ export class RunManager {
   // ---- execution -----------------------------------------------------------
 
   private async execute(runId: string, workflow: WorkflowDef, input: StartRunInput): Promise<void> {
+    if (this.workerExecutionStopped(runId)) { this.starting.delete(runId); return; }
+    this.workerIdentity(runId);
     const state: ActiveRun = {
+      delegationSettings: undefined, revokeDelegation: undefined,
       pendingHumanAsk: this.hasPendingHumanAsk(runId),
       cancelled: false,
       interrupt: () => undefined,
@@ -3225,7 +3454,9 @@ export class RunManager {
     if (this.requeueWhileHeld(runId, workflow, input, taskBackend)) return;
     // Extra system prompt (R2 2.3): POST override > config default; echoed on
     // the record so the UI/API can show what the run actually used.
-    const extraSystemPrompt = resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
+    const extraSystemPrompt = this.store.getRun(runId)?.delegation?.role === 'worker'
+      ? input.systemPrompt
+      : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
     // Canonical provider/model identity (#405) — the normalised `provider/model`
     // the task ran with, persisted for cost attribution / reproducible replay
     // beside the free-text `model`. Best-effort here (a per-step `runner`/`model`
@@ -3295,6 +3526,7 @@ export class RunManager {
         }
       }
       try {
+        if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return; }
         const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
         const wt = ownedWorkspace
           ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
@@ -3313,7 +3545,7 @@ export class RunManager {
         if (seededConfig.length > 0) {
           emit({ type: 'note', message: `seeded personal agent config: ${seededConfig.join(', ')}` });
         }
-        this.armAutosave(state);
+        this.armAutosave(runId, state);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         const error = `worktree creation failed: ${message}`;
@@ -3412,7 +3644,7 @@ export class RunManager {
 
     let i = 0;
     while (i < workflow.steps.length) {
-      if (state.cancelled) break;
+      if (state.cancelled || this.workerExecutionStopped(runId)) { state.cancelled = true; break; }
       const step = workflow.steps[i] as WorkflowStepDef;
       const kind = stepKind(step);
       const record = this.store.getRun(runId)?.steps.find((s) => s.id === step.id);
@@ -3654,7 +3886,7 @@ export class RunManager {
         // v2 `turn.completed` already flushed the coalescers; the v1 turn
         // boundary flushes again (idempotent) as a backstop.
         sink.flushAll();
-        void this.recordTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
+        this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
         const sessionOpen = !state.cancelled && state.session?.open;
         const done = interactive && sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
         // `CEZ:ASK` → the user is blocked; wins over `CEZ:MONITORING`, loses to
@@ -3749,7 +3981,7 @@ export class RunManager {
     // reads the wrong account's config dir finds no session and silently starts a fresh one.
     // Resolved together with the temp-directory preflight (#785): the step fails with a named,
     // actionable error instead of spawning a backend whose shell would return empty output.
-    let stepProfile: { env: Record<string, string>; profileId: string };
+    let stepProfile: Awaited<ReturnType<RunManager['agentEnvForStep']>>;
     try {
       stepProfile = await this.agentEnvForStep(runId, stepBackend, {
         generateFollowups: followupsEnabled() && input.generateFollowups !== false,
@@ -3762,11 +3994,17 @@ export class RunManager {
     if (state.cancelled || (beforeSpawn && this.executionBlockedByRootFinish(beforeSpawn))) return null;
     this.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
 
+    state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: backendModel,
+      effort: agentModelsLocked(this.repoRoot) ? undefined : this.store.getRun(runId)?.effort ?? input.effort,
+      agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: composeSystemPrompt(systemPrompt, extraSystemPrompt),
+      allowedTools: allowedToolsForStep(step, stepBackend), bashAllowlist: step.bashAllowlist };
     const runner = createRunner(stepBackend);
     let session: AgentSession | undefined;
     state.currentStepId = step.id;
     this.beginUsageInvocation(runId, state, step.id);
+    const delegation = this.provisionSession(runId, state);
     try {
+      if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
       session = runner.startSession(
         {
           // Skill body, then the run's extra prompt (POST override or config
@@ -3774,6 +4012,7 @@ export class RunManager {
           systemPrompt: composeSystemPrompt(
             systemPrompt,
             extraSystemPrompt,
+            delegation?.instructions,
             followupsEnabled() && input.generateFollowups !== false
               ? HANDOFF_INSTRUCTIONS
               : HANDOFF_ONLY_INSTRUCTIONS,
@@ -3785,7 +4024,7 @@ export class RunManager {
           bashAllowlist: step.bashAllowlist,
           // The handoff file lives outside the worktree — grant access.
           additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), stepProfile.env),
-          env: stepProfile.env,
+          env: { ...stepProfile.env, ...delegation?.env },
           model: backendModel,
           effort: agentModelsLocked(this.repoRoot)
             ? undefined
@@ -3802,18 +4041,21 @@ export class RunManager {
         },
       );
     } catch (err) {
+      delegation?.revoke(); state.revokeDelegation = undefined;
       state.currentStepId = undefined;
       return err instanceof Error ? err.message : String(err);
     }
+    const sessionClosed = this.trackWorkerSessionResult(runId, session);
     state.session = session;
     state.sessionEverOpened = true;
-    this.flushDeferred(runId);
-    this.flushAgentInputs(runId);
     state.currentStepId = step.id;
     state.interrupt = () => session?.interrupt();
-    if (session.pid !== undefined) registerRunProcess(runId, session.pid);
-
+    let setupComplete = false;
     try {
+      this.flushDeferred(runId);
+      this.flushAgentInputs(runId);
+      if (session.pid !== undefined) registerRunProcess(runId, session.pid);
+      setupComplete = true;
       const result = await session.result;
       if (this.isDisposedDelegatedRun(runId)) return null;
       const inputOrSessionError = sessionError ?? state.agentInputError;
@@ -3827,12 +4069,17 @@ export class RunManager {
       this.store.updateStep(runId, step.id, { tokensUsed: startTokens + result.tokensUsed });
       return null;
     } catch (err) {
+      if (!setupComplete) {
+        try { session.interrupt(); } catch { /* Still wait for actual termination. */ }
+        await sessionClosed;
+      }
       if (this.isDisposedDelegatedRun(runId)) return null;
       // Keep the provider failure that triggered teardown, even if teardown rejects.
       const message = sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
       sink.sessionEnded('error', message); // alongside v1's fatal `error`
       return message;
     } finally {
+      delegation?.revoke(); state.revokeDelegation = undefined;
       this.recordUsagePeaks(runId);
       this.clearIdleTimer(state);
       this.monitoring.delete(runId);
@@ -3889,9 +4136,9 @@ export class RunManager {
       this.releaseSlot();
       return;
     }
-    // Pi can resume autonomously when an async subagent completes. Work-producing
-    // events prove the backend owns an active turn again, so cancel its stale
-    // scheduler wake and restore active slot accounting.
+    // Pi can resume autonomously when an async subagent completes — the mapper
+    // synthesizes a parent `turn.started` for that work (#61). Nested child
+    // items without a parent turn must not unpark monitoring or worker waits (#121).
     if ((this.monitoring.has(runId) || this.workerWaiting.has(runId)) && isRunnerActivity(event)) {
       this.resumeParkedRun(runId, state);
     }
@@ -4285,7 +4532,7 @@ export class RunManager {
 
   private armMonitoringWakeTimer(runId: string, state: ActiveRun): void {
     const run = this.store.getRun(runId);
-    if (!run || this.executionBlockedByRootFinish(run)) return;
+    if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
     const minutes = this.semaphore.monitoringWakeIntervalMinutes();
     if (minutes === null) {
       this.clearMonitoringWakeTimer(state, runId);
@@ -4311,7 +4558,7 @@ export class RunManager {
     state.monitoringWakeTimer = setTimeout(() => {
       state.monitoringWakeTimer = undefined;
       const run = this.store.getRun(runId);
-      if (!run || this.executionBlockedByRootFinish(run)) return;
+      if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
       this.store.updateRun(runId, { monitoringWakeAt: undefined });
       if (!this.monitoring.has(runId) || !state.session?.open || state.cancelled) return;
       const wakeups = state.monitoringWakeups ?? 0;
@@ -4342,11 +4589,14 @@ export class RunManager {
 
   /** Autosave-commit the worktree every 90 s while the run lives (spec 006).
    *  Opt-in via CEZ_AUTOSAVE=1 (#471) — see periodicAutosaveEnabled. */
-  private armAutosave(state: ActiveRun): void {
+  private armAutosave(runId: string, state: ActiveRun): void {
     if (!periodicAutosaveEnabled()) return;
     if (state.cwd === this.repoRoot || state.autosaveTimer) return;
     state.autosaveTimer = setInterval(() => {
-      void autosaveCommit(state.cwd, 'periodic');
+      const task = autosaveCommit(state.cwd, 'periodic').then(() => undefined);
+      const turns = this.executions.get(runId)?.turns;
+      turns?.add(task);
+      void task.catch(() => undefined).finally(() => turns?.delete(task));
     }, AUTOSAVE_INTERVAL_MS);
     state.autosaveTimer.unref?.();
   }

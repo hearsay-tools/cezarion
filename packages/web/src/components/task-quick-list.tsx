@@ -424,6 +424,7 @@ function RunRow({
         aria-current={isActive ? 'page' : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 py-[7px] pr-2.5"
       >
+        {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
         {variant ? (
           <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-violet/15 font-mono text-[9.5px] font-semibold text-violet">
             {run.variant ?? '?'}

@@ -179,6 +179,9 @@ function activeProject(queryClient: QueryClient): string | undefined {
 function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: GlobalEvent): void {
   switch (event.type) {
     case 'run': {
+      // A changed worker may be absent from the visible list. Refresh this project's mounted
+      // relationship readers without discarding their last successful data.
+      void queryClient.invalidateQueries({ queryKey: [...queryKeys.runs.all, 'relationships'] })
       queryClient.setQueryData<ApiRun[]>(queryKeys.runs.list(), (list) => applyRunEvent(list, event.run))
       // Only a detail cache that exists: `setQueryData` would happily create one, leaving an entry
       // for a run nobody opened — and, worse, one built from a summary rather than from
@@ -202,6 +205,7 @@ function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: Gl
       return
     }
     case 'run-deleted': {
+      void queryClient.invalidateQueries({ queryKey: [...queryKeys.runs.all, 'relationships'] })
       queryClient.setQueryData<ApiRun[]>(queryKeys.runs.list(), (list) => applyRunDeleted(list, event.id))
       // Removed, not set to undefined: the run is gone server-side, so its detail and diff caches
       // are garbage. Anything still mounted on them refetches and gets the server's 404 — the

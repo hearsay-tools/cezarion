@@ -245,6 +245,11 @@ export class AgentBrowser {
     this.run(['set', 'viewport', String(width), String(height)])
   }
 
+  /** Actual browser network emulation, including online/offline events. */
+  setOffline(offline: boolean): void {
+    this.run(['set', 'offline', offline ? 'on' : 'off'])
+  }
+
   /** Emulate the accessibility preference in the real browser, including CSS media queries. */
   setReducedMotion(): void {
     this.run(['set', 'media', 'reduced-motion'])
