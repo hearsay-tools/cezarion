@@ -198,6 +198,9 @@ export const runRecordSchema = z.object({
   /** `monitoring` while `status === 'running'` and the agent is working on downstream work.
    *  Absent on old runs; cleared on resume/end. */
   activity: runActivitySchema.optional(),
+  /** Derived from valid human questions and matching delivery receipts in durable history.
+   * List attention only; never authorization to deliver an answer or wake a worker. */
+  hasPendingHumanAsk: z.boolean().optional(),
   /** Exact ISO-8601 deadline for the next automatic monitoring check. */
   monitoringWakeAt: z.string().optional(),
   /** The current live monitoring epoch exhausted its 40 automatic checks. */
@@ -329,6 +332,7 @@ export const runIndexEntrySchema = z.object({
   titleOrigin: z.enum(['user', 'auto', 'marker']).optional(),
   status: runStatusSchema,
   activity: runActivitySchema.optional(),
+  hasPendingHumanAsk: runRecordSchema.shape.hasPendingHumanAsk,
   /** Only the relationship role and wait phase used by list attention. */
   delegation: runDelegationSummarySchema.optional(),
   createdAt: z.string(),

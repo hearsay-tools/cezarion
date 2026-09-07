@@ -378,7 +378,14 @@ A visible human question takes priority over worker-wait presentation. The
 compact current-history producer retains the latest valid unanswered ask, and
 the header/dock derive attention from that current context rather than paginated
 historical cards. Full-replay fallback uses its authoritative current events through
-the same scan; only views without history retain legacy attention inference.
+the same scan. Views without history use the optional `hasPendingHumanAsk`
+summary on full records and workspace index rows, also preserved by the live
+palette projection. The store derives it from the same canonical event history,
+emits run updates when it changes, and reconstructs waiting roots and roots with
+durable waits on open and in the read-only cold-project index. It is presentation state, never
+input-delivery authority. Notification observations retain both status and
+attention, so a parked wait gaining a question can notify without a status change;
+boot and repeated observations stay silent.
 Manager delivery, compact context and cockpit attention share
 one pure acknowledgement reducer and the existing strict question schemas:
 only a matching successful `human-input-delivered` receipt retires that ask.

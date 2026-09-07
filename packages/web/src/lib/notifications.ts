@@ -53,41 +53,48 @@ export function notificationSupport(): NotificationSupport {
 
 // ---- transition detection ------------------------------------------------------------------
 
+export interface RunNotificationState {
+  status: RunStatus
+  wantsAttention: boolean
+}
+
 export interface RunTransitions {
   /** Runs that ENTERED an attention state in this observation — the ones worth a notification. */
   entering: RunRecord[]
-  /** The statuses to remember for the next observation. Rebuilt each time, so deleted runs
+  /** The status and attention to remember for the next observation. Rebuilt each time, so deleted runs
    *  fall out instead of accumulating forever. */
-  statuses: Map<string, RunStatus>
+  statuses: Map<string, RunNotificationState>
 }
 
 /**
- * Diff one observation of the run list against the last known statuses.
+ * Diff one observation of the run list against the last known status and attention.
  *
- * "Entering" is literal: a run notifies only when its status CHANGED into one that
- * `wantsAttention` — the top rungs of the attention ladder (permission/error/waiting-review),
- * exactly the spec's `waiting`/`review`/failed set. Two silences are deliberate:
+ * "Entering" is literal: a run notifies when it wants attention and either its status changes
+ * or it gains attention while keeping its status. `wantsAttention` owns the top rungs of the
+ * attention ladder (permission/error/waiting-review). Two silences are deliberate:
  *
  *  - a run seen for the first time never notifies, whatever its status. First sight is the
  *    boot fetch or a reconnect reconciliation seeding the cache — a run that has been sitting
  *    in `waiting` for an hour is the dot's job, not a fresh "ding";
- *  - an unchanged status never notifies: a live run re-announces itself on every token tick,
- *    and each of those events is the same state, not a transition.
+ *  - unchanged status and attention never notify: token ticks repeat the same state.
+ *    A parked worker wait gaining a human ask is a transition even though both are waiting.
  *
  * A CHANGED status that still wants attention does notify (`waiting` → `failed`: the agent gave
  * up while you were away — that is news, not a repeat).
  */
 export function diffRunTransitions(
-  previous: ReadonlyMap<string, RunStatus>,
+  previous: ReadonlyMap<string, RunNotificationState>,
   runs: readonly RunRecord[] | undefined,
 ): RunTransitions {
-  const statuses = new Map<string, RunStatus>()
+  const statuses = new Map<string, RunNotificationState>()
   const entering: RunRecord[] = []
   for (const run of runs ?? []) {
-    statuses.set(run.id, run.status)
+    const current = { status: run.status, wantsAttention: wantsAttention(run) }
+    statuses.set(run.id, current)
     const before = previous.get(run.id)
-    if (before === undefined || before === run.status) continue
-    if (wantsAttention(run)) entering.push(run)
+    if (before === undefined) continue
+    if (before.status === current.status && before.wantsAttention === current.wantsAttention) continue
+    if (current.wantsAttention) entering.push(run)
   }
   return { entering, statuses }
 }

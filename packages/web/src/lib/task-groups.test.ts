@@ -628,3 +628,10 @@ it.each(['registered', 'parked', 'wake-pending'] as const)('keeps %s worker wait
   expect(bucketOf(record, 'active')).toBe(phase === 'parked' ? 'Working' : 'Needs you')
   expect(listCounts([record, run({ status: 'waiting' })])).toEqual({ active: 2, archived: 0, waiting: phase === 'parked' ? 1 : 2 })
 })
+
+it('counts a parked parent question as Needs you from the run summary', () => {
+  const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['worker'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
+  expect(bucketOf(record, 'active')).toBe('Needs you')
+  expect(listCounts([record])).toEqual({ active: 1, archived: 0, waiting: 1 })
+  expect(bucketOf({ ...record, hasPendingHumanAsk: false }, 'active')).toBe('Working')
+})

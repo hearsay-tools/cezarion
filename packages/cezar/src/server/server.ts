@@ -5477,6 +5477,7 @@ export function createApp(deps: ServerDeps) {
     status: run.status,
     ...(run.delegation ? { delegation: runDelegationSummarySchema.parse(run.delegation) } : {}),
     ...(run.activity !== undefined ? { activity: run.activity } : {}),
+    ...(run.hasPendingHumanAsk !== undefined ? { hasPendingHumanAsk: run.hasPendingHumanAsk } : {}),
     createdAt: run.createdAt,
     ...(run.finishedAt !== undefined ? { finishedAt: run.finishedAt } : {}),
     ...(run.seenAt !== undefined ? { seenAt: run.seenAt } : {}),

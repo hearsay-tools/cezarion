@@ -132,6 +132,18 @@ it('shows unavailable parent with retry, successful empty state, worker wait and
   open(emptyId); browser.waitForFunction(`document.querySelector('${region}').textContent.includes('No workers')`)
   open(waitingId); expect(browser.text(region)).toContain('Waiting on workers')
   expect(browser.count('[data-slot="ask-card"]')).toBe(0)
+  // The real server derives attention from the seeded ask.requested event.
+  // Visit both lists before the ask detail so its history cannot prime attention.
+  browser.goto(`${base}/p/${project}/`)
+  const projectAsk = `[data-slot="task-row"][data-run-id="${askId}"]`
+  browser.waitForFunction(`document.querySelector('${projectAsk} [aria-label="needs you"]') !== null`)
+  expect(browser.count(`[data-bucket="Needs you"] ${projectAsk}`)).toBe(1)
+  expect(browser.count(`${projectAsk} [aria-label="waiting on workers"]`)).toBe(0)
+  browser.goto(`${base}/tasks`)
+  const globalAsk = `[data-slot="global-task-row"][data-run-id="${askId}"]`
+  browser.waitForFunction(`document.querySelector('${globalAsk}')?.textContent.includes('needs you')`)
+  expect(browser.text(globalAsk)).not.toContain('waiting on workers')
+  observations.push({ pendingHumanAsk: 'project and global lists need you before detail history loads' })
   open(askId)
   browser.waitForFunction(`document.body.textContent.includes('Which implementation should I use?')`)
   expect(browser.snapshot()).toContain('Minimal')

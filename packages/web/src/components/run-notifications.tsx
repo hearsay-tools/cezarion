@@ -2,9 +2,10 @@ import { hashKey, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 
 import { queryKeys, useWorkspaceUiState } from '@/api/queries'
-import type { ApiRun, RunStatus } from '@open-mercato/cezar-api-client'
+import type { ApiRun } from '@open-mercato/cezar-api-client'
 import {
   diffRunTransitions,
+  type RunNotificationState,
   normalizeNotifications,
   notificationSupport,
   shouldNotify,
@@ -42,7 +43,7 @@ export function RunNotifications() {
   // cache subscription and lose the status map — the whole "never replay" guarantee.
   const enabledRef = useRef(enabled)
   enabledRef.current = enabled
-  const statusesRef = useRef<ReadonlyMap<string, RunStatus>>(new Map())
+  const statusesRef = useRef<ReadonlyMap<string, RunNotificationState>>(new Map())
 
   useEffect(() => {
     const listHash = hashKey(queryKeys.runs.list())

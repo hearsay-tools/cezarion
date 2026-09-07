@@ -342,6 +342,30 @@ describe('workspace runs index API', () => {
     expect(JSON.stringify(body)).not.toMatch(/receipts|outcomes|workspace|permissions|parentRunId|managed/);
   });
 
+  it('carries pending human attention for hot and cold parked roots without opening the cold project', async () => {
+    await registerProject(repoRoot);
+    const other = await registerProject(otherRoot);
+    const live = store.createRun({ title: 'Hot question', workflow: 'quick-task', task: 'task', steps: [] });
+    const delegation = { role: 'root' as const, permissions: [], receipts: [], wait: { id: live.id, workerIds: [live.id], deadline: '2026-09-09T00:00:00.000Z', phase: 'parked' as const, outcomes: [] } };
+    const question = { type: 'ask.requested', requestId: 'question', questions: [{ header: 'Choice', question: 'Which option?', options: [{ label: 'First' }, { label: 'Second' }] }] };
+    store.updateRun(live.id, { status: 'waiting', delegation });
+    store.appendEvent(live.id, question);
+    seedColdProject(otherRoot, [storedRun({ id: 'cold-question', title: 'Cold question', status: 'waiting', delegation, hasPendingHumanAsk: false })]);
+    mkdirSync(join(otherRoot, '.ai/cezar/runs'));
+    writeFileSync(join(otherRoot, '.ai/cezar/runs/cold-question.ndjson'), JSON.stringify({ ...question, seq: 1, ts: new Date().toISOString() }) + '\n');
+    const before = readFileSync(join(otherRoot, '.ai/cezar/runs.json'), 'utf8');
+    const contexts = new ProjectContexts({ listProjects });
+    const app = makeApp({ contexts });
+    try {
+      const body = runsIndexResponseSchema.parse(await (await apiRequest(app, '/api/v1/workspace/runs-index')).json());
+      for (const id of [live.id, 'cold-question']) expect(body.runs.find(run => run.id === id)).toHaveProperty('hasPendingHumanAsk', true);
+      const full = await (await apiRequest(app, `/api/v1/runs/${live.id}`)).json();
+      expect(full).toHaveProperty('hasPendingHumanAsk', true);
+      expect(contexts.peek(other.id)).toBeUndefined();
+      expect(readFileSync(join(otherRoot, '.ai/cezar/runs.json'), 'utf8')).toBe(before);
+    } finally { contexts.disposeAll(); }
+  });
+
   it('carries `autoResumeAt`, so a usage-limit park does not read as a failure', async () => {
     await registerProject(repoRoot);
     await registerProject(otherRoot);

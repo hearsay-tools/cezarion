@@ -136,6 +136,7 @@ export function mergeTasks(
     seenAt: run.seenAt,
     archived: run.archived,
     autoResumeAt: run.autoResumeAt,
+    ...(run.hasPendingHumanAsk !== undefined ? { hasPendingHumanAsk: run.hasPendingHumanAsk } : {}),
     ...(run.delegation ? { delegation: runDelegationSummarySchema.parse(run.delegation) } : {}),
     workflow: run.workflow,
     branch: run.branch,

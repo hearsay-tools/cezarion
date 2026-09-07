@@ -6,9 +6,11 @@ import { z } from 'zod';
 import {
   agentInputSchema, delegationStateSchema, workerCreationReceiptSchema,
   continuationMessageSchema,
+  runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
 import type { AgentInput, DelegationState } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
+import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
@@ -201,6 +203,7 @@ export const runRecordSchema = z.object({
    *  `monitoring` while the agent is still working on its own downstream work.
    *  Optional/absent on old runs; cleared when the run resumes or ends. */
   activity: z.enum(['monitoring']).optional(),
+  hasPendingHumanAsk: contractRunRecordSchema.shape.hasPendingHumanAsk.catch(undefined),
   /** Exact server-computed deadline for the next automatic monitoring check. */
   monitoringWakeAt: z.string().datetime().optional().catch(undefined),
   /** True only for the live epoch that exhausted all automatic monitoring checks. */
@@ -744,6 +747,9 @@ export class RunStore extends EventEmitter {
         const parsed = z.array(runRecordSchema).safeParse(raw);
         if (parsed.success) {
           for (const run of parsed.data) {
+            if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
+              refreshHumanAskSummary(run, dataDir);
+            }
             store.runs.set(run.id, reconcileLoadedRun(run, opts));
           }
         }
@@ -1309,6 +1315,8 @@ export class RunStore extends EventEmitter {
     // Sync append keeps event order without a write queue; local NDJSON
     // appends at agent-event rates are effectively free.
     appendFileSync(this.eventsPath(runId), `${JSON.stringify(full)}\n`, 'utf8');
+    if ((full.type === 'ask.requested' || full.type === 'human-input-delivered') &&
+      refreshHumanAskSummary(run, this.dataDir)) this.touch(run);
     this.emit('event', { runId, event: full });
 
     // The janitor trick: agents print the PR URL after `gh pr create` — the

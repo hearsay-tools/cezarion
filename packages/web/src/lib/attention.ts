@@ -77,7 +77,7 @@ function isUnseen(_run: AttentionInput): boolean {
  *  same canonical function instead of inventing a second status-to-tone mapping. `activity` is
  *  optional (#490), so status-only callers keep working unchanged. Delegation uses the slim
  *  contract projection: both full run records and workspace index rows carry this context. */
-export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt'> & Pick<RunIndexEntry, 'delegation'>
+export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt' | 'hasPendingHumanAsk'> & Pick<RunIndexEntry, 'delegation'>
 
 /**
  * `RunRecord` → attention.
@@ -108,7 +108,7 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
   if (run.status === 'failed') {
     return { bucket: 'error', tone: 'danger', pulse: false, label: 'failed' }
   }
-  if (!hasPendingHumanAsk && run.status === 'waiting' && run.delegation?.role === 'root' && run.delegation.wait?.phase === 'parked') {
+  if (!hasPendingHumanAsk && !run.hasPendingHumanAsk && run.status === 'waiting' && run.delegation?.role === 'root' && run.delegation.wait?.phase === 'parked') {
     return { bucket: 'none', tone: 'violet', pulse: false, label: 'waiting on workers' }
   }
   if (run.status === 'waiting') {

@@ -52,7 +52,8 @@ describe('normalizeNotifications (the ui-state `notifications` key)', () => {
 })
 
 describe('diffRunTransitions (attention → notify mapping)', () => {
-  const seen = (entries: Array<[string, RunStatus]>) => new Map<string, RunStatus>(entries)
+  const seen = (entries: Array<[string, RunStatus]>) =>
+    new Map(entries.map(([id, status]) => [id, { status, wantsAttention: wantsAttention(run({ status })) }]))
 
   it('a run ENTERING waiting/review/failed notifies — the spec set, via wantsAttention', () => {
     for (const status of ['waiting', 'review', 'failed'] as const) {

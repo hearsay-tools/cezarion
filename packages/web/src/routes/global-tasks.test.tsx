@@ -1095,3 +1095,12 @@ it('identifies indexed workers and parked parents while preserving human waiting
   }
   expect(document.querySelector('[data-run-id="worker"] a a')).toBeNull()
 })
+
+it('shows a parked parent human question from the slim workspace index', async () => {
+  stubFetch({ runs: [{ ...RUNS[0]!, id: 'asking-parent', status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', wait: { phase: 'parked' } } }] })
+  renderPage()
+  await waitFor(() => expect(document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')).not.toBeNull())
+  const row = document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')
+  expect(row?.textContent).toContain('needs you')
+  expect(row?.textContent).not.toContain('waiting on workers')
+})

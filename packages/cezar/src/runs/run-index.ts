@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 
 import { reconcileLoadedRun, rescopeRun, runRecordSchema, type RepoHandle, type RunRecord } from './store.ts';
+import { refreshHumanAskSummary } from './human-ask-summary.ts';
 
 /**
  * The READ-ONLY half of `runs.json`, for the workspace-level run index (`GET
@@ -32,6 +33,9 @@ export function readRunIndexFromDisk(dataDir: string, handle?: RepoHandle | null
     // records were just parsed into fresh objects that nothing else holds a reference to.
     // Never `keepLive` — this reader has no RunManager, so there is nothing to recover into.
     return parsed.data.map((run) => {
+      if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
+        refreshHumanAskSummary(run, dataDir);
+      }
       reconcileLoadedRun(run);
       rescopeRun(run, handle);
       return run;
