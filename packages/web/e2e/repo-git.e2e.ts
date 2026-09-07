@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { assertDiffCoverage } from './repo-diff-coverage'
 
 /**
  * The repo view (R5 Step 1.7) end-to-end against the shared dry-run environment — which
@@ -10,7 +11,12 @@ import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
  * view must render), the log is whatever this checkout's history is, and the branch list is
  * live. Strictly READ-ONLY: no branch creation, no switching, no commits — the mutation
  * flows (switch/create incl. 409 reasons, base-branch picker) are pinned in
- * `src/routes/repo-git/repo-git.test.tsx` against fixtures.
+ *  `src/routes/repo-git/repo-git.test.tsx` against fixtures.
+ *
+ *  Diff completeness is NOT mounted-card cardinality: past the row threshold the same
+ *  `<Diff>` virtualizes and the viewport mounts a window. Totals, the file tree, and
+ *  last-row selection are the oracles (`repo-diff-coverage.ts`); card counts stay for
+ *  the flat renderer. Deterministic small/large fixtures live in `repo-git-diff.e2e.ts`.
  */
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -71,16 +77,13 @@ describe('the repo view against the live dry-run server', () => {
     ).toBe(scoped('/git'))
 
     // The working tree may be clean or dirty — assert the view tells the same story the API does.
-    const changes = await api<{ files: unknown[] }>('/api/v1/repo/changes')
+    const changes = await api<{ files: Array<{ path: string }> }>('/api/v1/repo/changes')
     if (changes.files.length === 0) {
       browser.waitForFunction(
         `[...document.querySelectorAll('[data-slot="repo-changes"] h2')].some((h) => h.textContent === 'Working tree clean')`,
       )
     } else {
-      browser.waitForFunction(
-        `document.querySelectorAll('[data-slot="diff-file"]').length === ${changes.files.length}`,
-      )
-      expect(browser.count('[data-slot="changes-tree"]')).toBe(1)
+      assertDiffCoverage(browser, changes.files, { tree: true })
     }
 
     browser.screenshot(`${artifactsDir}/repo-git-desktop.png`)
@@ -123,10 +126,7 @@ describe('the repo view against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="commit-meta"]') !== null`)
     expect(browser.url()).toBe(`${baseUrl}${scoped(`/git/commits/${picked.hash}`)}`)
     expect(browser.text('[data-slot="commit-meta"]')).toContain(picked.subject)
-    // The same <Diff> facade, one card per changed file.
-    browser.waitForFunction(
-      `document.querySelectorAll('[data-slot="diff-file"]').length === ${picked.files.length}`,
-    )
+    assertDiffCoverage(browser, picked.files, { tree: false })
     // The way back is a link.
     expect(
       browser.evaluate(`document.querySelector('[data-slot="commit-back"]').getAttribute('href')`),
