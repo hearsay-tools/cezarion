@@ -34,9 +34,9 @@ import type {
  * run) comes back.
  *
  * Multi-project (spec, step 3.1): the one stream carries EVERY project's events, each stamped
- * with its owner. This layer unwraps the envelope (events.ts) and applies only the active
- * project's events — the mounted scope's, or the boot project's when unscoped — so the caches
- * (which are keyed by that same scope, queries.ts) never see another project's data. One
+ * with its owner. Run lists are patched by stamp (boot → `'default'`, else the registry id) so
+ * a sidebar group never receives another project's row (#129). Todos, usage and detail stay
+ * active-scope-only — the mounted scope's, or the boot project's when unscoped. One
  * connection for the whole workspace, not one per project: same per-origin socket-budget
  * argument as ever, and a project switch changes the filter, not the socket.
  *
@@ -171,7 +171,34 @@ function reconcile(queryClient: QueryClient): void {
  * the reducers refuse to invent caches from stream messages anyway.
  */
 function activeProject(queryClient: QueryClient): string | undefined {
-  return getApiScope() ?? (queryClient.getQueryData(queryKeys.health) as HealthResponse | undefined)?.bootProject
+  return getApiScope() ?? bootProjectOf(queryClient)
+}
+
+function bootProjectOf(queryClient: QueryClient): string | undefined {
+  // `queryKeys.health` is scope-led, so a mounted non-boot project reads a different entry
+  // than the unscoped bootstrap. Fall back to the `'default'` cache the first health fetch
+  // populated — that is the same `bootProject` slug either way.
+  return (
+    queryClient.getQueryData<HealthResponse>(queryKeys.health)?.bootProject ??
+    queryClient.getQueryData<HealthResponse>(['default', 'health'])?.bootProject
+  )
+}
+
+/** Sidebar groups key the boot project as `'default'` (`useProjectRuns(..., boot)`); every other
+ *  group uses its registry id. A stamped run must land in that same entry, not in whatever
+ *  scope is currently mounted (#129). */
+function runListCacheKey(project: string, bootProject: string | undefined): readonly [string, 'runs', 'list'] {
+  return [project === bootProject ? 'default' : project, 'runs', 'list'] as const
+}
+
+function applyStampedRunList(queryClient: QueryClient, project: string, event: GlobalEvent): void {
+  if (event.type !== 'run' && event.type !== 'run-deleted') return
+  const key = runListCacheKey(project, bootProjectOf(queryClient))
+  if (event.type === 'run') {
+    queryClient.setQueryData<ApiRun[]>(key, (list) => applyRunEvent(list, event.run))
+    return
+  }
+  queryClient.setQueryData<ApiRun[]>(key, (list) => applyRunDeleted(list, event.id))
 }
 
 /** Fold one stream message into the cache. The reducers it calls are pure and table-tested in
@@ -179,7 +206,8 @@ function activeProject(queryClient: QueryClient): string | undefined {
 function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: GlobalEvent): void {
   switch (event.type) {
     case 'run': {
-      queryClient.setQueryData<ApiRun[]>(queryKeys.runs.list(), (list) => applyRunEvent(list, event.run))
+      // The run list is patched by `applyStampedRunList` against the stamp's cache key, not
+      // this scope's — so a boot run cannot land in another project's sidebar (#129).
       // Only a detail cache that exists: `setQueryData` would happily create one, leaving an entry
       // for a run nobody opened — and, worse, one built from a summary rather than from
       // `GET /api/runs/:id`, which the next reader would then be served as if it were fetched.
@@ -202,7 +230,7 @@ function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: Gl
       return
     }
     case 'run-deleted': {
-      queryClient.setQueryData<ApiRun[]>(queryKeys.runs.list(), (list) => applyRunDeleted(list, event.id))
+      // List eviction is stamp-addressed in `applyStampedRunList` (same seam as `run`).
       // Removed, not set to undefined: the run is gone server-side, so its detail and diff caches
       // are garbage. Anything still mounted on them refetches and gets the server's 404 — the
       // truth — instead of rendering a record that no longer exists.
@@ -300,9 +328,12 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           // the namer had rewritten stayed stale until the next tick, and the tick does not run
           // in a background tab, so coming back to one showed yesterday's rows until a reload.
           runsIndexRefresher.onEvent(parsed.event)
-          // Another project's news patches nothing SCOPED: this scope's caches hold this
-          // project's data only, and the reconcile-on-switch (3.2's provider swap) refetches
-          // the rest. `ping` (project null) always passes — liveness is not project-owned.
+          // Run lists are per-project sidebar caches, so a stamped run patches its OWNER's
+          // list even when that project is not the mounted scope (#129). Todos/usage/detail
+          // stay active-scope-only: those caches are the current project's, and the
+          // reconcile-on-switch (3.2's provider swap) refetches the rest.
+          // `ping` (project null) always passes — liveness is not project-owned.
+          if (parsed.project !== null) applyStampedRunList(queryClient, parsed.project, parsed.event)
           if (parsed.project !== null && parsed.project !== activeProject(queryClient)) return
           applyGlobalEvent(queryClient, usage, parsed.event)
         })

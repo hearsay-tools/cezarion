@@ -704,6 +704,41 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.map((r) => r.id)).toEqual(['theirs'])
     expect(usage.get()).toEqual({ theirs: SAMPLE })
   })
+
+  it('patches the stamped project\'s run list, never another project\'s (#129)', () => {
+    // Sidebar groups keep their own list caches. A boot-stamped run arriving while another
+    // project is the mounted scope must land in the boot group's `default` key — the one
+    // `useProjectRuns(..., boot)` reads — and must not insert into the active project's list.
+    setApiScope('other-project')
+    const otherRun = runRecord('theirs')
+    client.setQueryData<ApiRun[]>(['default', 'runs', 'list'], [])
+    client.setQueryData<ApiRun[]>(['other-project', 'runs', 'list'], [otherRun])
+    const { source } = mount()
+
+    source.emit('run', stampedRun(runRecord('boot-run'), BOOT))
+
+    expect(client.getQueryData<ApiRun[]>(['other-project', 'runs', 'list'])?.map((r) => r.id)).toEqual([
+      'theirs',
+    ])
+    expect(client.getQueryData<ApiRun[]>(['default', 'runs', 'list'])?.map((r) => r.id)).toEqual([
+      'boot-run',
+    ])
+  })
+
+  it('patches a non-boot list while unscoped, without touching the boot list (#129)', () => {
+    client.setQueryData<ApiRun[]>(['default', 'runs', 'list'], [runRecord('boot-run')])
+    client.setQueryData<ApiRun[]>(['other-project', 'runs', 'list'], [])
+    const { source } = mount()
+
+    source.emit('run', stampedRun(runRecord('theirs'), 'other-project'))
+
+    expect(client.getQueryData<ApiRun[]>(['default', 'runs', 'list'])?.map((r) => r.id)).toEqual([
+      'boot-run',
+    ])
+    expect(client.getQueryData<ApiRun[]>(['other-project', 'runs', 'list'])?.map((r) => r.id)).toEqual([
+      'theirs',
+    ])
+  })
 })
 
 describe('useGlobalEvents — reconcile doctrine', () => {
