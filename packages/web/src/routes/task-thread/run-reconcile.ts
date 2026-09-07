@@ -24,10 +24,10 @@ import type { ApiRun, RunEvent } from '@open-mercato/cezar-api-client'
  * own record update normally arrives moments later and cancels the timer.
  */
 
-/** How long the workspace stream gets to deliver the record update on its own before the
- *  transcript's session end is treated as proof of a stale record. Long enough for the engine's
- *  settle write (diff stat, review gate) plus the stream hop; short enough that the reader sees
- *  the thread close instead of a spinner over a "run finished" line. */
+/** How long the workspace stream gets to deliver its authoritative record update after a
+ *  transcript session-or-turn boundary before that boundary is treated as proof of a stale
+ *  record. Long enough for the engine's settle or park write plus the stream hop; short enough
+ *  that the reader does not remain in a stale Working state. */
 export const STALE_RECORD_GRACE_MS = 2_000
 
 /**
@@ -93,8 +93,8 @@ export function useRunRecordReconcile(run: ApiRun | undefined, events: RunEvent[
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail(runId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs.list() })
     }, STALE_RECORD_GRACE_MS)
-    // The healthy path's exit: the workspace stream patches the record, `status` flips to a
-    // settled one, and this cleanup cancels the refetch before it fires.
+    // The healthy path's exit: the workspace stream patches status/activity to an authoritative
+    // record consistent with the transcript, and this cleanup cancels the refetch before it fires.
     return () => clearTimeout(timer)
   }, [settledSeq, parkedSeq, runId, status, activity, queryClient])
 }
