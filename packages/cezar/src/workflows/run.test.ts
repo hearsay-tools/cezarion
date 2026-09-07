@@ -993,6 +993,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   beforeEach(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-490-'));
     savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
+    savedEnv.CEZ_CODEX_BIN = process.env.CEZ_CODEX_BIN;
     process.env.CEZ_DRY_RUN = '1';
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
@@ -1020,6 +1021,66 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
       await new Promise((r) => setTimeout(r, 50));
     }
   };
+
+  const publishedWaiting = (id: string): Promise<RunRecord> =>
+    new Promise((resolve) => {
+      // A continuation's synchronous turn.started checkpoint can republish the previous park.
+      let sawRunning = store.getRun(id)?.status === 'running';
+      const onRun = (record: RunRecord) => {
+        const current = record.steps.find((step) => step.id === record.currentStepId);
+        if (record.id !== id) return;
+        if (record.status === 'running' && current?.status === 'running') sawRunning = true;
+        if (!sawRunning || record.status !== 'waiting' || current?.status !== 'waiting') return;
+        store.off('run', onRun);
+        resolve(structuredClone(record));
+      };
+      store.on('run', onRun);
+    });
+
+  const persistedRun = (id: string): RunRecord => {
+    const records = JSON.parse(readFileSync(join(repoRoot, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[];
+    const record = records.find((candidate) => candidate.id === id);
+    if (!record) throw new Error(`persisted run ${id} missing`);
+    return record;
+  };
+
+  it.each([
+    { name: 'dry-run runner', task: 'plain markerless turn' },
+    { name: 'Codex app-server', runner: 'codex' as const, task: 'plain markerless Codex turn' },
+  ])('$name publishes and persists a complete waiting record before yielding', async ({ runner, task }) => {
+    if (runner === 'codex') {
+      process.env.CEZ_CODEX_BIN = join(import.meta.dirname, '../core/__fixtures__/codex/mock-codex-app-server.mjs');
+    }
+    const record = manager.startRun(SINGLE_STEP, { task, ...(runner ? { runner } : {}), worktree: false });
+    currentId = record.id;
+    const published = await publishedWaiting(record.id);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(published).toMatchObject({ status: 'waiting', activity: undefined });
+    expect(published.steps.find((step) => step.id === published.currentStepId)?.status).toBe('waiting');
+    expect(persistedRun(record.id)).toMatchObject({
+      status: 'waiting',
+      steps: [expect.objectContaining({ id: 'task', status: 'waiting' })],
+    });
+  });
+
+  it('a continuation turn persists a complete waiting record before yielding', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'first markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
+    store.flush();
+
+    const published = publishedWaiting(record.id);
+    expect(manager.sendMessage(record.id, [{ type: 'text', text: 'mock:hold second markerless turn' }])).toBe(true);
+    store.flush();
+    await published;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(persistedRun(record.id)).toMatchObject({
+      status: 'waiting',
+      steps: [expect.objectContaining({ id: 'task', status: 'waiting' })],
+    });
+  });
 
   it('a CEZ:MONITORING turn-end parks the run as running/monitoring', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });

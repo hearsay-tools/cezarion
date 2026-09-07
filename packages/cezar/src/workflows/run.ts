@@ -2463,6 +2463,7 @@ export class RunManager {
             } else {
               this.store.updateRun(runId, { status: 'waiting', activity: undefined });
               this.store.updateStep(runId, stepId, { status: 'waiting' });
+              this.store.flush();
               this.monitoring.delete(runId);
               this.clearMonitoringWakeTimer(state, runId);
             }
@@ -3131,6 +3132,7 @@ export class RunManager {
           } else {
             this.store.updateRun(runId, { status: 'waiting', activity: undefined });
             this.store.updateStep(runId, step.id, { status: 'waiting' });
+            this.store.flush();
             this.monitoring.delete(runId);
             this.clearMonitoringWakeTimer(state, runId);
           }
