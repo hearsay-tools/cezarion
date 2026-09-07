@@ -18,6 +18,7 @@ import type {
   ApiRun,
   HealthResponse,
   ProcessUsage,
+  ProjectsResponse,
   ProviderStatusResponse,
 } from '@open-mercato/cezar-api-client'
 
@@ -184,9 +185,12 @@ function activeProject(queryClient: QueryClient): string | undefined {
 }
 
 function bootProjectOf(queryClient: QueryClient): string | undefined {
-  // `queryKeys.health` is scope-led, so a mounted non-boot project reads a different entry
-  // than the unscoped bootstrap. Fall back to the `'default'` cache the first health fetch
-  // populated — that is the same `bootProject` slug either way.
+  // Registry first: sidebar groups key boot as `'default'` from `projects.bootProject`, and
+  // that cache is workspace-led. Health is scope-led, so a mounted non-boot project reads a
+  // different entry than the unscoped bootstrap — fall back to `'default'` health last.
+  const registry = queryClient.getQueryData<ProjectsResponse>(workspaceQueryKeys.projects)
+  const fromRegistry = registry?.bootProject
+  if (typeof fromRegistry === 'string' && fromRegistry !== '') return fromRegistry
   return (
     queryClient.getQueryData<HealthResponse>(queryKeys.health)?.bootProject ??
     queryClient.getQueryData<HealthResponse>(['default', 'health'])?.bootProject

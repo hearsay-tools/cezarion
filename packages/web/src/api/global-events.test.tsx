@@ -740,6 +740,25 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     ])
   })
 
+  it('aliases boot from the registry when health has not answered yet', () => {
+    client.removeQueries({ queryKey: queryKeys.health })
+    client.removeQueries({ queryKey: ['default', 'health'] })
+    client.setQueryData(workspaceQueryKeys.projects, { bootProject: BOOT, projects: [], projectsDir: '/' })
+    setApiScope('other-project')
+    client.setQueryData<ApiRun[]>(['default', 'runs', 'list'], [])
+    client.setQueryData<ApiRun[]>(['other-project', 'runs', 'list'], [runRecord('theirs')])
+    const { source } = mount()
+
+    source.emit('run', stampedRun(runRecord('boot-run'), BOOT))
+
+    expect(client.getQueryData<ApiRun[]>(['other-project', 'runs', 'list'])?.map((r) => r.id)).toEqual([
+      'theirs',
+    ])
+    expect(client.getQueryData<ApiRun[]>(['default', 'runs', 'list'])?.map((r) => r.id)).toEqual([
+      'boot-run',
+    ])
+  })
+
   it('writes a boot-stamped run to both default and the boot id when the boot project is scoped', () => {
     // Registry error path: `/p/<boot>` mounts scoped under the real id, so the main view
     // reads `[bootId, 'runs', 'list']` while sidebar groups (when present) still alias boot
