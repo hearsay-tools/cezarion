@@ -1037,9 +1037,9 @@ export class RunStore extends EventEmitter {
     const path = join(dir, `${result.workerId}.${snapshotId}.json`);
     if (existsSync(path)) throw new Error('worker result snapshot identity already exists');
     const temp = `${path}.${randomUUID()}.tmp`;
-    const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    try { writeFileSync(fd, JSON.stringify(file)); fsyncSync(fd); } finally { closeSync(fd); }
     try {
+      const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      try { writeFileSync(fd, JSON.stringify(file)); fsyncSync(fd); } finally { closeSync(fd); }
       renameSync(temp, path);
       const reference = { workerId: result.workerId, revision: result.revision, observedAt: result.observedAt, snapshotId,
         lastExecutionOutcome: result.lastExecutionOutcome,

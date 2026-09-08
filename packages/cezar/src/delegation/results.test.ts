@@ -1,11 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, rmSync, fsyncSync, fstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
+
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync), fsyncSync: vi.fn(actual.fsyncSync) };
+});
 
 describe('parent-owned collected worker results', () => {
   let f: ReturnType<typeof fixture>;
@@ -73,6 +78,24 @@ describe('parent-owned collected worker results', () => {
     expect(result.artifacts.items).toHaveLength(32);
     expect(result.artifacts.items[0]).toMatchObject({ state: 'deleted', reason: 'missing', id: '0.png' });
   });
+  it.each(['write', 'fsync'] as const)('removes temporary snapshots and closes descriptors after %s failure while retaining the previous result', async operation => {
+    const run = await worker(); f.store.appendEvent(run.id, { type: 'text', text: 'Retained evidence' });
+    const first = await f.service.collect(f.caller, { workerId: run.id });
+    const dir = join(f.root, '.ai/cezar/runs', `${f.parent.id}-worker-results`);
+    const before = readdirSync(dir);
+    let descriptor: number | undefined;
+    if (operation === 'write') vi.mocked(writeFileSync).mockImplementationOnce(file => {
+      if (typeof file === 'number') descriptor = file;
+      throw Error('snapshot write failed');
+    });
+    else vi.mocked(fsyncSync).mockImplementationOnce(fd => { descriptor = fd; throw Error('snapshot fsync failed'); });
+    expect(() => f.store.commitWorkerResult(f.parent.id, first)).toThrow(`snapshot ${operation} failed`);
+    expect(descriptor).toBeTypeOf('number');
+    expect(() => fstatSync(descriptor!)).toThrow();
+    expect(f.store.readWorkerResult(f.parent.id, run.id)).toEqual(first);
+    expect(readdirSync(dir)).toEqual(before);
+  });
+
   it('does not publish or replace retained evidence when the parent index checkpoint fails', async () => {
     const run = await worker(); f.store.appendEvent(run.id, { type: 'text', text: 'First evidence' });
     const first = await f.service.collect(f.caller, { workerId: run.id });
