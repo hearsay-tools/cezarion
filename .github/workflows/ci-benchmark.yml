@@ -1,0 +1,116 @@
+name: CI performance benchmark
+on:
+  push:
+    branches: ['bench/156-*']
+permissions:
+  contents: read
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - id: matrix
+        run: echo "matrix=$(cat .github/benchmarks/156/campaign.json)" >> "$GITHUB_OUTPUT"
+  measure:
+    needs: matrix
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+      - name: Check out fixed application baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: b1fe75911378dfe7816a7a83312c2acbdcf848f4
+          path: application
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.20.0'
+      - name: Apply isolated experiment
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          case "$VARIANT" in
+            baseline|workers-4|workers-6|workers-8|build-reuse) ;;
+            fixtures|splitting|setup|combined) git -C application apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/156/$VARIANT.patch" ;;
+            *) exit 1 ;;
+          esac
+      - name: Measure verification
+        env:
+          REPETITION: ${{ matrix.repetition }}
+          VARIANT: ${{ matrix.variant }}
+        run: python harness/.github/benchmarks/156/measure.py --root application --out results --variant "$VARIANT"
+      - name: Preserve raw results including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-${{ matrix.variant }}-${{ matrix.repetition }}
+          path: |
+            results/*.json
+            results/*.log
+            results/*.time
+          if-no-files-found: warn
+      - name: Archive verified dependencies and build for reuse experiment
+        if: success() && matrix.variant == 'baseline'
+        run: tar -czf verified.tgz -C application node_modules packages/cezar/dist packages/cezar/web/dist
+      - name: Upload verified archive
+        if: success() && matrix.variant == 'baseline'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verified-${{ matrix.repetition }}
+          path: verified.tgz
+          compression-level: 0
+  snapshot:
+    needs: measure
+    if: ${{ always() && !cancelled() }}
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        variant: [snapshot-fresh, snapshot-reuse]
+        repetition: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: b1fe75911378dfe7816a7a83312c2acbdcf848f4
+          path: application
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.20.0'
+      - name: Download verified archive
+        if: matrix.variant == 'snapshot-reuse'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: verified-${{ matrix.repetition }}
+      - name: Extract verified archive
+        if: matrix.variant == 'snapshot-reuse'
+        run: tar -xzf verified.tgz -C application
+      - name: Measure snapshot preparation and dry-run publication
+        env:
+          REPETITION: ${{ matrix.repetition }}
+          VARIANT: ${{ matrix.variant }}
+          CEZ_RELEASE_CHANNEL: nightly
+          NIGHTLY_DATE: '20260908'
+        run: python harness/.github/benchmarks/156/measure.py --root application --out results --variant "$VARIANT" --phase snapshot
+      - name: Preserve raw snapshot results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-${{ matrix.variant }}-${{ matrix.repetition }}
+          path: |
+            results/*.json
+            results/*.log
+            results/*.time
