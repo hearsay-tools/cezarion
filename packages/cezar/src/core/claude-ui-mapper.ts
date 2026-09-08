@@ -52,10 +52,10 @@ export interface ClaudeUiMapperState {
   readonly turnSeq: number;
   readonly currentTurnId: string | null;
   readonly itemSeq: number;
-  /** True once any assistant `text` block minted a message item. SESSION-scoped,
+  /** True once a parent assistant `text` block minted a message item. SESSION-scoped,
    *  never reset per turn — it mirrors `ctx.textChunks` in claude-cli-runner.ts,
    *  which is allocated once per `runAgent` and accumulates across turns. When a
-   *  session streams no text block at all, the runner falls back to emitting the
+   *  session streams no parent text block, the runner falls back to emitting the
    *  v1 `text` from `msg.result` (`textChunks.length === 0`), and `mapResult`
    *  must mint the v2 twin under the SAME guard — otherwise that prose exists
    *  only in v1 and the cockpit's "v2 wins per turn" dedup drops it with no
@@ -163,10 +163,9 @@ function mapAssistant(msg: Record<string, unknown>, state: ClaudeUiMapperState):
     if (raw.type === 'text' && typeof raw.text === 'string') {
       // Whole blocks per API round-trip — claude sends no deltas in this
       // mode, so we never fake `item.delta`s: started + completed.
-      // Counted against the result fallback exactly as the runner counts it:
-      // every text block, sub-agent ones included (`ctx.textChunks.push` runs
-      // regardless of `parent_tool_use_id`).
-      sawAssistantText = true;
+      // Match the runner's parent-only result fallback guard (#149), while
+      // still rendering child blocks as nested v2 messages.
+      if (parentItemId === undefined) sawAssistantText = true;
       const item: UiMessageItem = { kind: 'message', id: `item_${++itemSeq}`, role: 'assistant', text: raw.text };
       if (parentItemId !== undefined) item.parentItemId = parentItemId;
       events.push({ type: 'item.started', item }, { type: 'item.completed', item });
@@ -515,7 +514,7 @@ function mapResult(msg: Record<string, unknown>, state: ClaudeUiMapperState): Cl
   }
 
   // The result fallback, mirroring claude-cli-runner.ts's `textChunks.length === 0`
-  // branch: a session that streamed no assistant text block carries its whole
+  // branch: a session that streamed no parent assistant text block carries its whole
   // reply on `msg.result`. The runner emits a v1 `text` for it; without the v2
   // twin below, the cockpit's per-turn "v2 wins" dedup drops that line and the
   // turn renders tool cards with no prose at all.

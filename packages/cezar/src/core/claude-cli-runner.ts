@@ -485,6 +485,7 @@ function mockClaudePath(): string {
 interface ClaudeStreamMessage {
   type?: string;
   subtype?: string;
+  parent_tool_use_id?: string | null;
   message?: {
     role?: string;
     content?: unknown[];
@@ -524,6 +525,9 @@ function handleClaudeMessage(
     for (const block of msg.message.content) {
       const b = block as { type?: string; text?: string; id?: string; name?: string; input?: unknown };
       if (b.type === 'text' && typeof b.text === 'string') {
+        // The mapper keeps child text nested on v2. Neither v1 marker parsing
+        // nor the result fallback buffer may consume it as parent prose (#149).
+        if (typeof msg.parent_tool_use_id === 'string' && msg.parent_tool_use_id !== '') continue;
         ctx.textChunks.push(b.text);
         ctx.onEvent?.({ type: 'text', text: b.text });
       } else if (b.type === 'tool_use' && b.id && b.name) {

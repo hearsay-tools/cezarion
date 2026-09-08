@@ -205,6 +205,24 @@ describe('mapClaudeMessage edge cases', () => {
     ]);
   });
 
+  it('keeps the parent result fallback after only child text streamed (#149)', () => {
+    const child = mapClaudeMessage({
+      type: 'assistant', parent_tool_use_id: 'task_child',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Child verdict.' }] },
+    }, state);
+    expect(child.events).toContainEqual({
+      type: 'item.completed',
+      item: { kind: 'message', id: 'item_1', role: 'assistant', text: 'Child verdict.', parentItemId: 'task_child' },
+    });
+    const parent = mapClaudeMessage({
+      type: 'result', subtype: 'success', result: 'Parent is monitoring.\nCEZ:MONITORING',
+    }, child.state);
+    expect(parent.events).toContainEqual({
+      type: 'item.completed',
+      item: { kind: 'message', id: 'item_2', role: 'assistant', text: 'Parent is monitoring.\nCEZ:MONITORING' },
+    });
+  });
+
   it('does NOT mint a result message once a text block already streamed — no duplicate prose', () => {
     const streamed = mapClaudeMessage(
       { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Streamed.' }] } },
