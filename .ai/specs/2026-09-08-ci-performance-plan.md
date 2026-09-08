@@ -23,38 +23,38 @@
 
 ### 1. Measurement harness
 Files: `.github/workflows/ci-benchmark.yml`, `.github/benchmarks/156/measure.py`, `test_measure.py`, `campaign.json`, report under `docs/benchmarks/`.
-- [ ] Test a real successful command, failed command and child CPU/memory accounting; failure must remain visible in persisted JSON and exit status.
-- [ ] Run `python -m unittest discover -s .github/benchmarks/156 -p 'test_*.py'`, observe red, implement collector, rerun green.
-- [ ] Collector executes argument arrays via `/usr/bin/time`, stores wall/user/system/peak RSS, exit status, exact command and logs; metadata records git SHA, lockfile hash, Node/Vitest versions, CPUs, runner image, timestamps and CI identity.
-- [ ] Workflow matrix reads campaign.json, checks out baseline, installs without cache reuse, runs collector and uploads artifacts with always(). Push a dedicated measurement ref to start baseline/default and 4/6/8 worker variants.
+- [x] Test a real successful command, failed command and child CPU/memory accounting; failure must remain visible in persisted JSON and exit status.
+- [x] Run `python -m unittest discover -s .github/benchmarks/156 -p 'test_*.py'`, observe red, implement collector, rerun green.
+- [x] Collector executes argument arrays via `/usr/bin/time`, stores wall/user/system/peak RSS, exit status, exact command and logs; metadata records git SHA, lockfile hash, Node/Vitest versions, CPUs, runner image, timestamps and CI identity.
+- [x] Workflow matrix reads campaign.json, checks out baseline, installs without cache reuse, runs collector and uploads artifacts with always(). Push a dedicated measurement ref to start baseline/default and 4/6/8 worker variants.
 
 ### 2. Deterministic fixtures
 Files: experiment patch in `.github/benchmarks/156/fixtures.patch`; affected test files only.
-- [ ] Inspect prompt/state/attachment tests and semaphore sleeps. Replace incidental delays with scripted responses or explicit release gates; keep real timer/process tests intact.
-- [ ] Run affected suites against original and proposed fixture; verify same cases/assertions and test selected production mutations.
-- [ ] Save independent patch based on fixed baseline, document exact scope and preservation evidence.
+- [x] Inspect prompt/state/attachment tests and semaphore sleeps. Replace incidental delays with scripted responses or explicit release gates; keep real timer/process tests intact.
+- [x] Run affected suites against original and proposed fixture; verify same cases/assertions and test selected production mutations.
+- [x] Save independent patch based on fixed baseline, document exact scope and preservation evidence.
 
 ### 3. Suite splitting
 Files: `.github/benchmarks/156/splitting.patch`; three named test suites and testkits.
-- [ ] Partition independent worker-wait, harness-parity and run scenarios into files with shared non-test helpers.
-- [ ] Preserve every test name and parity row, no concurrent tests or loss of cleanup hooks.
-- [ ] Compare collected case inventory before/after; run split suites; retain independent patch.
+- [x] Partition independent worker-wait, harness-parity and run scenarios into files with shared non-test helpers.
+- [x] Preserve every test name and parity row, no concurrent tests or loss of cleanup hooks.
+- [x] Compare collected case inventory before/after; run split suites; retain independent patch.
 
 ### 4. Setup and duplicate builds
 Files: `.github/benchmarks/156/setup.patch`, benchmark collector modes, package/build workflow if selected.
-- [ ] Audit pure web tests; move eligible files to Node with file environment annotations, retaining isolation and server setup unchanged.
-- [ ] Measure reuse of pretypecheck's server artifact by running build:web plus check:pack after tests; declarations and inlining remain from initial build.
-- [ ] Compare snapshot fresh install/build with transfer of verified dependency/build artifacts on another job; use dry-run stamping and package checks.
+- [x] Audit pure web tests; move eligible files to Node with file environment annotations, retaining isolation and server setup unchanged.
+- [x] Measure reuse of pretypecheck's server artifact by running build:web plus check:pack after tests; declarations and inlining remain from initial build.
+- [x] Compare snapshot fresh install/build with transfer of verified dependency/build artifacts on another job; use dry-run stamping and package checks.
 
 ### 5. Balanced shards and full campaign
 Files: benchmark workflow and duration assignment manifest.
-- [ ] Extract baseline per-suite durations and allocate files to two bins by longest-processing-time greedy assignment.
-- [ ] Run full verification gate plus independently measured shard jobs, include total setup/runner time and assert inventory is a disjoint complete partition.
-- [ ] Run each individual variant three times, then three combined runs. Retain all failures and retries.
+- [x] Extract baseline per-suite durations and allocate files to two bins by longest-processing-time greedy assignment.
+- [x] Run full verification gate plus independently measured shard jobs, include total setup/runner time and assert inventory is a disjoint complete partition.
+- [x] Run each individual variant three times, then three combined runs. Retain all failures and retries.
 
 ### 6. Select, verify, report and review
 Files: selected application/CI changes, `docs/benchmarks/ci-performance-156.md` and raw JSON.
-- [ ] Compare median/range, CPU seconds and peak memory, total runner time, wall time and failures for all variants. Reject complexity unsupported by benefit.
-- [ ] Apply only winners; run npm run typecheck, npm test, npm run test:unit, npm run build, npm run test:package.
+- [x] Compare median/range, CPU seconds and peak memory, total runner time, wall time and failures for all variants. Reject complexity unsupported by benefit.
+- [x] Apply only winners; run npm run typecheck, npm test, npm run test:unit, npm run build, npm run test:package.
 - [ ] Commit, push, merge fresh origin/main and reverify if changed, open draft PR using repository template with Closes #156.
 - [ ] Move board to In review, run pr-checks and SDLC docs check, resolve automated review on final SHA and retain green CI/review links.

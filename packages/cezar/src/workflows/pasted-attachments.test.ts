@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { shellQuote } from '../core/shell-env.ts';
 import { HANDOFF_INSTRUCTIONS } from '../handoff.ts';
@@ -23,6 +23,7 @@ import { attachmentExtension, isAttachmentMediaType, isImageAttachmentName } fro
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 let gateSequence = 0;
+const pendingHolderReleases = new Set<() => void>();
 
 /** A real check-step subprocess that holds a slot until the test releases it. */
 function slotHolder(root: string, name: string): { workflow: WorkflowDef; release: () => void } {
@@ -30,6 +31,14 @@ function slotHolder(root: string, name: string): { workflow: WorkflowDef; releas
   const script =
     "const fs=require('node:fs');const gate=process.argv[1];" +
     'const poll=()=>fs.existsSync(gate)?undefined:setTimeout(poll,5);poll()';
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    writeFileSync(gate, '');
+    pendingHolderReleases.delete(release);
+  };
+  pendingHolderReleases.add(release);
   return {
     workflow: {
       name,
@@ -41,7 +50,7 @@ function slotHolder(root: string, name: string): { workflow: WorkflowDef; releas
         },
       ],
     },
-    release: () => writeFileSync(gate, ''),
+    release,
   };
 }
 
@@ -214,13 +223,38 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     manager = new RunManager(store, repoRoot);
   });
 
-  afterAll(() => {
-    for (const [key, value] of Object.entries(savedEnv)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
+  afterEach(async () => {
+    for (const release of [...pendingHolderReleases]) release();
+    for (const run of store.listRuns()) {
+      if (!['done', 'review', 'failed', 'cancelled'].includes(run.status)) manager.cancel(run.id);
     }
-    store.flush();
-    rmSync(repoRoot, { recursive: true, force: true });
+    await Promise.all(
+      store.listRuns().map((run) =>
+        waitForStatus(run.id, ['done', 'review', 'failed', 'cancelled'], 5_000),
+      ),
+    );
+  });
+
+  afterAll(async () => {
+    try {
+      for (const release of [...pendingHolderReleases]) release();
+      for (const run of store.listRuns()) {
+        if (!['done', 'review', 'failed', 'cancelled'].includes(run.status)) manager.cancel(run.id);
+      }
+      await Promise.all(
+        store
+          .listRuns()
+          .map((run) => waitForStatus(run.id, ['done', 'review', 'failed', 'cancelled'], 5_000)),
+      );
+    } finally {
+      manager.dispose();
+      for (const [key, value] of Object.entries(savedEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      store.flush();
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
   });
 
   function readStdinLines(): Array<{ userText: string; imageCount: number }> {

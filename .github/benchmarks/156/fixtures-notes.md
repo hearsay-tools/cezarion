@@ -27,6 +27,8 @@ The original baseline also passed these cases as part of the parent's clean full
 
 The gate commands quote the executable, inline script, and release path with the repository's `shellQuote` helper. One semaphore holder and one attachment holder also passed with `TMPDIR=/tmp/cez-$-\`-…`, covering literal dollar and backtick characters in generated paths.
 
+Post-measurement review added failure-path cleanup to the shipped attachment suite; the archived experiment patches remain unchanged so the measured candidate is reproducible. The final attachment suite registers every gate before starting its subprocess. `afterEach` releases outstanding gates, cancels every nonterminal run, and waits for terminal state; `afterAll` repeats that defense and disposes the manager in `finally` before deleting the fixture repository. A temporary prerelease assertion failure completed in 24 ms and the following attachment case still passed in 2.4 s, demonstrating that neither the holder nor the failed case's queued agent work leaked across the test boundary. The intentional failure was reverted before the final 37-test run.
+
 Mutation checks in the isolated copy:
 
 - Removing `await participant.pump()` from `WorkspaceSemaphore.release()` made `a slot freed in one project starts the run queued in ANOTHER project` fail because B remained queued.
@@ -35,4 +37,4 @@ Mutation checks in the isolated copy:
 
 The production source was restored before generating the patch. These checks show that the deterministic holder still detects release, workspace-cap, and per-project-cap regressions.
 
-Performance measurements are intentionally deferred to the GitHub benchmark campaign.
+Hosted performance results are recorded in `docs/benchmarks/ci-performance-156.md`.
