@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from './agent-runner.ts';
 import { isSignalTerminationExit, prependSystemPrompt } from './agent-runner.ts';
 import {
@@ -420,6 +420,162 @@ describe('Claude non-human stdin acknowledgement boundary', () => {
       session.interrupt(); close();
       await session.result;
       spawnHook.override = null;
+    }
+  });
+});
+
+/**
+ * #146 — a human follow-up written BEFORE the opening result must survive the
+ * auto-end window. Real timers throughout: the 250 ms reopen window is the
+ * thing under test, so nothing here fakes or advances a clock.
+ */
+describe('Claude auto-end with a prompt turn still pending (#146)', () => {
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  /** A controlled child over real pipes: the test decides exactly when each
+   *  `result` frame lands, and records the moment the runner closes stdin. */
+  function pipeFixture() {
+    const emitter = new EventEmitter();
+    const stdout = new PassThrough();
+    const stdin = new PassThrough();
+    let stdinEnded = false;
+    stdin.on('finish', () => { stdinEnded = true; });
+    stdin.resume();
+    const child = Object.assign(emitter, { stdin, stdout, stderr: new PassThrough(),
+      exitCode: null as number | null, signalCode: null as NodeJS.Signals | null, killed: false,
+      kill: () => { close(143); return true; },
+    }) as unknown as ChildProcessWithoutNullStreams;
+    const close = (code = 0) => {
+      if (child.exitCode !== null) return;
+      Object.assign(child, { exitCode: code }); stdout.end();
+      emitter.emit('exit', code, null); emitter.emit('close', code, null);
+    };
+    const result = (text: string) => stdout.write(JSON.stringify({
+      type: 'result', subtype: 'success', result: text, usage: { input_tokens: 1, output_tokens: 1 },
+    }) + '\n');
+    return { child, close, result, stdinEnded: () => stdinEnded };
+  }
+
+  function start(fixture: ReturnType<typeof pipeFixture>, opts: { autoEndAfterFirstTurn?: boolean }) {
+    spawnHook.override = () => fixture.child;
+    const events: AgentEvent[] = [];
+    const runner = new ClaudeCliRunner({ bin: 'unused-pipe-fixture' });
+    const session = runner.startSession({ userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 }, event => events.push(event), opts);
+    const turnEnds = () => events.filter(event => event.type === 'turn-end').length;
+    return { session, events, turnEnds };
+  }
+
+  afterEach(() => { spawnHook.override = null; });
+
+  it('keeps stdin open through a follow-up queued before the opening result, then closes after the final result', async () => {
+    const fixture = pipeFixture();
+    const { session, turnEnds } = start(fixture, { autoEndAfterFirstTurn: true });
+    try {
+      // The follow-up lands while the opening turn is still running.
+      expect(session.sendMessage([{ type: 'text', text: 'queued follow-up' }])).toBe(true);
+      await sleep(75);
+      fixture.result('opening turn');
+      await vi.waitFor(() => expect(turnEnds()).toBe(1));
+      // Well past the 250 ms window: the queued turn is still running, so
+      // stdin must still be open.
+      await sleep(400);
+      expect(session.open).toBe(true);
+      expect(fixture.stdinEnded()).toBe(false);
+      await sleep(300);
+      fixture.result('follow-up turn');
+      await vi.waitFor(() => expect(turnEnds()).toBe(2));
+      // The final result starts the normal close window.
+      await vi.waitFor(() => expect(fixture.stdinEnded()).toBe(true), { timeout: 2_000 });
+      expect(session.open).toBe(false);
+    } finally {
+      fixture.close();
+      await session.result;
+    }
+  });
+
+  it('closes after a single final result exactly as before', async () => {
+    const fixture = pipeFixture();
+    const { session, turnEnds } = start(fixture, { autoEndAfterFirstTurn: true });
+    try {
+      await sleep(75);
+      fixture.result('only turn');
+      await vi.waitFor(() => expect(turnEnds()).toBe(1));
+      await vi.waitFor(() => expect(fixture.stdinEnded()).toBe(true), { timeout: 2_000 });
+      expect(session.open).toBe(false);
+    } finally {
+      fixture.close();
+      await session.result;
+    }
+  });
+
+  it('leaves an interactive session open after every result', async () => {
+    const fixture = pipeFixture();
+    const { session, turnEnds } = start(fixture, {});
+    try {
+      expect(session.sendMessage([{ type: 'text', text: 'queued follow-up' }])).toBe(true);
+      fixture.result('opening turn');
+      await vi.waitFor(() => expect(turnEnds()).toBe(1));
+      fixture.result('follow-up turn');
+      await vi.waitFor(() => expect(turnEnds()).toBe(2));
+      await sleep(400);
+      expect(session.open).toBe(true);
+      expect(fixture.stdinEnded()).toBe(false);
+    } finally {
+      session.end();
+      fixture.close();
+      await session.result;
+    }
+  });
+
+  it('explicit interrupt terminates the session while a prompt turn is still pending', async () => {
+    const fixture = pipeFixture();
+    const { session, turnEnds } = start(fixture, { autoEndAfterFirstTurn: true });
+    expect(session.sendMessage([{ type: 'text', text: 'queued follow-up' }])).toBe(true);
+    fixture.result('opening turn');
+    await vi.waitFor(() => expect(turnEnds()).toBe(1));
+    session.interrupt();
+    expect(session.open).toBe(false);
+    const result = await session.result;
+    expect(result.text).toContain('opening turn');
+    expect(fixture.child.exitCode).toBe(143);
+  });
+
+  it('real mock binary: a follow-up written before the opening result finishes before stdin closes', async () => {
+    const mockBin = fileURLToPath(new URL('../../scripts/mock-claude.mjs', import.meta.url));
+    const runner = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 60_000 });
+    const events: AgentEvent[] = [];
+    const cwd = mkdtempSync(join(tmpdir(), 'cez-claude-queued-turn-'));
+    const turnEnds = () => events.filter(event => event.type === 'turn-end').length;
+    let openAtSecondTurnEnd: boolean | undefined;
+    const session = runner.startSession(
+      {
+        userPrompt: 'mock:hold opening',
+        cwd,
+        env: { CEZ_HANDOFF_FILE: '', CEZ_MOCK_ARGS_FILE: '', CEZ_TODOS_FILE: '' },
+        sessionId: '5f701b42-382a-4a6e-b831-0ab9e56eff58',
+      },
+      (event) => {
+        events.push(event);
+        if (event.type === 'turn-end' && turnEnds() === 2) openAtSecondTurnEnd = session.open;
+      },
+      { autoEndAfterFirstTurn: true },
+    );
+    try {
+      // The mock serializes turns and holds each `mock:hold` turn ~750 ms, so
+      // this follow-up is accepted long before the opening result arrives.
+      expect(session.sendMessage([{ type: 'text', text: 'mock:hold follow-up' }])).toBe(true);
+      await vi.waitFor(() => expect(turnEnds()).toBe(1), { timeout: 5_000 });
+      await sleep(400);
+      expect(session.open).toBe(true);
+      await vi.waitFor(() => expect(turnEnds()).toBe(2), { timeout: 5_000 });
+      expect(openAtSecondTurnEnd).toBe(true);
+      const result = await session.result;
+      expect(session.open).toBe(false);
+      expect(result.text).toContain('parity hold');
+    } finally {
+      session.interrupt();
+      await session.result.catch(() => undefined);
+      rmSync(cwd, { force: true, recursive: true });
     }
   });
 });
