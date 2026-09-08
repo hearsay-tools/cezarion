@@ -112,9 +112,7 @@ describe('parent-owned collected worker results', () => {
     f.store.appendEvent(run.id, { type: 'image', url: `/api/v1/runs/${run.id}/images/result.png` });
     await f.service.destroy(f.caller, { workerId: run.id });
     const result = await f.service.collect(f.caller, { workerId: run.id });
-    rmSync(images, { recursive: true });
-    const index = join(f.root, '.ai/cezar/runs.json');
-    writeFileSync(index, JSON.stringify(f.store.listRuns().filter(record => record.id !== run.id)));
+    expect(f.store.deleteRun(run.id)).toBe(true);
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager: f.manager });
     expect(await f.service.collect(f.caller, { workerId: run.id })).toMatchObject({ summary: result.summary, outcome: 'destroyed', artifacts: { state: 'available', items: [{ state: 'deleted', id: 'result.png' }] } });
@@ -122,6 +120,25 @@ describe('parent-owned collected worker results', () => {
     if (parent.delegation?.role !== 'root') throw Error('fixture');
     reopened.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, receipts: [] } }]);
     await expect(f.service.collect(f.caller, { workerId: run.id })).rejects.toMatchObject({ code: 'denied_scope' });
+    reopened.flush();
+  });
+  it.each(['absent', 'pending', 'malformed'] as const)('denies absent-child collection with %s deletion evidence', async kind => {
+    const run = await worker();
+    f.store.appendEvent(run.id, { type: 'text', text: 'Retained result' });
+    await f.service.destroy(f.caller, { workerId: run.id });
+    expect(f.store.deleteRun(run.id)).toBe(true);
+    const index = join(f.root, '.ai/cezar/runs.json');
+    const records = JSON.parse(readFileSync(index, 'utf8'));
+    const receipt = records.find((record: { id: string }) => record.id === f.parent.id).delegation.receipts[0];
+    if (kind === 'absent') delete receipt.deletion;
+    else if (kind === 'pending') receipt.deletion.phase = 'pending';
+    else receipt.deletion.generation = 'invalid-generation';
+    writeFileSync(index, JSON.stringify(records));
+    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager: f.manager });
+    const before = readFileSync(index, 'utf8');
+    await expect(f.service.collect(f.caller, { workerId: run.id })).rejects.toMatchObject({ code: 'denied_scope' });
+    expect(readFileSync(index, 'utf8')).toBe(before);
     reopened.flush();
   });
   it('a stopped public status is partial and unsettled until private termination is proven', async () => {

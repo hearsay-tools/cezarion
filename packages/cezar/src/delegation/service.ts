@@ -125,7 +125,7 @@ export class DelegationService {
     const parent = project.store.getRun(caller.runId);
     const worker = project.store.getRun(workerId);
     if (!worker) {
-      const retained = project.store.readWorkerResult(caller.runId, workerId);
+      const retained = project.store.readDeletedWorkerResult(caller.runId, workerId);
       authorizeRetainedResult(caller, parent, project.id, workerId, retained);
       return project.store.commitWorkerResult(caller.runId, revalidateRetainedWorkerResult(project.root, retained!), project.store.readWorkerResultDiff(caller.runId, workerId));
     }
