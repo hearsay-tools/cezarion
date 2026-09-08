@@ -133,6 +133,40 @@ class SummarizeTest(unittest.TestCase):
             self.assertEqual(sample['reason'], 'GitHub job is not complete')
             self.assertIsNone(sample['jobRunnerSeconds'])
 
+    def test_paired_job_keeps_half_statuses_and_accounts_runner_time_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_artifact(root, 'baseline', 1, [
+                step('install', 3), step('vitest', 8),
+            ])
+            self.write_artifact(root, 'combined', 1, [
+                step('install', 4), step('vitest', 6, exit_code=7),
+            ])
+            (root / 'jobs.json').write_text(json.dumps({'jobs': [{
+                'id': 99,
+                'name': 'paired (1)',
+                'status': 'completed',
+                # The aggregate shell step fails because combined failed.
+                'conclusion': 'failure',
+                'started_at': '2026-09-08T10:00:00Z',
+                'completed_at': '2026-09-08T10:03:00Z',
+            }]}))
+
+            report = summarize.summarize(root)
+            baseline = report['variants']['baseline']['samples'][0]
+            combined = report['variants']['combined']['samples'][0]
+            self.assertEqual(baseline['status'], 'success')
+            self.assertEqual(combined['status'], 'failure')
+            self.assertEqual(combined['failedSteps'], ['vitest'])
+            self.assertIsNone(baseline['jobRunnerSeconds'])
+            self.assertIsNone(combined['jobRunnerSeconds'])
+            self.assertEqual(baseline['sharedJobRunnerSeconds'], 180)
+            self.assertEqual(combined['sharedJobRunnerSeconds'], 180)
+            self.assertEqual(report['variants']['baseline']['metrics']['jobRunnerSeconds'], None)
+            self.assertEqual(report['variants']['combined']['metrics']['jobRunnerSeconds'], None)
+            self.assertEqual(len(report['jobs']), 1)
+            self.assertEqual(report['jobs'][0]['jobRunnerSeconds'], 180)
+
 
 if __name__ == '__main__':
     unittest.main()

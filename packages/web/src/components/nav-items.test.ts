@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vitest'
 
 import { NAV_ITEMS, activeNavItem, activeNavPath, visibleNavItems } from './nav-items'

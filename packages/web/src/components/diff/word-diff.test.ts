@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vitest'
 
 import { diffWords, overlaySegments, type WordSpan } from './word-diff'

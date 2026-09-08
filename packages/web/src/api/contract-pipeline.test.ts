@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vitest'
 import { healthResponseSchema, type HealthResponse } from '@open-mercato/cezar-api-client'
 

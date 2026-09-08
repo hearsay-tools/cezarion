@@ -8,6 +8,7 @@ from statistics import median
 
 
 JOB_NAME = re.compile(r'^(measure|snapshot) \((.+), (\d+)\)$')
+PAIRED_JOB_NAME = re.compile(r'^paired \((\d+)\)$')
 
 
 def read_json(path):
@@ -41,13 +42,18 @@ def job_rows(root):
     rows = []
     for raw in document.get('jobs', []):
         match = JOB_NAME.match(raw.get('name', ''))
-        if not match:
+        paired = PAIRED_JOB_NAME.match(raw.get('name', ''))
+        if not match and not paired:
             continue
-        kind, variant, repetition = match.groups()
+        if paired:
+            kind, variant, repetition = 'paired', 'paired', paired.group(1)
+        else:
+            kind, variant, repetition = match.groups()
         rows.append({
             'variant': variant,
             'repetition': int(repetition),
             'phase': 'snapshot' if kind == 'snapshot' else 'verify',
+            'paired': kind == 'paired',
             'status': raw.get('status'),
             'conclusion': raw.get('conclusion'),
             'jobRunnerSeconds': elapsed_seconds(raw),
@@ -94,7 +100,14 @@ def summarize(root):
     root = Path(root)
     jobs = job_rows(root)
     artifacts = artifact_rows(root)
-    indexed_jobs = {(row['variant'], row['repetition'], row['phase']): row for row in jobs}
+    indexed_jobs = {
+        (row['variant'], row['repetition'], row['phase']): row
+        for row in jobs if not row['paired']
+    }
+    for row in jobs:
+        if row['paired']:
+            for variant in ('baseline', 'combined'):
+                indexed_jobs[(variant, row['repetition'], row['phase'])] = row
     keys = sorted(set(artifacts) | set(indexed_jobs))
     variants = {}
     for variant, repetition, phase in keys:
@@ -103,7 +116,14 @@ def summarize(root):
         sample = {
             'variant': variant, 'repetition': repetition, 'phase': phase,
             'artifact': str(artifact['path']) if artifact else None,
-            'jobRunnerSeconds': job.get('jobRunnerSeconds') if job else None,
+            # A paired job runs both collectors sequentially. Keep its elapsed
+            # time as shared evidence rather than charging it to both samples.
+            'jobRunnerSeconds': (
+                job.get('jobRunnerSeconds') if job and not job['paired'] else None
+            ),
+            'sharedJobRunnerSeconds': (
+                job.get('jobRunnerSeconds') if job and job['paired'] else None
+            ),
             'jobStatus': job.get('status') if job else None,
             'jobConclusion': job.get('conclusion') if job else None,
         }
@@ -120,7 +140,7 @@ def summarize(root):
                 sample.update(status='missing', reason='missing GitHub job')
             elif job.get('status') != 'completed' or job.get('conclusion') is None:
                 sample.update(status='missing', reason='GitHub job is not complete')
-            elif failed_steps or job.get('conclusion') != 'success':
+            elif failed_steps or (not job['paired'] and job.get('conclusion') != 'success'):
                 sample.update(status='failure', failedSteps=[step.get('name') for step in failed_steps])
             else:
                 sample['status'] = 'success'

@@ -867,6 +867,9 @@ npm run test:package # pack/install and exercise the built CLI
 npm run test:e2e     # real-browser cockpit suite (agent-browser)
 ```
 
+CI runs two duration-balanced Vitest shards alongside the build and package checks.
+See [CI verification](docs/sdlc/ci.md) for the job graph and local commands.
+
 The stack is deliberately small: **TypeScript** (strict, ESM), **Hono** + SSE for
 the server, **Zod** at every boundary, **YAML** for workflows, and a **React 19 +
 Vite + Tailwind v4 + shadcn/ui** cockpit shipped pre-built in `packages/cezar/web/dist/` — the

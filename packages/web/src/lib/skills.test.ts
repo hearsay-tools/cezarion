@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vitest'
 
 import type { Skill, WorkflowDef } from '@open-mercato/cezar-api-client'
