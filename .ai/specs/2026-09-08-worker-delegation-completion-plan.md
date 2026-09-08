@@ -161,7 +161,7 @@ expect(childSpec.env?.CEZ_DELEGATION_TOKEN).not.toBe(parentSpec.env?.CEZ_DELEGAT
 
 - [x] Add parent/two-worker integration using wire-faithful runners: explicit context, mixed backend, steering, early completion before wait, wait-any then collect both, review-ready inspection, deliberate real Git cherry-pick, conflict abort, worker failure, permission denial, cancellation, restart, cleanup retries and child deletion.
 - [x] Run the integration red for remaining gaps, fix within owning task boundaries, and re-run focused guards. Document exact artifact survival and exemptions; actual browser evidence if UI changed.
-- [ ] Run required commands in order, retain logs and inspect failures: `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package`. Debug failures; no PR on red.
-- [ ] Independent whole-branch review of spec compliance, lifecycle races, public contracts and retained cleanup evidence; fix findings and reverify affected checks.
+- [x] Run required commands in order, retain logs and inspect failures: `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package`. Debug failures; no PR on red.
+- [x] Independent whole-branch review of spec compliance, lifecycle races, public contracts and retained cleanup evidence; fix findings and reverify affected checks.
 - [ ] Commit final QA/docs. Fetch origin and merge origin/main; resolve/reverify any merged changes; push feature branch.
 - [ ] Use repository PR template with Closes #116, Summary, Design decision/spec, Experience, command-result Verification and Left undone. Create draft with base main, board In review; execute pr-checks through CI verdict without auto-merge/ready flip.

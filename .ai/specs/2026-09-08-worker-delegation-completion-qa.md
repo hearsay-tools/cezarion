@@ -56,3 +56,17 @@ Guaranteed observed retention: parent summary and bounded diff payloads remain a
 Backend scope here is Claude + Codex. Existing backend parity/provisioning tests and Task 6's versioned control evidence cover OpenCode/pi, start/Continue/recovery and native restrictions. The documented pi arbitrary-extension exemption and same-user shell limitation remain unchanged. There is no auto-integration, review acceptance, network permission expansion, or new user-authored state.
 
 Required work outside this handoff: root's full typecheck/test/unit/build/package sequence (including the updated installed-package test), independent review and any resulting repairs, final documentation, draft PR and CI. No push was performed.
+
+## Final repository verification
+
+Verified merged commit `82663593`, incorporating `origin/main` at `91e2e590`. Whole-branch review and scoped merge review approved with no outstanding findings.
+
+```text
+npm run typecheck → passed
+npm test -- --maxWorkers=2 → 7,779 passed (374 files)
+npm run test:unit → 60 passed
+npm run build → passed
+npm run test:package → 24 passed
+```
+
+Tests used `TMPDIR=/tmp TMP=/tmp TEMP=/tmp` so intentionally non-Git fixtures remain outside the checkout. Two existing timing-sensitive cases passed in isolation (142 tests) and in the full suite with two workers. The initial stale private-route count was corrected from seven to nine. All merged gates exited zero; the final fetch/merge was already up to date. Draft PR and CI monitoring follow.
