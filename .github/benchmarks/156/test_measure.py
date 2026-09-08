@@ -18,8 +18,31 @@ class MeasureTest(unittest.TestCase):
             out = Path(directory)
             result = measure.run_step('failure', [sys.executable, '-c', 'print("evidence"); raise SystemExit(7)'], out, out)
             self.assertEqual(result['exitCode'], 7)
-            self.assertEqual(json.loads((out / 'failure.json').read_text())['exitCode'], 7)
+            self.assertEqual(json.loads((out / 'step-failure.json').read_text())['exitCode'], 7)
             self.assertIn('evidence', (out / 'failure.log').read_text())
+
+    def test_step_metrics_do_not_overwrite_the_commands_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            measure.run_step('vitest', [sys.executable, '-c',
+                'from pathlib import Path; Path("vitest.json").write_text(\'{"numTotalTests": 3}\')'], out, out)
+            self.assertEqual(json.loads((out / 'vitest.json').read_text()), {'numTotalTests': 3})
+
+    def test_snapshot_noop_is_not_a_successful_measurement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            subprocess.run(['git', '-c', 'user.name=test', '-c', 'user.email=test@local',
+                            'commit', '--allow-empty', '-qm', 'fixture'], cwd=root, check=True)
+            (root / 'package-lock.json').write_text('{}')
+            (root / 'scripts').mkdir()
+            (root / 'scripts/release-snapshot.mjs').write_text(
+                'console.log(\'release-snapshot result: {"attempted":false}\')')
+            result = subprocess.run([sys.executable, str(Path(__file__).with_name('measure.py')),
+                                     '--root', str(root), '--out', str(root / 'results'),
+                                     '--variant', 'snapshot-reuse', '--phase', 'snapshot'], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('snapshot', (root / 'results/summary.json').read_text())
 
     def test_cli_propagates_install_failure_and_keeps_evidence(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -34,4 +34,12 @@ Automated review remains enabled. Experiment refs have no PR and therefore do no
 
 ## Results
 
-The campaign is in progress. No performance conclusion has been drawn yet.
+The campaign is in progress. No final optimization has been selected.
+
+### Instrumentation findings retained in the evidence
+
+The first two harness revisions wrote per-step metrics to `vitest.json` after Vitest wrote its detailed report there. Command timing/CPU/RSS and the entire console log are intact; all 374 per-suite durations and failure details are recoverable from those logs. `balance.py` accepts that console format as well as proper Vitest JSON and rejects incomplete/duplicate inventories. Later revisions prefix metric filenames with `step-`; a real subprocess regression test proves a command's own report survives.
+
+The first snapshot runs returned `attempted:false`: the release script correctly rejects a nightly request on a push event. These are preparation-only measurements, not valid publication comparisons. The corrected snapshot campaign simulates `workflow_dispatch` on `main` only in the collector's subprocess environment, always passes `--dry-run`, and rejects results unless `attempted:true` and `dryRun:true`. It reuses the original baseline's verified artifacts from run 34272576293. Original and simulated context are recorded. No workflow settings or registry state are changed.
+
+The hosted runner label yielded both image versions `20260831.293.1` and `20260907.300.1`, and AMD EPYC 7763, AMD EPYC 9V74, and Intel Xeon 6973P-C CPUs. Every allocation had four available CPUs; Node 24.20.0 and npm 11.19.0 matched. This hardware/image variation is unavoidable with this standard GitHub-hosted label and limits causal certainty, especially the wide four-worker range. It is not a controlled physical-machine benchmark.

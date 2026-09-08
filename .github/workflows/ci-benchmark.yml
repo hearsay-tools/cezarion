@@ -4,6 +4,7 @@ on:
     branches: ['bench/156-*']
 permissions:
   contents: read
+  actions: read
 jobs:
   matrix:
     runs-on: ubuntu-24.04
@@ -16,6 +17,7 @@ jobs:
       - id: matrix
         run: echo "matrix=$(cat .github/benchmarks/156/campaign.json)" >> "$GITHUB_OUTPUT"
   measure:
+    if: ${{ !startsWith(github.ref_name, 'bench/156-snapshot') }}
     needs: matrix
     strategy:
       fail-fast: false
@@ -72,7 +74,7 @@ jobs:
           compression-level: 0
   snapshot:
     needs: measure
-    if: ${{ always() && !cancelled() && startsWith(github.ref_name, 'bench/156-workers') }}
+    if: ${{ always() && !cancelled() && (startsWith(github.ref_name, 'bench/156-workers') || startsWith(github.ref_name, 'bench/156-snapshot')) }}
     strategy:
       fail-fast: false
       max-parallel: 12
@@ -97,6 +99,8 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: verified-${{ matrix.repetition }}
+          github-token: ${{ github.token }}
+          run-id: ${{ startsWith(github.ref_name, 'bench/156-snapshot') && '34272576293' || github.run_id }}
       - name: Extract verified archive
         if: matrix.variant == 'snapshot-reuse'
         run: tar -xzf verified.tgz -C application

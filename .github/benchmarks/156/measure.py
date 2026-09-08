@@ -24,7 +24,7 @@ def run_step(name, command, root, out):
     result = dict(name=name, command=command, startedAt=started, completedAt=time.time(),
                   wallSeconds=float(elapsed), userSeconds=float(user), systemSeconds=float(system),
                   maxChildRssKiB=int(rss), exitCode=completed.returncode)
-    (out / f'{name}.json').write_text(json.dumps(result, indent=2) + '\n')
+    (out / f'step-{name}.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result), flush=True)
     return result
 
@@ -43,6 +43,7 @@ def main():
     root, out = args.root.resolve(), args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     metadata = dict(variant=args.variant, phase=args.phase, baseline=capture(['git', 'rev-parse', 'HEAD'], root),
+                    originalEvent=os.environ.get('GITHUB_EVENT_NAME'), originalRef=os.environ.get('GITHUB_REF_NAME'),
                     harnessSha=os.environ.get('GITHUB_SHA'), runId=os.environ.get('GITHUB_RUN_ID'),
                     attempt=os.environ.get('GITHUB_RUN_ATTEMPT'), repetition=os.environ.get('REPETITION'),
                     imageOS=os.environ.get('ImageOS'), imageVersion=os.environ.get('ImageVersion'),
@@ -85,6 +86,10 @@ def main():
     elif args.variant == 'shards-gate':
         steps = [step for step in steps if step[0] != 'vitest']
     if args.phase == 'snapshot':
+        # Simulate the eligible nightly event only inside this dry-run subprocess environment.
+        os.environ.update(GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_REF_NAME='main', CEZ_RELEASE_CHANNEL='nightly')
+        os.environ.setdefault('NIGHTLY_DATE', '20260908')
+        metadata['simulatedSnapshotContext'] = {'event': 'workflow_dispatch', 'ref': 'main', 'channel': 'nightly', 'dryRun': True}
         steps = [] if args.variant == 'snapshot-reuse' else [
             ('install', ['npm', 'ci', '--cache', str(out / 'npm-cache')]),
             ('build', ['npm', 'run', 'build']),
@@ -96,6 +101,13 @@ def main():
     results = []
     for name, command in steps:
         result = run_step(name, command, root, out)
+        if name == 'snapshot' and result['exitCode'] == 0:
+            lines = (out / 'snapshot.log').read_text().splitlines()
+            payloads = [line.removeprefix('release-snapshot result: ') for line in lines if line.startswith('release-snapshot result: ')]
+            payload = json.loads(payloads[-1]) if payloads else {}
+            if payload.get('attempted') is not True or payload.get('dryRun') is not True:
+                result.update(commandExitCode=0, exitCode=1, validationError='snapshot did not attempt dry-run publication')
+                (out / 'step-snapshot.json').write_text(json.dumps(result, indent=2) + '\n')
         results.append(result)
         if name == 'install' and result['exitCode'] == 0:
             metadata['vitestVersion'] = json.loads((root / 'node_modules/vitest/package.json').read_text())['version']

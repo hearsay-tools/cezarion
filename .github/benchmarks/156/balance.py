@@ -4,6 +4,7 @@ from collections import Counter
 import json
 from pathlib import Path
 import statistics
+import re
 
 
 def assign(durations, count):
@@ -26,6 +27,21 @@ def validate_inventory(bins, expected):
         raise ValueError('shard inventory differs from complete test inventory')
 
 
+def console_durations(text):
+    text = re.sub(r'\x1b\[[0-9;]*m', '', text)
+    packages = {'server': 'cezar', 'web': 'web', 'api-client': 'api-client'}
+    pattern = r'^\s*[✓❯×]\s+\|?(server|web|api-client)\|?\s+(src/\S+\.test\.(?:ts|tsx))\s+\([^\n]*\)\s+(\d+(?:\.\d+)?)(ms|s)'
+    results = {}
+    for project, path, duration, unit in re.findall(pattern, text, re.MULTILINE):
+        name = f'packages/{packages[project]}/{path}'
+        if name in results:
+            raise ValueError(f'duplicate suite duration: {name}')
+        results[name] = float(duration) * (1000 if unit == 's' else 1)
+    if not results:
+        raise ValueError('no suite durations found in console log')
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('reports', nargs='+', type=Path)
@@ -34,14 +50,19 @@ def main():
     samples = {}
     expected = None
     for report in args.reports:
-        data = json.loads(report.read_text())
-        names = set()
-        for suite in data['testResults']:
-            name = 'packages/' + suite['name'].split('/packages/', 1)[1]
-            if name in names:
-                raise ValueError(f'duplicate result: {name}')
-            names.add(name)
-            samples.setdefault(name, []).append(suite['endTime'] - suite['startTime'])
+        if report.suffix == '.log':
+            durations = console_durations(report.read_text())
+        else:
+            data = json.loads(report.read_text())
+            durations = {}
+            for suite in data['testResults']:
+                name = 'packages/' + suite['name'].split('/packages/', 1)[1]
+                if name in durations:
+                    raise ValueError(f'duplicate result: {name}')
+                durations[name] = suite['endTime'] - suite['startTime']
+        names = set(durations)
+        for name, duration in durations.items():
+            samples.setdefault(name, []).append(duration)
         if expected is not None and names != expected:
             raise ValueError('report inventories disagree')
         expected = names
