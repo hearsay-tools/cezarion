@@ -225,7 +225,7 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(validator, /permissions: \{\}/);
   assert.match(validator, /name: Reject untrusted bot actors/);
   assert.match(validator, /ACTOR: \$\{\{ github\.actor \}\}/);
-  assert.match(validator, /\[\[ "\$ACTOR" == \*'\[bot\]' && "\$ACTOR" != 'claude\[bot\]' \]\]/);
+  assert.match(validator, /\[\[ "\$ACTOR" == \*'\[bot\]' && "\$ACTOR" != 'claude\[bot\]' && "\$ACTOR" != 'blacksmith-sh\[bot\]' \]\]/);
   assert.ok(validator.indexOf('name: Reject untrusted bot actors') < validator.indexOf('id: provider'), 'bot guard must run before provider validation and the wildcard action allowlist');
   assert.match(aggregate, /permissions: \{\}/);
   assert.doesNotMatch(workflow, /resolveReviewThread/i, 'workflow must never resolve review threads automatically');
