@@ -1,0 +1,441 @@
+diff --git a/packages/web/src/api/contract-pipeline.test.ts b/packages/web/src/api/contract-pipeline.test.ts
+index 3884ff3f..679a83da 100644
+--- a/packages/web/src/api/contract-pipeline.test.ts
++++ b/packages/web/src/api/contract-pipeline.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ import { healthResponseSchema, type HealthResponse } from '@open-mercato/cezar-api-client'
+ 
+diff --git a/packages/web/src/api/events.test.ts b/packages/web/src/api/events.test.ts
+index 0d6eb210..bc553819 100644
+--- a/packages/web/src/api/events.test.ts
++++ b/packages/web/src/api/events.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it, vi } from 'vitest'
+ 
+ import {
+diff --git a/packages/web/src/components/composer/composer-text.test.ts b/packages/web/src/components/composer/composer-text.test.ts
+index 19ba2d92..5468b74b 100644
+--- a/packages/web/src/components/composer/composer-text.test.ts
++++ b/packages/web/src/components/composer/composer-text.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { applyCompletion, detectTrigger } from './composer-text'
+diff --git a/packages/web/src/components/diff/diff-scroll.test.ts b/packages/web/src/components/diff/diff-scroll.test.ts
+index fb0f3a33..70c2b0ee 100644
+--- a/packages/web/src/components/diff/diff-scroll.test.ts
++++ b/packages/web/src/components/diff/diff-scroll.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import {
+diff --git a/packages/web/src/components/diff/parse-patch.test.ts b/packages/web/src/components/diff/parse-patch.test.ts
+index 48e29cac..2f6032b0 100644
+--- a/packages/web/src/components/diff/parse-patch.test.ts
++++ b/packages/web/src/components/diff/parse-patch.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import {
+diff --git a/packages/web/src/components/diff/word-diff.test.ts b/packages/web/src/components/diff/word-diff.test.ts
+index 23948485..12ab5b30 100644
+--- a/packages/web/src/components/diff/word-diff.test.ts
++++ b/packages/web/src/components/diff/word-diff.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { diffWords, overlaySegments, type WordSpan } from './word-diff'
+diff --git a/packages/web/src/components/nav-items.test.ts b/packages/web/src/components/nav-items.test.ts
+index 9c7ac8ef..00a963e9 100644
+--- a/packages/web/src/components/nav-items.test.ts
++++ b/packages/web/src/components/nav-items.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { NAV_ITEMS, activeNavItem, activeNavPath, visibleNavItems } from './nav-items'
+diff --git a/packages/web/src/design-guardian.test.ts b/packages/web/src/design-guardian.test.ts
+index c42b235d..b41781c9 100644
+--- a/packages/web/src/design-guardian.test.ts
++++ b/packages/web/src/design-guardian.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { readdirSync, readFileSync } from 'node:fs'
+ import path from 'node:path'
+ import { fileURLToPath } from 'node:url'
+diff --git a/packages/web/src/lib/attention.test.ts b/packages/web/src/lib/attention.test.ts
+index 568ae1bb..271a413e 100644
+--- a/packages/web/src/lib/attention.test.ts
++++ b/packages/web/src/lib/attention.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/bookmarklet.test.ts b/packages/web/src/lib/bookmarklet.test.ts
+index fc5a09d9..37a4f3c6 100644
+--- a/packages/web/src/lib/bookmarklet.test.ts
++++ b/packages/web/src/lib/bookmarklet.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { DEFAULT_COCKPIT_ORIGIN, bookmarkletUrl } from './bookmarklet'
+diff --git a/packages/web/src/lib/format.test.ts b/packages/web/src/lib/format.test.ts
+index 719971a4..d166f9de 100644
+--- a/packages/web/src/lib/format.test.ts
++++ b/packages/web/src/lib/format.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { compactTokens, shortAge } from '@/lib/format'
+diff --git a/packages/web/src/lib/git-actions.test.ts b/packages/web/src/lib/git-actions.test.ts
+index d0e5faf7..dde8f24a 100644
+--- a/packages/web/src/lib/git-actions.test.ts
++++ b/packages/web/src/lib/git-actions.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunStatus } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/github-task.test.ts b/packages/web/src/lib/github-task.test.ts
+index 77c484b8..ffd7273c 100644
+--- a/packages/web/src/lib/github-task.test.ts
++++ b/packages/web/src/lib/github-task.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { GithubItem } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/global-tasks.test.ts b/packages/web/src/lib/global-tasks.test.ts
+index 39267d8f..1b331e53 100644
+--- a/packages/web/src/lib/global-tasks.test.ts
++++ b/packages/web/src/lib/global-tasks.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/highlighter.test.ts b/packages/web/src/lib/highlighter.test.ts
+index 6f5baf63..851867e3 100644
+--- a/packages/web/src/lib/highlighter.test.ts
++++ b/packages/web/src/lib/highlighter.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { canonicalLang, highlight, highlightSync, isPlainLang, supportedLanguages } from './highlighter'
+diff --git a/packages/web/src/lib/project-tags.test.ts b/packages/web/src/lib/project-tags.test.ts
+index 97350613..462302a7 100644
+--- a/packages/web/src/lib/project-tags.test.ts
++++ b/packages/web/src/lib/project-tags.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/prompt-templates.test.ts b/packages/web/src/lib/prompt-templates.test.ts
+index 1d137633..ed1940d4 100644
+--- a/packages/web/src/lib/prompt-templates.test.ts
++++ b/packages/web/src/lib/prompt-templates.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import {
+diff --git a/packages/web/src/lib/provider-auth-alert.test.ts b/packages/web/src/lib/provider-auth-alert.test.ts
+index f5eeef04..ee3a2852 100644
+--- a/packages/web/src/lib/provider-auth-alert.test.ts
++++ b/packages/web/src/lib/provider-auth-alert.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ProviderStatusResponse } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/provider-status.test.ts b/packages/web/src/lib/provider-status.test.ts
+index 9b55594b..89e6692a 100644
+--- a/packages/web/src/lib/provider-status.test.ts
++++ b/packages/web/src/lib/provider-status.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ProviderStatusResponse } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/read-state.test.ts b/packages/web/src/lib/read-state.test.ts
+index 27ae0e58..290bb0a9 100644
+--- a/packages/web/src/lib/read-state.test.ts
++++ b/packages/web/src/lib/read-state.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunRecord } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/skills.test.ts b/packages/web/src/lib/skills.test.ts
+index 5a42a70b..943ca7a7 100644
+--- a/packages/web/src/lib/skills.test.ts
++++ b/packages/web/src/lib/skills.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { Skill, WorkflowDef } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/task-columns.test.ts b/packages/web/src/lib/task-columns.test.ts
+index 818f23ac..135d93d3 100644
+--- a/packages/web/src/lib/task-columns.test.ts
++++ b/packages/web/src/lib/task-columns.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import {
+diff --git a/packages/web/src/lib/task-groups.test.ts b/packages/web/src/lib/task-groups.test.ts
+index 975a9fc3..c0617178 100644
+--- a/packages/web/src/lib/task-groups.test.ts
++++ b/packages/web/src/lib/task-groups.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/tasks-table.test.ts b/packages/web/src/lib/tasks-table.test.ts
+index 831f7164..5dad0bba 100644
+--- a/packages/web/src/lib/tasks-table.test.ts
++++ b/packages/web/src/lib/tasks-table.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ProcessUsage, RunRecord } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/token-metrics.test.ts b/packages/web/src/lib/token-metrics.test.ts
+index a1dda790..49a86dff 100644
+--- a/packages/web/src/lib/token-metrics.test.ts
++++ b/packages/web/src/lib/token-metrics.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { HealthResponse } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/unified-diff.test.ts b/packages/web/src/lib/unified-diff.test.ts
+index 4510043b..dc818fdb 100644
+--- a/packages/web/src/lib/unified-diff.test.ts
++++ b/packages/web/src/lib/unified-diff.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { diffTotals, parseUnifiedDiff } from './unified-diff'
+diff --git a/packages/web/src/lib/use-submit-shortcut.test.ts b/packages/web/src/lib/use-submit-shortcut.test.ts
+index c84c8f11..ee2c1909 100644
+--- a/packages/web/src/lib/use-submit-shortcut.test.ts
++++ b/packages/web/src/lib/use-submit-shortcut.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { isSubmitShortcut, submitShortcutHint, type SubmitShortcutEvent } from './use-submit-shortcut'
+diff --git a/packages/web/src/lib/utils.test.ts b/packages/web/src/lib/utils.test.ts
+index 18dbe0da..422aa5a6 100644
+--- a/packages/web/src/lib/utils.test.ts
++++ b/packages/web/src/lib/utils.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { cn, isHttpUrl } from './utils'
+diff --git a/packages/web/src/lib/workflow-builder.test.ts b/packages/web/src/lib/workflow-builder.test.ts
+index 8f91a880..b9c27254 100644
+--- a/packages/web/src/lib/workflow-builder.test.ts
++++ b/packages/web/src/lib/workflow-builder.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ import { parse } from 'yaml'
+ 
+diff --git a/packages/web/src/routes/github/github-filter.test.ts b/packages/web/src/routes/github/github-filter.test.ts
+index 07ba6183..bd6c3dea 100644
+--- a/packages/web/src/routes/github/github-filter.test.ts
++++ b/packages/web/src/routes/github/github-filter.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { GithubItem } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/new-task-autostart.test.ts b/packages/web/src/routes/new-task-autostart.test.ts
+index 91b0bd7e..de918be6 100644
+--- a/packages/web/src/routes/new-task-autostart.test.ts
++++ b/packages/web/src/routes/new-task-autostart.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { CreateRunInput } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/new-task-form.test.ts b/packages/web/src/routes/new-task-form.test.ts
+index e98653ba..b4d6497d 100644
+--- a/packages/web/src/routes/new-task-form.test.ts
++++ b/packages/web/src/routes/new-task-form.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type {
+diff --git a/packages/web/src/routes/new-task-params.test.ts b/packages/web/src/routes/new-task-params.test.ts
+index 2f322061..ef16d9a9 100644
+--- a/packages/web/src/routes/new-task-params.test.ts
++++ b/packages/web/src/routes/new-task-params.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { newTaskPrefillHref, parseNewTaskParams, type NewTaskParams } from './new-task-params'
+diff --git a/packages/web/src/routes/new-task-plan.test.ts b/packages/web/src/routes/new-task-plan.test.ts
+index bb260626..ffc8f33c 100644
+--- a/packages/web/src/routes/new-task-plan.test.ts
++++ b/packages/web/src/routes/new-task-plan.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { WorkflowStepDef } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/settings/agent-descriptors.test.ts b/packages/web/src/routes/settings/agent-descriptors.test.ts
+index c27006cf..0f28246f 100644
+--- a/packages/web/src/routes/settings/agent-descriptors.test.ts
++++ b/packages/web/src/routes/settings/agent-descriptors.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { AgentConfigFile } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-git/file-tree.test.ts b/packages/web/src/routes/task-git/file-tree.test.ts
+index f6127744..2b42ca3b 100644
+--- a/packages/web/src/routes/task-git/file-tree.test.ts
++++ b/packages/web/src/routes/task-git/file-tree.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ChangedFile } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-git/worktree-files.test.ts b/packages/web/src/routes/task-git/worktree-files.test.ts
+index 1839ae11..23ee4199 100644
+--- a/packages/web/src/routes/task-git/worktree-files.test.ts
++++ b/packages/web/src/routes/task-git/worktree-files.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { formatFileSize, isImagePath, previewKind } from './worktree-files'
+diff --git a/packages/web/src/routes/task-thread/active-provider.test.ts b/packages/web/src/routes/task-thread/active-provider.test.ts
+index a319cc52..47d64910 100644
+--- a/packages/web/src/routes/task-thread/active-provider.test.ts
++++ b/packages/web/src/routes/task-thread/active-provider.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ApiRun, ProviderStatusResponse } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-thread/run-actions.test.ts b/packages/web/src/routes/task-thread/run-actions.test.ts
+index 4cb6e407..4779be9b 100644
+--- a/packages/web/src/routes/task-thread/run-actions.test.ts
++++ b/packages/web/src/routes/task-thread/run-actions.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-thread/subagent-dock.test.ts b/packages/web/src/routes/task-thread/subagent-dock.test.ts
+index cd4e7e13..88714ff7 100644
+--- a/packages/web/src/routes/task-thread/subagent-dock.test.ts
++++ b/packages/web/src/routes/task-thread/subagent-dock.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ToolStatus, UiToolItem } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-thread/thread-groups.test.ts b/packages/web/src/routes/task-thread/thread-groups.test.ts
+index a38b7728..345bb50b 100644
+--- a/packages/web/src/routes/task-thread/thread-groups.test.ts
++++ b/packages/web/src/routes/task-thread/thread-groups.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunEvent } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-thread/thread-scroll.test.ts b/packages/web/src/routes/task-thread/thread-scroll.test.ts
+index 14dd89b6..44c94667 100644
+--- a/packages/web/src/routes/task-thread/thread-scroll.test.ts
++++ b/packages/web/src/routes/task-thread/thread-scroll.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { afterEach, describe, expect, it } from 'vitest'
+ import type { CacheSnapshot } from 'virtua'
+ 
+diff --git a/packages/web/src/routes/task-thread/thread-state.test.ts b/packages/web/src/routes/task-thread/thread-state.test.ts
+index e35bf5ed..1d059faa 100644
+--- a/packages/web/src/routes/task-thread/thread-state.test.ts
++++ b/packages/web/src/routes/task-thread/thread-state.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunEvent } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/vite-config.test.ts b/packages/web/src/vite-config.test.ts
+index 97e2c2fd..d6e1b1f8 100644
+--- a/packages/web/src/vite-config.test.ts
++++ b/packages/web/src/vite-config.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import config, { reactRuntimeChunk } from '../vite.config'
+

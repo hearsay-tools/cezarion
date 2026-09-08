@@ -11,6 +11,8 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check benchmark collector
+        run: python -m unittest discover -s .github/benchmarks/156 -p 'test_*.py'
       - id: matrix
         run: echo "matrix=$(cat .github/benchmarks/156/campaign.json)" >> "$GITHUB_OUTPUT"
   measure:
@@ -39,7 +41,7 @@ jobs:
           VARIANT: ${{ matrix.variant }}
         run: |
           case "$VARIANT" in
-            baseline|workers-4|workers-6|workers-8|build-reuse) ;;
+            baseline|workers-4|workers-6|workers-8|build-reuse|shards-1|shards-2|shards-gate) ;;
             fixtures|splitting|setup|combined) git -C application apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/156/$VARIANT.patch" ;;
             *) exit 1 ;;
           esac
@@ -59,10 +61,10 @@ jobs:
             results/*.time
           if-no-files-found: warn
       - name: Archive verified dependencies and build for reuse experiment
-        if: success() && matrix.variant == 'baseline'
+        if: success() && matrix.variant == 'baseline' && startsWith(github.ref_name, 'bench/156-workers')
         run: tar -czf verified.tgz -C application node_modules packages/cezar/dist packages/cezar/web/dist
       - name: Upload verified archive
-        if: success() && matrix.variant == 'baseline'
+        if: success() && matrix.variant == 'baseline' && startsWith(github.ref_name, 'bench/156-workers')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: verified-${{ matrix.repetition }}
@@ -70,7 +72,7 @@ jobs:
           compression-level: 0
   snapshot:
     needs: measure
-    if: ${{ always() && !cancelled() }}
+    if: ${{ always() && !cancelled() && startsWith(github.ref_name, 'bench/156-workers') }}
     strategy:
       fail-fast: false
       max-parallel: 12

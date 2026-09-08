@@ -8,6 +8,8 @@ import platform
 import subprocess
 import time
 
+from balance import validate_inventory
+
 
 def run_step(name, command, root, out):
     started = time.time()
@@ -61,12 +63,27 @@ def main():
     vitest = ['npm', 'test', '--', '--reporter=default', '--reporter=json', f'--outputFile={out / "vitest.json"}']
     if args.variant.startswith('workers-'):
         vitest.append('--maxWorkers=' + str(int(args.variant.split('-')[1])))
+    if args.variant in ('shards-1', 'shards-2'):
+        manifest = json.loads(Path(__file__).with_name('shards.json').read_text())
+        expected = []
+        for package in ('cezar', 'api-client', 'web'):
+            for path in (root / f'packages/{package}/src').rglob('*'):
+                if path.name.endswith('.test.ts') or (package == 'web' and path.name.endswith('.test.tsx')):
+                    expected.append(path.relative_to(root).as_posix())
+        validate_inventory(manifest['shards'], expected)
+        vitest += manifest['shards'][int(args.variant[-1]) - 1]
+        metadata['shardManifest'] = manifest
+        (out / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
     steps.append(('vitest', vitest))
     if args.variant == 'build-reuse':
         steps += [('build-web', ['npm', 'run', 'build:web']), ('check-pack', ['npm', 'run', 'check:pack'])]
     else:
         steps += [('build', ['npm', 'run', 'build'])]
     steps += [('package', ['npm', 'run', 'test:package'])]
+    if args.variant in ('shards-1', 'shards-2'):
+        steps = [steps[0], ('build-server', ['npm', 'run', 'build:server']), ('vitest', vitest)]
+    elif args.variant == 'shards-gate':
+        steps = [step for step in steps if step[0] != 'vitest']
     if args.phase == 'snapshot':
         steps = [] if args.variant == 'snapshot-reuse' else [
             ('install', ['npm', 'ci', '--cache', str(out / 'npm-cache')]),

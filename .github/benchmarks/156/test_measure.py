@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
+sys.path.insert(0, str(Path(__file__).parent))
 spec = importlib.util.spec_from_file_location('measure', Path(__file__).with_name('measure.py'))
 measure = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(measure)
