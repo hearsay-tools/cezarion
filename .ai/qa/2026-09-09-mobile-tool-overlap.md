@@ -4,7 +4,7 @@
 
 `VirtualRows` passed `shift` for every render. Virtua interprets that flag as a change at the beginning of the list and shifts its indexed size cache when the row count changes. An incoming tool appended at the end therefore assigned a short tool height to an existing assistant message. The existing DOM nodes did not resize, so ResizeObserver had no reason to correct those measurements. Cards stayed positioned inside the paragraph while the viewport was stationary.
 
-Enable `shift` only when the first row key changes and the old or new first row survives in the other list. Older-page prepends and start eviction retain their compensation; live appends and tail removal preserve existing measurements. Flat rendering, its containment optimization, the virtualization threshold, and scroll ownership remain intact.
+Enable `shift` only when the first row key changes and the old or new first row survives in the other list. Whole-list prepends and start eviction retain their compensation; live appends and tail removal preserve existing measurements. Flat rendering, its containment optimization, the virtualization threshold, and scroll ownership remain intact.
 
 The original screenshot's transcript was located in local run `30705eeb-47d3-48f2-a6b9-736ba9781147`, including the message at seq `14770`. Replaying through seq `14807` and injecting an incoming tool frame reproduced the screenshot's persistent overlap at 360×640. After the fix, the same paragraph's bottom and the following row's top both measured `541.234375px`; before the fix, its bottom was `496.234375px` while the following tool started at `289.984375px`.
 
@@ -32,7 +32,7 @@ The committed browser regression uses the repository's agent-browser provider. T
 
 The inspected mobile replay captures are also committed as [light](assets/160/mobile-light.png) and [dark](assets/160/mobile-dark.png) evidence.
 
-All 40 tests across `thread-scroll.e2e.ts`, `progressive-history.e2e.ts`, and `task-thread.e2e.ts` passed. Independent code review found no actionable issues. Full validation also passed:
+All 42 tests across `thread-scroll.e2e.ts`, `progressive-history.e2e.ts`, and `task-thread.e2e.ts` passed. Independent code review found no actionable issues. Full validation also passed:
 
 - `npm run typecheck` — pass.
 - `TMPDIR=/tmp npm test -- --maxWorkers=4` — 7,803 tests, 376 files pass.
@@ -41,3 +41,11 @@ All 40 tests across `thread-scroll.e2e.ts`, `progressive-history.e2e.ts`, and `t
 - `TMPDIR=/tmp npm run test:package` — 24 tests pass.
 
 The session's inherited temporary directory was inside a Git repository; using `/tmp` restored the fixture boundary tests' required non-Git environment. A GitHub template-menu test and a mock OpenCode startup test failed on separate full runs, each passed its targeted rerun, and the final complete four-worker run passed without changing their code or assertions.
+
+## Review follow-up: history behind a stable prompt
+
+The automated review asked for cache shifting when older history is inserted after the unchanged task prompt. That is a middle insertion: virtua documents `shift=false` for this case. Displaced rows change indices and are remeasured, while `useThreadScroll.loadOlder` restores the first visible row by key through `scrollToIndex`. Shifting the whole cache instead discards the stable prefix's measurement without changing its index.
+
+Added browser guards force virtualization at 360×640 and 1440×900, park the reader on history after the task prompt, load an earlier page, and verify the settled anchor stays within 2px. Both also return to the start and verify the prompt remains visible and adjacent rows remain separated. A unit guard pins `shift=false` for insertion behind a stable prefix. These preserve existing behavior; the incoming-tool regression above is the test proven red against the original bug.
+
+Follow-up validation reran all five commands successfully and all 42 browser tests passed together. Earlier browser runs intermittently timed out waiting for an injected tool in the virtual mobile dark case, and one run exceeded the existing cached-thread navigation tolerance. The six live-event cases and full 12-test thread-scroll file passed separately; the final complete run passed with all assertions unchanged. These retries are recorded rather than claimed as consistently stable runs.

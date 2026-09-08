@@ -62,6 +62,10 @@ describe('virtualized history prepend', () => {
     expect(virtualizerProbe.props?.shift).toBe(false)
     view.rerender(tree(initial))
     expect(virtualizerProbe.props?.shift).toBe(true)
+    // History can arrive after a stable task prompt: this is a middle insertion,
+    // so the prefix must keep its measured size rather than shifting the whole cache.
+    view.rerender(tree([initial[0]!, { key: 'middle', node: <p>older page</p> }, ...initial.slice(1)]))
+    expect(virtualizerProbe.props?.shift).toBe(false)
     view.rerender(tree([{ key: 'replacement', node: <p>different transcript</p> }]))
     expect(virtualizerProbe.props?.shift).toBe(false)
   })
