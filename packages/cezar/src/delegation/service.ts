@@ -1,4 +1,6 @@
-import { acceptedWorkerIdentitySchema } from './execution-identity.ts';
+import { join } from 'node:path';
+import { prepareWorkerContext, workerContextTask } from './context.ts';
+import { acceptedWorkerIdentitySchema, workerContextHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
@@ -55,8 +57,12 @@ export class DelegationService {
       const parent = project.store.getRun(caller.runId);
       authorizeSpawnReplay(caller, parent, project.id);
       if (parent?.delegation?.role !== 'root') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-      if (project.store.containsSessionSecret(request.task)) throw new DelegationPolicyError('invalid_input', 'Credentials cannot be included in delegated input');
-      const requestHash = createHash('sha256').update(JSON.stringify({ task: request.task, baseline: request.baseline })).digest('hex');
+      if (project.store.containsSessionSecret(JSON.stringify(request))) throw new DelegationPolicyError('invalid_input', 'Credentials cannot be included in delegated input');
+      const requestHash = createHash('sha256').update(JSON.stringify({ task: request.task, baseline: request.baseline,
+        ...(request.context === undefined ? {} : { context: request.context }),
+        ...(request.backend === undefined ? {} : { backend: request.backend }),
+        ...(request.model === undefined ? {} : { model: request.model }),
+      })).digest('hex');
       const receipt = parent.delegation.receipts.find(r => r.requestId === request.requestId);
       if (receipt) {
         if (receipt.requestHash !== requestHash) throw new DelegationPolicyError('invalid_input', 'Request ID payload conflict');
@@ -65,30 +71,39 @@ export class DelegationService {
         return { workerId: worker.id, baselineSha: worker.delegation.workspace.baselineSha };
       }
       authorizeSpawn(caller, parent, project.id);
-      const settings = project.manager.delegationExecutionSettings(parent.id);
+      const settings = await project.manager.selectDelegationExecutionSettings(parent.id, request);
       const identity = acceptedWorkerIdentitySchema.parse({ kind: 'accepted', account: settings.accountBinding, model: settings.model, effort: settings.effort,
         grants: { ...(settings.allowedTools === undefined ? {} : { allowedTools: [...settings.allowedTools] }),
           ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: [...settings.bashAllowlist] }) } });
       const baselineSha = await resolveWorkerBaseline(project.root, settings.cwd, request.baseline);
       const workspace = await planOwnedWorkspace(project.root, randomUUID(), baselineSha);
-      // Ref resolution yields to Finish, revocation and project disposal; recheck before acceptance.
-      const current = this.context(caller);
-      if (current !== project) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-      authorizeSpawn(caller, project.store.getRun(parent.id), project.id);
-      const workflowDef = { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
-        runner: settings.runner, model: settings.model,
-        ...(settings.allowedTools === undefined ? {} : { allowedTools: [...settings.allowedTools] }),
-        ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: [...settings.bashAllowlist] }),
-      }] };
-      const worker = project.store.createOwnedRun({
-        title: request.task.slice(0, 200), task: request.task, workflow: QUICK_TASK_WORKFLOW.name,
-        runner: settings.runner, model: settings.model, effort: settings.effort, agentProfile: identity.account.profileId,
-        systemPrompt: settings.systemPrompt, workflowDef,
-        autonomous: parent.autonomous, generateFollowups: parent.generateFollowups,
-        steps: workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: 'agent' as const })),
-      }, parent.id, request.requestId, { role: 'worker', permissions: [], parentRunId: parent.id, workspace }, requestHash, identity);
-      project.manager.enqueueOwnedRun(worker.id);
-      return { workerId: worker.id, baselineSha };
+      const prepared = request.context === undefined ? undefined : await prepareWorkerContext({
+        repoRoot: project.root, dataDir: join(project.root, '.ai/cezar'), parentId: parent.id, workspace,
+        context: request.context, containsSecret: text => project.store.containsSessionSecret(text),
+      });
+      const context = prepared?.recipe;
+      let accepted = false;
+      try {
+        // Ref resolution yields to Finish, revocation and project disposal; recheck before acceptance.
+        const current = this.context(caller);
+        if (current !== project) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+        authorizeSpawn(caller, project.store.getRun(parent.id), project.id);
+        const workflowDef = { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
+          runner: settings.runner, model: settings.model,
+          ...(settings.allowedTools === undefined ? {} : { allowedTools: [...settings.allowedTools] }),
+          ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: [...settings.bashAllowlist] }),
+        }] };
+        const worker = project.store.createOwnedRun({
+          title: request.task.slice(0, 200), task: context ? workerContextTask(request.task, context) : request.task, workflow: QUICK_TASK_WORKFLOW.name,
+          runner: settings.runner, model: settings.model, effort: settings.effort, agentProfile: identity.account.profileId,
+          systemPrompt: settings.systemPrompt, workflowDef,
+          autonomous: parent.autonomous, generateFollowups: parent.generateFollowups,
+          steps: workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: 'agent' as const })),
+        }, parent.id, request.requestId, { role: 'worker', permissions: [], parentRunId: parent.id, workspace, ...(context ? { context } : {}) }, requestHash, context ? { ...identity, contextHash: workerContextHash(context) } : identity);
+        accepted = true;
+        project.manager.enqueueOwnedRun(worker.id);
+        return { workerId: worker.id, baselineSha };
+      } finally { if (!accepted) await prepared?.discard(); }
     });
   }
   async inspect(caller: Caller, params: WorkerParams): Promise<WorkerInspection> {
@@ -97,6 +112,8 @@ export class DelegationService {
     const outcome = workerOutcome(worker, new Date().toISOString());
     const wait = parent.delegation?.role === 'root' ? parent.delegation.wait : undefined;
     return { workerId: worker.id, parentRunId: parent.id, status: worker.status, workspace: worker.delegation.workspace,
+      ...(worker.runner === undefined ? {} : { backend: worker.runner }), ...(worker.model === undefined ? {} : { model: worker.model }),
+      ...(worker.delegation.context === undefined ? {} : { inputs: worker.delegation.context.inputs }),
       ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
       ...(worker.activity === undefined ? {} : { activity: worker.activity }),
       ...(wait ? { wait } : {}), ...(worker.delegation.destroy ? { destroy: worker.delegation.destroy } : {}), ...(outcome ? { outcome } : {}) };

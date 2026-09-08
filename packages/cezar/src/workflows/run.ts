@@ -1,4 +1,4 @@
-import { captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding } from '../delegation/execution-identity.ts';
+import { workerContextHash, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding } from '../delegation/execution-identity.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
@@ -52,11 +52,12 @@ import type { AgentEvent, ContentBlock } from '../core/agent-runner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
 import { materializeSkillDir } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
-import { readAgentModelProvider } from '../agent-config/models.ts';
+import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
 import { autosaveCommit, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace, type WorkerNoMaterializationProof } from '../delegation/workspace.ts';
+import { verifyWorkerContext } from '../delegation/context.ts';
 import { enqueueAgentInput, nextAgentInput } from '../delegation/input.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
@@ -1003,6 +1004,9 @@ export class RunManager {
     const identity = this.store.readWorkerIdentity(runId);
     if (!identity) throw new WorkerIdentityError('Worker execution identity evidence is unavailable');
     if (identity.kind === 'internal') return undefined;
+    if (identity.contextHash !== undefined && (!run.delegation.context || workerContextHash(run.delegation.context) !== identity.contextHash)) {
+      throw new WorkerIdentityError('Accepted worker context recipe is unavailable or changed');
+    }
     if (agentModelsLocked(this.repoRoot) && (identity.model !== undefined || identity.effort !== undefined)) {
       throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
     }
@@ -1058,6 +1062,36 @@ export class RunManager {
     const state = this.active.get(runId);
     if (!state?.session?.open || !state.delegationSettings) throw new DelegationPolicyError('incompatible_state', 'Parent session settings unavailable');
     return structuredClone(state.delegationSettings);
+  }
+
+  /** Resolve caller selection once, before acceptance; permission grants always come from the parent. */
+  async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId; model?: string }): Promise<DelegationExecutionSettings> {
+    const parent = this.delegationExecutionSettings(runId);
+    const runner = selection.backend ?? parent.runner;
+    const sameBackend = runner === parent.runner;
+    try {
+      const locked = agentModelsLocked(this.repoRoot);
+      if (locked && (selection.model !== undefined || (sameBackend && (parent.model !== undefined || parent.effort !== undefined)))) {
+        throw new Error(AGENT_MODELS_LOCKED_ERROR);
+      }
+      let accountBinding = parent.accountBinding;
+      let env = buildChildEnv({ backend: runner });
+      if (!sameBackend) {
+        const resolved = await resolveProfileEnvForRoot(this.repoRoot, runner);
+        env = buildChildEnv({ backend: runner, extraEnv: resolved.env });
+        accountBinding = captureWorkerAccount(resolved.profile, env);
+      }
+      if (!accountBinding || accountBinding.provider !== runner) throw new Error('Accepted worker account identity is unavailable');
+      env = { ...env, ...boundWorkerAccountEnv(accountBinding, env) };
+      const native = await readAgentModelSettings(runner, this.repoRoot, env);
+      const chosen = selection.model ?? (sameBackend ? parent.model : locked ? undefined : native.model);
+      if (chosen && modelConflictsWithRunner(chosen, runner)) throw new Error('Model is incompatible with the selected backend');
+      const model = normalizeModelForBackend(runner, chosen, { configuredProvider: native.provider })?.backendModel;
+      return { ...parent, runner, model, effort: sameBackend ? parent.effort : undefined,
+        agentProfile: accountBinding.profileId, accountBinding };
+    } catch (error) {
+      throw new DelegationPolicyError('invalid_input', error instanceof Error ? error.message : 'Worker execution selection is unavailable');
+    }
   }
 
   startRun(
@@ -3112,6 +3146,7 @@ export class RunManager {
       try {
         if (record.delegation.destroy) throw new Error('Worker destruction has begun');
         cwd = (await verifyOwnedWorkspace(this.repoRoot, record)).path;
+        await verifyWorkerContext({ dataDir: this.dataDir, parentId: record.delegation.parentRunId, workspace: record.delegation.workspace, context: record.delegation.context });
       } catch (error) {
         const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
         const finishedAt = new Date().toISOString();
@@ -3658,6 +3693,7 @@ export class RunManager {
       try {
         if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return; }
         const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
+        if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
         const wt = ownedWorkspace
           ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
           : await createWorktree(this.repoRoot, runId, base);
