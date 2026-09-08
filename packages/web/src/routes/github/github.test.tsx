@@ -1132,6 +1132,20 @@ describe('the comment thread', () => {
     expect(document.querySelector('[data-slot="gh-commit-group"]')).toBeNull()
   })
 
+  it('manual Refresh bypasses the list cache and updates the selected issue body', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/github?limit=1000&refresh=1': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, body: 'Edited upstream requirements' }, ISSUE_139],
+      }),
+    })
+    renderAt('/github/issues/142')
+    await screen.findByText(ISSUE_142.body)
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
+    await screen.findByText('Edited upstream requirements')
+    expect(screen.queryByText(ISSUE_142.body)).toBeNull()
+    expect(sent.some(({ path }) => path === '/api/v1/github?limit=1000&refresh=1')).toBe(true)
+  })
+
   it('sends refresh=1 for the OPEN THREAD when the tab is manually refreshed', async () => {
     // Asserts the PROPERTY (fresh data is actually requested), not the mechanism (a request went
     // out). The first attempt at this fix only invalidated the query key, which made the client
