@@ -14,7 +14,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
-import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
+import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { planOwnedWorkspace, readOwnedDiff, removeOwnedWorkspace, resolveWorkerBaseline } from './workspace.ts';
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
@@ -170,7 +170,7 @@ export class DelegationService {
   async cancelWait(caller: Caller, value: WorkerCancelWaitRequest) {
     const { waitId } = workerCancelWaitRequestSchema.parse(value);
     const project = this.context(caller);
-    authorizeWait(caller, project.store.getRun(caller.runId), project.id);
+    authorizeCancelWait(caller, project.store.getRun(caller.runId), project.id);
     return { wait: project.manager.cancelWorkerWait(caller.runId, waitId) };
   }
   async destroy(caller: Caller, params: WorkerParams) {

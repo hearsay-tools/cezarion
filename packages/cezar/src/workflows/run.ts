@@ -2555,12 +2555,13 @@ export class RunManager {
       if (lastWait?.id === waitId) return lastWait;
       throw new DelegationPolicyError('incompatible_state', 'Worker wait is no longer current');
     }
-    if (this.disposed || !['queued', 'running', 'waiting'].includes(run.status) || run.delegation.finishRequestedAt) {
+    // Settled receipts are immutable observations, including a current receipt recovered
+    // on a terminal parent. Reading one neither resumes work nor cancels a later wait.
+    if (wait.phase === 'wake-pending') return reconcileWorkerWait(wait, [], new Date().toISOString());
+    if (this.disposed || !['queued', 'running', 'waiting'].includes(run.status) || run.delegation.finishRequestedAt || run.delegation.historyDeletion) {
       throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a worker wait');
     }
-    const settled = wait.phase === 'wake-pending'
-      ? reconcileWorkerWait(wait, [], new Date().toISOString())
-      : { ...wait, phase: 'wake-pending' as const, reason: 'cancelled' as const, wakeId: wait.wakeId ?? wait.id };
+    const settled = { ...wait, phase: 'wake-pending' as const, reason: 'cancelled' as const, wakeId: wait.wakeId ?? wait.id };
     this.store.commitDelegation([{ id: parentId, delegation: { ...run.delegation, wait: settled, lastWait: settled } }]);
     this.reconcileWorkerWaits();
     return this.workerWait(parentId) ?? settled;

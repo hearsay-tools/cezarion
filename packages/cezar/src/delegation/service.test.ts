@@ -176,4 +176,40 @@ describe('delegation service durable authority', () => {
       await expect(f.service.wait(f.caller, { workerIds: [workerId], timeoutSeconds: 600 })).rejects.toMatchObject({ code: 'denied_scope' });
     }
   });
+  async function cancellableWait() {
+    const { workerId } = await f.service.spawn(f.caller, input());
+    const waitId = randomUUID(); const parent = f.store.getRun(f.parent.id)!;
+    if (parent.delegation?.role !== 'root') throw Error('fixture');
+    f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: {
+      id: waitId, workerIds: [workerId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [],
+    } } }]);
+    return { workerId, waitId };
+  }
+  it('cancels a queued parent wait without stopping its worker or authorizing new work', async () => {
+    const { workerId, waitId } = await cancellableWait(); f.store.updateRun(f.parent.id, { status: 'queued' });
+    expect(await f.service.cancelWait(f.caller, { waitId })).toMatchObject({ wait: { id: waitId, phase: 'wake-pending', reason: 'cancelled' } });
+    expect(f.store.getRun(workerId)?.status).toBe('queued');
+    await expect(f.service.wait(f.caller, { workerIds: [workerId], timeoutSeconds: 600 })).rejects.toMatchObject({ code: 'incompatible_state' });
+    await expect(f.service.spawn(f.caller, input())).rejects.toMatchObject({ code: 'incompatible_state' });
+  });
+  it.each(['done', 'review', 'failed', 'cancelled'] as const)('reads the retained cancel receipt after the parent becomes %s', async status => {
+    const { waitId } = await cancellableWait();
+    const settled = await f.service.cancelWait(f.caller, { waitId });
+    f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId); f.store.updateRun(f.parent.id, { status });
+    const before = structuredClone(f.store.getRun(f.parent.id));
+    expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(settled);
+    expect(f.store.getRun(f.parent.id)).toEqual(before);
+  });
+  it('returns only the retained old cancellation while a queued parent has a newer wait', async () => {
+    const { workerId, waitId } = await cancellableWait(); const old = await f.service.cancelWait(f.caller, { waitId });
+    f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId);
+    const parent = f.store.getRun(f.parent.id)!; if (parent.delegation?.role !== 'root') throw Error('fixture');
+    const next = { id: randomUUID(), workerIds: [workerId], phase: 'registered' as const, deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [] };
+    f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: next } }]);
+    f.store.updateRun(parent.id, { status: 'queued' });
+    expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(old);
+    await expect(f.service.cancelWait(f.caller, { waitId: randomUUID() })).rejects.toMatchObject({ code: 'incompatible_state' });
+    expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ wait: next });
+  });
+
 });

@@ -69,13 +69,11 @@ export function authorizeSpawn(caller: Caller, parent: RunRecord | undefined, pr
   }
 }
 
-/** Cancelling an owned wait uses the existing wait grant, including receipt reads. */
-export function authorizeWait(caller: Caller, parent: RunRecord | undefined, projectId: string): void {
+/** Cancellation and settled receipt reads share ownership and the wait grant, not registration's active-session requirement. */
+export function authorizeCancelWait(caller: Caller, parent: RunRecord | undefined, projectId: string): void {
   requireRootAuthority(caller, parent, projectId, 'wait');
-  if (!parent) denyScope();
-  requireActiveParent(parent);
-  if (parent.delegation?.role === 'root' && parent.delegation.finishRequestedAt) {
-    throw new DelegationPolicyError('incompatible_state', 'Parent finish is pending');
+  if (parent?.delegation?.role === 'root' && parent.delegation.historyDeletion) {
+    throw new DelegationPolicyError('incompatible_state', 'Parent history deletion is pending; retry deletion');
   }
 }
 
