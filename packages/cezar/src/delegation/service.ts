@@ -130,6 +130,11 @@ export class DelegationService {
       return project.store.commitWorkerResult(caller.runId, revalidateRetainedWorkerResult(project.root, retained!), project.store.readWorkerResultDiff(caller.runId, workerId));
     }
     authorizeWorker(caller, worker, 'inspect', parent, project.id);
+    if (parent?.delegation?.role === 'root' && parent.delegation.receipts.some(receipt => receipt.workerId === workerId && receipt.deletion?.phase === 'pending')) {
+      const retained = project.store.readWorkerResult(parent.id, workerId);
+      if (!retained || !project.store.canDeleteRun(workerId)) throw new DelegationPolicyError('incompatible_state', 'Worker history deletion evidence is unavailable');
+      return project.store.commitWorkerResult(parent.id, revalidateRetainedWorkerResult(project.root, retained), project.store.readWorkerResultDiff(parent.id, workerId));
+    }
     // Store records preserve object references. Copy before yielding to Continue or cleanup.
     const snapshot = structuredClone(worker);
     const evidence = await collectWorkerEvidence(project.root, project.store, snapshot);
@@ -188,6 +193,10 @@ export class DelegationService {
     return this.serialized(`worker:${project.id}:${workerId}`, async (): Promise<WorkerDestroyResult> => {
       let worker = check();
       if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+      const parent = project.store.getRun(worker.delegation.parentRunId);
+      if (parent?.delegation?.role === 'root' && parent.delegation.receipts.some(receipt => receipt.workerId === workerId && receipt.deletion)) {
+        throw new DelegationPolicyError('incompatible_state', 'Worker history deletion has begun; retry history deletion');
+      }
       const workspace = worker.delegation.workspace;
       const requestedAt = worker.delegation.destroy?.requestedAt ?? new Date().toISOString();
       const resources = (worker.delegation.destroy?.remaining ?? ['worktree', 'branch']).filter((resource): resource is 'worktree' | 'branch' => resource !== 'process');
@@ -204,7 +213,26 @@ export class DelegationService {
         result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: 'Worker termination is not proven; retry cleanup later' };
       } else {
         persist('cleaning', resources);
+        const snapshot = structuredClone(check());
+        const proof = project.store.readWorkerExecution(workerId);
+        const evidence = await collectWorkerEvidence(project.root, project.store, snapshot);
+        const current = check();
+        if (proof?.phase !== 'complete' || project.store.readWorkerExecution(workerId)?.generation !== proof.generation ||
+          project.store.readWorkerExecution(workerId)?.phase !== 'complete' || current.status !== snapshot.status ||
+          JSON.stringify(current.delegation) !== JSON.stringify(snapshot.delegation)) throw new Error('Worker changed before cleanup checkpoint');
+        // This immutable parent payload must be durable before the first destructive operation.
+        project.store.commitWorkerResult(evidence.result.parentRunId, evidence.result, evidence.diffSnapshot);
         result = await removeOwnedWorkspace(project.root, workspace, project.manager.getWorkerNoMaterializationProof(workerId));
+        persist(result.state, result.remaining, result.error);
+        // Preserve the captured bytes even if Git removal was only partially successful.
+        const removed = !result.remaining.includes('worktree');
+        project.store.commitWorkerResult(evidence.result.parentRunId, { ...evidence.result, observedAt: new Date().toISOString(),
+          cleanup: result.state, outcome: result.state === 'complete' ? 'destroyed' : evidence.result.lastExecutionOutcome,
+          workspace: { ...workspace, state: removed ? 'deleted' : evidence.result.workspace.state },
+          head: removed ? { state: 'deleted', reason: 'missing', ...('sha' in evidence.result.head ? { sha: evidence.result.head.sha } : {}) } : evidence.result.head,
+          diff: evidence.result.diff.state === 'available' ? { ...evidence.result.diff, snapshotId: randomUUID() } : evidence.result.diff,
+        }, evidence.diffSnapshot);
+        return result;
       }
       persist(result.state, result.remaining, result.error);
       return result;

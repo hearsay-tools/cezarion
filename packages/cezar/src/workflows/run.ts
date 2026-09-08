@@ -2450,7 +2450,8 @@ export class RunManager {
     const ids = new Set([...parent.delegation.receipts.map(receipt => receipt.workerId),
       ...this.store.listRuns().filter(run => run.delegation?.role === 'worker' && run.delegation.parentRunId === runId).map(run => run.id)]);
     return parentReadiness(parent, [...ids].map(workerId => ({ workerId, run: this.store.getRun(workerId),
-      terminated: this.store.readWorkerExecution(workerId)?.phase === 'complete', result: this.store.readWorkerResult(runId, workerId),
+      terminated: this.store.readWorkerExecution(workerId)?.phase === 'complete', result: this.store.getRun(workerId)
+        ? this.store.readWorkerResult(runId, workerId) : this.store.readDeletedWorkerResult(runId, workerId),
     })));
   }
 
@@ -2627,11 +2628,23 @@ export class RunManager {
           const outcome = workerOutcome(child, now);
           return outcome && this.store.readWorkerExecution(child.id)?.phase === 'complete' ? [outcome] : [];
         });
+        // Explicit history deletion replaces the live execution proof with a completed
+        // parent receipt. Keep its acknowledged outcome while other all-wait workers run.
+        const deletedResults = new Map(parent.delegation.receipts.flatMap(receipt => {
+          const result = this.store.readDeletedWorkerResult(parent.id, receipt.workerId);
+          return result ? [[receipt.workerId, result] as const] : [];
+        }));
+        for (const result of deletedResults.values()) {
+          if (result.status === 'review' || result.status === 'done' || result.status === 'failed' || result.status === 'cancelled') {
+            outcomes.push({ workerId: result.workerId, revision: result.revision, status: result.status, observedAt: result.observedAt,
+              ...(result.error ? { summary: result.error } : {}) });
+          }
+        }
         // An unsettled wait follows an accepted continuation; old review observations
         // cannot complete an all-wait while that worker is executing its next revision.
         const revisions = wait.workerIds.map(workerId => {
           const metadata = this.store.getRun(workerId)?.delegation;
-          return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : 0 };
+          return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : deletedResults.get(workerId)?.revision ?? 0 };
         });
         let selected = wait.phase !== 'wake-pending' && JSON.stringify(wait.revisions) !== JSON.stringify(revisions)
           ? { ...wait, revisions } : wait;

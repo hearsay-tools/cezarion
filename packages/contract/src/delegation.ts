@@ -62,6 +62,7 @@ export const workerCreationReceiptSchema = z.object({
   workerId: z.uuid(),
   /** Hash of the original normalized spawn request, NOT the resolved commit or inherited settings. */
   requestHash: requestHashSchema,
+  deletion: z.object({ phase: z.enum(['pending', 'complete']), revision: z.number().int().nonnegative(), resourceId: z.uuid(), generation: z.uuid() }).strict().optional(),
 }).strict();
 
 export const workerBackendSchema = z.enum(['claude', 'codex', 'opencode', 'pi']);
@@ -107,7 +108,7 @@ export const workerCollectedResultSchema = z.object({
   outcome: z.enum(['running', 'review-ready', 'completed', 'failed', 'cancelled', 'destroyed']),
   lastExecutionOutcome: executionOutcomeSchema, partial: z.boolean(), settled: z.boolean(), error: errorSchema.optional(),
   backend: workerBackendSchema.optional(), model: z.string().max(512).optional(), baselineSha: commitShaSchema,
-  workspace: workerWorkspaceSchema,
+  workspace: workerWorkspaceSchema.extend({ state: z.enum(['available', 'unavailable', 'deleted']).optional() }),
   cleanup: z.enum(['retained', 'requested', 'terminating', 'cleaning', 'complete', 'incomplete']),
   summary: z.discriminatedUnion('state', [
     z.object({ state: z.literal('available'), text: z.string().min(1).max(4000), source: z.literal('assistant'), seq: z.number().int().nonnegative(), truncated: z.boolean() }).strict(),
@@ -146,6 +147,7 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
     lastWait: workerWaitSchema.optional(),
     results: z.array(workerResultReferenceSchema).max(32).refine(results => new Set(results.map(result => result.workerId)).size === results.length).optional(),
     finishRequestedAt: z.iso.datetime().optional(),
+    historyDeletion: z.literal('pending').optional(),
     completion: z.object({ phase: z.enum(['waiting', 'attention']), waitId: z.uuid().optional() }).strict().optional(),
   }).strict(),
   z.object({
@@ -238,6 +240,10 @@ export type WorkerStopResult = z.infer<typeof workerStopResultSchema>;
 export const workerDestroyResultSchema = z.object({
   workerId: z.uuid(),
   state: z.enum(['complete', 'incomplete']),
+  deleted: z.array(z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('worktree'), path: z.string().max(8192) }).strict(),
+    z.object({ kind: z.literal('branch'), ref: z.string().max(1024) }).strict(),
+  ])).max(2).optional(),
   remaining: remainingSchema,
   error: errorSchema.optional(),
 });

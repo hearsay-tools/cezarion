@@ -1005,7 +1005,7 @@ export class RunStore extends EventEmitter {
       try { const info = fstatSync(fd); if (!info.isFile() || info.size > 3_145_728) return undefined; raw = readFileSync(fd, 'utf8'); } finally { closeSync(fd); }
       const file = workerResultFileSchema.parse(JSON.parse(raw));
       if (file.result.diff.state === 'available' && file.result.diff.path !== path) return undefined;
-      if (file.result.parentRunId !== parentId || file.result.workerId !== workerId || file.result.revision !== reference.revision || file.result.observedAt !== reference.observedAt ||
+      if (file.result.parentRunId !== parentId || file.result.workerId !== workerId || file.result.workspace.ownerRunId !== workerId || file.result.revision !== reference.revision || file.result.observedAt !== reference.observedAt ||
         (file.result.diff.state === 'available' && (file.result.diff.snapshotId !== reference.snapshotId || file.diffSnapshot === undefined))) return undefined;
       return file;
     } catch { return undefined; }
@@ -1127,12 +1127,16 @@ export class RunStore extends EventEmitter {
     }
     // Preserve existing record references, but expose the entire transaction before its first event.
     for (const id of changed) {
-      const next = proposed.get(id)!;
+      const next = proposed.get(id);
+      if (!next) { this.runs.delete(id); continue; }
       const current = this.runs.get(id);
       if (current) Object.assign(current, next);
       else this.runs.set(id, next);
     }
-    for (const id of changed) this.emit('run', this.runs.get(id)!);
+    for (const id of changed) {
+      const run = this.runs.get(id);
+      if (run) this.emit('run', run); else this.emit('deleted', id);
+    }
   }
 
   updateRun(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): RunRecord | undefined {
@@ -1743,34 +1747,130 @@ export class RunStore extends EventEmitter {
     this.commitIndex(proposed, new Set([id]));
   }
 
-  /** Worker history is a tombstone. Parents retain evidence while resources/descendants remain. */
+  /** Complete replacement evidence can stand in for absent child history, never for a present execution. */
+  readDeletedWorkerResult(parentId: string, workerId: string): WorkerCollectedResult | undefined {
+    if (this.runs.has(workerId)) return undefined;
+    const parent = this.runs.get(parentId);
+    if (parent?.delegation?.role !== 'root' || parent.delegation.historyDeletion) return undefined;
+    const deletion = parent.delegation.receipts.find(receipt => receipt.workerId === workerId)?.deletion;
+    if (deletion?.phase !== 'complete') return undefined;
+    const result = this.readWorkerResult(parentId, workerId);
+    return result?.settled && ['review', 'done', 'failed', 'cancelled'].includes(result.status) &&
+      result.cleanup === 'complete' && result.revision === deletion.revision &&
+      result.workspace.resourceId === deletion.resourceId ? result : undefined;
+  }
+
+  /** A deleted child's receipt replaces the private proof only after the deletion checkpoint. */
+  private workerDeletionEvidence(id: string): boolean {
+    const child = this.runs.get(id);
+    if (child?.delegation?.role !== 'worker' || child.delegation.workspace.ownerRunId !== id ||
+      child.delegation.destroy?.phase !== 'complete' || child.delegation.destroy.remaining.length ||
+      !['review', 'done', 'failed', 'cancelled'].includes(child.status)) return false;
+    const parent = this.runs.get(child.delegation.parentRunId);
+    if (parent?.delegation?.role !== 'root' || parent.delegation.historyDeletion) return false;
+    const receipt = parent.delegation.receipts.find(entry => entry.workerId === id);
+    const result = this.readWorkerResult(parent.id, id);
+    if (!receipt || !result?.settled || result.cleanup !== 'complete' || result.status !== child.status ||
+      result.revision !== (child.delegation.executionRevision ?? 0)) return false;
+    const { state: _state, ...workspace } = result.workspace;
+    if (JSON.stringify(workspace) !== JSON.stringify(child.delegation.workspace)) return false;
+    const proof = this.readWorkerExecution(id);
+    if (receipt.deletion) return receipt.deletion.revision === result.revision &&
+      receipt.deletion.resourceId === workspace.resourceId && receipt.deletion.phase === 'pending' &&
+      (proof ? proof.phase === 'complete' && proof.generation === receipt.deletion.generation : !existsSync(this.executionPath(id)));
+    return proof?.phase === 'complete';
+  }
+
   canDeleteRun(id: string): boolean {
     const run = this.runs.get(id);
-    if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'invalid') return false;
+    if (run?.delegation?.role === 'invalid') return false;
+    if (run?.delegation?.role === 'worker') return this.workerDeletionEvidence(id);
     if (run?.delegation?.role === 'root') {
-      if (run.delegation.finishRequestedAt) return false;
-      const children = new Set([...run.delegation.receipts.map(receipt => receipt.workerId),
-        ...[...this.runs.values()].filter(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === id).map(child => child.id)]);
-      return [...children].every(workerId => {
-        const child = this.runs.get(workerId);
-        return child?.delegation?.role === 'worker' && child.delegation.parentRunId === id &&
-          child.delegation.destroy?.phase === 'complete' && !['queued', 'running', 'waiting'].includes(child.status);
+      if (run.delegation.finishRequestedAt && ['queued', 'running', 'waiting'].includes(run.status)) return false;
+      // Keep the parent's receipt and result ownership until each child history is explicitly removed.
+      if ([...this.runs.values()].some(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === id)) return false;
+      return run.delegation.receipts.every(receipt => {
+        if (this.runs.has(receipt.workerId) || receipt.deletion?.phase !== 'complete') return false;
+        // A pending parent deletion already validated the results before removing their bytes.
+        if (run.delegation?.role === 'root' && run.delegation.historyDeletion === 'pending') return true;
+        return this.readDeletedWorkerResult(id, receipt.workerId) !== undefined;
       });
     }
     return ![...this.runs.values()].some(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === id);
   }
 
+  /** Delegated history deletion is synchronous and checkpointed; any failed byte/index removal remains retryable. */
+  private deleteDelegatedRun(id: string): boolean {
+    const run = this.runs.get(id)!;
+    try {
+      if (run.delegation?.role === 'worker') {
+        const parent = this.runs.get(run.delegation.parentRunId)!;
+        if (parent.delegation?.role !== 'root') return false;
+        const receipt = parent.delegation.receipts.find(entry => entry.workerId === id)!;
+        const result = this.readWorkerResult(parent.id, id)!;
+        const deletion = receipt.deletion ?? { phase: 'pending' as const, revision: result.revision,
+          resourceId: run.delegation.workspace.resourceId, generation: this.readWorkerExecution(id)!.generation };
+        this.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation,
+          receipts: parent.delegation.receipts.map(entry => entry.workerId === id ? { ...entry, deletion } : entry),
+        } }]);
+        // Do not advertise artifact bytes as retained while interrupted deletion is in progress.
+        this.commitWorkerResult(parent.id, { ...result, observedAt: new Date().toISOString(),
+          diff: result.diff.state === 'available' ? { ...result.diff, snapshotId: randomUUID() } : result.diff,
+          artifacts: result.artifacts.state === 'available' ? { ...result.artifacts,
+            items: result.artifacts.items.map(item => ({ state: 'unavailable' as const, reason: 'unreadable' as const,
+              detail: 'History deletion is in progress', id: item.id, path: item.path })),
+          } : result.artifacts,
+        }, this.readWorkerResultDiff(parent.id, id));
+        this.removeRunHistoryBytes(id);
+        // Private process/account evidence is now replaced by the exact parent receipt.
+        rmSync(this.identityPath(id), { force: true });
+        rmSync(this.executionPath(id), { force: true });
+        const retained = this.readWorkerResult(parent.id, id)!;
+        this.commitWorkerResult(parent.id, { ...retained, observedAt: new Date().toISOString(),
+          diff: retained.diff.state === 'available' ? { ...retained.diff, snapshotId: randomUUID() } : retained.diff,
+          artifacts: retained.artifacts.state === 'available' ? { ...retained.artifacts,
+            items: retained.artifacts.items.map(item => ({ state: 'deleted' as const, reason: 'missing' as const, id: item.id, path: item.path })),
+          } : retained.artifacts,
+        }, this.readWorkerResultDiff(parent.id, id));
+        const proposed = new Map(this.runs);
+        proposed.delete(id);
+        proposed.set(parent.id, { ...parent, delegation: { ...parent.delegation,
+          receipts: parent.delegation.receipts.map(entry => entry.workerId === id ? { ...entry, deletion: { ...deletion, phase: 'complete' as const } } : entry),
+        } });
+        this.commitIndex(proposed, new Set([parent.id, id]));
+      } else if (run.delegation?.role === 'root') {
+        this.commitDelegation([{ id, delegation: { ...run.delegation, historyDeletion: 'pending' } }]);
+        this.removeRunHistoryBytes(id);
+        rmSync(join(this.dataDir, 'runs', `${id}-worker-results`), { recursive: true, force: true });
+        const proposed = new Map(this.runs); proposed.delete(id);
+        this.commitIndex(proposed, new Set([id]));
+      } else return false;
+      this.seqs.delete(id);
+      return true;
+    } catch { return false; }
+  }
+
+  private removeRunHistoryBytes(id: string): void {
+    // Fixed owned paths only: never follow context descriptors supplied in persisted metadata.
+    z.uuid().parse(id);
+    const dir = join(this.dataDir, 'runs');
+    if (realpathSync(dir) !== resolve(dir)) throw new Error('History storage redirected');
+    rmSync(this.eventsPath(id), { force: true });
+    rmSync(this.handoffPath(id), { force: true });
+    rmSync(this.imagesDir(id), { recursive: true, force: true });
+  }
+
   deleteRun(id: string): boolean {
     if (!this.canDeleteRun(id)) return false;
+    const run = this.runs.get(id);
+    if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'root') return this.deleteDelegatedRun(id);
     const existed = this.runs.delete(id);
     if (existed) {
       try {
         rmSync(this.eventsPath(id), { force: true });
-        rmSync(this.handoffPath(id), { force: true }); // spec 007: the journal goes with the task
-        rmSync(this.imagesDir(id), { recursive: true, force: true }); // agent screenshots
-      } catch {
-        // best effort — the index is authoritative
-      }
+        rmSync(this.handoffPath(id), { force: true });
+        rmSync(this.imagesDir(id), { recursive: true, force: true });
+      } catch { /* Ordinary run deletion preserves its existing best-effort behavior. */ }
       this.seqs.delete(id);
       this.scheduleSave();
       this.emit('deleted', id);
@@ -1837,7 +1937,8 @@ export class RunStore extends EventEmitter {
       ...all.filter((r) => r.archived).slice(MAX_ARCHIVED_KEPT),
     ];
     for (const stale of stalePool) {
-      if (!this.canDeleteRun(stale.id)) continue;
+      // Delegation promises history and parent snapshots until explicit deletion.
+      if (stale.delegation || !this.canDeleteRun(stale.id)) continue;
       this.runs.delete(stale.id);
       try {
         rmSync(this.eventsPath(stale.id), { force: true });

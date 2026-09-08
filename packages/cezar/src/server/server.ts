@@ -4319,7 +4319,7 @@ export function createApp(deps: ServerDeps) {
       const run = store.getRun(id);
       if (!run) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
-      if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
+      if (run.delegation?.role === 'worker' || !store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
       if (run.worktreePath) await removeWorktree(repoRoot, run.worktreePath, run.branch);
       store.updateRun(id, { worktreePath: undefined, branch: undefined });
       return c.json({ removed: true });
@@ -4332,9 +4332,9 @@ export function createApp(deps: ServerDeps) {
       const run = store.getRun(id);
       if (!run) return c.json({ error: 'not found' }, 404);
       // Delete cleans up after itself: worktree + branch go with the run (spec 006).
-      if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
-      if (run.worktreePath) await removeWorktree(repoRoot, run.worktreePath, run.branch);
-      return store.deleteRun(id) ? c.json({ deleted: true }) : c.json({ error: 'not found' }, 404);
+      if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup and explicit child history deletion first' }, 409);
+      if (run.delegation?.role !== 'worker' && run.worktreePath) await removeWorktree(repoRoot, run.worktreePath, run.branch);
+      return store.deleteRun(id) ? c.json({ deleted: true }) : c.json({ error: 'history cleanup incomplete — retry deletion' }, 409);
     });
 
   // ---- parallel variants (spec 010) -----------------------------------------
@@ -4415,7 +4415,8 @@ export function createApp(deps: ServerDeps) {
 
       for (const loser of losers) {
         if (manager.isActive(loser.id)) manager.cancel(loser.id);
-        if (!store.canDeleteRun(loser.id)) continue;
+        // Owned workers use verified cleanup exclusively, even after history becomes deletable.
+        if (loser.delegation?.role === 'worker' || !store.canDeleteRun(loser.id)) continue;
         if (loser.worktreePath) await removeWorktree(repoRoot, loser.worktreePath, loser.branch);
         store.updateRun(loser.id, { worktreePath: undefined, branch: undefined });
         store.setArchived(loser.id, true);

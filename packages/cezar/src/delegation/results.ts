@@ -23,12 +23,13 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
     if (typeof text === 'string' && text.trim()) summary = { state: 'available', text: text.slice(0, 4000), source: 'assistant', seq: event.seq, truncated: text.length > 4000 };
   }
   const destroyed = delegation.destroy?.phase === 'complete';
+  const workspaceRemoved = !!delegation.destroy && !delegation.destroy.remaining.includes('worktree');
   const lastExecutionOutcome = run.status === 'review' ? 'review-ready' : run.status === 'done' ? 'completed'
     : run.status === 'failed' ? 'failed' : run.status === 'cancelled' ? 'cancelled' : 'running';
   const settled = lastExecutionOutcome !== 'running' && store.readWorkerExecution(run.id)?.phase === 'complete';
   const historicalSha = previous?.head && 'sha' in previous.head ? previous.head.sha : undefined;
-  let head: WorkerCollectedResult['head'] = { state: destroyed ? 'deleted' : 'unavailable', reason: 'missing', ...(historicalSha ? { sha: historicalSha } : {}) };
-  let diff: WorkerCollectedResult['diff'] = { state: destroyed ? 'deleted' : 'unavailable', reason: 'missing' };
+  let head: WorkerCollectedResult['head'] = { state: workspaceRemoved ? 'deleted' : 'unavailable', reason: 'missing', ...(historicalSha ? { sha: historicalSha } : {}) };
+  let diff: WorkerCollectedResult['diff'] = { state: workspaceRemoved ? 'deleted' : 'unavailable', reason: 'missing' };
   let diffSnapshot: string | undefined;
   try {
     const workspace = await verifyOwnedWorkspace(repoRoot, run);
@@ -36,7 +37,7 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
       { cwd: workspace.path, encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 }, (error, stdout) => error ? reject(error) : resolve(stdout.trim())));
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) throw Error('invalid HEAD');
     head = { state: 'available', sha };
-  } catch { if (!destroyed) head = { state: 'unavailable', reason: 'unverified', ...(historicalSha ? { sha: historicalSha } : {}) }; }
+  } catch { if (!workspaceRemoved) head = { state: 'unavailable', reason: 'unverified', ...(historicalSha ? { sha: historicalSha } : {}) }; }
   try {
     const observation = await readOwnedDiff(repoRoot, run);
     diffSnapshot = observation.diff;
@@ -44,7 +45,7 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
     diff = { state: 'available', snapshotId, path: store.workerResultSnapshotPath(delegation.parentRunId, run.id, snapshotId), truncated: observation.truncated };
   } catch { if (!destroyed) diff = { state: 'unavailable', reason: 'unverified' }; }
   // A retained snapshot guarantees bytes even after cleanup; live availability is represented by cleanup/workspace and HEAD.
-  if (destroyed && previous?.diff.state === 'available') {
+  if (diffSnapshot === undefined && delegation.destroy && previous?.revision === workerRevision(run) && previous.diff.state === 'available') {
     const retained = store.readWorkerResultDiff(delegation.parentRunId, run.id);
     if (retained !== undefined) { diffSnapshot = retained; diff = { ...previous.diff, snapshotId: randomUUID() }; }
   }
@@ -69,7 +70,7 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
     partial: !settled || run.status === 'failed' || run.status === 'cancelled', settled,
     ...(run.error ? { error: run.error.slice(0, 2000) } : {}),
     ...(run.runner ? { backend: run.runner } : {}), ...(run.model ? { model: run.model } : {}),
-    baselineSha: delegation.workspace.baselineSha, workspace: delegation.workspace, cleanup: delegation.destroy?.phase ?? 'retained',
+    baselineSha: delegation.workspace.baselineSha, workspace: { ...delegation.workspace, state: workspaceRemoved ? 'deleted' : head.state === 'available' ? 'available' : 'unavailable' }, cleanup: delegation.destroy?.phase ?? 'retained',
     summary, head, diff, artifacts: { state: 'available', items, truncated: ids.size > 32 },
   }, ...(diffSnapshot === undefined ? {} : { diffSnapshot }) };
 }
