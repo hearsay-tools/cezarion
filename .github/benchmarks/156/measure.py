@@ -58,6 +58,11 @@ def main():
                     startedAt=time.time(), cache='cold private npm cache; no node_modules reuse')
     patch_name = 'combined' if args.variant.startswith('combined-shards-') else args.variant
     patch_file = Path(__file__).with_name(patch_name + '.patch')
+    if args.variant.startswith('split-shards-'):
+        patch_file = Path(__file__).parent.parent / 'shard-balance' / 'worker-wait-split.patch'
+    duration_file = root / '.github/test-durations.json'
+    if duration_file.is_file():
+        metadata['durationManifestSha256'] = hashlib.sha256(duration_file.read_bytes()).hexdigest()
     if patch_file.is_file():
         metadata['experimentPatchSha256'] = hashlib.sha256(patch_file.read_bytes()).hexdigest()
     (out / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')

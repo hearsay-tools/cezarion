@@ -44,6 +44,10 @@ jobs:
         run: |
           case "$VARIANT" in
             current-shards-1|current-shards-2) ;;
+            split-shards-1|split-shards-2)
+              git -C application apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/shard-balance/worker-wait-split.patch"
+              cp harness/.github/benchmarks/shard-balance/split-durations.json application/.github/test-durations.json
+              ;;
             refreshed-shards-1|refreshed-shards-2) cp harness/.github/benchmarks/shard-balance/refreshed-durations.json application/.github/test-durations.json ;;
             baseline|workers-4|workers-6|workers-8|build-reuse|shards-1|shards-2|shards-gate) ;;
             combined-shards-1|combined-shards-2|combined-shards-gate) git -C application apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/156/combined.patch" ;;
@@ -58,7 +62,7 @@ jobs:
           extra=()
           case "$VARIANT" in
             combined-shards-*) extra+=(--max-workers 4) ;;
-            current-shards-*|refreshed-shards-*) extra+=(--max-workers 4 --shard "${VARIANT##*-}") ;;
+            current-shards-*|refreshed-shards-*|split-shards-*) extra+=(--max-workers 4 --shard "${VARIANT##*-}") ;;
           esac
           python harness/.github/benchmarks/156/measure.py --root application --out results --variant "$VARIANT" "${extra[@]}"
       - name: Preserve raw results including failures
