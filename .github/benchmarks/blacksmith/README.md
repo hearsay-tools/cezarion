@@ -39,9 +39,10 @@ Download and extract the six `benchmark-split-shards-{1,2}-{1,2,3}` artifacts fr
 
 ```sh
 RESULTS_DIR=/path/to/34281539246 python3 - <<'PY'
-import json, os, pathlib, statistics
+import json, os, pathlib, statistics, subprocess
 source = pathlib.Path(os.environ['RESULTS_DIR'])
-current = json.loads(pathlib.Path('.github/test-durations.json').read_text())
+current = json.loads(subprocess.check_output(
+    ['git', 'show', '252b749d464a8f630f7446a6ff29e6f8fa076b10:.github/test-durations.json'], text=True))
 candidate = json.loads(pathlib.Path('.github/benchmarks/blacksmith/split-observed-durations.json').read_text())
 expected = {
     'packages/cezar/src/workflows/worker-wait.test.ts',
