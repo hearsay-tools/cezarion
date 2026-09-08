@@ -350,6 +350,73 @@ rl.on('close', () => process.exit(0));
     expect(waitOf(store.getRun(p.id))?.outcomes).toHaveLength(1);
   });
 
+  for (const mode of ['fresh', 'continuation'] as const) {
+    for (const delayedAck of [false, true]) {
+      it(`completion timeout ${mode} monitoring stays attention with delayed ACK=${delayedAck}`, async () => {
+        const exercise = async (release: () => void) => {
+          const backend = delayedAck ? 'opencode' : 'claude';
+          const original = HARNESS_ADAPTERS[backend].mockBin;
+          const mock = join(root, `timeout-${backend}.mjs`);
+          let source = readFileSync(original, 'utf8');
+          if (delayedAck) source = source.replace("text: JSON.parse(body).parts.map(part => part.text ?? '').join('\\n'),",
+            "text: JSON.parse(body).parts.map(part => part.text ?? '').join('\\n') + '\\nCEZ:MONITORING',");
+          else source = source.replace("userText.includes('mock:monitoring')", "(userText.includes('mock:monitoring') || userText.includes('Worker wait'))");
+          expect(source).not.toBe(readFileSync(original, 'utf8'));
+          writeFileSync(mock, source, { mode: 0o755 });
+          process.env.CEZ_DRY_RUN = '0'; process.env[HARNESS_ADAPTERS[backend].binEnv] = mock;
+          const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
+          store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+          await until(() => store.getRun(p.id)?.status === 'waiting');
+          if (mode === 'continuation') {
+            expect(manager.finish(p.id)).toBe(true); await until(() => !manager.isActive(p.id));
+            expect(manager.continueRun(p.id, { text: 'mock:hold' }).ok).toBe(true);
+            await until(() => store.getRun(p.id)?.status === 'waiting');
+          }
+          const w = await worker(p.id);
+          manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
+          await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+          const wait = waitOf(store.getRun(p.id))!;
+          const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
+          vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+          vi.setSystemTime(wait.deadline); manager.reconcileWorkerWaits();
+          expect.soft(store.getRun(p.id)?.delegation).toMatchObject({ completion: { phase: 'attention' } });
+          const persisted = (JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]).find(run => run.id === p.id);
+          expect.soft(persisted?.delegation).toMatchObject({ completion: { phase: 'attention' }, wait: { id: wait.id, reason: 'timeout' } });
+          await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
+          if (delayedAck) {
+            expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === wait.id)?.deliveredAt).toBeUndefined();
+            const engine = manager as unknown as { active: Map<string, { agentInputFlight?: { settled?: Promise<void> } }> };
+            const settled = engine.active.get(p.id)?.agentInputFlight?.settled;
+            expect(settled).toBeInstanceOf(Promise);
+            release(); await settled;
+          }
+          await until(() => !waitOf(store.getRun(p.id)));
+          expect.soft(store.getRun(p.id)?.status).toBe('waiting');
+          expect.soft(store.getRun(p.id)?.activity).toBeUndefined();
+          expect.soft(store.getRun(p.id)?.monitoringWakeAt).toBeUndefined();
+          expect.soft(semaphore.busy()).toBe(0);
+          await vi.advanceTimersByTimeAsync(300_001);
+          expect(store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).includes('automatic monitoring wake-up'))).toEqual([]);
+          expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle')).toHaveLength(1);
+          expect(store.getRun(w.id)?.status).toBe('queued');
+          const receipt = store.getRun(p.id)?.delegation;
+          expect(receipt).toMatchObject({ completion: { phase: 'attention' }, lastWait: { id: wait.id, reason: 'timeout' } });
+          // Attention still admits a deliberate wait; a human can then reset the cycle.
+          const deliberate = register(p.id, [w.id]);
+          expect(deliberate.id).not.toBe(wait.id);
+          expect(manager.sendMessage(p.id, [{ type: 'text', text: delayedAck ? 'mock:agent-echo' : 'mock:monitoring' }])).toBe(true);
+          await until(() => store.getRun(p.id)?.activity === 'monitoring');
+          expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
+          expect(store.getRun(p.id)?.monitoringWakeAt).toBeDefined();
+        };
+        try {
+          if (delayedAck) await withDelayedCommand('opencode', exercise, 'Worker wait');
+          else await exercise(() => {});
+        } finally { vi.useRealTimers(); }
+      });
+    }
+  }
+
   it('readiness Finish preserves pending parent human questions', async () => {
     const p = await parent('mock:ask'); await until(() => store.getRun(p.id)?.status === 'waiting');
     expect(manager.finish(p.id)).toBe(false);

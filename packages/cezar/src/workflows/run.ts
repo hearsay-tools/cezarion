@@ -2432,6 +2432,11 @@ export class RunManager {
     return delegation?.role === 'root' && !!delegation.completion;
   }
 
+  private parentCompletionAttention(runId: string): boolean {
+    const delegation = this.store.getRun(runId)?.delegation;
+    return delegation?.role === 'root' && delegation.completion?.phase === 'attention';
+  }
+
   private resetParentCompletion(runId: string): void {
     const run = this.store.getRun(runId);
     if (run?.delegation?.role !== 'root' || !run.delegation.completion) return;
@@ -2638,7 +2643,15 @@ export class RunManager {
           if (proven.length !== selected.outcomes.length) selected = { ...selected, outcomes: proven };
         }
         const next = reconcileWorkerWait(selected, outcomes, now);
-        if (next !== wait) this.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: next } }]);
+        // The one automatic completion timeout spends its wake budget before
+        // delivery. A MONITORING reply must not start another autonomous loop.
+        const completion = parent.delegation.completion?.waitId === next.id && next.reason === 'timeout'
+          ? { ...parent.delegation.completion, phase: 'attention' as const } : parent.delegation.completion;
+        if (next !== wait || completion?.phase !== parent.delegation.completion?.phase) {
+          this.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: next,
+            ...(completion ? { completion } : {}),
+          } }]);
+        }
         for (const outcome of next.outcomes) {
           if (!this.store.readEvents(parent.id).some(event => event.type === 'worker-outcome' &&
             event.waitId === wait.id && (event.outcome as { workerId?: string } | undefined)?.workerId === outcome.workerId &&
@@ -2840,7 +2853,7 @@ export class RunManager {
       } else if (state.parkAfterAck?.session === session && !this.waiting.has(runId) && !this.monitoring.has(runId)) {
         // A wake turn can finish before its HTTP/RPC acknowledgement. Retiring
         // that wait must release its completed turn, not invent another turn.
-        if (state.parkAfterAck.monitoring) {
+        if (state.parkAfterAck.monitoring && !this.parentCompletionAttention(runId)) {
           this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
           this.monitoring.add(runId);
           this.clearIdleTimer(state);
@@ -3424,6 +3437,7 @@ export class RunManager {
         const { ask, notes: askNotes } = askTurn;
         discardQueuedMessagesOnAsk(state.session, askTurn);
         const monitoring =
+          !this.parentCompletionAttention(runId) &&
           sessionOpen &&
           !done &&
           !ask &&
@@ -4190,6 +4204,7 @@ export class RunManager {
         const { ask, notes: askNotes } = askTurn;
         discardQueuedMessagesOnAsk(state.session, askTurn);
         const monitoring =
+          !this.parentCompletionAttention(runId) &&
           interactive &&
           sessionOpen &&
           !done &&
@@ -4870,6 +4885,7 @@ export class RunManager {
   }
 
   private armMonitoringWakeTimer(runId: string, state: ActiveRun): void {
+    if (this.parentCompletionAttention(runId)) { this.clearMonitoringWakeTimer(state, runId); return; }
     const run = this.store.getRun(runId);
     if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
     const minutes = this.semaphore.monitoringWakeIntervalMinutes();
@@ -4896,6 +4912,7 @@ export class RunManager {
     this.store.updateRun(runId, { monitoringWakeAt: new Date(deadline).toISOString() });
     state.monitoringWakeTimer = setTimeout(() => {
       state.monitoringWakeTimer = undefined;
+      if (this.parentCompletionAttention(runId)) { this.clearMonitoringWakeTimer(state, runId); return; }
       const run = this.store.getRun(runId);
       if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
       this.store.updateRun(runId, { monitoringWakeAt: undefined });
