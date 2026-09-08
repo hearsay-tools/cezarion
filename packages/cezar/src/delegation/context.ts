@@ -135,6 +135,12 @@ export async function verifyWorkerContext(options: {
       } catch (error) {
         // A redirected or modified copy is evidence of tampering, not permission to overwrite it.
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        // realpath also reports ENOENT for a dangling symlink; only a missing entry permits rebuilding.
+        const entry = await lstat(path).catch((failure: NodeJS.ErrnoException) => {
+          if (failure.code !== 'ENOENT') throw failure;
+          return undefined;
+        });
+        if (entry) throw invalid();
         bytes = await attachmentBytes(dataDir, parentId, input.source.id, input.bytes);
         if (bytes.length !== input.bytes || hash(bytes) !== input.sha256) throw invalid();
         await writeCopy(path, bytes);

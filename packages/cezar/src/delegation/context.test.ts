@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
+import { verifyWorkerContext } from './context.ts';
 import { ensureOwnedWorkspace } from './workspace.ts';
 import type { WorkerSpawnRequest } from '@open-mercato/cezar-contract';
 
@@ -32,6 +33,19 @@ describe('explicit owned worker context', () => {
     expect(worker.task).toContain(copy); expect(worker.task).toContain('selected notes');
     await ensureOwnedWorkspace(f.root, worker);
     expect(readFileSync(inspected.inputs![0]!.path, 'utf8')).toBe('committed');
+  });
+  it('rejects a dangling input-copy symlink without replacing it during recovery', async () => {
+    attachment();
+    const { workerId } = await f.service.spawn(f.caller, input({ artifacts: [{ kind: 'parent-attachment', id: 'document.txt' }] }));
+    const worker = f.store.getRun(workerId)!;
+    if (worker.delegation?.role !== 'worker') throw Error('worker');
+    const { context, workspace, parentRunId } = worker.delegation;
+    const copy = context!.inputs[0]!.path;
+    const missingTarget = join(f.root, 'missing-target');
+    rmSync(copy); symlinkSync(missingTarget, copy);
+    await expect(verifyWorkerContext({ dataDir: join(f.root, '.ai/cezar'), parentId: parentRunId, workspace, context })).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(lstatSync(copy).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(copy)).toBe(missingTarget);
   });
   it('removes prepared copies when later validation or durable acceptance fails', async () => {
     attachment();

@@ -78,6 +78,8 @@ export const workerContextSchema = z.object({
 export const workerInputSchema = z.object({
   source: workerContextReferenceSchema,
   path: z.string().min(1).max(8192),
+  /** Parent attachment: SHA-256 of copied bytes. Baseline file: SHA-256 of the pinned Git blob ID
+   * (the lowercase hexadecimal ID as UTF-8 text), not of file contents. Interpret by source.kind. */
   sha256: requestHashSchema,
   bytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
 }).strict();
