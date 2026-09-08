@@ -130,15 +130,23 @@ export class ClaudeCliRunner implements AgentRunner {
     child.stdin.on('error', (error: Error) => { onEvent?.({ type: 'note', message: `claude: stdin write failed: ${error.message}` }); });
     let agentInputReady = false;
     let agentWritePending = false;
+    // Prompt turns written to stdin whose `result` has not arrived yet. A
+    // follow-up accepted while the opening turn is still running makes this 2,
+    // and the opening result brings it back to 1, not 0.
+    let pendingPromptTurns = 0;
     const scheduleAutoEnd = () => {
+      // Never arm the close window while an accepted turn is still running:
+      // the timer the opening result would start here has nothing to cancel it,
+      // and closing stdin under a queued turn truncates it (#146). The final
+      // result brings the count to 0 and arms the window as before.
       if (!opts.autoEndAfterFirstTurn || !stdinOpen || autoEndTimer || agentWritePending) return;
+      if (pendingPromptTurns > 0) return;
       autoEndTimer = setTimeout(() => {
         autoEndTimer = undefined;
         if (opts.shouldAutoEnd?.() !== false) end();
       }, AUTO_END_DELAY_MS);
       autoEndTimer.unref?.();
     };
-    let pendingPromptTurns = 0;
     let pendingMarkerAsk = false;
     let turnTextStart = 0;
     const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void): boolean => {
