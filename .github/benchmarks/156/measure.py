@@ -39,6 +39,7 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--variant', required=True)
     parser.add_argument('--phase', choices=['verify', 'snapshot'], default='verify')
+    parser.add_argument('--max-workers', type=int, choices=[4, 6, 8])
     args = parser.parse_args()
     root, out = args.root.resolve(), args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -54,7 +55,8 @@ def main():
                     lockSha256=hashlib.sha256((root / 'package-lock.json').read_bytes()).hexdigest(),
                     patch=capture(['git', 'diff', '--binary', 'HEAD'], root),
                     startedAt=time.time(), cache='cold private npm cache; no node_modules reuse')
-    patch_file = Path(__file__).with_name(args.variant + '.patch')
+    patch_name = 'combined' if args.variant.startswith('combined-shards-') else args.variant
+    patch_file = Path(__file__).with_name(patch_name + '.patch')
     if patch_file.is_file():
         metadata['experimentPatchSha256'] = hashlib.sha256(patch_file.read_bytes()).hexdigest()
     (out / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
@@ -62,9 +64,13 @@ def main():
              ('typecheck', ['npm', 'run', 'typecheck']),
              ('unit', ['npm', 'run', 'test:unit'])]
     vitest = ['npm', 'test', '--', '--reporter=default', '--reporter=json', f'--outputFile={out / "vitest.json"}']
-    if args.variant.startswith('workers-'):
+    if args.max_workers is not None:
+        vitest.append(f'--maxWorkers={args.max_workers}')
+    elif args.variant.startswith('workers-'):
         vitest.append('--maxWorkers=' + str(int(args.variant.split('-')[1])))
-    if args.variant in ('shards-1', 'shards-2'):
+    if args.variant in ('combined-shards-1', 'combined-shards-2'):
+        vitest.append(f'--shard={args.variant[-1]}/2')
+    elif args.variant in ('shards-1', 'shards-2'):
         manifest = json.loads(Path(__file__).with_name('shards.json').read_text())
         expected = []
         for package in ('cezar', 'api-client', 'web'):
@@ -81,9 +87,9 @@ def main():
     else:
         steps += [('build', ['npm', 'run', 'build'])]
     steps += [('package', ['npm', 'run', 'test:package'])]
-    if args.variant in ('shards-1', 'shards-2'):
+    if args.variant in ('shards-1', 'shards-2', 'combined-shards-1', 'combined-shards-2'):
         steps = [steps[0], ('build-server', ['npm', 'run', 'build:server']), ('vitest', vitest)]
-    elif args.variant == 'shards-gate':
+    elif args.variant in ('shards-gate', 'combined-shards-gate'):
         steps = [step for step in steps if step[0] != 'vitest']
     if args.phase == 'snapshot':
         # Simulate the eligible nightly event only inside this dry-run subprocess environment.

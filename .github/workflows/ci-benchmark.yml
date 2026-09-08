@@ -17,7 +17,7 @@ jobs:
       - id: matrix
         run: echo "matrix=$(cat .github/benchmarks/156/campaign.json)" >> "$GITHUB_OUTPUT"
   measure:
-    if: ${{ !startsWith(github.ref_name, 'bench/156-snapshot') }}
+    if: ${{ !startsWith(github.ref_name, 'bench/156-snapshot') && !startsWith(github.ref_name, 'bench/156-paired') }}
     needs: matrix
     strategy:
       fail-fast: false
@@ -44,6 +44,7 @@ jobs:
         run: |
           case "$VARIANT" in
             baseline|workers-4|workers-6|workers-8|build-reuse|shards-1|shards-2|shards-gate) ;;
+            combined-shards-1|combined-shards-2|combined-shards-gate) git -C application apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/156/combined.patch" ;;
             fixtures|splitting|setup|combined) git -C application apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/156/$VARIANT.patch" ;;
             *) exit 1 ;;
           esac
@@ -51,7 +52,10 @@ jobs:
         env:
           REPETITION: ${{ matrix.repetition }}
           VARIANT: ${{ matrix.variant }}
-        run: python harness/.github/benchmarks/156/measure.py --root application --out results --variant "$VARIANT"
+        run: |
+          extra=()
+          case "$VARIANT" in combined-shards-*) extra+=(--max-workers 4) ;; esac
+          python harness/.github/benchmarks/156/measure.py --root application --out results --variant "$VARIANT" "${extra[@]}"
       - name: Preserve raw results including failures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -72,6 +76,82 @@ jobs:
           name: verified-${{ matrix.repetition }}
           path: verified.tgz
           compression-level: 0
+  paired:
+    needs: matrix
+    if: ${{ startsWith(github.ref_name, 'bench/156-paired') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        repetition: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Check out harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+      - name: Check out fixed baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: b1fe75911378dfe7816a7a83312c2acbdcf848f4
+          path: application-baseline
+      - name: Check out fixed combined candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: b1fe75911378dfe7816a7a83312c2acbdcf848f4
+          path: application-combined
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.20.0'
+      - name: Apply combined candidate
+        run: git -C application-combined apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/156/combined.patch"
+      - name: Measure paired verification
+        env:
+          REPETITION: ${{ matrix.repetition }}
+        run: |
+          set +e
+          run_baseline() {
+            REPETITION="$REPETITION" python harness/.github/benchmarks/156/measure.py \
+              --root application-baseline --out results/baseline --variant baseline
+            baseline_status=$?
+          }
+          run_combined() {
+            REPETITION="$REPETITION" python harness/.github/benchmarks/156/measure.py \
+              --root application-combined --out results/combined --variant combined --max-workers 4
+            combined_status=$?
+          }
+          baseline_status=0
+          combined_status=0
+          if (( REPETITION % 2 == 1 )); then
+            run_baseline
+            run_combined
+          else
+            run_combined
+            run_baseline
+          fi
+          if (( baseline_status != 0 || combined_status != 0 )); then
+            exit 1
+          fi
+      - name: Preserve baseline half
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-baseline-${{ matrix.repetition }}
+          path: |
+            results/baseline/*.json
+            results/baseline/*.log
+            results/baseline/*.time
+          if-no-files-found: warn
+      - name: Preserve combined half
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-combined-${{ matrix.repetition }}
+          path: |
+            results/combined/*.json
+            results/combined/*.log
+            results/combined/*.time
+          if-no-files-found: warn
   snapshot:
     needs: measure
     if: ${{ always() && !cancelled() && (startsWith(github.ref_name, 'bench/156-workers') || startsWith(github.ref_name, 'bench/156-snapshot')) }}

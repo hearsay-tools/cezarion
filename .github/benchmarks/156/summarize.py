@@ -19,8 +19,12 @@ def read_json(path):
 
 def elapsed_seconds(job):
     try:
-        start = datetime.fromisoformat(job['started_at'].replace('Z', '+00:00'))
-        end = datetime.fromisoformat(job['completed_at'].replace('Z', '+00:00'))
+        started_at = job['started_at']
+        completed_at = job['completed_at']
+        if not isinstance(started_at, str) or not isinstance(completed_at, str):
+            return None
+        start = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+        end = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
         return (end - start).total_seconds()
     except (KeyError, TypeError, ValueError):
         return None
@@ -44,6 +48,7 @@ def job_rows(root):
             'variant': variant,
             'repetition': int(repetition),
             'phase': 'snapshot' if kind == 'snapshot' else 'verify',
+            'status': raw.get('status'),
             'conclusion': raw.get('conclusion'),
             'jobRunnerSeconds': elapsed_seconds(raw),
             'raw': raw,
@@ -99,6 +104,7 @@ def summarize(root):
             'variant': variant, 'repetition': repetition, 'phase': phase,
             'artifact': str(artifact['path']) if artifact else None,
             'jobRunnerSeconds': job.get('jobRunnerSeconds') if job else None,
+            'jobStatus': job.get('status') if job else None,
             'jobConclusion': job.get('conclusion') if job else None,
         }
         summary = read_json(artifact['path'] / 'summary.json') if artifact else None
@@ -110,11 +116,12 @@ def summarize(root):
             sample['steps'] = steps
             sample['metrics'] = sample_metrics(steps)
             failed_steps = [step for step in steps if step.get('exitCode') != 0]
-            job_failed = job is not None and job.get('conclusion') != 'success'
-            if failed_steps or job_failed:
-                sample.update(status='failure', failedSteps=[step.get('name') for step in failed_steps])
-            elif job is None:
+            if job is None:
                 sample.update(status='missing', reason='missing GitHub job')
+            elif job.get('status') != 'completed' or job.get('conclusion') is None:
+                sample.update(status='missing', reason='GitHub job is not complete')
+            elif failed_steps or job.get('conclusion') != 'success':
+                sample.update(status='failure', failedSteps=[step.get('name') for step in failed_steps])
             else:
                 sample['status'] = 'success'
         variants.setdefault(variant, []).append(sample)

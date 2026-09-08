@@ -32,7 +32,8 @@ class SummarizeTest(unittest.TestCase):
                     step('vitest', 4, user=2, system=1, rss=200 + repetition),
                 ])
                 jobs.append({
-                    'name': f'measure (baseline, {repetition})', 'conclusion': 'success',
+                    'name': f'measure (baseline, {repetition})', 'status': 'completed',
+                    'conclusion': 'success',
                     'started_at': f'2026-09-08T10:00:0{repetition}Z',
                     'completed_at': f'2026-09-08T10:01:0{repetition}Z',
                     'id': repetition,
@@ -61,7 +62,8 @@ class SummarizeTest(unittest.TestCase):
                 'variant': 'setup', 'repetition': '3', 'phase': 'verify',
             }))
             jobs = [{
-                'name': f'measure (setup, {repetition})', 'conclusion': 'success' if repetition != 2 else 'failure',
+                'name': f'measure (setup, {repetition})', 'status': 'completed',
+                'conclusion': 'success' if repetition != 2 else 'failure',
                 'started_at': '2026-09-08T10:00:00Z', 'completed_at': '2026-09-08T10:01:00Z',
             } for repetition in (1, 2, 3)]
             (root / 'jobs.json').write_text(json.dumps({'jobs': jobs}))
@@ -84,7 +86,8 @@ class SummarizeTest(unittest.TestCase):
             for repetition, steps in enumerate(invalid_steps, 1):
                 self.write_artifact(root, 'broken', repetition, steps)
                 jobs.append({
-                    'name': f'measure (broken, {repetition})', 'conclusion': 'success',
+                    'name': f'measure (broken, {repetition})', 'status': 'completed',
+                    'conclusion': 'success',
                     'started_at': '2026-09-08T10:00:00Z',
                     'completed_at': '2026-09-08T10:01:00Z',
                 })
@@ -100,6 +103,7 @@ class SummarizeTest(unittest.TestCase):
             root = Path(directory)
             (root / 'jobs.json').write_text(json.dumps({'jobs': [{
                 'name': 'snapshot (snapshot-fresh, 1)', 'conclusion': 'success',
+                'status': 'completed',
                 'started_at': '2026-09-08T10:00:00Z', 'completed_at': '2026-09-08T10:02:00Z',
             }]}))
             report = summarize.summarize(root)
@@ -107,6 +111,27 @@ class SummarizeTest(unittest.TestCase):
             self.assertEqual(sample['status'], 'missing')
             self.assertEqual(sample['phase'], 'snapshot')
             self.assertEqual(sample['jobRunnerSeconds'], 120)
+
+    def test_in_progress_real_job_shape_has_no_elapsed_time_and_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_artifact(root, 'setup', 1, [step('install', 3), step('vitest', 8)])
+            (root / 'jobs.json').write_text(json.dumps({'total_count': 1, 'jobs': [{
+                'id': 102218819738,
+                'name': 'measure (setup, 1)',
+                'status': 'in_progress',
+                'conclusion': None,
+                'started_at': '2026-09-08T20:09:11Z',
+                'completed_at': None,
+                'steps': [{'name': 'Measure verification', 'status': 'in_progress',
+                           'conclusion': None, 'started_at': '2026-09-08T20:09:16Z',
+                           'completed_at': None}],
+            }]}))
+
+            sample = summarize.summarize(root)['variants']['setup']['samples'][0]
+            self.assertEqual(sample['status'], 'missing')
+            self.assertEqual(sample['reason'], 'GitHub job is not complete')
+            self.assertIsNone(sample['jobRunnerSeconds'])
 
 
 if __name__ == '__main__':
