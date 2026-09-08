@@ -13,7 +13,7 @@ describe('session provisioning', () => {
   const provision = (id = f.parent.id) => provisionDelegationSession({ projectId: 'project', runId: id, store: f.store, credentials: f.credentials, url: 'http://127.0.0.1:12345/api/v1/delegation' });
   it('rotates session identity, revokes on teardown, and never includes a token in instructions/events', () => {
     const first = provision()!; const old = f.credentials.authenticate(first.env.CEZ_DELEGATION_TOKEN!)!;
-    expect(first.instructions).toContain('worker spawn'); expect(first.instructions).not.toContain(first.env.CEZ_DELEGATION_TOKEN!);
+    expect(first.instructions).toContain('worker spawn'); expect(first.instructions).toContain('wait --request'); expect(first.instructions).not.toContain(first.env.CEZ_DELEGATION_TOKEN!);
     const second = provision()!;
     expect(f.credentials.authenticate(first.env.CEZ_DELEGATION_TOKEN!)).toBeUndefined();
     expect(f.credentials.authenticate(second.env.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: f.parent.id });
@@ -38,7 +38,7 @@ describe('session provisioning', () => {
     vi.stubEnv('CEZ_DELEGATION', '1'); f.store.updateRun(ordinary.id, { delegation: { role: 'invalid' } });
     expect(provision(ordinary.id)).toBeUndefined();
     const { workerId } = await f.service.spawn(f.caller, { task: 'worker', baseline: 'HEAD', requestId: randomUUID() });
-    const worker = provision(workerId)!; expect(worker.instructions).toContain('cannot delegate');
+    const worker = provision(workerId)!; expect(worker.instructions).toContain('cannot delegate'); expect(worker.instructions).toContain('wait --request'); expect(worker.instructions).toContain(f.parent.id); expect(worker.instructions).toContain('worker reply');
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ role: 'worker', permissions: [] });
     await expect(f.service.spawn(f.credentials.authenticate(worker.env.CEZ_DELEGATION_TOKEN!)!, { task: 'no', baseline: 'HEAD', requestId: randomUUID() })).rejects.toMatchObject({ code: 'denied_scope' });
   });

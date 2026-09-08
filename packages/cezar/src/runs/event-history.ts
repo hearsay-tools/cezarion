@@ -5,6 +5,9 @@ import { z } from 'zod';
 
 import {
   RUN_HISTORY_PAGE_ITEMS,
+  conversationMessageEventSchema,
+  requestOutcomeEventSchema,
+  agentInputEventSchema,
   advancePendingHumanAsk,
   type RunEvent,
   type RunHistoryContext,
@@ -226,6 +229,21 @@ export function canonicalSessionItems(events: readonly RunEvent[]): CanonicalIte
     }
     if (event.type === 'step-end' && event.status === 'failed') {
       upsert(`standalone:${event.seq}`, event);
+      continue;
+    }
+    if (event.type === 'conversation-message') {
+      const parsed = conversationMessageEventSchema.safeParse(event);
+      if (parsed.success) upsert(`conversation-message:${parsed.data.message.id}`, event);
+      continue;
+    }
+    if (event.type === 'request-outcome') {
+      const parsed = requestOutcomeEventSchema.safeParse(event);
+      if (parsed.success) upsert(`request-outcome:${parsed.data.outcome.requestId}`, event);
+      continue;
+    }
+    if (event.type === 'agent-input') {
+      const parsed = agentInputEventSchema.safeParse(event);
+      if (parsed.success) upsert(`${parsed.data.input.conversation ? 'conversation-message' : 'agent-input'}:${parsed.data.input.id}`, event);
       continue;
     }
     if (STANDALONE_TYPES.has(event.type)) upsert(`standalone:${event.seq}`, event);
