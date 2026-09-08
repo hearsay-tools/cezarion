@@ -98,7 +98,8 @@ jobs:
     name: Unit, build, E2E, and package
     needs: [build-and-package, vitest]
     if: always()
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # This lightweight gate benefits more from GitHub's warm runner pool than faster compute.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
