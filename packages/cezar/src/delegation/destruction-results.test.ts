@@ -4,8 +4,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
-import { ensureOwnedWorkspace } from './workspace.ts';
+import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
+import { RunManager } from '../workflows/run.ts';
+import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 
 vi.mock('node:fs', async original => { const fs = await original<typeof import('node:fs')>(); return { ...fs, rmSync: vi.fn(fs.rmSync) }; });
 
@@ -233,6 +235,63 @@ describe('verified destruction retains results through explicit history deletion
     expect(f.store.canDeleteRun(f.parent.id)).toBe(false);
     expect(f.manager.finishBlockedReason(f.parent.id)).toContain(workerId);
     await expect(f.service.collect(f.caller, { workerId })).rejects.toMatchObject({ code: 'denied_scope' });
+  });
+
+  function interruptedParentDeletion() {
+    vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
+    f.store.addStep(f.parent.id, { id: 'task', name: 'Task', kind: 'agent' });
+    f.store.updateStep(f.parent.id, 'task', { status: 'done', sessionId: 'mock-prior', backend: 'claude' });
+    f.store.updateRun(f.parent.id, { status: 'done', workflowDef: QUICK_TASK_WORKFLOW, task: 'mock:done', worktreePath: undefined });
+    vi.mocked(rmSync).mockImplementationOnce(() => { throw Error('history temporarily busy'); });
+    expect(f.store.deleteRun(f.parent.id)).toBe(false);
+    expect(f.store.getRun(f.parent.id)?.delegation).toMatchObject({ historyDeletion: 'pending' });
+  }
+  it('refuses Continue after interrupted parent deletion without resetting its retry marker', () => {
+    interruptedParentDeletion();
+    expect(f.manager.continueRun(f.parent.id, { text: 'mock:done' }, true)).toMatchObject({ ok: false, error: expect.stringContaining('deletion') });
+    expect(f.manager.isActive(f.parent.id)).toBe(false);
+    expect(f.store.deleteRun(f.parent.id)).toBe(true);
+  });
+  it('refuses spawn under a deleting parent even when its persisted public status is active', async () => {
+    interruptedParentDeletion(); f.store.updateRun(f.parent.id, { status: 'running' });
+    await expect(f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() })).rejects.toMatchObject({ code: 'incompatible_state' });
+    expect(f.store.listRuns()).toHaveLength(1);
+    expect(f.store.deleteRun(f.parent.id)).toBe(true);
+  });
+  it.each(['queued', 'running'] as const)('does not revive a %s parent with interrupted deletion on restart', async status => {
+    interruptedParentDeletion(); f.store.updateRun(f.parent.id, { status }); f.store.flush();
+    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    const manager = new RunManager(reopened, f.root);
+    vi.spyOn(manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+    try {
+      await manager.recover();
+      expect(manager.isActive(f.parent.id)).toBe(false);
+      expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ historyDeletion: 'pending' });
+      expect(reopened.deleteRun(f.parent.id)).toBe(true);
+    } finally { manager.dispose(); reopened.flush(); }
+  });
+  it.each(['execute', 'runContinuation'] as const)('refuses %s construction from a deleting parent without recreating its resources', async kind => {
+    interruptedParentDeletion();
+    const before = f.store.readEvents(f.parent.id);
+    const engine = f.manager as unknown as { execute(id: string, workflow: typeof QUICK_TASK_WORKFLOW, input: { task: string }): Promise<void>;
+      runContinuation(id: string, step: string, session: string | undefined, backend: 'claude', prompt: string): Promise<void> };
+    if (kind === 'execute') await engine.execute(f.parent.id, QUICK_TASK_WORKFLOW, { task: 'mock:done' });
+    else await engine.runContinuation(f.parent.id, 'task', 'mock-prior', 'claude', 'mock:done');
+    expect(f.store.readEvents(f.parent.id)).toEqual(before);
+    expect(existsSync(join(f.root, '.ai/cezar/worktrees', f.parent.id))).toBe(false);
+    expect(f.manager.isActive(f.parent.id)).toBe(false);
+    expect(f.store.getRun(f.parent.id)?.delegation).toMatchObject({ historyDeletion: 'pending' });
+    expect(f.store.deleteRun(f.parent.id)).toBe(true);
+  });
+
+  it('refuses the owned-run acceptance boundary after interrupted parent deletion', async () => {
+    const workspace = await planOwnedWorkspace(f.root, randomUUID(), f.sha);
+    interruptedParentDeletion();
+    expect(() => f.store.createOwnedRun({ title: 'child', task: 'child', workflow: 'quick-task', steps: [] }, f.parent.id, randomUUID(), {
+      role: 'worker', permissions: [], parentRunId: f.parent.id, workspace,
+    }, 'a'.repeat(64))).toThrow('invalid delegation parent');
+    expect(f.store.listRuns()).toHaveLength(1);
+    expect(f.store.deleteRun(f.parent.id)).toBe(true);
   });
 
 });

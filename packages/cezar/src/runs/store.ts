@@ -1071,7 +1071,7 @@ export class RunStore extends EventEmitter {
   ): RunRecord {
     const parent = this.runs.get(parentId);
     const authority = delegationStateSchema.safeParse(parent?.delegation);
-    if (!parent || !authority.success || authority.data.role !== 'root') {
+    if (!parent || !authority.success || authority.data.role !== 'root' || authority.data.historyDeletion) {
       throw new Error('invalid delegation parent');
     }
     // Validate retry identity independently of the newly proposed resource.

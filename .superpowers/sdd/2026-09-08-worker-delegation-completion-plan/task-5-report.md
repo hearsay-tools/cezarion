@@ -49,3 +49,26 @@ The final suite includes **16 new destruction/result/deletion regressions** and 
 - `/tmp/task5-final-shared-green.log`: `npm test -- packages/cezar/src/delegation/destruction-results.test.ts packages/cezar/src/delegation/results.test.ts packages/cezar/src/server/delegation-cleanup.test.ts packages/cezar/src/runs/store.test.ts packages/cezar/src/runs/delegation-state.test.ts` — **211 passed / 5 files**, 17.54s, after the final shared ownership check.
 - `/tmp/task5-final-shared-typecheck.log`: final full `npm run typecheck` passed, including server build/contract inlining and contract/client/server/web checks.
 - Final `git diff --check` passed. No known unresolved Task 5 defect; root's independent review and full integration gate remain.
+
+## Review fix round 1 — pending parent history deletion cannot execute again
+
+Verified the reviewer’s P2 scenario: an interrupted parent history deletion preserves its run and `historyDeletion: 'pending'`, but Continue previously accepted that terminal record. If its public status became active, spawn also accepted a new child; the new child prevented parent deletion while the deleting parent could not authorize child deletion. The deletion marker is irreversible and must remain a launch prohibition until deletion retry succeeds.
+
+`RunManager.historyDeletionPending` now feeds the existing execution-stop barriers, covering initial/continuation construction, pre-materialization/pre-launch checks, recovery and live message/monitoring paths. Continue refuses before any accepted-input, step or status mutation. Owned admission and queued revival refuse deleting parents; a legacy queued deletion can pass the old Finish-hold selector only to be cancelled by the stop barrier. Session provisioning, wait registration/reconciliation and lifecycle wake admission also refuse the marker. Both spawn authority (including replay and its post-await recheck) and `createOwnedRun` independently deny acceptance. No path clears `historyDeletion`; successful deletion retry remains available. Ordinary runs have no such marker and keep their existing behavior.
+
+Seven regressions create a real interrupted deletion checkpoint and test Continue, spawn under an active public status, queued/running recovery after reopening, fresh/Continue constructors, and direct owned-store acceptance. Each proves that no run/session/worktree/history is created as applicable and the parent can still be deleted. The Continue constructor test checks the actual transcript against its pre-call history: merely checking for a `session` event initially passed against the bug, so that weak assertion was replaced before the fix.
+
+RED evidence:
+
+- `/tmp/task5-round1-red.log`: **5 intended failures**, 4 selected guards passed; Continue and spawn accepted work, queued/running recovery re-admitted the parent, and fresh construction recreated its worktree.
+- `/tmp/task5-round1-construction-red.log`: direct Continue construction recreated transcript/execution history despite pending deletion.
+- `/tmp/task5-round1-acceptance-red.log`: temporarily removed only the new store acceptance condition, observed owned creation succeed unexpectedly, and restored store bytes in `finally`.
+
+GREEN evidence:
+
+- `/tmp/task5-round1-green.log`: **22 cleanup tests passed**, 5.23s, before adding the seventh direct store-acceptance test.
+- `/tmp/task5-round1-affected.log`: `npm test -- packages/cezar/src/delegation packages/cezar/src/runs/store.test.ts packages/cezar/src/runs/delegation-state.test.ts packages/cezar/src/workflows/worker-destroy.test.ts packages/cezar/src/server/delegation-cleanup.test.ts` — **610 passed / 17 files**, 26.19s, including all seven new regressions and all existing private termination barriers.
+- `/tmp/task5-round1-typecheck.log`: full `npm run typecheck` passed after the final code change.
+- Focused wait/recovery/monitoring integration results follow. `git diff --check` passed. No push or changes to the root-owned plan checkbox edit.
+
+Final round-1 lifecycle verification: `/tmp/task5-round1-lifecycle.log` — `npm test -- packages/cezar/src/workflows/worker-wait.test.ts -t 'readiness|monitoring|all-mode|Finish|restart|recovery'` passed **60 tests**, 114.38s; 45 unrelated wait cases were intentionally filtered. Final diff whitespace checks passed. The original reviewer can now perform the scoped rereview.

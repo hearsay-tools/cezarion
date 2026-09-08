@@ -759,9 +759,16 @@ export class RunManager {
     return verify(workspace) ? verify : undefined;
   }
 
+  /** Irreversible history removal is an execution tombstone, including for legacy children. */
+  private historyDeletionPending(runId: string): boolean {
+    const run = this.store.getRun(runId);
+    const parent = run?.delegation?.role === 'worker' ? this.store.getRun(run.delegation.parentRunId) : run;
+    return parent?.delegation?.role === 'root' && parent.delegation.historyDeletion === 'pending';
+  }
+
   private workerExecutionStopped(runId: string): boolean {
     const run = this.store.getRun(runId);
-    return run?.delegation?.role === 'invalid' || (run?.delegation?.role === 'worker' &&
+    return this.historyDeletionPending(runId) || run?.delegation?.role === 'invalid' || (run?.delegation?.role === 'worker' &&
       (!!run.delegation.destroy || this.stoppedWorkers.has(runId)));
   }
 
@@ -1053,6 +1060,7 @@ export class RunManager {
   }
   private provisionSession(runId: string, state: ActiveRun) {
     state.revokeDelegation?.(); state.revokeDelegation = undefined;
+    if (this.historyDeletionPending(runId)) return;
     const session = this.delegationProvisioner?.(runId);
     state.revokeDelegation = session?.revoke;
     return session;
@@ -1178,7 +1186,7 @@ export class RunManager {
 
   private ownedJob(run: RunRecord): { workflow: WorkflowDef; input: StartRunInput } {
     const delegation = delegationStateSchema.safeParse(run.delegation);
-    if (run.status !== 'queued' || !delegation.success || delegation.data.role !== 'worker' ||
+    if (this.historyDeletionPending(run.id) || run.status !== 'queued' || !delegation.success || delegation.data.role !== 'worker' ||
         delegation.data.workspace.ownerRunId !== run.id || delegation.data.destroy) {
       throw new DelegationPolicyError('incompatible_state', 'Run is not an executable owned creation');
     }
@@ -1324,7 +1332,7 @@ export class RunManager {
           // than being dequeued and re-queued (which would churn its position and its record).
           const next = this.queue.findIndex((id) => {
             const queued = this.store.getRun(id);
-            return !queued || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
+            return !queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
               (!anyHold || !accountHeldFor(queued, holds, defaultRunner ?? 'claude')));
           });
           if (next === -1) break; // every queued run has a durable reason to remain held
@@ -1431,7 +1439,7 @@ export class RunManager {
    * left in the queue as a ghost.
    */
   private async reviveQueuedRun(run: RunRecord, reason: string): Promise<void> {
-    if (this.isActive(run.id)) return;
+    if (this.isActive(run.id) || this.workerExecutionStopped(run.id)) return;
     const queuedContinuation = [...run.steps]
       .reverse()
       .find((step) => step.status === 'pending' && step.id.startsWith('continue-'));
@@ -2519,7 +2527,7 @@ export class RunManager {
     const parsed = workerWaitRequestSchema.parse(request);
     const run = this.store.getRun(parentId);
     const state = this.active.get(parentId);
-    if (run?.delegation?.role !== 'root' || !['running', 'waiting'].includes(run.status) ||
+    if (run?.delegation?.role !== 'root' || run.delegation.historyDeletion || !['running', 'waiting'].includes(run.status) ||
       !state?.session?.open || state.cancelled || state.pendingHumanAsk || this.hasPendingHumanAsk(parentId) || run.delegation.wait || run.delegation.finishRequestedAt) {
       throw new DelegationPolicyError('incompatible_state', 'parent cannot register a worker wait');
     }
@@ -2597,7 +2605,7 @@ export class RunManager {
     this.reconcilingWorkers = true;
     try {
       for (const parent of this.store.listRuns()) {
-        if (parent.delegation?.role !== 'root') continue;
+        if (parent.delegation?.role !== 'root' || parent.delegation.historyDeletion) continue;
         if (parent.status === 'cancelled' && parent.delegation.finishRequestedAt) {
           this.store.commitRootFinishCancellation(parent.id);
         }
@@ -2703,7 +2711,7 @@ export class RunManager {
   queueWorkerWake(parentId: string): void {
     const run = this.store.getRun(parentId);
     const wait = this.workerWait(parentId);
-    if (this.disposed || this.rootFinishRequested(parentId) || !run || !wait?.wakeId || wait.phase !== 'wake-pending' ||
+    if (this.disposed || this.historyDeletionPending(parentId) || this.rootFinishRequested(parentId) || !run || !wait?.wakeId || wait.phase !== 'wake-pending' ||
       !['queued', 'running', 'waiting'].includes(run.status)) return;
     const existing = run.agentInputs?.find(input => input.id === wait.wakeId);
     if (existing?.deliveredAt) return;
@@ -3080,6 +3088,7 @@ export class RunManager {
     if (this.active.has(runId) || this.executions.has(runId)) return { ok: false, error: 'run is still active' };
     const run = this.store.getRun(runId);
     if (!run) return { ok: false, error: 'not found' };
+    if (this.historyDeletionPending(runId)) return { ok: false, error: 'Parent history deletion is pending; retry deletion' };
     if (run.delegation?.role === 'worker' && this.store.getRun(run.delegation.parentRunId)?.status === 'review') {
       return { ok: false, error: 'Continue the reviewing parent before continuing its worker' };
     }

@@ -24,6 +24,9 @@ function requireRootAuthority(caller: Caller, parent: RunRecord | undefined, pro
 }
 
 function requireActiveParent(parent: RunRecord): void {
+  if (parent.delegation?.role === 'root' && parent.delegation.historyDeletion) {
+    throw new DelegationPolicyError('incompatible_state', 'Parent history deletion is pending; retry deletion');
+  }
   if (parent.status !== 'running' && parent.status !== 'waiting') {
     throw new DelegationPolicyError('incompatible_state', 'Parent session is not active');
   }
