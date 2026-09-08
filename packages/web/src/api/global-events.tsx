@@ -171,6 +171,13 @@ function reconcile(queryClient: QueryClient): void {
   // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
   void queryClient.invalidateQueries({ queryKey: queryKeys.worktrees })
   void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.providerStatus })
+  // GitHub edits never enter this stream. Reconnect (including server restart) must
+  // invalidate every project's list, leaving inactive caches stale until revisited.
+  // Restrict this to list keys: comments/checks/search have separate cache policies.
+  void queryClient.invalidateQueries({
+    predicate: ({ queryKey }) => queryKey.length === 3 && queryKey[1] === 'github'
+      && (queryKey[2] === null || typeof queryKey[2] === 'number'),
+  })
 }
 
 /**

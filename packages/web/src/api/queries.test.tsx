@@ -1,4 +1,4 @@
-import { QueryClientProvider } from '@tanstack/react-query'
+import { focusManager, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,6 +18,7 @@ import {
   useRecheckAgentAccount,
   useRefreshProviderStatus,
   useRetryProviderAuth,
+  useGithub,
   useHealth,
   useHealthSubscription,
   useRunnerModels,
@@ -1245,5 +1246,94 @@ describe('usePinRun scope ownership', () => {
     expect(client.getQueryState(['beta', 'runs'])?.isInvalidated).toBe(false)
     expect(client.getQueryData(['alpha', 'runs'])).toEqual([{ ...current, monitoringWakeCapReached: true }])
     setApiScope(null)
+  })
+})
+
+describe('GitHub list freshness (#152)', () => {
+  const data = (body: string) => ({
+    available: true,
+    issues: [{
+      kind: 'issue',
+      number: 152,
+      title: 'Requirements',
+      body,
+      author: 'ada',
+      createdAt: '2026-09-08T00:00:00Z',
+      labels: [],
+      url: 'https://github.com/acme/demo/issues/152',
+      comments: 0,
+    }],
+    prs: [],
+  })
+  beforeEach(() => {
+    vi.useFakeTimers()
+    focusManager.setFocused(true)
+    setApiScope('shop')
+  })
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+    focusManager.setFocused(undefined)
+    setApiScope(null)
+  })
+  async function tick(ms = 1) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+  }
+  it('refreshes mounted data once per minute, shares observers, and stops when hidden or unmounted', async () => {
+    fetchMock.mockImplementation(async () => json(data(fetchMock.mock.calls.length === 1 ? 'old' : 'edited')))
+    const wrap = wrapper()
+    const first = renderHook(() => useGithub({ limit: 1000 }), { wrapper: wrap })
+    const second = renderHook(() => useGithub({ limit: 1000 }), { wrapper: wrap })
+    await tick()
+    expect(first.result.current.data?.issues?.[0]?.body).toBe('old')
+    await tick(59_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await tick(1_010)
+    expect(first.result.current.data?.issues?.[0]?.body).toBe('edited')
+    expect(second.result.current.data?.issues?.[0]?.body).toBe('edited')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe('/api/v1/p/shop/github?limit=1000')
+    focusManager.setFocused(false)
+    await tick(180_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    first.unmount()
+    second.unmount()
+    focusManager.setFocused(true)
+    await tick(180_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+  it('fetches edits on revisit after one minute but reuses a fresh cache', async () => {
+    fetchMock.mockImplementation(async () => json(data(fetchMock.mock.calls.length === 1 ? 'old' : 'edited')))
+    const wrap = wrapper()
+    const first = renderHook(() => useGithub(), { wrapper: wrap })
+    await tick()
+    first.unmount()
+    await tick(30_000)
+    const fresh = renderHook(() => useGithub(), { wrapper: wrap })
+    await tick()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    fresh.unmount()
+    await tick(30_000)
+    const stale = renderHook(() => useGithub(), { wrapper: wrap })
+    await tick()
+    expect(stale.result.current.data?.issues?.[0]?.body).toBe('edited')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+  it('catches up on focus after the browser was hidden beyond the freshness bound', async () => {
+    fetchMock.mockImplementation(async () => json(data(fetchMock.mock.calls.length === 1 ? 'old' : 'edited')))
+    const { result } = renderHook(() => useGithub(), { wrapper: wrapper() })
+    await tick()
+    focusManager.setFocused(false)
+    await tick(90_000)
+    expect(result.current.data?.issues?.[0]?.body).toBe('old')
+    await act(async () => { focusManager.setFocused(true) })
+    await tick()
+    expect(result.current.data?.issues?.[0]?.body).toBe('edited')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+  it('does not fetch disabled lists', async () => {
+    renderHook(() => useGithub({}, false), { wrapper: wrapper() })
+    await tick(180_000)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

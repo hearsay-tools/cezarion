@@ -818,6 +818,18 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     ])
   })
 
+  it('invalidates cached GitHub lists across projects on reconnect without invalidating threads', () => {
+    const { source } = mount()
+    source.open()
+    const lists = [['default', 'github', null], ['shop', 'github', 1000]]
+    const thread = ['shop', 'github', 'comments', 'issue', 152]
+    for (const key of [...lists, thread]) client.setQueryData(key, { available: true })
+    source.drop()
+    source.open()
+    for (const key of lists) expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+    expect(client.getQueryState(thread)?.isInvalidated).toBe(false)
+  })
+
   it('marks every cached run list stale on reconnect, not only the active scope', () => {
     setApiScope('other-project')
     const { source } = mount()
