@@ -11,6 +11,14 @@ import time
 from balance import validate_inventory
 
 
+def release_verification_steps():
+    return [('install', ['npm', 'ci']),
+            ('typecheck', ['npm', 'run', 'typecheck']),
+            ('unit', ['npm', 'run', 'test:unit']),
+            ('vitest', ['npm', 'test']),
+            ('build', ['npm', 'run', 'build'])]
+
+
 def run_step(name, command, root, out):
     started = time.time()
     resource_file = out / f'{name}.time'
@@ -38,7 +46,7 @@ def main():
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--variant', required=True)
-    parser.add_argument('--phase', choices=['verify', 'snapshot'], default='verify')
+    parser.add_argument('--phase', choices=['verify', 'snapshot', 'release-verify'], default='verify')
     parser.add_argument('--max-workers', type=int, choices=[4, 6, 8])
     parser.add_argument('--shard', type=int, choices=[1, 2])
     args = parser.parse_args()
@@ -95,6 +103,10 @@ def main():
     else:
         steps += [('build', ['npm', 'run', 'build'])]
     steps += [('package', ['npm', 'run', 'test:package'])]
+    if args.phase == 'release-verify':
+        steps = release_verification_steps()
+        metadata['cache'] = 'setup-node npm cache; npm ci uses the default npm cache path'
+        (out / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
     if args.shard is not None or args.variant in ('shards-1', 'shards-2', 'combined-shards-1', 'combined-shards-2'):
         steps = [steps[0], ('build-server', ['npm', 'run', 'build:server']), ('vitest', vitest)]
     elif args.variant in ('shards-gate', 'combined-shards-gate'):
