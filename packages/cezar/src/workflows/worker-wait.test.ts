@@ -137,6 +137,22 @@ rl.on('close', () => process.exit(0));
     await manager.recover(); checkpoint('restart-recovered');
   }
 
+  it('all-mode replaces old observations when a selected worker accepts another execution', async () => {
+    const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
+    manager.registerWorkerWait(p.id, { workerIds: [first.id, second.id], timeoutSeconds: 600, mode: 'all' });
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    store.updateRun(first.id, { status: 'review' }); manager.reconcileWorkerWaits();
+    expect(waitOf(store.getRun(p.id))?.outcomes).toHaveLength(1);
+    store.commitWorkerContinuation(first.id, { status: 'queued' });
+    store.updateRun(second.id, { status: 'done' }); manager.reconcileWorkerWaits();
+    expect(waitOf(store.getRun(p.id))).toMatchObject({ phase: 'parked', outcomes: [{ workerId: second.id }] });
+    expect(waitOf(store.getRun(p.id))?.revisions).toContainEqual({ workerId: first.id, revision: 1 });
+    store.updateRun(first.id, { status: 'review' }); manager.reconcileWorkerWaits();
+    await until(() => !waitOf(store.getRun(p.id)));
+    expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { outcomes: expect.arrayContaining([{ workerId: first.id, revision: 1, status: 'review', observedAt: expect.any(String) }]) } });
+    expect(store.readEvents(p.id)).toContainEqual(expect.objectContaining({ type: 'worker-outcome', outcome: expect.objectContaining({ workerId: first.id, revision: 1 }) }));
+  });
+
   it('all-mode stays parked after one outcome and wakes exactly once after both', async () => {
     const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
     const wait = manager.registerWorkerWait(p.id, { workerIds: [first.id, second.id], timeoutSeconds: 600, mode: 'all' });

@@ -21,6 +21,7 @@ describe('bundled worker CLI', () => {
   it('uses only provisioned transport, emits JSON, and reports incomplete operations as nonzero', async () => {
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), 'work'], env)).toBe(0);
     const { workerId } = json(); expect(workerId).toBeTypeOf('string');
+    expect(await runWorkerCommand(['collect', workerId], env)).toBe(0); expect(json()).toMatchObject({ workerId, partial: true });
     expect(await runWorkerCommand(['inspect', workerId], env)).toBe(0); expect(json().status).toBe('queued');
     expect(await runWorkerCommand(['steer', workerId, 'next step'], env)).toBe(0); expect(json().state).toBe('queued');
     expect(await runWorkerCommand(['wait', workerId, '--timeout-seconds', '2'], env)).toBe(1); expect(json().code).toBe('incompatible_state');

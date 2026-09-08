@@ -9,6 +9,11 @@ const wait: WorkerWait = { id: randomUUID(), workerIds: [workerId], deadline: '2
 const outcome = (status: WorkerOutcome['status']): WorkerOutcome => ({ workerId, status, observedAt: now });
 
 describe('reconcileWorkerWait', () => {
+  it('does not settle a new revision with retained old observations', () => {
+    const selected = { ...wait, revisions: [{ workerId, revision: 1 }], outcomes: [outcome('review')] };
+    expect(reconcileWorkerWait(selected, [outcome('done')], now)).toMatchObject({ phase: 'registered', outcomes: [] });
+    expect(reconcileWorkerWait(selected, [{ ...outcome('review'), revision: 1 }], now)).toMatchObject({ phase: 'wake-pending', reason: 'outcome', outcomes: [{ revision: 1 }] });
+  });
   it('keeps an unexpired wait unchanged', () => {
     expect(reconcileWorkerWait(wait, [], now)).toBe(wait);
   });

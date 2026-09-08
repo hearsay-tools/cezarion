@@ -2,7 +2,7 @@ import { readBoundedContextFile } from './context.ts';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
-  workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
+  workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
   workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema,
   workerDiffSchema, workerWaitResultSchema, delegationErrorResponseSchema,
 } from '@open-mercato/cezar-contract';
@@ -17,7 +17,7 @@ export function delegationEndpoint(value: string | undefined): URL {
   return url;
 }
 
-const responseSchemas = { spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
+const responseSchemas = { collect: workerCollectedResultSchema, spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
   stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: workerWaitResultSchema, 'cancel-wait': workerCancelWaitResultSchema };
 const RESPONSE_BYTES = 3_145_728;
 async function boundedJson(response: Response): Promise<unknown> {
@@ -44,7 +44,7 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
     console.log(token ? json.replaceAll(token, '[REDACTED]') : json);
   };
   try {
-    const operation = argv[0] === 'cancel-wait' ? 'cancel-wait' : workerOperationSchema.parse(argv[0]);
+    const operation = argv[0] === 'collect' ? 'collect' : argv[0] === 'cancel-wait' ? 'cancel-wait' : workerOperationSchema.parse(argv[0]);
     const { values, positionals } = parseArgs({ args: argv.slice(1), allowPositionals: true, strict: true, options: {
       ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const }, backend: { type: 'string' as const }, model: { type: 'string' as const }, context: { type: 'string' as const }, 'context-file': { type: 'string' as const } } : {}),
       ...(operation === 'wait' ? { 'timeout-seconds': { type: 'string' as const }, mode: { type: 'string' as const } } : {}),
@@ -71,7 +71,7 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       if (positionals.length !== (operation === 'steer' ? 2 : 1)) throw Error('arguments');
       const { workerId } = workerParamsSchema.parse({ workerId: positionals[0] });
       path = operation === 'inspect' ? workerId : `${workerId}/${operation}`;
-      body = operation === 'steer' ? workerSteerRequestSchema.parse({ text: positionals[1] }) : operation === 'stop' || operation === 'destroy' ? {} : undefined;
+      body = operation === 'steer' ? workerSteerRequestSchema.parse({ text: positionals[1] }) : operation === 'stop' || operation === 'destroy' || operation === 'collect' ? {} : undefined;
     }
     let endpoint: URL;
     try {

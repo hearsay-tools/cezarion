@@ -47,6 +47,7 @@ export function createDelegationRoutes(service: DelegationService, credentials: 
     .post('/wait', jsonZodValidator(workerWaitRequestSchema, invalid), async c => c.json(await service.wait(c.get('caller'), c.req.valid('json')), 200))
     .post('/cancel-wait', jsonZodValidator(workerCancelWaitRequestSchema, invalid), async c => c.json(await service.cancelWait(c.get('caller'), c.req.valid('json')), 200))
     .get('/:workerId', paramZodValidator(workerParamsSchema, invalid), async c => c.json(await service.inspect(c.get('caller'), c.req.valid('param')), 200))
+    .post('/:workerId/collect', paramZodValidator(workerParamsSchema, invalid), jsonZodValidator(workerEmptyRequestSchema, { ...invalid, absent: {}, malformed: null }), async c => c.json(await service.collect(c.get('caller'), c.req.valid('param')), 200))
     .post('/:workerId/steer', paramZodValidator(workerParamsSchema, invalid), jsonZodValidator(workerSteerRequestSchema, invalid), async c => c.json(await service.steer(c.get('caller'), c.req.valid('param'), c.req.valid('json')), 200))
     .post('/:workerId/stop', paramZodValidator(workerParamsSchema, invalid), jsonZodValidator(workerEmptyRequestSchema, { ...invalid, absent: {}, malformed: null }), async c => c.json(await service.stop(c.get('caller'), c.req.valid('param')), 200))
     .post('/:workerId/destroy', paramZodValidator(workerParamsSchema, invalid), jsonZodValidator(workerEmptyRequestSchema, { ...invalid, absent: {}, malformed: null }), async c => {

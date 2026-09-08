@@ -21,7 +21,7 @@ describe('manager session delegation lifecycle', () => {
   let f: ReturnType<typeof fixture>, controller: DelegationController;
   const recoveredManagers: RunManager[] = [];
   const recoveredStores: RunStore[] = [];
-  const sessions: Array<{ spec: AgentRunSpec; session: AgentSession; emit(event: AgentEvent): void; finish(): void }> = [];
+  const sessions: Array<{ spec: AgentRunSpec; session: AgentSession; emit(event: AgentEvent): void; finish(text?: string): void }> = [];
   beforeEach(async () => {
     vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f = fixture(); vi.restoreAllMocks();
@@ -29,7 +29,7 @@ describe('manager session delegation lifecycle', () => {
     vi.spyOn(runners, 'createRunner').mockImplementation(backend => ({ backend: backend ?? 'claude', interrupt: async () => {}, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), startSession: (spec, emit) => {
       let resolve!: (value: AgentRunResult) => void; let open = true;
       const result = new Promise<AgentRunResult>(done => { resolve = done; });
-      const finish = () => { open = false; resolve({ text: '', toolCalls: [], tokensUsed: 0 }); };
+      const finish = (text = '') => { open = false; resolve({ text, toolCalls: [], tokensUsed: 0 }); };
       const session: AgentSession = { result, get open() { return open; }, sendMessage: () => open, sendAgentMessage: () => open ? Promise.resolve() : false, discardQueuedMessages: () => {}, interrupt: finish, end: finish };
       sessions.push({ spec, session, emit: event => emit?.(event), finish }); return session;
     } }));
@@ -71,6 +71,33 @@ describe('manager session delegation lifecycle', () => {
     accepted.pump.mockRestore(); await (f.manager as unknown as { pump(): Promise<void> }).pump();
     return { manager: f.manager, store: f.store };
   }
+  it('refuses a failed continuation checkpoint without advancing revision or opening another session', async () => {
+    const a = await acceptIdentityWorker(); await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);
+    sessions[1]!.emit({ type: 'session', sessionId: 'worker-session' }); sessions[1]!.finish();
+    expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    const run = f.store.getRun(a.child.workerId)!; const steps = structuredClone(run.steps);
+    const failure = vi.spyOn(f.store as unknown as { writeIndex(): void }, 'writeIndex').mockImplementation(() => { throw Error('disk failure'); });
+    expect(f.manager.continueRun(run.id, { text: 'again' })).toMatchObject({ ok: false });
+    expect(run.delegation).not.toHaveProperty('executionRevision'); expect(run.steps).toEqual(steps);
+    failure.mockRestore();
+    await until(() => !f.manager.isActive(run.id));
+    expect(sessions).toHaveLength(2);
+  });
+  it('persists result-only assistant evidence on initial execution and authorized Continue', async () => {
+    const a = await acceptIdentityWorker(); await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);
+    sessions[1]!.emit({ type: 'session', sessionId: 'worker-session' });
+    sessions[1]!.finish('Initial result-only summary');
+    expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    expect(await controller.service.collect(a.caller, { workerId: a.child.workerId })).toMatchObject({ revision: 0, settled: true, summary: { state: 'available', text: 'Initial result-only summary' } });
+    expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
+    expect(f.store.getRun(a.child.workerId)?.delegation).toMatchObject({ executionRevision: 1 });
+    const disk = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    expect(disk.getRun(a.child.workerId)?.delegation).toMatchObject({ executionRevision: 1 }); disk.flush();
+    await until(() => sessions.length === 3);
+    sessions[2]!.finish('Continuation result-only summary');
+    expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    expect(await controller.service.collect(a.caller, { workerId: a.child.workerId })).toMatchObject({ revision: 1, settled: true, summary: { state: 'available', text: 'Continuation result-only summary' } });
+  });
   it.each(['queued', 'restart', 'continue'] as const)('pins explicitly selected mixed-backend identity and defaults on %s', async mode => {
     const home = join(f.root, 'codex-account'); mkdirSync(home); vi.stubEnv('CODEX_HOME', home);
     writeFileSync(join(home, 'config.toml'), 'model = "gpt-5.1-codex"');

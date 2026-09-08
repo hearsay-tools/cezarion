@@ -14,6 +14,17 @@ describe('authenticated delegation HTTP family', () => {
     const response = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     expect(response.status).toBe(201); return workerSpawnResultSchema.parse(await response.json());
   }
+  it('collects under legacy inspect-only authority with strict middleware', async () => {
+    const { workerId } = await spawn(); const parent = f.store.getRun(f.parent.id)!;
+    if (parent.delegation?.role !== 'root') throw Error('fixture');
+    f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, permissions: ['inspect'] } }]);
+    expect((await request(`/${workerId}/collect`, {})).status).toBe(200);
+    expect((await request(`/${workerId}/collect`, { forged: true })).status).toBe(400);
+    expect((await request('/bad/collect', {})).status).toBe(400);
+    expect((await request(`/${workerId}/collect?token=forged`, {})).status).toBe(400);
+    const response = await app.request(`http://127.0.0.1/${workerId}/collect`, { method: 'POST', headers: { host: '127.0.0.1', authorization: `Bearer ${f.token}`, 'content-type': 'application/json' }, body: '{' });
+    expect(response.status).toBe(400);
+  });
   it('cancels with existing wait-only authority and returns retained settlement on retry', async () => {
     const { workerId } = await spawn(); const waitId = randomUUID();
     const delegation = f.store.getRun(f.parent.id)!.delegation!;

@@ -2437,6 +2437,7 @@ export class RunManager {
         worker.delegation.workspace.ownerRunId !== id) throw new DelegationPolicyError('denied_scope', 'not an owned worker');
     }
     const wait: WorkerWait = { id: randomUUID(), workerIds: parsed.workerIds,
+      revisions: parsed.workerIds.map(workerId => { const metadata = this.store.getRun(workerId)!.delegation; return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : 0 }; }),
       ...(parsed.mode === undefined ? {} : { mode: parsed.mode }),
       deadline: new Date(Date.now() + parsed.timeoutSeconds * 1000).toISOString(), phase: 'registered', outcomes: [] };
     this.store.commitDelegation([{ id: parentId, delegation: { ...run.delegation, wait } }]);
@@ -2534,11 +2535,20 @@ export class RunManager {
         const outcomes = this.store.listRuns().filter(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === parent.id).flatMap(child => {
           const outcome = workerOutcome(child, now); return outcome ? [outcome] : [];
         });
-        const next = reconcileWorkerWait(wait, outcomes, now);
+        // An unsettled wait follows an accepted continuation; old review observations
+        // cannot complete an all-wait while that worker is executing its next revision.
+        const revisions = wait.workerIds.map(workerId => {
+          const metadata = this.store.getRun(workerId)?.delegation;
+          return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : 0 };
+        });
+        const selected = wait.phase !== 'wake-pending' && JSON.stringify(wait.revisions) !== JSON.stringify(revisions)
+          ? { ...wait, revisions } : wait;
+        const next = reconcileWorkerWait(selected, outcomes, now);
         if (next !== wait) this.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: next } }]);
         for (const outcome of next.outcomes) {
           if (!this.store.readEvents(parent.id).some(event => event.type === 'worker-outcome' &&
-            event.waitId === wait.id && (event.outcome as { workerId?: string } | undefined)?.workerId === outcome.workerId)) {
+            event.waitId === wait.id && (event.outcome as { workerId?: string } | undefined)?.workerId === outcome.workerId &&
+            ((event.outcome as { revision?: number } | undefined)?.revision ?? 0) === (outcome.revision ?? 0))) {
             this.store.appendEvent(parent.id, { type: 'worker-outcome', waitId: wait.id, outcome });
           }
         }
@@ -3053,7 +3063,7 @@ export class RunManager {
 
     const continuations = run.steps.filter((s) => s.id.startsWith('continue-')).length;
     const stepId = `continue-${continuations + 1}`;
-    this.store.addStep(runId, { id: stepId, name: 'Continue', kind: 'agent' });
+    if (run.delegation?.role !== 'worker') this.store.addStep(runId, { id: stepId, name: 'Continue', kind: 'agent' });
     const recovered = deferForCapacity ? run.continuationMessage : undefined;
     const message = recovered ?? this.toQueuedMessage(runId, [
       ...(opts.text?.trim() ? [{ type: 'text' as const, text: opts.text.trim() }] : []),
@@ -3062,15 +3072,24 @@ export class RunManager {
     const prompt = message.text || 'Continue.';
     // Accepting a continuation is a crash boundary: both its recoverable status
     // and the original prompt/URLs must reach disk before the first startup await.
-    this.store.updateRun(runId, {
+    const acceptedPatch = {
       continuationMessage: { ...message, id: stepId, text: prompt,
-        origin: recovered ? recovered.origin : deferForCapacity ? 'lifecycle' : 'human' },
-      status: deferForCapacity ? 'queued' : 'running',
+        origin: recovered ? recovered.origin : deferForCapacity ? 'lifecycle' as const : 'human' as const },
+      status: deferForCapacity ? 'queued' as const : 'running' as const,
       error: undefined,
       finishedAt: undefined,
       currentStepId: deferForCapacity ? undefined : stepId,
-    });
-    this.store.flush();
+    };
+    if (run.delegation?.role === 'worker') {
+      try { this.store.commitWorkerContinuation(runId, acceptedPatch, { id: stepId, name: 'Continue', kind: 'agent' }); }
+      catch {
+        // No session or async launch exists yet. Release the private execution
+        // reservation through the same finalization/proof machinery.
+        void this.finishWorkerExecution(runId);
+        return { ok: false, error: 'worker execution checkpoint unavailable' };
+      }
+    }
+    else { this.store.updateRun(runId, acceptedPatch); this.store.flush(); }
     // Keep fresh viewable images even if persistence failed; recovery uses saved URLs.
     const images = contentBlocksOf(opts.images ?? []).filter((block) => block.type === 'image');
     if (deferForCapacity) {
@@ -3542,8 +3561,9 @@ export class RunManager {
       this.flushAgentInputs(runId);
       if (session.pid !== undefined) registerRunProcess(runId, session.pid);
       setupComplete = true;
-      await session.result.finally(() => state.agentInputFlight?.settled);
+      const result = await session.result.finally(() => state.agentInputFlight?.settled);
       if (this.preserveRunAfterDisposal(runId, state)) return;
+      this.persistWorkerAssistantResult(runId, stepId, result.text);
       if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
       if (!state.cancelled) {
         this.store.updateRun(runId, { continuationMessage: undefined });
@@ -4244,6 +4264,7 @@ export class RunManager {
       setupComplete = true;
       const result = await session.result.finally(() => state.agentInputFlight?.settled);
       if (this.isDisposedDelegatedRun(runId)) return null;
+      this.persistWorkerAssistantResult(runId, step.id, result.text);
       const inputOrSessionError = sessionError ?? state.agentInputError ??
         (!state.cancelled && this.workerWait(runId) ? 'Agent session ended before its accepted worker wait completed' : undefined);
       if (inputOrSessionError) {
@@ -4285,6 +4306,19 @@ export class RunManager {
       state.currentStepId = undefined;
       state.interrupt = () => undefined;
     }
+  }
+
+  /** Some adapters return assistant text only in their final result. Preserve that
+   * evidence for collection without duplicating an already persisted transcript. */
+  private persistWorkerAssistantResult(runId: string, stepId: string, text: string): void {
+    if (this.store.getRun(runId)?.delegation?.role !== 'worker' || !text.trim()) return;
+    const present = this.store.readEvents(runId).some(event => {
+      if (event.stepId !== stepId) return false;
+      const item = event.item as { kind?: string; role?: string; text?: string; parentItemId?: string } | undefined;
+      return (event.type === 'text' && typeof event.text === 'string' && !!event.text.trim()) ||
+        (event.type === 'item.completed' && item?.kind === 'message' && item.role === 'assistant' && !item.parentItemId && !!item.text?.trim());
+    });
+    if (!present) this.store.appendEvent(runId, { type: 'text', text, stepId });
   }
 
   /**

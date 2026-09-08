@@ -1,10 +1,11 @@
+import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
 import { join } from 'node:path';
 import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
-  type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
+  type WorkerCollectedResult, type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
   type WorkerParams, type WorkerSpawnRequest, type WorkerSteerRequest, type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract';
 import type { RunStore, RunRecord } from '../runs/store.ts';
@@ -13,7 +14,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
-import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeWait, DelegationPolicyError } from './policy.ts';
+import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { planOwnedWorkspace, readOwnedDiff, removeOwnedWorkspace, resolveWorkerBaseline } from './workspace.ts';
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
@@ -117,6 +118,27 @@ export class DelegationService {
       ...(worker.currentStepId === undefined ? {} : { currentStepId: worker.currentStepId }),
       ...(worker.activity === undefined ? {} : { activity: worker.activity }),
       ...(wait ? { wait } : {}), ...(worker.delegation.destroy ? { destroy: worker.delegation.destroy } : {}), ...(outcome ? { outcome } : {}) };
+  }
+  async collect(caller: Caller, params: WorkerParams): Promise<WorkerCollectedResult> {
+    const project = this.context(caller);
+    const { workerId } = workerParamsSchema.parse(params);
+    const parent = project.store.getRun(caller.runId);
+    const worker = project.store.getRun(workerId);
+    if (!worker) {
+      const retained = project.store.readWorkerResult(caller.runId, workerId);
+      authorizeRetainedResult(caller, parent, project.id, workerId, retained);
+      return project.store.commitWorkerResult(caller.runId, revalidateRetainedWorkerResult(project.root, retained!), project.store.readWorkerResultDiff(caller.runId, workerId));
+    }
+    authorizeWorker(caller, worker, 'inspect', parent, project.id);
+    // Store records preserve object references. Copy before yielding to Continue or cleanup.
+    const snapshot = structuredClone(worker);
+    const evidence = await collectWorkerEvidence(project.root, project.store, snapshot);
+    const current = this.target(caller, params, 'inspect');
+    if (current.project !== project || workerRevision(current.worker) !== workerRevision(snapshot) ||
+      current.worker.status !== snapshot.status || JSON.stringify(current.worker.delegation) !== JSON.stringify(snapshot.delegation)) {
+      throw new DelegationPolicyError('incompatible_state', 'Worker changed during collection; collect the current execution again');
+    }
+    return project.store.commitWorkerResult(parent!.id, evidence.result, evidence.diffSnapshot);
   }
   async steer(caller: Caller, params: WorkerParams, value: WorkerSteerRequest) {
     const request = workerSteerRequestSchema.parse(value);

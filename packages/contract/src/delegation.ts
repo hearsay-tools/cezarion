@@ -30,6 +30,7 @@ export const workerOutcomeSchema = z.object({
   status: z.enum(['review', 'done', 'failed', 'cancelled']),
   observedAt: z.iso.datetime(),
   summary: z.string().max(4_000).optional(),
+  revision: z.number().int().nonnegative().optional(),
 }).strict();
 export type WorkerOutcome = z.infer<typeof workerOutcomeSchema>;
 
@@ -40,6 +41,7 @@ export const workerWaitSchema = z.object({
   workerIds: workerIdsSchema,
   deadline: z.iso.datetime(),
   mode: workerWaitModeSchema.optional(),
+  revisions: z.array(z.object({ workerId: z.uuid(), revision: z.number().int().nonnegative() }).strict()).max(32).optional(),
   reason: z.enum(['outcome', 'timeout', 'cancelled']).optional(),
   phase: z.enum(['registered', 'parked', 'wake-pending']),
   outcomes: z.array(workerOutcomeSchema).max(32),
@@ -90,6 +92,49 @@ export const workerInputRecipeSchema = z.object({
 }).strict();
 export type WorkerInputRecipe = z.infer<typeof workerInputRecipeSchema>;
 
+/** Bounded result evidence; unavailable identifiers never promise retained bytes. */
+const unavailableEvidenceSchema = z.object({ state: z.literal('unavailable'), reason: z.enum(['no-assistant-output', 'missing', 'unreadable', 'unverified']), detail: errorSchema.optional() }).strict();
+const deletedEvidenceSchema = z.object({ state: z.literal('deleted'), reason: z.literal('missing') }).strict();
+const executionOutcomeSchema = z.enum(['running', 'review-ready', 'completed', 'failed', 'cancelled']);
+const workerArtifactSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('available'), id: z.string().max(255), path: z.string().max(8192) }).strict(),
+  unavailableEvidenceSchema.extend({ id: z.string().max(255), path: z.string().max(8192) }),
+  deletedEvidenceSchema.extend({ id: z.string().max(255), path: z.string().max(8192) }),
+]);
+export const workerCollectedResultSchema = z.object({
+  workerId: z.uuid(), parentRunId: z.uuid(), revision: z.number().int().nonnegative(), observedAt: z.iso.datetime(),
+  status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
+  outcome: z.enum(['running', 'review-ready', 'completed', 'failed', 'cancelled', 'destroyed']),
+  lastExecutionOutcome: executionOutcomeSchema, partial: z.boolean(), settled: z.boolean(), error: errorSchema.optional(),
+  backend: workerBackendSchema.optional(), model: z.string().max(512).optional(), baselineSha: commitShaSchema,
+  workspace: workerWorkspaceSchema,
+  cleanup: z.enum(['retained', 'requested', 'terminating', 'cleaning', 'complete', 'incomplete']),
+  summary: z.discriminatedUnion('state', [
+    z.object({ state: z.literal('available'), text: z.string().min(1).max(4000), source: z.literal('assistant'), seq: z.number().int().nonnegative(), truncated: z.boolean() }).strict(),
+    unavailableEvidenceSchema, deletedEvidenceSchema,
+  ]),
+  head: z.discriminatedUnion('state', [
+    z.object({ state: z.literal('available'), sha: commitShaSchema }).strict(),
+    unavailableEvidenceSchema.extend({ sha: commitShaSchema.optional() }), deletedEvidenceSchema.extend({ sha: commitShaSchema.optional() }),
+  ]),
+  diff: z.discriminatedUnion('state', [
+    // path addresses a workerResultFileSchema JSON document; its diffSnapshot field contains the patch.
+    z.object({ state: z.literal('available'), snapshotId: z.uuid(), path: z.string().min(1).max(8192), truncated: z.boolean() }).strict(),
+    unavailableEvidenceSchema, deletedEvidenceSchema,
+  ]),
+  artifacts: z.discriminatedUnion('state', [
+    z.object({ state: z.literal('available'), items: z.array(workerArtifactSchema).max(32), truncated: z.boolean() }).strict(),
+    unavailableEvidenceSchema, deletedEvidenceSchema,
+  ]),
+}).strict();
+export type WorkerCollectedResult = z.infer<typeof workerCollectedResultSchema>;
+export const workerResultFileSchema = z.object({ result: workerCollectedResultSchema, diffSnapshot: z.string().max(400_000).optional() }).strict();
+export const workerResultReferenceSchema = z.object({
+  workerId: z.uuid(), revision: z.number().int().nonnegative(), snapshotId: z.uuid(), observedAt: z.iso.datetime(),
+  lastExecutionOutcome: executionOutcomeSchema,
+  previous: z.object({ revision: z.number().int().nonnegative(), observedAt: z.iso.datetime(), lastExecutionOutcome: executionOutcomeSchema }).strict().optional(),
+}).strict();
+
 export const delegationStateSchema = z.discriminatedUnion('role', [
   z.object({
     role: z.literal('root'),
@@ -99,6 +144,7 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
       new Set(receipts.map(receipt => receipt.workerId)).size === receipts.length),
     wait: workerWaitSchema.optional(),
     lastWait: workerWaitSchema.optional(),
+    results: z.array(workerResultReferenceSchema).max(32).refine(results => new Set(results.map(result => result.workerId)).size === results.length).optional(),
     finishRequestedAt: z.iso.datetime().optional(),
   }).strict(),
   z.object({
@@ -108,6 +154,8 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
     workspace: workerWorkspaceSchema,
     destroy: workerDestroySchema.optional(),
     context: workerInputRecipeSchema.optional(),
+    executionRevision: z.number().int().nonnegative().optional(),
+    executionStartSeq: z.number().int().nonnegative().optional(),
   }).strict(),
   // A persisted quarantine is distinct from absent legacy metadata and grants no authority.
   z.object({ role: z.literal('invalid') }).strict(),

@@ -1,14 +1,14 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
-  agentInputSchema, delegationStateSchema, workerCreationReceiptSchema,
+  agentInputSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
   continuationMessageSchema,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
-import type { AgentInput, DelegationState } from '@open-mercato/cezar-contract';
+import type { AgentInput, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
@@ -964,6 +964,96 @@ export class RunStore extends EventEmitter {
       changed.add(patch.id);
     }
     this.commitIndex(proposed, changed);
+  }
+
+  /** Accepted execution revision is public lifecycle identity, separate from process generations. */
+  commitWorkerContinuation(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps' | 'delegation'>>, step?: Pick<StepState, 'id' | 'name' | 'kind'>): void {
+    const run = this.runs.get(id);
+    if (run?.delegation?.role !== 'worker') throw new Error('missing worker continuation target');
+    const delegation = delegationStateSchema.parse({ ...run.delegation,
+      executionRevision: (run.delegation.executionRevision ?? 0) + 1,
+      executionStartSeq: this.readEvents(id).reduce((seq, event) => Math.max(seq, event.seq), 0),
+    });
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...run, ...this.redactPatch(patch), delegation,
+      ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
+    });
+    this.commitIndex(proposed, new Set([id]));
+  }
+
+  private workerResultsDir(parentId: string): string {
+    z.uuid().parse(parentId);
+    const dir = join(this.dataDir, 'runs', `${parentId}-worker-results`);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (realpathSync(dir) !== resolve(dir) || !lstatSync(dir).isDirectory()) throw new Error('worker result storage redirected');
+    return dir;
+  }
+
+  workerResultSnapshotPath(parentId: string, workerId: string, snapshotId: string): string {
+    return join(this.dataDir, 'runs', `${z.uuid().parse(parentId)}-worker-results`, `${z.uuid().parse(workerId)}.${z.uuid().parse(snapshotId)}.json`);
+  }
+
+  private readWorkerResultFile(parentId: string, workerId: string): z.infer<typeof workerResultFileSchema> | undefined {
+    const parent = this.runs.get(parentId);
+    if (parent?.delegation?.role !== 'root' || !parent.delegation.receipts.some(receipt => receipt.workerId === workerId)) return undefined;
+    const reference = parent.delegation.results?.find(result => result.workerId === workerId);
+    if (!reference) return undefined;
+    try {
+      const path = join(this.workerResultsDir(parentId), `${z.uuid().parse(workerId)}.${z.uuid().parse(reference.snapshotId)}.json`);
+      const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      let raw: string;
+      try { const info = fstatSync(fd); if (!info.isFile() || info.size > 3_145_728) return undefined; raw = readFileSync(fd, 'utf8'); } finally { closeSync(fd); }
+      const file = workerResultFileSchema.parse(JSON.parse(raw));
+      if (file.result.diff.state === 'available' && file.result.diff.path !== path) return undefined;
+      if (file.result.parentRunId !== parentId || file.result.workerId !== workerId || file.result.revision !== reference.revision || file.result.observedAt !== reference.observedAt ||
+        (file.result.diff.state === 'available' && (file.result.diff.snapshotId !== reference.snapshotId || file.diffSnapshot === undefined))) return undefined;
+      return file;
+    } catch { return undefined; }
+  }
+
+  readWorkerResult(parentId: string, workerId: string): WorkerCollectedResult | undefined {
+    return this.readWorkerResultFile(parentId, workerId)?.result;
+  }
+  readWorkerResultDiff(parentId: string, workerId: string): string | undefined {
+    return this.readWorkerResultFile(parentId, workerId)?.diffSnapshot;
+  }
+
+  /** Publish a pointer only after its redacted immutable snapshot reaches disk. Failed index writes retain the old evidence. */
+  commitWorkerResult(parentId: string, value: WorkerCollectedResult, diffSnapshot?: string): WorkerCollectedResult {
+    const result = workerCollectedResultSchema.parse(this.redact({ type: 'worker-result', seq: 0, ts: value.observedAt, result: value }).result);
+    const parent = this.runs.get(parentId);
+    const worker = this.runs.get(result.workerId);
+    if (parent?.delegation?.role !== 'root' || result.parentRunId !== parentId ||
+      !parent.delegation.receipts.some(receipt => receipt.workerId === result.workerId)) throw new Error('missing result ownership');
+    if (worker && (worker.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parentId ||
+      worker.delegation.workspace.ownerRunId !== worker.id || (worker.delegation.executionRevision ?? 0) !== result.revision || worker.status !== result.status)) throw new Error('worker result revision changed');
+    const old = parent.delegation.results?.find(entry => entry.workerId === result.workerId);
+    if ((!worker && !this.readWorkerResult(parentId, result.workerId)) || (old && (old.revision > result.revision || (old.revision === result.revision && old.observedAt > result.observedAt)))) throw new Error('worker result is obsolete');
+    const snapshotId = result.diff.state === 'available' ? result.diff.snapshotId : randomUUID();
+    if (result.diff.state === 'available') result.diff.path = this.workerResultSnapshotPath(parentId, result.workerId, snapshotId);
+    if (result.diff.state === 'available' && diffSnapshot === undefined) throw new Error('missing diff snapshot');
+    const file = workerResultFileSchema.parse({ result, ...(diffSnapshot === undefined ? {} : { diffSnapshot: this.redactText(diffSnapshot) }) });
+    const dir = this.workerResultsDir(parentId);
+    const path = join(dir, `${result.workerId}.${snapshotId}.json`);
+    if (existsSync(path)) throw new Error('worker result snapshot identity already exists');
+    const temp = `${path}.${randomUUID()}.tmp`;
+    const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    try { writeFileSync(fd, JSON.stringify(file)); fsyncSync(fd); } finally { closeSync(fd); }
+    try {
+      renameSync(temp, path);
+      const reference = { workerId: result.workerId, revision: result.revision, observedAt: result.observedAt, snapshotId,
+        lastExecutionOutcome: result.lastExecutionOutcome,
+        ...(old ? { previous: old.revision === result.revision ? old.previous : { revision: old.revision, observedAt: old.observedAt, lastExecutionOutcome: old.lastExecutionOutcome } } : {}),
+      };
+      this.commitDelegation([{ id: parentId, delegation: { ...parent.delegation,
+        results: [...(parent.delegation.results ?? []).filter(entry => entry.workerId !== result.workerId), reference],
+      } }]);
+    } catch (error) { rmSync(temp, { force: true }); if (old?.snapshotId !== snapshotId) rmSync(path, { force: true }); throw error; }
+    // Keep the latest payload only; bounded previous outcome metadata lives in the pointer.
+    for (const name of readdirSync(dir)) if (name.startsWith(`${result.workerId}.`) && name !== `${result.workerId}.${snapshotId}.json`) {
+      try { rmSync(join(dir, name), { force: true }); } catch { /* retry on next collection */ }
+    }
+    return result;
   }
 
   /**

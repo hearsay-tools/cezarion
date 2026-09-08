@@ -1,5 +1,5 @@
 import { delegationStateSchema } from '@open-mercato/cezar-contract';
-import type { DelegationErrorResponse, WorkerOperation } from '@open-mercato/cezar-contract';
+import type { DelegationErrorResponse, WorkerOperation, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 import { isAuthenticatedCaller, type Caller } from './credentials.ts';
 
@@ -74,4 +74,12 @@ export function authorizeWait(caller: Caller, parent: RunRecord | undefined, pro
   if (parent.delegation?.role === 'root' && parent.delegation.finishRequestedAt) {
     throw new DelegationPolicyError('incompatible_state', 'Parent finish is pending');
   }
+}
+
+/** Retained results require both durable ownership and an actual parent-owned payload. */
+export function authorizeRetainedResult(caller: Caller, parent: RunRecord | undefined, projectId: string, workerId: string, result: WorkerCollectedResult | undefined): void {
+  requireRootAuthority(caller, parent, projectId, 'inspect');
+  if (!parent || parent.delegation?.role !== 'root' || !parent.delegation.receipts.some(receipt => receipt.workerId === workerId) ||
+    !result || result.parentRunId !== parent.id || result.workerId !== workerId) denyScope();
+  requireActiveParent(parent);
 }
