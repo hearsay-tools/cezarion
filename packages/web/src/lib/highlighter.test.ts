@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vitest'
 
 import { canonicalLang, highlight, highlightSync, isPlainLang, supportedLanguages } from './highlighter'

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
