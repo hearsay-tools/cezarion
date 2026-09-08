@@ -15,7 +15,6 @@ const arg = (flag, fallback) => {
   return i >= 0 && args[i + 1] !== undefined ? args[i + 1] : fallback;
 };
 const hostname = arg('--hostname', '127.0.0.1');
-const port = Number(arg('--port', '0'));
 
 const SESSION_ID = 'ses_mock_1';
 const MESSAGE_ID = 'msg_mock_1';
@@ -375,8 +374,10 @@ const server = createServer((req, res) => {
   });
 });
 
-server.listen(port, hostname, () => {
+// Test sessions share a host: let the OS allocate a port instead of racing
+// the runner’s random requested port against other fixtures.
+server.listen(0, hostname, () => {
   // The runner reads the bound URL back from stdout, like the real server.
-  console.log(`opencode server listening on http://${hostname}:${port}`);
+  console.log(`opencode server listening on http://${hostname}:${server.address().port}`);
 });
 process.on('SIGTERM', () => process.exit(0));
