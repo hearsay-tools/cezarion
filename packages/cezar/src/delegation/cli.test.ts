@@ -33,6 +33,25 @@ describe('bundled worker CLI', () => {
     expect(json()).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
     expect(JSON.stringify(output.mock.calls)).not.toContain(f.token);
   });
+  it('sends explicit wait modes and cancels a wait by ID using the provisioned transport', async () => {
+    expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), 'work'], env)).toBe(0);
+    const { workerId } = json();
+    for (const mode of ['one', 'any', 'all']) {
+      expect(await runWorkerCommand(['wait', workerId, '--mode', mode], env)).toBe(1);
+      expect(json().code).toBe('incompatible_state');
+    }
+    const waitId = randomUUID(); const delegation = f.store.getRun(f.parent.id)!.delegation!;
+    if (delegation.role !== 'root') throw Error('fixture');
+    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, permissions: ['wait'], wait: {
+      id: waitId, workerIds: [workerId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [],
+    } } }]);
+    expect(await runWorkerCommand(['cancel-wait', waitId], env)).toBe(0);
+    expect(json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' } });
+    expect(f.store.getRun(workerId)?.status).toBe('queued');
+    for (const argv of [['wait', workerId, randomUUID(), '--mode', 'one'], ['wait', workerId, '--mode', 'invalid'], ['cancel-wait'], ['cancel-wait', 'bad'], ['cancel-wait', waitId, 'extra']]) {
+      expect(await runWorkerCommand(argv, env)).toBe(1); expect(json().code).toBe('invalid_input');
+    }
+  });
   it.each([['spawn', 'task'], ['inspect', 'bad-id'], ['wait', randomUUID(), '--timeout-seconds', '0'], ['wait', randomUUID(), '--timeout-seconds', '1801'], ['wait', randomUUID(), '--timeout-seconds', '1e2'], ['inspect', randomUUID(), '--origin', 'http://evil'], ['inspect', randomUUID(), '--token', 'override'], ['inspect', randomUUID(), '--url', 'http://evil'], ['stop', randomUUID(), 'extra'], ['stop', randomUUID(), '--baseline', 'HEAD']])('rejects invalid arguments %j', async (...argv) => {
     expect(await runWorkerCommand(argv, env)).toBe(1); expect(json().code).toBe('invalid_input');
   });

@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
-  workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
+  workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
   workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema,
   workerDiffSchema, workerWaitResultSchema, delegationErrorResponseSchema,
 } from '@open-mercato/cezar-contract';
@@ -17,7 +17,7 @@ export function delegationEndpoint(value: string | undefined): URL {
 }
 
 const responseSchemas = { spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
-  stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: workerWaitResultSchema };
+  stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: workerWaitResultSchema, 'cancel-wait': workerCancelWaitResultSchema };
 const RESPONSE_BYTES = 3_145_728;
 async function boundedJson(response: Response): Promise<unknown> {
   if (Number(response.headers.get('content-length')) > RESPONSE_BYTES) { await response.body?.cancel(); throw Error('Response too large'); }
@@ -43,10 +43,10 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
     console.log(token ? json.replaceAll(token, '[REDACTED]') : json);
   };
   try {
-    const operation = workerOperationSchema.parse(argv[0]);
+    const operation = argv[0] === 'cancel-wait' ? 'cancel-wait' : workerOperationSchema.parse(argv[0]);
     const { values, positionals } = parseArgs({ args: argv.slice(1), allowPositionals: true, strict: true, options: {
       ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const } } : {}),
-      ...(operation === 'wait' ? { 'timeout-seconds': { type: 'string' as const } } : {}),
+      ...(operation === 'wait' ? { 'timeout-seconds': { type: 'string' as const }, mode: { type: 'string' as const } } : {}),
     } });
     let path: string = operation;
     let body: unknown;
@@ -56,7 +56,10 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
     } else if (operation === 'wait') {
       const timeout = values['timeout-seconds'];
       if (timeout !== undefined && (typeof timeout !== 'string' || !/^\d+$/.test(timeout))) throw Error('arguments');
-      body = workerWaitRequestSchema.parse({ workerIds: positionals, ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }) });
+      body = workerWaitRequestSchema.parse({ workerIds: positionals, ...(values.mode === undefined ? {} : { mode: values.mode }), ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }) });
+    } else if (operation === 'cancel-wait') {
+      if (positionals.length !== 1) throw Error('arguments');
+      body = workerCancelWaitRequestSchema.parse({ waitId: positionals[0] });
     } else {
       if (positionals.length !== (operation === 'steer' ? 2 : 1)) throw Error('arguments');
       const { workerId } = workerParamsSchema.parse({ workerId: positionals[0] });

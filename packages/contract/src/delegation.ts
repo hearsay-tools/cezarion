@@ -33,10 +33,14 @@ export const workerOutcomeSchema = z.object({
 }).strict();
 export type WorkerOutcome = z.infer<typeof workerOutcomeSchema>;
 
+export const workerWaitModeSchema = z.enum(['one', 'any', 'all']);
+
 export const workerWaitSchema = z.object({
   id: z.uuid(),
   workerIds: workerIdsSchema,
   deadline: z.iso.datetime(),
+  mode: workerWaitModeSchema.optional(),
+  reason: z.enum(['outcome', 'timeout', 'cancelled']).optional(),
   phase: z.enum(['registered', 'parked', 'wake-pending']),
   outcomes: z.array(workerOutcomeSchema).max(32),
   wakeId: z.uuid().optional(),
@@ -66,6 +70,7 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
       new Set(receipts.map(receipt => receipt.requestId)).size === receipts.length &&
       new Set(receipts.map(receipt => receipt.workerId)).size === receipts.length),
     wait: workerWaitSchema.optional(),
+    lastWait: workerWaitSchema.optional(),
     finishRequestedAt: z.iso.datetime().optional(),
   }).strict(),
   z.object({
@@ -105,7 +110,8 @@ export type WorkerSteerRequest = z.infer<typeof workerSteerRequestSchema>;
 export const workerWaitRequestSchema = z.object({
   workerIds: workerIdsSchema,
   timeoutSeconds: z.number().int().min(1).max(1800).default(600),
-}).strict();
+  mode: workerWaitModeSchema.optional(),
+}).strict().refine(request => request.mode !== 'one' || request.workerIds.length === 1, { message: 'one mode requires exactly one worker' });
 export type WorkerWaitRequest = z.infer<typeof workerWaitRequestSchema>;
 
 export const agentInputSchema = z.object({
@@ -177,3 +183,8 @@ export type WorkerSteerResult = z.infer<typeof workerSteerResultSchema>;
 export const workerWaitResultSchema = z.object({ wait: workerWaitSchema, instruction: z.string().min(1).max(1_000) }).strict();
 export type WorkerWaitResult = z.infer<typeof workerWaitResultSchema>;
 export const workerEmptyRequestSchema = z.object({}).strict();
+
+export const workerCancelWaitRequestSchema = z.object({ waitId: z.uuid() }).strict();
+export type WorkerCancelWaitRequest = z.infer<typeof workerCancelWaitRequestSchema>;
+export const workerCancelWaitResultSchema = z.object({ wait: workerWaitSchema }).strict();
+export type WorkerCancelWaitResult = z.infer<typeof workerCancelWaitResultSchema>;

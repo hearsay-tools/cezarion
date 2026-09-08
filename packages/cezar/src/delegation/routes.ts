@@ -1,7 +1,7 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { ZodError } from 'zod';
-import { workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
+import { workerCancelWaitRequestSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
 import { jsonZodValidator, paramZodValidator, queryZodValidator } from '../server/validators.ts';
 import { isLoopbackHostHeader } from '../server/capabilities.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
@@ -45,6 +45,7 @@ export function createDelegationRoutes(service: DelegationService, credentials: 
     .use('*', queryZodValidator(workerEmptyRequestSchema, invalid))
     .post('/spawn', jsonZodValidator(workerSpawnRequestSchema, invalid), async c => c.json(await service.spawn(c.get('caller'), c.req.valid('json')), 201))
     .post('/wait', jsonZodValidator(workerWaitRequestSchema, invalid), async c => c.json(await service.wait(c.get('caller'), c.req.valid('json')), 200))
+    .post('/cancel-wait', jsonZodValidator(workerCancelWaitRequestSchema, invalid), async c => c.json(await service.cancelWait(c.get('caller'), c.req.valid('json')), 200))
     .get('/:workerId', paramZodValidator(workerParamsSchema, invalid), async c => c.json(await service.inspect(c.get('caller'), c.req.valid('param')), 200))
     .post('/:workerId/steer', paramZodValidator(workerParamsSchema, invalid), jsonZodValidator(workerSteerRequestSchema, invalid), async c => c.json(await service.steer(c.get('caller'), c.req.valid('param'), c.req.valid('json')), 200))
     .post('/:workerId/stop', paramZodValidator(workerParamsSchema, invalid), jsonZodValidator(workerEmptyRequestSchema, { ...invalid, absent: {}, malformed: null }), async c => c.json(await service.stop(c.get('caller'), c.req.valid('param')), 200))

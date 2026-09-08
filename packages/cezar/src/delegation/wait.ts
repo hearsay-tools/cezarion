@@ -8,7 +8,15 @@ export function reconcileWorkerWait(wait: WorkerWait, outcomes: readonly WorkerO
       collected.push(outcome);
     }
   }
-  if (!collected.length && Date.parse(now) < Date.parse(wait.deadline) && wait.phase !== 'wake-pending') return wait;
-  if (wait.phase === 'wake-pending' && wait.wakeId && collected.length === wait.outcomes.length) return wait;
-  return { ...wait, phase: 'wake-pending', outcomes: collected, wakeId: wait.wakeId ?? wait.id };
+  const satisfies = (entries: readonly WorkerOutcome[]) => (wait.mode ?? 'any') === 'all'
+    ? wait.workerIds.every(id => entries.some(outcome => outcome.workerId === id))
+    : entries.length > 0;
+  // An old pending record already settled. Infer from its persisted observations,
+  // before adding new outcomes, so later wall time cannot change why it woke.
+  const reason = wait.reason ?? (wait.phase === 'wake-pending'
+    ? satisfies(wait.outcomes) ? 'outcome' : 'timeout'
+    : satisfies(collected) ? 'outcome' : Date.parse(now) >= Date.parse(wait.deadline) ? 'timeout' : undefined);
+  if (!reason) return collected.length === wait.outcomes.length ? wait : { ...wait, outcomes: collected };
+  if (wait.phase === 'wake-pending' && wait.wakeId && wait.reason === reason && collected.length === wait.outcomes.length) return wait;
+  return { ...wait, phase: 'wake-pending', reason, outcomes: collected, wakeId: wait.wakeId ?? wait.id };
 }

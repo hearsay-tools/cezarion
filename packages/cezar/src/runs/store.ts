@@ -12,6 +12,7 @@ import type { AgentInput, DelegationState } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
+import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -878,7 +879,7 @@ export class RunStore extends EventEmitter {
     this.commitIndex(proposed, new Set([id]));
   }
 
-  /** Retire exactly one wait together with any human message that superseded it. */
+  /** Retain the settled receipt and retire exactly one wait together with any human message that superseded it. */
   commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage): void {
     const run = this.runs.get(id);
     if (run?.delegation?.role !== 'root' || run.delegation.wait?.id !== waitId) {
@@ -887,7 +888,9 @@ export class RunStore extends EventEmitter {
     const { wait, ...delegation } = run.delegation;
     const message = acceptedHumanMessage ? queuedMessageSchema.parse(acceptedHumanMessage) : undefined;
     const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, delegation,
+    proposed.set(id, { ...run, delegation: { ...delegation, lastWait: wait.phase === 'wake-pending'
+      ? reconcileWorkerWait(wait, [], new Date().toISOString())
+      : { ...wait, phase: 'wake-pending', reason: wait.reason ?? 'cancelled', wakeId: wait.wakeId ?? wait.id } },
       ...(run.agentInputs ? { agentInputs: run.agentInputs.filter(input => input.id !== wait.wakeId || input.deliveredAt) } : {}),
       ...(message ? {
         queuedMessages: [...(run.queuedMessages ?? []), message],

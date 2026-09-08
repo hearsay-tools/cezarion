@@ -65,3 +65,13 @@ export function authorizeSpawn(caller: Caller, parent: RunRecord | undefined, pr
     throw new DelegationPolicyError('capacity_limit', 'Parent worker creation limit reached');
   }
 }
+
+/** Cancelling an owned wait uses the existing wait grant, including receipt reads. */
+export function authorizeWait(caller: Caller, parent: RunRecord | undefined, projectId: string): void {
+  requireRootAuthority(caller, parent, projectId, 'wait');
+  if (!parent) denyScope();
+  requireActiveParent(parent);
+  if (parent.delegation?.role === 'root' && parent.delegation.finishRequestedAt) {
+    throw new DelegationPolicyError('incompatible_state', 'Parent finish is pending');
+  }
+}

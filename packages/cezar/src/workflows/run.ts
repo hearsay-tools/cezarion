@@ -2403,11 +2403,32 @@ export class RunManager {
         worker.delegation.workspace.ownerRunId !== id) throw new DelegationPolicyError('denied_scope', 'not an owned worker');
     }
     const wait: WorkerWait = { id: randomUUID(), workerIds: parsed.workerIds,
+      ...(parsed.mode === undefined ? {} : { mode: parsed.mode }),
       deadline: new Date(Date.now() + parsed.timeoutSeconds * 1000).toISOString(), phase: 'registered', outcomes: [] };
     this.store.commitDelegation([{ id: parentId, delegation: { ...run.delegation, wait } }]);
     this.reconcileWorkerWaits();
     if (this.waiting.has(parentId) || state.atTurnBoundary === state.session) this.parkWorkerWait(parentId, state);
     return this.workerWait(parentId)!;
+  }
+
+  /** Cancel only the wait; persist its settlement before ordinary wake admission. */
+  cancelWorkerWait(parentId: string, waitId: string): WorkerWait {
+    const run = this.store.getRun(parentId);
+    if (run?.delegation?.role !== 'root') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    const { wait, lastWait } = run.delegation;
+    if (wait?.id !== waitId) {
+      if (lastWait?.id === waitId) return lastWait;
+      throw new DelegationPolicyError('incompatible_state', 'Worker wait is no longer current');
+    }
+    if (this.disposed || !['queued', 'running', 'waiting'].includes(run.status) || run.delegation.finishRequestedAt) {
+      throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a worker wait');
+    }
+    const settled = wait.phase === 'wake-pending'
+      ? reconcileWorkerWait(wait, [], new Date().toISOString())
+      : { ...wait, phase: 'wake-pending' as const, reason: 'cancelled' as const, wakeId: wait.wakeId ?? wait.id };
+    this.store.commitDelegation([{ id: parentId, delegation: { ...run.delegation, wait: settled, lastWait: settled } }]);
+    this.reconcileWorkerWaits();
+    return this.workerWait(parentId) ?? settled;
   }
 
   private workerWait(parentId: string): WorkerWait | undefined {
@@ -2527,7 +2548,7 @@ export class RunManager {
     const contextOutcomes = wait.outcomes.map(outcome => ({ ...outcome,
       ...(outcome.summary ? { summary: outcome.summary.slice(0, 256) } : {}),
     }));
-    const text = `Worker wait ${wait.id} (${Date.now() >= Date.parse(wait.deadline) ? 'deadline reached' : 'terminal outcome'}). ` +
+    const text = `Worker wait ${wait.id} (${wait.reason === 'cancelled' ? 'cancelled' : wait.reason === 'timeout' ? 'deadline reached' : 'terminal outcome'}). ` +
       `Review is not merge permission. Selected workers: ${JSON.stringify(wait.workerIds.map(workerId => ({
         workerId, status: this.store.getRun(workerId)?.status ?? 'unavailable',
       })))}. Outcomes (summaries abbreviated): ${JSON.stringify(contextOutcomes)}`;

@@ -14,6 +14,30 @@ describe('authenticated delegation HTTP family', () => {
     const response = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     expect(response.status).toBe(201); return workerSpawnResultSchema.parse(await response.json());
   }
+  it('cancels with existing wait-only authority and returns retained settlement on retry', async () => {
+    const { workerId } = await spawn(); const waitId = randomUUID();
+    const delegation = f.store.getRun(f.parent.id)!.delegation!;
+    if (delegation.role !== 'root') throw Error('fixture');
+    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, permissions: ['wait'], wait: {
+      id: waitId, workerIds: [workerId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [],
+    } } }]);
+    const response = await request('/cancel-wait', { waitId });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' } });
+    f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId);
+    expect(await (await request('/cancel-wait', { waitId })).json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' } });
+    expect(f.store.getRun(workerId)?.status).toBe('queued');
+    const retired = f.store.getRun(f.parent.id)!.delegation!;
+    if (retired.role !== 'root') throw Error('fixture');
+    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...retired, permissions: ['inspect'] } }]);
+    expect((await request('/cancel-wait', { waitId })).status).toBe(403);
+  });
+  it('validates cancellation IDs and bodies before any state mutation', async () => {
+    for (const body of [{}, { waitId: 'bad' }, { waitId: randomUUID(), parentRunId: f.parent.id }]) {
+      expect((await request('/cancel-wait', body)).status).toBe(400);
+    }
+    expect((await request('/cancel-wait', { waitId: randomUUID() })).status).toBe(409);
+  });
   it.each(['stop', 'destroy'])('rejects malformed %s without lifecycle or intent changes, while accepting empty bodies', async operation => {
     const { workerId } = await spawn();
     const before = structuredClone(f.store.getRun(workerId));

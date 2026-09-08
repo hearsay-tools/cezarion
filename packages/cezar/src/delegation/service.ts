@@ -1,7 +1,7 @@
 import { acceptedWorkerIdentitySchema } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema,
+  workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
   type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
   type WorkerParams, type WorkerSpawnRequest, type WorkerSteerRequest, type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract';
@@ -11,7 +11,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
-import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, DelegationPolicyError } from './policy.ts';
+import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeWait, DelegationPolicyError } from './policy.ts';
 import { planOwnedWorkspace, readOwnedDiff, removeOwnedWorkspace, resolveWorkerBaseline } from './workspace.ts';
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
@@ -121,7 +121,13 @@ export class DelegationService {
     for (const workerId of request.workerIds) this.target(caller, { workerId }, 'wait');
     const project = this.context(caller);
     const wait = project.manager.registerWorkerWait(caller.runId, request);
-    return { wait, instruction: `Wait registered until ${wait.deadline}. End your turn now to release capacity. Cezar will resume you on a selected terminal outcome or the deadline; no automatic re-wait.` };
+    return { wait, instruction: `Wait registered until ${wait.deadline}. End your turn now to release capacity. Cezar will resume you when ${wait.mode === 'all' ? 'all selected workers settle' : 'a selected worker settles'}, or on the deadline/cancellation; no automatic re-wait.` };
+  }
+  async cancelWait(caller: Caller, value: WorkerCancelWaitRequest) {
+    const { waitId } = workerCancelWaitRequestSchema.parse(value);
+    const project = this.context(caller);
+    authorizeWait(caller, project.store.getRun(caller.runId), project.id);
+    return { wait: project.manager.cancelWorkerWait(caller.runId, waitId) };
   }
   async destroy(caller: Caller, params: WorkerParams) {
     const { project, worker } = this.target(caller, params, 'destroy');

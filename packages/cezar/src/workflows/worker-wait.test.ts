@@ -137,6 +137,94 @@ rl.on('close', () => process.exit(0));
     await manager.recover(); checkpoint('restart-recovered');
   }
 
+  it('all-mode stays parked after one outcome and wakes exactly once after both', async () => {
+    const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
+    const wait = manager.registerWorkerWait(p.id, { workerIds: [first.id, second.id], timeoutSeconds: 600, mode: 'all' });
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    store.updateRun(first.id, { status: 'done' }); manager.reconcileWorkerWaits();
+    expect(waitOf(store.getRun(p.id))).toMatchObject({ phase: 'parked', mode: 'all', outcomes: [{ workerId: first.id }] });
+    expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
+    store.updateRun(second.id, { status: 'done' }); manager.reconcileWorkerWaits();
+    await until(() => !waitOf(store.getRun(p.id)));
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+    expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'outcome' } });
+  });
+
+  it('cancels before park durably without releasing an executing parent slot', async () => {
+    const release = join(root, 'release-cancelled-turn'); const wire = controlledWire({ firstResultGate: release });
+    const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
+    const wait = register(p.id, [w.id]);
+    const cancelled = manager.cancelWorkerWait(p.id, wait.id);
+    expect(cancelled).toMatchObject({ id: wait.id, phase: 'wake-pending', reason: 'cancelled', wakeId: wait.id });
+    expect(semaphore.busy()).toBe(1); expect(store.getRun(w.id)?.status).toBe('queued');
+    const disk = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[];
+    expect(disk.find(run => run.id === p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'cancelled' } });
+    expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
+    expect(manager.cancelWorkerWait(p.id, wait.id)).toEqual(cancelled);
+    writeFileSync(release, 'release');
+    await until(() => !waitOf(store.getRun(p.id)));
+    expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+    expect(store.getRun(p.id)?.agentInputs?.[0]?.text).toContain('cancelled');
+  });
+
+  it('cancelled parked wait queues one wake behind a running worker and stale IDs cannot cancel a later wait', async () => {
+    const p = await parent(); const w = await worker(p.id, 'mock:slow');
+    const wait = register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked' && store.getRun(w.id)?.status === 'running');
+    manager.cancelWorkerWait(p.id, wait.id); manager.cancelWorkerWait(p.id, wait.id); manager.reconcileWorkerWaits();
+    expect(store.getRun(w.id)?.status).toBe('running'); expect(semaphore.busy()).toBe(1);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+    manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15_000);
+    await until(() => !waitOf(store.getRun(p.id)));
+    const nextWorker = await worker(p.id); const next = register(p.id, [nextWorker.id]);
+    expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
+    expect(waitOf(store.getRun(p.id))?.id).toBe(next.id);
+    expect(() => manager.cancelWorkerWait(p.id, randomUUID())).toThrow();
+    expect(waitOf(store.getRun(p.id))?.reason).toBeUndefined();
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
+  });
+
+  it('restarts cancelled settlement and retains its receipt after delivery and another restart', async () => {
+    const release = join(root, 'release-recovered-turn'); const wire = controlledWire({ firstResultGate: release });
+    const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
+    const wait = register(p.id, [w.id]); manager.cancelWorkerWait(p.id, wait.id);
+    const disk = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
+    writeFileSync(release, 'release');
+    await restart(false, disk);
+    await until(() => !waitOf(store.getRun(p.id)));
+    expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+    expect(store.getRun(w.id)?.status).not.toBe('cancelled');
+    await restart();
+    expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
+  });
+
+  it('failed cancellation checkpoint publishes no wake and keeps the original wait retryable', async () => {
+    const p = await parent('mock:slow'); const w = await worker(p.id); const wait = register(p.id, [w.id]);
+    store.flush(); const diskPath = join(root, '.ai/cezar/runs.json'); const disk = readFileSync(diskPath, 'utf8');
+    rmSync(diskPath); mkdirSync(diskPath);
+    try {
+      expect(() => manager.cancelWorkerWait(p.id, wait.id)).toThrow();
+      expect(waitOf(store.getRun(p.id))).toEqual(wait);
+      expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
+      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('lastWait');
+      expect(semaphore.busy()).toBe(1);
+    } finally { rmSync(diskPath, { recursive: true }); writeFileSync(diskPath, disk); }
+    expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
+  });
+
+  it('parent cancellation retires its wait with a receipt while cancelling workers', async () => {
+    const p = await parent(); const w = await worker(p.id); const wait = register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    manager.cancel(p.id);
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'cancelled' } });
+    await until(() => store.getRun(w.id)?.status === 'cancelled');
+    expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
+  });
+
   it.each(['agent', 'check'].flatMap(next => ['early', 'late'].map(timing => ({ next, timing }))))('holds a nonfinal agent session and the following $next behind $timing admitted worker wake at cap one', async ({ next, timing }) => {
     const run = manager.startRun({ name: 'multi-step wait', source: 'built-in', steps: [
       { id: 'first', prompt: 'mock:hold' },
