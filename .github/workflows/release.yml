@@ -35,7 +35,7 @@ jobs:
   # Split like ci.yml: the suite owns one green job; publish is a dependent.
   verify:
     name: Verify before release
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     # Releases from `main` (the stable trunk) or a `release/*` maintenance branch —
     # the latter is how a patch line (e.g. `release/0.9.x`) ships fixes without the
@@ -74,7 +74,7 @@ jobs:
   release:
     name: Release ${{ inputs.bump }} to npm (latest)
     needs: verify
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
     # Gate the publish behind a required-reviewer approval. If the environment
