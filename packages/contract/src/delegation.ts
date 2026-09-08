@@ -146,6 +146,7 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
     lastWait: workerWaitSchema.optional(),
     results: z.array(workerResultReferenceSchema).max(32).refine(results => new Set(results.map(result => result.workerId)).size === results.length).optional(),
     finishRequestedAt: z.iso.datetime().optional(),
+    completion: z.object({ phase: z.enum(['waiting', 'attention']), waitId: z.uuid().optional() }).strict().optional(),
   }).strict(),
   z.object({
     role: z.literal('worker'),

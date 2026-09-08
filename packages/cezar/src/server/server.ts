@@ -3875,7 +3875,7 @@ export function createApp(deps: ServerDeps) {
       const id = c.req.param('id');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
       const finished = manager.finish(id);
-      if (!finished) return c.json({ error: 'no open session' }, 409);
+      if (!finished) return c.json({ error: manager.finishBlockedReason(id) ?? 'no open session' }, 409);
       return c.json({ finished: true });
     })
 

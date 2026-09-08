@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
 import { RunStore, type RunRecord } from '../runs/store.ts';
+import * as runnerFactory from '../core/runner-factory.ts';
+import { collectWorkerEvidence } from '../delegation/results.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from './run.ts';
@@ -137,17 +139,235 @@ rl.on('close', () => process.exit(0));
     await manager.recover(); checkpoint('restart-recovered');
   }
 
+  for (const mode of ['fresh', 'continuation'] as const) {
+    it(`readiness ${mode}: DONE waits for live workers without accepting human Finish`, async () => {
+      const p = await parent();
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      if (mode === 'continuation') {
+        expect(manager.finish(p.id)).toBe(true); await until(() => !manager.isActive(p.id));
+        expect(manager.continueRun(p.id, { text: 'mock:hold' }).ok).toBe(true);
+        await until(() => store.getRun(p.id)?.status === 'waiting');
+      }
+      const w = await worker(p.id);
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+      await until(() => waitOf(store.getRun(p.id))?.phase === 'parked' || terminal.includes(store.getRun(p.id)?.status ?? ''));
+      expect(store.getRun(p.id)?.status).toBe('waiting');
+      expect(waitOf(store.getRun(p.id))).toMatchObject({ mode: 'all', workerIds: [w.id] });
+      expect(manager.finish(p.id)).toBe(false);
+      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('finishRequestedAt');
+      expect(store.getRun(w.id)?.status).toBe('queued');
+      expect(semaphore.busy()).toBe(0);
+    });
+  }
+
+  it('readiness closed session defers successful done with outstanding workers', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
+    state.session.end();
+    await until(() => !manager.isActive(p.id));
+    expect(store.getRun(p.id)?.status).toBe('waiting');
+    expect(waitOf(store.getRun(p.id))).toMatchObject({ mode: 'all', workerIds: [w.id] });
+    expect(store.getRun(w.id)?.status).toBe('queued');
+  });
+
+  it('readiness public cancellation does not wake until private completion is durable', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    const generation = store.commitWorkerExecutionStart(w.id);
+    const wait = register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    store.updateRun(w.id, { status: 'cancelled' }); manager.reconcileWorkerWaits();
+    expect(waitOf(store.getRun(p.id))?.phase).toBe('parked');
+    expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
+    expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
+    await until(() => !waitOf(store.getRun(p.id)));
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
+  });
+
+  it('readiness real stopped process wakes its parent only after actual exit and finalization', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    let child: ReturnType<typeof spawn> | undefined; let ready = false;
+    const runner = vi.spyOn(runnerFactory, 'createRunner').mockReturnValue({ backend: 'claude', interrupt: async () => undefined,
+      run: async () => { throw Error('unused'); }, startSession: () => {
+        child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"], { stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout!.once('data', () => { ready = true; });
+        const result = new Promise<never>((_resolve, reject) => child!.once('close', () => reject(Error('stopped'))));
+        return { pid: child.pid, result, open: true, sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => {},
+          interrupt: () => { child!.kill('SIGTERM'); }, end: () => { child!.kill('SIGTERM'); } };
+      } });
+    try {
+      const wait = register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
+      await until(() => ready);
+      expect(manager.requestWorkerStop(w.id).state).toBe('stopping');
+      expect(store.getRun(w.id)?.status).toBe('cancelled');
+      expect(await manager.awaitRunTermination(w.id, 30)).toBe(false);
+      expect(waitOf(store.getRun(p.id))?.phase).toBe('parked');
+      expect(manager.finish(p.id)).toBe(false);
+      child!.kill('SIGKILL');
+      await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);
+      expect(store.readWorkerExecution(w.id)?.phase).toBe('complete');
+      expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    } finally { child?.kill('SIGKILL'); runner.mockRestore(); }
+  });
+
+  it('readiness review preserves workers live and through recovery', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    store.updateRun(p.id, { status: 'review' }); manager.reconcileWorkerWaits();
+    expect(store.getRun(w.id)?.status).toBe('queued');
+    await restart();
+    expect(store.getRun(w.id)?.status).not.toBe('cancelled');
+  });
+
+  it('readiness worker Continue requires continuing a reviewing parent first', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    store.updateRun(w.id, { status: 'done' });
+    store.updateStep(w.id, 'task', { status: 'done', sessionId: randomUUID(), backend: 'claude' });
+    const generation = store.commitWorkerExecutionStart(w.id); store.commitWorkerExecutionComplete(w.id, generation);
+    store.updateRun(p.id, { status: 'review' });
+    expect(manager.continueRun(w.id, { text: 'more' })).toMatchObject({ ok: false, error: expect.stringMatching(/parent.*review|parent.*continu/i) });
+  });
+
+  // Legacy lifecycle fixtures publish settled workers without launching a process.
+  // Supply the private completion boundary too; status alone is intentionally insufficient.
+  function fixtureUpdateRun(id: string, patch: Parameters<RunStore['updateRun']>[1]) {
+    const run = store.getRun(id);
+    const generation = run?.delegation?.role === 'worker' && patch.status && terminal.includes(patch.status)
+      ? store.commitWorkerExecutionStart(id) : undefined;
+    store.updateRun(id, patch);
+    if (generation) expect(store.commitWorkerExecutionComplete(id, generation)).toBe(true);
+  }
+  async function collect(id: string) {
+    const run = store.getRun(id)!;
+    const evidence = await collectWorkerEvidence(root, store, run);
+    return store.commitWorkerResult(run.delegation?.role === 'worker' ? run.delegation.parentRunId : '', evidence.result, evidence.diffSnapshot);
+  }
+  it.each(['review', 'failed', 'cancelled'] as const)('readiness requires settled collection of %s and accepts partial failures', async status => {
+    const p = await parent(); const w = await worker(p.id);
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const generation = store.commitWorkerExecutionStart(w.id);
+    store.updateRun(w.id, { status });
+    await collect(w.id); // Same status/revision, but the process is still unproven.
+    expect(manager.finish(p.id)).toBe(false);
+    expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
+    expect(manager.finish(p.id)).toBe(false); // A formerly partial observation is not fresh evidence.
+    const result = await collect(w.id);
+    expect(result.settled).toBe(true);
+    expect(manager.finish(p.id)).toBe(true);
+    await until(() => !manager.isActive(p.id));
+    expect(store.getRun(p.id)?.status).toBe('done');
+  });
+
+  it('readiness timeout and repeated DONE retain attention without another automatic wait', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
+    await until(() => !!waitOf(store.getRun(p.id)) || terminal.includes(store.getRun(p.id)?.status ?? ''));
+    const wait = waitOf(store.getRun(p.id)); expect(wait).toBeDefined();
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(wait!.deadline);
+    manager.reconcileWorkerWaits(); vi.useRealTimers();
+    await until(() => !waitOf(store.getRun(p.id)));
+    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
+    engine.active.get(p.id)!.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
+    await until(() => store.getRun(p.id)?.status === 'waiting' || terminal.includes(store.getRun(p.id)?.status ?? ''));
+    expect(store.getRun(p.id)?.status).toBe('waiting');
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle')).toHaveLength(1);
+    expect(store.getRun(w.id)?.status).toBe('queued');
+  });
+
+  it('readiness settled uncollected completion sends one collection response then remains attention', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
+    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
+    await until(() => store.getRun(p.id)?.agentInputs?.some(input => !!input.deliveredAt) === true);
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
+    const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
+    state.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
+    await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
+    expect(store.getRun(p.id)?.status).toBe('waiting');
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle')).toHaveLength(1);
+    expect(store.getRun(p.id)?.agentInputs?.[0]?.text).toMatch(/collect/i);
+    await collect(w.id);
+    process.env.CEZ_REVIEW_GATE = '1';
+    writeFileSync(join(store.getRun(p.id)!.worktreePath!, 'parent-result.txt'), 'parent result');
+    state.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
+    await until(() => !manager.isActive(p.id));
+    expect(store.getRun(p.id)?.status).toBe('review');
+  });
+
+  it('readiness accepted worker revision invalidates a previously collected settled result', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
+    store.commitWorkerContinuation(w.id, { status: 'queued' });
+    expect(manager.finish(p.id)).toBe(false);
+    fixtureUpdateRun(w.id, { status: 'done' });
+    expect(manager.finish(p.id)).toBe(false);
+    await collect(w.id);
+    expect(manager.finish(p.id)).toBe(true);
+    await until(() => !manager.isActive(p.id));
+  });
+
+  it('readiness closed-session wait resumes on a later proof after restart and preserves its cycle', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session.end();
+    await until(() => !manager.isActive(p.id));
+    const wait = waitOf(store.getRun(p.id)); expect(wait).toBeDefined();
+    await restart();
+    expect(waitOf(store.getRun(p.id))?.id).toBe(wait!.id);
+    await until(() => store.getRun(w.id)?.status === 'waiting');
+    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
+    await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait!.id && !!input.deliveredAt) === true);
+    expect(store.getRun(p.id)?.status).not.toBe('done');
+    expect(store.getRun(p.id)?.delegation).toHaveProperty('completion');
+  });
+
+  it('readiness ready human Finish retires an accepted wait before closing its session', async () => {
+    const p = await parent('mock:slow'); const w = await worker(p.id);
+    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
+    register(p.id, [w.id]);
+    expect(manager.finish(p.id)).toBe(true);
+    await until(() => !manager.isActive(p.id));
+    expect(store.getRun(p.id)?.status).toBe('done');
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+  });
+
+  it('readiness discards cached unsettled observations lacking current private proof', async () => {
+    const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
+    const generation = store.commitWorkerExecutionStart(first.id);
+    store.updateRun(first.id, { status: 'cancelled' });
+    const metadata = store.getRun(p.id)!.delegation;
+    if (metadata?.role !== 'root') throw Error('fixture');
+    const wait: WorkerWait = { id: randomUUID(), mode: 'all', workerIds: [first.id, second.id], phase: 'parked',
+      deadline: new Date(Date.now() + 600000).toISOString(),
+      outcomes: [{ workerId: first.id, revision: 0, status: 'cancelled', observedAt: new Date().toISOString() }] };
+    store.commitDelegation([{ id: p.id, delegation: { ...metadata, wait } }]);
+    manager.reconcileWorkerWaits();
+    expect(waitOf(store.getRun(p.id))?.outcomes).toEqual([]);
+    expect(store.commitWorkerExecutionComplete(first.id, generation)).toBe(true);
+    expect(waitOf(store.getRun(p.id))?.outcomes).toHaveLength(1);
+  });
+
+  it('readiness Finish preserves pending parent human questions', async () => {
+    const p = await parent('mock:ask'); await until(() => store.getRun(p.id)?.status === 'waiting');
+    expect(manager.finish(p.id)).toBe(false);
+    expect(store.getRun(p.id)?.status).toBe('waiting');
+    expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
+  });
+
   it('all-mode replaces old observations when a selected worker accepts another execution', async () => {
     const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
     manager.registerWorkerWait(p.id, { workerIds: [first.id, second.id], timeoutSeconds: 600, mode: 'all' });
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    store.updateRun(first.id, { status: 'review' }); manager.reconcileWorkerWaits();
+    fixtureUpdateRun(first.id, { status: 'review' }); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))?.outcomes).toHaveLength(1);
     store.commitWorkerContinuation(first.id, { status: 'queued' });
-    store.updateRun(second.id, { status: 'done' }); manager.reconcileWorkerWaits();
+    fixtureUpdateRun(second.id, { status: 'done' }); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))).toMatchObject({ phase: 'parked', outcomes: [{ workerId: second.id }] });
     expect(waitOf(store.getRun(p.id))?.revisions).toContainEqual({ workerId: first.id, revision: 1 });
-    store.updateRun(first.id, { status: 'review' }); manager.reconcileWorkerWaits();
+    fixtureUpdateRun(first.id, { status: 'review' }); manager.reconcileWorkerWaits();
     await until(() => !waitOf(store.getRun(p.id)));
     expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { outcomes: expect.arrayContaining([{ workerId: first.id, revision: 1, status: 'review', observedAt: expect.any(String) }]) } });
     expect(store.readEvents(p.id)).toContainEqual(expect.objectContaining({ type: 'worker-outcome', outcome: expect.objectContaining({ workerId: first.id, revision: 1 }) }));
@@ -157,10 +377,10 @@ rl.on('close', () => process.exit(0));
     const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
     const wait = manager.registerWorkerWait(p.id, { workerIds: [first.id, second.id], timeoutSeconds: 600, mode: 'all' });
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    store.updateRun(first.id, { status: 'done' }); manager.reconcileWorkerWaits();
+    fixtureUpdateRun(first.id, { status: 'done' }); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))).toMatchObject({ phase: 'parked', mode: 'all', outcomes: [{ workerId: first.id }] });
     expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
-    store.updateRun(second.id, { status: 'done' }); manager.reconcileWorkerWaits();
+    fixtureUpdateRun(second.id, { status: 'done' }); manager.reconcileWorkerWaits();
     await until(() => !waitOf(store.getRun(p.id)));
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
     expect(store.getRun(p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'outcome' } });
@@ -298,6 +518,7 @@ rl.on('close', () => process.exit(0));
           expect(engine.active.get(run.id)?.session).toBe(session); expect(session.open).toBe(true);
           expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
           expect(semaphore.busy()).toBe(1);
+          await collect(w.id);
           release();
           await until(() => !!store.getRun(run.id)?.agentInputs?.find(input => input.id === wake?.id)?.deliveredAt);
           expect(waitOf(store.getRun(run.id))).toBeUndefined();
@@ -423,7 +644,7 @@ rl.on('close', () => process.exit(0));
       session.sendAgentMessage = () => false;
       const w = await worker(p.id); const wait = register(p.id, [w.id]);
       await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-      store.updateRun(w.id, { status: 'done' });
+      fixtureUpdateRun(w.id, { status: 'done' });
       await until(() => engine.workerWakeAdmitted.has(p.id));
       const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
       session.sendMessage([{ type: 'text', text: 'mock:ask' }]);
@@ -448,9 +669,9 @@ rl.on('close', () => process.exit(0));
         manager.enqueueOwnedRun(w.id);
         await until(() => store.getRun(w.id)?.status === 'waiting');
       }
-      manager.finish(target.id); await until(() => !manager.isActive(target.id));
-      // Root Finish cancelled the child; restore a genuine queued child for the
-      // crash snapshot of the newly accepted human continuation.
+      (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(target.id)!.session.end();
+      await until(() => !manager.isActive(target.id));
+      // The explicit human continuation is the only authority to answer the ask.
       expect(manager.continueRun(target.id, { text: 'human answer mock:hold' }).ok).toBe(true);
       if (role === 'root') store.updateRun(w.id, { status: 'queued', finishedAt: undefined });
       store.flush(); const checkpoint = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
@@ -514,11 +735,11 @@ rl.on('close', () => process.exit(0));
   });
 
   for (const review of [false, true]) {
-    it(`inactive root Finish persists intent before async settlement and restart keeps review=${review}`, async () => {
-      const p = await parent('mock:ask'); const w = await worker(p.id);
+    it(`inactive ready root Finish persists intent before async settlement and restart keeps review=${review}`, async () => {
+      const p = await parent(); const w = await worker(p.id);
       await until(() => store.getRun(p.id)?.status === 'waiting');
+      manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
       await restart();
-      await until(() => store.getRun(w.id)?.status === 'waiting');
       process.env.CEZ_REVIEW_GATE = review ? '1' : '0';
       writeFileSync(join(store.getRun(p.id)!.worktreePath!, 'review-change.txt'), 'review me');
       const engine = manager as unknown as { settleSuccess(id: string, durable?: boolean): Promise<void> };
@@ -526,22 +747,15 @@ rl.on('close', () => process.exit(0));
       let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
       let completion: Promise<void> | undefined;
       engine.settleSuccess = (id, durable) => completion = gate.then(() => real(id, durable));
-      expect(manager.continueRun(p.id).ok).toBe(false); // unresolved ask
       expect(manager.finish(p.id)).toBe(true);
-      const intent = store.getRun(p.id)?.delegation;
-      expect(intent).toHaveProperty('finishRequestedAt');
+      expect(store.getRun(p.id)?.delegation).toHaveProperty('finishRequestedAt');
       expect(manager.continueRun(p.id, { text: 'too late' }).ok).toBe(false);
       store.flush(); const checkpoint = readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
-      const childSession = (manager as unknown as { active: Map<string, { session: { interrupt(): void } }> }).active.get(w.id)!.session;
-      manager.dispose(); childSession.interrupt();
-      release(); await completion;
-      await Promise.all(executions.splice(0)); await Promise.all(bookkeeping.splice(0));
+      manager.dispose(); release(); await completion;
       expect(store.getRun(p.id)?.status).toBe(review ? 'review' : 'done');
-      expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
       await restart(false, checkpoint);
       expect(store.getRun(p.id)?.status).toBe(review ? 'review' : 'done');
       expect(store.getRun(w.id)?.status).toBe('cancelled');
-      expect(store.getRun(w.id)?.delegation?.role).toBe('worker');
     });
   }
 
@@ -549,18 +763,19 @@ rl.on('close', () => process.exit(0));
     const p = await parent(); const w = await worker(p.id);
     await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
     await until(() => store.getRun(w.id)?.status === 'waiting');
+    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
     await Promise.all(bookkeeping.splice(0)); store.flush();
     const snapshot = JSON.stringify(store.getRun(p.id));
     const tmpPath = join(root, '.ai/cezar/runs.json.tmp'); mkdirSync(tmpPath);
     try { expect(manager.finish(p.id)).toBe(false); }
     finally { rmSync(tmpPath, { recursive: true }); }
     expect(JSON.stringify(store.getRun(p.id))).toBe(snapshot);
-    expect(store.getRun(w.id)?.status).toBe('waiting');
+    expect(store.getRun(w.id)?.status).toBe('cancelled');
     expect(manager.continueRun(p.id, { text: 'mock:hold' }).ok).toBe(true);
     await until(() => store.getRun(p.id)?.status === 'waiting');
   });
 
-  it.each(['queued', 'continued'])('pending inactive Finish holds %s children while unrelated work progresses', async mode => {
+  it.each(['queued', 'continued'])('legacy pending inactive Finish holds %s children while unrelated work progresses', async mode => {
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
     const w = await worker(p.id); manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');
@@ -575,7 +790,7 @@ rl.on('close', () => process.exit(0));
     let completion: Promise<void> | undefined;
     engine.settleSuccess = (id, durable) => id === p.id ? completion = gate.then(() => real(id, durable)) : real(id, durable);
     try {
-      expect(manager.finish(p.id)).toBe(true);
+      store.commitRootFinishIntent(p.id); void engine.settleSuccess(p.id, true);
       if (mode === 'continued') expect(manager.continueRun(w.id, { text: 'must not start' }).ok).toBe(false);
       const unrelated = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: 'claude' });
       manager.cancel(blocker.id);
@@ -586,10 +801,11 @@ rl.on('close', () => process.exit(0));
       expect(store.readEvents(queued.id).some(event => event.type === 'session')).toBe(false);
       expect(semaphore.busy()).toBe(0);
     } finally { release(); await completion; }
-    await until(() => store.getRun(queued.id)?.status === 'cancelled');
+    expect(store.getRun(queued.id)?.status).not.toBe('cancelled');
+    expect(store.getRun(p.id)?.status).toBe('waiting');
   });
 
-  it.each(['fresh', 'continuation'])('pending inactive Finish rechecks a %s child at the pre-spawn boundary', async mode => {
+  it.each(['fresh', 'continuation'])('legacy pending inactive Finish rechecks a %s child at the pre-spawn boundary', async mode => {
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
     const w = await worker(p.id);
     if (mode === 'continuation') {
@@ -611,20 +827,22 @@ rl.on('close', () => process.exit(0));
       if (mode === 'continuation') expect(manager.continueRun(w.id, { text: 'mock:hold' }).ok).toBe(true);
       else manager.enqueueOwnedRun(w.id);
       await until(() => entered);
-      expect(manager.finish(p.id)).toBe(true);
+      store.commitRootFinishIntent(p.id); void engine.settleSuccess(p.id, true);
       start();
       await until(() => store.getRun(w.id)?.status === 'queued');
       expect(store.readEvents(w.id).filter(event => event.type === 'session')).toHaveLength(sessions);
       expect(semaphore.busy()).toBe(0);
     } finally { start(); finish(); await completion; }
-    await until(() => store.getRun(w.id)?.status === 'cancelled');
+    expect(store.getRun(w.id)?.status).not.toBe('cancelled');
+    expect(store.getRun(p.id)?.status).toBe('waiting');
   });
 
   for (const failure of ['diff', 'checkpoint'] as const) {
-    it(`inactive Finish retains retryable intent after ${failure} failure and checkpoints before cascade`, async () => {
+    it(`inactive Finish retains retryable intent after ${failure} failure and checkpoints successful publication`, async () => {
       const p = await parent(); const w = await worker(p.id);
       await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
       await until(() => store.getRun(w.id)?.status === 'waiting');
+      manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
       await Promise.all(bookkeeping.splice(0));
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const commit = store.commitRootFinishSuccess.bind(store);
@@ -637,27 +855,27 @@ rl.on('close', () => process.exit(0));
       await until(() => warn.mock.calls.length > 0);
       expect(store.getRun(p.id)?.status).toBe('waiting');
       expect(store.getRun(p.id)?.delegation).toHaveProperty('finishRequestedAt');
-      expect(store.getRun(w.id)?.status).toBe('waiting');
+      expect(store.getRun(w.id)?.status).toBe('cancelled');
       expect(manager.continueRun(p.id, { text: 'cannot supersede finish' }).ok).toBe(false);
       expect(() => manager.steerWorker(w.id, { id: randomUUID(), parentRunId: p.id, source: 'agent',
         text: 'cannot steer', createdAt: new Date().toISOString() })).toThrow('finish');
       store.commitRootFinishSuccess = commit; store.updateRun(p.id, { baseBranch: 'main' });
       let durableStatus: string | undefined;
       const observe = (run: RunRecord) => {
-        if (run.id === w.id && run.status === 'cancelled') {
+        if (run.id === p.id && run.status === 'done') {
           durableStatus = (JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as RunRecord[]).find(run => run.id === p.id)?.status;
         }
       };
       store.on('run', observe);
       expect(manager.finish(p.id)).toBe(true);
-      await until(() => store.getRun(w.id)?.status === 'cancelled');
+      await until(() => store.getRun(p.id)?.status === 'done');
       expect(durableStatus).toBe('done');
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('finishRequestedAt');
       store.off('run', observe); warn.mockRestore();
     });
   }
 
-  it.each([false, true])('monitoring synthetic delivery respects pending Finish=%s before wake bookkeeping', async pending => {
+  it.each([false, true])('monitoring synthetic delivery respects legacy pending Finish=%s before wake bookkeeping', async pending => {
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
     const w = await worker(p.id, 'mock:monitoring keep going');
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
@@ -677,7 +895,7 @@ rl.on('close', () => process.exit(0));
     engine.settleSuccess = (id, durable) => id === p.id ? completion = gate.then(() => settle(id, durable)) : settle(id, durable);
     const deadline = store.getRun(w.id)!.monitoringWakeAt!;
     try {
-      if (pending) expect(manager.finish(p.id)).toBe(true);
+      if (pending) store.commitRootFinishIntent(p.id);
       await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
       if (pending) {
         expect(send).not.toHaveBeenCalled();
@@ -697,7 +915,7 @@ rl.on('close', () => process.exit(0));
   });
 
   it.each(['delayed diff', 'failed diff'])('cancellation retires pending Finish after %s and preserves human Continue across restart', async mode => {
-    const p = await parent('mock:ask'); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
+    const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
     const engine = manager as unknown as { settleSuccess(id: string, durable?: boolean): Promise<void> };
     const settle = engine.settleSuccess.bind(manager);
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
@@ -718,9 +936,8 @@ rl.on('close', () => process.exit(0));
       expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
       store.updateRun(p.id, { baseBranch: 'main' });
       await restart();
-      expect(manager.continueRun(p.id)).toMatchObject({ ok: false, error: 'pending human question requires an explicit answer' });
       expect(manager.continueRun(p.id, { text: 'actual human answer mock:hold' }).ok).toBe(true);
-      await until(() => store.readEvents(p.id).some(event => event.type === 'human-input-delivered'));
+      await until(() => store.getRun(p.id)?.status === 'waiting');
     } finally { release(); await completion?.catch(() => {}); warn.mockRestore(); }
   });
 
@@ -880,7 +1097,7 @@ rl.on('close', () => process.exit(0));
   for (const status of ['review', 'done', 'failed', 'cancelled'] as const) {
     it(`observes ${status} before registration, includes all selected statuses and wakes once`, async () => {
       const p = await parent(); const a = await worker(p.id); const b = await worker(p.id);
-      store.updateRun(a.id, { status });
+      fixtureUpdateRun(a.id, { status });
       const wait = register(p.id, [a.id, b.id]);
       expect(wait.phase).toBe('wake-pending'); expect(wait.outcomes[0]?.status).toBe(status);
       await until(() => !waitOf(store.getRun(p.id)));
@@ -895,7 +1112,7 @@ rl.on('close', () => process.exit(0));
     const p = await parent(); checkpoint('32-parent-open'); const ids: string[] = [];
     for (let i = 0; i < 32; i++) {
       const w = await worker(p.id); ids.push(w.id); checkpoint(`32-created-${i + 1}`);
-      store.updateRun(w.id, { status: 'failed', error: '\u0000'.repeat(4_000) });
+      fixtureUpdateRun(w.id, { status: 'failed', error: '\u0000'.repeat(4_000) });
     }
     checkpoint('32-before-register'); const wait = register(p.id, ids); checkpoint('32-registered');
     expect(wait.outcomes).toHaveLength(32);
@@ -917,7 +1134,7 @@ rl.on('close', () => process.exit(0));
     for (const status of statuses) children.push({ run: await worker(p.id), status });
     const wait = register(p.id, children.map(child => child.run.id));
     expect(wait.phase).toBe('registered');
-    for (const child of children) store.updateRun(child.run.id, { status: child.status });
+    for (const child of children) fixtureUpdateRun(child.run.id, { status: child.status });
     writeFileSync(release, 'release');
     await until(() => !waitOf(store.getRun(p.id)));
     const input = store.getRun(p.id)?.agentInputs?.[0];
@@ -1024,7 +1241,7 @@ rl.on('close', () => process.exit(0));
   }
   it('retiring a delivered wait durably records the resumed status in the same snapshot', async () => {
     const p = await parent(); const w = await worker(p.id);
-    store.updateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: 'done' });
     const commit = store.commitWorkerWaitWithdrawal.bind(store);
     let retiredStatus: string | undefined;
     store.commitWorkerWaitWithdrawal = (...args) => {
@@ -1077,10 +1294,10 @@ rl.on('close', () => process.exit(0));
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
     expect(store.readEvents(p.id).filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
   });
-  for (const status of ['review', 'done', 'failed', 'cancelled'] as const) {
+  for (const status of ['done', 'failed', 'cancelled'] as const) {
     it(`parent ${status} clears wait and cancels unfinished children, preserving terminal artifacts`, async () => {
       const p = await parent(); const w = await worker(p.id); const done = await worker(p.id);
-      store.updateRun(done.id, { status: 'review' }); register(p.id, [w.id]);
+      fixtureUpdateRun(done.id, { status: 'review' }); register(p.id, [w.id]);
       store.updateRun(p.id, { status });
       await until(() => store.getRun(w.id)?.status === 'cancelled');
       expect(waitOf(store.getRun(p.id))).toBeUndefined(); expect(store.getRun(done.id)?.status).toBe('review');
@@ -1184,7 +1401,7 @@ rl.on('close', () => process.exit(0));
     }
   }
 
-  for (const intent of ['cancel', 'finish'] as const) {
+  for (const intent of ['cancel'] as const) {
     it(`explicit ${intent} before disposal is not resurrected on restart`, async () => {
       const p = await parent(); const w = await worker(p.id);
       register(p.id, [w.id]); await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');

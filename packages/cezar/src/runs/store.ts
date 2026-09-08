@@ -1727,6 +1727,9 @@ export class RunStore extends EventEmitter {
       if (this.readWorkerExecution(id)?.generation !== generation) return false;
       this.writeWorkerExecution(id, { generation, phase: 'complete',
         ...(proof.phase === 'queued' || proof.neverMaterialized ? { neverMaterialized: true as const } : {}) });
+      // The earlier index event cannot attest exit: subscribers must observe the
+      // durable private proof before a terminal worker can satisfy a lifecycle wait.
+      this.emit('run', this.runs.get(id)!);
       return true;
     } catch { return false; }
   }
