@@ -27,8 +27,8 @@ jobs:
         env:
           ACTOR: ${{ github.actor }}
         run: |
-          if [[ "$ACTOR" == *'[bot]' && "$ACTOR" != 'claude[bot]' ]]; then
-            echo "Unsupported bot actor: $ACTOR. Only claude[bot] may trigger automated review." >&2
+          if [[ "$ACTOR" == *'[bot]' && "$ACTOR" != 'claude[bot]' && "$ACTOR" != 'blacksmith-sh[bot]' ]]; then
+            echo "Unsupported bot actor: $ACTOR. Only claude[bot] and blacksmith-sh[bot] may trigger automated review." >&2
             exit 1
           fi
 
