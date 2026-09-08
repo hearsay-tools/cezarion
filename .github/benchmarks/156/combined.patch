@@ -1,0 +1,1429 @@
+diff --git a/packages/cezar/src/workflows/workspace-semaphore.test.ts b/packages/cezar/src/workflows/workspace-semaphore.test.ts
+--- a/packages/cezar/src/workflows/workspace-semaphore.test.ts
++++ b/packages/cezar/src/workflows/workspace-semaphore.test.ts
+@@ -1,8 +1,9 @@
+ import { execFileSync } from 'node:child_process';
+-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
++import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { shellQuote } from '../core/shell-env.ts';
+ import { RunStore } from '../runs/store.ts';
+ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
+ import { RunManager } from './run.ts';
+@@ -47,13 +48,28 @@
+ 
+ const settled = ['done', 'failed', 'cancelled', 'review'];
+ 
+-/** Holds a workspace slot (status `running`, never `waiting`) long enough to
+- *  observe scheduling — a check step, so no agent process is involved. */
+-const SLOW: WorkflowDef = {
+-  name: 'slow',
+-  source: 'built-in',
+-  steps: [{ id: 'hold', command: 'node -e "setTimeout(()=>{},3000)"' }],
+-};
++/** A real check-step subprocess that holds a slot until the test releases it. */
++function slotHolder(roots: string[]): { workflow: WorkflowDef; release: () => void } {
++  const root = mkdtempSync(join(tmpdir(), 'cez-slot-gate-'));
++  roots.push(root);
++  const gate = join(root, 'release');
++  const script =
++    "const fs=require('node:fs');const gate=process.argv[1];" +
++    'const poll=()=>fs.existsSync(gate)?undefined:setTimeout(poll,5);poll()';
++  return {
++    workflow: {
++      name: 'slot-holder',
++      source: 'built-in',
++      steps: [
++        {
++          id: 'hold',
++          command: `${shellQuote(process.execPath)} -e ${shellQuote(script)} ${shellQuote(gate)}`,
++        },
++      ],
++    },
++    release: () => writeFileSync(gate, ''),
++  };
++}
+ const INSTANT: WorkflowDef = {
+   name: 'instant',
+   source: 'built-in',
+@@ -136,8 +152,9 @@
+     const a = project('cez-wsem-a-', semaphore);
+     const b = project('cez-wsem-b-', semaphore);
+ 
+-    const slowA = a.manager.startRun(SLOW, { task: 'hold a slot (A)' });
+-    const slowB = b.manager.startRun(SLOW, { task: 'hold a slot (B)' });
++    const holder = slotHolder(roots);
++    const slowA = a.manager.startRun(holder.workflow, { task: 'hold a slot (A)' });
++    const slowB = b.manager.startRun(holder.workflow, { task: 'hold a slot (B)' });
+     await waitFor(
+       () =>
+         a.store.getRun(slowA.id)?.status === 'running' &&
+@@ -152,6 +169,7 @@
+     expect(a.store.getRun(third.id)?.status).toBe('queued');
+ 
+     // Capacity returns as the holders settle — the queued run then completes.
++    holder.release();
+     await waitFor(
+       () => settled.includes(a.store.getRun(third.id)?.status ?? ''),
+       'the queued run to complete once a slot frees',
+@@ -171,8 +189,9 @@
+     const a = project('cez-wsem-cross-a-', semaphore);
+     const b = project('cez-wsem-cross-b-', semaphore);
+ 
+-    const slow1 = a.manager.startRun(SLOW, { task: 'saturate 1' });
+-    const slow2 = a.manager.startRun(SLOW, { task: 'saturate 2' });
++    const holder = slotHolder(roots);
++    const slow1 = a.manager.startRun(holder.workflow, { task: 'saturate 1' });
++    const slow2 = a.manager.startRun(holder.workflow, { task: 'saturate 2' });
+     await waitFor(
+       () =>
+         a.store.getRun(slow1.id)?.status === 'running' &&
+@@ -185,6 +204,7 @@
+     expect(b.store.getRun(queued.id)?.status).toBe('queued');
+ 
+     // Nothing else happens in B — the only event is A's runs settling.
++    holder.release();
+     await waitFor(
+       () => settled.includes(b.store.getRun(queued.id)?.status ?? ''),
+       "B's queued run to start once A frees a slot",
+@@ -198,17 +218,20 @@
+     const a = project('cez-wsem-fair-a-', semaphore);
+     const b = project('cez-wsem-fair-b-', semaphore);
+ 
+-    const holder = a.manager.startRun(SLOW, { task: 'hold the only slot' });
++    const gate = slotHolder(roots);
++    const holder = a.manager.startRun(gate.workflow, { task: 'hold the only slot' });
+     await waitFor(() => a.store.getRun(holder.id)?.status === 'running', 'the holder to run');
+     // B queues first, then A — the freed slot must go to B despite the slot
+     // being freed by (and the pump originating in) A.
+     const older = b.manager.startRun(INSTANT, { task: 'queued first, other project' });
+     await new Promise((resolve) => setTimeout(resolve, 50));
+-    const newer = a.manager.startRun(SLOW, { task: 'queued second, same project' });
++    const newerGate = slotHolder(roots);
++    const newer = a.manager.startRun(newerGate.workflow, { task: 'queued second, same project' });
+     await new Promise((resolve) => setTimeout(resolve, 200));
+     expect(b.store.getRun(older.id)?.status).toBe('queued');
+     expect(a.store.getRun(newer.id)?.status).toBe('queued');
+ 
++    gate.release();
+     await waitFor(
+       () => settled.includes(b.store.getRun(older.id)?.status ?? ''),
+       "B's older queued run to take the freed slot",
+@@ -231,8 +254,9 @@
+     );
+ 
+     // Project A saturates the workspace cap: 2 running holders, busy == cap.
+-    const slow1 = a.manager.startRun(SLOW, { task: 'saturate 1' });
+-    const slow2 = a.manager.startRun(SLOW, { task: 'saturate 2' });
++    const holder = slotHolder(roots);
++    const slow1 = a.manager.startRun(holder.workflow, { task: 'saturate 1' });
++    const slow2 = a.manager.startRun(holder.workflow, { task: 'saturate 2' });
+     await waitFor(
+       () =>
+         a.store.getRun(slow1.id)?.status === 'running' &&
+@@ -280,15 +304,16 @@
+ 
+     // A starts two runs. The workspace has room (cap 4), but A's own ceiling is
+     // 1 — so the second A run must queue on the per-project gate.
+-    const a1 = a.manager.startRun(SLOW, { task: 'A slot 1' });
+-    const a2 = a.manager.startRun(SLOW, { task: 'A slot 2 — must queue on A per-project cap' });
++    const holder = slotHolder(roots);
++    const a1 = a.manager.startRun(holder.workflow, { task: 'A slot 1' });
++    const a2 = a.manager.startRun(holder.workflow, { task: 'A slot 2 — must queue on A per-project cap' });
+     await waitFor(() => a.store.getRun(a1.id)?.status === 'running', 'A first run to run');
+     await new Promise((resolve) => setTimeout(resolve, 300));
+     expect(a.store.getRun(a2.id)?.status).toBe('queued'); // blocked by A's own cap, not the workspace
+ 
+     // B inherits the workspace cap (no override) — it runs two concurrently.
+-    const b1 = b.manager.startRun(SLOW, { task: 'B slot 1' });
+-    const b2 = b.manager.startRun(SLOW, { task: 'B slot 2' });
++    const b1 = b.manager.startRun(holder.workflow, { task: 'B slot 1' });
++    const b2 = b.manager.startRun(holder.workflow, { task: 'B slot 2' });
+     await waitFor(
+       () =>
+         b.store.getRun(b1.id)?.status === 'running' && b.store.getRun(b2.id)?.status === 'running',
+@@ -301,6 +326,7 @@
+     expect(semaphore.busy()).toBeLessThanOrEqual(4);
+ 
+     // Once A's holder settles, A's second run starts — the cap gates, never strands.
++    holder.release();
+     await waitFor(
+       () => settled.includes(a.store.getRun(a2.id)?.status ?? ''),
+       "A's queued run to start and finish after its slot frees",
+@@ -327,8 +353,9 @@
+     stores.push(store);
+     managers.push(manager);
+ 
++    const holder = slotHolder(roots);
+     const runs = Array.from({ length: 5 }, (_, index) =>
+-      manager.startRun(SLOW, { task: `task-worktree slot ${index + 1}` }),
++      manager.startRun(holder.workflow, { task: `task-worktree slot ${index + 1}` }),
+     );
+     await waitFor(
+       () => runs.slice(0, 4).every((run) => store.getRun(run.id)?.status === 'running'),
+@@ -490,7 +517,8 @@
+     // per-project cap of 1 with a running holder.
+     const waitingRun = a.manager.startRun(AGENT, { task: 'park and wait', worktree: false });
+     await waitFor(() => a.store.getRun(waitingRun.id)?.status === 'waiting', 'the agent run to park');
+-    const holder = a.manager.startRun(SLOW, { task: 'occupy the single per-project slot' });
++    const gate = slotHolder(roots);
++    const holder = a.manager.startRun(gate.workflow, { task: 'occupy the single per-project slot' });
+     await waitFor(() => a.store.getRun(holder.id)?.status === 'running', "the holder to take A's only slot");
+ 
+     // Even at A's per-project cap, the resume bypasses pump() — straight into the
+@@ -512,7 +540,8 @@
+     });
+     const a = project('cez-wsem-refresh-', semaphore);
+ 
+-    const holder = a.manager.startRun(SLOW, { task: 'hold the only slot' });
++    const gate = slotHolder(roots);
++    const holder = a.manager.startRun(gate.workflow, { task: 'hold the only slot' });
+     const queued = a.manager.startRun(INSTANT, { task: 'wait for capacity' });
+     await waitFor(() => a.store.getRun(holder.id)?.status === 'running', 'the holder to run');
+     await new Promise((resolve) => setTimeout(resolve, 200));
+diff --git a/packages/cezar/src/workflows/pasted-attachments.test.ts b/packages/cezar/src/workflows/pasted-attachments.test.ts
+--- a/packages/cezar/src/workflows/pasted-attachments.test.ts
++++ b/packages/cezar/src/workflows/pasted-attachments.test.ts
+@@ -5,6 +5,7 @@
+ import { promisify } from 'node:util';
+ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+ import type { ContentBlock } from '../core/agent-runner.ts';
++import { shellQuote } from '../core/shell-env.ts';
+ import { HANDOFF_INSTRUCTIONS } from '../handoff.ts';
+ import { RunStore } from '../runs/store.ts';
+ import type { WorkflowDef } from './types.ts';
+@@ -21,6 +22,28 @@
+ 
+ const run = promisify(execFile);
+ const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
++let gateSequence = 0;
++
++/** A real check-step subprocess that holds a slot until the test releases it. */
++function slotHolder(root: string, name: string): { workflow: WorkflowDef; release: () => void } {
++  const gate = join(root, `.release-${gateSequence++}`);
++  const script =
++    "const fs=require('node:fs');const gate=process.argv[1];" +
++    'const poll=()=>fs.existsSync(gate)?undefined:setTimeout(poll,5);poll()';
++  return {
++    workflow: {
++      name,
++      source: 'built-in',
++      steps: [
++        {
++          id: 'hold',
++          command: `${shellQuote(process.execPath)} -e ${shellQuote(script)} ${shellQuote(gate)}`,
++        },
++      ],
++    },
++    release: () => writeFileSync(gate, ''),
++  };
++}
+ 
+ // 1x1 transparent PNG — small enough to inline, real enough to round-trip through base64.
+ const TINY_PNG_B64 =
+@@ -235,12 +258,8 @@
+       type: 'image',
+       source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 },
+     };
+-    const holder: WorkflowDef = {
+-      name: 'hold-slot',
+-      source: 'built-in',
+-      steps: [{ id: 'hold', command: `${process.execPath} -e "setTimeout(() => {}, 500)"` }],
+-    };
+-    manager.startRun(holder, { task: 'occupy the only slot', worktree: false });
++    const holder = slotHolder(repoRoot, 'hold-slot');
++    manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
+     const record = manager.startRun(workflow, {
+       task: 'save the pasted screenshot to disk',
+       images: [image],
+@@ -253,6 +272,7 @@
+     expect(queued?.taskImages).toEqual([`/api/v1/runs/${record.id}/images/pasted-1.png`]);
+     expect(existsSync(join(dataDir, 'runs', `${record.id}-images`, 'pasted-1.png'))).toBe(true);
+ 
++    holder.release();
+     await waitForStatus(record.id, ['done', 'review', 'failed', 'cancelled']);
+ 
+     const after = store.getRun(record.id);
+@@ -295,12 +315,8 @@
+         { id: 'verify', command: 'true' },
+       ],
+     };
+-    const holder: WorkflowDef = {
+-      name: 'hold-slot-files',
+-      source: 'built-in',
+-      steps: [{ id: 'hold', command: `${process.execPath} -e "setTimeout(() => {}, 500)"` }],
+-    };
+-    manager.startRun(holder, { task: 'occupy the only slot', worktree: false });
++    const holder = slotHolder(repoRoot, 'hold-slot-files');
++    manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
+     const record = manager.startRun(workflow, {
+       task: 'read the attached brief',
+       images: [
+@@ -319,6 +335,7 @@
+       `/api/v1/runs/${record.id}/images/pasted-2.pdf`,
+     ]);
+ 
++    holder.release();
+     await waitForStatus(record.id, ['done', 'review', 'failed', 'cancelled']);
+     const after = store.getRun(record.id);
+     expect(after?.status, after?.error).toMatch(/^(done|review)$/);
+@@ -357,12 +374,8 @@
+         { id: 'verify', command: 'true' },
+       ],
+     };
+-    const holder: WorkflowDef = {
+-      name: 'hold-slot-stacked',
+-      source: 'built-in',
+-      steps: [{ id: 'hold', command: `${process.execPath} -e "setTimeout(() => {}, 700)"` }],
+-    };
+-    manager.startRun(holder, { task: 'occupy the only slot', worktree: false });
++    const holder = slotHolder(repoRoot, 'hold-slot-stacked');
++    manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
+     const record = manager.startRun(workflow, { task: 'wait for my brief', worktree: false });
+     expect(store.getRun(record.id)?.status).toBe('queued');
+ 
+@@ -374,6 +387,7 @@
+     const stackedName = queuedMessage?.images?.[0]?.split('/').pop() as string;
+     expect(stackedName).toMatch(/^pasted-\d+\.txt$/);
+ 
++    holder.release();
+     await waitForStatus(record.id, ['done', 'review', 'failed', 'cancelled']);
+     const opening = readStdinLines().find((line) => line.userText.includes('wait for my brief'));
+     expect(opening).toBeDefined();
+@@ -383,12 +397,13 @@
+ 
+   it('notes a queued document deleted before same-process execution and still delivers text', async () => {
+     writeFileSync(stdinFile, '');
+-    const holder: WorkflowDef = { name: 'hold-delete', source: 'built-in', steps: [{ id: 'hold', command: `${process.execPath} -e "setTimeout(() => {}, 500)"` }] };
+-    manager.startRun(holder, { task: 'hold slot', worktree: false });
++    const holder = slotHolder(repoRoot, 'hold-delete');
++    manager.startRun(holder.workflow, { task: 'hold slot', worktree: false });
+     const workflow: WorkflowDef = { name: 'missing-file', source: 'built-in', steps: [{ id: 'work', prompt: '{{task}}' }, { id: 'verify', command: 'true' }] };
+     const record = manager.startRun(workflow, { task: 'read my missing brief', worktree: false, images: [{ type: 'file', mediaType: 'application/pdf', data: TINY_PDF_B64 }] });
+     const path = join(dataDir, 'runs', `${record.id}-images`, 'pasted-1.pdf');
+     rmSync(path);
++    holder.release();
+     await waitForStatus(record.id, ['done', 'review']);
+     const message = readStdinLines().find((line) => line.userText.includes('read my missing brief'))!;
+     expect(message.userText).not.toContain(path);
+
+diff --git a/packages/web/src/api/contract-pipeline.test.ts b/packages/web/src/api/contract-pipeline.test.ts
+index 3884ff3f..679a83da 100644
+--- a/packages/web/src/api/contract-pipeline.test.ts
++++ b/packages/web/src/api/contract-pipeline.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ import { healthResponseSchema, type HealthResponse } from '@open-mercato/cezar-api-client'
+ 
+diff --git a/packages/web/src/api/events.test.ts b/packages/web/src/api/events.test.ts
+index 0d6eb210..bc553819 100644
+--- a/packages/web/src/api/events.test.ts
++++ b/packages/web/src/api/events.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it, vi } from 'vitest'
+ 
+ import {
+diff --git a/packages/web/src/components/composer/composer-text.test.ts b/packages/web/src/components/composer/composer-text.test.ts
+index 19ba2d92..5468b74b 100644
+--- a/packages/web/src/components/composer/composer-text.test.ts
++++ b/packages/web/src/components/composer/composer-text.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { applyCompletion, detectTrigger } from './composer-text'
+diff --git a/packages/web/src/components/diff/diff-scroll.test.ts b/packages/web/src/components/diff/diff-scroll.test.ts
+index fb0f3a33..70c2b0ee 100644
+--- a/packages/web/src/components/diff/diff-scroll.test.ts
++++ b/packages/web/src/components/diff/diff-scroll.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import {
+diff --git a/packages/web/src/components/diff/parse-patch.test.ts b/packages/web/src/components/diff/parse-patch.test.ts
+index 48e29cac..2f6032b0 100644
+--- a/packages/web/src/components/diff/parse-patch.test.ts
++++ b/packages/web/src/components/diff/parse-patch.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import {
+diff --git a/packages/web/src/components/diff/word-diff.test.ts b/packages/web/src/components/diff/word-diff.test.ts
+index 23948485..12ab5b30 100644
+--- a/packages/web/src/components/diff/word-diff.test.ts
++++ b/packages/web/src/components/diff/word-diff.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { diffWords, overlaySegments, type WordSpan } from './word-diff'
+diff --git a/packages/web/src/components/nav-items.test.ts b/packages/web/src/components/nav-items.test.ts
+index 9c7ac8ef..00a963e9 100644
+--- a/packages/web/src/components/nav-items.test.ts
++++ b/packages/web/src/components/nav-items.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { NAV_ITEMS, activeNavItem, activeNavPath, visibleNavItems } from './nav-items'
+diff --git a/packages/web/src/design-guardian.test.ts b/packages/web/src/design-guardian.test.ts
+index c42b235d..b41781c9 100644
+--- a/packages/web/src/design-guardian.test.ts
++++ b/packages/web/src/design-guardian.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { readdirSync, readFileSync } from 'node:fs'
+ import path from 'node:path'
+ import { fileURLToPath } from 'node:url'
+diff --git a/packages/web/src/lib/attention.test.ts b/packages/web/src/lib/attention.test.ts
+index 568ae1bb..271a413e 100644
+--- a/packages/web/src/lib/attention.test.ts
++++ b/packages/web/src/lib/attention.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/bookmarklet.test.ts b/packages/web/src/lib/bookmarklet.test.ts
+index fc5a09d9..37a4f3c6 100644
+--- a/packages/web/src/lib/bookmarklet.test.ts
++++ b/packages/web/src/lib/bookmarklet.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { DEFAULT_COCKPIT_ORIGIN, bookmarkletUrl } from './bookmarklet'
+diff --git a/packages/web/src/lib/format.test.ts b/packages/web/src/lib/format.test.ts
+index 719971a4..d166f9de 100644
+--- a/packages/web/src/lib/format.test.ts
++++ b/packages/web/src/lib/format.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { compactTokens, shortAge } from '@/lib/format'
+diff --git a/packages/web/src/lib/git-actions.test.ts b/packages/web/src/lib/git-actions.test.ts
+index d0e5faf7..dde8f24a 100644
+--- a/packages/web/src/lib/git-actions.test.ts
++++ b/packages/web/src/lib/git-actions.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunStatus } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/github-task.test.ts b/packages/web/src/lib/github-task.test.ts
+index 77c484b8..ffd7273c 100644
+--- a/packages/web/src/lib/github-task.test.ts
++++ b/packages/web/src/lib/github-task.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { GithubItem } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/global-tasks.test.ts b/packages/web/src/lib/global-tasks.test.ts
+index 39267d8f..1b331e53 100644
+--- a/packages/web/src/lib/global-tasks.test.ts
++++ b/packages/web/src/lib/global-tasks.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/highlighter.test.ts b/packages/web/src/lib/highlighter.test.ts
+index 6f5baf63..851867e3 100644
+--- a/packages/web/src/lib/highlighter.test.ts
++++ b/packages/web/src/lib/highlighter.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { canonicalLang, highlight, highlightSync, isPlainLang, supportedLanguages } from './highlighter'
+diff --git a/packages/web/src/lib/project-tags.test.ts b/packages/web/src/lib/project-tags.test.ts
+index 97350613..462302a7 100644
+--- a/packages/web/src/lib/project-tags.test.ts
++++ b/packages/web/src/lib/project-tags.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/prompt-templates.test.ts b/packages/web/src/lib/prompt-templates.test.ts
+index 1d137633..ed1940d4 100644
+--- a/packages/web/src/lib/prompt-templates.test.ts
++++ b/packages/web/src/lib/prompt-templates.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import {
+diff --git a/packages/web/src/lib/provider-auth-alert.test.ts b/packages/web/src/lib/provider-auth-alert.test.ts
+index f5eeef04..ee3a2852 100644
+--- a/packages/web/src/lib/provider-auth-alert.test.ts
++++ b/packages/web/src/lib/provider-auth-alert.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ProviderStatusResponse } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/provider-status.test.ts b/packages/web/src/lib/provider-status.test.ts
+index 9b55594b..89e6692a 100644
+--- a/packages/web/src/lib/provider-status.test.ts
++++ b/packages/web/src/lib/provider-status.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ProviderStatusResponse } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/read-state.test.ts b/packages/web/src/lib/read-state.test.ts
+index 27ae0e58..290bb0a9 100644
+--- a/packages/web/src/lib/read-state.test.ts
++++ b/packages/web/src/lib/read-state.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunRecord } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/skills.test.ts b/packages/web/src/lib/skills.test.ts
+index 5a42a70b..943ca7a7 100644
+--- a/packages/web/src/lib/skills.test.ts
++++ b/packages/web/src/lib/skills.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { Skill, WorkflowDef } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/task-columns.test.ts b/packages/web/src/lib/task-columns.test.ts
+index 818f23ac..135d93d3 100644
+--- a/packages/web/src/lib/task-columns.test.ts
++++ b/packages/web/src/lib/task-columns.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import {
+diff --git a/packages/web/src/lib/task-groups.test.ts b/packages/web/src/lib/task-groups.test.ts
+index 975a9fc3..c0617178 100644
+--- a/packages/web/src/lib/task-groups.test.ts
++++ b/packages/web/src/lib/task-groups.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/tasks-table.test.ts b/packages/web/src/lib/tasks-table.test.ts
+index 831f7164..5dad0bba 100644
+--- a/packages/web/src/lib/tasks-table.test.ts
++++ b/packages/web/src/lib/tasks-table.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ProcessUsage, RunRecord } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/token-metrics.test.ts b/packages/web/src/lib/token-metrics.test.ts
+index a1dda790..49a86dff 100644
+--- a/packages/web/src/lib/token-metrics.test.ts
++++ b/packages/web/src/lib/token-metrics.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { HealthResponse } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/lib/unified-diff.test.ts b/packages/web/src/lib/unified-diff.test.ts
+index 4510043b..dc818fdb 100644
+--- a/packages/web/src/lib/unified-diff.test.ts
++++ b/packages/web/src/lib/unified-diff.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { diffTotals, parseUnifiedDiff } from './unified-diff'
+diff --git a/packages/web/src/lib/use-submit-shortcut.test.ts b/packages/web/src/lib/use-submit-shortcut.test.ts
+index c84c8f11..ee2c1909 100644
+--- a/packages/web/src/lib/use-submit-shortcut.test.ts
++++ b/packages/web/src/lib/use-submit-shortcut.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { isSubmitShortcut, submitShortcutHint, type SubmitShortcutEvent } from './use-submit-shortcut'
+diff --git a/packages/web/src/lib/utils.test.ts b/packages/web/src/lib/utils.test.ts
+index 18dbe0da..422aa5a6 100644
+--- a/packages/web/src/lib/utils.test.ts
++++ b/packages/web/src/lib/utils.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { cn, isHttpUrl } from './utils'
+diff --git a/packages/web/src/lib/workflow-builder.test.ts b/packages/web/src/lib/workflow-builder.test.ts
+index 8f91a880..b9c27254 100644
+--- a/packages/web/src/lib/workflow-builder.test.ts
++++ b/packages/web/src/lib/workflow-builder.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ import { parse } from 'yaml'
+ 
+diff --git a/packages/web/src/routes/github/github-filter.test.ts b/packages/web/src/routes/github/github-filter.test.ts
+index 07ba6183..bd6c3dea 100644
+--- a/packages/web/src/routes/github/github-filter.test.ts
++++ b/packages/web/src/routes/github/github-filter.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { GithubItem } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/new-task-autostart.test.ts b/packages/web/src/routes/new-task-autostart.test.ts
+index 91b0bd7e..de918be6 100644
+--- a/packages/web/src/routes/new-task-autostart.test.ts
++++ b/packages/web/src/routes/new-task-autostart.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { CreateRunInput } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/new-task-form.test.ts b/packages/web/src/routes/new-task-form.test.ts
+index e98653ba..b4d6497d 100644
+--- a/packages/web/src/routes/new-task-form.test.ts
++++ b/packages/web/src/routes/new-task-form.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type {
+diff --git a/packages/web/src/routes/new-task-params.test.ts b/packages/web/src/routes/new-task-params.test.ts
+index 2f322061..ef16d9a9 100644
+--- a/packages/web/src/routes/new-task-params.test.ts
++++ b/packages/web/src/routes/new-task-params.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { newTaskPrefillHref, parseNewTaskParams, type NewTaskParams } from './new-task-params'
+diff --git a/packages/web/src/routes/new-task-plan.test.ts b/packages/web/src/routes/new-task-plan.test.ts
+index bb260626..ffc8f33c 100644
+--- a/packages/web/src/routes/new-task-plan.test.ts
++++ b/packages/web/src/routes/new-task-plan.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { WorkflowStepDef } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/settings/agent-descriptors.test.ts b/packages/web/src/routes/settings/agent-descriptors.test.ts
+index c27006cf..0f28246f 100644
+--- a/packages/web/src/routes/settings/agent-descriptors.test.ts
++++ b/packages/web/src/routes/settings/agent-descriptors.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { AgentConfigFile } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-git/file-tree.test.ts b/packages/web/src/routes/task-git/file-tree.test.ts
+index f6127744..2b42ca3b 100644
+--- a/packages/web/src/routes/task-git/file-tree.test.ts
++++ b/packages/web/src/routes/task-git/file-tree.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ChangedFile } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-git/worktree-files.test.ts b/packages/web/src/routes/task-git/worktree-files.test.ts
+index 1839ae11..23ee4199 100644
+--- a/packages/web/src/routes/task-git/worktree-files.test.ts
++++ b/packages/web/src/routes/task-git/worktree-files.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import { formatFileSize, isImagePath, previewKind } from './worktree-files'
+diff --git a/packages/web/src/routes/task-thread/active-provider.test.ts b/packages/web/src/routes/task-thread/active-provider.test.ts
+index a319cc52..47d64910 100644
+--- a/packages/web/src/routes/task-thread/active-provider.test.ts
++++ b/packages/web/src/routes/task-thread/active-provider.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ApiRun, ProviderStatusResponse } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-thread/run-actions.test.ts b/packages/web/src/routes/task-thread/run-actions.test.ts
+index 4cb6e407..4779be9b 100644
+--- a/packages/web/src/routes/task-thread/run-actions.test.ts
++++ b/packages/web/src/routes/task-thread/run-actions.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-thread/subagent-dock.test.ts b/packages/web/src/routes/task-thread/subagent-dock.test.ts
+index cd4e7e13..88714ff7 100644
+--- a/packages/web/src/routes/task-thread/subagent-dock.test.ts
++++ b/packages/web/src/routes/task-thread/subagent-dock.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { ToolStatus, UiToolItem } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-thread/thread-groups.test.ts b/packages/web/src/routes/task-thread/thread-groups.test.ts
+index a38b7728..345bb50b 100644
+--- a/packages/web/src/routes/task-thread/thread-groups.test.ts
++++ b/packages/web/src/routes/task-thread/thread-groups.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunEvent } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/routes/task-thread/thread-scroll.test.ts b/packages/web/src/routes/task-thread/thread-scroll.test.ts
+index 14dd89b6..44c94667 100644
+--- a/packages/web/src/routes/task-thread/thread-scroll.test.ts
++++ b/packages/web/src/routes/task-thread/thread-scroll.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { afterEach, describe, expect, it } from 'vitest'
+ import type { CacheSnapshot } from 'virtua'
+ 
+diff --git a/packages/web/src/routes/task-thread/thread-state.test.ts b/packages/web/src/routes/task-thread/thread-state.test.ts
+index e35bf5ed..1d059faa 100644
+--- a/packages/web/src/routes/task-thread/thread-state.test.ts
++++ b/packages/web/src/routes/task-thread/thread-state.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import type { RunEvent } from '@open-mercato/cezar-api-client'
+diff --git a/packages/web/src/vite-config.test.ts b/packages/web/src/vite-config.test.ts
+index 97e2c2fd..d6e1b1f8 100644
+--- a/packages/web/src/vite-config.test.ts
++++ b/packages/web/src/vite-config.test.ts
+@@ -1,3 +1,5 @@
++// @vitest-environment node
++
+ import { describe, expect, it } from 'vitest'
+ 
+ import config, { reactRuntimeChunk } from '../vite.config'
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 106de2b4..fdd17215 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -19,8 +19,8 @@ concurrency:
+   cancel-in-progress: true
+ 
+ jobs:
+-  verify:
+-    name: Unit, build, E2E, and package
++  build-and-package:
++    name: Typecheck, unit, build, and package
+     runs-on: ubuntu-latest
+     timeout-minutes: 15
+ 
+@@ -47,9 +47,6 @@ jobs:
+       - name: Run unit tests
+         run: npm run test:unit
+ 
+-      - name: Run server and cockpit unit suites
+-        run: npm test
+-
+       - name: Build application
+         run: npm run build
+ 
+@@ -66,6 +63,53 @@ jobs:
+           npm pack --dry-run --ignore-scripts -w @wjarka/cezarion
+           (cd alias-cezarion && npm pack --dry-run --ignore-scripts)
+ 
++  vitest:
++    name: Vitest shard ${{ matrix.shard }}/2
++    strategy:
++      fail-fast: false
++      matrix:
++        shard: [1, 2]
++    runs-on: ubuntu-latest
++    timeout-minutes: 15
++
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
++
++      - name: Set up Node.js
++        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
++        with:
++          node-version: lts/*
++          cache: npm
++
++      - name: Install dependencies
++        run: npm ci
++
++      # TypeScript test imports resolve through the server build, as in pretypecheck.
++      - name: Build server dependencies
++        run: npm run build:server
++
++      - name: Run server and cockpit unit suites
++        run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4
++
++  # Keep this aggregate job's name stable: branch protection uses it as the
++  # required-check identity while the work runs in the build and Vitest jobs.
++  verify:
++    name: Unit, build, E2E, and package
++    needs: [build-and-package, vitest]
++    if: always()
++    runs-on: ubuntu-latest
++    timeout-minutes: 15
++
++    steps:
++      - name: Require every verification job
++        env:
++          BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
++          VITEST_RESULT: ${{ needs.vitest.result }}
++        run: |
++          test "$BUILD_AND_PACKAGE_RESULT" = success
++          test "$VITEST_RESULT" = success
++
+   # npm preview publishing (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482).
+   # Publishes a snapshot of both packages after a fully green verify run:
+   # same-repo PRs → dist-tag pr-<N>, develop pushes → @develop. `main` pushes do
+diff --git a/vitest.config.ts b/vitest.config.ts
+index 2da3b550..8408b4e4 100644
+--- a/vitest.config.ts
++++ b/vitest.config.ts
+@@ -1,4 +1,5 @@
+ import { defineConfig } from 'vitest/config'
++import CiTestSequencer from './.github/scripts/ci-test-sequencer.mjs'
+ 
+ // Three packages, one `npm test`. Each owns its own vitest config — this file only names
+ // them, so `npm test -w <pkg>` and the whole-repo run execute the identical setup:
+@@ -10,6 +11,8 @@ export default defineConfig({
+     // The suites are still being grown; a project that currently matches no file must not
+     // fail the validation gate. Root-level only — vitest rejects this inside a project.
+     passWithNoTests: true,
++    // Balance CI shards by measured duration; new tests remain automatically discovered.
++    sequence: { sequencer: CiTestSequencer },
+     // Pin reporters so Actions gets exactly one `github-actions` job summary for the whole
+     // multi-project run (#62). Leaving this unset lets Vitest auto-append the reporter when
+     // GITHUB_ACTIONS=true; an explicit list replaces the defaults and documents the
+diff --git a/.github/scripts/ci-test-sequencer.mjs b/.github/scripts/ci-test-sequencer.mjs
+new file mode 100644
+index 00000000..1c3cd01a
+--- /dev/null
++++ b/.github/scripts/ci-test-sequencer.mjs
+@@ -0,0 +1,80 @@
++import { readFileSync } from 'node:fs';
++import { relative } from 'node:path';
++import { BaseSequencer } from 'vitest/node';
++
++const durationManifest = JSON.parse(
++  readFileSync(new URL('../test-durations.json', import.meta.url), 'utf8'),
++);
++const durations = durationManifest.durationsMs;
++
++function positiveDuration(value) {
++  return typeof value === 'number' && Number.isFinite(value) && value > 0;
++}
++
++function fallbackDuration(measured) {
++  const values = Object.values(measured).filter(positiveDuration).sort((a, b) => a - b);
++  if (values.length === 0) return 1;
++  const middle = Math.floor(values.length / 2);
++  return values.length % 2 === 1
++    ? values[middle]
++    : (values[middle - 1] + values[middle]) / 2;
++}
++
++/** Deterministically assign every discovered file using longest-processing-time bins. */
++export function assignShards(filePaths, measuredDurations, count) {
++  if (!Number.isInteger(count) || count <= 0) {
++    throw new TypeError('shard count must be a positive integer');
++  }
++
++  const unique = new Set(filePaths);
++  if (unique.size !== filePaths.length) {
++    throw new TypeError('test file paths must be unique');
++  }
++
++  const fallback = fallbackDuration(measuredDurations);
++  const weighted = [...filePaths]
++    .map((file) => ({
++      file,
++      duration: positiveDuration(measuredDurations[file]) ? measuredDurations[file] : fallback,
++    }))
++    .sort((a, b) => b.duration - a.duration || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
++  const bins = Array.from({ length: count }, () => ({ total: 0, files: [] }));
++
++  for (const entry of weighted) {
++    let target = 0;
++    for (let index = 1; index < bins.length; index += 1) {
++      if (bins[index].total < bins[target].total) target = index;
++    }
++    bins[target].files.push(entry.file);
++    bins[target].total += entry.duration;
++  }
++
++  return bins.map((bin) => bin.files);
++}
++
++function repoRelative(root, moduleId) {
++  return relative(root, moduleId).replaceAll('\\', '/');
++}
++
++export default class CiTestSequencer extends BaseSequencer {
++  async shard(specifications) {
++    const { index, count } = this.ctx.config.shard;
++    if (!Number.isInteger(index) || index < 1 || index > count) {
++      throw new TypeError('shard index must be between 1 and shard count');
++    }
++    const byKey = new Map();
++    const keyedDurations = {};
++    specifications.forEach((specification) => {
++      const file = repoRelative(this.ctx.config.root, specification.moduleId);
++      const project = specification.project.name ?? '';
++      const baseKey = `${project}\0${file}`;
++      let key = baseKey;
++      let duplicate = 1;
++      while (byKey.has(key)) key = `${baseKey}\0${duplicate++}`;
++      byKey.set(key, specification);
++      keyedDurations[key] = durations[file];
++    });
++    const assigned = assignShards([...byKey.keys()], keyedDurations, count);
++    return assigned[index - 1].map((key) => byKey.get(key));
++  }
++}
+diff --git a/.github/scripts/ci-test-sequencer.test.cjs b/.github/scripts/ci-test-sequencer.test.cjs
+new file mode 100644
+index 00000000..15ddf525
+--- /dev/null
++++ b/.github/scripts/ci-test-sequencer.test.cjs
+@@ -0,0 +1,96 @@
++const assert = require('node:assert/strict');
++const { test } = require('node:test');
++const { pathToFileURL } = require('node:url');
++const { join } = require('node:path');
++
++const moduleUrl = pathToFileURL(join(__dirname, 'ci-test-sequencer.mjs')).href;
++
++async function allocator() {
++  return (await import(moduleUrl)).assignShards;
++}
++
++test('assignShards uses deterministic longest-processing-time bins', async () => {
++  const assignShards = await allocator();
++  const result = assignShards(
++    ['slow.test.ts', 'medium.test.ts', 'small.test.ts', 'tiny.test.ts'],
++    {
++      'slow.test.ts': 10,
++      'medium.test.ts': 6,
++      'small.test.ts': 4,
++      'tiny.test.ts': 1,
++    },
++    2,
++  );
++
++  assert.deepEqual(result, [
++    ['slow.test.ts', 'tiny.test.ts'],
++    ['medium.test.ts', 'small.test.ts'],
++  ]);
++});
++
++test('assignShards includes new files with a positive fallback duration', async () => {
++  const assignShards = await allocator();
++  const result = assignShards(
++    ['known.test.ts', 'new-a.test.ts', 'new-b.test.ts'],
++    { 'known.test.ts': 12 },
++    2,
++  );
++
++  assert.deepEqual(result, [
++    ['known.test.ts', 'new-b.test.ts'],
++    ['new-a.test.ts'],
++  ]);
++  assert.deepEqual([...result.flat()].sort(), ['known.test.ts', 'new-a.test.ts', 'new-b.test.ts']);
++  assert.equal(result.flat().length, 3);
++  assert.ok(result.every((shard) => shard.length > 0));
++});
++
++test('assignShards is stable when discovery order changes', async () => {
++  const assignShards = await allocator();
++  const durations = { 'a.test.ts': 5, 'b.test.ts': 4, 'c.test.ts': 3, 'd.test.ts': 2 };
++
++  assert.deepEqual(
++    assignShards(['d.test.ts', 'b.test.ts', 'a.test.ts', 'c.test.ts'], durations, 2),
++    assignShards(['a.test.ts', 'b.test.ts', 'c.test.ts', 'd.test.ts'], durations, 2),
++  );
++});
++
++test('assignShards resolves equal weights by path and shard index', async () => {
++  const assignShards = await allocator();
++  assert.deepEqual(
++    assignShards(['d', 'c', 'b', 'a'], { a: 1, b: 1, c: 1, d: 1 }, 2),
++    [
++      ['a', 'c'],
++      ['b', 'd'],
++    ],
++  );
++});
++
++test('assignShards validates a positive integer shard count', async () => {
++  const assignShards = await allocator();
++  for (const count of [0, -1, 1.5, Number.NaN]) {
++    assert.throws(() => assignShards(['a'], {}, count), /positive integer/);
++  }
++});
++
++test('sequencer shards cover every specification including duplicate module ids', async () => {
++  const { default: Sequencer } = await import(moduleUrl);
++  const specifications = [
++    { moduleId: '/repo/a.test.ts', project: { name: 'one' } },
++    { moduleId: '/repo/a.test.ts', project: { name: 'two' } },
++    { moduleId: '/repo/new.test.ts', project: { name: 'one' } },
++  ];
++  const shard = async (input, index) => {
++    const sequencer = new Sequencer({ config: { root: '/repo', shard: { index, count: 2 } } });
++    return sequencer.shard(input);
++  };
++  const selected = [...(await shard(specifications, 1)), ...(await shard(specifications, 2))];
++
++  assert.equal(selected.length, specifications.length);
++  assert.deepEqual(new Set(selected), new Set(specifications));
++  assert.deepEqual(
++    (await shard(specifications, 1)).map((spec) => spec.project.name),
++    (await shard([...specifications].reverse(), 1)).map((spec) => spec.project.name),
++  );
++  assert.equal(Object.hasOwn(Sequencer.prototype, 'sort'), false);
++});
+diff --git a/.github/test-durations.json b/.github/test-durations.json
+new file mode 100644
+index 00000000..8b4ebc81
+--- /dev/null
++++ b/.github/test-durations.json
+@@ -0,0 +1,385 @@
++{
++  "_provenance": {
++    "baselineGitSha": "b1fe75911378dfe7816a7a83312c2acbdcf848f4",
++    "workflowRunId": "34272576293",
++    "repetitions": 3,
++    "aggregation": "median suite duration across three baseline console reports",
++    "source": ".github/benchmarks/156/shards.json durationsMs"
++  },
++  "durationsMs": {
++    "packages/api-client/src/protocol/tool-display.test.ts": 10,
++    "packages/api-client/src/utils/project-scope.test.ts": 14,
++    "packages/cezar/src/server/forge/github.test.ts": 303,
++    "packages/cezar/src/runs/store.test.ts": 264,
++    "packages/cezar/src/core/opencode-server-runner.test.ts": 6665,
++    "packages/cezar/src/server/git-changes.test.ts": 4790,
++    "packages/cezar/src/core/codex-ui-mapper.test.ts": 2130,
++    "packages/cezar/src/core/opencode-ui-mapper.test.ts": 494,
++    "packages/cezar/src/workflows/run.test.ts": 78026,
++    "packages/cezar/src/core/provider-auth.test.ts": 55,
++    "packages/cezar/src/delegation/provision-workflows.test.ts": 34491,
++    "packages/cezar/src/core/harness-parity.test.ts": 97693,
++    "packages/cezar/src/server/agent-profiles-api.test.ts": 1872,
++    "packages/cezar/src/delegation/workspace.test.ts": 15417,
++    "packages/cezar/src/workflows/worker-destroy.test.ts": 20103,
++    "packages/cezar/src/core/claude-ui-mapper.test.ts": 6064,
++    "packages/cezar/src/core/pi-runner.test.ts": 13539,
++    "packages/cezar/src/server/projects-api.test.ts": 1511,
++    "packages/cezar/src/workflows/auto-resume.test.ts": 21690,
++    "packages/cezar/src/server-install/platforms/ubuntu-vps.test.ts": 34,
++    "packages/cezar/src/workflows/worker-wait.test.ts": 172447,
++    "packages/cezar/src/server/providers-api.test.ts": 594,
++    "packages/cezar/src/git-worktree.test.ts": 1545,
++    "packages/cezar/src/server/workspace-api.test.ts": 608,
++    "packages/cezar/src/runs/delegation-state.test.ts": 162,
++    "packages/cezar/src/workflows/pasted-attachments.test.ts": 36207,
++    "packages/cezar/src/core/claude-cli-runner.test.ts": 8948,
++    "packages/cezar/src/server/runs-index-api.test.ts": 379,
++    "packages/cezar/src/delegation/destruction-results.test.ts": 4927,
++    "packages/cezar/src/server/checkout.test.ts": 349,
++    "packages/cezar/src/workflows/system-prompt.test.ts": 32319,
++    "packages/cezar/src/workspace/config.test.ts": 77,
++    "packages/cezar/src/delegation/service.test.ts": 2449,
++    "packages/cezar/src/workflows/workspace-semaphore.test.ts": 25707,
++    "packages/cezar/src/server/provider-action-gating.test.ts": 2533,
++    "packages/cezar/src/server-install/engine.test.ts": 89,
++    "packages/cezar/src/runs/ui-event-sink.test.ts": 33,
++    "packages/cezar/src/core/agent-env.test.ts": 31,
++    "packages/cezar/src/server/route-parity.test.ts": 727,
++    "packages/cezar/src/config.test.ts": 79,
++    "packages/cezar/src/core/ask.test.ts": 52,
++    "packages/cezar/src/server/workspace-events.test.ts": 572,
++    "packages/cezar/src/workspace/projects.test.ts": 453,
++    "packages/cezar/src/server/queued-messages.test.ts": 617,
++    "packages/cezar/src/skills-update.test.ts": 216,
++    "packages/cezar/src/server/models-api.test.ts": 469,
++    "packages/cezar/src/workspace/agent-accounts.test.ts": 70,
++    "packages/cezar/src/runs/event-history.test.ts": 310,
++    "packages/cezar/src/server/origin-guard.test.ts": 944,
++    "packages/cezar/src/server/ws.test.ts": 328,
++    "packages/cezar/src/server-install/platforms/macosx-ngrok.test.ts": 146,
++    "packages/cezar/src/server/open-in-cli-resume.test.ts": 606,
++    "packages/cezar/src/core/pi-model-catalog.test.ts": 47,
++    "packages/cezar/src/server/config-api.test.ts": 520,
++    "packages/cezar/src/delegation/input.test.ts": 71,
++    "packages/cezar/src/server/repo-pull.test.ts": 10263,
++    "packages/cezar/src/workflows/delegation-integration.test.ts": 28338,
++    "packages/cezar/src/server/open-in-app.test.ts": 1565,
++    "packages/cezar/src/server/request-validation.test.ts": 577,
++    "packages/cezar/src/core/claude-model-catalog.test.ts": 178,
++    "packages/cezar/src/server/health-topic.test.ts": 1489,
++    "packages/cezar/src/server/contract-parity.workspace.test.ts": 12,
++    "packages/cezar/src/server/attachments-api.test.ts": 1278,
++    "packages/cezar/src/server/todos-start.test.ts": 598,
++    "packages/cezar/src/server/health-forge.test.ts": 1863,
++    "packages/cezar/src/delegation/routes.test.ts": 1804,
++    "packages/cezar/src/core/tool-display.test.ts": 36,
++    "packages/cezar/src/core/opencode-model-catalog.test.ts": 37,
++    "packages/cezar/src/git-diff-base.test.ts": 15,
++    "packages/cezar/src/workspace/projects-cli.test.ts": 460,
++    "packages/cezar/src/delegation/results.test.ts": 2043,
++    "packages/cezar/src/workflows/continuation-tools.test.ts": 616,
++    "packages/cezar/src/workspace/agent-profiles.test.ts": 46,
++    "packages/cezar/src/workspace/semaphore.test.ts": 16,
++    "packages/cezar/src/workflows/run-lease.test.ts": 1544,
++    "packages/cezar/src/server/bc-route-inventory.test.ts": 15,
++    "packages/cezar/src/core/pi-ui-mapper.test.ts": 29,
++    "packages/cezar/src/server/fs-browse.test.ts": 419,
++    "packages/cezar/src/server-install/steps.test.ts": 29,
++    "packages/cezar/src/server/automations-gate.test.ts": 905,
++    "packages/cezar/src/release/snapshot.test.ts": 15,
++    "packages/cezar/src/server/provider-auth-runtime.test.ts": 57,
++    "packages/cezar/src/delegation/policy.test.ts": 134,
++    "packages/cezar/src/workspace/migrations.test.ts": 63,
++    "packages/cezar/src/core/model-identity.test.ts": 25,
++    "packages/cezar/src/server/continue-run.test.ts": 331,
++    "packages/cezar/src/server/forge/github-filters.test.ts": 39,
++    "packages/cezar/src/runs/repo-handle-recovery.test.ts": 54,
++    "packages/cezar/src/server/worktrees-api.test.ts": 745,
++    "packages/cezar/src/server/capabilities.test.ts": 31,
++    "packages/cezar/src/server/open-in-file.test.ts": 326,
++    "packages/cezar/src/server/start-run.test.ts": 330,
++    "packages/cezar/src/runs/agent-tmpdir.test.ts": 23,
++    "packages/cezar/src/server/automations-api.test.ts": 267,
++    "packages/cezar/src/server/tool-display-mirror.test.ts": 19,
++    "packages/cezar/src/server/ui-state-api.test.ts": 413,
++    "packages/cezar/src/server/skills-update-api.test.ts": 238,
++    "packages/cezar/src/server/project-context.test.ts": 137,
++    "packages/cezar/src/core/codex-app-server-runner.test.ts": 654,
++    "packages/cezar/src/delegation/cli.test.ts": 770,
++    "packages/cezar/src/runs/auto-name.test.ts": 629,
++    "packages/cezar/src/workflows/agent-profile-wiring.test.ts": 44,
++    "packages/cezar/src/server/typed-bodies.test.ts": 4,
++    "packages/cezar/src/workflows/agent-tmpdir.test.ts": 63,
++    "packages/cezar/src/server/typed-client.test.ts": 234,
++    "packages/cezar/src/server/usage-scope.test.ts": 177,
++    "packages/cezar/src/core/ui-events.test.ts": 10,
++    "packages/cezar/src/core/codex-app-server-transport.test.ts": 17,
++    "packages/cezar/src/server/static-ui.test.ts": 10,
++    "packages/cezar/src/core/runner-model-catalog.test.ts": 13,
++    "packages/cezar/src/automations/scheduler.test.ts": 46,
++    "packages/cezar/src/server/contract-parity.runs.test.ts": 4,
++    "packages/cezar/src/skills.test.ts": 48,
++    "packages/cezar/src/server/contract-parity.github.test.ts": 4,
++    "packages/cezar/src/workspace/home-safety.test.ts": 1318,
++    "packages/cezar/src/paths.test.ts": 11,
++    "packages/cezar/src/core/owned-input-delivery.test.ts": 20921,
++    "packages/cezar/src/server-install/state.test.ts": 24,
++    "packages/cezar/src/server/start-run-todo.test.ts": 269,
++    "packages/cezar/src/agent-config/account-identity.test.ts": 18,
++    "packages/cezar/src/delegation/context.test.ts": 653,
++    "packages/cezar/src/server/open-in-terminal.test.ts": 46,
++    "packages/cezar/src/server/contract-parity.automations.test.ts": 5,
++    "packages/cezar/src/workflows/model-identity-wiring.test.ts": 22219,
++    "packages/cezar/src/runs/human-ask-summary.test.ts": 52,
++    "packages/cezar/src/autosave-conflict-guard.test.ts": 581,
++    "packages/cezar/src/release/stable.test.ts": 17,
++    "packages/cezar/src/core/codex-model-catalog.test.ts": 40,
++    "packages/cezar/src/automations/github-poller.test.ts": 26,
++    "packages/cezar/src/delegation/wait.test.ts": 18,
++    "packages/cezar/src/server/github-comments-api.test.ts": 168,
++    "packages/cezar/src/workflows/run-isolation.test.ts": 2838,
++    "packages/cezar/src/server/delegation-cleanup.test.ts": 945,
++    "packages/cezar/src/server/ref-status-invalidation.test.ts": 374,
++    "packages/cezar/src/server/agent-config-api.test.ts": 321,
++    "packages/cezar/src/workflows/autosave-gate.test.ts": 228,
++    "packages/cezar/src/runs/task-markers.test.ts": 11,
++    "packages/cezar/src/core/ui-parity.test.ts": 13,
++    "packages/cezar/src/server/contract-parity.workflows.test.ts": 5,
++    "packages/cezar/src/workflows/retention-wiring.test.ts": 2107,
++    "packages/cezar/src/core/owned-input-failure.test.ts": 2905,
++    "packages/cezar/src/server/versioned-surface.test.ts": 221,
++    "packages/cezar/src/server/cold-repo-handles.test.ts": 29,
++    "packages/cezar/src/agent-config/files.test.ts": 30,
++    "packages/cezar/src/workflows/skill-system-prompt.test.ts": 15,
++    "packages/cezar/src/server/github-search-api.test.ts": 231,
++    "packages/cezar/src/core/secret-redaction.test.ts": 19,
++    "packages/cezar/src/server/read-run.test.ts": 187,
++    "packages/cezar/src/agent-config/models.test.ts": 24,
++    "packages/cezar/src/runs/run-index.test.ts": 31,
++    "packages/cezar/src/core/usage-limit.test.ts": 38,
++    "packages/cezar/src/server/auto-resume-api.test.ts": 187,
++    "packages/cezar/src/delegation/provision.test.ts": 303,
++    "packages/cezar/src/runs/retention-enforce.test.ts": 263,
++    "packages/cezar/src/server/contract-parity.delegation.test.ts": 6,
++    "packages/cezar/src/server/inbox-gate.test.ts": 249,
++    "packages/cezar/src/server/github-ref-status-api.test.ts": 190,
++    "packages/cezar/src/server/provider-action-gate.test.ts": 10,
++    "packages/cezar/src/server/open-in-project.test.ts": 201,
++    "packages/cezar/src/runs/retention.test.ts": 9,
++    "packages/cezar/src/runs/retention-rematerialize.test.ts": 188,
++    "packages/cezar/src/workflows/recover-followups.test.ts": 102,
++    "packages/cezar/src/server/github-merge-api.test.ts": 264,
++    "packages/cezar/src/server/host-guard.test.ts": 922,
++    "packages/cezar/src/runs/arm-repo-handle.test.ts": 16,
++    "packages/cezar/src/todos.test.ts": 1433,
++    "packages/cezar/src/automations/task-template.test.ts": 25,
++    "packages/cezar/src/agent-config/seed.test.ts": 287,
++    "packages/cezar/src/server-install/ui.test.ts": 15,
++    "packages/cezar/src/skills-banner.test.ts": 24,
++    "packages/cezar/src/automations/store.test.ts": 61,
++    "packages/cezar/src/server/ui-state.test.ts": 236,
++    "packages/cezar/src/server/forge/index.test.ts": 15,
++    "packages/cezar/src/server/wsl.test.ts": 14,
++    "packages/cezar/src/server/group-pick.test.ts": 391,
++    "packages/cezar/src/server/github-checks-api.test.ts": 190,
++    "packages/cezar/src/server/patch-run.test.ts": 213,
++    "packages/cezar/src/runs/task-refs.test.ts": 13,
++    "packages/cezar/src/server/api-types.test.ts": 7,
++    "packages/cezar/src/server/forge/draft-pr-autosave.test.ts": 215,
++    "packages/cezar/src/server/run-relationships.test.ts": 1351,
++    "packages/cezar/src/core/shell-env.test.ts": 11,
++    "packages/cezar/src/core/v1-text-coalescer.test.ts": 12,
++    "packages/cezar/src/workflows/recover-session-failure.test.ts": 221,
++    "packages/cezar/src/workflows/recover-autonomous.test.ts": 77,
++    "packages/cezar/src/core/agent-profiles.test.ts": 13,
++    "packages/cezar/src/core/usage.test.ts": 12,
++    "packages/cezar/src/agent-config/catalog.test.ts": 15,
++    "packages/cezar/src/server/contract-parity.test.ts": 6,
++    "packages/cezar/src/delegation/credentials.test.ts": 13,
++    "packages/cezar/src/server/git.test.ts": 255,
++    "packages/cezar/src/server/project-context-repo-handle.test.ts": 89,
++    "packages/cezar/src/core/model-presets.test.ts": 11,
++    "packages/cezar/src/server/resume-command.test.ts": 11,
++    "packages/cezar/src/server-install/strategies.test.ts": 104,
++    "packages/cezar/src/server/github-pr-changes-api.test.ts": 105,
++    "packages/cezar/src/agent-config/validate.test.ts": 13,
++    "packages/cezar/src/install-as-command.test.ts": 15,
++    "packages/cezar/src/automations/coordinator.test.ts": 30,
++    "packages/cezar/src/workflows/pi-teardown.test.ts": 639,
++    "packages/cezar/src/core/agent-model-policy.test.ts": 9,
++    "packages/cezar/src/release/manifests.test.ts": 7,
++    "packages/cezar/src/server/query-repeat-parity.test.ts": 99,
++    "packages/cezar/src/server/sse-headers.test.ts": 100,
++    "packages/cezar/src/automations/types.test.ts": 16,
++    "packages/cezar/src/workflows/allowed-tools.test.ts": 8,
++    "packages/cezar/src/core/provider-availability.test.ts": 8,
++    "packages/cezar/src/pack-check.test.ts": 12,
++    "packages/cezar/src/core/process-usage.test.ts": 11,
++    "packages/cezar/src/skills-remote.test.ts": 9,
++    "packages/cezar/src/core/codex-provider-failure.test.ts": 743,
++    "packages/cezar/src/server-install/types.test.ts": 12,
++    "packages/cezar/src/runs/review-gate.test.ts": 6,
++    "packages/cezar/src/handoff.test.ts": 5,
++    "packages/cezar/src/server/forge/github-pr-diff.test.ts": 10,
++    "packages/cezar/src/git-refs.test.ts": 6,
++    "packages/cezar/src/server/model-contract.test.ts": 9,
++    "packages/cezar/src/core/effort.test.ts": 6,
++    "packages/cezar/src/headless-repo-handle.test.ts": 6357,
++    "packages/web/src/routes/task-thread/run-header.test.tsx": 5960,
++    "packages/web/src/api/queries.test.tsx": 4286,
++    "packages/web/src/routes/new-task.test.tsx": 13236,
++    "packages/web/src/routes/tasks-overview.test.tsx": 2501,
++    "packages/web/src/routes/task-thread/task-thread.test.tsx": 3011,
++    "packages/web/src/routes/task-thread/thread-state.test.ts": 34,
++    "packages/web/src/components/app-shell.test.tsx": 2334,
++    "packages/web/src/routes/global-tasks.test.tsx": 5826,
++    "packages/web/src/components/command-palette.test.tsx": 2059,
++    "packages/web/src/routes/inbox.test.tsx": 1779,
++    "packages/web/src/api/global-events.test.tsx": 1063,
++    "packages/web/src/routes/github/github.test.tsx": 30117,
++    "packages/web/src/components/composer/composer.test.tsx": 1925,
++    "packages/web/src/routes/settings/accounts-section.test.tsx": 3246,
++    "packages/web/src/components/task-quick-list.test.tsx": 779,
++    "packages/web/src/routes/skills.test.tsx": 1560,
++    "packages/web/src/routes/settings/agents-section.test.tsx": 1865,
++    "packages/web/src/routes/repo-git/repo-git.test.tsx": 1858,
++    "packages/web/src/routes.test.tsx": 8622,
++    "packages/web/src/lib/task-groups.test.ts": 43,
++    "packages/web/src/api/client.test.ts": 66,
++    "packages/web/src/routes/settings/projects-section.test.tsx": 2590,
++    "packages/web/src/lib/tasks-table.test.ts": 38,
++    "packages/web/src/routes/new-task-form.test.ts": 21,
++    "packages/web/src/routes/settings/provider-settings.test.tsx": 1202,
++    "packages/web/src/routes/task-thread/follow-up-engine.test.tsx": 2729,
++    "packages/web/src/components/reference-status.test.tsx": 1037,
++    "packages/web/src/routes/settings/settings.test.tsx": 1244,
++    "packages/web/src/components/app-shell-container.test.tsx": 1450,
++    "packages/web/src/routes/task-thread/subagent-dock.test.ts": 19,
++    "packages/web/src/components/project-groups.test.tsx": 1008,
++    "packages/web/src/routes/task-git/task-changes.test.tsx": 2101,
++    "packages/web/src/routes/task-thread/thread-items.test.tsx": 815,
++    "packages/web/src/lib/skills.test.ts": 21,
++    "packages/web/src/routes/task-thread/review-panel.test.tsx": 1300,
++    "packages/web/src/components/reference-chip.test.tsx": 705,
++    "packages/web/src/lib/global-tasks.test.ts": 30,
++    "packages/web/src/routes/workflows/workflows.test.tsx": 1404,
++    "packages/web/src/components/engine-pills.test.ts": 614,
++    "packages/web/src/routes/task-thread/run-actions.test.ts": 29,
++    "packages/web/src/routes/settings/prompt-templates-section.test.tsx": 1357,
++    "packages/web/src/lib/prompt-templates.test.ts": 24,
++    "packages/web/src/routes/task-thread/ask-card.test.tsx": 812,
++    "packages/web/src/routes/new-task-project.test.tsx": 2040,
++    "packages/web/src/routes/settings/accounts-defaults.test.tsx": 979,
++    "packages/web/src/api/run-events.test.ts": 79,
++    "packages/web/src/lib/github-task.test.ts": 19,
++    "packages/web/src/routes/compare-variants.test.tsx": 1063,
++    "packages/web/src/routes/task-thread/markdown.test.tsx": 1442,
++    "packages/web/src/components/tools-menu.test.tsx": 1035,
++    "packages/web/src/routes/task-thread/thread-groups.test.ts": 19,
++    "packages/web/src/lib/provider-status.test.ts": 19,
++    "packages/web/src/components/diff/diff.test.tsx": 1305,
++    "packages/web/src/components/add-project-dialog.test.tsx": 819,
++    "packages/web/src/routes/task-thread/session-transcript.test.tsx": 424,
++    "packages/web/src/routes/task-git/task-files.test.tsx": 1286,
++    "packages/web/src/lib/attention.test.ts": 14,
++    "packages/web/src/routes/settings/project-general.test.tsx": 584,
++    "packages/web/src/api/run-history.test.tsx": 3578,
++    "packages/web/src/routes/settings/resources-section.test.tsx": 801,
++    "packages/web/src/design-guardian.test.ts": 188,
++    "packages/web/src/api/ws.test.ts": 17,
++    "packages/web/src/components/run-notifications.test.tsx": 69,
++    "packages/web/src/components/clone-project-dialog.test.tsx": 620,
++    "packages/web/src/routes/settings/agent-config-section.test.tsx": 597,
++    "packages/web/src/routes/task-thread/agents-dock.test.tsx": 216,
++    "packages/web/src/lib/workflow-builder.test.ts": 32,
++    "packages/web/src/api/events.test.ts": 31,
++    "packages/web/src/components/theme-provider.test.tsx": 117,
++    "packages/web/src/components/provider-banner.test.tsx": 264,
++    "packages/web/src/components/composer/composer-attachments.test.ts": 21,
++    "packages/web/src/lib/keyboard-inset.test.ts": 29,
++    "packages/web/src/routes/github/github-route-wiring.test.tsx": 1720,
++    "packages/web/src/routes/task-thread/thread-scroller.test.tsx": 109,
++    "packages/web/src/routes/task-thread/run-reconcile.test.ts": 61,
++    "packages/web/src/routes/settings/bookmarklets-section.test.tsx": 187,
++    "packages/web/src/lib/use-command-shortcut.test.tsx": 70,
++    "packages/web/src/lib/notifications.test.ts": 14,
++    "packages/web/src/routes/task-thread/run-relationships.test.tsx": 1054,
++    "packages/web/src/components/provider-banner-container.test.tsx": 355,
++    "packages/web/src/components/composer/dictation.test.tsx": 308,
++    "packages/web/src/routes/task-thread/step-rail.test.tsx": 359,
++    "packages/web/src/routes/new-task-draft.test.ts": 10,
++    "packages/web/src/lib/use-task-table-columns.test.tsx": 472,
++    "packages/web/src/routes/task-thread/plan-dock.test.tsx": 129,
++    "packages/web/src/lib/read-state.test.ts": 10,
++    "packages/web/src/components/diff/parse-patch.test.ts": 13,
++    "packages/web/src/components/diff/diff-virtualize.test.tsx": 873,
++    "packages/web/src/components/ghost-code-backdrop.test.tsx": 166,
++    "packages/web/src/routes/cross-project-task-navigation.test.tsx": 811,
++    "packages/web/src/routes/new-task-plan.test.ts": 14,
++    "packages/web/src/lib/git-actions.test.ts": 12,
++    "packages/web/src/routes/settings/project-location.test.tsx": 873,
++    "packages/web/src/routes/settings/notifications-section.test.tsx": 514,
++    "packages/web/src/routes/github/github-filter.test.ts": 25,
++    "packages/web/src/components/reference-conflict-action.test.tsx": 298,
++    "packages/web/src/lib/theme.test.ts": 42,
++    "packages/web/src/routes/task-thread/subagent-sheet.test.tsx": 706,
++    "packages/web/src/components/nav-items.test.ts": 12,
++    "packages/web/src/routes/settings/worktrees-section.test.tsx": 300,
++    "packages/web/src/routes/settings/skills-section.test.tsx": 486,
++    "packages/web/src/api/project-scope-context.test.tsx": 64,
++    "packages/web/src/lib/last-location.test.ts": 11,
++    "packages/web/src/components/last-location-controller.test.tsx": 255,
++    "packages/web/src/routes/settings/worktrees-panel.test.tsx": 431,
++    "packages/web/src/components/ui/toaster.test.tsx": 272,
++    "packages/web/src/routes/task-thread/thread-scroll.test.ts": 10,
++    "packages/web/src/lib/unified-diff.test.ts": 11,
++    "packages/web/src/lib/bookmarklet.test.ts": 9,
++    "packages/web/src/components/centered-state.test.tsx": 256,
++    "packages/web/src/lib/highlighter.test.ts": 475,
++    "packages/web/src/routes/task-thread/ask-answer.test.ts": 15,
++    "packages/web/src/routes/new-task-params.test.ts": 12,
++    "packages/web/src/routes/task-git/commit-list.test.tsx": 216,
++    "packages/web/src/components/diff/diff-scroll.test.ts": 11,
++    "packages/web/src/routes/new-task-autostart.test.ts": 8,
++    "packages/web/src/components/diff-stat.test.tsx": 73,
++    "packages/web/src/components/theme-toggle.test.tsx": 265,
++    "packages/web/src/lib/appearance.test.ts": 11,
++    "packages/web/src/routes/task-thread/subagent-replay.test.tsx": 281,
++    "packages/web/src/lib/project-router.test.tsx": 214,
++    "packages/web/src/routes/task-thread/active-provider.test.ts": 7,
++    "packages/web/src/components/ui/button.test.tsx": 280,
++    "packages/web/src/routes/task-git/file-tree.test.ts": 17,
++    "packages/web/src/components/diff/word-diff.test.ts": 10,
++    "packages/web/src/lib/provider-auth-alert.test.ts": 7,
++    "packages/web/src/lib/project-tags.test.ts": 20,
++    "packages/web/src/routes/settings/agent-descriptors.test.ts": 9,
++    "packages/web/src/lib/utils.test.ts": 20,
++    "packages/web/src/lib/sidebar-width.test.ts": 12,
++    "packages/web/src/lib/task-columns.test.ts": 8,
++    "packages/web/src/routes/github/hand-to-agent-draft.test.ts": 10,
++    "packages/web/src/components/composer/composer-text.test.ts": 8,
++    "packages/web/src/test/fixture-serve-env.test.ts": 65,
++    "packages/web/src/lib/github-list-width.test.ts": 12,
++    "packages/web/src/routes/task-thread/thread-open-cards.test.tsx": 308,
++    "packages/web/src/components/code-editor.test.tsx": 100,
++    "packages/web/src/components/status-dot.test.tsx": 75,
++    "packages/web/src/components/pill.test.tsx": 76,
++    "packages/web/src/lib/use-submit-shortcut.test.ts": 7,
++    "packages/web/src/routes/task-git/worktree-files.test.ts": 6,
++    "packages/web/src/components/diff/diff-fallback.test.tsx": 77,
++    "packages/web/src/components/list-view.test.tsx": 256,
++    "packages/web/src/lib/sidebar-collapse.test.ts": 11,
++    "packages/web/src/lib/token-metrics.test.ts": 6,
++    "packages/web/src/lib/use-document-title.test.ts": 20,
++    "packages/web/src/routes/task-thread/thread-scroller-virtualizer.test.tsx": 121,
++    "packages/web/src/lib/format.test.ts": 9,
++    "packages/web/src/api/contract-pipeline.test.ts": 7,
++    "packages/web/src/routes/plan-review.test.tsx": 316,
++    "packages/web/src/lib/use-now.test.tsx": 201,
++    "packages/web/src/vite-config.test.ts": 13,
++    "packages/web/src/components/zoomable-image.test.tsx": 213,
++    "packages/web/src/components/directional-usage.test.tsx": 52,
++    "packages/web/src/components/picker-pill.test.tsx": 219
++  }
++}

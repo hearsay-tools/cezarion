@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { ContentBlock } from '../core/agent-runner.ts';
+import { shellQuote } from '../core/shell-env.ts';
 import { HANDOFF_INSTRUCTIONS } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
 import type { WorkflowDef } from './types.ts';
@@ -21,6 +22,37 @@ import { attachmentExtension, isAttachmentMediaType, isImageAttachmentName } fro
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
+let gateSequence = 0;
+const pendingHolderReleases = new Set<() => void>();
+
+/** A real check-step subprocess that holds a slot until the test releases it. */
+function slotHolder(root: string, name: string): { workflow: WorkflowDef; release: () => void } {
+  const gate = join(root, `.release-${gateSequence++}`);
+  const script =
+    "const fs=require('node:fs');const gate=process.argv[1];" +
+    'const poll=()=>fs.existsSync(gate)?undefined:setTimeout(poll,5);poll()';
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    writeFileSync(gate, '');
+    pendingHolderReleases.delete(release);
+  };
+  pendingHolderReleases.add(release);
+  return {
+    workflow: {
+      name,
+      source: 'built-in',
+      steps: [
+        {
+          id: 'hold',
+          command: `${shellQuote(process.execPath)} -e ${shellQuote(script)} ${shellQuote(gate)}`,
+        },
+      ],
+    },
+    release,
+  };
+}
 
 // 1x1 transparent PNG — small enough to inline, real enough to round-trip through base64.
 const TINY_PNG_B64 =
@@ -191,13 +223,38 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     manager = new RunManager(store, repoRoot);
   });
 
-  afterAll(() => {
-    for (const [key, value] of Object.entries(savedEnv)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
+  afterEach(async () => {
+    for (const release of [...pendingHolderReleases]) release();
+    for (const run of store.listRuns()) {
+      if (!['done', 'review', 'failed', 'cancelled'].includes(run.status)) manager.cancel(run.id);
     }
-    store.flush();
-    rmSync(repoRoot, { recursive: true, force: true });
+    await Promise.all(
+      store.listRuns().map((run) =>
+        waitForStatus(run.id, ['done', 'review', 'failed', 'cancelled'], 5_000),
+      ),
+    );
+  });
+
+  afterAll(async () => {
+    try {
+      for (const release of [...pendingHolderReleases]) release();
+      for (const run of store.listRuns()) {
+        if (!['done', 'review', 'failed', 'cancelled'].includes(run.status)) manager.cancel(run.id);
+      }
+      await Promise.all(
+        store
+          .listRuns()
+          .map((run) => waitForStatus(run.id, ['done', 'review', 'failed', 'cancelled'], 5_000)),
+      );
+    } finally {
+      manager.dispose();
+      for (const [key, value] of Object.entries(savedEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      store.flush();
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
   });
 
   function readStdinLines(): Array<{ userText: string; imageCount: number }> {
@@ -235,12 +292,8 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       type: 'image',
       source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 },
     };
-    const holder: WorkflowDef = {
-      name: 'hold-slot',
-      source: 'built-in',
-      steps: [{ id: 'hold', command: `${process.execPath} -e "setTimeout(() => {}, 500)"` }],
-    };
-    manager.startRun(holder, { task: 'occupy the only slot', worktree: false });
+    const holder = slotHolder(repoRoot, 'hold-slot');
+    manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
     const record = manager.startRun(workflow, {
       task: 'save the pasted screenshot to disk',
       images: [image],
@@ -253,6 +306,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     expect(queued?.taskImages).toEqual([`/api/v1/runs/${record.id}/images/pasted-1.png`]);
     expect(existsSync(join(dataDir, 'runs', `${record.id}-images`, 'pasted-1.png'))).toBe(true);
 
+    holder.release();
     await waitForStatus(record.id, ['done', 'review', 'failed', 'cancelled']);
 
     const after = store.getRun(record.id);
@@ -295,12 +349,8 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
         { id: 'verify', command: 'true' },
       ],
     };
-    const holder: WorkflowDef = {
-      name: 'hold-slot-files',
-      source: 'built-in',
-      steps: [{ id: 'hold', command: `${process.execPath} -e "setTimeout(() => {}, 500)"` }],
-    };
-    manager.startRun(holder, { task: 'occupy the only slot', worktree: false });
+    const holder = slotHolder(repoRoot, 'hold-slot-files');
+    manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
     const record = manager.startRun(workflow, {
       task: 'read the attached brief',
       images: [
@@ -319,6 +369,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       `/api/v1/runs/${record.id}/images/pasted-2.pdf`,
     ]);
 
+    holder.release();
     await waitForStatus(record.id, ['done', 'review', 'failed', 'cancelled']);
     const after = store.getRun(record.id);
     expect(after?.status, after?.error).toMatch(/^(done|review)$/);
@@ -357,12 +408,8 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
         { id: 'verify', command: 'true' },
       ],
     };
-    const holder: WorkflowDef = {
-      name: 'hold-slot-stacked',
-      source: 'built-in',
-      steps: [{ id: 'hold', command: `${process.execPath} -e "setTimeout(() => {}, 700)"` }],
-    };
-    manager.startRun(holder, { task: 'occupy the only slot', worktree: false });
+    const holder = slotHolder(repoRoot, 'hold-slot-stacked');
+    manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
     const record = manager.startRun(workflow, { task: 'wait for my brief', worktree: false });
     expect(store.getRun(record.id)?.status).toBe('queued');
 
@@ -374,6 +421,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     const stackedName = queuedMessage?.images?.[0]?.split('/').pop() as string;
     expect(stackedName).toMatch(/^pasted-\d+\.txt$/);
 
+    holder.release();
     await waitForStatus(record.id, ['done', 'review', 'failed', 'cancelled']);
     const opening = readStdinLines().find((line) => line.userText.includes('wait for my brief'));
     expect(opening).toBeDefined();
@@ -383,12 +431,13 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
 
   it('notes a queued document deleted before same-process execution and still delivers text', async () => {
     writeFileSync(stdinFile, '');
-    const holder: WorkflowDef = { name: 'hold-delete', source: 'built-in', steps: [{ id: 'hold', command: `${process.execPath} -e "setTimeout(() => {}, 500)"` }] };
-    manager.startRun(holder, { task: 'hold slot', worktree: false });
+    const holder = slotHolder(repoRoot, 'hold-delete');
+    manager.startRun(holder.workflow, { task: 'hold slot', worktree: false });
     const workflow: WorkflowDef = { name: 'missing-file', source: 'built-in', steps: [{ id: 'work', prompt: '{{task}}' }, { id: 'verify', command: 'true' }] };
     const record = manager.startRun(workflow, { task: 'read my missing brief', worktree: false, images: [{ type: 'file', mediaType: 'application/pdf', data: TINY_PDF_B64 }] });
     const path = join(dataDir, 'runs', `${record.id}-images`, 'pasted-1.pdf');
     rmSync(path);
+    holder.release();
     await waitForStatus(record.id, ['done', 'review']);
     const message = readStdinLines().find((line) => line.userText.includes('read my missing brief'))!;
     expect(message.userText).not.toContain(path);
