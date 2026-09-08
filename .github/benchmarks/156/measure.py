@@ -40,6 +40,7 @@ def main():
     parser.add_argument('--variant', required=True)
     parser.add_argument('--phase', choices=['verify', 'snapshot'], default='verify')
     parser.add_argument('--max-workers', type=int, choices=[4, 6, 8])
+    parser.add_argument('--shard', type=int, choices=[1, 2])
     args = parser.parse_args()
     root, out = args.root.resolve(), args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -57,6 +58,11 @@ def main():
                     startedAt=time.time(), cache='cold private npm cache; no node_modules reuse')
     patch_name = 'combined' if args.variant.startswith('combined-shards-') else args.variant
     patch_file = Path(__file__).with_name(patch_name + '.patch')
+    if args.variant.startswith('split-shards-'):
+        patch_file = Path(__file__).parent.parent / 'shard-balance' / 'worker-wait-split.patch'
+    duration_file = root / '.github/test-durations.json'
+    if duration_file.is_file():
+        metadata['durationManifestSha256'] = hashlib.sha256(duration_file.read_bytes()).hexdigest()
     if patch_file.is_file():
         metadata['experimentPatchSha256'] = hashlib.sha256(patch_file.read_bytes()).hexdigest()
     (out / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
@@ -68,7 +74,9 @@ def main():
         vitest.append(f'--maxWorkers={args.max_workers}')
     elif args.variant.startswith('workers-'):
         vitest.append('--maxWorkers=' + str(int(args.variant.split('-')[1])))
-    if args.variant in ('combined-shards-1', 'combined-shards-2'):
+    if args.shard is not None:
+        vitest.append(f'--shard={args.shard}/2')
+    elif args.variant in ('combined-shards-1', 'combined-shards-2'):
         vitest.append(f'--shard={args.variant[-1]}/2')
     elif args.variant in ('shards-1', 'shards-2'):
         manifest = json.loads(Path(__file__).with_name('shards.json').read_text())
@@ -87,7 +95,7 @@ def main():
     else:
         steps += [('build', ['npm', 'run', 'build'])]
     steps += [('package', ['npm', 'run', 'test:package'])]
-    if args.variant in ('shards-1', 'shards-2', 'combined-shards-1', 'combined-shards-2'):
+    if args.shard is not None or args.variant in ('shards-1', 'shards-2', 'combined-shards-1', 'combined-shards-2'):
         steps = [steps[0], ('build-server', ['npm', 'run', 'build:server']), ('vitest', vitest)]
     elif args.variant in ('shards-gate', 'combined-shards-gate'):
         steps = [step for step in steps if step[0] != 'vitest']

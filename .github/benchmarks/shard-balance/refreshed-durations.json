@@ -4,13 +4,8 @@
     "harnessGitSha": "2b07fd3fdd75100cc33253883bb97814c4c90a3d",
     "workflowRunId": "34276216531",
     "repetitions": 3,
-    "aggregation": "median optimized suite duration; worker-wait partitions use sums of matched original test-case durations per repetition",
-    "source": "docs/benchmarks/156/raw/34276216531.tar.gz",
-    "splitCaseCounts": {
-      "packages/cezar/src/workflows/worker-wait.test.ts": 28,
-      "packages/cezar/src/workflows/worker-wait-durability.test.ts": 42,
-      "packages/cezar/src/workflows/worker-wait-capacity.test.ts": 35
-    }
+    "aggregation": "median optimized suite duration across both four-worker shards in three repetitions",
+    "source": "docs/benchmarks/156/raw/34276216531.tar.gz"
   },
   "durationsMs": {
     "packages/api-client/src/protocol/tool-display.test.ts": 10.0,
@@ -222,6 +217,7 @@
     "packages/cezar/src/workflows/skill-system-prompt.test.ts": 15.0,
     "packages/cezar/src/workflows/system-prompt.test.ts": 32195.0,
     "packages/cezar/src/workflows/worker-destroy.test.ts": 20629.0,
+    "packages/cezar/src/workflows/worker-wait.test.ts": 185943.0,
     "packages/cezar/src/workflows/workspace-semaphore.test.ts": 10483.0,
     "packages/cezar/src/workspace/agent-accounts.test.ts": 99.0,
     "packages/cezar/src/workspace/agent-profiles.test.ts": 60.0,
@@ -385,9 +381,6 @@
     "packages/web/src/routes/tasks-overview.test.tsx": 3131.0,
     "packages/web/src/routes/workflows/workflows.test.tsx": 1946.0,
     "packages/web/src/test/fixture-serve-env.test.ts": 71.0,
-    "packages/web/src/vite-config.test.ts": 7.0,
-    "packages/cezar/src/workflows/worker-wait.test.ts": 40819.390202,
-    "packages/cezar/src/workflows/worker-wait-durability.test.ts": 70627.19370300007,
-    "packages/cezar/src/workflows/worker-wait-capacity.test.ts": 74491.06976099995
+    "packages/web/src/vite-config.test.ts": 7.0
   }
 }
