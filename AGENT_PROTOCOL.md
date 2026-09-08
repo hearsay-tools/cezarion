@@ -456,7 +456,14 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
 | `ask-bad` | a malformed ask, and then still end the turn |
 | `ask-reply-late` | the same ask, with OpenCode SSE idle preceding the independent reply HTTP acknowledgement |
-| `subagent` | child work, and a child terminal signal the parent turn must survive |
+| `subagent` | child work and a child terminal signal the parent survives, then parent `CEZ:MONITORING` text followed by child text before parent turn-end |
+
+S9 also pins parent-only v1/result text while child messages remain nested on v2.
+R12 asserts the `subagent` turn parks as `running`/`monitoring`, never `waiting`
+(#149). Pi is explicitly exempt from S9 and R12 because its RPC has no child
+session transcript. Codex filters both child message deltas and completions;
+Claude excludes child assistant text from v1 and its result fallback buffer;
+the v2 fallback uses the same parent-only guard.
 
 Owned-input rows S11/S12 pin ask separation and false/retry/closed-session delivery
 on all four real runners. R6–R11 exercise durable queued/startup input, before/during/

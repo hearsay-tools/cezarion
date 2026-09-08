@@ -157,7 +157,15 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
     id: 'S9',
     name: 'S9 keeps the parent turn open past a child session terminal signal',
     scenario: 'subagent',
-    assert: ({ v1 }) => {
+    assert: ({ v1, v2, result }) => {
+      // #149: child text stays nested on v2 and never contaminates parent text,
+      // including AgentRunResult's fallback buffer and unfinished child deltas.
+      const texts = v1.filter((e) => e.type === 'text').map((e) => e.text);
+      expect(texts).toHaveLength(1);
+      expect(texts[0]).toMatch(/CEZ:MONITORING\s*$/);
+      expect(result.text).toBe(texts[0]);
+      expect(v2.some((e) => e.type === 'item.completed' && e.item.kind === 'message'
+        && e.item.text === 'Child review finished.' && !!e.item.parentItemId)).toBe(true);
       expect(v1.filter((e) => e.type === 'turn-end')).toHaveLength(1);
       const lastText = lastIndexWhere(v1, (e) => e.type === 'text');
       expect(lastText).toBeGreaterThanOrEqual(0);
@@ -283,6 +291,18 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
     id: 'R5',
     name: 'R5 parks a declared monitoring turn as running/monitoring, not waiting',
     scenario: 'split-text',
+    settled: (record) => record?.activity === 'monitoring' || record?.status === 'waiting',
+    assert: (obs) => {
+      expect(obs.record?.activity).toBe('monitoring');
+      expect(obs.record?.status).toBe('running');
+      expect(obs.statuses).not.toContain('waiting');
+    },
+  },
+  {
+    // #149: the child message lands before the parent's turn-end, after its marker.
+    id: 'R12',
+    name: 'R12 keeps monitoring parked when child text follows the parent marker',
+    scenario: 'subagent',
     settled: (record) => record?.activity === 'monitoring' || record?.status === 'waiting',
     assert: (obs) => {
       expect(obs.record?.activity).toBe('monitoring');

@@ -48,7 +48,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `provider-error` | a runtime provider rejection in its native error shape |
  * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
  * | `ask-bad` | a malformed ask, and then still end the turn |
- * | `subagent` | child work, and a child terminal signal the parent must survive |
+ * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
  */
 export const SCENARIOS = [
   'baseline',
@@ -150,7 +150,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       ask: 'mock:ask',
       'ask-reply-late': 'mock:ask',
       'ask-bad': 'mock:ask-bad',
-      // No `subagent`: see the S9 entry in PARITY_EXEMPTIONS.
+      // No `subagent`: see the S9 and R12 entries in PARITY_EXEMPTIONS.
     },
   },
 };
@@ -197,6 +197,15 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  {
+    criterion: 'R12',
+    backend: 'pi',
+    kind: 'scenario-unconstructible',
+    reason:
+      "pi's RPC has no child session or child transcript: task tools run on the parent " +
+      'session (see `__fixtures__/pi/rpc-lifecycle.expected.json`), so no child message can ' +
+      'arrive between the parent monitoring marker and turn-end.',
+  },
   {
     criterion: 'S9',
     backend: 'pi',

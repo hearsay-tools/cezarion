@@ -491,6 +491,9 @@ class CodexSession implements AgentSession {
         break;
       }
       case 'item/agentMessage/delta': {
+        // Child text belongs only to v2; buffering it here would pollute the
+        // parent's marker parse when the coalescer flushes at turn-end (#149).
+        if (this.isForeignThreadTurn(params)) break;
         const delta = typeof params.delta === 'string' ? params.delta : '';
         if (delta) this.textCoalescer.append(stringField(params, 'itemId'), delta);
         break;
@@ -511,6 +514,7 @@ class CodexSession implements AgentSession {
         const type = stringField(item, 'type');
         const id = stringField(item, 'id') ?? '';
         if (type === 'agentMessage') {
+          if (this.isForeignThreadTurn(params)) break;
           // One v1 `text` per finished message — the snapshot's full text when
           // present (also covers turns that send no deltas), else the deltas.
           this.textCoalescer.complete(id || undefined, typeof item.text === 'string' ? item.text : undefined);
