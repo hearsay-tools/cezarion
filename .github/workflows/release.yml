@@ -74,7 +74,8 @@ jobs:
   release:
     name: Release ${{ inputs.bump }} to npm (latest)
     needs: verify
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # npm trusted publishing and provenance require a GitHub-hosted runner.
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
     # Gate the publish behind a required-reviewer approval. If the environment
