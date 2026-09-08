@@ -9,7 +9,7 @@
 // server stays deaf to stdin EOF (the CLI hang the EOF watchdog exists for)
 // and handles SIGTERM itself, exiting 143 rather than dying from the signal.
 import { createInterface } from 'node:readline';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 
 const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 const rl = createInterface({ input: process.stdin });
@@ -29,6 +29,7 @@ rl.on('line', (line) => {
   } catch {
     return;
   }
+  if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(msg)}\n`);
   if (msg.id === 'ask-bad-1' && msg.error) {
     // The runner rejected the malformed payload with -32602, as it must. A real
     // app-server carries on from there, so the turn still completes — a mock

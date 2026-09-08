@@ -19,8 +19,9 @@
  * above the seam.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { agentInputEventSchema, type AgentInput } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
@@ -293,6 +294,7 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
 
 /** Criteria driven through `whileOpen` rather than one settled observation. */
 const CONTROL_CRITERIA = [
+  { id: 'D1', scenario: 'baseline' },
   { id: 'S5', scenario: 'baseline' },
   { id: 'S6', scenario: 'baseline' },
   { id: 'S11', scenario: 'ask' },
@@ -808,4 +810,61 @@ describe('harness parity — the matrix itself', () => {
     const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     expect(source).not.toMatch(/\b(?:it|test|describe)\s*\.\s*(?:skip|todo)\s*\(/);
   });
+});
+
+// D1: inspect the actual argv/RPC/HTTP boundary of the real runners. Expectations
+// come from installed CLI help, generated Codex schemas and OpenCode /doc; see §7.
+describe('harness parity — D1 governed native delegation', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const resume of [false, true]) {
+      it(`${backend} restricts verified native delegation on ${resume ? 'Continue' : 'start'} without widening ordinary settings`, async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'cez-native-wire-'));
+        try {
+          const launches = [];
+          for (const restricted of [false, true]) {
+            const path = join(dir, `${restricted}.ndjson`);
+            const obs = await driveSeam(backend, 'baseline', { spec: {
+              cwd: dir, resume, allowedTools: ['Read', 'Bash'], bashAllowlist: ['git status'],
+              systemPrompt: 'Use cezar workers. Native workers are not tracked by cezar.',
+              ...(restricted ? { restrictNativeDelegation: true } : {}),
+              env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
+            } });
+            expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
+            expect(obs.v1.at(-1)?.type).toBe('done');
+            launches.push(readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line)));
+          }
+          const [ordinary, restricted] = launches;
+          if (backend === 'claude' || backend === 'pi') {
+            const flag = backend === 'claude' ? '--disallowedTools' : '--exclude-tools';
+            const names = backend === 'claude' ? 'Agent,Task' : 'subagent';
+            const args = restricted![0] as string[];
+            const index = args.indexOf(flag);
+            expect(index).toBeGreaterThanOrEqual(0);
+            expect(args[index + 1]).toBe(names);
+            expect(args.filter((_, i) => i !== index && i !== index + 1)).toEqual(ordinary![0]);
+            // Pi has no native delegate primitive: arbitrary custom extension names
+            // cannot be discovered as delegation. Preserve unrelated tools/extensions.
+            if (backend === 'pi') expect(args).not.toContain('--no-extensions');
+          } else if (backend === 'codex') {
+            const normal = ordinary!.find(row => row.method === (resume ? 'thread/resume' : 'thread/start'));
+            const controlled = restricted!.find(row => row.method === (resume ? 'thread/resume' : 'thread/start'));
+            expect(controlled.params.config).toEqual({ 'features.multi_agent': false, 'features.multi_agent_v2': false });
+            const { config: _config, ...rest } = controlled.params;
+            expect(rest).toEqual(normal.params);
+            expect(normal.params).not.toHaveProperty('config');
+          } else {
+            const normal = ordinary!.find(row => row.method === 'POST' && row.url === '/session');
+            const controlled = restricted!.find(row => row.method === 'POST' && row.url === '/session');
+            expect(controlled.body.permission).toEqual([{ permission: 'task', pattern: '*', action: 'deny' }]);
+            const { permission: _permission, ...rest } = controlled.body;
+            expect(rest).toEqual(normal.body);
+            expect(normal.body).not.toHaveProperty('permission');
+            // Later prompts must not replace the session rules with a tools map.
+            expect(restricted!.filter(row => row.url !== '/session')).toEqual(ordinary!.filter(row => row.url !== '/session'));
+            expect(restricted!.filter(row => row.url.includes('prompt_async')).every(row => row.body.tools === undefined)).toBe(true);
+          }
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+      }, 45000);
+    }
+  }
 });

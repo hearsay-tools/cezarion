@@ -3674,6 +3674,7 @@ export class RunManager {
         bashAllowlist: grants.bashAllowlist,
         additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), continueProfile.env),
         env: { ...continueProfile.env, ...delegation?.env },
+        ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
         model: continueModel,
         effort: agentModelsLocked(this.repoRoot) ? undefined : record?.effort,
         sessionId,
@@ -4368,6 +4369,7 @@ export class RunManager {
           // The handoff file lives outside the worktree — grant access.
           additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), stepProfile.env),
           env: { ...stepProfile.env, ...delegation?.env },
+          ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
           model: backendModel,
           effort: agentModelsLocked(this.repoRoot)
             ? undefined

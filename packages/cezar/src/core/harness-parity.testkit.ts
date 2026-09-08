@@ -26,7 +26,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-import type { AgentEvent, AgentRunResult, AgentSession, RunnerId, SessionOptions } from './agent-runner.ts';
+import type { AgentRunSpec, AgentEvent, AgentRunResult, AgentSession, RunnerId, SessionOptions } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
 import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
@@ -247,6 +247,7 @@ export interface SeamObservation {
 }
 
 export interface DriveSeamOptions {
+  readonly spec?: Partial<AgentRunSpec>;
   readonly sessionOptions?: SessionOptions;
   /** Extra work while the session is live — a follow-up message, an interrupt.
    *  When absent, `driveSeam` waits for the first turn-end or error. */
@@ -293,6 +294,7 @@ export async function driveSeam(
         // The claude mock writes to these when set; empty keeps a row from
         // touching a handoff file it does not own.
         env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '' },
+        ...opts.spec,
       },
       (event) => v1.push(event),
       { ...opts.sessionOptions, onUiEvent: (event) => v2.push(event) },

@@ -191,6 +191,10 @@ Notable fields (full doc-comments in the source):
   sandbox: Codex uses `danger-full-access` with `approvalPolicy: never`, and
   OpenCode auto-approves every permission. Configurable restrictive modes are
   specified by `2026-07-17-permission-modes` (#475).
+- `restrictNativeDelegation?` — optional per-invocation intent, mapped only inside
+  adapters; absent preserves ordinary settings. Governed session provisioning
+  supplies it on initial steps, Continue and recovery. See D1 below for precise
+  controls and exemptions; this is not a shell sandbox.
 - `sessionId?` / `resume?` — stable session id for interactive takeover and for
   `--resume` ("Continue" after a run ends).
 
@@ -491,6 +495,65 @@ defect. A red row is first evidence of a real bug, not of a bad assertion:
 authoring this matrix is what found the claude half of group 1, where an
 `is_error` result whose subtype is still `success` reported an auth failure to
 the cockpit as a clean end of turn.
+
+---
+
+### Governed delegation controls (D1)
+
+D1 inspects real runner argv, JSON-RPC and HTTP boundaries on ordinary versus
+restricted start/Continue launches. These controls add no tool grants and write
+no global harness configuration. Per-backend knowledge remains inside adapters.
+`provision-workflows.test.ts` covers every backend's initial, nonfinal, Continue,
+recovery and disabled paths, plus mixed-backend workers retaining their own
+accepted identity, empty grants and distinct per-session delegation credentials.
+
+| Backend (locally verified version) | Per-invocation control | Evidence and limitation |
+| --- | --- | --- |
+| Claude Code 2.1.260 | `--disallowedTools Agent,Task` | `claude --help` documents the deny flag; installed `sdk-tools.d.ts` names `AgentInput`. `Task` covers the legacy name in recorded fixtures. Other tools and permission modes are preserved. |
+| Codex 0.153.4 | `thread/start` and `thread/resume` `config: { "features.multi_agent": false, "features.multi_agent_v2": false }` | `codex features list` names both flags; `codex --help` documents dotted config overrides; `codex app-server generate-json-schema` confirms both request config fields. Existing sandbox, approval, account and model settings remain unchanged. |
+| OpenCode 1.18.29 | `POST /session` `permission: [{ permission: "task", pattern: "*", action: "deny" }]` | Installed server `/doc` declares `PermissionRuleset`; its embedded `TaskTool.execute` checks `task`. Later prompt requests contain no `tools` map that would replace session rules. The current adapter creates a fresh session on Continue, so the deny applies there too. It still does not map general `allowedTools`. |
+| pi 0.85.1 | `--exclude-tools subagent` | Installed `pi --help` applies exclusions to built-in/extension/custom names; the shipped `examples/extensions/subagent/index.ts` registers `subagent`. Other extension discovery and ordinary tool settings remain unchanged. |
+
+**Explicit D1 pi exemption:** pi's RPC has no native delegation primitive or
+capability identifying arbitrary custom delegation extensions. Only the verified
+`subagent` entry point is excluded. Renamed/custom extensions remain outside that
+restriction; D1 pins the exact exclusion and preserves unrelated extension/tool
+settings. Guidance directs agents to cezar workers but must never be represented
+as enforcement of this unsupported capability. Custom tools on other backends
+and unrestricted same-user shell likewise remain outside hard isolation. Native
+workers are not cezar-owned, collected, waited on or cleaned up by this protocol.
+Older harness versions are not attested by this versioned capability check.
+
+Provisioning supplies the bundled absolute CLI invocation and fresh environment
+credentials for both parent and worker sessions; it never copies the parent's
+credential to a worker. With delegation disabled/unavailable, the intent is absent
+and ordinary execution keeps its prior settings. Start/Continue/recovery share the
+same provisioner, including nonfinal workflow steps.
+
+The governed command protocol is documented with runnable forms in [README](README.md#owned-workers-opt-in).
+Spawn supports selected context (`--context` or UTF-8 `--context-file`) and backend/
+model selection; omitted backend follows the active parent, same-backend omitted
+model/account/effort inherit, and mixed-backend defaults resolve independently.
+Inspect reports materialized input paths. Wait defaults to `any`; `one` requires
+one worker and `all` every selected worker. All waits have finite 1–1800 second
+deadlines (600 default), return immediately, and release capacity at turn end.
+`cancel-wait <wait-id>` cancels only waiting, preserving worker work.
+
+`collect <worker-id>` returns typed availability and persists the latest execution
+revision's summary, HEAD, bounded diff and artifact descriptors under the parent.
+An available `diff.path` names a JSON `{ result, diffSnapshot }` document, **not a
+raw patch**. Latest settled collection is required for parent readiness; running
+or obsolete collected output cannot satisfy it. Collection is observation, not
+integration. Automatic completion wakes for inspection/collection without silently
+accepting review; timeout/repeated premature completion retains attention. Human
+Finish refuses unmet readiness. Continue a reviewing parent before its worker.
+
+Review and deliberately integrate desired worker commits with Git before cleanup.
+Collect/integrate, destroy owned resources, explicitly delete child histories, then
+delete the parent. Summary and bounded diff snapshots survive child deletion until
+parent deletion; general artifacts are not archived. Removed paths, branch names
+and historical SHAs do not promise live resources. A worker's pending human ask is
+never answered by lifecycle input, and no automatic merge/review acceptance exists.
 
 ---
 

@@ -2,6 +2,7 @@ import { type WorkerSpawnRequest, workerDiffSchema, workerWaitResultSchema } fro
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { AgentRunResult, AgentRunSpec, AgentSession, AgentEvent } from '../core/agent-runner.ts';
 import * as runners from '../core/runner-factory.ts';
 import { RunStore } from '../runs/store.ts';
@@ -71,6 +72,34 @@ describe('manager session delegation lifecycle', () => {
     accepted.pump.mockRestore(); await (f.manager as unknown as { pump(): Promise<void> }).pump();
     return { manager: f.manager, store: f.store };
   }
+  it.each(RUNNER_IDS.flatMap(backend => ['start', 'continue', 'recovery', 'noninteractive', 'off'].map(mode => ({ backend, mode }))))('provisions governed intent for $backend on $mode', async ({ backend, mode }) => {
+    if (mode === 'off') vi.stubEnv('CEZ_DELEGATION', '0');
+    const workflow = mode === 'noninteractive'
+      ? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, id: 'preflight' }, QUICK_TASK_WORKFLOW.steps[0]!] }
+      : QUICK_TASK_WORKFLOW;
+    let run;
+    if (mode === 'recovery') {
+      run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: backend, steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
+      await f.manager.recover();
+    } else run = f.manager.startRun(workflow, { task: 'parent', runner: backend, worktree: false });
+    await until(() => sessions.length === 1);
+    const initial = sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN;
+    if (mode === 'continue') {
+      sessions[0]!.finish(); await until(() => !f.manager.isActive(run.id));
+      expect(f.manager.continueRun(run.id, { text: 'continue' }).ok).toBe(true);
+      await until(() => sessions.length === 2);
+      expect(sessions[1]!.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(initial);
+    }
+    const spec = sessions.at(-1)!.spec;
+    if (mode === 'off') {
+      expect(spec.restrictNativeDelegation).toBeUndefined();
+      expect(spec.env?.CEZ_DELEGATION_TOKEN).toBeUndefined();
+    } else {
+      expect(spec.restrictNativeDelegation).toBe(true);
+      expect(spec.systemPrompt).toContain('cezar');
+      expect(controller.credentials.authenticate(spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: run.id });
+    }
+  });
   it('refuses a failed continuation checkpoint without advancing revision or opening another session', async () => {
     const a = await acceptIdentityWorker(); await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);
     sessions[1]!.emit({ type: 'session', sessionId: 'worker-session' }); sessions[1]!.finish();
@@ -110,7 +139,7 @@ describe('manager session delegation lifecycle', () => {
       sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
       expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true); await until(() => sessions.length === 3);
     }
-    expect(sessions.at(-1)!.spec).toMatchObject({ model: 'gpt-5.1-codex', allowedTools: [], bashAllowlist: [] });
+    expect(sessions.at(-1)!.spec).toMatchObject({ restrictNativeDelegation: true, model: 'gpt-5.1-codex', allowedTools: [], bashAllowlist: [] });
     expect(sessions.at(-1)!.spec.effort).toBeUndefined();
     expect(sessions.at(-1)!.spec.env?.CODEX_HOME).toBe(home);
     expect(sessions.at(-1)!.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN);

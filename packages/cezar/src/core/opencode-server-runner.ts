@@ -48,12 +48,13 @@ export const KILL_GRACE_MS = 4_000;
  * the opencode TUI talks to) with an SSE event stream. One server per session,
  * bound to the run's `cwd` (worktree), gives OpenCode the same multi-turn shape
  * as the Claude runner: each `sendMessage` posts another prompt to the same
- * session (history is kept server-side), `session/abort` cancels, and reusing
- * the session id resumes for "Continue".
+ * session (history is kept server-side), and `session/abort` cancels. The
+ * current adapter opens a fresh session with the continuation prompt on Continue.
  *
  * Auth = the host's opencode config/logins. The agent runs autonomously
- * (auto-approved permissions); OpenCode has no per-tool allowlist, so
- * `spec.allowedTools` is ignored. `spec.model` is `provider/model`.
+ * (auto-approved permissions); this adapter does not map `spec.allowedTools`.
+ * Governed delegation adds only a supported session-level task deny rule.
+ * `spec.model` is `provider/model`.
  */
 export class OpencodeServerRunner implements AgentRunner {
   readonly backend = 'opencode' as const;
@@ -424,7 +425,12 @@ class OpencodeSession implements AgentSession {
   }
 
   private async bootstrap(): Promise<void> {
-    const created = await this.http('POST', '/session', { title: 'cezar task' });
+    const created = await this.http('POST', '/session', {
+      title: 'cezar task',
+      // OpenCode 1.18.29 /doc: session.create permission rules. The native task
+      // tool checks this permission; other agent/project permissions stay intact.
+      ...(this.spec.restrictNativeDelegation ? { permission: [{ permission: 'task', pattern: '*', action: 'deny' }] } : {}),
+    });
     this.sessionId = stringField(created, 'id');
     if (!this.sessionId) throw new Error('opencode did not return a session id');
     this.emit({ type: 'session', sessionId: this.sessionId });

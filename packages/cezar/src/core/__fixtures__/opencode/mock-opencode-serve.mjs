@@ -6,6 +6,7 @@
 // response resolves immediately — every part and the closing `session.idle`
 // arrive over SSE afterwards, so a correct stream (v1 and v2 alike) must
 // take its turn-end from `session.idle`, never from the HTTP response.
+import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
 const args = process.argv.slice(2);
@@ -79,6 +80,7 @@ const server = createServer((req, res) => {
   let body = '';
   req.on('data', (chunk) => (body += chunk));
   req.on('end', () => {
+    if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify({ method: req.method, url, body: body ? JSON.parse(body) : undefined })}\n`);
     if (req.method === 'POST' && /^\/question\/[^/]+\/(reply|reject)$/.test(url)) {
       // Native question reply resumes the held turn, then its own session.idle
       // ends it (same SSE lifecycle shape as the baseline; never the HTTP ack).

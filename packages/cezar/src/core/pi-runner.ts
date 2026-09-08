@@ -386,6 +386,9 @@ export function buildPiArgs(spec: AgentRunSpec): string[] {
   if (spec.model) args.push('--model', spec.model);
   const effort = parseEffort(spec.effort);
   if (effort) args.push('--thinking', effort);
+  // Pi 0.85.1 --exclude-tools covers the shipped subagent extension. Arbitrary
+  // custom delegation tool names have no discoverable capability (D1 exemption).
+  if (spec.restrictNativeDelegation) args.push('--exclude-tools', 'subagent');
   const tools = piTools(spec.allowedTools ?? [], spec.bashAllowlist);
   if (tools.length > 0) args.push('--tools', tools.join(','));
   return args;

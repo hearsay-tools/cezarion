@@ -434,6 +434,9 @@ export function buildClaudeArgs(
       args.push('--session-id', spec.sessionId);
     }
   }
+  // Claude 2.1.260 --help: per-process deny rules; Agent is current, Task
+  // remains the name in older harnesses/recorded fixtures. Never widen grants.
+  if (spec.restrictNativeDelegation) args.push('--disallowedTools', 'Agent,Task');
   const allowed = buildAllowedTools(spec.allowedTools ?? [], spec.bashAllowlist);
   if (allowed.length > 0) {
     args.push('--allowedTools', allowed.join(','));

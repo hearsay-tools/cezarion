@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import readline from 'node:readline';
+import { appendFileSync } from 'node:fs';
+if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(process.argv.slice(2))}\n`);
 
 // Pi handles SIGTERM and reports 128 + signal, rather than a null exit code.
 process.on('SIGTERM', () => process.exit(143));
