@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,6 +29,40 @@ describe('delegation service durable authority', () => {
     expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ receipts: [{ workerId: a.workerId }] });
     expect(reopened.getRun(a.workerId)?.delegation).toEqual(worker.delegation); reopened.flush();
     await expect(f.service.spawn(f.caller, { ...request, task: 'different' })).rejects.toMatchObject({ code: 'invalid_input' });
+  });
+  it('accepts explicit same-backend context/model and hashes caller choices while retaining legacy hashes', async () => {
+    const request = { ...input(), backend: 'claude' as const, model: ' sonnet ', context: { text: 'Only inspect the parser' } };
+    const accepted = await f.service.spawn(f.caller, request);
+    expect(f.store.getRun(accepted.workerId)).toMatchObject({ runner: 'claude', model: 'sonnet', effort: 'high' });
+    expect(f.store.getRun(accepted.workerId)?.task).toContain('Only inspect the parser');
+    expect(await f.service.inspect(f.caller, { workerId: accepted.workerId })).toMatchObject({ backend: 'claude', model: 'sonnet' });
+    expect(await f.service.spawn(f.caller, { ...request, model: 'sonnet' })).toEqual(accepted);
+    for (const changed of [{ context: { text: 'changed' } }, { backend: 'codex' as const }, { model: 'opus' }]) {
+      await expect(f.service.spawn(f.caller, { ...request, ...changed })).rejects.toMatchObject({ code: 'invalid_input' });
+    }
+    const legacy = input(); await f.service.spawn(f.caller, legacy);
+    expect(f.store.getRun(f.parent.id)?.delegation).toMatchObject({ receipts: expect.arrayContaining([
+      expect.objectContaining({ requestId: legacy.requestId, requestHash: createHash('sha256').update(JSON.stringify({ task: legacy.task, baseline: legacy.baseline })).digest('hex') }),
+    ]) });
+  });
+  it('switches backend without carrying parent provider model, effort, account, or widening empty grants', async () => {
+    vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default', allowedTools: [], bashAllowlist: [], accountBinding: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } } });
+    vi.stubEnv('CODEX_HOME', f.root);
+    const { workerId } = await f.service.spawn(f.caller, { ...input(), backend: 'codex' });
+    expect(f.store.getRun(workerId)).toMatchObject({ runner: 'codex', agentProfile: 'default' });
+    expect(f.store.getRun(workerId)?.model).toBeUndefined(); expect(f.store.getRun(workerId)?.effort).toBeUndefined();
+    expect(f.store.readWorkerIdentity(workerId)).toMatchObject({ account: { provider: 'codex', homePath: f.root }, grants: { allowedTools: [], bashAllowlist: [] } });
+  });
+  it('rejects incompatible selections, unavailable accepted accounts, and model locks before acceptance', async () => {
+    vi.stubEnv('CODEX_HOME', f.root);
+    for (const selection of [{ backend: 'codex' as const, model: 'opus' }, { backend: 'opencode' as const, model: 'bare-model' }]) {
+      await expect(f.service.spawn(f.caller, { ...input(), ...selection })).rejects.toMatchObject({ code: 'invalid_input' });
+    }
+    vi.stubEnv('CODEX_HOME', join(f.root, 'absent'));
+    await expect(f.service.spawn(f.caller, { ...input(), backend: 'codex' })).rejects.toMatchObject({ code: 'invalid_input' });
+    vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '1');
+    await expect(f.service.spawn(f.caller, { ...input(), model: 'sonnet' })).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(f.store.listRuns()).toHaveLength(1);
   });
   it('publishes concrete private identity before worker events/enqueue and never rewrites it on replay', async () => {
     const request = input(); let publishedIdentity: unknown;
@@ -142,4 +176,40 @@ describe('delegation service durable authority', () => {
       await expect(f.service.wait(f.caller, { workerIds: [workerId], timeoutSeconds: 600 })).rejects.toMatchObject({ code: 'denied_scope' });
     }
   });
+  async function cancellableWait() {
+    const { workerId } = await f.service.spawn(f.caller, input());
+    const waitId = randomUUID(); const parent = f.store.getRun(f.parent.id)!;
+    if (parent.delegation?.role !== 'root') throw Error('fixture');
+    f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: {
+      id: waitId, workerIds: [workerId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [],
+    } } }]);
+    return { workerId, waitId };
+  }
+  it('cancels a queued parent wait without stopping its worker or authorizing new work', async () => {
+    const { workerId, waitId } = await cancellableWait(); f.store.updateRun(f.parent.id, { status: 'queued' });
+    expect(await f.service.cancelWait(f.caller, { waitId })).toMatchObject({ wait: { id: waitId, phase: 'wake-pending', reason: 'cancelled' } });
+    expect(f.store.getRun(workerId)?.status).toBe('queued');
+    await expect(f.service.wait(f.caller, { workerIds: [workerId], timeoutSeconds: 600 })).rejects.toMatchObject({ code: 'incompatible_state' });
+    await expect(f.service.spawn(f.caller, input())).rejects.toMatchObject({ code: 'incompatible_state' });
+  });
+  it.each(['done', 'review', 'failed', 'cancelled'] as const)('reads the retained cancel receipt after the parent becomes %s', async status => {
+    const { waitId } = await cancellableWait();
+    const settled = await f.service.cancelWait(f.caller, { waitId });
+    f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId); f.store.updateRun(f.parent.id, { status });
+    const before = structuredClone(f.store.getRun(f.parent.id));
+    expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(settled);
+    expect(f.store.getRun(f.parent.id)).toEqual(before);
+  });
+  it('returns only the retained old cancellation while a queued parent has a newer wait', async () => {
+    const { workerId, waitId } = await cancellableWait(); const old = await f.service.cancelWait(f.caller, { waitId });
+    f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId);
+    const parent = f.store.getRun(f.parent.id)!; if (parent.delegation?.role !== 'root') throw Error('fixture');
+    const next = { id: randomUUID(), workerIds: [workerId], phase: 'registered' as const, deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [] };
+    f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, wait: next } }]);
+    f.store.updateRun(parent.id, { status: 'queued' });
+    expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(old);
+    await expect(f.service.cancelWait(f.caller, { waitId: randomUUID() })).rejects.toMatchObject({ code: 'incompatible_state' });
+    expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ wait: next });
+  });
+
 });

@@ -450,7 +450,9 @@ describe('removeOwnedWorkspace verified retryable destruction', () => {
     await writeFile(join(workspace.path, 'tracked.txt'), 'worker commit');
     git(workspace.path, 'commit', '-qam', 'worker');
     const result = await removeOwnedWorkspace(root, workspace);
-    expect(result).toEqual({ workerId: workspace.ownerRunId, state: 'complete', remaining: [] });
+    expect(result).toEqual({ workerId: workspace.ownerRunId, state: 'complete', remaining: [], deleted: [
+      { kind: 'worktree', path: workspace.path }, { kind: 'branch', ref: `refs/heads/${workspace.branch}` },
+    ] });
     expect(existsSync(workspace.path)).toBe(false);
     expect(git(root, 'branch', '--list', workspace.branch)).toBe('');
     expect(existsSync(receiptPath(root, workspace))).toBe(true);

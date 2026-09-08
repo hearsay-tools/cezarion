@@ -8,6 +8,6 @@ export function workerOutcome(run: RunRecord, observedAt: string): WorkerOutcome
   if (run.delegation?.role !== 'worker') return undefined;
   const status = run.status;
   if (status !== 'review' && status !== 'done' && status !== 'failed' && status !== 'cancelled') return undefined;
-  return { workerId: run.id, status, observedAt: run.finishedAt ?? observedAt,
+  return { workerId: run.id, status, revision: run.delegation.executionRevision ?? 0, observedAt: run.finishedAt ?? observedAt,
     ...(run.error ? { summary: run.error.slice(0, 4_000) } : {}) };
 }

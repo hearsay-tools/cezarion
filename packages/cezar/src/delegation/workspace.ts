@@ -248,7 +248,14 @@ export type WorkerNoMaterializationProof = (workspace: WorkerWorkspace) => boole
  * the exact ref/log identity whose compare-and-swap deletion may be retried. */
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, neverMaterialized?: WorkerNoMaterializationProof): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
-  const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining });
+  let provisioned = false;
+  const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
+    ...(remaining.length ? { error: 'Owned resources remain; resource identity or cleanup could not be verified' } : {}),
+    ...(provisioned ? { deleted: [
+      ...(!remaining.includes('worktree') ? [{ kind: 'worktree' as const, path: value.path }] : []),
+      ...(!remaining.includes('branch') ? [{ kind: 'branch' as const, ref: `refs/heads/${value.branch}` }] : []),
+    ] } : {}),
+  });
   try {
     const workspace = await validateIntent(repoRoot, value);
     const path = await receiptLocation(repoRoot, workspace);
@@ -268,6 +275,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       return result();
     }
     if (!same(receipt.workspace, workspace)) return result();
+    provisioned = true;
     const checkpointPath = path.replace(/\.json$/, '.cleanup.json');
     let checkpoint = await exists(checkpointPath) ? cleanupSchema.parse(JSON.parse(await readIdentityFile(checkpointPath, RECEIPT_CAP))) : undefined;
     if (checkpoint && (!same(checkpoint.workspace, workspace) || checkpoint.gitDir !== receipt.gitDir)) return result();

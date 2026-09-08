@@ -172,7 +172,7 @@ describe('RunStore durable delegation', () => {
     expect(JSON.stringify(store.getRun(run.id))).toBe(before);
     store.commitWorkerWaitWithdrawal(run.id, selected.id, next);
     const reopened = RunStore.open(dataDir, { keepLive: true }).getRun(run.id);
-    expect(reopened?.delegation).toEqual(root);
+    expect(reopened?.delegation).toEqual({ ...root, lastWait: { ...selected, reason: 'timeout' } });
     expect(reopened?.agentInputs).toEqual([unrelated]);
     expect(reopened?.queuedMessages).toEqual([old, next]);
     expect(reopened?.continuationMessage).toMatchObject({ text: 'human opening', images: ['opening.png'], origin: 'human' });

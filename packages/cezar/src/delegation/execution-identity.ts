@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { workerInputRecipeSchema, type WorkerInputRecipe } from '@open-mercato/cezar-contract';
 import { isAbsolute } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 import { z } from 'zod';
@@ -27,6 +29,8 @@ export type WorkerAccountBinding = z.infer<typeof workerAccountBindingSchema>;
 
 export const acceptedWorkerIdentitySchema = z.object({
   kind: z.literal('accepted'),
+  /** Binds new input recipes; absence retains compatibility with pre-context identities. */
+  contextHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   account: workerAccountBindingSchema,
   // Required private evidence; absent properties and explicit empty grants differ.
   grants: z.object({
@@ -73,4 +77,9 @@ export function boundWorkerAccountEnv(binding: WorkerAccountBinding, env: NodeJS
     return {};
   }
   return profileEnv(binding.provider, binding.homePath);
+}
+
+/** Canonical schema order makes equivalent persisted object ordering immaterial. */
+export function workerContextHash(context: WorkerInputRecipe): string {
+  return createHash('sha256').update(JSON.stringify(workerInputRecipeSchema.parse(context))).digest('hex');
 }

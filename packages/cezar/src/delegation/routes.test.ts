@@ -1,3 +1,7 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { RunStore } from '../runs/store.ts';
+import { RunManager } from '../workflows/run.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
@@ -14,6 +18,41 @@ describe('authenticated delegation HTTP family', () => {
     const response = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     expect(response.status).toBe(201); return workerSpawnResultSchema.parse(await response.json());
   }
+  it('collects under legacy inspect-only authority with strict middleware', async () => {
+    const { workerId } = await spawn(); const parent = f.store.getRun(f.parent.id)!;
+    if (parent.delegation?.role !== 'root') throw Error('fixture');
+    f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, permissions: ['inspect'] } }]);
+    expect((await request(`/${workerId}/collect`, {})).status).toBe(200);
+    expect((await request(`/${workerId}/collect`, { forged: true })).status).toBe(400);
+    expect((await request('/bad/collect', {})).status).toBe(400);
+    expect((await request(`/${workerId}/collect?token=forged`, {})).status).toBe(400);
+    const response = await app.request(`http://127.0.0.1/${workerId}/collect`, { method: 'POST', headers: { host: '127.0.0.1', authorization: `Bearer ${f.token}`, 'content-type': 'application/json' }, body: '{' });
+    expect(response.status).toBe(400);
+  });
+  it('cancels with existing wait-only authority and returns retained settlement on retry', async () => {
+    const { workerId } = await spawn(); const waitId = randomUUID();
+    const delegation = f.store.getRun(f.parent.id)!.delegation!;
+    if (delegation.role !== 'root') throw Error('fixture');
+    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, permissions: ['wait'], wait: {
+      id: waitId, workerIds: [workerId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [],
+    } } }]);
+    const response = await request('/cancel-wait', { waitId });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' } });
+    f.store.commitWorkerWaitWithdrawal(f.parent.id, waitId);
+    expect(await (await request('/cancel-wait', { waitId })).json()).toMatchObject({ wait: { id: waitId, reason: 'cancelled' } });
+    expect(f.store.getRun(workerId)?.status).toBe('queued');
+    const retired = f.store.getRun(f.parent.id)!.delegation!;
+    if (retired.role !== 'root') throw Error('fixture');
+    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...retired, permissions: ['inspect'] } }]);
+    expect((await request('/cancel-wait', { waitId })).status).toBe(403);
+  });
+  it('validates cancellation IDs and bodies before any state mutation', async () => {
+    for (const body of [{}, { waitId: 'bad' }, { waitId: randomUUID(), parentRunId: f.parent.id }]) {
+      expect((await request('/cancel-wait', body)).status).toBe(400);
+    }
+    expect((await request('/cancel-wait', { waitId: randomUUID() })).status).toBe(409);
+  });
   it.each(['stop', 'destroy'])('rejects malformed %s without lifecycle or intent changes, while accepting empty bodies', async operation => {
     const { workerId } = await spawn();
     const before = structuredClone(f.store.getRun(workerId));
@@ -76,4 +115,37 @@ describe('authenticated delegation HTTP family', () => {
     vi.stubEnv('CEZ_DELEGATION', '0');
     expect(await (await request('/spawn', {})).json()).toMatchObject({ code: 'unavailable_transport' });
   });
+  it.each([['queued', false], ['done', false], ['review', false], ['failed', false], ['cancelled', false], ['done', true]] as const)('reads a settled current cancellation over HTTP for a %s parent after restart (legacy=%s)', async (status, legacy) => {
+    const { workerId } = await spawn(); const waitId = randomUUID();
+    const wait = { id: waitId, workerIds: [workerId], phase: 'wake-pending', reason: 'timeout', wakeId: waitId,
+      deadline: new Date(Date.now() - 1000).toISOString(), outcomes: [] };
+    const records = f.store.listRuns().map(run => run.id === f.parent.id ? { ...run, status,
+      delegation: { ...run.delegation, permissions: ['wait'], wait: legacy ? { id: wait.id, workerIds: wait.workerIds, phase: wait.phase, deadline: wait.deadline, outcomes: wait.outcomes } : wait } } : run);
+    writeFileSync(join(f.root, '.ai/cezar/runs.json'), JSON.stringify(records));
+    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = new RunManager(reopened, f.root);
+    f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });
+    try {
+      for (let i = 0; i < 2; i++) {
+        const response = await request('/cancel-wait', { waitId });
+        expect(response.status).toBe(200); expect(await response.json()).toEqual({ wait });
+      }
+      expect(reopened.getRun(workerId)?.status).toBe('queued');
+      expect(reopened.getRun(f.parent.id)?.status).toBe(status);
+    } finally { manager.dispose(); reopened.flush(); }
+  });
+  it.each(['worker', 'foreign', 'no-grant'] as const)('denies %s callers access to a queued cancellation receipt', async kind => {
+    const { workerId } = await spawn(); const waitId = randomUUID(); const parent = f.store.getRun(f.parent.id)!;
+    if (parent.delegation?.role !== 'root') throw Error('fixture');
+    f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, permissions: kind === 'no-grant' ? ['inspect'] : ['wait'], lastWait: {
+      id: waitId, workerIds: [workerId], phase: 'wake-pending', reason: 'cancelled', wakeId: waitId,
+      deadline: new Date().toISOString(), outcomes: [],
+    } } }]);
+    f.store.updateRun(parent.id, { status: 'queued' });
+    const token = kind === 'worker' ? f.credentials.issue('project', workerId, randomUUID())
+      : kind === 'foreign' ? f.credentials.issue('elsewhere', parent.id, randomUUID()) : f.token;
+    const before = structuredClone(f.store.listRuns());
+    expect((await request('/cancel-wait', { waitId }, { authorization: `Bearer ${token}` })).status).toBe(403);
+    expect(f.store.listRuns()).toEqual(before);
+  });
+
 });

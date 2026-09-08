@@ -385,6 +385,9 @@ class CodexSession implements AgentSession {
       // CEZ_CODEX_NETWORK=0 remains the backwards-compatible explicit sandbox opt-out.
       sandbox: process.env.CEZ_CODEX_NETWORK === '0' ? 'workspace-write' : 'danger-full-access',
       approvalPolicy: 'never',
+      // ThreadStartParams AND ThreadResumeParams accept dotted config overrides.
+      // Both feature generations exist in Codex 0.153.4; no global config write.
+      ...(this.spec.restrictNativeDelegation ? { config: { 'features.multi_agent': false, 'features.multi_agent_v2': false } } : {}),
     };
     if (this.spec.resume && this.spec.sessionId) {
       await this.rpc.request('thread/resume', { threadId: this.spec.sessionId, ...clean(overrides) });

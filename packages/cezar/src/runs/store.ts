@@ -1,17 +1,18 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
-  agentInputSchema, delegationStateSchema, workerCreationReceiptSchema,
+  agentInputSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
   continuationMessageSchema,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
-import type { AgentInput, DelegationState } from '@open-mercato/cezar-contract';
+import type { AgentInput, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
+import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -878,7 +879,7 @@ export class RunStore extends EventEmitter {
     this.commitIndex(proposed, new Set([id]));
   }
 
-  /** Retire exactly one wait together with any human message that superseded it. */
+  /** Retain the settled receipt and retire exactly one wait together with any human message that superseded it. */
   commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage): void {
     const run = this.runs.get(id);
     if (run?.delegation?.role !== 'root' || run.delegation.wait?.id !== waitId) {
@@ -887,7 +888,9 @@ export class RunStore extends EventEmitter {
     const { wait, ...delegation } = run.delegation;
     const message = acceptedHumanMessage ? queuedMessageSchema.parse(acceptedHumanMessage) : undefined;
     const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, delegation,
+    proposed.set(id, { ...run, delegation: { ...delegation, lastWait: wait.phase === 'wake-pending'
+      ? reconcileWorkerWait(wait, [], new Date().toISOString())
+      : { ...wait, phase: 'wake-pending', reason: wait.reason ?? 'cancelled', wakeId: wait.wakeId ?? wait.id } },
       ...(run.agentInputs ? { agentInputs: run.agentInputs.filter(input => input.id !== wait.wakeId || input.deliveredAt) } : {}),
       ...(message ? {
         queuedMessages: [...(run.queuedMessages ?? []), message],
@@ -963,6 +966,96 @@ export class RunStore extends EventEmitter {
     this.commitIndex(proposed, changed);
   }
 
+  /** Accepted execution revision is public lifecycle identity, separate from process generations. */
+  commitWorkerContinuation(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps' | 'delegation'>>, step?: Pick<StepState, 'id' | 'name' | 'kind'>): void {
+    const run = this.runs.get(id);
+    if (run?.delegation?.role !== 'worker') throw new Error('missing worker continuation target');
+    const delegation = delegationStateSchema.parse({ ...run.delegation,
+      executionRevision: (run.delegation.executionRevision ?? 0) + 1,
+      executionStartSeq: this.readEvents(id).reduce((seq, event) => Math.max(seq, event.seq), 0),
+    });
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...run, ...this.redactPatch(patch), delegation,
+      ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
+    });
+    this.commitIndex(proposed, new Set([id]));
+  }
+
+  private workerResultsDir(parentId: string): string {
+    z.uuid().parse(parentId);
+    const dir = join(this.dataDir, 'runs', `${parentId}-worker-results`);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (realpathSync(dir) !== resolve(dir) || !lstatSync(dir).isDirectory()) throw new Error('worker result storage redirected');
+    return dir;
+  }
+
+  workerResultSnapshotPath(parentId: string, workerId: string, snapshotId: string): string {
+    return join(this.dataDir, 'runs', `${z.uuid().parse(parentId)}-worker-results`, `${z.uuid().parse(workerId)}.${z.uuid().parse(snapshotId)}.json`);
+  }
+
+  private readWorkerResultFile(parentId: string, workerId: string): z.infer<typeof workerResultFileSchema> | undefined {
+    const parent = this.runs.get(parentId);
+    if (parent?.delegation?.role !== 'root' || !parent.delegation.receipts.some(receipt => receipt.workerId === workerId)) return undefined;
+    const reference = parent.delegation.results?.find(result => result.workerId === workerId);
+    if (!reference) return undefined;
+    try {
+      const path = join(this.workerResultsDir(parentId), `${z.uuid().parse(workerId)}.${z.uuid().parse(reference.snapshotId)}.json`);
+      const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      let raw: string;
+      try { const info = fstatSync(fd); if (!info.isFile() || info.size > 3_145_728) return undefined; raw = readFileSync(fd, 'utf8'); } finally { closeSync(fd); }
+      const file = workerResultFileSchema.parse(JSON.parse(raw));
+      if (file.result.diff.state === 'available' && file.result.diff.path !== path) return undefined;
+      if (file.result.parentRunId !== parentId || file.result.workerId !== workerId || file.result.workspace.ownerRunId !== workerId || file.result.revision !== reference.revision || file.result.observedAt !== reference.observedAt ||
+        (file.result.diff.state === 'available' && (file.result.diff.snapshotId !== reference.snapshotId || file.diffSnapshot === undefined))) return undefined;
+      return file;
+    } catch { return undefined; }
+  }
+
+  readWorkerResult(parentId: string, workerId: string): WorkerCollectedResult | undefined {
+    return this.readWorkerResultFile(parentId, workerId)?.result;
+  }
+  readWorkerResultDiff(parentId: string, workerId: string): string | undefined {
+    return this.readWorkerResultFile(parentId, workerId)?.diffSnapshot;
+  }
+
+  /** Publish a pointer only after its redacted immutable snapshot reaches disk. Failed index writes retain the old evidence. */
+  commitWorkerResult(parentId: string, value: WorkerCollectedResult, diffSnapshot?: string): WorkerCollectedResult {
+    const result = workerCollectedResultSchema.parse(this.redact({ type: 'worker-result', seq: 0, ts: value.observedAt, result: value }).result);
+    const parent = this.runs.get(parentId);
+    const worker = this.runs.get(result.workerId);
+    if (parent?.delegation?.role !== 'root' || result.parentRunId !== parentId ||
+      !parent.delegation.receipts.some(receipt => receipt.workerId === result.workerId)) throw new Error('missing result ownership');
+    if (worker && (worker.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parentId ||
+      worker.delegation.workspace.ownerRunId !== worker.id || (worker.delegation.executionRevision ?? 0) !== result.revision || worker.status !== result.status)) throw new Error('worker result revision changed');
+    const old = parent.delegation.results?.find(entry => entry.workerId === result.workerId);
+    if ((!worker && !this.readWorkerResult(parentId, result.workerId)) || (old && (old.revision > result.revision || (old.revision === result.revision && old.observedAt > result.observedAt)))) throw new Error('worker result is obsolete');
+    const snapshotId = result.diff.state === 'available' ? result.diff.snapshotId : randomUUID();
+    if (result.diff.state === 'available') result.diff.path = this.workerResultSnapshotPath(parentId, result.workerId, snapshotId);
+    if (result.diff.state === 'available' && diffSnapshot === undefined) throw new Error('missing diff snapshot');
+    const file = workerResultFileSchema.parse({ result, ...(diffSnapshot === undefined ? {} : { diffSnapshot: this.redactText(diffSnapshot) }) });
+    const dir = this.workerResultsDir(parentId);
+    const path = join(dir, `${result.workerId}.${snapshotId}.json`);
+    if (existsSync(path)) throw new Error('worker result snapshot identity already exists');
+    const temp = `${path}.${randomUUID()}.tmp`;
+    try {
+      const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      try { writeFileSync(fd, JSON.stringify(file)); fsyncSync(fd); } finally { closeSync(fd); }
+      renameSync(temp, path);
+      const reference = { workerId: result.workerId, revision: result.revision, observedAt: result.observedAt, snapshotId,
+        lastExecutionOutcome: result.lastExecutionOutcome,
+        ...(old ? { previous: old.revision === result.revision ? old.previous : { revision: old.revision, observedAt: old.observedAt, lastExecutionOutcome: old.lastExecutionOutcome } } : {}),
+      };
+      this.commitDelegation([{ id: parentId, delegation: { ...parent.delegation,
+        results: [...(parent.delegation.results ?? []).filter(entry => entry.workerId !== result.workerId), reference],
+      } }]);
+    } catch (error) { rmSync(temp, { force: true }); if (old?.snapshotId !== snapshotId) rmSync(path, { force: true }); throw error; }
+    // Keep the latest payload only; bounded previous outcome metadata lives in the pointer.
+    for (const name of readdirSync(dir)) if (name.startsWith(`${result.workerId}.`) && name !== `${result.workerId}.${snapshotId}.json`) {
+      try { rmSync(join(dir, name), { force: true }); } catch { /* retry on next collection */ }
+    }
+    return result;
+  }
+
   /**
    * requestHash is supplied only by the trusted service: hash the ORIGINAL normalized request,
    * before resolving refs. A retry keeps the original worker and pinned SHA even if HEAD moved.
@@ -978,7 +1071,7 @@ export class RunStore extends EventEmitter {
   ): RunRecord {
     const parent = this.runs.get(parentId);
     const authority = delegationStateSchema.safeParse(parent?.delegation);
-    if (!parent || !authority.success || authority.data.role !== 'root') {
+    if (!parent || !authority.success || authority.data.role !== 'root' || authority.data.historyDeletion) {
       throw new Error('invalid delegation parent');
     }
     // Validate retry identity independently of the newly proposed resource.
@@ -1034,12 +1127,16 @@ export class RunStore extends EventEmitter {
     }
     // Preserve existing record references, but expose the entire transaction before its first event.
     for (const id of changed) {
-      const next = proposed.get(id)!;
+      const next = proposed.get(id);
+      if (!next) { this.runs.delete(id); continue; }
       const current = this.runs.get(id);
       if (current) Object.assign(current, next);
       else this.runs.set(id, next);
     }
-    for (const id of changed) this.emit('run', this.runs.get(id)!);
+    for (const id of changed) {
+      const run = this.runs.get(id);
+      if (run) this.emit('run', run); else this.emit('deleted', id);
+    }
   }
 
   updateRun(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): RunRecord | undefined {
@@ -1634,6 +1731,9 @@ export class RunStore extends EventEmitter {
       if (this.readWorkerExecution(id)?.generation !== generation) return false;
       this.writeWorkerExecution(id, { generation, phase: 'complete',
         ...(proof.phase === 'queued' || proof.neverMaterialized ? { neverMaterialized: true as const } : {}) });
+      // The earlier index event cannot attest exit: subscribers must observe the
+      // durable private proof before a terminal worker can satisfy a lifecycle wait.
+      this.emit('run', this.runs.get(id)!);
       return true;
     } catch { return false; }
   }
@@ -1647,34 +1747,130 @@ export class RunStore extends EventEmitter {
     this.commitIndex(proposed, new Set([id]));
   }
 
-  /** Worker history is a tombstone. Parents retain evidence while resources/descendants remain. */
+  /** Complete replacement evidence can stand in for absent child history, never for a present execution. */
+  readDeletedWorkerResult(parentId: string, workerId: string): WorkerCollectedResult | undefined {
+    if (this.runs.has(workerId)) return undefined;
+    const parent = this.runs.get(parentId);
+    if (parent?.delegation?.role !== 'root' || parent.delegation.historyDeletion) return undefined;
+    const deletion = parent.delegation.receipts.find(receipt => receipt.workerId === workerId)?.deletion;
+    if (deletion?.phase !== 'complete') return undefined;
+    const result = this.readWorkerResult(parentId, workerId);
+    return result?.settled && ['review', 'done', 'failed', 'cancelled'].includes(result.status) &&
+      result.cleanup === 'complete' && result.revision === deletion.revision &&
+      result.workspace.resourceId === deletion.resourceId ? result : undefined;
+  }
+
+  /** A deleted child's receipt replaces the private proof only after the deletion checkpoint. */
+  private workerDeletionEvidence(id: string): boolean {
+    const child = this.runs.get(id);
+    if (child?.delegation?.role !== 'worker' || child.delegation.workspace.ownerRunId !== id ||
+      child.delegation.destroy?.phase !== 'complete' || child.delegation.destroy.remaining.length ||
+      !['review', 'done', 'failed', 'cancelled'].includes(child.status)) return false;
+    const parent = this.runs.get(child.delegation.parentRunId);
+    if (parent?.delegation?.role !== 'root' || parent.delegation.historyDeletion) return false;
+    const receipt = parent.delegation.receipts.find(entry => entry.workerId === id);
+    const result = this.readWorkerResult(parent.id, id);
+    if (!receipt || !result?.settled || result.cleanup !== 'complete' || result.status !== child.status ||
+      result.revision !== (child.delegation.executionRevision ?? 0)) return false;
+    const { state: _state, ...workspace } = result.workspace;
+    if (JSON.stringify(workspace) !== JSON.stringify(child.delegation.workspace)) return false;
+    const proof = this.readWorkerExecution(id);
+    if (receipt.deletion) return receipt.deletion.revision === result.revision &&
+      receipt.deletion.resourceId === workspace.resourceId && receipt.deletion.phase === 'pending' &&
+      (proof ? proof.phase === 'complete' && proof.generation === receipt.deletion.generation : !existsSync(this.executionPath(id)));
+    return proof?.phase === 'complete';
+  }
+
   canDeleteRun(id: string): boolean {
     const run = this.runs.get(id);
-    if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'invalid') return false;
+    if (run?.delegation?.role === 'invalid') return false;
+    if (run?.delegation?.role === 'worker') return this.workerDeletionEvidence(id);
     if (run?.delegation?.role === 'root') {
-      if (run.delegation.finishRequestedAt) return false;
-      const children = new Set([...run.delegation.receipts.map(receipt => receipt.workerId),
-        ...[...this.runs.values()].filter(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === id).map(child => child.id)]);
-      return [...children].every(workerId => {
-        const child = this.runs.get(workerId);
-        return child?.delegation?.role === 'worker' && child.delegation.parentRunId === id &&
-          child.delegation.destroy?.phase === 'complete' && !['queued', 'running', 'waiting'].includes(child.status);
+      if (run.delegation.finishRequestedAt && ['queued', 'running', 'waiting'].includes(run.status)) return false;
+      // Keep the parent's receipt and result ownership until each child history is explicitly removed.
+      if ([...this.runs.values()].some(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === id)) return false;
+      return run.delegation.receipts.every(receipt => {
+        if (this.runs.has(receipt.workerId) || receipt.deletion?.phase !== 'complete') return false;
+        // A pending parent deletion already validated the results before removing their bytes.
+        if (run.delegation?.role === 'root' && run.delegation.historyDeletion === 'pending') return true;
+        return this.readDeletedWorkerResult(id, receipt.workerId) !== undefined;
       });
     }
     return ![...this.runs.values()].some(child => child.delegation?.role === 'worker' && child.delegation.parentRunId === id);
   }
 
+  /** Delegated history deletion is synchronous and checkpointed; any failed byte/index removal remains retryable. */
+  private deleteDelegatedRun(id: string): boolean {
+    const run = this.runs.get(id)!;
+    try {
+      if (run.delegation?.role === 'worker') {
+        const parent = this.runs.get(run.delegation.parentRunId)!;
+        if (parent.delegation?.role !== 'root') return false;
+        const receipt = parent.delegation.receipts.find(entry => entry.workerId === id)!;
+        const result = this.readWorkerResult(parent.id, id)!;
+        const deletion = receipt.deletion ?? { phase: 'pending' as const, revision: result.revision,
+          resourceId: run.delegation.workspace.resourceId, generation: this.readWorkerExecution(id)!.generation };
+        this.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation,
+          receipts: parent.delegation.receipts.map(entry => entry.workerId === id ? { ...entry, deletion } : entry),
+        } }]);
+        // Do not advertise artifact bytes as retained while interrupted deletion is in progress.
+        this.commitWorkerResult(parent.id, { ...result, observedAt: new Date().toISOString(),
+          diff: result.diff.state === 'available' ? { ...result.diff, snapshotId: randomUUID() } : result.diff,
+          artifacts: result.artifacts.state === 'available' ? { ...result.artifacts,
+            items: result.artifacts.items.map(item => ({ state: 'unavailable' as const, reason: 'unreadable' as const,
+              detail: 'History deletion is in progress', id: item.id, path: item.path })),
+          } : result.artifacts,
+        }, this.readWorkerResultDiff(parent.id, id));
+        this.removeRunHistoryBytes(id);
+        // Private process/account evidence is now replaced by the exact parent receipt.
+        rmSync(this.identityPath(id), { force: true });
+        rmSync(this.executionPath(id), { force: true });
+        const retained = this.readWorkerResult(parent.id, id)!;
+        this.commitWorkerResult(parent.id, { ...retained, observedAt: new Date().toISOString(),
+          diff: retained.diff.state === 'available' ? { ...retained.diff, snapshotId: randomUUID() } : retained.diff,
+          artifacts: retained.artifacts.state === 'available' ? { ...retained.artifacts,
+            items: retained.artifacts.items.map(item => ({ state: 'deleted' as const, reason: 'missing' as const, id: item.id, path: item.path })),
+          } : retained.artifacts,
+        }, this.readWorkerResultDiff(parent.id, id));
+        const proposed = new Map(this.runs);
+        proposed.delete(id);
+        proposed.set(parent.id, { ...parent, delegation: { ...parent.delegation,
+          receipts: parent.delegation.receipts.map(entry => entry.workerId === id ? { ...entry, deletion: { ...deletion, phase: 'complete' as const } } : entry),
+        } });
+        this.commitIndex(proposed, new Set([parent.id, id]));
+      } else if (run.delegation?.role === 'root') {
+        this.commitDelegation([{ id, delegation: { ...run.delegation, historyDeletion: 'pending' } }]);
+        this.removeRunHistoryBytes(id);
+        rmSync(join(this.dataDir, 'runs', `${id}-worker-results`), { recursive: true, force: true });
+        const proposed = new Map(this.runs); proposed.delete(id);
+        this.commitIndex(proposed, new Set([id]));
+      } else return false;
+      this.seqs.delete(id);
+      return true;
+    } catch { return false; }
+  }
+
+  private removeRunHistoryBytes(id: string): void {
+    // Fixed owned paths only: never follow context descriptors supplied in persisted metadata.
+    z.uuid().parse(id);
+    const dir = join(this.dataDir, 'runs');
+    if (realpathSync(dir) !== resolve(dir)) throw new Error('History storage redirected');
+    rmSync(this.eventsPath(id), { force: true });
+    rmSync(this.handoffPath(id), { force: true });
+    rmSync(this.imagesDir(id), { recursive: true, force: true });
+  }
+
   deleteRun(id: string): boolean {
     if (!this.canDeleteRun(id)) return false;
+    const run = this.runs.get(id);
+    if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'root') return this.deleteDelegatedRun(id);
     const existed = this.runs.delete(id);
     if (existed) {
       try {
         rmSync(this.eventsPath(id), { force: true });
-        rmSync(this.handoffPath(id), { force: true }); // spec 007: the journal goes with the task
-        rmSync(this.imagesDir(id), { recursive: true, force: true }); // agent screenshots
-      } catch {
-        // best effort — the index is authoritative
-      }
+        rmSync(this.handoffPath(id), { force: true });
+        rmSync(this.imagesDir(id), { recursive: true, force: true });
+      } catch { /* Ordinary run deletion preserves its existing best-effort behavior. */ }
       this.seqs.delete(id);
       this.scheduleSave();
       this.emit('deleted', id);
@@ -1741,7 +1937,8 @@ export class RunStore extends EventEmitter {
       ...all.filter((r) => r.archived).slice(MAX_ARCHIVED_KEPT),
     ];
     for (const stale of stalePool) {
-      if (!this.canDeleteRun(stale.id)) continue;
+      // Delegation promises history and parent snapshots until explicit deletion.
+      if (stale.delegation || !this.canDeleteRun(stale.id)) continue;
       this.runs.delete(stale.id);
       try {
         rmSync(this.eventsPath(stale.id), { force: true });

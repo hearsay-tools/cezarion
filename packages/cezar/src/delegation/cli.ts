@@ -1,7 +1,8 @@
+import { readBoundedContextFile } from './context.ts';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
-  workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
+  workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
   workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema,
   workerDiffSchema, workerWaitResultSchema, delegationErrorResponseSchema,
 } from '@open-mercato/cezar-contract';
@@ -16,8 +17,8 @@ export function delegationEndpoint(value: string | undefined): URL {
   return url;
 }
 
-const responseSchemas = { spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
-  stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: workerWaitResultSchema };
+const responseSchemas = { collect: workerCollectedResultSchema, spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
+  stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: workerWaitResultSchema, 'cancel-wait': workerCancelWaitResultSchema };
 const RESPONSE_BYTES = 3_145_728;
 async function boundedJson(response: Response): Promise<unknown> {
   if (Number(response.headers.get('content-length')) > RESPONSE_BYTES) { await response.body?.cancel(); throw Error('Response too large'); }
@@ -43,25 +44,34 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
     console.log(token ? json.replaceAll(token, '[REDACTED]') : json);
   };
   try {
-    const operation = workerOperationSchema.parse(argv[0]);
+    const operation = argv[0] === 'collect' ? 'collect' : argv[0] === 'cancel-wait' ? 'cancel-wait' : workerOperationSchema.parse(argv[0]);
     const { values, positionals } = parseArgs({ args: argv.slice(1), allowPositionals: true, strict: true, options: {
-      ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const } } : {}),
-      ...(operation === 'wait' ? { 'timeout-seconds': { type: 'string' as const } } : {}),
+      ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const }, backend: { type: 'string' as const }, model: { type: 'string' as const }, context: { type: 'string' as const }, 'context-file': { type: 'string' as const } } : {}),
+      ...(operation === 'wait' ? { 'timeout-seconds': { type: 'string' as const }, mode: { type: 'string' as const } } : {}),
     } });
     let path: string = operation;
     let body: unknown;
     if (operation === 'spawn') {
       if (positionals.length !== 1) throw Error('arguments');
-      body = workerSpawnRequestSchema.parse({ task: positionals[0], baseline: values.baseline, requestId: values['request-id'] });
+      if (values.context !== undefined && values['context-file'] !== undefined) throw Error('arguments');
+      const contextText = values['context-file'] === undefined ? values.context
+        : new TextDecoder('utf-8', { fatal: true }).decode(await readBoundedContextFile(String(values['context-file']), 400_000));
+      body = workerSpawnRequestSchema.parse({ task: positionals[0], baseline: values.baseline, requestId: values['request-id'],
+        ...(values.backend === undefined ? {} : { backend: values.backend }), ...(values.model === undefined ? {} : { model: values.model }),
+        ...(contextText === undefined ? {} : { context: { text: contextText } }),
+      });
     } else if (operation === 'wait') {
       const timeout = values['timeout-seconds'];
       if (timeout !== undefined && (typeof timeout !== 'string' || !/^\d+$/.test(timeout))) throw Error('arguments');
-      body = workerWaitRequestSchema.parse({ workerIds: positionals, ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }) });
+      body = workerWaitRequestSchema.parse({ workerIds: positionals, ...(values.mode === undefined ? {} : { mode: values.mode }), ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }) });
+    } else if (operation === 'cancel-wait') {
+      if (positionals.length !== 1) throw Error('arguments');
+      body = workerCancelWaitRequestSchema.parse({ waitId: positionals[0] });
     } else {
       if (positionals.length !== (operation === 'steer' ? 2 : 1)) throw Error('arguments');
       const { workerId } = workerParamsSchema.parse({ workerId: positionals[0] });
       path = operation === 'inspect' ? workerId : `${workerId}/${operation}`;
-      body = operation === 'steer' ? workerSteerRequestSchema.parse({ text: positionals[1] }) : operation === 'stop' || operation === 'destroy' ? {} : undefined;
+      body = operation === 'steer' ? workerSteerRequestSchema.parse({ text: positionals[1] }) : operation === 'stop' || operation === 'destroy' || operation === 'collect' ? {} : undefined;
     }
     let endpoint: URL;
     try {

@@ -198,8 +198,11 @@ rl.on('close', () => queue.then(() => process.exit(0)));
     assert.equal(diff.baselineSha, baseline); assert.equal(diff.truncated, false);
     assert.equal((await command(['stop', workerId])).state, 'terminated');
     assert.equal(store.getRun(workerId)?.status, 'review', 'stop never accepts review');
-    assert.deepEqual(await command(['destroy', workerId]), { workerId, state: 'complete', remaining: [] });
-    assert.deepEqual(await command(['destroy', workerId]), { workerId, state: 'complete', remaining: [] });
+    const destroyed = { workerId, state: 'complete', remaining: [], deleted: [
+      { kind: 'worktree', path: workspace.path }, { kind: 'branch', ref: `refs/heads/${workspace.branch}` },
+    ] };
+    assert.deepEqual(await command(['destroy', workerId]), destroyed);
+    assert.deepEqual(await command(['destroy', workerId]), destroyed);
     assert.equal(await exists(workspace.path), false);
     assert.doesNotMatch((await git('worktree', 'list', '--porcelain')).stdout, new RegExp(workerId));
     assert.equal((await git('branch', '--list', workspace.branch)).stdout.trim(), '');

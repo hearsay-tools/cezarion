@@ -1,7 +1,8 @@
-import { workerDiffSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract';
+import { type WorkerSpawnRequest, workerDiffSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { AgentRunResult, AgentRunSpec, AgentSession, AgentEvent } from '../core/agent-runner.ts';
 import * as runners from '../core/runner-factory.ts';
 import { RunStore } from '../runs/store.ts';
@@ -21,7 +22,7 @@ describe('manager session delegation lifecycle', () => {
   let f: ReturnType<typeof fixture>, controller: DelegationController;
   const recoveredManagers: RunManager[] = [];
   const recoveredStores: RunStore[] = [];
-  const sessions: Array<{ spec: AgentRunSpec; session: AgentSession; emit(event: AgentEvent): void; finish(): void }> = [];
+  const sessions: Array<{ spec: AgentRunSpec; session: AgentSession; emit(event: AgentEvent): void; finish(text?: string): void }> = [];
   beforeEach(async () => {
     vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f = fixture(); vi.restoreAllMocks();
@@ -29,7 +30,7 @@ describe('manager session delegation lifecycle', () => {
     vi.spyOn(runners, 'createRunner').mockImplementation(backend => ({ backend: backend ?? 'claude', interrupt: async () => {}, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), startSession: (spec, emit) => {
       let resolve!: (value: AgentRunResult) => void; let open = true;
       const result = new Promise<AgentRunResult>(done => { resolve = done; });
-      const finish = () => { open = false; resolve({ text: '', toolCalls: [], tokensUsed: 0 }); };
+      const finish = (text = '') => { open = false; resolve({ text, toolCalls: [], tokensUsed: 0 }); };
       const session: AgentSession = { result, get open() { return open; }, sendMessage: () => open, sendAgentMessage: () => open ? Promise.resolve() : false, discardQueuedMessages: () => {}, interrupt: finish, end: finish };
       sessions.push({ spec, session, emit: event => emit?.(event), finish }); return session;
     } }));
@@ -46,7 +47,7 @@ describe('manager session delegation lifecycle', () => {
     await controller.close(); sessions.length = 0; f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
   });
   // Real acceptance/store/manager and account registry; only the external agent wire is fake.
-  async function acceptIdentityWorker(settings: { model?: string; effort?: string } = { model: 'haiku', effort: 'high' }, grants?: { allowedTools: string[]; bashAllowlist: string[] }) {
+  async function acceptIdentityWorker(settings: { model?: string; effort?: string } = { model: 'haiku', effort: 'high' }, grants?: { allowedTools: string[]; bashAllowlist: string[] }, spawnInputs: Pick<WorkerSpawnRequest, 'context' | 'backend' | 'model'> = {}, prepare?: (parentId: string) => void) {
     const home = join(f.root, 'account-a'); mkdirSync(home);
     await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'account-a', provider: 'claude', configDir: home, label: 'A', addedAt: '' }]; });
     const workflow = grants ? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, ...grants }] } : QUICK_TASK_WORKFLOW;
@@ -54,7 +55,8 @@ describe('manager session delegation lifecycle', () => {
     await until(() => sessions.length === 1);
     const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
     const pump = vi.spyOn(f.manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
-    const request = { task: 'child', baseline: 'HEAD', requestId: randomUUID() };
+    prepare?.(parent.id);
+    const request = { task: 'child', baseline: 'HEAD', requestId: randomUUID(), ...spawnInputs };
     const child = await controller.service.spawn(caller, request);
     return { home, parent, caller, request, child, pump };
   }
@@ -70,6 +72,123 @@ describe('manager session delegation lifecycle', () => {
     accepted.pump.mockRestore(); await (f.manager as unknown as { pump(): Promise<void> }).pump();
     return { manager: f.manager, store: f.store };
   }
+  it.each(RUNNER_IDS.flatMap(backend => ['start', 'continue', 'recovery', 'noninteractive', 'off'].map(mode => ({ backend, mode }))))('provisions governed intent for $backend on $mode', async ({ backend, mode }) => {
+    if (mode === 'off') vi.stubEnv('CEZ_DELEGATION', '0');
+    const workflow = mode === 'noninteractive'
+      ? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, id: 'preflight' }, QUICK_TASK_WORKFLOW.steps[0]!] }
+      : QUICK_TASK_WORKFLOW;
+    let run;
+    if (mode === 'recovery') {
+      run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: backend, steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
+      await f.manager.recover();
+    } else run = f.manager.startRun(workflow, { task: 'parent', runner: backend, worktree: false });
+    await until(() => sessions.length === 1);
+    const initial = sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN;
+    if (mode === 'continue') {
+      sessions[0]!.finish(); await until(() => !f.manager.isActive(run.id));
+      expect(f.manager.continueRun(run.id, { text: 'continue' }).ok).toBe(true);
+      await until(() => sessions.length === 2);
+      expect(sessions[1]!.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(initial);
+    }
+    const spec = sessions.at(-1)!.spec;
+    if (mode === 'off') {
+      expect(spec.restrictNativeDelegation).toBeUndefined();
+      expect(spec.env?.CEZ_DELEGATION_TOKEN).toBeUndefined();
+    } else {
+      expect(spec.restrictNativeDelegation).toBe(true);
+      expect(spec.systemPrompt).toContain('cezar');
+      expect(controller.credentials.authenticate(spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: run.id });
+    }
+  });
+  it('refuses a failed continuation checkpoint without advancing revision or opening another session', async () => {
+    const a = await acceptIdentityWorker(); await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);
+    sessions[1]!.emit({ type: 'session', sessionId: 'worker-session' }); sessions[1]!.finish();
+    expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    const run = f.store.getRun(a.child.workerId)!; const steps = structuredClone(run.steps);
+    const failure = vi.spyOn(f.store as unknown as { writeIndex(): void }, 'writeIndex').mockImplementation(() => { throw Error('disk failure'); });
+    expect(f.manager.continueRun(run.id, { text: 'again' })).toMatchObject({ ok: false });
+    expect(run.delegation).not.toHaveProperty('executionRevision'); expect(run.steps).toEqual(steps);
+    failure.mockRestore();
+    await until(() => !f.manager.isActive(run.id));
+    expect(sessions).toHaveLength(2);
+  });
+  it('persists result-only assistant evidence on initial execution and authorized Continue', async () => {
+    const a = await acceptIdentityWorker(); await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);
+    sessions[1]!.emit({ type: 'session', sessionId: 'worker-session' });
+    sessions[1]!.finish('Initial result-only summary');
+    expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    expect(await controller.service.collect(a.caller, { workerId: a.child.workerId })).toMatchObject({ revision: 0, settled: true, summary: { state: 'available', text: 'Initial result-only summary' } });
+    expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
+    expect(f.store.getRun(a.child.workerId)?.delegation).toMatchObject({ executionRevision: 1 });
+    const disk = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    expect(disk.getRun(a.child.workerId)?.delegation).toMatchObject({ executionRevision: 1 }); disk.flush();
+    await until(() => sessions.length === 3);
+    sessions[2]!.finish('Continuation result-only summary');
+    expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    expect(await controller.service.collect(a.caller, { workerId: a.child.workerId })).toMatchObject({ revision: 1, settled: true, summary: { state: 'available', text: 'Continuation result-only summary' } });
+  });
+  it.each(['queued', 'restart', 'continue'] as const)('pins explicitly selected mixed-backend identity and defaults on %s', async mode => {
+    const home = join(f.root, 'codex-account'); mkdirSync(home); vi.stubEnv('CODEX_HOME', home);
+    writeFileSync(join(home, 'config.toml'), 'model = "gpt-5.1-codex"');
+    const a = await acceptIdentityWorker(undefined, { allowedTools: [], bashAllowlist: [] }, { backend: 'codex', context: { text: 'selected context only' } });
+    expect(f.store.readWorkerIdentity(a.child.workerId)).toMatchObject({ account: { provider: 'codex', homePath: home }, model: 'gpt-5.1-codex', grants: { allowedTools: [], bashAllowlist: [] } });
+    writeFileSync(join(home, 'config.toml'), 'model = "gpt-5.1-codex-mini"');
+    await launchAccepted(a, mode); await until(() => sessions.length === 2);
+    expect(sessions[1]!.spec.userPrompt).toContain('selected context only');
+    if (mode === 'continue') {
+      sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+      expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true); await until(() => sessions.length === 3);
+    }
+    expect(sessions.at(-1)!.spec).toMatchObject({ restrictNativeDelegation: true, model: 'gpt-5.1-codex', allowedTools: [], bashAllowlist: [] });
+    expect(sessions.at(-1)!.spec.effort).toBeUndefined();
+    expect(sessions.at(-1)!.spec.env?.CODEX_HOME).toBe(home);
+    expect(sessions.at(-1)!.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN);
+  });
+  it.each(['queued', 'restart', 'continue'] as const)('rejects lost accepted input recipes on %s', async mode => {
+    const a = await acceptIdentityWorker(undefined, undefined, { context: { text: 'accepted context' } });
+    if (mode === 'continue') {
+      await launchAccepted(a, mode); await until(() => sessions.length === 2);
+      sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    }
+    const worker = f.store.getRun(a.child.workerId)!;
+    if (worker.delegation?.role !== 'worker') throw Error('worker');
+    const { context: _context, ...delegation } = worker.delegation;
+    f.store.commitDelegation([{ id: worker.id, delegation }]);
+    if (mode === 'continue') expect(f.manager.continueRun(worker.id, { text: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('context') });
+    else {
+      const { store } = await launchAccepted(a, mode);
+      await until(() => store.getRun(worker.id)?.status === 'failed' || sessions.length > 1);
+      expect(store.getRun(worker.id)).toMatchObject({ status: 'failed', error: expect.stringContaining('context') });
+    }
+    expect(sessions).toHaveLength(mode === 'continue' ? 2 : 1);
+  });
+  it.each(['queued', 'restart', 'continue'].flatMap(mode => ['original-deleted', 'copy-missing', 'both-changed'].map(damage => ({ mode: mode as 'queued' | 'restart' | 'continue', damage }))))('verifies or rebuilds explicit context with $damage on $mode', async ({ mode, damage }) => {
+    let original = '';
+    const a = await acceptIdentityWorker(undefined, undefined, { context: { artifacts: [{ kind: 'parent-attachment', id: 'document.txt' }] } }, parentId => {
+      const dir = join(f.root, '.ai/cezar/runs', `${parentId}-images`); mkdirSync(dir);
+      original = join(dir, 'document.txt'); writeFileSync(original, 'accepted document');
+    });
+    const inspected = await controller.service.inspect(a.caller, { workerId: a.child.workerId });
+    const copy = inspected.inputs![0]!.path;
+    if (mode === 'continue') {
+      await launchAccepted(a, mode); await until(() => sessions.length === 2);
+      sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    }
+    if (damage === 'original-deleted') rmSync(original);
+    else { rmSync(copy); if (damage === 'both-changed') writeFileSync(original, 'replaced document'); }
+    let store = f.store;
+    if (mode === 'continue') expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
+    else ({ store } = await launchAccepted(a, mode));
+    const expectedSessions = mode === 'continue' ? 3 : 2;
+    if (damage === 'both-changed') {
+      await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length === expectedSessions);
+      expect(store.getRun(a.child.workerId)).toMatchObject({ status: 'failed', error: expect.stringContaining('context input') });
+      expect(sessions).toHaveLength(expectedSessions - 1);
+    } else {
+      await until(() => sessions.length === expectedSessions);
+      expect(readFileSync(copy, 'utf8')).toBe('accepted document');
+    }
+  });
   it.each(['restart', 'continue'].flatMap(mode => ['missing', 'malformed', 'missing-step'].flatMap(damage => [[], ['Read']].map(allowedTools => ({ mode: mode as 'restart' | 'continue', damage, allowedTools })))))('pins accepted $allowedTools grants across $damage workflow on $mode', async ({ mode, damage, allowedTools }) => {
     const grants = { allowedTools, bashAllowlist: ['git status'] };
     const a = await acceptIdentityWorker(undefined, grants);

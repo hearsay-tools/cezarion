@@ -48,6 +48,11 @@ export interface AgentRunSpec {
    *  unrestricted unless `bashAllowlist` is set, so treat the default as
    *  full shell access in `cwd`, not a sandboxed allowlist (#430). */
   allowedTools?: string[];
+  /** Prefer governed cezar workers: suppress verified native delegation entry
+   * points for this invocation only. Adapters map this intent; absent preserves
+   * ordinary harness settings. Custom tools and unrestricted shell are not
+   * hard-isolated. See AGENT_PROTOCOL.md's D1 capability limits. */
+  restrictNativeDelegation?: boolean;
   /** When `Bash` is allowed, restrict it to commands starting with one of these. */
   bashAllowlist?: string[];
   /** Extra directories the agent may read/write besides `cwd`. */
