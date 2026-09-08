@@ -2,7 +2,7 @@
 
 Date: 2026-09-08
 Issue: https://github.com/wjarka/cezar/issues/116
-Status: Architecture approved; detailed spec awaiting owner review.
+Status: Detailed spec approved by the owner on 2026-09-08.
 
 ## Approved direction
 
