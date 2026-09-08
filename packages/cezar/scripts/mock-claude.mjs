@@ -355,11 +355,17 @@ async function respond(userText, imageCount) {
       await sleep(200);
     }
 
-    const summary = 'Both sub-agents reported back: the redirect drops the cookie in src/middleware.ts:12, and the store layer is clean. (dry-run mock)';
+    const summary = 'Both sub-agents reported back: the redirect drops the cookie in src/middleware.ts:12, and the store layer is clean. (dry-run mock)\nCEZ:MONITORING';
     emit({
       type: 'assistant',
       message: { role: 'assistant', content: [{ type: 'text', text: summary }], usage: { input_tokens: 400, output_tokens: 60 } },
       parent_tool_use_id: null,
+    });
+    // #149: a child assistant frame can arrive after the parent's final marker.
+    emit({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Child review finished.' }] },
+      parent_tool_use_id: agents[0].id,
     });
     await sleep(150);
     emit({

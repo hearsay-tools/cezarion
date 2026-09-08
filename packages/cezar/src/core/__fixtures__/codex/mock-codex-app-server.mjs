@@ -154,13 +154,18 @@ rl.on('line', (line) => {
       // A spawned sub-agent runs in its OWN child thread that emits a full turn
       // lifecycle over the shared connection. Its turn/completed must not end the
       // parent turn (#600): the parent is still working after the child finishes.
+      // Collaboration attribution from collab-agent-tool-call.ndjson; late text reproduces #149.
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', item: { type: 'collabAgentToolCall', id: 'item_spawn', tool: 'spawnAgent', status: 'inProgress', receiverThreadIds: ['th_child'] } } });
       emit({ method: 'turn/started', params: { threadId: 'th_child', turn: { id: 'turn_child', status: 'inProgress', items: [] } } });
       emit({ method: 'item/started', params: { threadId: 'th_child', turnId: 'turn_child', item: { type: 'commandExecution', id: 'item_child', command: ['rg', 'requestUserInput'], cwd: '/repo', status: 'inProgress' } } });
       emit({ method: 'turn/completed', params: { threadId: 'th_child', turn: { id: 'turn_child', status: 'completed' } } });
       // Parent keeps streaming after the child's turn ended.
       emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_p1', text: '' } } });
-      emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_p1', delta: 'Still working after the sub-agent.' } });
-      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_p1', text: 'Still working after the sub-agent.' } } });
+      emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_p1', delta: 'Still working after the sub-agent.\nCEZ:MONITORING' } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_p1', text: 'Still working after the sub-agent.\nCEZ:MONITORING' } } });
+      emit({ method: 'item/completed', params: { threadId: 'th_child', turnId: 'turn_child', item: { type: 'agentMessage', id: 'item_child_text', text: 'Child review finished.' } } });
+      // No completion for this second child item: parent turn-end must not flush it into v1.
+      emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_child', turnId: 'turn_child', itemId: 'item_child_partial', delta: 'Child review still streaming.' } });
       emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
     }

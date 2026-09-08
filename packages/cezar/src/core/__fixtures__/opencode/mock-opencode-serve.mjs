@@ -145,11 +145,26 @@ const server = createServer((req, res) => {
           time: { start: 1760000008800, end: 1760000008900 },
         } } });
         send({ type: 'session.idle', properties: { sessionID: 'ses_mock_child' } });
+        // A second child is still running when the parent declares monitoring.
+        send({ type: 'message.part.updated', properties: { part: {
+          id: 'prt_mock_late_subt', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'subtask',
+          prompt: 'Review the callers', description: 'Review callers', agent: 'general',
+        } } });
+        send({ type: 'message.updated', properties: { info: {
+          ...info({}), id: 'msg_mock_late_child', sessionID: 'ses_mock_late_child',
+          parentID: SESSION_ID, mode: 'subagent',
+        } } });
         setTimeout(() => {
           send({ type: 'message.part.updated', properties: { part: {
             id: 'prt_mock_ptxt', messageID: MESSAGE_ID, sessionID: SESSION_ID,
-            type: 'text', text: 'Still working after the sub-agent.',
+            type: 'text', text: 'Still working after the sub-agent.\nCEZ:MONITORING',
             time: { start: 1760000009000, end: 1760000009200 },
+          } } });
+          // #149: foreign-session text after the parent's marker must stay v2-only.
+          send({ type: 'message.part.updated', properties: { part: {
+            id: 'prt_mock_late_child', messageID: 'msg_mock_late_child', sessionID: 'ses_mock_late_child',
+            type: 'text', text: 'Child review finished.',
+            time: { start: 1760000009200, end: 1760000009300 },
           } } });
           send({ type: 'message.updated', properties: { info: info({
             cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
