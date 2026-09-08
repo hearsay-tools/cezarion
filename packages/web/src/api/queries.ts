@@ -1457,15 +1457,20 @@ export function useRemoveQueuedMessage(id: string) {
   })
 }
 
-/** Issues + PRs through the forge (`/api/github`). `enabled` exists for the GitHub tab's
- *  legacy two-shot load: the background everything-open fetch (limit 1000) waits until the
- *  fast default batch has proven the forge reachable — no point paying the big `gh` call
- *  twice just to learn "unavailable" twice. */
+/** GitHub edits produce no Cezar events (#152). The owner-approved polling exception
+ * refreshes mounted, foreground lists every minute; unmounted queries have no timer.
+ * Revisit/focus after a minute also refetches. Automatic reads retain the server's 60 s
+ * cache, so an upstream edit appears within 120 s plus request time while online/visible.
+ * Explicit Refresh remains the only list-cache bypass. */
 export function useGithub(params: { limit?: number } = {}, enabled = true) {
   return useQuery({
     queryKey: queryKeys.github(params),
     queryFn: ({ signal }) => getGithub({ limit: params.limit }, { signal }),
     enabled,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   })
 }
 

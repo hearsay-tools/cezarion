@@ -11,8 +11,8 @@ import { ApiError } from './client'
  * a schedule that has nothing to do with when the data actually changed, and would paper over a
  * broken stream with data that happens to be nearly right.
  *
- * The doctrine holds because everything it covers is OURS, and two families override it per query
- * for two different reasons:
+ * The doctrine holds because everything it covers is OURS, and these families override it per query
+ * for different reasons:
  *
  * - `useReferenceStatuses` — GitHub is not ours and pushes the cockpit nothing, so a "checks
  *   running" chip would say that forever. It is not a blanket interval: the server tells it when
@@ -22,7 +22,10 @@ import { ApiError } from './client'
  *   an invalidation); the interval covers only what a stream cannot promise — a dropped socket, a
  *   frozen tab, a run that ended while we were disconnected.
  *
- * Adding a third needs the same kind of justification, in those terms.
+ * - `useGithub` — owner-approved exception (#152): upstream edits emit no Cezar events.
+ *   Foreground lists poll every 60 s, retaining the server cache; inactive lists do no work.
+ *
+ * Adding another needs the same kind of justification, in those terms.
  */
 export function createQueryClient(): QueryClient {
   return new QueryClient({
