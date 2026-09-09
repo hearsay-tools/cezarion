@@ -136,6 +136,7 @@ describe('selection and control states (#171)', () => {
       const disabled = 'button[data-slot="variants-pill"]'
       browser.waitForFunction(`document.querySelector('${model}')?.disabled === false && document.querySelector('${disabled}')?.disabled === true`)
       applyContrastQaVariant(browser, variant)
+      browser.click('[data-slot="execution-options"] summary')
       browser.moveTo(0, 0)
       const bounds = () => browser.evaluate(`(() => {
         const r = document.querySelector('${model}').getBoundingClientRect(); return { width: r.width, height: r.height }

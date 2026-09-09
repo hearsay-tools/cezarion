@@ -41,3 +41,13 @@ Browser QA used the real built cockpit with isolated dry-run fixture servers and
 - `TMPDIR=/tmp AGENT_BROWSER_ARGS=--no-sandbox AGENT_BROWSER_SOCKET_DIR=/tmp/ab168 XDG_RUNTIME_DIR=/tmp/rt168 npm test -- --config packages/web/e2e/vitest.config.ts --maxWorkers=1 new-task-hierarchy.e2e.ts new-task.e2e.ts plan-mode.e2e.ts composer.e2e.ts composer-defaults.e2e.ts` → five files, 50 browser tests passed.
 
 SDLC documentation check: no process, workflow, API, or configuration changes; no SDLC documentation update needed.
+
+## Review integration follow-up
+
+The existing touch-target and selection-state suites now open Execution options before measuring or interacting with its controls; the general mobile target/overlap scan also opens it. The execution group retains the original card background. Their contrast, disabled-state, selection, overlap, and edge-hit assertions remain in place.
+
+The supervisor confirmed that the intended labeled submit button may be wider than 44px. Its obsolete exact-square assertion now checks both minimum dimensions, and the enabled labeled button additionally receives the suite's five-point hit test. Its measured width was about 120px at comfortable density, with no clipping; the label remains visible.
+
+`TMPDIR=/tmp AGENT_BROWSER_ARGS=--no-sandbox AGENT_BROWSER_SOCKET_DIR=/tmp/ab168 XDG_RUNTIME_DIR=/tmp/rt168 npm test -- --config packages/web/e2e/vitest.config.ts --maxWorkers=1 touch-targets.e2e.ts selection-states.e2e.ts new-task-hierarchy.e2e.ts` → 3 suites, 68 tests passed against the final production build. Captures above were refreshed from that run. Before the correction, the focused integration run failed three cases (old square-width expectation and control-background contrast sampling).
+
+All five repository gates were rerun for this follow-up: typecheck passed; 7,821 Vitest tests, 177 core tests, production build/package inventory, and 24 packaged CLI tests passed.

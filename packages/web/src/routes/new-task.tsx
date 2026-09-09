@@ -646,7 +646,7 @@ export function NewTaskRoute() {
             </>
           }
           executionOptions={
-            <details data-slot="execution-options" className="group border-t border-border bg-muted/20">
+            <details data-slot="execution-options" className="group border-t border-border">
               <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
                 <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
                 <span className="font-medium text-foreground">Execution options</span>
