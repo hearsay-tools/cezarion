@@ -97,6 +97,7 @@ import {
   modelCatalogStatus,
   pushRecentSource,
   QUICK_TASK,
+  RUNNERS,
   resolveEffort,
   resolveModel,
   resolveRunner,
@@ -636,117 +637,136 @@ export function NewTaskRoute() {
                 workflows={workflowList}
                 onPick={(next) => update({ source: next })}
               />
-              {/* Icon-only: this row already carries source/runner/model/variants/worktree/
-                  autonomous/branch, and templates is the least-used of them. */}
+              {/* Templates stay beside prompt context and attachments. */}
               <PromptTemplateMenu
                 templates={templates}
                 iconOnly
                 onInsert={(text) => composerRef.current?.insertAtCaret(text)}
               />
-              {/* Shown when there is a choice to make: more than one runner, or more than one
-                  login for one of them. A host with neither sees no pill, exactly as before. */}
-              {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
-                <RunnerPill
-                  runners={runners}
-                  value={displayRunner}
-                  accounts={accountChoices}
-                  account={agentProfile}
-                  repoAccount={repoAccount}
-                  // Changing the AGENT clears the model pin: presets are per-runner, so a kept
-                  // model would be one the new runner does not have. Changing only the account
-                  // keeps it — the model catalog is the same either way.
-                  onPick={(next, picked) =>
-                    update({
-                      runner: next,
-                      agentProfile: picked,
-                      ...(next === displayRunner ? {} : { model: null }),
-                    })
-                  }
-                  disabled={!providersReady}
-                />
-              ) : null}
-              <PickerPill
-                slot="model-pill"
-                ariaLabel="Model"
-                label={models.find((m) => m.id === model)?.label ?? 'auto'}
-                value={model}
-                disabled={!providersReady}
-                readOnly={modelsLocked}
-                disabledHint={
-                  modelsLocked
-                    ? 'Model selection is locked to native coding-agent settings.'
-                    : undefined
-                }
-                onPick={(next) => {
-                  const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
-                  update({
-                    model: next,
-                    effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
-                  })
-                }}
-                options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
-                status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
-              />
-              <PickerPill
-                slot="effort-pill"
-                ariaLabel="Effort"
-                label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
-                value={effort}
-                disabled={!providersReady}
-                readOnly={modelsLocked}
-                disabledHint={
-                  modelsLocked
-                    ? 'Effort selection is locked to native coding-agent settings.'
-                    : undefined
-                }
-                onPick={(next) => update({ effort: next })}
-                options={effortOptions.map((option) => ({
-                  value: option.value,
-                  label: option.label,
-                  desc: option.desc,
-                }))}
-              />
-              <PickerPill
-                slot="variants-pill"
-                ariaLabel="Parallel variants"
-                label={variants > 1 ? `×${variants} variants` : '×1'}
-                value={String(variants)}
-                onPick={(next) => update({ variants: Number(next) })}
-                disabled={!hasGit}
-                hint="How many times to run this task in parallel — each variant gets its own worktree, and you pick the diff you keep. ×1 runs it once."
-                disabledHint="Parallel variants need a git repository — each variant runs in its own worktree."
-                options={[
-                  { value: '1', label: '×1', desc: 'One run' },
-                  { value: '2', label: '×2 variants', desc: 'Two competing runs — pick the diff you keep' },
-                  { value: '3', label: '×3 variants', desc: 'Three competing runs — pick the diff you keep' },
-                ]}
-              />
-              {worktreeToggleShown ? (
-                <WorktreeToggle
-                  on={worktreeOn}
-                  disabled={worktreeForced}
-                  disabledReason="Parallel variants always use isolated worktrees"
-                  onChange={(on) => update({ worktree: on })}
-                />
-              ) : null}
-              <AutonomousToggle
-                on={autonomousOn}
-                disabled={draft.planFirst}
-                onChange={(on) => update({ autonomous: on })}
-              />
-              {selectedSkill?.interactive && (draft.autonomous === null || draft.worktree === null) ? (
-                <p className="basis-full text-xs text-muted-foreground" data-slot="interactive-skill-hint">
-                  This skill recommends an interactive run in the current checkout. You can change either setting.
-                </p>
-              ) : null}
-              {followupsToggleShown ? (
-                <GenerateFollowupsToggle
-                  on={generateFollowupsOn}
-                  onChange={(on) => update({ generateFollowups: on })}
-                />
-              ) : null}
-              {repo.data ? <BaseBranchPill repo={repo.data} /> : null}
             </>
+          }
+          executionOptions={
+            <details data-slot="execution-options" className="group border-t border-border bg-muted/20">
+              <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
+                <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
+                <span className="font-medium text-foreground">Execution options</span>
+                <span data-slot="execution-summary" className="min-w-0 basis-full truncate pl-5 md:ml-auto md:basis-auto md:pl-0">
+                  {RUNNERS.find((runner) => runner.id === displayRunner)?.label ?? displayRunner}
+                  {' · '}{models.find((item) => item.id === model)?.label ?? 'auto'}
+                </span>
+              </summary>
+              <div className="space-y-3 px-3 pb-3">
+                <div role="group" aria-label="Agent settings" className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="basis-full text-xs font-medium text-muted-foreground">Agent</span>
+                  {/* Shown when there is a choice to make: more than one runner, or more than one
+                      login for one of them. A host with neither sees no pill, exactly as before. */}
+                  {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
+                    <RunnerPill
+                      runners={runners}
+                      value={displayRunner}
+                      accounts={accountChoices}
+                      account={agentProfile}
+                      repoAccount={repoAccount}
+                      // Changing the AGENT clears the model pin: presets are per-runner, so a kept
+                      // model would be one the new runner does not have. Changing only the account
+                      // keeps it — the model catalog is the same either way.
+                      onPick={(next, picked) =>
+                        update({
+                          runner: next,
+                          agentProfile: picked,
+                          ...(next === displayRunner ? {} : { model: null }),
+                        })
+                      }
+                      disabled={!providersReady}
+                    />
+                  ) : null}
+                  <PickerPill
+                    slot="model-pill"
+                    ariaLabel="Model"
+                    label={models.find((m) => m.id === model)?.label ?? 'auto'}
+                    value={model}
+                    disabled={!providersReady}
+                    readOnly={modelsLocked}
+                    disabledHint={
+                      modelsLocked
+                        ? 'Model selection is locked to native coding-agent settings.'
+                        : undefined
+                    }
+                    onPick={(next) => {
+                      const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
+                      update({
+                        model: next,
+                        effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
+                      })
+                    }}
+                    options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
+                    status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
+                  />
+                  <PickerPill
+                    slot="effort-pill"
+                    ariaLabel="Effort"
+                    label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
+                    value={effort}
+                    disabled={!providersReady}
+                    readOnly={modelsLocked}
+                    disabledHint={
+                      modelsLocked
+                        ? 'Effort selection is locked to native coding-agent settings.'
+                        : undefined
+                    }
+                    onPick={(next) => update({ effort: next })}
+                    options={effortOptions.map((option) => ({
+                      value: option.value,
+                      label: option.label,
+                      desc: option.desc,
+                    }))}
+                  />
+                </div>
+                <div role="group" aria-label="Run settings" className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="basis-full text-xs font-medium text-muted-foreground">Run</span>
+                  <PickerPill
+                    slot="variants-pill"
+                    ariaLabel="Parallel variants"
+                    label={variants > 1 ? `×${variants} variants` : '×1'}
+                    value={String(variants)}
+                    onPick={(next) => update({ variants: Number(next) })}
+                    disabled={!hasGit}
+                    hint="How many times to run this task in parallel — each variant gets its own worktree, and you pick the diff you keep. ×1 runs it once."
+                    disabledHint="Parallel variants need a git repository — each variant runs in its own worktree."
+                    options={[
+                      { value: '1', label: '×1', desc: 'One run' },
+                      { value: '2', label: '×2 variants', desc: 'Two competing runs — pick the diff you keep' },
+                      { value: '3', label: '×3 variants', desc: 'Three competing runs — pick the diff you keep' },
+                    ]}
+                  />
+                  {worktreeToggleShown ? (
+                    <WorktreeToggle
+                      on={worktreeOn}
+                      disabled={worktreeForced}
+                      disabledReason="Parallel variants always use isolated worktrees"
+                      onChange={(on) => update({ worktree: on })}
+                    />
+                  ) : null}
+                  <AutonomousToggle
+                    on={autonomousOn}
+                    disabled={draft.planFirst}
+                    onChange={(on) => update({ autonomous: on })}
+                  />
+                  {selectedSkill?.interactive && (draft.autonomous === null || draft.worktree === null) ? (
+                    <p className="basis-full text-xs text-muted-foreground" data-slot="interactive-skill-hint">
+                      This skill recommends an interactive run in the current checkout. You can change either setting.
+                    </p>
+                  ) : null}
+                  {followupsToggleShown ? (
+                    <GenerateFollowupsToggle
+                      on={generateFollowupsOn}
+                      onChange={(on) => update({ generateFollowups: on })}
+                    />
+                  ) : null}
+                  {repo.data ? <BaseBranchPill repo={repo.data} /> : null}
+                </div>
+              </div>
+            </details>
           }
           footerEnd={
             <>
@@ -765,7 +785,7 @@ export function NewTaskRoute() {
               />
               <kbd
                 aria-hidden="true"
-                className="rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[10.5px] font-medium text-muted-foreground"
+                className="hidden rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[10.5px] font-medium text-muted-foreground md:inline"
               >
                 {submitShortcutHint()}
               </kbd>
