@@ -503,7 +503,13 @@ function SidebarContent({
             images, one accessible name: the mark carries `alt="Cezarion"`, the wordmark is
             decorative (`alt=""`) so screen readers say the name once. The intrinsic dimensions
             reserve identical geometry while resolved-theme assets swap. */}
-        <span data-slot="brand-lockup" className="flex h-[69px] shrink-0 items-center gap-2">
+        {/* WIDTH PRIORITY on this row, narrowest column first to give: the repo chip (shrink
+            weight 100 — it is droppable metadata and returns when the column is dragged wider),
+            then the wordmark (`min-w-0`, no fixed width: it scales down via object-contain,
+            anchored left), never the mark and never the drawer's 44px close button. At the
+            design's full 232px the lockup fits a 264px column exactly, so anything else on the
+            row has to come out of the chip or the wordmark. */}
+        <span data-slot="brand-lockup" className="flex h-[69px] min-w-0 items-center gap-2">
           <img
             src={brandMarkUrl(resolvedTheme)}
             alt="Cezarion"
@@ -518,7 +524,7 @@ function SidebarContent({
             width={160}
             height={48}
             data-slot="brand-lockup-wordmark"
-            className="h-12 w-40 shrink-0 object-contain"
+            className="h-12 w-auto max-w-40 min-w-0 object-contain object-left"
           />
         </span>
         {/* With project groups mounted the boot repo/branch is one group header among many —
@@ -526,7 +532,7 @@ function SidebarContent({
         {repo && !projectGroups ? (
           <span
             data-slot="repo-chip"
-            className="ml-auto truncate font-mono text-[11px] font-medium text-soft-foreground"
+            className="ml-auto min-w-0 shrink-[100] truncate font-mono text-[11px] font-medium text-soft-foreground"
           >
             {repo.name} / {repo.branch}
           </span>
