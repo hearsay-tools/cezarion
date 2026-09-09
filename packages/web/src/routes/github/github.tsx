@@ -609,7 +609,7 @@ export function GithubRoute({
       >
         <header data-slot="gh-header" className="sticky top-0 z-10 border-b border-border bg-background/95 px-4 pt-3 backdrop-blur">
           <div className="flex min-w-0 items-center gap-2.5">
-            <h1 className="text-lg font-semibold">GitHub</h1>
+            <h1 className="sr-only text-lg font-semibold md:not-sr-only">GitHub</h1>
             {gh.repo ? (
               <span data-slot="gh-repo" className="min-w-0 truncate font-mono text-[11px] text-soft-foreground">
                 {gh.repo}
