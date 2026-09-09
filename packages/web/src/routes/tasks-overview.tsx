@@ -405,7 +405,7 @@ function Th({
       data-column-id={columnId}
       data-folded={folded || undefined}
       className={cn(
-        'h-[38px] border-b border-border px-2.5 text-left text-[11px] font-semibold tracking-[0.05em] whitespace-nowrap text-soft-foreground uppercase first:pl-4 last:pr-4',
+        'h-[38px] border-b border-border px-2.5 text-left text-[11px] font-semibold tracking-[0.05em] whitespace-nowrap text-supporting-foreground uppercase first:pl-4 last:pr-4',
         right && 'text-right',
         folded && 'px-0 first:pl-0 last:pr-0',
       )}
@@ -549,7 +549,7 @@ function TableRow({
               data-slot="queue-note"
               data-column-id="cpu-memory"
               colSpan={2}
-              className={cn(TD_BASE, 'text-right font-mono text-[11.5px] text-soft-foreground')}
+              className={cn(TD_BASE, 'text-right font-mono text-[11.5px] text-supporting-foreground')}
             >
               #{queuePosition} in queue
             </td>
@@ -674,7 +674,7 @@ function TaskTableCell({
       )
     case 'started':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'text-right text-xs text-soft-foreground tabular-nums')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'text-right text-xs text-supporting-foreground tabular-nums')}>
           {shortAge(run.startedAt ?? run.createdAt, now)}
         </td>
       )
@@ -731,7 +731,7 @@ function TitleCell({
         to={to}
         title={title}
         className={cn(
-          'min-w-0 truncate text-[13px]',
+          'min-w-0 truncate rounded-sm text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
           unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
         )}
       >
@@ -809,7 +809,7 @@ function UsageTd({ column, cell }: { column: 'cpu' | 'memory'; cell: UsageCell }
         TD_BASE,
         'text-right font-mono tabular-nums',
         cell.kind === 'live' && 'bg-violet/5 text-xs font-medium text-foreground',
-        cell.kind === 'peak' && 'text-[11.5px] text-soft-foreground',
+        cell.kind === 'peak' && 'text-[11.5px] text-supporting-foreground',
         cell.kind === 'none' && 'text-xs text-soft-foreground'
       )}
     >
@@ -865,7 +865,7 @@ function TaskCard({
         <Link
           to={to}
           className={cn(
-            'min-w-0 flex-1 text-[13.5px] leading-[1.35]',
+            'min-w-0 flex-1 rounded-sm text-[13.5px] leading-[1.35] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
             unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
           )}
         >
@@ -882,7 +882,7 @@ function TaskCard({
             className="mt-1.5 shrink-0"
           />
         ) : null}
-        <span className="mt-0.5 shrink-0 text-[11.5px] text-soft-foreground tabular-nums">
+        <span className="mt-0.5 shrink-0 text-[11.5px] text-supporting-foreground tabular-nums">
           {shortAge(run.finishedAt ?? run.createdAt, now)}
         </span>
         {/* Always visible here, not hover-revealed: a card has no hover to speak of on the
