@@ -813,6 +813,7 @@ it('retained success cannot clear a newer controlled draft', async () => {
 })
 
 it('retained submission prevents dictation insertion and dictation send while pending', async () => {
+  const abort = vi.fn()
   let recognition!: { onresult: ((event: unknown) => void) | null }
   vi.stubGlobal('SpeechRecognition', class {
     onresult = null
@@ -820,7 +821,7 @@ it('retained submission prevents dictation insertion and dictation send while pe
     onend = null
     start() { recognition = this }
     stop() {}
-    abort() {}
+    abort = abort
   })
   let resolve!: () => void
   const onSubmit = vi.fn(() => new Promise<void>(done => { resolve = done }))
@@ -831,6 +832,15 @@ it('retained submission prevents dictation insertion and dictation send while pe
   fireEvent.keyDown(textarea, { key: 'Enter' })
   fireEvent.click(screen.getByRole('button', { name: 'Insert transcription' }))
   fireEvent.click(screen.getByRole('button', { name: 'Insert transcription and send' }))
+  expect(textarea.value).toBe('Original')
+  expect(onSubmit).toHaveBeenCalledTimes(1)
+  const cancel = screen.getByRole('button', { name: 'Cancel dictation' })
+  expect(cancel.closest('[inert]')).toBeNull()
+  expect((screen.getByRole('button', { name: 'Insert transcription' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((screen.getByRole('button', { name: 'Insert transcription and send' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(cancel)
+  expect(abort).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('button', { name: 'Cancel dictation' })).toBeNull()
   expect(textarea.value).toBe('Original')
   expect(onSubmit).toHaveBeenCalledTimes(1)
   await act(async () => resolve())

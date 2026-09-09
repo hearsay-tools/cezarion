@@ -569,10 +569,11 @@ export function Composer({
           />
 
           {recording ? (
-            <div inert={readOnly || undefined}>
+            <div>
               <DictationBar
                 transcript={recording.transcript}
                 startedAt={recording.startedAt}
+                insertionDisabled={readOnly}
                 onCancel={dictation.cancel}
                 onInsert={() => insertTranscript(false)}
                 onInsertAndSend={() => insertTranscript(true)}
@@ -775,12 +776,14 @@ function AttachButton({
 function DictationBar({
   transcript,
   startedAt,
+  insertionDisabled,
   onCancel,
   onInsert,
   onInsertAndSend,
 }: {
   transcript: string
   startedAt: number
+  insertionDisabled: boolean
   onCancel: () => void
   onInsert: () => void
   onInsertAndSend: () => void
@@ -825,6 +828,7 @@ function DictationBar({
         type="button"
         variant="outline"
         size="icon-sm"
+        disabled={insertionDisabled}
         aria-label="Insert transcription"
         className="size-11 md:size-8"
         onClick={onInsert}
@@ -834,6 +838,7 @@ function DictationBar({
       <Button
         type="button"
         size="icon-sm"
+        disabled={insertionDisabled}
         aria-label="Insert transcription and send"
         className="size-11 md:size-8"
         onClick={onInsertAndSend}
