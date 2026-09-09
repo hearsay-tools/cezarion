@@ -493,14 +493,18 @@ function SidebarContent({
     >
       <div className="flex items-center gap-[9px] px-3.5 pt-3.5 pb-2.5">
         {/* The wordmark lockup IS the brand (issue #143) — no tile-plus-label pairing beside it.
-            26px tall, like the tile it replaced: ~64px wide at the kit's aspect, inside the
-            264px column with room for the repo chip. The alt carries the name the old text
-            label used to, so screen readers say "Cezarion" once. */}
+            Its cropped canvas removes the kit's presentation whitespace, so 34px gives the word
+            a readable painted height without taking navigation space from the 264px drawer. The
+            intrinsic dimensions reserve identical geometry while resolved-theme assets swap.
+            The alt carries the name the old text label used to, so screen readers say
+            "Cezarion" once. */}
         <img
           src={brandLockupUrl(resolvedTheme)}
           alt="Cezarion"
+          width={103}
+          height={34}
           data-slot="brand-lockup"
-          className="h-[26px] w-auto shrink-0"
+          className="h-[34px] w-auto shrink-0"
         />
         {/* With project groups mounted the boot repo/branch is one group header among many —
             a chip repeating it up here would just be the first group's header said twice. */}
