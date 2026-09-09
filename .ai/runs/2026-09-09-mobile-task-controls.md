@@ -52,3 +52,18 @@ These are automated real-Chrome checks plus inspection of representative screens
 - [Mobile, light, ultra](assets/mobile-task-controls/mobile-light.png)
 - [Mobile, dark, comfortable](assets/mobile-task-controls/mobile-dark.png)
 - [Desktop, dark, comfortable](assets/mobile-task-controls/desktop-dark.png)
+
+## Repository and integration gates
+
+Before the clean merge of main `b6df0f65` (#168): typecheck passed; full Vitest **376 files / 7,832 tests** passed; node unit **177 tests** passed; build and **555-file** package inventory passed; packaged CLI **24 tests** passed.
+
+The first full Vitest attempt had one existing OpenCode harness S4 token-event failure (7,831 passed). The unchanged focused test and a fresh complete suite then passed. No backend files or test assertions were changed to obtain the pass.
+
+The supervisor authorized preserving that full-suite evidence for the unrelated clean main integration, with affected checks on the merged tree. After integration:
+
+```text
+TMPDIR=/tmp npm run typecheck → passed
+TMPDIR=/tmp npm test -- packages/web/src/routes/tasks-overview.test.tsx packages/web/src/routes/new-task.test.tsx packages/web/src/components/composer --maxWorkers=2 → 6 files, 305 tests passed
+TMPDIR=/tmp npm run build → passed; check:pack 555 files
+AGENT_BROWSER_ARGS=--no-sandbox TMPDIR=/tmp/qa175 XDG_RUNTIME_DIR=/tmp/qa175/run AGENT_BROWSER_SOCKET_DIR=/tmp/qa175 npm test -- --config packages/web/e2e/vitest.config.ts mobile-task-controls new-task-hierarchy composer-defaults selection-states touch-targets --maxWorkers=1 → 5 suites, 85 tests passed
+```
