@@ -276,6 +276,54 @@
   --spacing: 0.1875rem;
 }
 
+/* Mobile actions reserve their real hit area in layout (#166). Numeric Tailwind sizes
+ * follow density, so `size-11` is only 33px in ultra. Keep the floor in CSS pixels and
+ * outside layers so local size/min-size utilities cannot shrink it. No pseudo-element
+ * expansion: neighboring actions must never share a target. Desktop density is unchanged.
+ * Include native controls and Radix menu rows as well as our shared Button (including
+ * asChild links); inline prose links deliberately keep their text layout.
+ */
+@media (width < 48rem) {
+  :where(button, select, [role='button'], [role='menuitem'], [role='menuitemradio'],
+    [role='menuitemcheckbox'], [role='option'], nav a, a[data-slot='button'], [data-slot='run-tabs'] a,
+    input:not([type='hidden'], [type='checkbox'], [type='radio'], [type='range'], [type='file'])) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  :where(button, select, [role='button'], nav a, a[data-slot='button']):focus-visible {
+    /* Use semantic ink: the violet fill/ring is below 3:1 on the light sidebar. */
+    outline: 2px solid var(--link-foreground);
+    outline-offset: 2px;
+  }
+
+  /* The settings row scrolls; its labels must keep their intrinsic width rather than
+   * shrinking to the 44px floor. Preserve its existing overflow/reveal controller. */
+  [data-slot='settings-nav-mobile'] a {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* A switch reserves a 44px square while its familiar track stays compact. The
+   * transparent border belongs to the button, so even its edges toggle the switch. */
+  [role='switch'] {
+    box-sizing: content-box;
+    min-width: 32px;
+    min-height: 18px;
+    width: 32px;
+    height: 18px;
+    border-width: 13px 6px;
+    border-color: transparent;
+    background-clip: padding-box;
+    box-shadow: none;
+  }
+  [data-slot='switch-thumb'] {
+    width: 16px;
+    height: 16px;
+  }
+}
+
 /* Wide reading width (Settings → Appearance → Reading width): open the task-view column from the
  * default 820px to 1180px so long transcripts, diffs and command output use more of the screen.
  * One token, same `:root[…]` (unlayered) lever as density; narrow is the absence of the attribute. */
