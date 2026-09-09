@@ -116,6 +116,11 @@ function openThread(query = '') {
   // full-replay fallback; progressive-history.e2e.ts covers the paginated default.
   // Only the optimized history request fails; actual server/SSE replay stays real.
   browser.evaluate(`(() => {
+    const NativeSource = window.EventSource;
+    window.__threadSources = [];
+    window.EventSource = class extends NativeSource {
+      constructor(...args) { super(...args); window.__threadSources.push(this); }
+    };
     const original = window.fetch.bind(window);
     window.fetch = (input, options) => new URL(String(input), location.href).pathname.endsWith('/history')
       ? Promise.resolve(new Response('{"error":"fixture optimized history unavailable"}', { status: 404 }))
@@ -308,5 +313,76 @@ describe('iPhone viewport (390×844)', () => {
 
     browser.screenshot(`${artifactsDir}/thread-iphone.png`, { viewport: true })
     browser.setViewport(1440, 900)
+  }, 90_000)
+})
+
+/** #160: live appends must not shift the cached height of a message onto a tool card.
+ * Replay uses the real server; only the additional incoming wire frame is injected into
+ * its EventSource, so the real reducer, grouping, virtualizer and browser layout all run. */
+describe('tool cards remain below assistant messages after live appends', () => {
+  it.each([
+    ['flat', 360, 640, 'light'], ['virtual', 360, 640, 'light'],
+    ['flat', 360, 640, 'dark'], ['virtual', 360, 640, 'dark'],
+    ['flat', 1440, 900, 'dark'], ['virtual', 1440, 900, 'dark'],
+  ] as const)('%s at %s×%s in %s keeps rows separated through live updates and interaction', (mode, width, height, theme) => {
+    browser.setViewport(width, height)
+    openThread(`?thread=${mode}`)
+    browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
+
+    parkAt('m.scrollHeight - m.clientHeight - 120')
+    browser.evaluate(`(() => {
+      const source = window.__threadSources.findLast(s => s.url.includes('/runs/') && s.url.includes('/events'));
+      if (!source) throw new Error('missing run EventSource');
+      source.dispatchEvent(new MessageEvent('ui-event', { data: JSON.stringify({
+        type: 'item.completed', seq: 100000, ts: new Date().toISOString(), stepId: 'task',
+        item: { kind: 'tool', id: 'overlap-probe', name: 'Bash', toolKind: 'execute',
+          title: 'Ran incoming overlap probe', status: 'completed', output: 'probe completed', exitCode: 0 },
+      }) }));
+    })()`)
+    browser.waitForFunction(`document.body.textContent.includes('incoming overlap probe')`)
+    const assertSeparated = () => {
+      // React can commit an expanded card before ResizeObserver delivers its new size.
+      // Measure after layout delivery, not between those two phases of the same frame.
+      browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+      const overlaps = browser.evaluate(`(() => {
+        const rows = [...document.querySelectorAll('[data-slot="thread-row"]')];
+        return rows.flatMap((row, index) => {
+          const next = rows[index + 1];
+          if (!next || getComputedStyle(row.parentElement).visibility === 'hidden') return [];
+          const bounds = row.getBoundingClientRect(), following = next.getBoundingClientRect();
+          return bounds.top < innerHeight && bounds.bottom > 0 && bounds.bottom > following.top + 1
+            ? [{ key: row.dataset.rowKey, bottom: bounds.bottom, nextTop: following.top }] : [];
+        });
+      })()`)
+      expect(overlaps).toEqual([])
+    }
+    assertSeparated()
+    // Keep the view stationary while opening/closing an existing measured card.
+    browser.evaluate(`(() => {
+      const dockTop = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect().top;
+      window.__overlapCard = [...document.querySelectorAll('[data-slot="tool-card"]')].find(card => {
+        const r = card.getBoundingClientRect(); return r.top > 50 && r.bottom < dockTop;
+      });
+      if (!window.__overlapCard) throw new Error('no visible tool card to expand');
+      window.__overlapCard.querySelector('button').click();
+    })()`)
+    browser.waitForFunction(`window.__overlapCard.dataset.state === 'open'`)
+    assertSeparated()
+    browser.evaluate(`window.__overlapCard.querySelector('button').click()`)
+    browser.waitForFunction(`window.__overlapCard.dataset.state === 'closed'`)
+    assertSeparated()
+    for (const delta of [-80, 80]) {
+      browser.evaluate(`(() => {
+        const main = ${MAIN};
+        main.dispatchEvent(new WheelEvent('wheel', { deltaY: ${delta}, bubbles: true }));
+        main.scrollTop += ${delta};
+      })()`)
+      assertSeparated()
+    }
+    expect(browser.evaluate(`(() => {
+      const r = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect();
+      return r.top >= 0 && r.bottom <= innerHeight;
+    })()`)).toBe(true)
+    browser.screenshot(`${artifactsDir}/tool-overlap-${mode}-${width}-${theme}.png`, { viewport: true })
   }, 90_000)
 })

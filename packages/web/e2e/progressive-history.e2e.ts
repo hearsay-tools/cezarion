@@ -376,4 +376,39 @@ describe('progressive long-session history', () => {
     })
     browser.setViewport(1440, 900)
   }, 90_000)
+
+  it.each([360, 1440])('preserves a virtual history anchor behind the task prefix at %ipx', (width) => {
+    browser.setViewport(width, width === 360 ? 640 : 900)
+    browser.goto(`${baseUrl}/p/${bootProject}/tasks/${RUN_ID}?thread=virtual`)
+    browser.waitForFunction(
+      `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '1' &&
+       document.querySelector('[data-slot="thread-rows"]')?.dataset.virtualized === 'true'`,
+    )
+    parkAndSettleHistoryStart()
+    browser.evaluate(`(() => {
+      const main = ${MAIN}
+      const row = main.querySelector('[data-slot="thread-row"][data-row-key]:not([data-row-key="task"])')
+      main.scrollTop += row.getBoundingClientRect().top - main.getBoundingClientRect().top + 1
+      main.dispatchEvent(new Event('scroll', { bubbles: true }))
+    })()`)
+    const before = settleHistoryAnchor(`main.querySelector('[data-slot="thread-row"][data-row-key]:not([data-row-key="task"])')`)
+    // Invoke without moving focus: keyboard focus would scroll the boundary into view.
+    browser.evaluate(`document.querySelector('[data-slot="history-boundary"] button').click()`)
+    browser.waitForFunction(
+      `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '2'`,
+    )
+    const after = settleNamedHistoryAnchor(before.key)
+    expect(Math.abs(after.top - before.top), JSON.stringify({ before, after })).toBeLessThan(2)
+    parkAndSettleHistoryStart()
+    expect(browser.evaluate(`(() => {
+      const task = document.querySelector('[data-row-key="task"]')
+      return task && getComputedStyle(task).visibility === 'visible' && task.getBoundingClientRect().height > 0
+    })()`)).toBe(true)
+    expect(browser.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('[data-slot="thread-row"]')]
+        .filter(row => getComputedStyle(row).visibility === 'visible')
+        .map(row => row.getBoundingClientRect())
+      return rows.every((row, index) => index === 0 || row.top >= rows[index - 1].bottom - 1)
+    })()`)).toBe(true)
+  }, 90_000)
 })
