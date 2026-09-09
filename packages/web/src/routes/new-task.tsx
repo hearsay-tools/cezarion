@@ -1154,9 +1154,8 @@ function SourcePill({
   }
 
   const SourceIcon = source === null ? PlusIcon : source.source === 'skill' ? SparklesIcon : WorkflowIcon
-  // An empty picker looks empty: dashed, quiet, an invitation rather than a value. Every other
-  // pill in this row shows a resolved choice, so a filled-looking pill that nobody chose was
-  // read as one that could not be changed.
+  // The + and generic label distinguish an empty choice. Keep its enabled boundary and ink
+  // consistent with the other selectors; dashed boundaries mark disabled pills (#171).
   const trigger = (
     <button
       type="button"
@@ -1181,13 +1180,13 @@ function SourcePill({
         chipClass,
         'font-mono text-[11.5px]',
         source === null
-          ? 'border-dashed text-soft-foreground'
+          ? 'text-muted-foreground'
           : 'rounded-r-none border-r-0 border-foreground/60 pr-1.5 font-semibold text-foreground',
       )}
     >
       <SourceIcon
         aria-hidden="true"
-        className={cn('size-3 shrink-0', source === null ? 'text-soft-foreground' : 'text-violet')}
+        className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-violet')}
       />
       <span className="max-w-44 truncate">{!ready ? '…' : (source?.ref ?? 'Skill')}</span>
       {chevron}
