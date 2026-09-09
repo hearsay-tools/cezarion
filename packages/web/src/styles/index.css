@@ -276,23 +276,25 @@
 /* ---------- appearance: accent + density (Settings → Appearance, redesign R6) ----------
  * `data-accent` / `data-density` land on <html> before first paint (the index.html pre-paint
  * script reads the localStorage mirror; ui-state.json is the authoritative store — see
- * src/lib/appearance.ts). The default (lime / comfortable) is the ABSENCE of the attribute,
+ * src/lib/appearance.ts). The default (violet / comfortable) is the ABSENCE of the attribute,
  * so these blocks only name the deviations.
  */
 
-/* Violet accent: the `--primary` family swaps onto the existing violet tokens. An accent is
- * exactly a `--primary` family swap — a new accent = a new block here + one entry in
- * ACCENT_OPTIONS (routes/settings/appearance.tsx). */
-:root[data-accent='violet'] {
-  --primary: var(--violet);
-  --primary-foreground: var(--violet-foreground);
+/* Lime accent: the `--primary` family swaps onto the lime tokens the cockpit shipped with before
+ * the pen.dev redesign made the brand purple the default. An accent is exactly a `--primary`
+ * family swap — a new accent = a new block here + one entry in ACCENT_OPTIONS
+ * (routes/settings/appearance.tsx). */
+:root[data-accent='lime'] {
+  --primary: var(--accent-lime);
+  --primary-foreground: #0d0d0d;
   --link-foreground: var(--primary);
-  --ring: var(--violet);
+  --ring: var(--accent-lime);
 }
 
-/* Violet-700 is the light-theme ink partner for the unchanged violet fill. */
-:root.light[data-accent='violet'] {
-  --link-foreground: #6d28d9;
+/* Olive-800 is the light-theme ink partner for the lime fill — lime itself is ~1.3:1 on white. */
+:root.light[data-accent='lime'] {
+  --link-foreground: #3f6212;
+  --ring: #3f6212;
 }
 
 /* Compact density: Tailwind v4's whole numeric spacing scale keys off ONE token (`--spacing`,

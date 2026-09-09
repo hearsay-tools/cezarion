@@ -92,17 +92,17 @@ describe('settings → appearance against the live dry-run server', () => {
   })
 
   it('accent lands in ui-state.json and re-applies at boot', async () => {
-    browser.click('[data-slot="appearance-accent"] [data-value="violet"]')
-    browser.waitForFunction(`document.documentElement.dataset.accent === 'violet'`)
+    browser.click('[data-slot="appearance-accent"] [data-value="lime"]')
+    browser.waitForFunction(`document.documentElement.dataset.accent === 'lime'`)
 
     // The server actually persisted it — not just the query cache.
-    const appearance = await waitForServerAppearance((a) => a.accent === 'violet')
-    expect(appearance.accent).toBe('violet')
+    const appearance = await waitForServerAppearance((a) => a.accent === 'lime')
+    expect(appearance.accent).toBe('lime')
 
-    // Cold load: pre-paint mirror + server truth both say violet.
+    // Cold load: pre-paint mirror + server truth both say lime.
     browser.goto(`${baseUrl}/settings/global/appearance`)
-    browser.waitForFunction(`document.documentElement.dataset.accent === 'violet'`)
-    expect(browser.count('[data-slot="appearance-accent"] [data-value="violet"][aria-checked="true"]')).toBe(1)
+    browser.waitForFunction(`document.documentElement.dataset.accent === 'lime'`)
+    expect(browser.count('[data-slot="appearance-accent"] [data-value="lime"][aria-checked="true"]')).toBe(1)
   })
 
   it('compact density measurably tightens the spacing scale', async () => {
@@ -120,7 +120,7 @@ describe('settings → appearance against the live dry-run server', () => {
 
     // Neutralize for the rest of the suite run (afterAll restores the file itself too).
     browser.click('[data-slot="appearance-density"] [data-value="comfortable"]')
-    browser.click('[data-slot="appearance-accent"] [data-value="lime"]')
+    browser.click('[data-slot="appearance-accent"] [data-value="violet"]')
     browser.waitForFunction(
       `document.documentElement.dataset.density === undefined && document.documentElement.dataset.accent === undefined`,
     )
