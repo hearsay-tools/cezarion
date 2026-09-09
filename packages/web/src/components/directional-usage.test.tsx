@@ -18,9 +18,11 @@ describe('DirectionalUsage', () => {
   })
 
   it('keeps both table placeholders when requested', () => {
-    render(<DirectionalUsage variant="table" omitWhenUnknown={false} />)
-    expect(screen.getByText('— / —').getAttribute('aria-label')).toBe(
+    render(<DirectionalUsage variant="table" omitWhenUnknown={false} title="Exact token usage" />)
+    const usage = screen.getByText('— / —')
+    expect(usage.getAttribute('aria-label')).toBe(
       'Input tokens: unknown; output tokens: unknown',
     )
+    expect(usage.getAttribute('title')).toBe('Exact token usage')
   })
 })
