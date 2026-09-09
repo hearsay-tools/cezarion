@@ -50,7 +50,7 @@ export function restoreContrastQaDefaults(browser: AgentBrowser): void {
  * Browser expression for the contrast a person actually sees: the element's computed ink,
  * composited over every transparent ancestor until the opaque page surface is reached.
  */
-export function contrastSampleExpression(selector: string, foregroundProperty = 'color'): string {
+export function contrastSampleExpression(selector: string, foregroundProperty = 'color', backgroundSource: 'element' | 'parent' = 'element'): string {
   return `(() => {
     const element = document.querySelector(${JSON.stringify(selector)})
     if (!element) throw new Error('contrast target not found: ' + ${JSON.stringify(selector)})
@@ -69,7 +69,8 @@ export function contrastSampleExpression(selector: string, foregroundProperty = 
       }
     }
     const layers = []
-    for (let node = element; node; node = node.parentElement) {
+    // An offset outline sits outside the control's fill, on the parent surface.
+    for (let node = ${backgroundSource === 'parent' ? 'element.parentElement' : 'element'}; node; node = node.parentElement) {
       const layer = parse(getComputedStyle(node).backgroundColor)
       if (layer.a > 0) layers.push(layer)
       if (layer.a === 1) break
