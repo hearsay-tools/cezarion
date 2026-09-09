@@ -12,13 +12,20 @@ import { WorkflowsRoute } from './workflows'
 afterEach(() => {
   act(() => resetToasts())
   cleanup()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
 // ---- fixtures ----------------------------------------------------------------------------------
 
 const SKILLS: Skill[] = [
-  { name: 'om-fix', description: 'Fix the thing', body: '', path: '.ai/skills/om-fix.md', source: 'ai' },
+  {
+    name: 'om-fix',
+    description: 'Fix the thing, verify the regression, and leave a concise review note for the next person.',
+    body: '',
+    path: '.ai/skills/om-fix.md',
+    source: 'ai',
+  },
   { name: 'om-review', description: 'Review it', body: '', path: '~/.cez/skills/om-review.md', source: 'global' },
 ]
 
@@ -145,6 +152,60 @@ describe('canvas seeding', () => {
     await screen.findByText('Drop a skill here — or Import a workflow.yaml')
     expect(stepCards()).toHaveLength(0)
     expect(nameInput().value).toBe('my-workflow')
+  })
+})
+
+// ---- action hierarchy + readable summaries ----------------------------------------------------
+
+describe('workflow editor presentation', () => {
+  it('makes Save the sole primary toolbar action and keeps destructive emphasis inside confirmation', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+
+    const save = document.querySelector<HTMLElement>('[data-slot="wb-save"]')!
+    const removeFile = document.querySelector<HTMLElement>('[data-slot="wb-delete"]')!
+    expect(save.dataset.variant).toBe('primary')
+    expect(removeFile.dataset.variant).toBe('ghost')
+    expect(removeFile.className).not.toContain('text-soft-foreground')
+
+    fireEvent.click(removeFile)
+    const confirm = document.querySelector<HTMLElement>('[data-slot="wb-delete-confirm"]')!
+    expect(confirm.className).toContain('bg-danger')
+  })
+
+  it('renders step summaries as wrapping content outside the heading controls', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+
+    const first = stepCards()[0]!
+    const summary = first.querySelector<HTMLElement>('[data-slot="wb-step-summary"]')!
+    expect(summary).toBeTruthy()
+    expect(summary.textContent).toContain('leave a concise review note')
+    expect(summary.className).toContain('break-words')
+    expect(summary.className).not.toContain('truncate')
+    expect(first.querySelector('[data-slot="wb-step-heading"]')).toBeTruthy()
+  })
+
+  it('keeps Export available and downloads the current workflow YAML', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:workflow-yaml')
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      expect(this.download).toBe('ship-it.yaml')
+      expect(this.href).toBe('blob:workflow-yaml')
+    })
+
+    fireEvent.click(document.querySelector('[data-slot="wb-export"]')!)
+
+    expect(createObjectUrl).toHaveBeenCalledOnce()
+    const exported = createObjectUrl.mock.calls[0]?.[0]
+    expect(exported).toBeInstanceOf(Blob)
+    await expect((exported as Blob).text()).resolves.toContain('name: ship-it')
+    expect(click).toHaveBeenCalledOnce()
   })
 })
 

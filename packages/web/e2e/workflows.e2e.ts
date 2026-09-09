@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 
 import { AgentBrowser, readTestEnv } from './agent-browser'
+import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
 
 /**
  * The workflow builder (R6 Step 1.6) end-to-end against the shared dry-run environment.
@@ -27,6 +28,7 @@ const ALPHA = 'e2e-wb-alpha'
 const BETA = 'e2e-wb-beta'
 const FLOW = 'e2e-wb-flow'
 const savedFlowPath = resolve(repoRoot, `.ai/cezar/workflows/${FLOW}.yaml`)
+const presentationArtifacts = resolve(artifactsDir, 'workflow-editor-presentation')
 
 let browser: AgentBrowser
 let baseUrl: string
@@ -38,9 +40,10 @@ beforeAll(() => {
   rmSync(savedFlowPath, { force: true })
   createdSkillsDir = !existsSync(skillsDir)
   mkdirSync(skillsDir, { recursive: true })
+  mkdirSync(presentationArtifacts, { recursive: true })
   writeFileSync(
     resolve(skillsDir, `${ALPHA}.md`),
-    `---\nname: ${ALPHA}\ndescription: First e2e-seeded skill\n---\n\nDo the alpha thing.\n`,
+    `---\nname: ${ALPHA}\ndescription: Fix the issue, verify the regression, and leave a concise review note for the next person.\n---\n\nDo the alpha thing.\n`,
     'utf8',
   )
   writeFileSync(
@@ -117,6 +120,9 @@ describe('workflow builder against the live dry-run server', () => {
     expect(browser.text('[data-slot="wb-yaml"]').indexOf(BETA)).toBeLessThan(
       browser.text('[data-slot="wb-yaml"]').indexOf(ALPHA),
     )
+    // dnd-kit's keyboard auto-scroll can leave the toolbar underneath the sticky app header.
+    // Return to the top before the next test operates that toolbar, as a user would.
+    browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
   })
 
   it('Save writes a real portable workflow file the server round-trips', () => {
@@ -134,6 +140,167 @@ describe('workflow builder against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="wb-load-chip"][data-name="${FLOW}"]') !== null`)
     browser.waitForFunction(`document.querySelector('[data-slot="wb-delete"]') !== null`)
     browser.screenshot(`${artifactsDir}/workflows-saved.png`)
+  })
+
+  it('keeps action hierarchy and readable summaries across viewport, theme, and density', () => {
+    for (const [width, height] of [[360, 640], [1440, 900]] as const) {
+      for (const density of ['comfortable', 'compact', 'ultra']) {
+        for (const theme of ['light', 'dark']) {
+          browser.setViewport(width, height)
+          browser.evaluate(`(() => {
+            document.documentElement.dataset.density = ${JSON.stringify(density)};
+            document.documentElement.classList.toggle('light', ${JSON.stringify(theme)} === 'light');
+          })()`)
+
+          const presentation = browser.evaluate(`(() => {
+            const save = document.querySelector('[data-slot="wb-save"]');
+            const removeFile = document.querySelector('[data-slot="wb-delete"]');
+            const step = document.querySelector('[data-slot="wb-step"][data-id="${ALPHA}"]');
+            const heading = step.querySelector('[data-slot="wb-step-heading"]');
+            const summary = step.querySelector('[data-slot="wb-step-summary"]');
+            const sr = summary.getBoundingClientRect(), hr = heading.getBoundingClientRect(), cr = step.getBoundingClientRect();
+            const style = getComputedStyle(summary), saveStyle = getComputedStyle(save), deleteStyle = getComputedStyle(removeFile);
+            const controls = ['[data-slot="wb-step-grip"]', '[data-slot="wb-step-remove"]', '${addButton(ALPHA)}']
+              .map(selector => document.querySelector(selector).getBoundingClientRect())
+              .map(rect => ({ width: rect.width, height: rect.height }));
+            return {
+              saveVariant: save.dataset.variant,
+              deleteVariant: removeFile.dataset.variant,
+              saveBackground: saveStyle.backgroundColor,
+              deleteBackground: deleteStyle.backgroundColor,
+              whiteSpace: style.whiteSpace,
+              textOverflow: style.textOverflow,
+              summaryTop: sr.top,
+              summaryBottom: sr.bottom,
+              headingBottom: hr.bottom,
+              cardRight: cr.right,
+              summaryRight: sr.right,
+              lineHeight: parseFloat(style.lineHeight),
+              controls,
+              pageFits: document.documentElement.scrollWidth <= innerWidth,
+            };
+          })()`) as {
+            saveVariant: string
+            deleteVariant: string
+            saveBackground: string
+            deleteBackground: string
+            whiteSpace: string
+            textOverflow: string
+            summaryTop: number
+            summaryBottom: number
+            headingBottom: number
+            cardRight: number
+            summaryRight: number
+            lineHeight: number
+            controls: Array<{ width: number; height: number }>
+            pageFits: boolean
+          }
+
+          expect(presentation.saveVariant).toBe('primary')
+          expect(presentation.deleteVariant).toBe('ghost')
+          expect(presentation.saveBackground).not.toBe(presentation.deleteBackground)
+          const deleteContrast = browser.evaluate(
+            contrastSampleExpression('[data-slot="wb-delete"]'),
+          ) as ContrastSample
+          expect(
+            deleteContrast.ratio,
+            `${width}/${density}/${theme}: ${deleteContrast.foreground} on ${deleteContrast.background}`,
+          ).toBeGreaterThanOrEqual(4.5)
+          expect(presentation.whiteSpace).toBe('normal')
+          expect(presentation.textOverflow).not.toBe('ellipsis')
+          expect(presentation.summaryTop).toBeGreaterThanOrEqual(presentation.headingBottom)
+          expect(presentation.summaryRight).toBeLessThanOrEqual(presentation.cardRight)
+          expect(presentation.pageFits).toBe(true)
+          if (width === 360) {
+            expect(presentation.summaryBottom - presentation.summaryTop).toBeGreaterThan(
+              presentation.lineHeight,
+            )
+            for (const control of presentation.controls) {
+              expect(control.width).toBeGreaterThanOrEqual(44)
+              expect(control.height).toBeGreaterThanOrEqual(44)
+            }
+          } else {
+            for (const selector of [
+              '[data-slot="wb-delete"]',
+              '[data-slot="wb-save"]',
+              '[data-slot="wb-step-grip"]',
+              '[data-slot="wb-step-remove"]',
+              addButton(ALPHA),
+            ]) {
+              focusWithKeyboard(browser, selector)
+              expect(browser.evaluate(`(() => {
+                const element = document.querySelector(${JSON.stringify(selector)});
+                const style = getComputedStyle(element);
+                return document.activeElement === element && element.matches(':focus-visible') &&
+                  ((style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0) || style.boxShadow !== 'none');
+              })()`), `${density}/${theme}: ${selector}`).toBe(true)
+            }
+          }
+
+          browser.screenshot(
+            `${presentationArtifacts}/${width}-${density}-${theme}.png`,
+            { viewport: true },
+          )
+        }
+      }
+    }
+  }, 60_000)
+
+  it('keeps workflow actions reachable and visibly focused under reduced motion', () => {
+    browser.setReducedMotion()
+    for (const [width, height, density, theme] of [
+      [360, 640, 'ultra', 'dark'],
+      [1440, 900, 'comfortable', 'light'],
+    ] as const) {
+      browser.setViewport(width, height)
+      browser.evaluate(`(() => {
+        document.documentElement.dataset.density = ${JSON.stringify(density)};
+        document.documentElement.classList.toggle('light', ${JSON.stringify(theme)} === 'light');
+      })()`)
+      // Establish keyboard modality before focusing Save so :focus-visible is exercised.
+      browser.press('Tab')
+      browser.evaluate(`document.querySelector('[data-slot="wb-save"]').focus()`)
+
+      const facts = browser.evaluate(`(() => {
+        const save = document.querySelector('[data-slot="wb-save"]');
+        const saveStyle = getComputedStyle(save);
+        const actions = [...document.querySelectorAll('[data-slot="wb-actions"] button')]
+          .map(button => button.getBoundingClientRect())
+          .map(rect => ({ width: rect.width, height: rect.height, right: rect.right }));
+        return {
+          reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+          focused: document.activeElement === save && save.matches(':focus-visible'),
+          focusRing: saveStyle.boxShadow,
+          animationName: saveStyle.animationName,
+          actions,
+          pageFits: document.documentElement.scrollWidth <= innerWidth,
+        };
+      })()`) as {
+        reducedMotion: boolean
+        focused: boolean
+        focusRing: string
+        animationName: string
+        actions: Array<{ width: number; height: number; right: number }>
+        pageFits: boolean
+      }
+
+      expect(facts.reducedMotion).toBe(true)
+      expect(facts.focused).toBe(true)
+      expect(facts.focusRing).not.toBe('none')
+      expect(facts.animationName).toBe('none')
+      expect(facts.pageFits).toBe(true)
+      if (width === 360) {
+        for (const action of facts.actions) {
+          expect(action.width).toBeGreaterThanOrEqual(44)
+          expect(action.height).toBeGreaterThanOrEqual(44)
+          expect(action.right).toBeLessThanOrEqual(width)
+        }
+      }
+      browser.screenshot(
+        `${presentationArtifacts}/${width}-${density}-${theme}-reduced-motion.png`,
+        { viewport: true },
+      )
+    }
   })
 
   it('Import parses pasted YAML through the server and renders richer flows as full steps', () => {
@@ -160,6 +327,15 @@ describe('workflow builder against the live dry-run server', () => {
     expect(browser.text('[data-slot="wb-step"][data-id="tests"] [data-slot="wb-step-badge"]')).toBe('check')
     expect(browser.text('[data-slot="wb-yaml"]')).toContain('steps:')
     expect(browser.text('[data-slot="wb-yaml"]')).toContain('command: npm test')
+    const separation = browser.evaluate(`(() => {
+      const step = document.querySelector('[data-slot="wb-step"][data-id="tests"]');
+      const heading = step.querySelector('[data-slot="wb-step-heading"]').getBoundingClientRect();
+      const summary = step.querySelector('[data-slot="wb-step-summary"]').getBoundingClientRect();
+      const badge = step.querySelector('[data-slot="wb-step-badge"]').getBoundingClientRect();
+      return { summaryTop: summary.top, headingBottom: heading.bottom, badgeBottom: badge.bottom };
+    })()`) as { summaryTop: number; headingBottom: number; badgeBottom: number }
+    expect(separation.summaryTop).toBeGreaterThanOrEqual(separation.headingBottom)
+    expect(separation.summaryTop).toBeGreaterThanOrEqual(separation.badgeBottom)
     browser.screenshot(`${artifactsDir}/workflows-imported.png`)
   })
 
