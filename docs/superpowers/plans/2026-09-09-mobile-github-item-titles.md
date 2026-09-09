@@ -77,7 +77,7 @@ Confirm loading/empty/error/search/selected states are unchanged; no skeleton ge
 
 Run in order with TMPDIR=/tmp and bounded workers where supported: npm run typecheck, npm test, npm run test:unit, npm run build, and npm run test:package.
 
-- [ ] **Step 2: Commit and push**
+- [x] **Step 2: Commit and push**
 
 Commit with Conventional Commits, fetch origin/main, verify the branch base/diff, then push the current Cezar task branch with upstream tracking.
 
