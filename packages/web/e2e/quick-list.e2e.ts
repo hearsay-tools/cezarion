@@ -7,7 +7,14 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
+import {
+  applyContrastQaVariant,
+  contrastQaVariants,
+  contrastSampleExpression,
+  focusWithKeyboard,
+  restoreContrastQaDefaults,
+  type ContrastSample,
+} from './contrast'
 
 /**
  * The task quick-list, in a real browser, against a real cezar serving real runs.
@@ -237,6 +244,37 @@ describe('task quick-list', () => {
     expect(rowsIn('Recent')).toEqual(['README parallel-agents tagline+9 −22h', 'Bump zod to v43h'])
   })
 
+  it('keeps selected and hovered sidebar task metadata AA-readable', () => {
+    const selectedRow = '[data-slot="task-row"][data-run-id="fix-done"]'
+    const hoveredRow = '[data-slot="task-row"][data-run-id="fix-failed"]'
+    const age = (row: string) => `${row} > a > span.tabular-nums`
+
+    browser.goto(`${baseUrl}${scoped('/tasks/fix-done')}`)
+    browser.waitForFunction(`document.querySelector('${selectedRow}[data-active="true"]') !== null`)
+    try {
+      for (const variant of contrastQaVariants.filter(({ viewport }) => viewport.width === 1440)) {
+        applyContrastQaVariant(browser, variant)
+        const selected = browser.evaluate(contrastSampleExpression(age(selectedRow))) as ContrastSample
+        expect(
+          selected.ratio,
+          `${variant.id} selected: ${selected.foreground} on ${selected.background}`,
+        ).toBeGreaterThanOrEqual(4.5)
+
+        browser.hover(hoveredRow)
+        const hovered = browser.evaluate(contrastSampleExpression(age(hoveredRow))) as ContrastSample
+        expect(
+          hovered.ratio,
+          `${variant.id} hover: ${hovered.foreground} on ${hovered.background}`,
+        ).toBeGreaterThanOrEqual(4.5)
+        browser.screenshot(`${artifactsDir}/issue-165-task-sidebar-${variant.id}.png`, { viewport: true })
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+      browser.goto(`${baseUrl}${scoped('/')}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="quick-list"]') !== null`)
+    }
+  })
+
   it('renders the diff pair through the success/danger tokens, not as plain text', () => {
     const pair = browser.evaluate(`(() => {
       const el = document.querySelector('[data-slot="task-row"][data-run-id="fix-review-pr"] [data-slot="diff-stat"]')
@@ -455,45 +493,45 @@ describe('tasks table overview', () => {
   })
 
   it('keeps task metadata AA-readable on normal and hovered rows with visible title focus', () => {
-    const row = `${TABLE_ROW}[data-run-id="fix-review-pr"]`
-    const metadata = `${row} [data-column-id="started"]`
-    browser.evaluate(`document.documentElement.style.setProperty('--default-transition-duration', '0s')`)
-    for (const theme of ['dark', 'light'] as const) {
-      browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
-      const normal = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
-      expect(normal.ratio, `${theme} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)
-      browser.hover(row)
-      const hovered = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
-      expect(hovered.ratio, `${theme} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
-      focusWithKeyboard(browser, `${row} a[href]`)
-      const focusStyle = browser.evaluate(`(() => {
-        const link = document.querySelector(${JSON.stringify(`${row} a[href]`)})
-        const probe = document.createElement('span')
-        probe.style.color = 'var(--link-foreground)'
-        document.body.append(probe)
-        const color = getComputedStyle(probe).color
-        probe.remove()
-        const style = getComputedStyle(link)
-        return { active: document.activeElement === link, color, outline: style.outlineStyle, width: style.outlineWidth }
-      })()` ) as { active: boolean; color: string; outline: string; width: string }
-      const focus = browser.evaluate(contrastSampleExpression(`${row} a[href]`, 'outline-color')) as ContrastSample
-      expect(focusStyle.active).toBe(true)
-      expect(focusStyle.outline).not.toBe('none')
-      expect(Number.parseFloat(focusStyle.width)).toBeGreaterThanOrEqual(2)
-      expect(focus.foreground).toBe(focusStyle.color)
-      expect(focus.ratio, `${theme} focus: ${focus.foreground} on ${focus.background}`).toBeGreaterThanOrEqual(3)
-    }
-
-    browser.setViewport(360, 640)
     browser.goto(`${baseUrl}${scoped('/')}`)
-    const card = `[data-slot="task-card"][data-run-id="fix-review-pr"]`
-    browser.waitForFunction(`document.querySelector(${JSON.stringify(card)}) !== null`)
-    focusWithKeyboard(browser, `${card} a[href]`)
-    const mobileFocus = browser.evaluate(
-      contrastSampleExpression(`${card} a[href]`, 'outline-color'),
-    ) as ContrastSample
-    expect(mobileFocus.ratio, `mobile focus: ${mobileFocus.foreground} on ${mobileFocus.background}`).toBeGreaterThanOrEqual(3)
-    browser.setViewport(1440, 900)
+    browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    try {
+      for (const variant of contrastQaVariants) {
+        applyContrastQaVariant(browser, variant)
+        const mobile = variant.viewport.width === 360
+        const row = mobile
+          ? `[data-slot="task-card"][data-run-id="fix-review-pr"]`
+          : `${TABLE_ROW}[data-run-id="fix-review-pr"]`
+        const metadata = mobile
+          ? `${row} > div:first-child > span.tabular-nums`
+          : `${row} [data-column-id="started"]`
+        const normal = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
+        expect(normal.ratio, `${variant.id} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)
+        browser.hover(row)
+        const hovered = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
+        expect(hovered.ratio, `${variant.id} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
+        focusWithKeyboard(browser, `${row} a[href]`)
+        const focusStyle = browser.evaluate(`(() => {
+          const link = document.querySelector(${JSON.stringify(`${row} a[href]`)})
+          const probe = document.createElement('span')
+          probe.style.color = 'var(--link-foreground)'
+          document.body.append(probe)
+          const color = getComputedStyle(probe).color
+          probe.remove()
+          const style = getComputedStyle(link)
+          return { active: document.activeElement === link, color, outline: style.outlineStyle, width: style.outlineWidth }
+        })()` ) as { active: boolean; color: string; outline: string; width: string }
+        const focus = browser.evaluate(contrastSampleExpression(`${row} a[href]`, 'outline-color')) as ContrastSample
+        expect(focusStyle.active).toBe(true)
+        expect(focusStyle.outline).not.toBe('none')
+        expect(Number.parseFloat(focusStyle.width)).toBeGreaterThanOrEqual(2)
+        expect(focus.foreground).toBe(focusStyle.color)
+        expect(focus.ratio, `${variant.id} focus: ${focus.foreground} on ${focus.background}`).toBeGreaterThanOrEqual(3)
+        browser.screenshot(`${artifactsDir}/issue-165-tasks-${variant.id}.png`, { viewport: true })
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+    }
   })
 
   it('renames a task inline from its row — the hover pencil, committed by Enter, stored for real', async () => {

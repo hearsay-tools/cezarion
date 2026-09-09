@@ -3,7 +3,14 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
-import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
+import {
+  applyContrastQaVariant,
+  contrastQaVariants,
+  contrastSampleExpression,
+  focusWithKeyboard,
+  restoreContrastQaDefaults,
+  type ContrastSample,
+} from './contrast'
 
 /**
  * Settings → Skills (R6 Step 1.4) end-to-end against the shared dry-run environment.
@@ -95,37 +102,41 @@ describe('settings → skills against the live dry-run server', () => {
   })
 
   it('keeps selected and hovered skill descriptions AA-readable with visible keyboard focus', () => {
-    browser.goto(`${baseUrl}${scoped('/skills')}?skill=${ALPHA}`)
+    browser.goto(`${baseUrl}${scoped('/skills')}`)
     browser.waitForFunction(`document.querySelector('${row(ALPHA)} > span:last-child') !== null`)
-    browser.evaluate(`document.documentElement.style.setProperty('--default-transition-duration', '0s')`)
-    for (const theme of ['dark', 'light'] as const) {
-      browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
-      const selectedSelector = `${row(ALPHA)} > span:last-child`
-      const selected = browser.evaluate(contrastSampleExpression(selectedSelector)) as ContrastSample
-      expect(selected.ratio, `${theme} selected: ${selected.foreground} on ${selected.background}`).toBeGreaterThanOrEqual(4.5)
+    try {
+      for (const variant of contrastQaVariants) {
+        applyContrastQaVariant(browser, variant)
+        const selectedSelector = `${row(ALPHA)} > span:last-child`
+        const selected = browser.evaluate(contrastSampleExpression(selectedSelector)) as ContrastSample
+        expect(selected.ratio, `${variant.id} selected: ${selected.foreground} on ${selected.background}`).toBeGreaterThanOrEqual(4.5)
 
-      browser.hover(row(BETA))
-      const hoveredSelector = `${row(BETA)} > span:last-child`
-      const hovered = browser.evaluate(contrastSampleExpression(hoveredSelector)) as ContrastSample
-      expect(hovered.ratio, `${theme} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
+        browser.hover(row(BETA))
+        const hoveredSelector = `${row(BETA)} > span:last-child`
+        const hovered = browser.evaluate(contrastSampleExpression(hoveredSelector)) as ContrastSample
+        expect(hovered.ratio, `${variant.id} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
 
-      focusWithKeyboard(browser, row(ALPHA))
-      const focusStyle = browser.evaluate(`(() => {
-        const row = document.querySelector(${JSON.stringify(row(ALPHA))})
-        const probe = document.createElement('span')
-        probe.style.color = 'var(--link-foreground)'
-        document.body.append(probe)
-        const color = getComputedStyle(probe).color
-        probe.remove()
-        const style = getComputedStyle(row)
-        return { active: document.activeElement === row, color, outline: style.outlineStyle, width: style.outlineWidth }
-      })()` ) as { active: boolean; color: string; outline: string; width: string }
-      const focus = browser.evaluate(contrastSampleExpression(row(ALPHA), 'outline-color')) as ContrastSample
-      expect(focusStyle.active).toBe(true)
-      expect(focusStyle.outline).not.toBe('none')
-      expect(Number.parseFloat(focusStyle.width)).toBeGreaterThanOrEqual(2)
-      expect(focus.foreground).toBe(focusStyle.color)
-      expect(focus.ratio, `${theme} focus: ${focus.foreground} on ${focus.background}`).toBeGreaterThanOrEqual(3)
+        focusWithKeyboard(browser, row(ALPHA))
+        const focusStyle = browser.evaluate(`(() => {
+          const row = document.querySelector(${JSON.stringify(row(ALPHA))})
+          const probe = document.createElement('span')
+          probe.style.color = 'var(--link-foreground)'
+          document.body.append(probe)
+          const color = getComputedStyle(probe).color
+          probe.remove()
+          const style = getComputedStyle(row)
+          return { active: document.activeElement === row, color, outline: style.outlineStyle, width: style.outlineWidth }
+        })()` ) as { active: boolean; color: string; outline: string; width: string }
+        const focus = browser.evaluate(contrastSampleExpression(row(ALPHA), 'outline-color')) as ContrastSample
+        expect(focusStyle.active).toBe(true)
+        expect(focusStyle.outline).not.toBe('none')
+        expect(Number.parseFloat(focusStyle.width)).toBeGreaterThanOrEqual(2)
+        expect(focus.foreground).toBe(focusStyle.color)
+        expect(focus.ratio, `${variant.id} focus: ${focus.foreground} on ${focus.background}`).toBeGreaterThanOrEqual(3)
+        browser.screenshot(`${artifactsDir}/issue-165-skills-${variant.id}.png`, { viewport: true })
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
     }
   })
 
