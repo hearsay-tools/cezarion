@@ -556,7 +556,10 @@ function SidebarContent({
                 reserves ⌘N for a new window — so the chip advertises the one that always works.) */}
             <kbd
               aria-hidden="true"
-              className="absolute right-2.5 rounded-[3px] border border-brand-foreground/20 bg-transparent px-[5px] py-px font-mono text-[10.5px] font-medium text-brand-foreground"
+              // `primary-foreground`, not `brand-foreground`: the button paints `--primary`, and
+              // under the explicit Lime accent that is lime with near-black ink — a hard-coded
+              // white chip there would read at ~1.3:1.
+              className="absolute right-2.5 rounded-[3px] border border-primary-foreground/20 bg-transparent px-[5px] py-px font-mono text-[10.5px] font-medium text-primary-foreground"
             >
               C
             </kbd>
