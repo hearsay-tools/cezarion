@@ -51,6 +51,24 @@ class SummarizeTest(unittest.TestCase):
             self.assertEqual(len(report['jobs']), 3)
             self.assertEqual(report['jobs'][0]['raw']['id'], 1)
 
+    def test_release_variant_job_matches_release_verify_artifact_phase(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_artifact(root, 'release-github', 1, [
+                step('install', 3), step('vitest', 8),
+            ], phase='release-verify')
+            (root / 'jobs.json').write_text(json.dumps({'jobs': [{
+                'name': 'measure (release-github, 1)',
+                'status': 'completed', 'conclusion': 'success',
+                'started_at': '2026-09-08T10:00:00Z',
+                'completed_at': '2026-09-08T10:01:00Z',
+            }]}))
+
+            aggregate = summarize.summarize(root)['variants']['release-github']
+            self.assertEqual((aggregate['successes'], aggregate['failures'], aggregate['missing']), (1, 0, 0))
+            self.assertEqual(aggregate['samples'][0]['phase'], 'release-verify')
+            self.assertEqual(aggregate['metrics']['jobRunnerSeconds'], {'median': 60, 'min': 60, 'max': 60})
+
     def test_failure_and_missing_summary_are_never_successes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

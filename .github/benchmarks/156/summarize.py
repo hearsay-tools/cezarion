@@ -49,10 +49,12 @@ def job_rows(root):
             kind, variant, repetition = 'paired', 'paired', paired.group(1)
         else:
             kind, variant, repetition = match.groups()
+        phase = ('snapshot' if kind == 'snapshot' else
+                 'release-verify' if variant.startswith('release-') else 'verify')
         rows.append({
             'variant': variant,
             'repetition': int(repetition),
-            'phase': 'snapshot' if kind == 'snapshot' else 'verify',
+            'phase': phase,
             'paired': kind == 'paired',
             'status': raw.get('status'),
             'conclusion': raw.get('conclusion'),
