@@ -54,20 +54,6 @@ test('OIDC and the production environment stay on the publish job only', () => {
     'trusted publishing still needs the job OIDC token on release');
 });
 
-test('the version-bump commit stages every stamped manifest and a regenerated lockfile', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
-  const bump = step(job(workflow, 'release'), 'Open version-bump PR (patch/minor/major only)');
-
-  assert.match(
-    bump,
-    /npm install --package-lock-only --ignore-scripts/,
-    'the lockfile must be regenerated from the stamped manifests so npm ci can install the bump branch',
-  );
-  assert.match(bump, /git add[^\n]*packages\/\*\/package\.json/, 'every workspace manifest must be staged');
-  assert.match(bump, /git add[^\n]*alias-cezarion\/package\.json/, 'the alias manifest must be staged');
-  assert.match(bump, /git add[^\n]*package-lock\.json/, 'the regenerated lockfile must be staged');
-});
-
 test('the publish step has no npm credential and authenticates via OIDC', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   assert.match(workflow, /id-token: write/, 'trusted publishing needs the job OIDC token');
@@ -93,18 +79,5 @@ test('snapshots, nightlies, and dist-tag cleanup still pass NPM_TOKEN', () => {
   }
 });
 
-test('the GitHub Release body lists only packages that were actually published', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
-  const release = step(job(workflow, 'release'), 'Create GitHub Release');
-
-  assert.ok(
-    release.includes('steps.release.outputs.publishedNames'),
-    'the table must be built from the names the orchestrator actually published',
-  );
-  assert.match(release, /process\.env\.PUBLISHED_NAMES/);
-  assert.doesNotMatch(
-    release,
-    /API_CLIENT_NAME/,
-    'the private api-client must not be listed as a published package',
-  );
-});
+// Branch contents and published release metadata are exercised through the actual
+// workflow steps in release-finalization.test.cjs.
