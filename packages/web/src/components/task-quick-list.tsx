@@ -469,7 +469,7 @@ function RunRow({
             reference" alone would have silently deleted the queue position from every
             issue-driven queued row. */}
         {age && (queuePosition !== null || !reference) ? (
-          <span className="shrink-0 text-[11px] text-soft-foreground tabular-nums">{age}</span>
+          <span className="shrink-0 text-[11px] text-supporting-foreground tabular-nums">{age}</span>
         ) : null}
         {/* The unread marker (#unread-done-items): a trailing violet dot, opposite end and
             different hue from the leading status dot, so the two read as two signals. */}

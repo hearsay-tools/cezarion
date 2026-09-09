@@ -232,6 +232,11 @@ export class AgentBrowser {
     this.run(['mouse', 'up'])
   }
 
+  /** Move a real pointer without clicking, for hover targets whose bounding-box center is covered. */
+  moveTo(x: number, y: number): void {
+    this.run(['mouse', 'move', String(Math.round(x)), String(Math.round(y))])
+  }
+
   /** operation: interact (`mouse move`/`down`/`up`) — press at one viewport coordinate, move to
    *  another, release. A real, trusted pointer stream, which is the only kind that can exercise
    *  a drag built on pointer capture (`setPointerCapture` rejects a pointer id the browser is

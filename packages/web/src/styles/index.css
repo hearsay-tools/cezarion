@@ -100,6 +100,10 @@
   --muted: #262626;
   --muted-foreground: #a3a3a3;
   --soft-foreground: #7b7b7b;
+  /* Semantic ink: brand lime remains the dark-theme link, while supporting copy uses the
+   * already-readable muted step instead of the intentionally faint decorative soft step. */
+  --link-foreground: var(--primary);
+  --supporting-foreground: var(--muted-foreground);
   --border: #262626;
   --input: #262626;
   --contrast: #ebebeb;
@@ -196,6 +200,9 @@
   --muted: #f7f7f7;
   --muted-foreground: #5c5c5c;
   --soft-foreground: #a3a3a3;
+  /* Lime stays available for fills; olive-800 carries its identity as readable ink on white. */
+  --link-foreground: #3f6212;
+  --supporting-foreground: var(--muted-foreground);
   --border: #ebebeb;
   --input: #ebebeb;
   --contrast: #262626;
@@ -242,7 +249,13 @@
 :root[data-accent='violet'] {
   --primary: var(--violet);
   --primary-foreground: var(--violet-foreground);
+  --link-foreground: var(--primary);
   --ring: var(--violet);
+}
+
+/* Violet-700 is the light-theme ink partner for the unchanged violet fill. */
+:root.light[data-accent='violet'] {
+  --link-foreground: #6d28d9;
 }
 
 /* Compact density: Tailwind v4's whole numeric spacing scale keys off ONE token (`--spacing`,
@@ -307,6 +320,8 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-soft-foreground: var(--soft-foreground);
+  --color-link-foreground: var(--link-foreground);
+  --color-supporting-foreground: var(--supporting-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-contrast: var(--contrast);
@@ -531,6 +546,17 @@
   background: var(--muted);
   padding: 1.5px 5px;
   font-size: 0.9em;
+}
+.thread-markdown [data-streamdown='link'] {
+  color: var(--link-foreground);
+  text-decoration-line: underline;
+  text-decoration-thickness: from-font;
+  text-underline-offset: 0.16em;
+}
+.thread-markdown [data-streamdown='link']:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--link-foreground);
+  outline-offset: 2px;
 }
 .thread-markdown [data-streamdown='code-block'] pre {
   font-size: 12px;
