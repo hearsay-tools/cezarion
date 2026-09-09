@@ -585,7 +585,7 @@ function SidebarContent({
                   className={cn(
                     // h-[34px] is the mockup's desktop row. In the drawer these are touch targets, so
                     // they relax to 44px — the one place the two framings legitimately differ.
-                    'flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[34px]',
+                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[34px]',
                     isActive && 'bg-muted font-semibold text-foreground'
                   )}
                 >
@@ -680,7 +680,7 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
       // rows are muted. The violet icon is the one spot of accent — the same hue the tag chips
       // and this page's own selected filters use, so the door and the room match.
       className={cn(
-        'flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-semibold text-foreground transition-colors hover:bg-muted md:h-9',
+        'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-semibold text-foreground transition-colors hover:bg-muted md:h-9',
         isActive && 'bg-muted',
       )}
     >
