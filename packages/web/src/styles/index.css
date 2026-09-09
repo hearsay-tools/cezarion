@@ -89,23 +89,27 @@
   color-scheme: dark;
 
   /* neutral ramp — elevation comes from surface steps, not shadows */
-  --background: #0d0d0d;
-  --foreground: #ffffff;
-  --card: #171717;
-  --card-2: #1c1c1c;
+  /* Slate ramp from the pen.dev redesign (.pencil/design.pen, "surface-*" / "text-*"). */
+  --background: #0b0f17;
+  --foreground: #f8fafc;
+  --card: #121722;
+  --card-2: #171d2a;
   /* The sidebar's surface. Its own token because the two themes disagree about what it is:
    * dark wants the card step, light wants a tint *below* the white card so the rail reads as
    * chrome rather than page. See the `.light` block. */
   --sidebar: var(--card);
-  --muted: #262626;
-  --muted-foreground: #a3a3a3;
-  --soft-foreground: #7b7b7b;
+  /* The band behind the brand lockup at the top of the sidebar — a step BELOW the page so the
+   * mark reads as chrome, not content. */
+  --sidebar-header: #080d12;
+  --muted: #202535;
+  --muted-foreground: #afb5c5;
+  --soft-foreground: #8992a6;
   /* Semantic ink: brand lime remains the dark-theme link, while supporting copy uses the
    * already-readable muted step instead of the intentionally faint decorative soft step. */
-  --link-foreground: var(--primary);
+  --link-foreground: var(--accent-ink);
   --supporting-foreground: var(--muted-foreground);
-  --border: #262626;
-  --input: #262626;
+  --border: #2c3142;
+  --input: #2c3142;
   /* Functional boundaries need more contrast than decorative surface separators. */
   --control-border: #808080;
   --selection-indicator: var(--supporting-foreground);
@@ -115,13 +119,29 @@
   /* accents — `--accent-lime` is the stable name for the brand lime; `--primary` points at
    * whichever accent family is active (Settings → Appearance swaps it via [data-accent]). */
   --accent-lime: #a8f372;
-  --primary: var(--accent-lime);
-  --primary-foreground: #0d0d0d;
+  /* The brand purple — the redesign's one saturated fill: New task, the FAB, the active nav
+   * indicator. `--primary` points at it by default now; the lime stays available as a family. */
+  --brand: #7c3aed;
+  --brand-foreground: #ffffff;
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-foreground);
+  /* Accent INK: the purple that passes AA as text on each theme (workflow names, the selected
+   * nav label, the active tab). Never a fill. */
+  --accent-ink: #d7bdff;
+  /* The gold count beside "Active" — the brand's second hue, spent on exactly one number. */
+  --accent-count: #f4c542;
+  /* Icon strokes: the redesign draws chrome icons a step quieter than the text beside them. */
+  --icon: #a3a3a3;
+  --icon-soft: #7b7b7b;
+  /* The sidebar search field's translucent fill, and the 1px "surface ring" the redesign paints
+   * around raised controls instead of a border. */
+  --search-fill: rgba(32, 37, 53, 0.3);
+  --ring-subtle: rgba(255, 255, 255, 0.08);
   --violet: #8f86e8;
   /* Text/icons printed *on* --violet (the Inbox count badge). White in both themes — the violet
    * never lightens enough for ink to pass AA against it. */
   --violet-foreground: #ffffff;
-  --ring: #a8f372;
+  --ring: var(--brand);
 
   /* status */
   --danger: #ef4444;
@@ -195,23 +215,32 @@
 .light {
   color-scheme: light;
 
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
   --card: #ffffff;
-  --card-2: #fbfbfb;
-  --sidebar: #fafafa;
-  --muted: #f7f7f7;
-  --muted-foreground: #5c5c5c;
-  --soft-foreground: #a3a3a3;
-  /* Lime stays available for fills; olive-800 carries its identity as readable ink on white. */
-  --link-foreground: #3f6212;
+  --card-2: #fbfcfd;
+  --sidebar: #ffffff;
+  --sidebar-header: #f1f3f8;
+  --muted: #eef0f5;
+  --muted-foreground: #4b5566;
+  --soft-foreground: #7a8496;
+  /* Violet-700: the brand purple darkened far enough to read as ink on white. */
+  --accent-ink: #6d28d9;
+  --link-foreground: var(--accent-ink);
   --supporting-foreground: var(--muted-foreground);
-  --border: #ebebeb;
-  --input: #ebebeb;
+  --border: #e2e5ee;
+  --input: #e2e5ee;
+  --control-border: #c5cad6;
   --contrast: #262626;
   --contrast-foreground: #ffffff;
+  /* amber-700 — the same darkening `--pending-strong` makes, for the same reason. */
+  --accent-count: #b45309;
+  --icon: #6b7280;
+  --icon-soft: #8a94a6;
+  --search-fill: #e9ecf3;
+  --ring-subtle: rgba(0, 0, 0, 0.1);
 
-  --ring: #171717;
+  --ring: var(--brand);
 
   /* blue-700, not blue-300 — the same per-theme darkening the syntax blue already makes. */
   --info: #1d4ed8;
@@ -354,6 +383,10 @@
   --shadow-sm: 0 2px 4px 0 rgba(27, 28, 29, 0.04);
   --shadow-md: 0 16px 32px -12px rgba(14, 18, 27, 0.1);
   --shadow-modal: 0 16px 48px 0 rgba(0, 0, 0, 0.45);
+  /* The redesign's "surface ring": a 1px translucent halo on raised controls, painted as a
+   * shadow so it stacks with a real border and costs no layout. */
+  --shadow-ring: 0 0 0 1px var(--ring-subtle);
+  --shadow-fab: 0 10px 24px -8px rgba(124, 58, 237, 0.55);
 }
 
 /* ---------- Tailwind theme: utilities point at the tokens above ----------
@@ -368,6 +401,7 @@
   --color-card-foreground: var(--card-foreground);
   --color-card-2: var(--card-2);
   --color-sidebar: var(--sidebar);
+  --color-sidebar-header: var(--sidebar-header);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-soft-foreground: var(--soft-foreground);
@@ -381,6 +415,14 @@
 
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-count: var(--accent-count);
+  --color-icon: var(--icon);
+  --color-icon-soft: var(--icon-soft);
+  --color-search-fill: var(--search-fill);
+  --color-ring-subtle: var(--ring-subtle);
   --color-violet: var(--violet);
   --color-violet-foreground: var(--violet-foreground);
   --color-ring: var(--ring);

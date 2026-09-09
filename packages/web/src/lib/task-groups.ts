@@ -60,6 +60,9 @@ export type QuickListRow =
       run: RunRecord
       /** 1-based position among queued runs, `null` unless the run is queued. */
       queuePosition: number | null
+      /** The workers this run spawned that sit in the same bucket, in view order — painted nested
+       *  under the row rather than as peers. Absent when there are none. See `groupRuns`. */
+      workers?: RunRecord[]
     }
   | {
       kind: 'group'
@@ -236,6 +239,64 @@ export function sortRuns(runs: readonly RunRecord[], view: ListView): RunRecord[
 }
 
 /**
+ * The run that spawned this one, when the record says it is a worker (delegation spec).
+ *
+ * `null` for everything else — a root, a quarantined `invalid`, or a plain run — so a surface
+ * that nests workers under their parent asks one question and never re-reads the union.
+ */
+export function workerParentId(run: Pick<RunRecord, 'delegation'>): string | null {
+  const delegation = run.delegation
+  return delegation?.role === 'worker' ? delegation.parentRunId : null
+}
+
+/** One painted row of the Tasks table: the run and how deep it sits. */
+export interface TaskRow {
+  run: RunRecord
+  /** `0` for a task, `1` for a worker nested under the task that spawned it. */
+  depth: 0 | 1
+  /** 1-based position among queued runs, `null` unless the run is queued. */
+  queuePosition: number | null
+}
+
+/**
+ * Places each worker directly under its parent, keeping the parent's own position and the
+ * workers' relative order (the order `sorted` gave them). A worker whose parent is not in the
+ * list — archived away, deleted, or filtered out by a search — stays where it sorted, at depth 0:
+ * hiding it would lose the row, and indenting it under nothing would point at a parent that is
+ * not there.
+ *
+ * `positions` is the FULL list's queue numbering (`queuePositions`), never recomputed from
+ * `sorted`, for the same reason the table never renumbers the queue after a search.
+ */
+export function nestWorkers(
+  sorted: readonly RunRecord[],
+  positions: ReadonlyMap<string, number> = new Map(),
+): TaskRow[] {
+  const present = new Set(sorted.map((run) => run.id))
+  const byParent = new Map<string, RunRecord[]>()
+  for (const run of sorted) {
+    const parent = workerParentId(run)
+    if (parent === null || !present.has(parent) || parent === run.id) continue
+    const siblings = byParent.get(parent)
+    if (siblings) siblings.push(run)
+    else byParent.set(parent, [run])
+  }
+  const rows: TaskRow[] = []
+  const row = (run: RunRecord, depth: 0 | 1): TaskRow => ({
+    run,
+    depth,
+    queuePosition: run.status === 'queued' ? (positions.get(run.id) ?? null) : null,
+  })
+  for (const run of sorted) {
+    const parent = workerParentId(run)
+    if (parent !== null && byParent.has(parent) && parent !== run.id) continue
+    rows.push(row(run, 0))
+    for (const child of byParent.get(run.id) ?? []) rows.push(row(child, 1))
+  }
+  return rows
+}
+
+/**
  * The whole list, ready to render: filtered to the view, sorted, variant-collapsed and bucketed.
  *
  * Variant collapsing (spec 010): runs sharing a `groupId` render as one tile, placed where the
@@ -257,8 +318,26 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
     else byBucket.set(label, [row])
   }
 
+  // Workers fold under the run that spawned them (the design's indented rows), but only when the
+  // two land in the same bucket: a finished worker must not ride up into `Needs you` on its
+  // parent's account, nor a waiting parent be buried under its children in `Recent`.
+  const bucketById = new Map(sorted.map((run) => [run.id, bucketOf(run, view)] as const))
+  const nested = new Map<string, RunRecord[]>()
+  const folded = new Set<string>()
+  for (const run of sorted) {
+    const parent = workerParentId(run)
+    if (parent === null || parent === run.id) continue
+    const parentBucket = bucketById.get(parent)
+    if (parentBucket === undefined || parentBucket !== bucketById.get(run.id)) continue
+    folded.add(run.id)
+    const siblings = nested.get(parent)
+    if (siblings) siblings.push(run)
+    else nested.set(parent, [run])
+  }
+
   const seenGroups = new Set<string>()
   for (const run of sorted) {
+    if (folded.has(run.id)) continue
     if (run.groupId) {
       if (seenGroups.has(run.groupId)) continue
       seenGroups.add(run.groupId)
@@ -272,7 +351,13 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
         continue
       }
     }
-    push(bucketOf(run, view), { kind: 'run', run, queuePosition: positions.get(run.id) ?? null })
+    const workers = nested.get(run.id)
+    push(bucketOf(run, view), {
+      kind: 'run',
+      run,
+      queuePosition: positions.get(run.id) ?? null,
+      ...(workers ? { workers } : {}),
+    })
   }
 
   return BUCKET_ORDER.filter((label) => byBucket.has(label)).map((label) => ({

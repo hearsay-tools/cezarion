@@ -10,11 +10,13 @@ import {
   groupRuns,
   groupTitle,
   listCounts,
+  nestWorkers,
   queuePositions,
   refPrefixMatches,
   runTitle,
   sortRuns,
   splitRefPrefix,
+  workerParentId,
   type QuickListBucket,
 } from '@/lib/task-groups'
 
@@ -636,4 +638,83 @@ it('counts a parked parent question as Needs you from the run summary', () => {
   expect(bucketOf(record, 'active')).toBe('Needs you')
   expect(listCounts([record])).toEqual({ active: 1, archived: 0, waiting: 1 })
   expect(bucketOf({ ...record, hasPendingHumanAsk: false }, 'active')).toBe('Working')
+})
+
+/** A worker record: the slice of `delegation` the list reads (`role` + `parentRunId`). */
+function worker(parentRunId: string, over: Partial<RunRecord> = {}): RunRecord {
+  return run({
+    delegation: {
+      role: 'worker',
+      permissions: [],
+      parentRunId,
+      workspace: {
+        ownerRunId: 'w',
+        resourceId: 'w',
+        kind: 'owned-isolated',
+        path: '/w',
+        branch: 'cez/w',
+        baselineSha: 'a'.repeat(40),
+      },
+    },
+    ...over,
+  })
+}
+
+describe('workerParentId', () => {
+  it('names the parent of an owned worker and nothing else', () => {
+    expect(workerParentId(worker('parent'))).toBe('parent')
+    expect(workerParentId(run())).toBeNull()
+    expect(workerParentId(run({ delegation: { role: 'root', permissions: [], receipts: [] } }))).toBeNull()
+    expect(workerParentId(run({ delegation: { role: 'invalid' } }))).toBeNull()
+  })
+})
+
+describe('nestWorkers', () => {
+  it('places each worker directly under its parent, in the order they arrived', () => {
+    const parent = run({ id: 'p', createdAt: '2026-07-14T10:00:00.000Z' })
+    const other = run({ id: 'o', createdAt: '2026-07-14T12:00:00.000Z' })
+    const w1 = worker('p', { id: 'w1', createdAt: '2026-07-14T13:00:00.000Z' })
+    const w2 = worker('p', { id: 'w2', createdAt: '2026-07-14T11:00:00.000Z' })
+    const rows = nestWorkers(sortRuns([parent, other, w1, w2], 'active'))
+    expect(rows.map((row) => `${row.run.id}:${row.depth}`)).toEqual(['o:0', 'p:0', 'w1:1', 'w2:1'])
+  })
+
+  it('leaves a worker whose parent is not in the list where it sorted', () => {
+    const orphan = worker('gone', { id: 'w' })
+    const plain = run({ id: 'a' })
+    const rows = nestWorkers([plain, orphan])
+    expect(rows.map((row) => `${row.run.id}:${row.depth}`)).toEqual(['a:0', 'w:0'])
+  })
+
+  it('carries queue positions from the full list onto each row', () => {
+    const parent = run({ id: 'p', status: 'running' })
+    const queued = worker('p', { id: 'q', status: 'queued' })
+    const rows = nestWorkers([parent, queued], queuePositions([parent, queued]))
+    expect(rows.find((row) => row.run.id === 'q')?.queuePosition).toBe(1)
+    expect(rows.find((row) => row.run.id === 'p')?.queuePosition).toBeNull()
+  })
+})
+
+describe('groupRuns — worker nesting', () => {
+  it('folds workers under their parent row instead of listing them as peers', () => {
+    const parent = run({ id: 'p', createdAt: '2026-07-14T10:00:00.000Z' })
+    const w = worker('p', { id: 'w', createdAt: '2026-07-14T11:00:00.000Z' })
+    const buckets = groupRuns([parent, w], 'active')
+    expect(shape(buckets)).toEqual(['Recent: p'])
+    const row = rowsOf(buckets)[0]
+    expect(row?.kind === 'run' && row.workers?.map((member) => member.id)).toEqual(['w'])
+  })
+
+  it('keeps an orphan worker as its own row', () => {
+    const buckets = groupRuns([worker('gone', { id: 'w' })], 'active')
+    expect(shape(buckets)).toEqual(['Recent: w'])
+  })
+
+  it('never nests a worker under a parent in a different bucket', () => {
+    // The parent needs you; the worker is done. Nesting would pull the worker up into Needs
+    // you, or hide the parent's own state under a finished child — both read wrong.
+    const parent = run({ id: 'p', status: 'waiting', hasPendingHumanAsk: true })
+    const w = worker('p', { id: 'w', status: 'done' })
+    expect(shape(groupRuns([parent, w], 'active'))).toEqual(['Needs you: p', 'Recent: w'])
+  })
 })

@@ -23,16 +23,21 @@ export function resolveIndexHtml(opts: { distExists: boolean }): IndexTarget {
 export type GetTarget = IndexTarget | 'passthrough';
 
 /** Paths owned by routes registered before the catch-all: the built app's hashed bundles and
- *  the themed brand SVGs (#143) — the sidebar lockup pair and the favicon pair. */
-const BRAND_SVG_PATHS = new Set([
+ *  the themed brand files (#143) — the lockup SVG pair, the favicon SVG pair, and the redesign's
+ *  transparent mark + wordmark PNG pairs. */
+const BRAND_ASSET_PATHS = new Set([
   '/cezarion-lockup-light.svg',
   '/cezarion-lockup-dark.svg',
   '/cezarion-mark-light.svg',
   '/cezarion-mark-dark.svg',
+  '/cezarion-mark-light.png',
+  '/cezarion-mark-dark.png',
+  '/cezarion-wordmark-light.png',
+  '/cezarion-wordmark-dark.png',
 ]);
 
 function isStaticAsset(path: string): boolean {
-  return path.startsWith('/assets/') || BRAND_SVG_PATHS.has(path);
+  return path.startsWith('/assets/') || BRAND_ASSET_PATHS.has(path);
 }
 
 /** Decide what any GET gets, so every route in the spec's map (`/tasks/:id/changes`,

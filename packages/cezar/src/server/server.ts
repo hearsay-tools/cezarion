@@ -1451,6 +1451,12 @@ export function createApp(deps: ServerDeps) {
   app.get('/cezarion-lockup-dark.svg', staticFile('cezarion-lockup-dark.svg', 'image/svg+xml'));
   app.get('/cezarion-mark-light.svg', staticFile('cezarion-mark-light.svg', 'image/svg+xml'));
   app.get('/cezarion-mark-dark.svg', staticFile('cezarion-mark-dark.svg', 'image/svg+xml'));
+  // The pen.dev redesign's brand PNGs: the sidebar lockup is the transparent mark beside the
+  // transparent wordmark, and the mobile top bar carries the mark alone. Same pairing rule.
+  app.get('/cezarion-mark-light.png', staticFile('cezarion-mark-light.png', 'image/png'));
+  app.get('/cezarion-mark-dark.png', staticFile('cezarion-mark-dark.png', 'image/png'));
+  app.get('/cezarion-wordmark-light.png', staticFile('cezarion-wordmark-light.png', 'image/png'));
+  app.get('/cezarion-wordmark-dark.png', staticFile('cezarion-wordmark-dark.png', 'image/png'));
 
   // ---- meta ----------------------------------------------------------------
   // CORS — deliberately for /api/health ONLY (spec 011): the bookmarklets

@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { activeNavItem, activeNavPath, visibleNavItems, type NavItem } from '@/components/nav-items'
+import { NavRowContent, navRowClass } from '@/components/nav-row'
 import {
   DEFAULT_SIDEBAR_WIDTH,
   MAX_SIDEBAR_WIDTH,
@@ -46,7 +47,11 @@ import { cn } from '@/lib/utils'
 // bundled imports: the service serves the same files at these exact paths, so a second, hashed
 // URL for the same picture would be one cache entry too many. Vite serves `public/` at the root
 // in dev and copies it into the build, so the paths hold in both.
-const brandLockupUrl = (resolved: ResolvedTheme) => `/cezarion-lockup-${resolved}.svg`
+// The redesign (`.pencil/design.pen`, "Cezarion — dark horizontal lockup") composes the lockup
+// from two transparent PNGs — the orbit mark and the wordmark-plus-tagline — rather than one
+// flattened picture, so each can size to its own box and the band's colour shows through.
+const brandMarkUrl = (resolved: ResolvedTheme) => `/cezarion-mark-${resolved}.png`
+const brandWordmarkUrl = (resolved: ResolvedTheme) => `/cezarion-wordmark-${resolved}.png`
 
 /** Tailwind's `md`. The drawer is the `<md` affordance, so this must stay in step with the
  *  `md:hidden` / `md:flex` classes below — they are the same breakpoint expressed twice, once
@@ -305,7 +310,7 @@ function Sidebar({ width, onWidthChange, ...props }: NavProps & SidebarResize) {
     <aside
       data-slot="sidebar"
       style={{ width }}
-      className="relative hidden shrink-0 flex-col border-r border-border bg-sidebar md:flex"
+      className="relative hidden shrink-0 flex-col border-r-2 border-border bg-sidebar md:flex"
     >
       <SidebarContent {...props} />
       <SidebarResizeHandle width={width} onWidthChange={onWidthChange} />
@@ -491,21 +496,31 @@ function SidebarContent({
       // an `@min-[…]/sidebar:` query and returns when the user drags the column wider.
       className="@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
-      <div className="flex items-center gap-[9px] px-3.5 pt-3.5 pb-2.5">
-        {/* The wordmark lockup IS the brand (issue #143) — no tile-plus-label pairing beside it.
-            Its cropped canvas removes the kit's presentation whitespace, so 34px gives the word
-            a readable painted height without taking navigation space from the 264px drawer. The
-            intrinsic dimensions reserve identical geometry while resolved-theme assets swap.
-            The alt carries the name the old text label used to, so screen readers say
-            "Cezarion" once. */}
-        <img
-          src={brandLockupUrl(resolvedTheme)}
-          alt="Cezarion"
-          width={103}
-          height={34}
-          data-slot="brand-lockup"
-          className="h-[34px] w-auto shrink-0"
-        />
+      {/* The redesign's header band: the lockup sits on its own darker step (`--sidebar-header`),
+          so the brand reads as chrome above the navigation rather than as the first nav row. */}
+      <div data-slot="sidebar-brand" className="flex items-center gap-[9px] bg-sidebar-header px-3.5 py-4">
+        {/* The lockup IS the brand (issue #143) — no tile-plus-label pairing beside it. Two
+            images, one accessible name: the mark carries `alt="Cezarion"`, the wordmark is
+            decorative (`alt=""`) so screen readers say the name once. The intrinsic dimensions
+            reserve identical geometry while resolved-theme assets swap. */}
+        <span data-slot="brand-lockup" className="flex h-[69px] shrink-0 items-center gap-2">
+          <img
+            src={brandMarkUrl(resolvedTheme)}
+            alt="Cezarion"
+            width={64}
+            height={62}
+            data-slot="brand-lockup-mark"
+            className="h-[62px] w-16 shrink-0 object-contain"
+          />
+          <img
+            src={brandWordmarkUrl(resolvedTheme)}
+            alt=""
+            width={160}
+            height={48}
+            data-slot="brand-lockup-wordmark"
+            className="h-12 w-40 shrink-0 object-contain"
+          />
+        </span>
         {/* With project groups mounted the boot repo/branch is one group header among many —
             a chip repeating it up here would just be the first group's header said twice. */}
         {repo && !projectGroups ? (
@@ -521,8 +536,8 @@ function SidebarContent({
         ) : null}
       </div>
 
-      <div className="flex gap-1.5 px-2.5 pt-1 pb-2">
-        <Button asChild variant="contrast" className="relative min-w-0 flex-1 justify-center">
+      <div className="flex gap-2 px-2.5 pt-4 pb-2">
+        <Button asChild variant="primary" className="relative min-w-0 flex-1 justify-center">
           {/* A Router Link since R4 Step 1.1: the React /new composer is real, so deliberate
               New task affordances stay inside the SPA. Full document loads of /new (the
               bookmarklet contract) land on the shell like any route (static-ui.ts) — the
@@ -535,7 +550,7 @@ function SidebarContent({
                 reserves ⌘N for a new window — so the chip advertises the one that always works.) */}
             <kbd
               aria-hidden="true"
-              className="absolute right-2.5 rounded-[5px] border border-b-2 border-contrast-foreground/25 bg-transparent px-[5px] py-px font-mono text-[10.5px] font-medium text-contrast-foreground/60"
+              className="absolute right-2.5 rounded-[3px] border border-brand-foreground/20 bg-transparent px-[5px] py-px font-mono text-[10.5px] font-medium text-brand-foreground"
             >
               C
             </kbd>
@@ -552,7 +567,7 @@ function SidebarContent({
               what stops it reading as an unusually-worded project. Only in a multi-project
               workspace: with one project the page would be that project's own Tasks table
               wearing a second name. */}
-          <div className="shrink-0 border-b border-border px-1.5 pt-0.5 pb-2">
+          <div className="shrink-0 px-1.5 pt-2 pb-0.5">
             <AllTasksLink onNavigate={onNavigate} />
           </div>
           {/* Step 3.3: one collapsible group per registered project — nav + task list per group.
@@ -582,14 +597,11 @@ function SidebarContent({
                   to={item.to}
                   onClick={onNavigate}
                   aria-current={isActive ? 'page' : undefined}
-                  className={cn(
-                    // h-[34px] is the mockup's desktop row. In the drawer these are touch targets, so
-                    // they relax to 44px — the one place the two framings legitimately differ.
-                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[34px]',
-                    isActive && 'bg-muted font-semibold text-foreground'
-                  )}
+                  // The redesign's row (`nav-row.tsx`): 30px on desktop, a 44px touch target in
+                  // the drawer — the one place the two framings legitimately differ.
+                  className={navRowClass(isActive)}
                 >
-                  <Icon className="size-4 shrink-0" aria-hidden="true" />
+                  <NavRowContent icon={Icon} active={isActive}>
                   {item.label}
                   {item.badge === 'inbox-count' && inboxCount ? (
                     <span
@@ -619,6 +631,7 @@ function SidebarContent({
                       <span className="sr-only">Skills update available</span>
                     </span>
                   ) : null}
+                  </NavRowContent>
                 </Link>
               )
             })}
@@ -640,7 +653,7 @@ function SidebarContent({
        *  and a column cannot regress into that no matter what a future control's width is. */}
       <div
         data-slot="sidebar-footer"
-        className="flex flex-col gap-1.5 border-t border-border px-3.5 py-2.5"
+        className="flex flex-col gap-2.5 border-t-2 border-border px-3.5 pt-3 pb-2.5"
       >
         <CommandPaletteHint />
         <div data-slot="sidebar-footer-controls" className="flex items-center gap-2">
@@ -648,10 +661,16 @@ function SidebarContent({
           <div data-slot="tools-menu" className="shrink-0">
             {toolsMenu}
           </div>
-          {version ? <VersionChip version={version} latestVersion={latestVersion} /> : null}
           <GlobalSettingsLink onNavigate={onNavigate} className="ml-auto" />
           <ThemeToggle />
         </div>
+        {/* Its own line, per the redesign ("Build version — secondary metadata"): the controls row
+            stays a row of controls, and the version stops competing with them for width. */}
+        {version ? (
+          <div className="flex">
+            <VersionChip version={version} latestVersion={latestVersion} />
+          </div>
+        ) : null}
       </div>
     </div>
   )
@@ -680,7 +699,7 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
       // rows are muted. The violet icon is the one spot of accent — the same hue the tag chips
       // and this page's own selected filters use, so the door and the room match.
       className={cn(
-        'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-semibold text-foreground transition-colors hover:bg-muted md:h-9',
+        'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-[5px] rounded-md px-1.5 text-[13px] font-semibold text-foreground transition-colors hover:bg-muted md:h-[34px]',
         isActive && 'bg-muted',
       )}
     >
@@ -709,7 +728,7 @@ function GlobalSettingsLink({
   onNavigate?: () => void
 }) {
   return (
-    <Button asChild variant="ghost" size="icon" className={cn('size-7', className)}>
+    <Button asChild variant="ghost" size="icon" className={cn('size-7 rounded-md', className)}>
       <RouterLink
         to="/settings/global"
         data-slot="global-settings-link"
@@ -753,7 +772,7 @@ function AddProjectMenu() {
           size="icon"
           aria-label="Add project"
           title="Add project"
-          className="size-11 shrink-0 md:size-9"
+          className="size-11 shrink-0 shadow-ring md:size-9"
         >
           <FolderOpenIcon className="size-4" aria-hidden="true" />
         </Button>
@@ -797,13 +816,13 @@ function CommandPaletteHint() {
       data-slot="command-palette-hint"
       title="Search — command palette (⌘K / Ctrl+K)"
       onClick={() => openCommandPalette()}
-      className="flex w-full items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2 py-1 text-left text-xs font-medium text-soft-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="flex w-full items-center gap-1.5 rounded-md border border-border bg-search-fill px-2.5 py-1.5 text-left text-xs font-medium text-soft-foreground shadow-ring transition-colors hover:bg-muted hover:text-foreground"
     >
-      <SearchIcon className="size-3.5 shrink-0" aria-hidden="true" />
+      <SearchIcon className="size-3.5 shrink-0 text-icon-soft" aria-hidden="true" />
       <span className="truncate">Search…</span>
       <kbd
         aria-hidden="true"
-        className="ml-auto shrink-0 rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[10.5px] font-medium text-muted-foreground"
+        className="ml-auto shrink-0 rounded-[4px] border border-ring-subtle bg-card px-[5px] py-px font-mono text-[10.5px] font-medium text-muted-foreground"
       >
         {commandShortcutHint('k')}
       </kbd>
@@ -842,12 +861,13 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
 
 /** Mobile chrome (<md): the sidebar's replacement. Its menu button opens `MobileNavDrawer`. */
 function MobileTopBar({ title }: { title: string }) {
+  const { resolvedTheme } = useTheme()
   return (
     <header
       data-slot="mobile-top-bar"
       className="row-start-1 border-b border-border bg-card pt-[env(safe-area-inset-top)] md:hidden"
     >
-      <div className="flex h-[44px] items-center gap-2.5 px-3">
+      <div className="flex h-[45px] items-center gap-2.5 pr-3 pl-1.5">
         {/* A real SheetTrigger rather than an onClick that flips our state: it is what registers
             the button as the dialog's trigger, which is what Radix restores focus to on close —
             with a bare onClick, closing the drawer drops focus on <body>. It also carries the
@@ -863,6 +883,16 @@ function MobileTopBar({ title }: { title: string }) {
             <MenuIcon className="size-[17px]" aria-hidden="true" />
           </Button>
         </SheetTrigger>
+        {/* The mark beside the page title (redesign, mobile frames): the drawer holds the full
+            lockup, so up here the brand is a 26px glyph and the title keeps the words. */}
+        <img
+          src={brandMarkUrl(resolvedTheme)}
+          alt=""
+          width={26}
+          height={26}
+          data-slot="brand-mark"
+          className="size-[26px] shrink-0"
+        />
         <span className="truncate text-[14.5px] font-semibold">{title}</span>
         {/* SLOT — the run status dot / kebab land with the thread view (Step R3). */}
         <div data-slot="mobile-status" className="ml-auto flex items-center gap-2" />

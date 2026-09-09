@@ -59,21 +59,28 @@ describe('AppShell', () => {
 
   it('renders the themed Cezarion lockup, not a tile plus a label (#143)', () => {
     renderShell()
-    const lockup = document.querySelector('[data-slot="brand-lockup"]') as HTMLImageElement
+    const lockup = document.querySelector('[data-slot="brand-lockup"]')
     expect(lockup).toBeTruthy()
-    // Dark is the default palette (the matchMedia stub reports no light preference).
-    expect(lockup.getAttribute('src')).toBe('/cezarion-lockup-dark.svg')
-    // The image carries the accessible name; the decorative `cezar` span is gone so the
-    // name is not spoken twice.
-    expect(lockup.getAttribute('alt')).toBe('Cezarion')
+    const mark = lockup?.querySelector('[data-slot="brand-lockup-mark"]') as HTMLImageElement
+    const wordmark = lockup?.querySelector('[data-slot="brand-lockup-wordmark"]') as HTMLImageElement
+    // Dark is the default palette (the matchMedia stub reports no light preference). The
+    // redesign composes the lockup from the transparent mark and wordmark PNGs.
+    expect(mark.getAttribute('src')).toBe('/cezarion-mark-dark.png')
+    expect(wordmark.getAttribute('src')).toBe('/cezarion-wordmark-dark.png')
+    // The mark carries the accessible name, the wordmark is decorative, and the old `cezar`
+    // span is gone — so the name is spoken exactly once.
+    expect(mark.getAttribute('alt')).toBe('Cezarion')
+    expect(wordmark.getAttribute('alt')).toBe('')
     expect(within(sidebar()).queryByText(/^cezar$/i)).toBeNull()
   })
 
   it('swaps the lockup with the resolved theme (#143)', () => {
     localStorage.setItem('cez-theme', 'light')
     renderShell()
-    const lockup = document.querySelector('[data-slot="brand-lockup"]') as HTMLImageElement
-    expect(lockup.getAttribute('src')).toBe('/cezarion-lockup-light.svg')
+    const mark = document.querySelector('[data-slot="brand-lockup-mark"]') as HTMLImageElement
+    const wordmark = document.querySelector('[data-slot="brand-lockup-wordmark"]') as HTMLImageElement
+    expect(mark.getAttribute('src')).toBe('/cezarion-mark-light.png')
+    expect(wordmark.getAttribute('src')).toBe('/cezarion-wordmark-light.png')
   })
 
   it('resets the main scroller to the top on navigation (#mobile-scroll-top)', () => {
@@ -229,10 +236,13 @@ describe('AppShell', () => {
 
   /* The footer used to be one wrapping row that overflowed the 264px column, so the theme toggle
    * silently fell onto a line of its own (#702). jsdom cannot measure that — but it can pin the
-   * structure that makes the wrap impossible: two rows, by construction, not by luck. */
-  describe('sidebar footer is two intentional rows (#702)', () => {
+   * structure that makes the wrap impossible: intentional rows, by construction, not by luck.
+   * The pen.dev redesign gives the version chip a third line of its own, under the controls. */
+  describe('sidebar footer is intentional rows, never a wrap (#702)', () => {
     const controls = () =>
       document.querySelector('[data-slot="sidebar-footer-controls"]') as HTMLElement
+    const versionRow = () =>
+      document.querySelector('[data-slot="version-chip"]')?.parentElement as HTMLElement
 
     it('lays the footer out as a column, never a wrapping row', () => {
       renderShell()
@@ -240,24 +250,32 @@ describe('AppShell', () => {
       expect(footer().className).not.toContain('flex-wrap')
     })
 
-    it('has exactly two children: the search bar, then the controls row', () => {
+    it('has exactly three children: the search bar, the controls row, then the version line', () => {
       renderShell('/', { version: '1.2.3' })
       const children = Array.from(footer().children) as HTMLElement[]
-      expect(children.map((child) => child.dataset.slot)).toEqual([
+      expect(children.map((child) => child.dataset.slot ?? child.firstElementChild?.getAttribute('data-slot'))).toEqual([
         'command-palette-hint',
         'sidebar-footer-controls',
+        'version-chip',
       ])
+    })
+
+    it('drops the version line entirely when there is no version to show', () => {
+      renderShell('/')
+      expect(Array.from(footer().children)).toHaveLength(2)
     })
 
     it('keeps every control a sibling inside the one controls row', () => {
       renderShell('/', { version: '1.2.3', toolsMenu: <button type="button">Tools</button> })
       // The gear and the toggle are the pair that came apart in #702 — assert they share a parent,
-      // and that the row is the whole of the footer's chrome rather than a subset of it.
+      // and that the row is the whole of the footer's chrome rather than a subset of it. The
+      // version is metadata, not a control: it sits on its own line below (redesign).
       const row = controls()
       expect(row.querySelector('[data-slot="global-settings-link"]')).not.toBeNull()
       expect(row.querySelector('[data-slot="theme-toggle"]')).not.toBeNull()
       expect(row.querySelector('[data-slot="tools-menu"]')).not.toBeNull()
-      expect(row.querySelector('[data-slot="version-chip"]')).not.toBeNull()
+      expect(row.querySelector('[data-slot="version-chip"]')).toBeNull()
+      expect(versionRow().parentElement).toBe(footer())
       // The gear pushes itself right; the toggle rides along at the end of the same row.
       const gear = row.querySelector('[data-slot="global-settings-link"]') as HTMLElement
       expect(gear.closest('a,button')?.parentElement).toBe(row)
@@ -280,23 +298,23 @@ describe('AppShell', () => {
       expect(opened).toHaveBeenCalledTimes(1)
     })
 
-    it('still shows the version chip update affordance (#368) in the narrower row', () => {
+    it('still shows the version chip update affordance (#368) on its own line', () => {
       renderShell('/', { version: '1.2.3', latestVersion: '1.3.0' })
-      const chip = controls().querySelector('[data-slot="version-chip"]') as HTMLElement
+      const chip = versionRow().querySelector('[data-slot="version-chip"]') as HTMLElement
       expect(chip.getAttribute('data-update-available')).toBe('true')
       expect(chip.querySelector('[data-slot="status-dot"]')).not.toBeNull()
     })
 
-    /* The two-row footer holds only while something in the controls row can give: every icon
-     * button is `shrink-0` (button base class), so a long version string — `0.9.2-nightly.…`,
-     * the nightly dist-tag of #876 — used to push the gear and the toggle outside the 264px
-     * column entirely. jsdom still measures nothing; what it can pin is which item yields. */
-    it('makes the version chip the one control that gives, so a nightly version cannot push the row out', () => {
+    /* A long version string — `0.9.2-nightly.…`, the nightly dist-tag of #876 — used to push the
+     * gear and the toggle outside the 264px column entirely. The chip has its own line now, so
+     * the controls cannot be pushed; the chip itself still yields (truncates) rather than
+     * widening past the column. jsdom measures nothing; what it can pin is which item yields. */
+    it('makes the version chip give, so a nightly version cannot widen the footer', () => {
       renderShell('/', {
         version: '0.9.2-nightly.20260813.1',
         toolsMenu: <button type="button">Tools</button>,
       })
-      const chip = controls().querySelector('[data-slot="version-chip"]') as HTMLElement
+      const chip = versionRow().querySelector('[data-slot="version-chip"]') as HTMLElement
       expect(chip.className).not.toContain('shrink-0')
       expect(chip.className).toContain('min-w-0')
       // The text truncates inside the pill rather than widening it past what the row can hold.

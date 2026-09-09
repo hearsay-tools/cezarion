@@ -30,17 +30,17 @@ describe('TASK_COLUMNS', () => {
 
   it('keeps secondary columns compact while reserving readable width for Task', () => {
     expect(Object.fromEntries(TASK_COLUMNS.map((column) => [column.id, column.width]))).toEqual({
-      status: '120px',
+      status: '124px',
       task: '320px',
-      workflow: '84px',
+      workflow: '96px',
       branch: '120px',
-      diff: '84px',
-      reference: '104px',
-      tokens: '112px',
-      cost: '64px',
+      diff: '72px',
+      reference: '72px',
+      tokens: '104px',
+      cost: '68px',
       cpu: '60px',
-      memory: '80px',
-      started: '68px',
+      memory: '92px',
+      started: '84px',
     })
   })
 
