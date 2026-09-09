@@ -225,8 +225,9 @@ describe('TasksOverview — the table', () => {
       ],
     })
     const chip = tableRow('queued-issue')?.querySelector('[data-slot="issue-chip"]')
-    expect(chip?.textContent).toBe('Issue #554')
+    expect(chip?.textContent).toBe('#554')
     expect(chip?.getAttribute('href')).toBe('https://github.com/open-mercato/cezar/issues/554')
+    expect(chip?.getAttribute('aria-label')).toContain('Open the issue')
   })
 
   it('fills the columns with the run facts, and honest dashes where no fact exists', () => {

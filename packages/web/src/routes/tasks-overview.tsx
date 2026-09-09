@@ -662,7 +662,7 @@ function TaskTableCell({
       return (
         <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
           {reference ? (
-            <TaskReferenceChip run={run} reference={reference} className="max-w-full overflow-hidden" />
+            <TaskReferenceChip run={run} reference={reference} compact className="max-w-full overflow-hidden" />
           ) : <Dash />}
         </td>
       )

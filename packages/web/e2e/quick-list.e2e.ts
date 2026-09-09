@@ -478,7 +478,10 @@ describe('tasks table overview', () => {
             const reference = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"] td[data-column-id="reference"]')
             const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
             const referenceLabel = [...referenceChip.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
-            referenceLabel.textContent = 'Issue #1234'
+            referenceLabel.textContent = '#1234'
+            const referenceGlyph = referenceChip.querySelector('svg')
+            referenceChip.insertBefore(referenceGlyph.cloneNode(true), referenceChip.firstChild)
+            const diff = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"] td[data-column-id="diff"]')
             const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
             const secondary = secondaryIds.map((id) => {
               const cell = rows[0].querySelector('td[data-column-id="' + id + '"]')
@@ -496,7 +499,9 @@ describe('tasks table overview', () => {
               unbrokenContained: getComputedStyle(secondLink).overflow === 'hidden' && secondLink.scrollWidth > secondLink.clientWidth && secondRect.right <= secondCellRect.right + 1,
               workflowContained: workflowStyle.overflow === 'hidden' && workflow.scrollWidth > workflow.clientWidth,
               statusContained: status.scrollWidth <= status.clientWidth + 1 && statusPill.getBoundingClientRect().right <= status.getBoundingClientRect().right + 1,
-              referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1,
+              referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1 && [...referenceChip.querySelectorAll('svg')].every((glyph) => glyph.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1),
+              referenceLabel: referenceChip.textContent,
+              diffContained: diff.scrollWidth <= diff.clientWidth + 1,
               secondary,
               pageContained: document.documentElement.scrollWidth <= window.innerWidth,
             }
@@ -512,6 +517,8 @@ describe('tasks table overview', () => {
             workflowContained: boolean
             statusContained: boolean
             referenceContained: boolean
+            referenceLabel: string
+            diffContained: boolean
             secondary: Array<{ id: string; width: number; contained: boolean }>
             pageContained: boolean
           }
@@ -524,6 +531,8 @@ describe('tasks table overview', () => {
           expect(facts.workflowContained, `${theme}/${density}: workflow ellipsis`).toBe(true)
           expect.soft(facts.statusContained, `${theme}/${density}: status pill`).toBe(true)
           expect.soft(facts.referenceContained, `${theme}/${density}: reference chip`).toBe(true)
+          expect(facts.referenceLabel, `${theme}/${density}: compact reference label`).toBe('#1234')
+          expect.soft(facts.diffContained, `${theme}/${density}: diff stat`).toBe(true)
           expect(facts.secondary.every(({ width, contained }) => width > 0 && contained), `${theme}/${density}: ${JSON.stringify(facts.secondary)}`).toBe(true)
           expect(facts.pageContained, `${theme}/${density}: page overflow`).toBe(true)
 
