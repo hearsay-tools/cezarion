@@ -2387,3 +2387,29 @@ it.each(['plan', 'bookmarklet'] as const)('a late %s start cannot clear a remoun
   expect(readDraft().text).toBe('Newer draft')
   expect(textarea().value).toBe('Newer draft')
 })
+
+it('clears the submitted dictation draft after delayed creation succeeds', async () => {
+  let recognition!: { onresult: ((event: unknown) => void) | null }
+  vi.stubGlobal('SpeechRecognition', class {
+    onresult = null
+    onerror = null
+    onend = null
+    start() { recognition = this }
+    stop() {}
+    abort() {}
+  })
+  const delayed = deferredJson<{ id: string }>()
+  serve({ createRun: delayed.fetch })
+  renderNewTask()
+  await pillReady()
+  fireEvent.change(textarea(), { target: { value: 'Typed' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+  act(() => recognition.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'and spoken' } }] }))
+  fireEvent.click(screen.getByRole('button', { name: 'Insert transcription and send' }))
+  await waitFor(() => expect(postedBody()).toMatchObject({ task: 'Typed and spoken' }))
+  expect(textarea().value).toBe('Typed and spoken')
+  expect(readDraft().text).toBe('Typed and spoken')
+  await act(async () => delayed.release({ id: 'dictated-task' }))
+  await waitFor(() => expect(location()).toBe('/tasks/dictated-task'))
+  expect(readDraft().text).toBe('')
+})

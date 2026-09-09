@@ -164,9 +164,11 @@ export function NewTaskRoute() {
         : {}),
     }
   })
+  const currentDraft = useRef(draft)
   useEffect(() => {
-    writeDraft(draft, draftProjectId)
-  }, [draft, draftProjectId])
+    // Claim this mounted draft even when its text matches the previous visit.
+    writeDraft(currentDraft.current, draftProjectId)
+  }, [draftProjectId])
   const submissionPending = useRef(false)
   const mounted = useRef(true)
   useEffect(() => {
@@ -175,7 +177,11 @@ export function NewTaskRoute() {
   }, [])
   const update = (patch: Partial<NewTaskDraft>) => {
     if (!mounted.current || submissionPending.current) return
-    setDraft((current) => ({ ...current, ...patch }))
+    const next = { ...currentDraft.current, ...patch }
+    currentDraft.current = next
+    // Dictation can edit and submit in one event. Persist before submit captures its revision.
+    writeDraft(next, draftProjectId)
+    setDraft(next)
   }
 
   // ---- effective picker values (rules in new-task-form.ts, mirrored from legacy) -----------
