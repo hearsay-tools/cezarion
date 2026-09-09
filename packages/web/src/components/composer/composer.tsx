@@ -81,6 +81,8 @@ export interface ComposerProps {
   footerStart?: ReactNode
   /** Rendered between Dictation and the send button — the /new mode segment + kbd hint. */
   footerEnd?: ReactNode
+  /** New-task settings below a dedicated submission row; replies keep their compact footer. */
+  executionOptions?: ReactNode
   /** The send button's accessible name. */
   sendAriaLabel?: string
   disabled?: boolean
@@ -136,6 +138,7 @@ export function Composer({
   mobileDisclosureKey,
   footerStart,
   footerEnd,
+  executionOptions,
   sendAriaLabel = 'Send',
   disabled = false,
   disabledReason = 'Session closed — Continue to reopen.',
@@ -487,6 +490,22 @@ export function Composer({
 
   const recording = dictation.recording
 
+  const dictationButton = dictation.supported ? (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={disabled || readOnly}
+      aria-label="Start dictation"
+      title="Dictation"
+      className={cn('h-11 gap-1.5 px-2.5 text-xs font-medium text-muted-foreground md:h-8', mobileCompact && 'hidden md:inline-flex')}
+      onClick={() => { if (!editsBlocked()) dictation.start() }}
+    >
+      <MicIcon aria-hidden="true" className="size-3.5" />
+      Dictation
+    </Button>
+  ) : null
+
   return (
     <Popover open={menuOpen} onOpenChange={(open) => (open ? undefined : closeMenu())}>
       <PopoverAnchor asChild>
@@ -583,10 +602,9 @@ export function Composer({
             // The footer may WRAP (the /new pill row on narrow widths), but the trailing
             // controls wrap on phones to keep long model/account labels inside the viewport.
             <div className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pt-1 pb-1.5 md:gap-y-1.5 md:px-2 md:pt-1.5 md:pb-2">
-              {/* The paperclip shares ONE wrapping row with the footer pills — otherwise the
-                  pill group is a single flex item that wraps as a block, stranding the
-                  paperclip alone on the line above it (#composer-attach-line). */}
-              <div data-slot="composer-footer-start" className="flex min-w-0 flex-wrap items-center gap-1">
+              {/* Tools and context wrap together. New-task execution options get their own
+                  section; thread composers retain their compact, wrapping footer. */}
+              <div data-slot="composer-footer-start" className={cn('flex min-w-0 flex-wrap items-center gap-1', executionOptions && 'w-full')}>
                 <AttachButton disabled={disabled || readOnly} onFiles={addFiles} />
                 {mobileCollapsible ? (
                   <Button
@@ -606,25 +624,12 @@ export function Composer({
                   </Button>
                 ) : null}
                 <div className="contents" inert={readOnly || undefined}>{footerStart}</div>
+                {executionOptions ? <div className="ml-auto">{dictationButton}</div> : null}
               </div>
-              <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap">
-                {dictation.supported ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={disabled || readOnly}
-                    aria-label="Start dictation"
-                    title="Dictation"
-                    className={cn('h-11 gap-1.5 px-2.5 text-xs font-medium text-muted-foreground md:h-8', mobileCompact && 'hidden md:inline-flex')}
-                    onClick={() => { if (!editsBlocked()) dictation.start() }}
-                  >
-                    <MicIcon aria-hidden="true" className="size-3.5" />
-                    Dictation
-                  </Button>
-                ) : null}
+              <div data-slot="composer-submit-row" className={cn('ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap', executionOptions && 'mt-1 w-full border-t border-border pt-2')}>
+                {executionOptions ? null : dictationButton}
                 {footerEnd ? (
-                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
+                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', executionOptions && 'mr-auto', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
                     <div className="contents" inert={readOnly || undefined}>{footerEnd}</div>
                   </div>
                 ) : null}
@@ -636,14 +641,16 @@ export function Composer({
                   disabled={
                     disabled || busy || (text.trim() === '' && images.length === 0 && !allowEmptySubmit)
                   }
-                  className="size-11 md:size-8"
+                  className={executionOptions ? 'h-11 w-auto gap-1.5 px-3 md:h-8' : 'size-11 md:size-8'}
                   onClick={submitDraft}
                 >
+                  {executionOptions ? sendAriaLabel : null}
                   <ArrowUpIcon aria-hidden="true" />
                 </Button>
               </div>
             </div>
           )}
+          {executionOptions ? <div inert={readOnly || undefined}>{executionOptions}</div> : null}
           {retainDraftUntilSuccess ? (
             <div className="h-24 overflow-y-auto px-3 pb-2 text-xs leading-5 text-muted-foreground md:h-20 md:px-4">
               <div

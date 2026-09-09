@@ -365,6 +365,36 @@ const postedBody = () => requests.find((r) => r.method === 'POST' && r.url === '
 // ---- the hero surface -------------------------------------------------------------------------
 
 describe('the hero surface', () => {
+  it('keeps execution options in a disclosure separate from prompt context and submission', async () => {
+    serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
+    renderNewTask()
+    await pillReady()
+    const summary = screen.getByText('Execution options')
+    const disclosure = summary.closest('details')!
+    expect(disclosure).not.toBeNull()
+    expect(disclosure.open).toBe(false)
+    expect(disclosure.contains(sourcePill())).toBe(false)
+    expect(disclosure.contains(screen.getByRole('radio', { name: 'Plan first' }))).toBe(false)
+    expect(disclosure.contains(screen.getByRole('button', { name: 'Start task' }))).toBe(false)
+    expect(summary.parentElement?.textContent).toContain('claude')
+    fireEvent.click(summary)
+    const model = screen.getByRole('button', { name: 'Model' })
+    expect(disclosure.contains(model)).toBe(true)
+    fireEvent.pointerDown(model)
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /sonnet/ }))
+    expect(summary.parentElement?.textContent).toContain('sonnet')
+    fireEvent.change(textarea(), { target: { value: 'Keep this draft' } })
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Parallel variants' }))
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /×2 variants/ }))
+    const originalTextarea = textarea()
+    fireEvent.click(summary)
+    fireEvent.click(summary)
+    expect(textarea()).toBe(originalTextarea)
+    expect(textarea().value).toBe('Keep this draft')
+    expect(screen.getByRole('button', { name: 'Parallel variants' }).textContent).toContain('×2')
+    expect(screen.getByRole('button', { name: 'Model' })).toBe(model)
+  })
+
   it('renders the mockup hero: title, subtitle, twinkles, and focus lands in the textarea', async () => {
     serve()
     renderNewTask()
@@ -2325,6 +2355,7 @@ describe('retained task submission (#164)', () => {
     await startTask()
     expect(textarea().value).toBe('  Keep this prompt  ')
     expect(textarea().readOnly).toBe(true)
+    expect(screen.getByText('Execution options').closest('[inert]')).not.toBeNull()
     expect((screen.getByRole('button', { name: 'Remove notes.txt' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('Starting task…').getAttribute('role')).toBe('status')
     for (const keys of [{}, { ctrlKey: true }, { metaKey: true }]) fireEvent.keyDown(textarea(), { key: 'Enter', ...keys })
