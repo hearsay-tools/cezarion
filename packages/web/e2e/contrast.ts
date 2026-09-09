@@ -112,9 +112,14 @@ export function focusWithKeyboard(browser: AgentBrowser, selector: string): void
 
 /** Hovers a painted, unobstructed point of a possibly wrapping inline element. */
 export function hoverVisiblePoint(browser: AgentBrowser, selector: string): void {
+  // A previous matrix state can leave the real pointer over a hover-triggered surface after
+  // the viewport changes. Clear that state before scrolling so it cannot re-cover the target
+  // between the visibility poll and the CDP mouse move.
+  browser.moveTo(0, 0)
   browser.waitForFunction(`(() => {
     const target = document.querySelector(${JSON.stringify(selector)})
     if (!target) return false
+    target.scrollIntoView({ block: 'center', inline: 'nearest' })
     for (const rect of target.getClientRects()) {
       for (const yPart of [0.25, 0.5, 0.75]) {
         for (const xPart of [0.25, 0.5, 0.75]) {
@@ -123,8 +128,6 @@ export function hoverVisiblePoint(browser: AgentBrowser, selector: string): void
         }
       }
     }
-    const scroller = document.querySelector('[data-slot="main"]')
-    if (scroller) scroller.scrollTop += target.getBoundingClientRect().top - 180
     return false
   })()`)
   const point = browser.evaluate(`(() => {
