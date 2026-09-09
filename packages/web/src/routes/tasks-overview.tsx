@@ -29,7 +29,7 @@ import { queryKeys, useHealth, usePinRun, useReferenceProjectId, useRuns } from 
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
-import { DirectionalUsage } from '@/components/directional-usage'
+import { DirectionalUsage, directionalUsageLabel } from '@/components/directional-usage'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
 import { useListView } from '@/components/list-view'
 import { Pill } from '@/components/pill'
@@ -210,7 +210,7 @@ export function TasksOverview({
               className="hidden overflow-x-auto rounded-lg border border-border bg-card shadow-xs md:block"
             >
               <TooltipProvider>
-                <table className="w-full border-collapse">
+                <table className="w-full table-fixed border-collapse">
                   <colgroup>
                     {columns.map((column) => {
                       const expanded = isColumnExpanded(column.id, expandedColumns)
@@ -613,46 +613,61 @@ function TaskTableCell({
   switch (column.id) {
     case 'status':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
           {/* A scheduled run wears its appointment in the pill, the way a queued one wears its
               queue position — the row's whole answer to "what is this waiting for?". */}
-          <Pill dot={attention.tone} pulse={attention.pulse} title={scheduled?.title}>
-            {attention.label}
-            {scheduled ? <span className="tabular-nums">{scheduled.label}</span> : null}
+          <Pill
+            dot={attention.tone}
+            pulse={attention.pulse}
+            title={scheduled?.title ?? attention.label}
+            className="w-full max-w-full overflow-hidden"
+          >
+            <span className="min-w-0 truncate">
+              {attention.label}
+              {scheduled ? (
+                <>
+                  {' '}
+                  <span className="tabular-nums">{scheduled.label}</span>
+                </>
+              ) : null}
+            </span>
           </Pill>
         </td>
       )
     case 'task':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'min-w-[220px] max-w-0')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'min-w-[320px] max-w-0 whitespace-normal')}>
           <TitleCell run={run} to={to} onRename={onRename} onTogglePin={onTogglePin} />
         </td>
       )
     case 'workflow':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'text-[12.5px] text-muted-foreground')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'max-w-0 truncate text-[12.5px] text-muted-foreground')}>
           {workflowLabel(run)}
         </td>
       )
     case 'branch':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'max-w-0 overflow-hidden')}>
           {run.branch ? <BranchChip branch={run.branch} /> : <Dash />}
         </td>
       )
     case 'diff':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
-          {run.diffStat ? <DiffStatLabel stat={run.diffStat} /> : <Dash />}
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
+          {run.diffStat ? <DiffStatLabel stat={run.diffStat} compact className="block max-w-full" /> : <Dash />}
         </td>
       )
     case 'reference':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
-          {reference ? <TaskReferenceChip run={run} reference={reference} /> : <Dash />}
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
+          {reference ? (
+            <TaskReferenceChip run={run} reference={reference} compact className="max-w-full overflow-hidden" />
+          ) : <Dash />}
         </td>
       )
     case 'tokens':
+      const tokensLabel = directionalUsageLabel(run.inputTokens, run.outputTokens)
       return (
         <td data-column-id={column.id} className={cn(TD_BASE, 'text-right text-xs text-muted-foreground')}>
           <DirectionalUsage
@@ -660,6 +675,8 @@ function TaskTableCell({
             outputTokens={run.outputTokens}
             variant="table"
             omitWhenUnknown={false}
+            title={tokensLabel}
+            className="block max-w-full overflow-hidden text-ellipsis"
           />
         </td>
       )
@@ -669,7 +686,7 @@ function TaskTableCell({
           data-column-id={column.id}
           className={cn(TD_BASE, 'text-right font-mono text-xs text-muted-foreground tabular-nums')}
         >
-          {cost || <Dash />}
+          {cost ? <BoundedMetric text={cost} accessibleText={`$${run.costUsd}`} /> : <Dash />}
         </td>
       )
     case 'started':
@@ -731,7 +748,7 @@ function TitleCell({
         to={to}
         title={title}
         className={cn(
-          'min-w-0 truncate rounded-sm text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
+          'line-clamp-2 min-w-0 flex-1 whitespace-normal rounded-sm text-[13px] leading-[18px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
           unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
         )}
       >
@@ -799,22 +816,35 @@ function UsageTds({
 }
 
 function UsageTd({ column, cell }: { column: 'cpu' | 'memory'; cell: UsageCell }) {
+  const accessibleText = cell.text && cell.title ? `${cell.text}; ${cell.title}` : cell.text
   return (
     <td
       data-usage={column === 'memory' ? 'mem' : column}
       data-column-id={column}
       data-usage-kind={cell.kind}
-      title={cell.title}
       className={cn(
         TD_BASE,
+        'overflow-hidden',
         'text-right font-mono tabular-nums',
         cell.kind === 'live' && 'bg-violet/5 text-xs font-medium text-foreground',
         cell.kind === 'peak' && 'text-[11.5px] text-supporting-foreground',
         cell.kind === 'none' && 'text-xs text-soft-foreground'
       )}
     >
-      {cell.text || '—'}
+      <BoundedMetric text={cell.text || '—'} accessibleText={accessibleText || undefined} />
     </td>
+  )
+}
+
+function BoundedMetric({ text, accessibleText }: { text: string; accessibleText?: string }) {
+  return (
+    <span
+      data-slot="bounded-metric"
+      {...(accessibleText ? { 'aria-label': accessibleText, title: accessibleText } : {})}
+      className="block max-w-full overflow-hidden text-ellipsis"
+    >
+      {text}
+    </span>
   )
 }
 
@@ -954,7 +984,10 @@ function Sep() {
 
 function BranchChip({ branch }: { branch: string }) {
   return (
-    <span className="rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[11.5px] font-medium text-muted-foreground">
+    <span
+      title={branch}
+      className="block truncate rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[11.5px] font-medium text-muted-foreground"
+    >
       {branch}
     </span>
   )

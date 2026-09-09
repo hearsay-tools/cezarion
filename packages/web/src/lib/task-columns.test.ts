@@ -28,6 +28,22 @@ describe('TASK_COLUMNS', () => {
     expect(TASK_COLUMNS.slice(0, 2).map((column) => column.canFold)).toEqual([false, false])
   })
 
+  it('keeps secondary columns compact while reserving readable width for Task', () => {
+    expect(Object.fromEntries(TASK_COLUMNS.map((column) => [column.id, column.width]))).toEqual({
+      status: '120px',
+      task: '320px',
+      workflow: '84px',
+      branch: '120px',
+      diff: '84px',
+      reference: '104px',
+      tokens: '112px',
+      cost: '64px',
+      cpu: '60px',
+      memory: '80px',
+      started: '68px',
+    })
+  })
+
   it('folds only Branch by default', () => {
     const normalized = normalizeExpandedColumns(undefined)
     expect(

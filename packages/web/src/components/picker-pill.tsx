@@ -19,10 +19,10 @@ import { RUNNERS } from '@/routes/new-task-form'
 
 /** The mockup's `.chip`: a quiet bordered pill that darkens on hover. */
 export const chipClass =
-  'inline-flex h-[26px] min-w-0 max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-55'
+  'inline-flex h-[26px] min-w-0 max-w-full items-center gap-1.5 rounded-full border border-control-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:border-dashed disabled:bg-muted'
 
 export const chevron = (
-  <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
+  <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-supporting-foreground" />
 )
 
 /** A generic single-choice pill (runner / model / variants): DropdownMenu radio semantics,

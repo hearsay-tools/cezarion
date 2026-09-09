@@ -137,6 +137,61 @@ describe('TasksOverview — the table', () => {
     expect(ids).toEqual(['rev1', 'run1', 'done1'])
   })
 
+  it('gives long desktop task titles a two-line readable region without changing their link', () => {
+    const title = 'Review the desktop task table with several shared prefix words before the distinguishing detail'
+    renderOverview({ runs: [run({ id: 'long-title', title })] })
+
+    const row = tableRow('long-title') as HTMLElement
+    const taskCell = row.querySelector<HTMLElement>('td[data-column-id="task"]')
+    const titleLink = within(taskCell as HTMLElement).getByRole('link', { name: title })
+
+    expect(taskCell?.className).toContain('min-w-[320px]')
+    expect(titleLink.getAttribute('href')).toBe('/tasks/long-title')
+    expect(titleLink.className).toContain('line-clamp-2')
+    expect(titleLink.className).toContain('whitespace-normal')
+    expect(titleLink.className).not.toContain('truncate')
+  })
+
+  it('contains secondary desktop content inside the compact column geometry', () => {
+    renderOverview({
+      runs: [
+        run({
+          id: 'compact-secondary',
+          workflow: 'a-very-long-workflow-name-that-must-not-steal-title-space',
+          pullRequestUrl: 'https://github.com/o/r/pull/1234',
+          inputTokens: 999_900,
+          outputTokens: 888_800,
+          costUsd: 123.45,
+          peakRssBytes: 1023 * 1024 ** 2,
+        }),
+      ],
+    })
+
+    const table = document.querySelector<HTMLElement>('[data-slot="tasks-table"] table')
+    const status = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="status"]')
+    const workflow = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="workflow"]')
+    const workflowHeader = document.querySelector<HTMLElement>('th[data-column-id="workflow"]')
+    const reference = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="reference"]')
+    const diff = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="diff"]')
+    const tokens = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="tokens"] > span')
+    const cost = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="cost"] > span')
+    const memory = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="memory"] > span')
+
+    expect(table?.className).toContain('table-fixed')
+    expect(status?.className).toContain('overflow-hidden')
+    expect(workflow?.className).toContain('truncate')
+    expect(workflowHeader?.textContent).toContain('Workflow')
+    expect(reference?.className).toContain('overflow-hidden')
+    expect(reference?.querySelector('[data-slot="pr-chip"]')?.className).toContain('max-w-full')
+    expect(diff?.className).toContain('overflow-hidden')
+    expect(tokens?.className).toContain('overflow-hidden')
+    expect(tokens?.getAttribute('title')).toBe('Input tokens: 999,900; output tokens: 888,800')
+    expect(cost?.className).toContain('overflow-hidden')
+    expect(cost?.getAttribute('aria-label')).toBe('$123.45')
+    expect(memory?.className).toContain('overflow-hidden')
+    expect(memory?.getAttribute('aria-label')).toBe('peak 1023 MB; peak — run finished')
+  })
+
   it('says the run status through the attention pill', () => {
     renderOverview({
       runs: [
@@ -187,8 +242,9 @@ describe('TasksOverview — the table', () => {
       ],
     })
     const chip = tableRow('queued-issue')?.querySelector('[data-slot="issue-chip"]')
-    expect(chip?.textContent).toBe('Issue #554')
+    expect(chip?.textContent).toBe('#554')
     expect(chip?.getAttribute('href')).toBe('https://github.com/open-mercato/cezar/issues/554')
+    expect(chip?.getAttribute('aria-label')).toContain('Open the issue')
   })
 
   it('fills the columns with the run facts, and honest dashes where no fact exists', () => {
@@ -692,6 +748,7 @@ describe('TasksOverview — usage cells', () => {
     expect(usageCell('live1', 'cpu')?.getAttribute('data-usage-kind')).toBe('live')
     expect(usageCell('live1', 'mem')?.textContent).toBe('612 MB')
     expect(usageCell('live1', 'mem')?.getAttribute('data-usage-kind')).toBe('live')
+    expect(usageCell('live1', 'cpu')?.querySelector('[data-slot="bounded-metric"]')?.getAttribute('title')).toBe('38%')
   })
 
   it('shows a finished run its dimmed peaks, and never a live sample', () => {
@@ -703,7 +760,10 @@ describe('TasksOverview — usage cells', () => {
     expect(usageCell('done1', 'cpu')?.textContent).toBe('—')
     expect(usageCell('done1', 'mem')?.textContent).toBe('peak 401 MB')
     expect(usageCell('done1', 'mem')?.getAttribute('data-usage-kind')).toBe('peak')
-    expect(usageCell('done1', 'mem')?.getAttribute('title')).toBe('peak — run finished · 7 procs')
+    const metric = usageCell('done1', 'mem')?.querySelector('[data-slot="bounded-metric"]')
+    expect(metric?.className).toContain('overflow-hidden')
+    expect(metric?.getAttribute('title')).toBe('peak 401 MB; peak — run finished · 7 procs')
+    expect(metric?.getAttribute('aria-label')).toBe(metric?.getAttribute('title'))
   })
 })
 

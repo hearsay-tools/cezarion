@@ -106,6 +106,9 @@
   --supporting-foreground: var(--muted-foreground);
   --border: #262626;
   --input: #262626;
+  /* Functional boundaries need more contrast than decorative surface separators. */
+  --control-border: #808080;
+  --selection-indicator: var(--supporting-foreground);
   --contrast: #ebebeb;
   --contrast-foreground: #171717;
 
@@ -371,6 +374,7 @@
   --color-link-foreground: var(--link-foreground);
   --color-supporting-foreground: var(--supporting-foreground);
   --color-border: var(--border);
+  --color-control-border: var(--control-border);
   --color-input: var(--input);
   --color-contrast: var(--contrast);
   --color-contrast-foreground: var(--contrast-foreground);
@@ -609,4 +613,21 @@
 .thread-markdown [data-streamdown='code-block'] pre {
   font-size: 12px;
   line-height: 1.55;
+}
+
+/* A persistent shape distinguishes current navigation from its hover fill. Positioned inside
+ * the existing row: no layout shift, target-size change, or interference with focus rings. */
+.selection-row {
+  position: relative;
+}
+
+.selection-row:is([aria-current='page'], [data-active='true'])::before {
+  content: '';
+  position: absolute;
+  inset-block: 6px;
+  inset-inline-start: 0;
+  width: 3px;
+  border-radius: 99px;
+  background: var(--selection-indicator);
+  pointer-events: none;
 }
