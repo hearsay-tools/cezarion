@@ -1,0 +1,49 @@
+name: Recover Automated Review
+
+on:
+  workflow_run:
+    # The review completion closes the race where CI completes while its
+    # original waiter is still finishing failure. It cannot retry model errors.
+    workflows: [CI, Automated Code Review]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: recover-automated-review-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write # rerun only the original trusted CI gate and dependents
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout trusted recovery script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # workflow_run's SHA is on the default branch, never the PR head.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Reconcile CI and recover a blocked review
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          AUTOMATED_REVIEW_ROUNDS: ${{ vars.AUTOMATED_REVIEW_ROUNDS }}
+        with:
+          script: |
+            const { recoverReview } = require('./.github/scripts/recover-review.cjs');
+            await recoverReview({
+              github,
+              ...context.repo,
+              event: context.payload,
+              maxRounds: process.env.AUTOMATED_REVIEW_ROUNDS || '',
+              log: message => {
+                core.info(message);
+                core.summary.addRaw(message + '\n');
+              },
+            });
+            await core.summary.write();
