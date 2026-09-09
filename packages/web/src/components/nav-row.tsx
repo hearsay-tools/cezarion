@@ -17,20 +17,13 @@ import { cn } from '@/lib/utils'
  */
 export function navRowClass(active: boolean, className?: string): string {
   return cn(
-    'selection-row relative flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground md:h-[30px]',
+    // `selection-row` paints the design's 3×18 bar itself (index.css: 3px wide, inset 6px, so
+    // 18px tall in the 30px row) off `aria-current`; on nav rows it takes the per-theme
+    // `--nav-indicator` (index.css). ONE indicator, not a bar plus a bar — the neutral rail
+    // elsewhere stays neutral.
+    'selection-row relative flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground transition-colors [--selection-indicator:var(--nav-indicator)] hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground md:h-[30px]',
     active && 'bg-brand/15 font-semibold text-accent-ink ring-1 ring-brand ring-inset hover:bg-brand/20 hover:text-accent-ink',
     className,
-  )
-}
-
-/** The leading brand bar the selected row carries. Decorative — `aria-current` says it. */
-export function NavActiveBar() {
-  return (
-    <span
-      data-slot="nav-active-bar"
-      aria-hidden="true"
-      className="h-[18px] w-[3px] shrink-0 rounded-full bg-brand"
-    />
   )
 }
 
@@ -51,7 +44,8 @@ export function NavRowIcon({
   )
 }
 
-/** The row's content in the redesign's order: bar (selected only) → icon → label → trailing. */
+/** The row's content in the redesign's order: icon → label → trailing. The selected bar is the
+ *  row's own `selection-row` indicator, not a child. */
 export function NavRowContent({
   icon,
   active,
@@ -65,7 +59,6 @@ export function NavRowContent({
 }) {
   return (
     <>
-      {active ? <NavActiveBar /> : null}
       <NavRowIcon icon={icon} active={active} />
       {children}
       {trailing}

@@ -128,6 +128,10 @@
   /* Accent INK: the purple that passes AA as text on each theme (workflow names, the selected
    * nav label, the active tab). Never a fill. */
   --accent-ink: #d7bdff;
+  /* The selected nav row's 3px bar. The brand purple itself reads ~2.6:1 against the row's
+   * translucent brand fill on this theme, under the 3:1 the selection-states sweep requires, so
+   * the dark bar borrows the lighter violet; light uses the brand purple outright. */
+  --nav-indicator: var(--violet);
   /* The gold count beside "Active" — the brand's second hue, spent on exactly one number. */
   --accent-count: #f4c542;
   /* Icon strokes: the redesign draws chrome icons a step quieter than the text beside them. */
@@ -226,6 +230,7 @@
   --soft-foreground: #7a8496;
   /* Violet-700: the brand purple darkened far enough to read as ink on white. */
   --accent-ink: #6d28d9;
+  --nav-indicator: var(--brand);
   --link-foreground: var(--accent-ink);
   --supporting-foreground: var(--muted-foreground);
   --border: #e2e5ee;
