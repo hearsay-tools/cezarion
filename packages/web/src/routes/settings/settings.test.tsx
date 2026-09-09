@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -24,6 +24,7 @@ import { SETTINGS_SECTIONS, visibleSettingsSections } from './registry'
  */
 
 let requests: Array<{ method: string; url: string; body?: unknown }> = []
+const originalElementScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
 
 /** Both ui-state stores plus the project config answer; everything else the routes fetch stays
  *  honestly pending. Both stores are served on purpose — a section writing to the wrong one
@@ -106,11 +107,39 @@ function renderAt(entry: string, { singleProject = false }: { singleProject?: bo
   )
 }
 
+function elementRect(left: number, width: number): DOMRect {
+  return {
+    x: left,
+    y: 0,
+    width,
+    height: 40,
+    top: 0,
+    left,
+    right: left + width,
+    bottom: 40,
+    toJSON: () => ({}),
+  }
+}
+
+function setHorizontalGeometry(
+  element: HTMLElement,
+  { clientWidth, scrollWidth, scrollLeft }: { clientWidth: number; scrollWidth: number; scrollLeft: number },
+) {
+  Object.defineProperties(element, {
+    clientWidth: { configurable: true, value: clientWidth },
+    scrollWidth: { configurable: true, value: scrollWidth },
+    scrollLeft: { configurable: true, writable: true, value: scrollLeft },
+  })
+}
+
 beforeEach(() => serve())
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  if (originalElementScrollTo) Object.defineProperty(HTMLElement.prototype, 'scrollTo', originalElementScrollTo)
+  else Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
   localStorage.clear()
   delete document.documentElement.dataset.accent
   delete document.documentElement.dataset.density
@@ -172,6 +201,131 @@ describe('the settings shell', () => {
     // The mobile pill row renders through the same registry — the two can never disagree.
     const pills = document.querySelector('[data-slot="settings-nav-mobile"]')!
     expect([...pills.querySelectorAll('[data-section]')].length).toBe(PROJECT_SECTIONS.length)
+  })
+
+  it('shows overflow cues only at edges with hidden mobile settings pills', () => {
+    renderAt('/settings/global/appearance')
+    const nav = document.querySelector<HTMLElement>('[data-slot="settings-nav-mobile"]')!
+    setHorizontalGeometry(nav, { clientWidth: 320, scrollWidth: 600, scrollLeft: 0 })
+
+    fireEvent.scroll(nav)
+    expect(document.querySelector('[data-slot="settings-overflow-start"]')?.getAttribute('data-visible')).toBe(
+      'false',
+    )
+    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
+      'true',
+    )
+
+    nav.scrollLeft = 140
+    fireEvent.scroll(nav)
+    expect(document.querySelector('[data-slot="settings-overflow-start"]')?.getAttribute('data-visible')).toBe(
+      'true',
+    )
+    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
+      'true',
+    )
+
+    nav.scrollLeft = 280
+    fireEvent.scroll(nav)
+    expect(document.querySelector('[data-slot="settings-overflow-start"]')?.getAttribute('data-visible')).toBe(
+      'true',
+    )
+    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
+      'false',
+    )
+  })
+
+  it('recalculates overflow cues when tab or viewport layout changes', () => {
+    let resize: ResizeObserverCallback | undefined
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resize = callback
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', TestResizeObserver)
+
+    renderAt('/settings/global/appearance')
+    const nav = document.querySelector<HTMLElement>('[data-slot="settings-nav-mobile"]')!
+    setHorizontalGeometry(nav, { clientWidth: 320, scrollWidth: 320, scrollLeft: 0 })
+    fireEvent.scroll(nav)
+    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
+      'false',
+    )
+
+    setHorizontalGeometry(nav, { clientWidth: 280, scrollWidth: 520, scrollLeft: 0 })
+    expect(resize).toBeTypeOf('function')
+    act(() => resize?.([], {} as ResizeObserver))
+    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
+      'true',
+    )
+  })
+
+  it('reveals a directly opened active pill horizontally without moving the page', async () => {
+    const scrollTo = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    })
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const element = this as HTMLElement
+      if (element.dataset.slot === 'settings-nav-mobile') return elementRect(0, 320)
+      if (element.dataset.section === 'projects') return elementRect(500, 80)
+      return elementRect(16, 80)
+    })
+    const pageScroll = vi.spyOn(window, 'scrollTo')
+
+    renderAt('/settings/global/projects')
+
+    await waitFor(() => {
+      expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', left: 272 })
+    })
+    expect(pageScroll).not.toHaveBeenCalled()
+  })
+
+  it('reveals a directly linked late pill after the mobile row becomes visible', () => {
+    const scrollTo = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    })
+    let mobile = false
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const element = this as HTMLElement
+      if (!mobile) return elementRect(0, 0)
+      if (element.dataset.slot === 'settings-nav-mobile') return elementRect(0, 320)
+      if (element.dataset.section === 'projects') return elementRect(500, 80)
+      return elementRect(16, 80)
+    })
+
+    renderAt('/settings/global/projects')
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    mobile = true
+    fireEvent(window, new Event('resize'))
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', left: 272 })
+  })
+
+  it('reveals a pill immediately when keyboard focus reaches it', () => {
+    const scrollTo = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    })
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const element = this as HTMLElement
+      if (element.dataset.slot === 'settings-nav-mobile') return elementRect(0, 320)
+      if (element.dataset.section === 'projects') return elementRect(500.25, 80)
+      return elementRect(16, 80)
+    })
+
+    renderAt('/settings/global/appearance')
+    scrollTo.mockClear()
+    fireEvent.focus(document.querySelector<HTMLElement>('[data-slot="settings-nav-mobile"] [data-section="projects"]')!)
+
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', left: 273 })
   })
 
   it('every section keeps a way BACK to the index: the "General" nav entry', () => {
