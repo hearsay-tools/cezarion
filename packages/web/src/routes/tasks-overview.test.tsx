@@ -10,6 +10,7 @@ import { createQueryClient } from '@/api/query-client'
 import type { ProcessUsage, RunRecord } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
+import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { TasksOverview, TasksOverviewRoute } from '@/routes/tasks-overview'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
@@ -78,6 +79,36 @@ const card = (id: string) => document.querySelector(`[data-slot="task-card"][dat
 const cellsOf = (id: string): string[] => [...(tableRow(id)?.querySelectorAll('td') ?? [])].map((td) => td.textContent ?? '')
 
 afterEach(cleanup)
+
+describe('TasksOverview — mobile actions', () => {
+  it('opens the keyboard actions menu and uses the existing archive handler', () => {
+    const { onArchiveFinished } = renderOverview({ runs: [run({ status: 'done' })] })
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive finished' }))
+    expect(onArchiveFinished).toHaveBeenCalledOnce()
+  })
+
+  it('disables the shared archive controls while a request is pending', () => {
+    const { onArchiveFinished } = renderOverview({ runs: [run()], archivePending: true })
+    const desktop = screen.getByRole('button', { name: 'Archive finished' })
+    expect(desktop.hasAttribute('disabled')).toBe(true)
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
+    const pending = screen.getByRole('menuitem', { name: 'Archiving…' })
+    expect(pending.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(pending)
+    expect(onArchiveFinished).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { runs: undefined, view: 'active' as const },
+    { runs: [], view: 'active' as const },
+    { runs: [run({ status: 'running' }), run({ status: 'review' })], view: 'active' as const },
+    { runs: [run({ status: 'done' })], view: 'archived' as const },
+  ])('withholds the mobile archive action when ineligible (%#)', (props) => {
+    renderOverview(props)
+    expect(screen.queryByRole('button', { name: 'Task actions' })).toBeNull()
+  })
+})
 
 describe('TasksOverview — the table', () => {
   it('starts with Branch folded while keeping fixed columns and an in-place restore control', () => {
@@ -1059,6 +1090,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
 
   afterEach(() => {
     cleanup()
+    resetToasts()
     fetchMock.mockReset()
     vi.unstubAllGlobals()
   })
@@ -1078,6 +1110,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
             {/* The sidebar and the overview together, under ONE provider — the point under test. */}
             <TaskQuickListContainer />
             <TasksOverviewRoute />
+            <Toaster />
           </ListViewProvider>
         </MemoryRouter>
       </QueryClientProvider>
@@ -1191,6 +1224,20 @@ describe('TasksOverviewRoute — wired to the app', () => {
       const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/runs')
       expect(listFetches.length).toBeGreaterThan(1)
     })
+  })
+
+  it('keeps query and rows on archive failure and exposes a retryable action', async () => {
+    renderApp([run({ id: 'failure', title: 'Keep me' })])
+    await waitFor(() => expect(tableRow('failure')).not.toBeNull())
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'Keep' } })
+    fetchMock.mockImplementation(async input => String(input).endsWith('archive-finished')
+      ? json({ error: 'Archive unavailable. Try again.' }, 503)
+      : json([]))
+    fireEvent.click(screen.getByRole('button', { name: 'Archive finished' }))
+    expect(await screen.findByText('Archive unavailable. Try again.')).not.toBeNull()
+    expect(tableRow('failure')).not.toBeNull()
+    expect((screen.getByRole('textbox', { name: 'Search tasks' }) as HTMLInputElement).value).toBe('Keep')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Archive finished' }).hasAttribute('disabled')).toBe(false))
   })
 
   it('PATCHes a table rename to /api/v1/runs/:id and refetches the authoritative list', async () => {

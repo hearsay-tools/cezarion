@@ -13,6 +13,7 @@ import {
   ListChecksIcon,
   LinkIcon,
   MemoryStickIcon,
+  MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
   ScaleIcon,
@@ -38,6 +39,12 @@ import { TaskReferenceChip } from '@/components/reference-conflict-action'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { StatusDot } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { deriveAttention } from '@/lib/attention'
@@ -86,6 +93,7 @@ export function TasksOverview({
   view,
   onViewChange,
   onArchiveFinished,
+  archivePending = false,
   onMarkAllRead,
   onRename,
   onTogglePin,
@@ -101,6 +109,7 @@ export function TasksOverview({
   runs: RunRecord[] | undefined
   view: ListView
   onViewChange: (view: ListView) => void
+  archivePending?: boolean
   onArchiveFinished: () => void
   /** "Mark all read" (#unread-done-items) — stamps every unread finished run. */
   onMarkAllRead: () => void
@@ -123,6 +132,18 @@ export function TasksOverview({
   columnsPending?: boolean
 }) {
   const [query, setQuery] = React.useState('')
+  const headerRef = React.useRef<HTMLElement>(null)
+  const archiveSelected = React.useRef(false)
+  const [actionsOpen, setActionsOpen] = React.useState(false)
+  // A CSS-hidden Radix menu would keep its modal focus trap after a desktop resize.
+  React.useEffect(() => {
+    const media = window.matchMedia?.('(min-width: 768px)')
+    if (!media) return
+    const closeOnDesktop = () => { if (media.matches) setActionsOpen(false) }
+    closeOnDesktop()
+    media.addEventListener('change', closeOnDesktop)
+    return () => media.removeEventListener('change', closeOnDesktop)
+  }, [])
   const all = runs ?? []
   const counts = listCounts(all)
   const visible = sortRuns(filterRuns(all, query), view)
@@ -142,10 +163,10 @@ export function TasksOverview({
 
   return (
     <div data-route="tasks" className="flex min-h-full flex-col">
-      {/* Desktop header. Below `md` the shell's top bar already says "Tasks", and the drawer
-          carries the shared Active/Archived tabs — repeating them here would be a third copy. */}
-      <header className="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-5 md:flex">
-        <h1 className="text-base font-semibold">Tasks</h1>
+      {/* One set of search/view controls across breakpoints keeps query and selection intact.
+          Mobile places search above the list filters; the shell already supplies its title. */}
+      <header ref={headerRef} className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-background p-3 md:h-14 md:flex-nowrap md:gap-3 md:px-5 md:py-0">
+        <h1 className="hidden text-base font-semibold md:block">Tasks</h1>
         <div className="inline-flex gap-0.5 rounded-md bg-muted p-[3px]">
           <OverviewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
             Active
@@ -164,6 +185,7 @@ export function TasksOverview({
             variant="ghost"
             size="sm"
             data-slot="mark-all-read"
+            className="hidden md:inline-flex"
             onClick={onMarkAllRead}
           >
             <CheckCheckIcon className="size-3.5" aria-hidden="true" />
@@ -177,13 +199,56 @@ export function TasksOverview({
             variant="ghost"
             size="sm"
             data-slot="archive-finished"
+            className="hidden md:inline-flex"
+            disabled={archivePending}
+            aria-busy={archivePending}
             onClick={onArchiveFinished}
           >
             <ArchiveIcon className="size-3.5" aria-hidden="true" />
             Archive finished
           </Button>
         ) : null}
-        <div className="relative w-60">
+        {view === 'active' && (finished > 0 || archivePending) ? (
+          <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="md:hidden"
+                aria-label="Task actions"
+                aria-busy={archivePending}
+              >
+                <MoreHorizontalIcon aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="md:hidden"
+              onCloseAutoFocus={(event) => {
+                // The successful mutation removes its trigger. Return to the stable filter,
+                // without focusing search and summoning the phone keyboard.
+                if (archiveSelected.current || window.matchMedia?.('(min-width: 768px)').matches) {
+                  event.preventDefault()
+                  archiveSelected.current = false
+                  headerRef.current?.querySelector<HTMLButtonElement>('[data-view="active"]')?.focus()
+                }
+              }}
+            >
+              <DropdownMenuItem
+                disabled={archivePending || finished === 0}
+                onSelect={() => {
+                  archiveSelected.current = true
+                  onArchiveFinished()
+                }}
+              >
+                <ArchiveIcon aria-hidden="true" />
+                {archivePending ? 'Archiving…' : 'Archive finished'}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+        <div className="relative order-first w-full md:order-none md:w-60">
           <SearchIcon
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-soft-foreground"
             aria-hidden="true"
@@ -1008,6 +1073,7 @@ export function TasksOverviewRoute() {
   const archive = useMutation({
     mutationFn: archiveFinished,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+    onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })
   // "Mark all read" (#unread-done-items): one call stamps every unread finished run; the
   // invalidate is the authoritative half — each stamped run also rides the `run` SSE.
@@ -1051,7 +1117,8 @@ export function TasksOverviewRoute() {
         runs={runs.data}
         view={view}
         onViewChange={setView}
-        onArchiveFinished={() => archive.mutate()}
+        onArchiveFinished={() => { if (!archive.isPending) archive.mutate() }}
+        archivePending={archive.isPending}
         onMarkAllRead={() => markAllRead.mutate()}
         onRename={(id, title) => rename.mutate({ id, title })}
         onTogglePin={(run, pinned) =>
