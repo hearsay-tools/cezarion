@@ -137,6 +137,33 @@ describe('TasksOverview — the table', () => {
     expect(ids).toEqual(['rev1', 'run1', 'done1'])
   })
 
+  it('gives long desktop task titles a two-line readable region without changing their link', () => {
+    const title = 'Review the desktop task table with several shared prefix words before the distinguishing detail'
+    renderOverview({ runs: [run({ id: 'long-title', title })] })
+
+    const row = tableRow('long-title') as HTMLElement
+    const taskCell = row.querySelector<HTMLElement>('td[data-column-id="task"]')
+    const titleLink = within(taskCell as HTMLElement).getByRole('link', { name: title })
+
+    expect(taskCell?.className).toContain('min-w-[320px]')
+    expect(titleLink.getAttribute('href')).toBe('/tasks/long-title')
+    expect(titleLink.className).toContain('line-clamp-2')
+    expect(titleLink.className).toContain('whitespace-normal')
+    expect(titleLink.className).not.toContain('truncate')
+  })
+
+  it('contains secondary desktop content inside the compact column geometry', () => {
+    renderOverview({
+      runs: [run({ id: 'compact-secondary', workflow: 'a-very-long-workflow-name-that-must-not-steal-title-space' })],
+    })
+
+    const table = document.querySelector<HTMLElement>('[data-slot="tasks-table"] table')
+    const workflow = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="workflow"]')
+
+    expect(table?.className).toContain('table-fixed')
+    expect(workflow?.className).toContain('truncate')
+  })
+
   it('says the run status through the attention pill', () => {
     renderOverview({
       runs: [

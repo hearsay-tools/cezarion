@@ -210,7 +210,7 @@ export function TasksOverview({
               className="hidden overflow-x-auto rounded-lg border border-border bg-card shadow-xs md:block"
             >
               <TooltipProvider>
-                <table className="w-full border-collapse">
+                <table className="w-full table-fixed border-collapse">
                   <colgroup>
                     {columns.map((column) => {
                       const expanded = isColumnExpanded(column.id, expandedColumns)
@@ -624,19 +624,19 @@ function TaskTableCell({
       )
     case 'task':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'min-w-[220px] max-w-0')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'min-w-[320px] max-w-0 whitespace-normal')}>
           <TitleCell run={run} to={to} onRename={onRename} onTogglePin={onTogglePin} />
         </td>
       )
     case 'workflow':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'text-[12.5px] text-muted-foreground')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'max-w-0 truncate text-[12.5px] text-muted-foreground')}>
           {workflowLabel(run)}
         </td>
       )
     case 'branch':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'max-w-0 overflow-hidden')}>
           {run.branch ? <BranchChip branch={run.branch} /> : <Dash />}
         </td>
       )
@@ -731,7 +731,7 @@ function TitleCell({
         to={to}
         title={title}
         className={cn(
-          'min-w-0 truncate rounded-sm text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
+          'line-clamp-2 min-w-0 flex-1 whitespace-normal rounded-sm text-[13px] leading-[18px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
           unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
         )}
       >
@@ -954,7 +954,10 @@ function Sep() {
 
 function BranchChip({ branch }: { branch: string }) {
   return (
-    <span className="rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[11.5px] font-medium text-muted-foreground">
+    <span
+      title={branch}
+      className="block truncate rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[11.5px] font-medium text-muted-foreground"
+    >
       {branch}
     </span>
   )
