@@ -58,7 +58,11 @@ const FIXTURE = [
     createdAt: ago(40 * 60_000),
     finishedAt: ago(26 * 60_000),
     tokensUsed: 128_400,
+    inputTokens: 999_900,
+    outputTokens: 888_800,
+    costUsd: 123.45,
     diffStat: { adds: 128, dels: 14, files: 6 },
+    peakRssBytes: 1023 * 1024 ** 2,
     pullRequestUrl: 'https://github.com/open-mercato/cezar/pull/396',
     archived: false,
     steps: [],
@@ -424,8 +428,7 @@ describe('tasks table overview', () => {
       const pr = tr.querySelector('[data-slot="pr-chip"]')
       return { text: tr.textContent, prHref: pr.href, prTarget: pr.target }
     })()`) as { text: string; prHref: string; prTarget: string }
-    // Historical fixtures have only tokensUsed; directional usage stays explicitly unknown.
-    expect(browser.evaluate(`document.querySelector('[data-run-id="fix-review-pr"] [aria-label="Input tokens: unknown; output tokens: unknown"]') !== null`)).toBe(true)
+    expect(browser.evaluate(`document.querySelector('[data-run-id="fix-review-pr"] [aria-label="Input tokens: 999,900; output tokens: 888,800"]') !== null`)).toBe(true)
     expect(reviewRow.text).toContain('Structured changes endpoint for the git view')
     expect(reviewRow.text).not.toContain('add a structured changes endpoint plz')
     expect(reviewRow.prHref).toBe('https://github.com/open-mercato/cezar/pull/396')
@@ -489,11 +492,37 @@ describe('tasks table overview', () => {
             diff.querySelector('[data-slot="diff-stat"]').setAttribute('aria-label', '+12345 −1234 across 37 files')
             const workflowHeader = document.querySelector('th[data-column-id="workflow"]')
             const workflowHeaderButton = workflowHeader.querySelector('button')
+            const metricsRow = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"]')
+            const cpuCell = metricsRow.querySelector('td[data-column-id="cpu"]')
+            const cpuMetric = cpuCell.firstElementChild
+            cpuMetric.textContent = '100%'
+            cpuMetric.setAttribute('title', '100%')
+            cpuMetric.setAttribute('aria-label', '100%')
             const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
             const secondary = secondaryIds.map((id) => {
-              const cell = rows[0].querySelector('td[data-column-id="' + id + '"]')
-              return { id, width: cell.getBoundingClientRect().width, contained: cell.scrollWidth <= cell.clientWidth + 1 }
+              const cell = metricsRow.querySelector('td[data-column-id="' + id + '"]')
+              const style = getComputedStyle(cell)
+              const rect = cell.getBoundingClientRect()
+              const target = cell.firstElementChild || cell
+              const targetRect = target.getBoundingClientRect()
+              const targetStyle = getComputedStyle(target)
+              const range = document.createRange()
+              range.selectNodeContents(target)
+              const content = range.getBoundingClientRect()
+              const textFits = content.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && content.right <= rect.right - Number.parseFloat(style.paddingRight) + 1
+              const clipsOverflow = targetStyle.overflowX === 'hidden' && target.scrollWidth > target.clientWidth
+              return {
+                id,
+                width: rect.width,
+                contained: targetRect.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && targetRect.right <= rect.right - Number.parseFloat(style.paddingRight) + 1 && (textFits || clipsOverflow),
+                right: targetRect.right,
+                clipsOverflow,
+                label: cell.textContent,
+                accessible: cell.firstElementChild?.getAttribute('aria-label') || cell.getAttribute('aria-label'),
+                title: cell.firstElementChild?.getAttribute('title') || cell.getAttribute('title'),
+              }
             })
+            const memoryCell = metricsRow.querySelector('td[data-column-id="memory"]')
             const workflowStyle = getComputedStyle(workflow)
             const diffStyle = getComputedStyle(diff)
             const diffRect = diff.getBoundingClientRect()
@@ -520,6 +549,12 @@ describe('tasks table overview', () => {
               referenceLabel: referenceChip.textContent,
               diffContained: diffTextRect.left >= diffRect.left + Number.parseFloat(diffStyle.paddingLeft) - 1 && diffTextRect.right <= diffRect.right - Number.parseFloat(diffStyle.paddingRight) + 1 && diffTextRect.right < referenceContentRect.left,
               workflowHeaderContained: workflowHeaderChildren.every((rect) => rect.left >= workflowHeaderRect.left + Number.parseFloat(workflowHeaderStyle.paddingLeft) - 1 && rect.right <= workflowHeaderContentRight + 1),
+              memoryLabel: memoryCell.textContent,
+              metricsBeforeNeighbors: secondary.slice(0, -1).every((metric, index) => {
+                const nextCell = metricsRow.querySelector('td[data-column-id="' + secondaryIds[index + 1] + '"]')
+                const nextStyle = getComputedStyle(nextCell)
+                return metric.right < nextCell.getBoundingClientRect().left + Number.parseFloat(nextStyle.paddingLeft)
+              }),
               secondary,
               pageContained: document.documentElement.scrollWidth <= window.innerWidth,
             }
@@ -538,7 +573,9 @@ describe('tasks table overview', () => {
             referenceLabel: string
             diffContained: boolean
             workflowHeaderContained: boolean
-            secondary: Array<{ id: string; width: number; contained: boolean }>
+            memoryLabel: string
+            metricsBeforeNeighbors: boolean
+            secondary: Array<{ id: string; width: number; contained: boolean; right: number; clipsOverflow: boolean; label: string; accessible: string | null; title: string | null }>
             pageContained: boolean
           }
 
@@ -553,7 +590,16 @@ describe('tasks table overview', () => {
           expect(facts.referenceLabel, `${theme}/${density}: compact reference label`).toBe('#1234')
           expect.soft(facts.diffContained, `${theme}/${density}: diff stat`).toBe(true)
           expect.soft(facts.workflowHeaderContained, `${theme}/${density}: workflow header`).toBe(true)
-          expect(facts.secondary.every(({ width, contained }) => width > 0 && contained), `${theme}/${density}: ${JSON.stringify(facts.secondary)}`).toBe(true)
+          expect(facts.memoryLabel, `${theme}/${density}: persisted memory metric`).toBe('peak 1023 MB')
+          expect.soft(facts.metricsBeforeNeighbors, `${theme}/${density}: metrics before neighboring content`).toBe(true)
+          expect(facts.secondary.slice(0, -1).every(({ width, contained }) => width > 0 && contained), `${theme}/${density}: ${JSON.stringify(facts.secondary)}`).toBe(true)
+          expect(facts.secondary.filter(({ clipsOverflow }) => clipsOverflow).map(({ id }) => id)).toEqual(['tokens', 'memory'])
+          expect(facts.secondary.slice(0, -1).map(({ id, label, accessible, title }) => ({ id, label, accessible, title }))).toEqual([
+            { id: 'tokens', label: '999.9k / 888.8k', accessible: 'Input tokens: 999,900; output tokens: 888,800', title: 'Input tokens: 999,900; output tokens: 888,800' },
+            { id: 'cost', label: '$123', accessible: '$123.45', title: '$123.45' },
+            { id: 'cpu', label: '100%', accessible: '100%', title: '100%' },
+            { id: 'memory', label: 'peak 1023 MB', accessible: 'peak 1023 MB; peak — run finished', title: 'peak 1023 MB; peak — run finished' },
+          ])
           expect(facts.pageContained, `${theme}/${density}: page overflow`).toBe(true)
 
           const row = `${TABLE_ROW}[data-run-id="fix-review-pr"]`

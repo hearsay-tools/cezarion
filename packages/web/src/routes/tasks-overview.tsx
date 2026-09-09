@@ -29,7 +29,7 @@ import { queryKeys, useHealth, usePinRun, useReferenceProjectId, useRuns } from 
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
-import { DirectionalUsage } from '@/components/directional-usage'
+import { DirectionalUsage, directionalUsageLabel } from '@/components/directional-usage'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
 import { useListView } from '@/components/list-view'
 import { Pill } from '@/components/pill'
@@ -667,6 +667,7 @@ function TaskTableCell({
         </td>
       )
     case 'tokens':
+      const tokensLabel = directionalUsageLabel(run.inputTokens, run.outputTokens)
       return (
         <td data-column-id={column.id} className={cn(TD_BASE, 'text-right text-xs text-muted-foreground')}>
           <DirectionalUsage
@@ -674,6 +675,8 @@ function TaskTableCell({
             outputTokens={run.outputTokens}
             variant="table"
             omitWhenUnknown={false}
+            title={tokensLabel}
+            className="block max-w-full overflow-hidden text-ellipsis"
           />
         </td>
       )
@@ -683,7 +686,7 @@ function TaskTableCell({
           data-column-id={column.id}
           className={cn(TD_BASE, 'text-right font-mono text-xs text-muted-foreground tabular-nums')}
         >
-          {cost || <Dash />}
+          {cost ? <BoundedMetric text={cost} accessibleText={`$${run.costUsd}`} /> : <Dash />}
         </td>
       )
     case 'started':
@@ -813,22 +816,35 @@ function UsageTds({
 }
 
 function UsageTd({ column, cell }: { column: 'cpu' | 'memory'; cell: UsageCell }) {
+  const accessibleText = cell.text && cell.title ? `${cell.text}; ${cell.title}` : cell.text
   return (
     <td
       data-usage={column === 'memory' ? 'mem' : column}
       data-column-id={column}
       data-usage-kind={cell.kind}
-      title={cell.title}
       className={cn(
         TD_BASE,
+        'overflow-hidden',
         'text-right font-mono tabular-nums',
         cell.kind === 'live' && 'bg-violet/5 text-xs font-medium text-foreground',
         cell.kind === 'peak' && 'text-[11.5px] text-supporting-foreground',
         cell.kind === 'none' && 'text-xs text-soft-foreground'
       )}
     >
-      {cell.text || '—'}
+      <BoundedMetric text={cell.text || '—'} accessibleText={accessibleText || undefined} />
     </td>
+  )
+}
+
+function BoundedMetric({ text, accessibleText }: { text: string; accessibleText?: string }) {
+  return (
+    <span
+      data-slot="bounded-metric"
+      {...(accessibleText ? { 'aria-label': accessibleText, title: accessibleText } : {})}
+      className="block max-w-full overflow-hidden text-ellipsis"
+    >
+      {text}
+    </span>
   )
 }
 
