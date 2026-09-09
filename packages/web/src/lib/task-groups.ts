@@ -321,12 +321,25 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
   // Workers fold under the run that spawned them (the design's indented rows), but only when the
   // two land in the same bucket: a finished worker must not ride up into `Needs you` on its
   // parent's account, nor a waiting parent be buried under its children in `Recent`.
+  //
+  // Nor under a parent that renders as a variant TILE: the tile stands in for two or three runs
+  // and paints none of their workers, so folding there would drop the row outright. Such a
+  // worker stays a plain row instead.
   const bucketById = new Map(sorted.map((run) => [run.id, bucketOf(run, view)] as const))
+  const groupSizes = new Map<string, number>()
+  for (const run of sorted) {
+    if (run.groupId) groupSizes.set(run.groupId, (groupSizes.get(run.groupId) ?? 0) + 1)
+  }
+  const byId = new Map(sorted.map((run) => [run.id, run] as const))
+  const rendersAsTile = (id: string): boolean => {
+    const groupId = byId.get(id)?.groupId
+    return groupId !== undefined && (groupSizes.get(groupId) ?? 0) > 1
+  }
   const nested = new Map<string, RunRecord[]>()
   const folded = new Set<string>()
   for (const run of sorted) {
     const parent = workerParentId(run)
-    if (parent === null || parent === run.id) continue
+    if (parent === null || parent === run.id || rendersAsTile(parent)) continue
     const parentBucket = bucketById.get(parent)
     if (parentBucket === undefined || parentBucket !== bucketById.get(run.id)) continue
     folded.add(run.id)

@@ -718,3 +718,15 @@ describe('groupRuns — worker nesting', () => {
     expect(shape(groupRuns([parent, w], 'active'))).toEqual(['Needs you: p', 'Recent: w'])
   })
 })
+
+describe('groupRuns — workers of a variant-group parent', () => {
+  it('keeps a worker visible when its parent renders as a collapsed variant tile', () => {
+    // The tile stands in for its members and has no place to hang a worker, so the worker stays
+    // its own row rather than being folded into a row that is never painted.
+    const a = run({ id: 'a', title: 'Add autocomplete (A)', groupId: 'g', variant: 'A' })
+    const b = run({ id: 'b', title: 'Add autocomplete (B)', groupId: 'g', variant: 'B' })
+    const w = worker('a', { id: 'w' })
+    const buckets = groupRuns([a, b, w], 'active')
+    expect(shape(buckets)).toEqual(['Recent: [AB], w'])
+  })
+})
