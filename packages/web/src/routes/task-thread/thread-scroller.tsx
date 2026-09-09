@@ -413,6 +413,20 @@ function VirtualRows({
   controls: ThreadScrollControls
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const previousRows = useRef(rows)
+  const firstKey = rows[0]?.key
+  const previousFirstKey = previousRows.current[0]?.key
+  // `shift` moves virtua's SIZE CACHE, not just its scroll anchor. Applying it to a
+  // live append assigns existing messages their neighbours' heights; unchanged DOM
+  // nodes do not resize, so ResizeObserver cannot repair the resulting overlap (#160).
+  // Only shift when an existing edge moves because history was added/removed at start.
+  const shift = firstKey !== previousFirstKey && (
+    rows.some((row) => row.key === previousFirstKey) ||
+    previousRows.current.some((row) => row.key === firstKey)
+  )
+  useLayoutEffect(() => {
+    previousRows.current = rows
+  }, [rows])
   // The per-run measurement cache: read once per mount (only honored at the row count the
   // snapshot was taken at — virtua's caveat), written back with the final count on detach.
   const [measurements] = useState(() => readThreadMeasurements(runId, rows.length))
@@ -473,7 +487,7 @@ function VirtualRows({
         ref={attachHandle}
         scrollRef={controls.scrollElRef}
         startMargin={startMargin}
-        shift
+        shift={shift}
         {...(measurements !== undefined ? { cache: measurements } : {})}
       >
         {rows.map((row) => (

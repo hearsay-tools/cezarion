@@ -40,15 +40,33 @@ describe('virtualized history prepend', () => {
     virtualizerProbe.props = undefined
   })
 
-  it('enables reverse-infinite scroll compensation for older pages', () => {
+  it('shifts measurements for history prepends, but not live appends', () => {
     const controls = renderHook(() => useThreadScroll('r1')).result.current
 
-    render(
+    const initial = rows(400)
+    const tree = (items: ThreadRow[]) => (
       <main data-slot="main">
-        <ThreadRows runId="r1" rows={rows(400)} mode="virtual" controls={controls} />
-      </main>,
+        <ThreadRows runId="r1" rows={items} mode="virtual" controls={controls} />
+      </main>
     )
+    const view = render(tree(initial))
 
+    expect(virtualizerProbe.props?.shift).toBe(false)
+    const older = [{ key: 'older', node: <p>older page</p> }, ...initial]
+    view.rerender(tree(older))
     expect(virtualizerProbe.props?.shift).toBe(true)
+    view.rerender(tree([...older, { key: 'new', node: <p>live tool</p> }]))
+    expect(virtualizerProbe.props?.shift).toBe(false)
+    // Removing from the end is ordinary forward sizing; evicting an older page shifts.
+    view.rerender(tree(older))
+    expect(virtualizerProbe.props?.shift).toBe(false)
+    view.rerender(tree(initial))
+    expect(virtualizerProbe.props?.shift).toBe(true)
+    // History can arrive after a stable task prompt: this is a middle insertion,
+    // so the prefix must keep its measured size rather than shifting the whole cache.
+    view.rerender(tree([initial[0]!, { key: 'middle', node: <p>older page</p> }, ...initial.slice(1)]))
+    expect(virtualizerProbe.props?.shift).toBe(false)
+    view.rerender(tree([{ key: 'replacement', node: <p>different transcript</p> }]))
+    expect(virtualizerProbe.props?.shift).toBe(false)
   })
 })
