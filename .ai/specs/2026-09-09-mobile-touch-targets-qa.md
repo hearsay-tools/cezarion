@@ -18,7 +18,7 @@ contains a completed task with continuation metadata, a skill, and a saved workf
 The server uses `CEZ_DRY_RUN=1`; no real agent session is resumed.
 
 Matrix: comfortable, compact, ultra × light, dark × 360×640, 1440×900.
-The six mobile geometry cases and twelve interaction cases pass. Theme/density styling
+The six mobile geometry cases, twelve interaction cases, and six focus-contrast cases pass. Theme/density styling
 is applied through the root class/attribute; the appearance density choice is also
 activated through the real control. This is Chrome at the requested CSS viewports,
 not a claim of native phone keyboard testing.
@@ -64,3 +64,20 @@ TMPDIR=/tmp XDG_RUNTIME_DIR=/tmp/cez166-browser \
 AGENT_BROWSER_SOCKET_DIR=/tmp/cez166-browser AGENT_BROWSER_ARGS=--no-sandbox \
 npm test -- --config packages/web/e2e/vitest.config.ts touch-targets
 ```
+
+## Supervisor focus-contrast follow-up
+
+Integrated main's #184 wordmark without changing its dimensions/assets. The default light
+ring is dark and passes; the confirmed regression was the violet accent's ring on the
+light sidebar: `rgb(143, 134, 232)` on `rgb(250, 250, 250)` measured **2.9837:1**.
+The new regression failed in all three densities before the fix
+(`/tmp/cez166-focus-red.log`). Only this PR's mobile outline now uses the existing
+`link-foreground` semantic ink token; desktop styling and all hit-target assertions remain.
+
+Six additional browser cases use real Tab navigation, verify `:focus-visible`, wait for
+finite transitions to settle, and measure the computed outline against the composited
+parent surface (the outline has a 2px offset, outside the control fill). Sampled elements and ancestors have `opacity: 1`; transparent backgrounds are composited. The 48 samples cover settings navigation, appearance buttons,
+drawer navigation, and the drawer's button link in both accents/themes and all densities.
+Light-theme fixed contrast is **6.78–7.10:1**; the minimum across both themes is **5.76:1**.
+Samples and focused screenshots are retained locally as `focus-<pid>.jsonl` and
+`focus-<density>-<theme>-<accent>.png` alongside the original browser artifacts.

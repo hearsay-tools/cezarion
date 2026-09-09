@@ -1,13 +1,14 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
 
 // Real layout regression: jsdom cannot resolve density, clipping, or hit testing.
 let browser: AgentBrowser
@@ -19,6 +20,7 @@ const runId = randomUUID()
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/touch-targets')
 
 beforeAll(async () => {
+  mkdirSync(artifacts, { recursive: true })
   root = mkdtempSync(join(tmpdir(), 'cez-touch-'))
   const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args])
   git('init', '-q', '-b', 'main')
@@ -146,6 +148,41 @@ function focus(selector: string) {
 describe('density-independent mobile action targets (#166)', () => {
   for (const density of ['comfortable', 'compact', 'ultra']) {
     for (const theme of ['light', 'dark']) {
+      it(`${density}/${theme}: mobile keyboard outline contrast for both accents`, () => {
+        browser.setViewport(360, 640)
+        browser.goto(`${baseUrl}/settings/global/appearance`)
+        browser.waitForFunction(`document.querySelector('[data-slot="appearance-density"]') !== null`)
+        appearance(density, theme)
+        for (const accent of ['lime', 'violet']) {
+          browser.evaluate(`document.documentElement.dataset.accent = ${JSON.stringify(accent)}`)
+          for (const selector of ['[data-slot="settings-nav-mobile"] a:last-child', '[data-slot="appearance-density"] button:nth-child(2)', '[data-slot="mobile-nav-drawer"] nav a:last-child', '[data-slot="mobile-nav-drawer"] a[data-slot="button"]']) {
+            if (selector.includes('mobile-nav-drawer') && !browser.count('[data-slot="mobile-nav-drawer"]')) {
+              browser.click('[aria-label="Open menu"]')
+              browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
+            }
+            focusWithKeyboard(browser, selector)
+            region(selector, true)
+            const style = browser.evaluate(`(() => {
+              const el = document.querySelector(${JSON.stringify(selector)}), s = getComputedStyle(el);
+              return { active: document.activeElement === el && el.matches(':focus-visible'),
+                outline: s.outlineStyle, width: parseFloat(s.outlineWidth), offset: parseFloat(s.outlineOffset),
+                opaque: (() => { for (let node=el; node; node=node.parentElement) if (getComputedStyle(node).opacity !== '1') return false; return true })() };
+            })()`) as { active: boolean; outline: string; width: number; offset: number; opaque: boolean }
+            expect(style.active).toBe(true)
+            expect(style.outline).toBe('solid')
+            expect(style.width).toBeGreaterThanOrEqual(2)
+            expect(style.offset).toBeGreaterThanOrEqual(2)
+            expect(style.opaque).toBe(true)
+            const sample = browser.evaluate(contrastSampleExpression(selector, 'outline-color', 'parent')) as ContrastSample
+            appendFileSync(`${artifacts}/focus-${process.pid}.jsonl`, JSON.stringify({ density, theme, accent, selector, ...sample }) + '\n')
+            expect(sample.ratio, `${accent} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(3)
+          }
+          browser.screenshot(`${artifacts}/focus-${density}-${theme}-${accent}.png`, { viewport: true })
+          browser.press('Escape')
+          browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
+        }
+      })
+
       it(`${density}/${theme}: mobile shell, composer, appearance and workflow targets`, () => {
         browser.setViewport(360, 640)
         for (const path of [`/p/${project}/new`, '/settings/global/appearance', `/p/${project}/workflows`]) {
