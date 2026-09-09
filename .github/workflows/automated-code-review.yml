@@ -90,11 +90,12 @@ jobs:
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
 
   claude-review:
-    needs: [validate-provider, review-round]
-    if: needs.validate-provider.outputs.provider == 'claude' && needs.review-round.outputs.can_review == 'true'
+    needs: [validate-provider, review-round, wait-for-ci]
+    if: needs.validate-provider.outputs.provider == 'claude' && needs.review-round.outputs.can_review == 'true' && needs['wait-for-ci'].result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      actions: read
       contents: read
       pull-requests: read
       issues: read
@@ -105,6 +106,16 @@ jobs:
         with:
           ref: refs/pull/${{ needs.review-round.outputs.pr_number }}/merge
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Remove pull-request content at the trusted checkout path
+        run: rm -rf -- trusted-review
+
+      - name: Checkout trusted CI context script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.review-round.outputs.base_sha }}
+          path: trusted-review
           persist-credentials: false
 
       - name: Verify Claude can read pull request data
@@ -123,6 +134,17 @@ jobs:
           gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[]' > .review-context/prior-review-bodies.jsonl
           gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" --jq '.[]' > .review-context/prior-inline-comments.jsonl
 
+      - name: Fetch CI workflow results (verification only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ needs.review-round.outputs.head_sha }}
+        run: |
+          node trusted-review/.github/scripts/fetch-ci-results.cjs \
+            --repo "$GITHUB_REPOSITORY" \
+            --head-sha "$HEAD_SHA" \
+            --out .review-context/ci-results.md \
+            --require-success
+
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@c3d45e8e941e1b2ad7b278c57482d9c5bf1f35b3 # v1.0.99
@@ -137,6 +159,8 @@ jobs:
           plugins: 'code-review@claude-code-plugins'
           prompt: >-
             /code-review:code-review ${{ github.repository }}/pull/${{ needs.review-round.outputs.pr_number }}
+
+            Read successful CI verification from .review-context/ci-results.md.
 
             Override for this repository: in step 1, do NOT treat "the pull
             request is a draft" as a reason to stop. Draft is the normal
@@ -196,7 +220,7 @@ jobs:
 
   wait-for-ci:
     needs: [validate-provider, review-round]
-    if: needs.validate-provider.outputs.provider == 'codex' && needs.review-round.outputs.can_review == 'true'
+    if: needs.review-round.outputs.can_review == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -209,7 +233,7 @@ jobs:
           ref: ${{ needs.review-round.outputs.base_sha }}
           persist-credentials: false
 
-      - name: Wait for ci.yml on this head SHA
+      - name: Wait for successful ci.yml verification on this head SHA
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ needs.review-round.outputs.head_sha }}
@@ -221,7 +245,7 @@ jobs:
 
   codex-review:
     needs: [validate-provider, review-round, wait-for-ci]
-    if: needs.validate-provider.outputs.provider == 'codex' && needs.review-round.outputs.can_review == 'true'
+    if: needs.validate-provider.outputs.provider == 'codex' && needs.review-round.outputs.can_review == 'true' && needs['wait-for-ci'].result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -255,7 +279,7 @@ jobs:
           gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[]' > pull-request/.review-context/prior-review-bodies.jsonl
           gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" --jq '.[]' > pull-request/.review-context/prior-inline-comments.jsonl
 
-      - name: Fetch CI workflow results
+      - name: Fetch CI workflow results (verification only)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ needs.review-round.outputs.head_sha }}
@@ -263,7 +287,8 @@ jobs:
           node trusted-review/.github/scripts/fetch-ci-results.cjs \
             --repo "$GITHUB_REPOSITORY" \
             --head-sha "$HEAD_SHA" \
-            --out pull-request/.review-context/ci-results.md
+            --out pull-request/.review-context/ci-results.md \
+            --require-success
 
       - name: Run Codex review
         id: codex-review

@@ -59,17 +59,16 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(round, /can_review=false/);
 
   const claude = job(workflow, 'claude-review');
-  assert.match(claude, /needs: \[validate-provider, review-round\]/);
-  assert.doesNotMatch(claude, /wait-for-ci/);
+  assert.match(claude, /needs: \[validate-provider, review-round, wait-for-ci\]/);
   assert.match(claude, /needs\.review-round\.outputs\.can_review == 'true'/);
-  assert.match(claude, /permissions:\n      contents: read/);
+  assert.match(claude, /permissions:\n      actions: read\n      contents: read/);
   assert.match(claude, /pull-requests: read/);
   assert.doesNotMatch(claude, /pull-requests: write/);
   assert.match(claude, /github_token: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
   assert.doesNotMatch(claude, /id-token: write/, 'the Claude job authenticates with GITHUB_TOKEN, not the OIDC app-token exchange, which rejects pull_request_target tokens');
   assert.match(claude, /anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/);
   assert.equal((workflow.match(/ANTHROPIC_API_KEY/g) || []).length, 1, 'only the Claude job may reference ANTHROPIC_API_KEY');
-  assert.equal((workflow.match(/secrets\.GITHUB_TOKEN/g) || []).length, 7, 'only the read-only round guard, wait-for-ci, and provider context fetches use secrets.GITHUB_TOKEN');
+  assert.equal((workflow.match(/secrets\.GITHUB_TOKEN/g) || []).length, 8, 'only the read-only round guard, wait-for-ci, and provider context fetches use secrets.GITHUB_TOKEN');
   assert.match(claude, /anthropics\/claude-code-action@[0-9a-f]{40}/);
   assert.match(claude, /ref: refs\/pull\/\$\{\{ needs\.review-round\.outputs\.pr_number \}\}\/merge/);
   assert.match(claude, /fetch-depth: 0/);
@@ -146,6 +145,7 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(codex, /HEAD_SHA: \$\{\{ needs\.review-round\.outputs\.head_sha \}\}/);
   assert.match(codex, /node trusted-review\/\.github\/scripts\/fetch-ci-results\.cjs/);
   assert.match(codex, /--out pull-request\/\.review-context\/ci-results\.md/);
+  assert.match(codex, /--require-success/);
   assert.doesNotMatch(codex, /node pull-request\/\.github\/scripts\/fetch-ci-results/);
   assert.doesNotMatch(codex, /TMPDIR:/, 'codex-review must not add a writable TMPDIR');
   assert.match(codex, /name: Checkout trusted review instructions/);
@@ -333,4 +333,41 @@ test('review schema requires every object property and models optional values as
   assert.deepEqual(finding.properties.severity.type, ['string', 'null']);
   assert.ok(finding.properties.severity.enum.includes(null));
   assertAllPropertiesRequired(schema);
+});
+
+
+test('both model jobs require successful verification and trusted context rechecks', async () => {
+  const { parse } = await import('yaml');
+  const { runInNewContext } = require('node:vm');
+  const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const expression = condition => condition.replace(/^\$\{\{\s*|\s*\}\}$/g, '').replace(/needs\.([\w-]+)/g, "needs['$1']");
+  for (const provider of ['codex', 'claude']) {
+    const modelJob = workflow.jobs[`${provider}-review`];
+    assert.ok(modelJob.needs.includes('wait-for-ci'));
+    for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
+      const needs = {
+        'validate-provider': { outputs: { provider } },
+        'review-round': { outputs: { can_review: 'true' } },
+        'wait-for-ci': { result },
+      };
+      assert.equal(runInNewContext(expression(modelJob.if), { needs }), result === 'success', `${provider}: ${result}`);
+      assert.equal(runInNewContext(expression(workflow.jobs['wait-for-ci'].if), { needs }), true, `${provider} waits`);
+    }
+    const modelIndex = modelJob.steps.findIndex(step => step.uses?.includes(provider === 'codex' ? 'openai/codex-action' : 'anthropics/claude-code-action'));
+    const contextIndex = modelJob.steps.findIndex(step => step.run?.includes('--require-success'));
+    assert.ok(contextIndex >= 0 && contextIndex < modelIndex, `${provider} rechecks before model work`);
+    const context = modelJob.steps[contextIndex];
+    assert.match(context.run, /node trusted-review\/\.github\/scripts\/fetch-ci-results\.cjs/);
+    assert.equal(context['continue-on-error'], undefined);
+    assert.equal(modelJob.permissions.actions, 'read');
+    const trusted = modelJob.steps.find(step => step.with?.path === 'trusted-review');
+    assert.equal(trusted?.with.ref, '${{ needs.review-round.outputs.base_sha }}');
+    assert.equal(trusted?.with['persist-credentials'], false);
+    if (provider === 'claude') {
+      const resetIndex = modelJob.steps.findIndex(step => step.run === 'rm -rf -- trusted-review');
+      const trustedIndex = modelJob.steps.indexOf(trusted);
+      const mergeIndex = modelJob.steps.findIndex(step => step.with?.ref?.startsWith('refs/pull/'));
+      assert.ok(mergeIndex < resetIndex && resetIndex < trustedIndex, 'remove the PR-controlled path before trusted checkout');
+    }
+  }
 });

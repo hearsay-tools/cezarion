@@ -17,7 +17,7 @@ jobs:
       - id: matrix
         run: echo "matrix=$(cat .github/benchmarks/156/campaign.json)" >> "$GITHUB_OUTPUT"
   measure:
-    if: ${{ !startsWith(github.ref_name, 'bench/156-snapshot') && !startsWith(github.ref_name, 'bench/156-paired') }}
+    if: ${{ !startsWith(github.ref_name, 'bench/156-snapshot') && !startsWith(github.ref_name, 'bench/156-paired') && !startsWith(github.ref_name, 'bench/156-release') }}
     needs: matrix
     strategy:
       fail-fast: false
@@ -33,7 +33,7 @@ jobs:
       - name: Check out fixed application baseline
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: b1fe75911378dfe7816a7a83312c2acbdcf848f4
+          ref: ${{ startsWith(github.ref_name, 'bench/156-rebalance') && '76429dcfbd0449ad5e09c116d7abb64bc2730b2c' || 'b1fe75911378dfe7816a7a83312c2acbdcf848f4' }}
           path: application
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
@@ -43,6 +43,12 @@ jobs:
           VARIANT: ${{ matrix.variant }}
         run: |
           case "$VARIANT" in
+            current-shards-1|current-shards-2) ;;
+            split-shards-1|split-shards-2)
+              git -C application apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/shard-balance/worker-wait-split.patch"
+              cp harness/.github/benchmarks/shard-balance/split-durations.json application/.github/test-durations.json
+              ;;
+            refreshed-shards-1|refreshed-shards-2) cp harness/.github/benchmarks/shard-balance/refreshed-durations.json application/.github/test-durations.json ;;
             baseline|workers-4|workers-6|workers-8|build-reuse|shards-1|shards-2|shards-gate) ;;
             combined-shards-1|combined-shards-2|combined-shards-gate) git -C application apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/156/combined.patch" ;;
             fixtures|splitting|setup|combined) git -C application apply "$GITHUB_WORKSPACE/harness/.github/benchmarks/156/$VARIANT.patch" ;;
@@ -54,7 +60,10 @@ jobs:
           VARIANT: ${{ matrix.variant }}
         run: |
           extra=()
-          case "$VARIANT" in combined-shards-*) extra+=(--max-workers 4) ;; esac
+          case "$VARIANT" in
+            combined-shards-*) extra+=(--max-workers 4) ;;
+            current-shards-*|refreshed-shards-*|split-shards-*) extra+=(--max-workers 4 --shard "${VARIANT##*-}") ;;
+          esac
           python harness/.github/benchmarks/156/measure.py --root application --out results --variant "$VARIANT" "${extra[@]}"
       - name: Preserve raw results including failures
         if: always()
@@ -76,6 +85,68 @@ jobs:
           name: verified-${{ matrix.repetition }}
           path: verified.tgz
           compression-level: 0
+  release-verify:
+    name: measure (release-${{ matrix.provider }}, ${{ matrix.repetition }})
+    needs: matrix
+    if: ${{ startsWith(github.ref_name, 'bench/156-release') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: github
+            runner: ubuntu-latest
+            repetition: 1
+          - provider: blacksmith
+            runner: blacksmith-4vcpu-ubuntu-2404
+            repetition: 1
+          - provider: github
+            runner: ubuntu-latest
+            repetition: 2
+          - provider: blacksmith
+            runner: blacksmith-4vcpu-ubuntu-2404
+            repetition: 2
+          - provider: github
+            runner: ubuntu-latest
+            repetition: 3
+          - provider: blacksmith
+            runner: blacksmith-4vcpu-ubuntu-2404
+            repetition: 3
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - name: Check out harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+      - name: Check out fixed application baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 252b749d464a8f630f7446a6ff29e6f8fa076b10
+          path: application
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: application/package-lock.json
+      - name: Measure release verification
+        env:
+          REPETITION: ${{ matrix.repetition }}
+          VARIANT: release-${{ matrix.provider }}
+        run: >-
+          python harness/.github/benchmarks/156/measure.py
+          --root application --out results --variant "$VARIANT" --phase release-verify
+      - name: Preserve raw results including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-release-${{ matrix.provider }}-${{ matrix.repetition }}
+          path: |
+            results/*.json
+            results/*.log
+            results/*.time
+          if-no-files-found: warn
   paired:
     needs: matrix
     if: ${{ startsWith(github.ref_name, 'bench/156-paired') }}

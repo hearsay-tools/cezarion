@@ -35,7 +35,7 @@ jobs:
   # Split like ci.yml: the suite owns one green job; publish is a dependent.
   verify:
     name: Verify before release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     # Releases from `main` (the stable trunk) or a `release/*` maintenance branch —
     # the latter is how a patch line (e.g. `release/0.9.x`) ships fixes without the

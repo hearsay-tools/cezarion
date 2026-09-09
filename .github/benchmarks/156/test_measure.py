@@ -13,6 +13,15 @@ spec.loader.exec_module(measure)
 
 
 class MeasureTest(unittest.TestCase):
+    def test_release_verification_uses_the_exact_read_only_release_commands(self):
+        self.assertEqual(measure.release_verification_steps(), [
+            ('install', ['npm', 'ci']),
+            ('typecheck', ['npm', 'run', 'typecheck']),
+            ('unit', ['npm', 'run', 'test:unit']),
+            ('vitest', ['npm', 'test']),
+            ('build', ['npm', 'run', 'build']),
+        ])
+
     def test_failure_is_persisted_and_not_reported_as_success(self):
         with tempfile.TemporaryDirectory() as directory:
             out = Path(directory)

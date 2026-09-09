@@ -4,8 +4,32 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-function pickPullRequestRun(runs) {
-  return (runs || []).find((run) => run.event === 'pull_request') || null;
+const VERIFICATION_JOB = 'Unit, build, E2E, and package';
+
+function pickPullRequestRun(runs, headSha) {
+  return (runs || []).find((run) => run.event === 'pull_request' &&
+    (headSha === undefined || run.headSha === headSha)) || null;
+}
+
+function verificationJob(jobs) {
+  const matches = (jobs || []).filter(job => job.name === VERIFICATION_JOB);
+  if (matches.length > 1) throw new Error(`Ambiguous ci.yml verification job: ${VERIFICATION_JOB}`);
+  return matches[0] || null;
+}
+
+function verificationJobs(jobs) {
+  return (jobs || []).filter(job => job.name === VERIFICATION_JOB ||
+    job.name === 'Typecheck, unit, build, and package' || /^Vitest shard \d+\/\d+$/.test(job.name));
+}
+
+function verificationComplete(job) {
+  return job?.status === 'completed' && typeof job.conclusion === 'string' && job.conclusion.length > 0;
+}
+
+function listRunJobs(gh, repo, run) {
+  const details = JSON.parse(gh(['run', 'view', String(run.databaseId), '--repo', repo, '--json', 'jobs']));
+  if (!Array.isArray(details.jobs)) throw new Error('Invalid ci.yml jobs response');
+  return details.jobs;
 }
 
 function failedJobsFrom(jobs) {
@@ -28,20 +52,23 @@ function pendingResult(url) {
 }
 
 function resolveCiResults(runs, details = {}) {
-  const run = pickPullRequestRun(runs);
-  if (!run || run.status !== 'completed') return pendingResult(run && run.url);
+  const run = pickPullRequestRun(runs, details.headSha);
+  const verification = run && verificationJob(details.jobs);
+  if (!verificationComplete(verification)) return pendingResult(run && run.url);
   return {
     status: 'completed',
-    conclusion: run.conclusion || null,
+    conclusion: verification.conclusion,
     url: run.url || null,
-    failedJobs: failedJobsFrom(details.jobs),
+    failedJobs: failedJobsFrom(verificationJobs(details.jobs)),
     failedLog: details.failedLog || '',
   };
 }
 
 function renderCiResults(result) {
   const lines = [
-    '# CI workflow test results',
+    '# CI verification results',
+    '',
+    'Scope: Unit, build, E2E, and package; npm publishing is not included.',
     '',
     `status: ${result.status}`,
     `conclusion: ${result.conclusion || ''}`,
@@ -50,7 +77,7 @@ function renderCiResults(result) {
   if (result.status === 'pending') {
     lines.push(
       '',
-      'The CI run has not finished. Do not run the test suite; read this file instead of probing npm test.',
+      'CI verification has not finished. Do not run the test suite; read this file instead of probing npm test.',
     );
     return `${lines.join('\n')}\n`;
   }
@@ -66,26 +93,29 @@ function renderCiResults(result) {
   return `${lines.join('\n')}\n`;
 }
 
-function collectCiResults({ gh, repo, headSha }) {
+function collectCiResults({ gh, repo, headSha, requireSuccess = false }) {
   const runs = listCiRuns(gh, repo, headSha);
-  const run = pickPullRequestRun(runs);
-  if (!run || run.status !== 'completed') return resolveCiResults(runs);
-
-  let jobs = [];
-  let failedLog = '';
-  try {
-    jobs = JSON.parse(gh(['run', 'view', String(run.databaseId), '--repo', repo, '--json', 'jobs'])).jobs || [];
-  } catch {
-    jobs = [];
+  const run = pickPullRequestRun(runs, headSha);
+  const jobs = run ? listRunJobs(gh, repo, run) : [];
+  const result = resolveCiResults(runs, { jobs, headSha });
+  if (requireSuccess && (result.status !== 'completed' || result.conclusion !== 'success')) {
+    throw new Error(`ci.yml verification did not succeed for ${headSha}: ${result.conclusion || result.status}`);
   }
-  if (run.conclusion === 'failure' || run.conclusion === 'timed_out') {
+  if (result.status !== 'completed') return result;
+
+  // A run-level log archive waits for publishing. Completed job logs are available
+  // independently through the Actions job endpoint, including failed shards.
+  const logs = [];
+  for (const job of verificationJobs(jobs)) {
+    if (job.status !== 'completed' || !failedJobsFrom([job]).length) continue;
     try {
-      failedLog = gh(['run', 'view', String(run.databaseId), '--repo', repo, '--log-failed']);
+      if (!Number.isSafeInteger(job.databaseId) || job.databaseId <= 0) throw new Error('Missing job id');
+      logs.push(`${job.name}\n${gh(['api', `repos/${repo}/actions/jobs/${job.databaseId}/logs`])}`);
     } catch {
-      failedLog = '';
+      logs.push(`${job.name}: failed-job log unavailable.`);
     }
   }
-  return resolveCiResults(runs, { jobs, failedLog });
+  return { ...result, failedLog: logs.join('\n') };
 }
 
 function writeCiResults({ out, result }) {
@@ -130,15 +160,14 @@ function waitForCiRun({
 }) {
   const deadline = now() + timeoutMs;
   while (true) {
-    const run = pickPullRequestRun(listCiRuns(gh, repo, headSha));
-    if (run) {
-      if (run.status !== 'completed') {
-        gh(['run', 'watch', String(run.databaseId), '--repo', repo]);
-      }
-      return run;
+    const run = pickPullRequestRun(listCiRuns(gh, repo, headSha), headSha);
+    const verification = run && verificationJob(listRunJobs(gh, repo, run));
+    if (verification?.status === 'completed') {
+      if (verification.conclusion === 'success') return run;
+      throw new Error(`ci.yml verification did not succeed for ${headSha}: ${verification.conclusion || 'missing conclusion'}`);
     }
     if (now() >= deadline) {
-      throw new Error(`Timed out waiting for ci.yml pull_request run for ${headSha}`);
+      throw new Error(`Timed out waiting for ci.yml pull_request verification for ${headSha}`);
     }
     sleep(Math.min(pollIntervalMs, Math.max(0, deadline - now())));
   }
@@ -150,6 +179,10 @@ function parseArgs(argv) {
     const key = argv[i];
     if (key === '--wait') {
       parsed.wait = true;
+      continue;
+    }
+    if (key === '--require-success') {
+      parsed.requireSuccess = true;
       continue;
     }
     const value = argv[i + 1];
@@ -173,7 +206,7 @@ if (require.main === module) {
   } else {
     writeCiResults({
       out: args.out,
-      result: collectCiResults({ gh, repo: args.repo, headSha: args.headSha }),
+      result: collectCiResults({ gh, repo: args.repo, headSha: args.headSha, requireSuccess: args.requireSuccess }),
     });
   }
 }
