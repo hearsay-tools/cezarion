@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 
+const originalBrowserArgs = process.env.AGENT_BROWSER_ARGS
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 let browser: AgentBrowser
 let server: ChildProcess
@@ -17,6 +18,9 @@ let variantId: string
 const samples: Array<{ variant: string; target: string; state: string } & ContrastSample> = []
 
 beforeAll(async () => {
+  // Headless Chrome can report hover:none even for mouse events. Exercise the actual
+  // hover CSS at both widths; moving a pointer alone would silently test the rest style.
+  process.env.AGENT_BROWSER_ARGS = [originalBrowserArgs, '--blink-settings=primaryHoverType=2'].filter(Boolean).join(',')
   // No Git: the real composer must disable variants while leaving model selection available.
   root = mkdtempSync(join(tmpdir(), 'cez-states-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
@@ -48,6 +52,8 @@ afterAll(() => {
   mkdirSync(artifacts, { recursive: true })
   writeFileSync(join(artifacts, 'selection-state-contrast.json'), JSON.stringify(samples, null, 2))
   browser?.close()
+  if (originalBrowserArgs === undefined) delete process.env.AGENT_BROWSER_ARGS
+  else process.env.AGENT_BROWSER_ARGS = originalBrowserArgs
   server?.kill()
   if (root) rmSync(root, { recursive: true, force: true })
 })
@@ -145,7 +151,14 @@ describe('selection and control states (#171)', () => {
       expect(disabledStyle.opacity).toBe('1')
       expect((browser.evaluate(contrastSampleExpression(disabled)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       for (const state of ['rest', 'hover', 'focus']) {
-        if (state === 'hover') hoverVisiblePoint(browser, model)
+        if (state === 'hover') {
+          hoverVisiblePoint(browser, model)
+          expect(browser.evaluate(`({
+            hover: matchMedia('(hover: hover)').matches,
+            target: document.querySelector('${model}').matches(':hover'),
+          })`)).toEqual({ hover: true, target: true })
+          expect(style(model).background).not.toBe(enabledStyle.background)
+        }
         if (state === 'focus') focus(model)
         const sample = browser.evaluate(contrastSampleExpression(model, 'border-top-color')) as ContrastSample
         samples.push({ variant: variantId, target: model, state, ...sample })
