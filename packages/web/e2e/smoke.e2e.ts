@@ -74,6 +74,56 @@ function setTheme(theme: 'light' | 'dark'): void {
   browser.goto(baseUrl + scoped('/'))
 }
 
+type BrandFacts = {
+  src: string
+  width: number
+  height: number
+  paintedTextHeight: number
+  headerOverflow: number
+}
+
+/** Measure the shipped SVG as the browser actually rasterizes it at CSS size. The right half is
+ * the word rather than the atom mark; counting pixels that differ from its opaque background
+ * catches a lockup whose box is technically visible while its letters are only a few pixels tall. */
+function brandFacts(scope: string): BrandFacts {
+  return browser.evaluate(`(() => {
+    const root = document.querySelector(${JSON.stringify(scope)})
+    const img = root.querySelector('[data-slot="brand-lockup"]')
+    const header = img.parentElement
+    const rect = img.getBoundingClientRect()
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(rect.width)
+    canvas.height = Math.round(rect.height)
+    const context = canvas.getContext('2d')
+    context.drawImage(img, 0, 0, canvas.width, canvas.height)
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
+    const background = [pixels[0], pixels[1], pixels[2]]
+    let minY = canvas.height
+    let maxY = -1
+    for (let y = 0; y < canvas.height; y += 1) {
+      for (let x = Math.floor(canvas.width / 2); x < canvas.width; x += 1) {
+        const offset = (y * canvas.width + x) * 4
+        const contrast = Math.max(
+          Math.abs(pixels[offset] - background[0]),
+          Math.abs(pixels[offset + 1] - background[1]),
+          Math.abs(pixels[offset + 2] - background[2]),
+        )
+        if (contrast > 12) {
+          minY = Math.min(minY, y)
+          maxY = Math.max(maxY, y)
+        }
+      }
+    }
+    return {
+      src: img.getAttribute('src'),
+      width: rect.width,
+      height: rect.height,
+      paintedTextHeight: maxY < minY ? 0 : maxY - minY + 1,
+      headerOverflow: header.scrollWidth - header.clientWidth,
+    }
+  })()`) as BrandFacts
+}
+
 describe('cockpit app shell', () => {
   beforeAll(() => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)
@@ -169,6 +219,28 @@ describe('cockpit app shell', () => {
     expect(Math.abs(footerRows.theme - footerRows.gear)).toBeLessThanOrEqual(1)
     // Exactly two rows — every other footer control shares the controls row's centerline.
     expect(footerRows.rowCount).toBe(2)
+  })
+
+  it('keeps the themed wordmark readable and geometry-stable at the minimum sidebar width', () => {
+    browser.goto(baseUrl + scoped('/'))
+    setTheme('light')
+    browser.waitForFunction(`document.querySelector('[data-slot="brand-lockup"]')?.complete === true`)
+    const light = brandFacts('[data-slot="sidebar"]')
+
+    expect(light.src).toBe('/cezarion-lockup-light.svg')
+    expect(light.height).toBeGreaterThanOrEqual(34)
+    expect(light.paintedTextHeight).toBeGreaterThanOrEqual(9)
+    expect(light.headerOverflow).toBeLessThanOrEqual(0)
+
+    browser.click('[data-slot="sidebar"] [data-slot="theme-toggle"]')
+    browser.waitForFunction(
+      `(() => { const img = document.querySelector('[data-slot="sidebar"] [data-slot="brand-lockup"]'); return img?.getAttribute('src') === '/cezarion-lockup-dark.svg' && img.complete && img.naturalWidth > 0 })()`,
+    )
+    const dark = brandFacts('[data-slot="sidebar"]')
+    expect(dark.src).toBe('/cezarion-lockup-dark.svg')
+    expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
+    expect(dark.paintedTextHeight).toBeGreaterThanOrEqual(9)
+    expect(dark.headerOverflow).toBeLessThanOrEqual(0)
   })
 
   it('keeps the footer controls inside the 264px column even on a nightly-length version', () => {
@@ -406,6 +478,35 @@ describe('mobile shell', () => {
       expect(box.minLinkHeight).toBeGreaterThanOrEqual(44)
 
       browser.screenshot(`${artifactsDir}/drawer-iphone.png`)
+    })
+
+    it('keeps the themed wordmark readable and unclipped at 360×640', () => {
+      browser.setViewport(360, 640)
+      try {
+        browser.goto(baseUrl + scoped('/'))
+        setTheme('light')
+        openDrawer()
+        browser.waitForFunction(
+          `document.querySelector('${DRAWER} [data-slot="brand-lockup"]')?.complete === true`,
+        )
+        const light = brandFacts(DRAWER)
+        expect(light.src).toBe('/cezarion-lockup-light.svg')
+        expect(light.height).toBeGreaterThanOrEqual(34)
+        expect(light.paintedTextHeight).toBeGreaterThanOrEqual(9)
+        expect(light.headerOverflow).toBeLessThanOrEqual(0)
+
+        browser.click(`${DRAWER} [data-slot="theme-toggle"]`)
+        browser.waitForFunction(
+          `(() => { const img = document.querySelector('${DRAWER} [data-slot="brand-lockup"]'); return img?.getAttribute('src') === '/cezarion-lockup-dark.svg' && img.complete && img.naturalWidth > 0 })()`,
+        )
+        const dark = brandFacts(DRAWER)
+        expect(dark.src).toBe('/cezarion-lockup-dark.svg')
+        expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
+        expect(dark.paintedTextHeight).toBeGreaterThanOrEqual(9)
+        expect(dark.headerOverflow).toBeLessThanOrEqual(0)
+      } finally {
+        browser.setViewport(IPHONE.width, IPHONE.height)
+      }
     })
 
     it('navigates and closes when a nav item is tapped', () => {
