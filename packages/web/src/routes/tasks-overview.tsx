@@ -654,8 +654,8 @@ function TaskTableCell({
       )
     case 'diff':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
-          {run.diffStat ? <DiffStatLabel stat={run.diffStat} /> : <Dash />}
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
+          {run.diffStat ? <DiffStatLabel stat={run.diffStat} compact className="block max-w-full" /> : <Dash />}
         </td>
       )
     case 'reference':

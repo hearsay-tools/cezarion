@@ -42,7 +42,7 @@ export interface TaskColumnDefinition {
  * this list so capability-hidden and folded columns cannot drift structurally.
  */
 export const TASK_COLUMNS = [
-  { id: 'status', label: 'Status', canFold: false, defaultExpanded: true, align: 'left', width: '128px' },
+  { id: 'status', label: 'Status', canFold: false, defaultExpanded: true, align: 'left', width: '120px' },
   { id: 'task', label: 'Task', canFold: false, defaultExpanded: true, align: 'left', width: '320px' },
   {
     id: 'workflow',
@@ -62,7 +62,7 @@ export const TASK_COLUMNS = [
     width: '120px',
     icon: 'branch',
   },
-  { id: 'diff', label: '±', canFold: true, defaultExpanded: true, align: 'left', width: '68px', icon: 'diff' },
+  { id: 'diff', label: '±', canFold: true, defaultExpanded: true, align: 'left', width: '84px', icon: 'diff' },
   {
     id: 'reference',
     label: 'Ref',
@@ -99,7 +99,7 @@ export const TASK_COLUMNS = [
     canFold: true,
     defaultExpanded: true,
     align: 'right',
-    width: '88px',
+    width: '80px',
     icon: 'memory',
   },
   {

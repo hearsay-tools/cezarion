@@ -482,12 +482,29 @@ describe('tasks table overview', () => {
             const referenceGlyph = referenceChip.querySelector('svg')
             referenceChip.insertBefore(referenceGlyph.cloneNode(true), referenceChip.firstChild)
             const diff = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"] td[data-column-id="diff"]')
+            const [adds, dels] = diff.querySelectorAll('[data-slot="diff-stat"] > span')
+            adds.textContent = '+12k'
+            dels.textContent = '−1k'
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('title', '+12345 −1234 across 37 files')
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('aria-label', '+12345 −1234 across 37 files')
+            const workflowHeader = document.querySelector('th[data-column-id="workflow"]')
+            const workflowHeaderButton = workflowHeader.querySelector('button')
             const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
             const secondary = secondaryIds.map((id) => {
               const cell = rows[0].querySelector('td[data-column-id="' + id + '"]')
               return { id, width: cell.getBoundingClientRect().width, contained: cell.scrollWidth <= cell.clientWidth + 1 }
             })
             const workflowStyle = getComputedStyle(workflow)
+            const diffStyle = getComputedStyle(diff)
+            const diffRect = diff.getBoundingClientRect()
+            const diffRange = document.createRange()
+            diffRange.selectNodeContents(diff.querySelector('[data-slot="diff-stat"]'))
+            const diffTextRect = diffRange.getBoundingClientRect()
+            const referenceContentRect = referenceChip.getBoundingClientRect()
+            const workflowHeaderStyle = getComputedStyle(workflowHeader)
+            const workflowHeaderRect = workflowHeader.getBoundingClientRect()
+            const workflowHeaderContentRight = workflowHeaderRect.right - Number.parseFloat(workflowHeaderStyle.paddingRight)
+            const workflowHeaderChildren = [...workflowHeaderButton.children].map((child) => child.getBoundingClientRect())
             return {
               taskWidth: firstCell.getBoundingClientRect().width,
               titleWidth: firstRect.width,
@@ -501,7 +518,8 @@ describe('tasks table overview', () => {
               statusContained: status.scrollWidth <= status.clientWidth + 1 && statusPill.getBoundingClientRect().right <= status.getBoundingClientRect().right + 1,
               referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1 && [...referenceChip.querySelectorAll('svg')].every((glyph) => glyph.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1),
               referenceLabel: referenceChip.textContent,
-              diffContained: diff.scrollWidth <= diff.clientWidth + 1,
+              diffContained: diffTextRect.left >= diffRect.left + Number.parseFloat(diffStyle.paddingLeft) - 1 && diffTextRect.right <= diffRect.right - Number.parseFloat(diffStyle.paddingRight) + 1 && diffTextRect.right < referenceContentRect.left,
+              workflowHeaderContained: workflowHeaderChildren.every((rect) => rect.left >= workflowHeaderRect.left + Number.parseFloat(workflowHeaderStyle.paddingLeft) - 1 && rect.right <= workflowHeaderContentRight + 1),
               secondary,
               pageContained: document.documentElement.scrollWidth <= window.innerWidth,
             }
@@ -519,6 +537,7 @@ describe('tasks table overview', () => {
             referenceContained: boolean
             referenceLabel: string
             diffContained: boolean
+            workflowHeaderContained: boolean
             secondary: Array<{ id: string; width: number; contained: boolean }>
             pageContained: boolean
           }
@@ -533,6 +552,7 @@ describe('tasks table overview', () => {
           expect.soft(facts.referenceContained, `${theme}/${density}: reference chip`).toBe(true)
           expect(facts.referenceLabel, `${theme}/${density}: compact reference label`).toBe('#1234')
           expect.soft(facts.diffContained, `${theme}/${density}: diff stat`).toBe(true)
+          expect.soft(facts.workflowHeaderContained, `${theme}/${density}: workflow header`).toBe(true)
           expect(facts.secondary.every(({ width, contained }) => width > 0 && contained), `${theme}/${density}: ${JSON.stringify(facts.secondary)}`).toBe(true)
           expect(facts.pageContained, `${theme}/${density}: page overflow`).toBe(true)
 

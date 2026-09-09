@@ -7,10 +7,10 @@ afterEach(cleanup)
 
 const label = () => screen.getByTestId('stat-host').querySelector('[data-slot="diff-stat"]') as HTMLElement
 
-function renderStat(stat: Parameters<typeof DiffStatLabel>[0]['stat']) {
+function renderStat(stat: Parameters<typeof DiffStatLabel>[0]['stat'], compact = false) {
   render(
     <div data-testid="stat-host">
-      <DiffStatLabel stat={stat} />
+      <DiffStatLabel stat={stat} compact={compact} />
     </div>
   )
   return label()
@@ -25,6 +25,20 @@ describe('DiffStatLabel', () => {
 
   it('says "file" in the singular for a one-file diff', () => {
     expect(renderStat({ adds: 1, dels: 0, files: 1 }).title).toBe('+1 −0 across 1 file')
+  })
+
+  it('bounds large table counts while retaining their exact accessible value', () => {
+    const el = renderStat({ adds: 12_345, dels: 1_234, files: 37 }, true)
+    expect(el.textContent).toBe('+12k −1k')
+    expect(el.title).toBe('+12345 −1234 across 37 files')
+    expect(el.getAttribute('aria-label')).toBe(el.title)
+  })
+
+  it('keeps counts beyond the named suffixes bounded', () => {
+    const el = renderStat({ adds: Number.MAX_SAFE_INTEGER, dels: 0, files: 1 }, true)
+    expect(el.textContent).toBe('+9e15 −0')
+    expect(el.title).toBe('+9007199254740991 −0 across 1 file')
+    expect(el.getAttribute('aria-label')).toBe(el.title)
   })
 
   it('carries no repointed marker on an ordinary stat', () => {
