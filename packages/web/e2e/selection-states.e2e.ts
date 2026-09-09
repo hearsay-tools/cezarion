@@ -84,7 +84,7 @@ function focus(selector: string): void {
   focusWithKeyboard(browser, selector)
   expect(browser.evaluate(`document.querySelector(${JSON.stringify(selector)}) === document.activeElement && document.activeElement.matches(':focus-visible')`)).toBe(true)
   expect(style(selector).outline).not.toBe('none')
-  const sample = browser.evaluate(contrastSampleExpression(selector, 'outline-color')) as ContrastSample
+  const sample = browser.evaluate(contrastSampleExpression(selector, 'outline-color', 'parent')) as ContrastSample
   samples.push({ variant: variantId, target: selector, state: 'keyboard focus', ...sample })
   expect(sample.ratio, JSON.stringify(sample)).toBeGreaterThanOrEqual(3)
 }
@@ -139,8 +139,12 @@ describe('selection and control states (#171)', () => {
       browser.moveTo(0, 0)
       const bounds = () => browser.evaluate(`(() => {
         const r = document.querySelector('${model}').getBoundingClientRect(); return { width: r.width, height: r.height }
-      })()`)
+      })()`) as { width: number; height: number }
       const originalBounds = bounds()
+      if (variant.viewport.width === 360) {
+        expect(originalBounds.width).toBeGreaterThanOrEqual(44)
+        expect(originalBounds.height).toBeGreaterThanOrEqual(44)
+      }
       const source = 'button[data-slot="source-pill"]'
       expect(style(source).border).toBe('solid')
       expect((browser.evaluate(contrastSampleExpression(source)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
@@ -163,6 +167,8 @@ describe('selection and control states (#171)', () => {
         const sample = browser.evaluate(contrastSampleExpression(model, 'border-top-color')) as ContrastSample
         samples.push({ variant: variantId, target: model, state, ...sample })
         expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(3)
+        const outside = browser.evaluate(contrastSampleExpression(model, 'border-top-color', 'parent')) as ContrastSample
+        expect(outside.ratio, `${state} outside: ${JSON.stringify(outside)}`).toBeGreaterThanOrEqual(3)
         expect(bounds()).toEqual(originalBounds)
         expect((browser.evaluate(contrastSampleExpression(model)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       }
