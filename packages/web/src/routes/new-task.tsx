@@ -83,6 +83,7 @@ import {
 } from './new-task-autostart'
 import {
   clearStartedDraft,
+  draftRevision,
   composerRunModeNote,
   readDraft,
   resolveComposerRunMode,
@@ -163,11 +164,25 @@ export function NewTaskRoute() {
         : {}),
     }
   })
+  const currentDraft = useRef(draft)
   useEffect(() => {
-    writeDraft(draft, draftProjectId)
-  }, [draft, draftProjectId])
-  const update = (patch: Partial<NewTaskDraft>) =>
-    setDraft((current) => ({ ...current, ...patch }))
+    // Claim this mounted draft even when its text matches the previous visit.
+    writeDraft(currentDraft.current, draftProjectId)
+  }, [draftProjectId])
+  const submissionPending = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const update = (patch: Partial<NewTaskDraft>) => {
+    if (!mounted.current || submissionPending.current) return
+    const next = { ...currentDraft.current, ...patch }
+    currentDraft.current = next
+    // Dictation can edit and submit in one event. Persist before submit captures its revision.
+    writeDraft(next, draftProjectId)
+    setDraft(next)
+  }
 
   // ---- effective picker values (rules in new-task-form.ts, mirrored from legacy) -----------
   const recentSources = uiState.data?.recentSources
@@ -209,7 +224,7 @@ export function NewTaskRoute() {
   useEffect(() => {
     // Wait for the pickers' data: before it lands `source` is still a provisional guess, and
     // auto-applying against it would flash text in for a skill the user may not end up on.
-    if (!sourcesReady) return
+    if (!sourcesReady || submissionPending.current) return
     const resolved = resolveAutoApply(draftTextRef.current, autoAppliedRef.current, autoText)
     autoAppliedRef.current = resolved.applied
     if (resolved.text !== draftTextRef.current) update({ text: resolved.text })
@@ -360,6 +375,7 @@ export function NewTaskRoute() {
       setAutoStarting(false)
       return
     }
+    const submittedRevision = draftRevision(draftProjectId)
     void (async () => {
       let launchKey = ''
       try {
@@ -370,9 +386,9 @@ export function NewTaskRoute() {
       if (launchKey !== '' && deepLink.key === launchKey) {
         try {
           const created = await createRun(bookmarkletRunBody(deepLink, runner, defaultRunner))
-          clearStartedDraft(draftProjectId)
+          clearStartedDraft(draftProjectId, submittedRevision)
           void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-          void navigate(startedRunPath(created))
+          if (mounted.current) void navigate(startedRunPath(created))
           return
         } catch (error) {
           setNotice({
@@ -413,6 +429,7 @@ export function NewTaskRoute() {
   }, [notice, sourcesReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (text: string, images: AttachmentInput[]) => {
+    const submittedRevision = draftRevision(draftProjectId)
     if (!providersReady || runner === null) {
       throw new Error(
         providers.isPending
@@ -427,14 +444,11 @@ export function NewTaskRoute() {
       throw new Error('Still loading workflows and skills — try again in a second.')
     }
     if (draft.planFirst) {
-      // Plan mode: submit means PLAN. A rejection propagates — the composer toasts and
-      // restores the draft; a success restores the text ourselves (the composer already
-      // cleared optimistically) so Discard hands back exactly what was typed. The review
-      // overlay is deliberate: it's where steps are edited and saved as a reusable chain.
+      // Keep the original draft while planning so Discard returns to it unchanged.
       setPlanning(true)
       try {
-        setPlan(pendingPlanOf(text, images, await postPlan(text)))
-        update({ text })
+        const planned = await postPlan(text)
+        if (mounted.current) setPlan(pendingPlanOf(text, images, planned))
       } finally {
         setPlanning(false)
       }
@@ -486,15 +500,16 @@ export function NewTaskRoute() {
     })
       .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.uiState }))
       .catch(() => {})
-    clearStartedDraft(draftProjectId)
+    clearStartedDraft(draftProjectId, submittedRevision)
     void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-    navigate(startedRunPath(created))
+    if (mounted.current) navigate(startedRunPath(created))
   }
 
   /** ▶ Start on the reviewed plan: the (possibly edited) steps go INLINE, with the composer's
    *  current picker choices — legacy `startPlannedRun` semantics on the new surface. */
   const startPlanned = async () => {
     if (plan === null || plan.steps.length === 0 || starting || !providersReady || runner === null) return
+    const submittedRevision = draftRevision(draftProjectId)
     setStarting(true)
     try {
       const created = await createRun(
@@ -521,10 +536,10 @@ export function NewTaskRoute() {
           .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.uiState }))
           .catch(() => {})
       }
-      clearStartedDraft(draftProjectId)
+      clearStartedDraft(draftProjectId, submittedRevision)
       setPlan(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-      navigate(startedRunPath(created))
+      if (mounted.current) navigate(startedRunPath(created))
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })
     } finally {
@@ -576,6 +591,11 @@ export function NewTaskRoute() {
         <Composer
           ref={composerRef}
           onSubmit={submit}
+          retainDraftUntilSuccess
+          pendingLabel={draft.planFirst ? 'Planning task…' : 'Starting task…'}
+          failureHint={draft.planFirst ? 'Could not create the plan. Your draft is kept. Please retry.' : undefined}
+          clearOnSuccess={!draft.planFirst}
+          onPendingChange={(pending) => { submissionPending.current = pending }}
           value={draft.text}
           onValueChange={(text) => update({ text })}
           autoFocus
