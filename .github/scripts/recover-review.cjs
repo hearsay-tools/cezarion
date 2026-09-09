@@ -103,7 +103,9 @@ async function recoverReview({ github, owner, repo, event, maxRounds = '', log =
     const failedAt = Date.parse(gate.completed_at);
     const startedAt = Date.parse(gate.started_at);
     const verifiedAt = Date.parse(verification.completed_at);
-    if (![failedAt, startedAt, verifiedAt].every(Number.isFinite) || startedAt > failedAt || startedAt >= verifiedAt) {
+    // REST timestamps have second precision. Equality cannot establish ordering:
+    // the waiter may have started before verification succeeded within that second.
+    if (![failedAt, startedAt, verifiedAt].every(Number.isFinite) || startedAt > failedAt || startedAt > verifiedAt) {
       return skip('this successful verification was already available when the failed review gate started');
     }
     return { recovered: true, pull: pull.number, head: pull.head.sha, ci: ci.id, ciAttempt: ci.run_attempt,

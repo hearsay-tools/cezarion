@@ -171,6 +171,19 @@ test('review completion closes the race when CI completion observed an active re
   await recover(h); assert.equal(h.writes.length, 1, 'recovery failure must not cause a rerun loop');
 });
 
+test('same-second waiter start and verification completion remain eligible for recovery', async () => {
+  const h = harness();
+  const gate = h.state.reviewJobs.find(j => j.name === 'wait-for-ci');
+  gate.started_at = at('12');
+  gate.completed_at = at('13');
+  // GitHub REST timestamps discard subsecond ordering: the waiter can start
+  // first even though both timestamps are serialized as 11:12:00Z.
+  await recover(h);
+  assert.equal(h.writes.length, 1);
+  await recover(h);
+  assert.equal(h.writes.length, 1, 'a repeated event still skips the active recovery');
+});
+
 test('publication failure cannot veto successful aggregate verification', async () => {
   const h = harness(); h.state.ci.conclusion = 'failure';
   h.state.ciJobs.push(job(102, 'Publish npm snapshot', 'failure', '13'));
