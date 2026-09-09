@@ -730,3 +730,27 @@ describe('groupRuns — workers of a variant-group parent', () => {
     expect(shape(buckets)).toEqual(['Recent: [AB], w'])
   })
 })
+
+describe('groupRuns — a folded worker promotes its parent', () => {
+  it('places the parent row where its earliest-sorted worker would have sat', () => {
+    // Newest first inside Recent: the worker sorts to the top, its parent to the bottom. Folding
+    // the worker away must not leave the parent at the bottom — the sidebar caps the list at ten
+    // rows, and a worker that earned a top slot would otherwise vanish along with its parent.
+    const parent = run({ id: 'p', createdAt: '2026-07-14T09:00:00.000Z' })
+    const others = Array.from({ length: 3 }, (_, i) =>
+      run({ id: `o${i}`, createdAt: `2026-07-14T1${i}:00:00.000Z` }),
+    )
+    const w = worker('p', { id: 'w', createdAt: '2026-07-14T15:00:00.000Z' })
+    const buckets = groupRuns([parent, ...others, w], 'active')
+    expect(shape(buckets)).toEqual(['Recent: p, o2, o1, o0'])
+    const row = rowsOf(buckets)[0]
+    expect(row?.kind === 'run' && row.workers?.map((member) => member.id)).toEqual(['w'])
+  })
+
+  it('leaves the parent where it sorted when it already precedes its workers', () => {
+    const parent = run({ id: 'p', createdAt: '2026-07-14T15:00:00.000Z' })
+    const other = run({ id: 'o', createdAt: '2026-07-14T12:00:00.000Z' })
+    const w = worker('p', { id: 'w', createdAt: '2026-07-14T10:00:00.000Z' })
+    expect(shape(groupRuns([parent, other, w], 'active'))).toEqual(['Recent: p, o'])
+  })
+})

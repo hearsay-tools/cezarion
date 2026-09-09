@@ -348,9 +348,30 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
     else nested.set(parent, [run])
   }
 
+  // A folded worker PROMOTES its parent: the parent's row is emitted where the earliest-sorted
+  // member of the pair sat, the same placement rule variant groups use. Otherwise a worker that
+  // earned a top slot would be folded away under a parent sitting past the sidebar's row cap
+  // (`capBuckets`), and both would vanish. Folding keeps the bucket, so the promotion cannot
+  // cross one.
+  const emitted = new Set<string>()
   const seenGroups = new Set<string>()
+  const emitRun = (run: RunRecord) => {
+    emitted.add(run.id)
+    const workers = nested.get(run.id)
+    push(bucketOf(run, view), {
+      kind: 'run',
+      run,
+      queuePosition: positions.get(run.id) ?? null,
+      ...(workers ? { workers } : {}),
+    })
+  }
   for (const run of sorted) {
-    if (folded.has(run.id)) continue
+    if (emitted.has(run.id)) continue
+    if (folded.has(run.id)) {
+      const parent = byId.get(workerParentId(run) ?? '')
+      if (parent && !emitted.has(parent.id)) emitRun(parent)
+      continue
+    }
     if (run.groupId) {
       if (seenGroups.has(run.groupId)) continue
       seenGroups.add(run.groupId)
@@ -364,13 +385,7 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
         continue
       }
     }
-    const workers = nested.get(run.id)
-    push(bucketOf(run, view), {
-      kind: 'run',
-      run,
-      queuePosition: positions.get(run.id) ?? null,
-      ...(workers ? { workers } : {}),
-    })
+    emitRun(run)
   }
 
   return BUCKET_ORDER.filter((label) => byBucket.has(label)).map((label) => ({
