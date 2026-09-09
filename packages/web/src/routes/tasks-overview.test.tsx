@@ -154,14 +154,25 @@ describe('TasksOverview — the table', () => {
 
   it('contains secondary desktop content inside the compact column geometry', () => {
     renderOverview({
-      runs: [run({ id: 'compact-secondary', workflow: 'a-very-long-workflow-name-that-must-not-steal-title-space' })],
+      runs: [
+        run({
+          id: 'compact-secondary',
+          workflow: 'a-very-long-workflow-name-that-must-not-steal-title-space',
+          pullRequestUrl: 'https://github.com/o/r/pull/1234',
+        }),
+      ],
     })
 
     const table = document.querySelector<HTMLElement>('[data-slot="tasks-table"] table')
+    const status = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="status"]')
     const workflow = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="workflow"]')
+    const reference = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="reference"]')
 
     expect(table?.className).toContain('table-fixed')
+    expect(status?.className).toContain('overflow-hidden')
     expect(workflow?.className).toContain('truncate')
+    expect(reference?.className).toContain('overflow-hidden')
+    expect(reference?.querySelector('[data-slot="pr-chip"]')?.className).toContain('max-w-full')
   })
 
   it('says the run status through the attention pill', () => {

@@ -472,6 +472,13 @@ describe('tasks table overview', () => {
             const lineHeight = Number.parseFloat(getComputedStyle(firstLink).lineHeight)
             const workflow = rows[0].querySelector('td[data-column-id="workflow"]')
             workflow.textContent = 'workflow-name-that-is-deliberately-too-long-for-its-column'
+            const status = rows[0].querySelector('td[data-column-id="status"]')
+            const statusPill = status.querySelector('[data-slot="pill"]')
+            statusPill.textContent = 'waiting on workers'
+            const reference = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"] td[data-column-id="reference"]')
+            const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
+            const referenceLabel = [...referenceChip.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
+            referenceLabel.textContent = 'Issue #1234'
             const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
             const secondary = secondaryIds.map((id) => {
               const cell = rows[0].querySelector('td[data-column-id="' + id + '"]')
@@ -488,6 +495,8 @@ describe('tasks table overview', () => {
               suffixVisible: suffixRect.left >= firstRect.left - 1 && suffixRect.right <= firstRect.right + 1 && suffixRect.bottom <= firstRect.bottom + 1,
               unbrokenContained: getComputedStyle(secondLink).overflow === 'hidden' && secondLink.scrollWidth > secondLink.clientWidth && secondRect.right <= secondCellRect.right + 1,
               workflowContained: workflowStyle.overflow === 'hidden' && workflow.scrollWidth > workflow.clientWidth,
+              statusContained: status.scrollWidth <= status.clientWidth + 1 && statusPill.getBoundingClientRect().right <= status.getBoundingClientRect().right + 1,
+              referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1,
               secondary,
               pageContained: document.documentElement.scrollWidth <= window.innerWidth,
             }
@@ -501,6 +510,8 @@ describe('tasks table overview', () => {
             suffixVisible: boolean
             unbrokenContained: boolean
             workflowContained: boolean
+            statusContained: boolean
+            referenceContained: boolean
             secondary: Array<{ id: string; width: number; contained: boolean }>
             pageContained: boolean
           }
@@ -511,6 +522,8 @@ describe('tasks table overview', () => {
           expect(facts.suffixVisible, `${theme}/${density}: distinguishing suffix; ${JSON.stringify(facts)}`).toBe(true)
           expect(facts.unbrokenContained, `${theme}/${density}: unbroken title`).toBe(true)
           expect(facts.workflowContained, `${theme}/${density}: workflow ellipsis`).toBe(true)
+          expect.soft(facts.statusContained, `${theme}/${density}: status pill`).toBe(true)
+          expect.soft(facts.referenceContained, `${theme}/${density}: reference chip`).toBe(true)
           expect(facts.secondary.every(({ width, contained }) => width > 0 && contained), `${theme}/${density}: ${JSON.stringify(facts.secondary)}`).toBe(true)
           expect(facts.pageContained, `${theme}/${density}: page overflow`).toBe(true)
 

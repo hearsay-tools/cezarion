@@ -613,12 +613,24 @@ function TaskTableCell({
   switch (column.id) {
     case 'status':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
           {/* A scheduled run wears its appointment in the pill, the way a queued one wears its
               queue position — the row's whole answer to "what is this waiting for?". */}
-          <Pill dot={attention.tone} pulse={attention.pulse} title={scheduled?.title}>
-            {attention.label}
-            {scheduled ? <span className="tabular-nums">{scheduled.label}</span> : null}
+          <Pill
+            dot={attention.tone}
+            pulse={attention.pulse}
+            title={scheduled?.title ?? attention.label}
+            className="w-full max-w-full overflow-hidden"
+          >
+            <span className="min-w-0 truncate">
+              {attention.label}
+              {scheduled ? (
+                <>
+                  {' '}
+                  <span className="tabular-nums">{scheduled.label}</span>
+                </>
+              ) : null}
+            </span>
           </Pill>
         </td>
       )
@@ -648,8 +660,10 @@ function TaskTableCell({
       )
     case 'reference':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
-          {reference ? <TaskReferenceChip run={run} reference={reference} /> : <Dash />}
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
+          {reference ? (
+            <TaskReferenceChip run={run} reference={reference} className="max-w-full overflow-hidden" />
+          ) : <Dash />}
         </td>
       )
     case 'tokens':
