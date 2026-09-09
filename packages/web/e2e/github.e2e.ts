@@ -21,6 +21,7 @@ const sessionId = `e2e-github-${process.pid}`
 
 const DESKTOP = { width: 1440, height: 900 }
 const IPHONE = { width: 390, height: 844 }
+const REVIEW_PHONE = { width: 360, height: 640 }
 
 let browser: AgentBrowser
 let baseUrl: string
@@ -275,4 +276,109 @@ describe('the GitHub tab against the live dry-run server', () => {
       browser.setViewport(DESKTOP.width, DESKTOP.height)
     }
   })
+
+  it('lays out long issue and pull-request titles at the review viewports in both themes and densities', async () => {
+    if (!forgeAvailable) return
+
+    const longTitle =
+      'Keep the shared GitHub synchronization workflow readable when several records begin with exactly the same words but end differently'
+    const longAuthor = 'a-contributor-with-a-deliberately-long-github-login'
+    const observations: Array<Record<string, unknown>> = []
+
+    for (const viewport of [REVIEW_PHONE, DESKTOP]) {
+      for (const theme of ['light', 'dark'] as const) {
+        for (const density of ['comfortable', 'ultra'] as const) {
+          browser.setViewport(viewport.width, viewport.height)
+          browser.goto(`${baseUrl}${scoped('/github')}`)
+          browser.waitForFunction(`document.querySelector('[data-slot="gh-row"]') !== null`)
+          browser.evaluate(`(() => {
+            document.documentElement.classList.toggle('light', ${theme === 'light'})
+            document.documentElement.dataset.density = ${JSON.stringify(density)}
+          })()`)
+
+          for (const view of ['issues', 'prs'] as const) {
+            const path = view === 'issues' ? '/github' : '/github/prs'
+            browser.click(`[data-slot="gh-tabs"] a[href="${scoped(path)}"]`)
+            browser.waitForFunction(
+              `document.querySelector('[data-slot="gh-row"]')?.getAttribute('href')?.includes(${JSON.stringify(view === 'issues' ? '/issues/' : '/prs/')}) === true`,
+            )
+            const facts = browser.evaluate(`(() => {
+              const row = document.querySelector('[data-slot="gh-row"]')
+              const titleLine = row.children[0]
+              const icon = titleLine.children[0]
+              const title = titleLine.children[1]
+              const meta = row.children[1]
+              const labels = row.children[2]
+              title.textContent = ${JSON.stringify(longTitle)}
+              meta.children[1].textContent = ${JSON.stringify(longAuthor)}
+              const titleStyle = getComputedStyle(title)
+              const titleRect = title.getBoundingClientRect()
+              const iconRect = icon.getBoundingClientRect()
+              const metaRect = meta.getBoundingClientRect()
+              const labelsRect = labels?.getBoundingClientRect()
+              const lineHeight = Number.parseFloat(titleStyle.lineHeight)
+              const metaLines = new Set([...meta.children].map((child) => Math.round(child.getBoundingClientRect().top))).size
+              return {
+                titleLines: Math.round(titleRect.height / lineHeight),
+                titleClamped: title.scrollHeight > title.clientHeight,
+                titleOverflowing: title.scrollWidth > title.clientWidth,
+                textOverflow: titleStyle.textOverflow,
+                whiteSpace: titleStyle.whiteSpace,
+                iconOffset: Math.abs(iconRect.top - titleRect.top),
+                metaLines,
+                metaBelowTitle: metaRect.top >= titleRect.bottom,
+                labelsBelowMeta: !labelsRect || labelsRect.top >= metaRect.bottom,
+                pageOverflow: document.documentElement.scrollWidth > innerWidth,
+                listWidth: document.querySelector('[data-slot="gh-list"]').getBoundingClientRect().width,
+                light: document.documentElement.classList.contains('light'),
+                appliedDensity: document.documentElement.dataset.density,
+              }
+            })()`) as {
+              titleLines: number
+              titleClamped: boolean
+              titleOverflowing: boolean
+              textOverflow: string
+              whiteSpace: string
+              iconOffset: number
+              metaLines: number
+              metaBelowTitle: boolean
+              labelsBelowMeta: boolean
+              pageOverflow: boolean
+              listWidth: number
+              light: boolean
+              appliedDensity: string
+            }
+
+            observations.push({ viewport, theme, density, view, ...facts })
+            expect(facts.light).toBe(theme === 'light')
+            expect(facts.appliedDensity).toBe(density)
+            expect(facts.metaBelowTitle).toBe(true)
+            expect(facts.labelsBelowMeta).toBe(true)
+            expect(facts.pageOverflow).toBe(false)
+            if (viewport.width === REVIEW_PHONE.width) {
+              expect(facts.titleLines).toBe(2)
+              expect(facts.titleClamped).toBe(true)
+              expect(facts.iconOffset).toBeLessThanOrEqual(3)
+              expect(facts.metaLines).toBeGreaterThan(1)
+            } else {
+              expect(facts.titleLines).toBe(1)
+              expect(facts.titleOverflowing).toBe(true)
+              expect(facts.textOverflow).toBe('ellipsis')
+              expect(facts.whiteSpace).toBe('nowrap')
+              expect(facts.metaLines).toBe(1)
+              expect(facts.listWidth).toBeCloseTo(360, 0)
+            }
+          }
+
+          browser.screenshot(
+            `${artifactsDir}/github-titles-${viewport.width}-${theme}-${density}.png`,
+            { viewport: true },
+          )
+        }
+      }
+    }
+
+    expect(observations).toHaveLength(16)
+    browser.setViewport(DESKTOP.width, DESKTOP.height)
+  }, 60_000)
 })
