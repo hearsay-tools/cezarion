@@ -189,6 +189,7 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.goto(`${baseUrl}${path}`)
           browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea, [data-slot="appearance-section"], [data-slot="wb-name"]') !== null`)
           appearance(density, theme)
+          if (path.endsWith('/new')) browser.click('[data-slot="execution-options"] summary')
           expect(smallTargets(), path).toEqual([])
           expect(overlappingTargets(), path).toEqual([])
           expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth'), path).toBe(true)
@@ -215,10 +216,17 @@ describe('density-independent mobile action targets (#166)', () => {
             const el = document.querySelector('${send}'); el.scrollIntoView({block:'center'});
             const r=el.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height};
           })()`) as { x: number; y: number; width: number; height: number }
-          if (mobile) expect([disabled.width, disabled.height]).toEqual([44, 44])
+          // New Task has a labeled submit action (#168); 44px is the minimum target,
+          // while its width follows the label. Thread icon controls keep their own checks.
+          if (mobile) {
+            expect(disabled.width).toBeGreaterThanOrEqual(44)
+            expect(disabled.height).toBeGreaterThanOrEqual(44)
+          }
           browser.tapAt(Math.round(disabled.x), Math.round(disabled.y))
           expect(browser.url()).toContain('/new')
           browser.fill(textarea, 'Preserve this draft while changing density')
+          browser.waitForFunction(`document.querySelector('${send}')?.disabled === false`)
+          region(send, mobile)
           tapEdge('[data-slot="mode-plan"]', mobile)
           expect(browser.evaluate(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked')`)).toBe('true')
           for (const next of ['comfortable', 'compact', 'ultra', density]) appearance(next, theme)
@@ -227,6 +235,7 @@ describe('density-independent mobile action targets (#166)', () => {
           focus('[data-slot="mode-seg"] button:first-child')
           browser.press('Enter')
           expect(browser.evaluate(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked')`)).toBe('false')
+          tapEdge('[data-slot="execution-options"] summary', mobile)
           tapEdge('[data-slot="model-pill"]', mobile)
           browser.waitForFunction(`document.querySelector('[role="menu"]') !== null`)
           region('[role="menuitemradio"]', mobile)

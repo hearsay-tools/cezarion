@@ -123,6 +123,7 @@ describe('configurable composer run defaults', () => {
       // The popover is dismissed by the pick, but its exit animation still covers the chip row
       // for a frame or two — and the toggles below are exactly what this spec clicks next.
       browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
+      browser.click('[data-slot="execution-options"] summary')
       for (const slot of ['worktree-toggle', 'autonomous-toggle']) {
         expect(browser.evaluate(
           `document.querySelector('[data-slot="${slot}"]')?.getAttribute('aria-checked')`,
