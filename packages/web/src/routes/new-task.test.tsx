@@ -297,7 +297,7 @@ function serve(overrides: {
       if (url === '/api/v1/launch-key') return json({ key: data.launchKey })
       if (url === '/api/v1/ui-state' && method === 'GET') return json(data.uiState, data.uiStateStatus)
       if (url === '/api/v1/ui-state' && method === 'PUT') return json(body ?? {})
-      if (url === '/api/v1/runs' && method === 'POST') return json(data.createRun, data.createRunStatus)
+      if (url === '/api/v1/runs' && method === 'POST') return typeof data.createRun === 'function' ? data.createRun() : json(data.createRun, data.createRunStatus)
       if (url === '/api/v1/config' && method === 'GET')
         return typeof data.config === 'function'
           ? data.config()
@@ -2310,4 +2310,106 @@ describe('the composer runner pill carries the account', () => {
     // …and nothing account-shaped reaches the wire.
     expect(postedBody()).not.toHaveProperty('agentProfile')
   })
+})
+
+
+describe('retained task submission (#164)', () => {
+  it('keeps prompt and attachments read-only during delayed success and blocks repeat submits', async () => {
+    const delayed = deferredJson<{ id: string }>()
+    serve({ createRun: delayed.fetch })
+    renderNewTask()
+    await pillReady()
+    fireEvent.change(textarea(), { target: { value: '  Keep this prompt  ' } })
+    fireEvent.paste(textarea(), { clipboardData: { items: [{ kind: 'file', getAsFile: () => new File(['notes'], 'notes.txt', { type: 'text/plain' }) }] } })
+    await screen.findByRole('button', { name: 'Remove notes.txt' })
+    await startTask()
+    expect(textarea().value).toBe('  Keep this prompt  ')
+    expect(textarea().readOnly).toBe(true)
+    expect((screen.getByRole('button', { name: 'Remove notes.txt' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText('Starting task…').getAttribute('role')).toBe('status')
+    for (const keys of [{}, { ctrlKey: true }, { metaKey: true }]) fireEvent.keyDown(textarea(), { key: 'Enter', ...keys })
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    expect(requests.filter(r => r.method === 'POST' && r.url === '/api/v1/runs')).toHaveLength(1)
+    await act(async () => delayed.release({ id: 'delayed-task' }))
+    await waitFor(() => expect(location()).toBe('/tasks/delayed-task'))
+    expect(readDraft().text).toBe('')
+  })
+
+  it.each([503, 504])('retains failed draft and offers a deliberate retry after HTTP %s', async (status) => {
+    serve({ createRun: { error: status === 504 ? 'Gateway timeout' : 'Service unavailable' }, createRunStatus: status })
+    renderNewTask()
+    await pillReady()
+    fireEvent.change(textarea(), { target: { value: 'Retain on failure' } })
+    await startTask()
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Check Tasks'))
+    expect(screen.getByRole('alert').textContent).toContain('retry')
+    expect(screen.getByRole('alert').textContent).toContain(status === 504 ? 'Gateway timeout' : 'Service unavailable')
+    expect(textarea().value).toBe('Retain on failure')
+    expect(textarea().readOnly).toBe(false)
+    expect(readDraft().text).toBe('Retain on failure')
+    expect(requests.filter(r => r.method === 'POST' && r.url === '/api/v1/runs')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() => expect(requests.filter(r => r.method === 'POST' && r.url === '/api/v1/runs')).toHaveLength(2))
+  })
+
+  it('does not clear or navigate away from a newer draft after the submitting route unmounts', async () => {
+    const delayed = deferredJson<{ id: string }>()
+    serve({ createRun: delayed.fetch })
+    const first = renderNewTask()
+    await pillReady()
+    fireEvent.change(textarea(), { target: { value: 'Old task' } })
+    await startTask()
+    first.unmount()
+    renderNewTask()
+    await pillReady()
+    fireEvent.change(textarea(), { target: { value: 'New task' } })
+    await act(async () => delayed.release({ id: 'old-task' }))
+    expect(readDraft().text).toBe('New task')
+    expect(textarea().value).toBe('New task')
+    expect(location()).toBe('/new')
+  })
+})
+
+it.each(['plan', 'bookmarklet'] as const)('a late %s start cannot clear a remounted draft', async (mode) => {
+  const delayed = deferredJson<{ id: string }>()
+  serve({ createRun: delayed.fetch })
+  const first = renderNewTask(mode === 'bookmarklet' ? '/new?auto=1&ref=Old&key=k-real' : '/new')
+  if (mode === 'plan') {
+    await planTask('Old planned task')
+    fireEvent.click(document.querySelector('[data-slot="plan-start"]') as HTMLElement)
+  }
+  await waitFor(() => expect(requests.some(r => r.url === '/api/v1/runs' && r.method === 'POST')).toBe(true))
+  first.unmount()
+  renderNewTask()
+  await pillReady()
+  fireEvent.change(textarea(), { target: { value: 'Newer draft' } })
+  await act(async () => delayed.release({ id: 'old-created-task' }))
+  expect(readDraft().text).toBe('Newer draft')
+  expect(textarea().value).toBe('Newer draft')
+})
+
+it('clears the submitted dictation draft after delayed creation succeeds', async () => {
+  let recognition!: { onresult: ((event: unknown) => void) | null }
+  vi.stubGlobal('SpeechRecognition', class {
+    onresult = null
+    onerror = null
+    onend = null
+    start() { recognition = this }
+    stop() {}
+    abort() {}
+  })
+  const delayed = deferredJson<{ id: string }>()
+  serve({ createRun: delayed.fetch })
+  renderNewTask()
+  await pillReady()
+  fireEvent.change(textarea(), { target: { value: 'Typed' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+  act(() => recognition.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'and spoken' } }] }))
+  fireEvent.click(screen.getByRole('button', { name: 'Insert transcription and send' }))
+  await waitFor(() => expect(postedBody()).toMatchObject({ task: 'Typed and spoken' }))
+  expect(textarea().value).toBe('Typed and spoken')
+  expect(readDraft().text).toBe('Typed and spoken')
+  await act(async () => delayed.release({ id: 'dictated-task' }))
+  await waitFor(() => expect(location()).toBe('/tasks/dictated-task'))
+  expect(readDraft().text).toBe('')
 })

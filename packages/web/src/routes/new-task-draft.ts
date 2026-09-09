@@ -160,6 +160,12 @@ function isSource(raw: unknown): raw is TaskSource {
 // truth across reloads. Keyed by storage key, so one open cockpit holds every project's draft
 // independently — swapping the pill back and forth never round-trips through a stale singleton.
 const cache = new Map<string, NewTaskDraft>()
+const revisions = new Map<string, number>()
+
+/** A write (including a remount) invalidates cleanup from an older submission. */
+export function draftRevision(projectId: string | null = null): number {
+  return revisions.get(storageKey(projectId)) ?? 0
+}
 
 export function readDraft(projectId: string | null = null): NewTaskDraft {
   const key = storageKey(projectId)
@@ -178,6 +184,7 @@ export function readDraft(projectId: string | null = null): NewTaskDraft {
 
 export function writeDraft(next: NewTaskDraft, projectId: string | null = null): void {
   const key = storageKey(projectId)
+  revisions.set(key, draftRevision(projectId) + 1)
   cache.set(key, { ...next })
   try {
     localStorage.setItem(key, JSON.stringify(next))
@@ -193,7 +200,8 @@ export function writeDraft(next: NewTaskDraft, projectId: string | null = null):
  *  decision about the task that just started, and carrying it into the next one is how a skill
  *  picked once ended up silently running every task after it. A fresh `/new` starts with no
  *  skill; picking one again is one click. */
-export function clearStartedDraft(projectId: string | null = null): void {
+export function clearStartedDraft(projectId: string | null = null, expectedRevision?: number): void {
+  if (expectedRevision !== undefined && draftRevision(projectId) !== expectedRevision) return
   writeDraft({ ...readDraft(projectId), text: '', source: null }, projectId)
 }
 
@@ -201,6 +209,7 @@ export function clearStartedDraft(projectId: string | null = null): void {
  *  storage (a fresh page). */
 export function resetDraft(): void {
   cache.clear()
+  revisions.clear()
   try {
     for (const key of Object.keys(localStorage)) {
       if (key === STORAGE_KEY || key.startsWith(`${STORAGE_KEY}:`)) localStorage.removeItem(key)
