@@ -63,7 +63,7 @@ function Segmented<V extends string>({
       role="radiogroup"
       aria-label={label}
       data-slot={slot}
-      className="inline-flex w-fit gap-0.5 rounded-md border border-border bg-card p-0.5"
+      className="inline-flex w-fit gap-0.5 rounded-md border border-border bg-card p-0.5 max-md:max-w-full max-md:flex-wrap"
     >
       {options.map((option) => {
         const checked = option.value === value

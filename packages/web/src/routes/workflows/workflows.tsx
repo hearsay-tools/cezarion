@@ -354,7 +354,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
           {/* ---- canvas ---------------------------------------------------------------- */}
           <section data-slot="wb-main" className="mx-auto w-full min-w-0 max-w-3xl flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <div className="flex min-w-0 flex-1 items-center gap-2.5 max-md:basis-full">
                 <Input
                   ref={nameInput}
                   data-slot="wb-name"
@@ -368,7 +368,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
                   {stepCountLabel(steps)}
                 </span>
               </div>
-              <div className="flex shrink-0 items-center gap-1.5">
+              <div className="flex shrink-0 items-center gap-1.5 max-md:max-w-full max-md:flex-wrap">
                 {savedFile ? (
                   <Button
                     type="button"
