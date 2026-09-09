@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
 
 /**
  * The task quick-list, in a real browser, against a real cezar serving real runs.
@@ -451,6 +452,48 @@ describe('tasks table overview', () => {
     expect(browser.url()).toContain(scoped('/tasks/fix-done'))
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+  })
+
+  it('keeps task metadata AA-readable on normal and hovered rows with visible title focus', () => {
+    const row = `${TABLE_ROW}[data-run-id="fix-review-pr"]`
+    const metadata = `${row} [data-column-id="started"]`
+    browser.evaluate(`document.documentElement.style.setProperty('--default-transition-duration', '0s')`)
+    for (const theme of ['dark', 'light'] as const) {
+      browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
+      const normal = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
+      expect(normal.ratio, `${theme} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)
+      browser.hover(row)
+      const hovered = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
+      expect(hovered.ratio, `${theme} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
+      focusWithKeyboard(browser, `${row} a[href]`)
+      const focusStyle = browser.evaluate(`(() => {
+        const link = document.querySelector(${JSON.stringify(`${row} a[href]`)})
+        const probe = document.createElement('span')
+        probe.style.color = 'var(--link-foreground)'
+        document.body.append(probe)
+        const color = getComputedStyle(probe).color
+        probe.remove()
+        const style = getComputedStyle(link)
+        return { active: document.activeElement === link, color, outline: style.outlineStyle, width: style.outlineWidth }
+      })()` ) as { active: boolean; color: string; outline: string; width: string }
+      const focus = browser.evaluate(contrastSampleExpression(`${row} a[href]`, 'outline-color')) as ContrastSample
+      expect(focusStyle.active).toBe(true)
+      expect(focusStyle.outline).not.toBe('none')
+      expect(Number.parseFloat(focusStyle.width)).toBeGreaterThanOrEqual(2)
+      expect(focus.foreground).toBe(focusStyle.color)
+      expect(focus.ratio, `${theme} focus: ${focus.foreground} on ${focus.background}`).toBeGreaterThanOrEqual(3)
+    }
+
+    browser.setViewport(360, 640)
+    browser.goto(`${baseUrl}${scoped('/')}`)
+    const card = `[data-slot="task-card"][data-run-id="fix-review-pr"]`
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(card)}) !== null`)
+    focusWithKeyboard(browser, `${card} a[href]`)
+    const mobileFocus = browser.evaluate(
+      contrastSampleExpression(`${card} a[href]`, 'outline-color'),
+    ) as ContrastSample
+    expect(mobileFocus.ratio, `mobile focus: ${mobileFocus.foreground} on ${mobileFocus.background}`).toBeGreaterThanOrEqual(3)
+    browser.setViewport(1440, 900)
   })
 
   it('renames a task inline from its row — the hover pencil, committed by Enter, stored for real', async () => {

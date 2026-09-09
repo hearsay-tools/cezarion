@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
 import record from './fixtures/thread-run.record.json'
 
 /**
@@ -146,6 +147,38 @@ describe('task thread', () => {
     // The dedup rule end-to-end: the fixture file carries the v1 `text` twin of this message —
     // exactly one copy renders.
     expect(browser.count('[data-slot="assistant-message"] [data-streamdown="heading-2"]')).toBe(1)
+  })
+
+  it('keeps transcript links AA-readable with a permanent affordance and visible focus in both themes', () => {
+    const link = '[data-slot="assistant-message"] [data-streamdown="link"]'
+    browser.evaluate(`document.documentElement.style.setProperty('--default-transition-duration', '0s')`)
+    for (const theme of ['dark', 'light'] as const) {
+      browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
+      const normal = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
+      browser.evaluate(`document.querySelector(${JSON.stringify(link)}).scrollIntoView({ block: 'center' })`)
+      browser.hover(link)
+      const hovered = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
+      expect(normal.ratio, `${theme} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)
+      expect(hovered.ratio, `${theme} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
+      focusWithKeyboard(browser, link)
+      const affordance = browser.evaluate(`(() => {
+        const link = document.querySelector(${JSON.stringify(link)})
+        const style = getComputedStyle(link)
+        const probe = document.createElement('span')
+        probe.style.color = 'var(--link-foreground)'
+        document.body.append(probe)
+        const semantic = getComputedStyle(probe).color
+        probe.remove()
+        return { active: document.activeElement === link, decoration: style.textDecorationLine, outline: style.outlineStyle, width: style.outlineWidth, semantic }
+      })()` ) as { active: boolean; decoration: string; outline: string; width: string; semantic: string }
+      const focus = browser.evaluate(contrastSampleExpression(link, 'outline-color')) as ContrastSample
+      expect(affordance.decoration).toContain('underline')
+      expect(affordance.active).toBe(true)
+      expect(affordance.outline).not.toBe('none')
+      expect(Number.parseFloat(affordance.width)).toBeGreaterThanOrEqual(2)
+      expect(focus.foreground).toBe(affordance.semantic)
+      expect(focus.ratio, `${theme} focus: ${focus.foreground} on ${focus.background}`).toBeGreaterThanOrEqual(3)
+    }
   })
 
   it('highlights the ts fence through the lazy Shiki singleton, themed by the --syn-* tokens', () => {
