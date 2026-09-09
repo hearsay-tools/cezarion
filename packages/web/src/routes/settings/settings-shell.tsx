@@ -1,4 +1,5 @@
 import { ChevronRightIcon, SlidersHorizontalIcon } from 'lucide-react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { Link as RouterLink, NavLink as RouterNavLink } from 'react-router'
 import type { Capabilities } from '@open-mercato/cezar-api-client'
 import { Link as ScopedLink, NavLink as ScopedNavLink } from '@/lib/project-router'
@@ -49,6 +50,30 @@ function navComponents(scope: SettingsScope) {
   return scope === 'global'
     ? { Link: RouterLink, NavLink: RouterNavLink }
     : { Link: ScopedLink, NavLink: ScopedNavLink }
+}
+
+const OVERFLOW_EPSILON_PX = 1
+const PILL_EDGE_GUTTER_PX = 12
+
+function revealPill(scroller: HTMLElement, pill: HTMLElement) {
+  const scrollerRect = scroller.getBoundingClientRect()
+  const pillRect = pill.getBoundingClientRect()
+  // Hidden desktop stand-ins and jsdom have no layout. Waiting for a real box also keeps the
+  // reveal from guessing before the mobile shell has settled.
+  if (scrollerRect.width <= 0 || pillRect.width <= 0) return
+
+  const visibleLeft = scrollerRect.left + PILL_EDGE_GUTTER_PX
+  const visibleRight = scrollerRect.right - PILL_EDGE_GUTTER_PX
+  let delta = 0
+  if (pillRect.left < visibleLeft) delta = pillRect.left - visibleLeft
+  else if (pillRect.right > visibleRight) delta = pillRect.right - visibleRight
+  if (delta === 0) return
+
+  // Scroll only this horizontal viewport. `scrollIntoView` may also move the page vertically,
+  // which is especially disruptive when a deep-linked settings section has restored its scroll.
+  const target = scroller.scrollLeft + delta
+  const outwardTarget = delta < 0 ? Math.floor(target) : Math.ceil(target)
+  scroller.scrollTo({ left: Math.max(0, outwardTarget), behavior: 'auto' })
 }
 
 function SectionNav({
@@ -123,39 +148,109 @@ function SectionPills({
   capabilities?: Pick<Capabilities, 'singleProject'>
 }) {
   const { NavLink } = navComponents(scope)
+  const scrollerRef = useRef<HTMLElement>(null)
+  const [overflow, setOverflow] = useState({ start: false, end: false })
+  const updateOverflow = useCallback(() => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const start = scroller.scrollLeft > OVERFLOW_EPSILON_PX
+    const end = scroller.scrollWidth - scroller.clientWidth - scroller.scrollLeft > OVERFLOW_EPSILON_PX
+    setOverflow((current) =>
+      current.start === start && current.end === end ? current : { start, end },
+    )
+  }, [])
+  const revealActiveAndUpdateOverflow = useCallback(() => {
+    const scroller = scrollerRef.current
+    const active = scroller?.querySelector<HTMLElement>('[aria-current="page"]')
+    if (!scroller || !active) return
+    revealPill(scroller, active)
+    updateOverflow()
+  }, [updateOverflow])
+
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    revealActiveAndUpdateOverflow()
+
+    // The viewport changes on resize; pill widths also change with density and font layout.
+    // Observe both so a cue never goes stale while the page itself stays mounted.
+    const observer = typeof ResizeObserver === 'undefined'
+      ? undefined
+      : new ResizeObserver(revealActiveAndUpdateOverflow)
+    observer?.observe(scroller)
+    for (const pill of scroller.children) observer?.observe(pill)
+    window.addEventListener('resize', revealActiveAndUpdateOverflow)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', revealActiveAndUpdateOverflow)
+    }
+  }, [scope, capabilities?.singleProject, revealActiveAndUpdateOverflow])
+
+  useLayoutEffect(() => {
+    revealActiveAndUpdateOverflow()
+  }, [activeId, revealActiveAndUpdateOverflow])
+
   return (
-    <nav
-      aria-label="Settings sections"
-      data-slot="settings-nav-mobile"
-      className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-border px-3 py-2.5 md:hidden"
-    >
-      {/* Never the active pill: the index is a different route, and reaching it from a section
-          is the whole reason this entry exists. */}
-      <NavLink
-        to={settingsIndexPath(scope)}
-        end
-        data-slot="settings-nav-index"
-        className="rounded-full border border-border bg-card px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors"
+    <div className="relative shrink-0 md:hidden">
+      <nav
+        ref={scrollerRef}
+        aria-label="Settings sections"
+        data-slot="settings-nav-mobile"
+        onScroll={updateOverflow}
+        onFocusCapture={(event) => {
+          const target = event.target
+          if (target instanceof HTMLElement) revealPill(event.currentTarget, target)
+        }}
+        className="flex gap-1.5 overflow-x-auto border-b border-border px-3 py-2.5"
       >
-        General
-      </NavLink>
-      {visibleSettingsSections(scope, capabilities).map((section) => (
+        {/* Never the active pill: the index is a different route, and reaching it from a section
+            is the whole reason this entry exists. */}
         <NavLink
-          key={section.id}
-          to={settingsSectionPath(scope, section.id)}
-          data-section={section.id}
-          aria-current={section.id === activeId ? 'page' : undefined}
-          className={cn(
-            'rounded-full border px-3 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors',
-            section.id === activeId
-              ? 'border-transparent bg-contrast text-contrast-foreground'
-              : 'border-border bg-card text-muted-foreground',
-          )}
+          to={settingsIndexPath(scope)}
+          end
+          data-slot="settings-nav-index"
+          className="rounded-full border border-border bg-card px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors"
         >
-          {section.title}
+          General
         </NavLink>
-      ))}
-    </nav>
+        {visibleSettingsSections(scope, capabilities).map((section) => (
+          <NavLink
+            key={section.id}
+            to={settingsSectionPath(scope, section.id)}
+            data-section={section.id}
+            aria-current={section.id === activeId ? 'page' : undefined}
+            className={cn(
+              'rounded-full border px-3 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors',
+              section.id === activeId
+                ? 'border-transparent bg-contrast text-contrast-foreground'
+                : 'border-border bg-card text-muted-foreground',
+            )}
+          >
+            {section.title}
+          </NavLink>
+        ))}
+      </nav>
+      {/* These stay inside the row's existing 12px padding gutter. Active and focused pills are
+          revealed with the same inset, keeping labels and rings clear of the visual cue. */}
+      <span
+        aria-hidden="true"
+        data-slot="settings-overflow-start"
+        data-visible={overflow.start}
+        className={cn(
+          'pointer-events-none absolute inset-y-px left-0 z-10 w-3 bg-gradient-to-r from-background to-transparent',
+          !overflow.start && 'hidden',
+        )}
+      />
+      <span
+        aria-hidden="true"
+        data-slot="settings-overflow-end"
+        data-visible={overflow.end}
+        className={cn(
+          'pointer-events-none absolute inset-y-px right-0 z-10 w-3 bg-gradient-to-l from-background to-transparent',
+          !overflow.end && 'hidden',
+        )}
+      />
+    </div>
   )
 }
 
