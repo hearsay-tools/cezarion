@@ -120,6 +120,10 @@ HTTP acknowledgement, and Pi at the matching prompt response id. Claude has no
 per-prompt RPC receipt: its write callback proves only successful pipe delivery,
 not model execution. A transport rejection remains replayable; a successfully
 accepted command followed by a provider failure retains its transport receipt.
+OpenCode's provider-error SSE frame may overtake the independent HTTP ACK: the
+runner holds v1 failure and subsequent SSE frames until that request settles,
+with the teardown grace as an upper bound. An unresponsive ACK is aborted and
+remains undelivered; explicit end/interrupt still abort immediately.
 Human `sendMessage` keeps its existing synchronous semantics. The `agent-input` event
 carries `{input: {id, source: 'agent'|'lifecycle', parentRunId, text, createdAt,
 deliveredAt?}}`; it is not a `user-message`, does not resolve an ask card, and
