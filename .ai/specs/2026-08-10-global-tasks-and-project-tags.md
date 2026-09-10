@@ -105,7 +105,7 @@ There is deliberately **no project facet**. Narrowing this page to one project i
 
   The **Active/Archived split is `archived=1`, present-or-absent**, rather than `view=active|archived`: Active is the default and the overwhelmingly common case, so spelling it out would put a key in every shared link that says only "the normal thing". Defaults emitting nothing is the same rule the facets follow.
 
-  It still reaches the shared `useListView()` context — the thing that keeps this page, the per-project table and the sidebar quick-list answering one question — but ONE WAY: here the URL is the authority and the context follows it. Nothing else on this route can change the view (the multi-project sidebar's groups only read it), so there is no loop to break, and walking from an archived view into a project keeps the same question in force.
+  The URL is this table's own Active/Archived state. The sidebar quick-list keeps a separate in-memory filter and does not follow `archived=1` (reversed #209).
 - **A run whose project has left the registry still renders**, showing its raw project id and grouping as untagged. Dropping a task from the list because the registry response is a few seconds staler than the index would be the worse failure.
 
 ## Backward compatibility

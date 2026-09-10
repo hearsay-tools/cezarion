@@ -799,7 +799,7 @@ describe('TasksOverview — usage cells', () => {
 })
 
 describe('TasksOverview — header', () => {
-  it('shows the shared tabs with counts and reports a flip', () => {
+  it('shows the Active/Archived tabs with counts and reports a flip', () => {
     const { onViewChange } = renderOverview({
       runs: [run({ status: 'running' }), run({ status: 'done' }), run({ status: 'done', archived: true })],
     })
@@ -1107,7 +1107,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
       <QueryClientProvider client={createQueryClient()}>
         <MemoryRouter>
           <ListViewProvider>
-            {/* The sidebar and the overview together, under ONE provider — the point under test. */}
+            {/* Sidebar and overview together: they must keep independent Active/Archived state. */}
             <TaskQuickListContainer />
             <TasksOverviewRoute />
             <Toaster />
@@ -1130,24 +1130,36 @@ describe('TasksOverviewRoute — wired to the app', () => {
     document.querySelector(`[data-slot="overview-tab"][data-view="${view}"]`) as HTMLElement
   const sidebarRow = (id: string) => document.querySelector(`[data-slot="task-row"][data-run-id="${id}"]`)
 
-  it('shares the Active/Archived state with the sidebar — either set of tabs flips both', async () => {
+  it('keeps the sidebar and table Active/Archived tabs independent', async () => {
     renderApp([run({ id: 'act', status: 'running' }), run({ id: 'arc', status: 'done', archived: true })])
     await waitFor(() => expect(tableRow('act')).not.toBeNull())
     expect(sidebarRow('act')).not.toBeNull()
+    expect(overviewTab('active').getAttribute('aria-pressed')).toBe('true')
+    expect(sidebarTab('active').getAttribute('aria-pressed')).toBe('true')
 
-    // Flip in the table header → the sidebar follows.
     fireEvent.click(overviewTab('archived'))
+    expect(overviewTab('archived').getAttribute('aria-pressed')).toBe('true')
+    expect(sidebarTab('active').getAttribute('aria-pressed')).toBe('true')
+    expect(tableRow('arc')).not.toBeNull()
+    expect(tableRow('act')).toBeNull()
+    expect(sidebarRow('act')).not.toBeNull()
+    expect(sidebarRow('arc')).toBeNull()
+
+    fireEvent.click(sidebarTab('archived'))
     expect(sidebarTab('archived').getAttribute('aria-pressed')).toBe('true')
+    expect(overviewTab('archived').getAttribute('aria-pressed')).toBe('true')
     expect(tableRow('arc')).not.toBeNull()
     expect(tableRow('act')).toBeNull()
     expect(sidebarRow('arc')).not.toBeNull()
     expect(sidebarRow('act')).toBeNull()
 
-    // Flip back in the sidebar → the table follows.
     fireEvent.click(sidebarTab('active'))
-    expect(overviewTab('active').getAttribute('aria-pressed')).toBe('true')
-    expect(tableRow('act')).not.toBeNull()
-    expect(tableRow('arc')).toBeNull()
+    expect(sidebarTab('active').getAttribute('aria-pressed')).toBe('true')
+    expect(overviewTab('archived').getAttribute('aria-pressed')).toBe('true')
+    expect(tableRow('arc')).not.toBeNull()
+    expect(tableRow('act')).toBeNull()
+    expect(sidebarRow('act')).not.toBeNull()
+    expect(sidebarRow('arc')).toBeNull()
   })
 
   it('adopts persisted workspace choices, updates optimistically, and reloads the server answer', async () => {

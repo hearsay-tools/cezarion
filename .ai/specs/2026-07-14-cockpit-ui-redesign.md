@@ -252,7 +252,7 @@ Tabs sit in the run detail next to the thread: **Session | Changes | Files** (mo
 
 ### Task list & table (#389)
 
-- The **full-width table is the Tasks overview and home** (`/`): the Tasks nav item always lands here — also when already active ("back to overview") — per PR #392, which removed the list/table toggle. **Active/Archived filter tabs live in the table header** and share state with the sidebar quick-list tabs. Columns keep live CPU/Mem/Procs and gain editable Title (auto-summary), ±, and branch; clicking a row (or a sidebar quick-list item) opens `/tasks/:id` with Tasks still active.
+- The **full-width table is the Tasks overview and home** (`/`): the Tasks nav item always lands here — also when already active ("back to overview") — per PR #392, which removed the list/table toggle. **Active/Archived filter tabs live in the table header**, independent of the sidebar quick-list tabs (reversed #209: the original "share state" rule hid live sidebar runs while browsing archived table rows). Per-project table state is local; global `/tasks` uses `archived=1` in the URL; the sidebar filter stays in-memory. Both default to Active on a fresh load. Columns keep live CPU/Mem/Procs and gain editable Title (auto-summary), ±, and branch; clicking a row (or a sidebar quick-list item) opens `/tasks/:id` with Tasks still active.
 - Sidebar quick-list rows: status dot, editable auto-summary title, `± stat` chip, PR chip, age/queue position.
 
 ### GitHub tab (forge tab)
