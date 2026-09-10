@@ -7,6 +7,7 @@ import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { useSidebarNavigate } from '@/components/app-shell'
 import { useListView } from '@/components/list-view'
 import { activeNavPath, visibleNavItems } from '@/components/nav-items'
+import { NavRowContent, navRowClass } from '@/components/nav-row'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { QuickListBuckets } from '@/components/task-quick-list'
 import { Link, pathnameProjectId, scopeTo, stripProjectPrefix, useProjectMatch } from '@/lib/project-router'
@@ -256,13 +257,13 @@ function ProjectGroup({
         className={cn(
           // 44px touch target in the drawer, the mockup's 34px row on desktop — the same
           // relaxation the flat nav makes.
-          'flex h-11 w-full items-center gap-[7px] rounded-lg px-2 text-left text-[13px] font-semibold transition-colors hover:bg-muted md:h-[34px]',
+          'flex h-11 w-full items-center gap-[7px] rounded-lg px-2 text-left text-[13px] font-semibold text-foreground transition-colors hover:bg-muted md:h-[34px]',
           active && 'bg-muted',
         )}
       >
         <ChevronDownIcon
           className={cn(
-            'size-3 shrink-0 text-muted-foreground transition-transform',
+            'size-3 shrink-0 text-icon transition-transform',
             collapsed && '-rotate-90',
           )}
           aria-hidden="true"
@@ -293,10 +294,10 @@ function ProjectGroup({
           data-slot="project-group-body"
           // The gap and the rail are what make the header read as the PARENT of these rows.
           // Without them the active group's `bg-muted` header sits flush against the active nav
-          // row's `bg-muted` and the two fuse into one block — the project name then reads as
-          // just another menu item. The rail is offset to sit under the chevron, so the whole
-          // body hangs off the same vertical the disclosure control is on.
-          className="mt-1 ml-[14px] border-l border-border pl-2"
+          // row and the two fuse into one block — the project name then reads as just another
+          // menu item. The redesign draws the rail 2px wide on the group's own left edge, with
+          // the body indented 24px inside it.
+          className="mt-1 border-l-2 border-border pl-6"
         >
           <nav aria-label={`${project.name} navigation`}>
             {/* Forge-gated per PROJECT (#698): the entry's own remote decides whether THIS
@@ -320,12 +321,9 @@ function ProjectGroup({
                   to={scopeTo(project.id, item.to)}
                   onClick={onNavigate}
                   aria-current={isActive ? 'page' : undefined}
-                  className={cn(
-                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
-                    isActive && 'bg-muted font-semibold text-foreground',
-                  )}
+                  className={navRowClass(isActive)}
                 >
-                  <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+                  <NavRowContent icon={Icon} active={isActive}>
                   {item.label}
                   {/* `/api/todos` is fetched for the active scope only, so only the active
                       group has a real count to show — a badge on the others would be the active
@@ -344,6 +342,7 @@ function ProjectGroup({
                       <span className="sr-only">Skills update available</span>
                     </span>
                   ) : null}
+                  </NavRowContent>
                 </Link>
               )
             })}
@@ -376,7 +375,7 @@ function ProjectGroup({
             to={scopeTo(project.id, '/')}
             onClick={onNavigate}
             data-slot="project-group-more"
-            className="flex h-9 items-center rounded-md px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground md:h-7"
+            className="flex h-9 items-center rounded-md pl-[25px] pr-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground md:h-7"
           >
             More…
           </Link>

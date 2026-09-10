@@ -59,6 +59,10 @@ describe('resolveGetRequest', () => {
     { name: '/cezarion-lockup-dark.svg (sidebar lockup, dark) → passthrough', path: '/cezarion-lockup-dark.svg', target: 'passthrough' },
     { name: '/cezarion-mark-light.svg (favicon, light) → passthrough', path: '/cezarion-mark-light.svg', target: 'passthrough' },
     { name: '/cezarion-mark-dark.svg (favicon, dark) → passthrough', path: '/cezarion-mark-dark.svg', target: 'passthrough' },
+    { name: '/cezarion-mark-light.png (redesign mark, light) → passthrough', path: '/cezarion-mark-light.png', target: 'passthrough' },
+    { name: '/cezarion-mark-dark.png (redesign mark, dark) → passthrough', path: '/cezarion-mark-dark.png', target: 'passthrough' },
+    { name: '/cezarion-wordmark-light.png (redesign wordmark, light) → passthrough', path: '/cezarion-wordmark-light.png', target: 'passthrough' },
+    { name: '/cezarion-wordmark-dark.png (redesign wordmark, dark) → passthrough', path: '/cezarion-wordmark-dark.png', target: 'passthrough' },
     { name: '/cezarion-mark.svg → the shell (retired single-file favicon)', path: '/cezarion-mark.svg', target: 'dist' },
     { name: '/open-mercato.svg → the shell (retired favicon path)', path: '/open-mercato.svg', target: 'dist' },
     // Passthrough is about ownership, not about the build being there.

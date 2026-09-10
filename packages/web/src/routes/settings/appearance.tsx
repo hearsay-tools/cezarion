@@ -26,11 +26,12 @@ const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: ComponentType<SV
   { value: 'dark', label: 'Dark', icon: MoonIcon },
 ]
 
-/** Swatches point at the STABLE family tokens (`--accent-lime`, `--violet`), not `--primary` —
- *  the whole point of the control is that `--primary` changes under it. */
+/** Swatches point at the STABLE family tokens (`--brand`, `--accent-lime`), not `--primary` —
+ *  the whole point of the control is that `--primary` changes under it. Violet first: it is the
+ *  default since the redesign. */
 const ACCENT_OPTIONS: Array<{ value: Accent; label: string; swatch: string }> = [
+  { value: 'violet', label: 'Violet', swatch: 'var(--brand)' },
   { value: 'lime', label: 'Lime', swatch: 'var(--accent-lime)' },
-  { value: 'violet', label: 'Violet', swatch: 'var(--violet)' },
 ]
 
 const DENSITY_OPTIONS: Array<{ value: Density; label: string }> = [

@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ScaleIcon } from 'lucide-react'
+import { ChevronDownIcon, CornerDownRightIcon, ScaleIcon } from 'lucide-react'
 import * as React from 'react'
 import { useHealth, usePinRun, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useProjectMatch } from '@/lib/project-router'
@@ -140,7 +140,7 @@ export function QuickListBuckets({
     <>
       {buckets.map((bucket) => (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
-          <h2 className="px-3 pt-2.5 pb-1 text-[11px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
+          <h2 className="px-2.5 pt-5 pb-1 text-[11px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
             {bucket.label}
           </h2>
           {bucket.rows.map((row) => (
@@ -187,13 +187,19 @@ function ViewTab({
       aria-pressed={isActive}
       onClick={() => onSelect(view)}
       className={cn(
+        // The same segmented control as the Tasks toolbar (redesign): brand fill + accent ink
+        // on the selected segment, the gold count beside it.
         'flex h-7 flex-1 items-center justify-center gap-1.5 rounded-[7px] text-[12.5px] font-medium text-muted-foreground',
-        isActive && 'bg-card font-semibold text-foreground shadow-xs'
+        isActive && 'bg-brand/20 font-semibold text-accent-ink shadow-ring'
       )}
     >
       {children}
       {/* No "0": an empty bucket says so by being empty. */}
-      {count > 0 ? <span className="font-mono text-[11px] tabular-nums">{count}</span> : null}
+      {count > 0 ? (
+        <span className={cn('font-mono text-[11px] font-semibold tabular-nums', isActive && 'text-accent-count')}>
+          {count}
+        </span>
+      ) : null}
     </button>
   )
 }
@@ -221,16 +227,19 @@ function Row({
 }) {
   if (row.kind === 'run') {
     return (
-      <RunRow
-        run={row.run}
-        queuePosition={row.queuePosition}
-        currentRunId={currentRunId}
-        now={now}
-        scope={scope}
-        showTokens={showTokens}
-        showCost={showCost}
-        onTogglePin={onTogglePin}
-      />
+      <>
+        <RunRow
+          run={row.run}
+          queuePosition={row.queuePosition}
+          currentRunId={currentRunId}
+          now={now}
+          scope={scope}
+          showTokens={showTokens}
+          showCost={showCost}
+          onTogglePin={onTogglePin}
+        />
+        {row.workers ? <WorkerRows workers={row.workers} currentRunId={currentRunId} scope={scope} /> : null}
+      </>
     )
   }
   return (
@@ -424,7 +433,14 @@ function RunRow({
         aria-current={isActive ? 'page' : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 py-[7px] pr-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground"
       >
-        {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
+        {/* A worker that could not nest under its parent (archived away, filtered out) still says
+            what it is — the redesign's connector glyph, with the word for assistive tech. */}
+        {run.delegation?.role === 'worker' ? (
+          <>
+            <CornerDownRightIcon className="size-3.5 shrink-0 text-soft-foreground" aria-hidden="true" />
+            <span className="sr-only">Worker</span>
+          </>
+        ) : null}
         {variant ? (
           <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-violet/15 font-mono text-[9.5px] font-semibold text-violet">
             {run.variant ?? '?'}
@@ -493,6 +509,63 @@ function RunRow({
           className={ROW_PIN_CLASS}
         />
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * The workers a task spawned, hung under its row on a 1px rail (redesign, "Recent task —
+ * workers"): a 5px status dot and the title at 12px in secondary ink — quieter than the parent,
+ * because they are the parent's detail, not peers of it. Each row is its own link to the
+ * worker's thread; `data-depth="1"` is how a test or a style asks which rows are nested.
+ *
+ * No age, no diff, no pin: the parent carries the moment; the worker's own numbers live in the
+ * Tasks table and its thread. What the column has to spend goes to the title.
+ */
+function WorkerRows({
+  workers,
+  currentRunId,
+  scope,
+}: {
+  workers: RunRecord[]
+  currentRunId: string | null
+  scope: string | null
+}) {
+  return (
+    <div data-slot="task-row-workers" className="mb-1 ml-[13px] border-l border-border">
+      {workers.map((worker) => {
+        const attention = deriveAttention(worker)
+        const isActive = worker.id === currentRunId
+        const title = runTitle(worker)
+        return (
+          <Link
+            key={worker.id}
+            to={scopeTo(scope, `/tasks/${worker.id}`)}
+            title={title}
+            data-slot="task-row"
+            data-run-id={worker.id}
+            data-depth="1"
+            data-active={isActive ? 'true' : undefined}
+            aria-current={isActive ? 'page' : undefined}
+            className={cn(
+              'selection-row flex items-center gap-2 rounded-sm py-1.5 pr-2.5 pl-5 hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
+              isActive && 'bg-muted',
+            )}
+          >
+            <StatusDot
+              tone={attention.tone}
+              pulse={attention.pulse}
+              aria-label={attention.label}
+              role="img"
+              className="size-[5px]"
+            />
+            <span className="sr-only">Worker</span>
+            <span data-slot="task-row-title" className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
+              {title}
+            </span>
+          </Link>
+        )
+      })}
     </div>
   )
 }

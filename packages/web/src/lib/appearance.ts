@@ -15,9 +15,12 @@ export const ACCENT_STORAGE_KEY = 'cez-accent'
 export const DENSITY_STORAGE_KEY = 'cez-density'
 export const WIDTH_STORAGE_KEY = 'cez-width'
 
-/** The two accents the token sheet can express today: `lime` is `--primary` as shipped;
- *  `violet` swaps the `--primary` family onto the existing `--violet` tokens (index.css
- *  `:root[data-accent="violet"]`). More accents = more token families there, nothing here. */
+/** The two accents the token sheet can express today. Since the pen.dev redesign `violet` is
+ *  the brand purple `--primary` ships with (the stock sheet, no attribute); `lime` swaps the
+ *  `--primary` family onto the `--accent-lime` tokens (index.css `:root[data-accent="lime"]`).
+ *  The stored ids are unchanged so every persisted `ui-state.json` keeps meaning what it said:
+ *  a saved `lime` stays lime, a saved `violet` gets the purple it asked for. More accents = more
+ *  token families there, nothing here. */
 export type Accent = 'lime' | 'violet'
 
 /** Density shrinks Tailwind v4's one spacing token (`--spacing`, default 4px/unit) so every
@@ -30,7 +33,7 @@ export type Density = 'comfortable' | 'compact' | 'ultra'
  *  to 1180px so long transcripts use more of the screen. Type size and spacing stay untouched. */
 export type Width = 'narrow' | 'wide'
 
-export const DEFAULT_ACCENT: Accent = 'lime'
+export const DEFAULT_ACCENT: Accent = 'violet'
 export const DEFAULT_DENSITY: Density = 'comfortable'
 export const DEFAULT_WIDTH: Width = 'narrow'
 
@@ -87,7 +90,7 @@ export function writeStoredAppearance(appearance: Appearance): void {
   }
 }
 
-/** Stamp the root element. Defaults REMOVE the attribute rather than writing `data-accent="lime"`,
+/** Stamp the root element. Defaults REMOVE the attribute rather than writing `data-accent="violet"`,
  *  so the stock token sheet applies untouched and the CSS only ever names the non-default cases. */
 export function applyAppearance(root: HTMLElement, appearance: Appearance): void {
   if (appearance.accent === DEFAULT_ACCENT) delete root.dataset.accent

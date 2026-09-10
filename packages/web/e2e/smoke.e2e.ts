@@ -82,14 +82,15 @@ type BrandFacts = {
   headerOverflow: number
 }
 
-/** Measure the shipped SVG as the browser actually rasterizes it at CSS size. The right half is
- * the word rather than the atom mark; counting pixels that differ from its opaque background
+/** Measure the shipped wordmark as the browser actually rasterizes it at CSS size. The lockup is
+ * two images since the pen.dev redesign — the orbit mark and the wordmark — so this reads the
+ * wordmark alone; counting pixels that differ from its (transparent → band-coloured) background
  * catches a lockup whose box is technically visible while its letters are only a few pixels tall. */
 function brandFacts(scope: string): BrandFacts {
   return browser.evaluate(`(() => {
     const root = document.querySelector(${JSON.stringify(scope)})
-    const img = root.querySelector('[data-slot="brand-lockup"]')
-    const header = img.parentElement
+    const img = root.querySelector('[data-slot="brand-lockup-wordmark"]')
+    const header = img.closest('[data-slot="sidebar-brand"]') ?? img.parentElement
     const rect = img.getBoundingClientRect()
     const canvas = document.createElement('canvas')
     canvas.width = Math.round(rect.width)
@@ -101,7 +102,7 @@ function brandFacts(scope: string): BrandFacts {
     let minY = canvas.height
     let maxY = -1
     for (let y = 0; y < canvas.height; y += 1) {
-      for (let x = Math.floor(canvas.width / 2); x < canvas.width; x += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
         const offset = (y * canvas.width + x) * 4
         const contrast = Math.max(
           Math.abs(pixels[offset] - background[0]),
@@ -214,30 +215,31 @@ describe('cockpit app shell', () => {
       }
     })()`) as { search: number; gear: number; theme: number; rowCount: number }
 
-    // Row 1 is the search bar; row 2 carries the gear and the toggle on one shared centerline.
+    // Row 1 is the search bar; row 2 carries the gear and the toggle on one shared centerline;
+    // row 3 is the version chip alone (pen.dev redesign).
     expect(footerRows.search).toBeLessThan(footerRows.gear)
     expect(Math.abs(footerRows.theme - footerRows.gear)).toBeLessThanOrEqual(1)
-    // Exactly two rows — every other footer control shares the controls row's centerline.
-    expect(footerRows.rowCount).toBe(2)
+    // Exactly three rows — every other footer control shares the controls row's centerline.
+    expect(footerRows.rowCount).toBe(3)
   })
 
   it('keeps the themed wordmark readable and geometry-stable at the minimum sidebar width', () => {
     browser.goto(baseUrl + scoped('/'))
     setTheme('light')
-    browser.waitForFunction(`document.querySelector('[data-slot="brand-lockup"]')?.complete === true`)
+    browser.waitForFunction(`document.querySelector('[data-slot="brand-lockup-wordmark"]')?.complete === true`)
     const light = brandFacts('[data-slot="sidebar"]')
 
-    expect(light.src).toBe('/cezarion-lockup-light.svg')
+    expect(light.src).toBe('/cezarion-wordmark-light.png')
     expect(light.height).toBeGreaterThanOrEqual(34)
     expect(light.paintedTextHeight).toBeGreaterThanOrEqual(9)
     expect(light.headerOverflow).toBeLessThanOrEqual(0)
 
     browser.click('[data-slot="sidebar"] [data-slot="theme-toggle"]')
     browser.waitForFunction(
-      `(() => { const img = document.querySelector('[data-slot="sidebar"] [data-slot="brand-lockup"]'); return img?.getAttribute('src') === '/cezarion-lockup-dark.svg' && img.complete && img.naturalWidth > 0 })()`,
+      `(() => { const img = document.querySelector('[data-slot="sidebar"] [data-slot="brand-lockup-wordmark"]'); return img?.getAttribute('src') === '/cezarion-wordmark-dark.png' && img.complete && img.naturalWidth > 0 })()`,
     )
     const dark = brandFacts('[data-slot="sidebar"]')
-    expect(dark.src).toBe('/cezarion-lockup-dark.svg')
+    expect(dark.src).toBe('/cezarion-wordmark-dark.png')
     expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
     expect(dark.paintedTextHeight).toBeGreaterThanOrEqual(9)
     expect(dark.headerOverflow).toBeLessThanOrEqual(0)
@@ -487,20 +489,20 @@ describe('mobile shell', () => {
         setTheme('light')
         openDrawer()
         browser.waitForFunction(
-          `document.querySelector('${DRAWER} [data-slot="brand-lockup"]')?.complete === true`,
+          `document.querySelector('${DRAWER} [data-slot="brand-lockup-wordmark"]')?.complete === true`,
         )
         const light = brandFacts(DRAWER)
-        expect(light.src).toBe('/cezarion-lockup-light.svg')
+        expect(light.src).toBe('/cezarion-wordmark-light.png')
         expect(light.height).toBeGreaterThanOrEqual(34)
         expect(light.paintedTextHeight).toBeGreaterThanOrEqual(9)
         expect(light.headerOverflow).toBeLessThanOrEqual(0)
 
         browser.click(`${DRAWER} [data-slot="theme-toggle"]`)
         browser.waitForFunction(
-          `(() => { const img = document.querySelector('${DRAWER} [data-slot="brand-lockup"]'); return img?.getAttribute('src') === '/cezarion-lockup-dark.svg' && img.complete && img.naturalWidth > 0 })()`,
+          `(() => { const img = document.querySelector('${DRAWER} [data-slot="brand-lockup-wordmark"]'); return img?.getAttribute('src') === '/cezarion-wordmark-dark.png' && img.complete && img.naturalWidth > 0 })()`,
         )
         const dark = brandFacts(DRAWER)
-        expect(dark.src).toBe('/cezarion-lockup-dark.svg')
+        expect(dark.src).toBe('/cezarion-wordmark-dark.png')
         expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
         expect(dark.paintedTextHeight).toBeGreaterThanOrEqual(9)
         expect(dark.headerOverflow).toBeLessThanOrEqual(0)

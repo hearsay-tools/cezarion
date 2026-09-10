@@ -31,7 +31,9 @@ export interface TaskColumnDefinition {
   canFold: boolean
   defaultExpanded: boolean
   align: 'left' | 'right'
-  /** Preferred expanded width. Extra table width is distributed after these readable defaults. */
+  /** Preferred expanded width. Extra table width is distributed after these readable defaults.
+   *  The defaults sum to ≤1138px — the table's width at a 1440px viewport beside the 262px
+   *  sidebar — so the design's proportions hold without a horizontal scrollbar there. */
   width?: string
   icon?: TaskColumnIcon
   capability?: 'tokens' | 'cost'
@@ -42,7 +44,7 @@ export interface TaskColumnDefinition {
  * this list so capability-hidden and folded columns cannot drift structurally.
  */
 export const TASK_COLUMNS = [
-  { id: 'status', label: 'Status', canFold: false, defaultExpanded: true, align: 'left', width: '120px' },
+  { id: 'status', label: 'Status', canFold: false, defaultExpanded: true, align: 'left', width: '124px' },
   { id: 'task', label: 'Task', canFold: false, defaultExpanded: true, align: 'left', width: '320px' },
   {
     id: 'workflow',
@@ -50,7 +52,7 @@ export const TASK_COLUMNS = [
     canFold: true,
     defaultExpanded: true,
     align: 'left',
-    width: '84px',
+    width: '96px',
     icon: 'workflow',
   },
   {
@@ -62,14 +64,14 @@ export const TASK_COLUMNS = [
     width: '120px',
     icon: 'branch',
   },
-  { id: 'diff', label: '±', canFold: true, defaultExpanded: true, align: 'left', width: '84px', icon: 'diff' },
+  { id: 'diff', label: '±', canFold: true, defaultExpanded: true, align: 'right', width: '72px', icon: 'diff' },
   {
     id: 'reference',
     label: 'Ref',
     canFold: true,
     defaultExpanded: true,
-    align: 'left',
-    width: '104px',
+    align: 'right',
+    width: '72px',
     icon: 'reference',
   },
   {
@@ -78,7 +80,7 @@ export const TASK_COLUMNS = [
     canFold: true,
     defaultExpanded: true,
     align: 'right',
-    width: '112px',
+    width: '104px',
     icon: 'tokens',
     capability: 'tokens',
   },
@@ -88,7 +90,7 @@ export const TASK_COLUMNS = [
     canFold: true,
     defaultExpanded: true,
     align: 'right',
-    width: '64px',
+    width: '68px',
     icon: 'cost',
     capability: 'cost',
   },
@@ -99,7 +101,7 @@ export const TASK_COLUMNS = [
     canFold: true,
     defaultExpanded: true,
     align: 'right',
-    width: '80px',
+    width: '92px',
     icon: 'memory',
   },
   {
@@ -108,7 +110,7 @@ export const TASK_COLUMNS = [
     canFold: true,
     defaultExpanded: true,
     align: 'right',
-    width: '68px',
+    width: '84px',
     icon: 'started',
   },
 ] as const satisfies readonly TaskColumnDefinition[]

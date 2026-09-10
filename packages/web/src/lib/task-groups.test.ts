@@ -10,11 +10,13 @@ import {
   groupRuns,
   groupTitle,
   listCounts,
+  nestWorkers,
   queuePositions,
   refPrefixMatches,
   runTitle,
   sortRuns,
   splitRefPrefix,
+  workerParentId,
   type QuickListBucket,
 } from '@/lib/task-groups'
 
@@ -636,4 +638,119 @@ it('counts a parked parent question as Needs you from the run summary', () => {
   expect(bucketOf(record, 'active')).toBe('Needs you')
   expect(listCounts([record])).toEqual({ active: 1, archived: 0, waiting: 1 })
   expect(bucketOf({ ...record, hasPendingHumanAsk: false }, 'active')).toBe('Working')
+})
+
+/** A worker record: the slice of `delegation` the list reads (`role` + `parentRunId`). */
+function worker(parentRunId: string, over: Partial<RunRecord> = {}): RunRecord {
+  return run({
+    delegation: {
+      role: 'worker',
+      permissions: [],
+      parentRunId,
+      workspace: {
+        ownerRunId: 'w',
+        resourceId: 'w',
+        kind: 'owned-isolated',
+        path: '/w',
+        branch: 'cez/w',
+        baselineSha: 'a'.repeat(40),
+      },
+    },
+    ...over,
+  })
+}
+
+describe('workerParentId', () => {
+  it('names the parent of an owned worker and nothing else', () => {
+    expect(workerParentId(worker('parent'))).toBe('parent')
+    expect(workerParentId(run())).toBeNull()
+    expect(workerParentId(run({ delegation: { role: 'root', permissions: [], receipts: [] } }))).toBeNull()
+    expect(workerParentId(run({ delegation: { role: 'invalid' } }))).toBeNull()
+  })
+})
+
+describe('nestWorkers', () => {
+  it('places each worker directly under its parent, in the order they arrived', () => {
+    const parent = run({ id: 'p', createdAt: '2026-07-14T10:00:00.000Z' })
+    const other = run({ id: 'o', createdAt: '2026-07-14T12:00:00.000Z' })
+    const w1 = worker('p', { id: 'w1', createdAt: '2026-07-14T13:00:00.000Z' })
+    const w2 = worker('p', { id: 'w2', createdAt: '2026-07-14T11:00:00.000Z' })
+    const rows = nestWorkers(sortRuns([parent, other, w1, w2], 'active'))
+    expect(rows.map((row) => `${row.run.id}:${row.depth}`)).toEqual(['o:0', 'p:0', 'w1:1', 'w2:1'])
+  })
+
+  it('leaves a worker whose parent is not in the list where it sorted', () => {
+    const orphan = worker('gone', { id: 'w' })
+    const plain = run({ id: 'a' })
+    const rows = nestWorkers([plain, orphan])
+    expect(rows.map((row) => `${row.run.id}:${row.depth}`)).toEqual(['a:0', 'w:0'])
+  })
+
+  it('carries queue positions from the full list onto each row', () => {
+    const parent = run({ id: 'p', status: 'running' })
+    const queued = worker('p', { id: 'q', status: 'queued' })
+    const rows = nestWorkers([parent, queued], queuePositions([parent, queued]))
+    expect(rows.find((row) => row.run.id === 'q')?.queuePosition).toBe(1)
+    expect(rows.find((row) => row.run.id === 'p')?.queuePosition).toBeNull()
+  })
+})
+
+describe('groupRuns — worker nesting', () => {
+  it('folds workers under their parent row instead of listing them as peers', () => {
+    const parent = run({ id: 'p', createdAt: '2026-07-14T10:00:00.000Z' })
+    const w = worker('p', { id: 'w', createdAt: '2026-07-14T11:00:00.000Z' })
+    const buckets = groupRuns([parent, w], 'active')
+    expect(shape(buckets)).toEqual(['Recent: p'])
+    const row = rowsOf(buckets)[0]
+    expect(row?.kind === 'run' && row.workers?.map((member) => member.id)).toEqual(['w'])
+  })
+
+  it('keeps an orphan worker as its own row', () => {
+    const buckets = groupRuns([worker('gone', { id: 'w' })], 'active')
+    expect(shape(buckets)).toEqual(['Recent: w'])
+  })
+
+  it('never nests a worker under a parent in a different bucket', () => {
+    // The parent needs you; the worker is done. Nesting would pull the worker up into Needs
+    // you, or hide the parent's own state under a finished child — both read wrong.
+    const parent = run({ id: 'p', status: 'waiting', hasPendingHumanAsk: true })
+    const w = worker('p', { id: 'w', status: 'done' })
+    expect(shape(groupRuns([parent, w], 'active'))).toEqual(['Needs you: p', 'Recent: w'])
+  })
+})
+
+describe('groupRuns — workers of a variant-group parent', () => {
+  it('keeps a worker visible when its parent renders as a collapsed variant tile', () => {
+    // The tile stands in for its members and has no place to hang a worker, so the worker stays
+    // its own row rather than being folded into a row that is never painted.
+    const a = run({ id: 'a', title: 'Add autocomplete (A)', groupId: 'g', variant: 'A' })
+    const b = run({ id: 'b', title: 'Add autocomplete (B)', groupId: 'g', variant: 'B' })
+    const w = worker('a', { id: 'w' })
+    const buckets = groupRuns([a, b, w], 'active')
+    expect(shape(buckets)).toEqual(['Recent: [AB], w'])
+  })
+})
+
+describe('groupRuns — a folded worker promotes its parent', () => {
+  it('places the parent row where its earliest-sorted worker would have sat', () => {
+    // Newest first inside Recent: the worker sorts to the top, its parent to the bottom. Folding
+    // the worker away must not leave the parent at the bottom — the sidebar caps the list at ten
+    // rows, and a worker that earned a top slot would otherwise vanish along with its parent.
+    const parent = run({ id: 'p', createdAt: '2026-07-14T09:00:00.000Z' })
+    const others = Array.from({ length: 3 }, (_, i) =>
+      run({ id: `o${i}`, createdAt: `2026-07-14T1${i}:00:00.000Z` }),
+    )
+    const w = worker('p', { id: 'w', createdAt: '2026-07-14T15:00:00.000Z' })
+    const buckets = groupRuns([parent, ...others, w], 'active')
+    expect(shape(buckets)).toEqual(['Recent: p, o2, o1, o0'])
+    const row = rowsOf(buckets)[0]
+    expect(row?.kind === 'run' && row.workers?.map((member) => member.id)).toEqual(['w'])
+  })
+
+  it('leaves the parent where it sorted when it already precedes its workers', () => {
+    const parent = run({ id: 'p', createdAt: '2026-07-14T15:00:00.000Z' })
+    const other = run({ id: 'o', createdAt: '2026-07-14T12:00:00.000Z' })
+    const w = worker('p', { id: 'w', createdAt: '2026-07-14T10:00:00.000Z' })
+    expect(shape(groupRuns([parent, other, w], 'active'))).toEqual(['Recent: p, o'])
+  })
 })

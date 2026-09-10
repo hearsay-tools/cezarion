@@ -2,10 +2,12 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveIcon,
   CheckCheckIcon,
+  ChevronRightIcon,
   ChevronsLeftIcon,
   ChevronsRightIcon,
   Clock3Icon,
   CoinsIcon,
+  CornerDownRightIcon,
   CpuIcon,
   DollarSignIcon,
   FileDiffIcon,
@@ -59,7 +61,15 @@ import {
   type TaskColumnIcon,
   type TaskColumnId,
 } from '@/lib/task-columns'
-import { listCounts, queuePositions, runTitle, sortRuns, type ListView } from '@/lib/task-groups'
+import {
+  listCounts,
+  nestWorkers,
+  queuePositions,
+  runTitle,
+  sortRuns,
+  type ListView,
+  type TaskRow,
+} from '@/lib/task-groups'
 import {
   compareGroups,
   filterRuns,
@@ -150,6 +160,9 @@ export function TasksOverview({
   // Positions come from the full list, never the filtered one: a search must not renumber the
   // queue the engine is actually going to drain.
   const positions = queuePositions(all)
+  // Workers sit under the task that spawned them (redesign: the indented rows) — same runs, same
+  // sort, only the placement changes. See `nestWorkers` for the orphan rule.
+  const rows = nestWorkers(visible, positions)
   const strips = compareGroups(filterRuns(all, query), view)
   const finished = finishedRunCount(all)
   const columns = taskColumnsForCapabilities({ tokens: showTokens, cost: showCost })
@@ -165,9 +178,9 @@ export function TasksOverview({
     <div data-route="tasks" className="flex min-h-full flex-col">
       {/* One set of search/view controls across breakpoints keeps query and selection intact.
           Mobile places search above the list filters; the shell already supplies its title. */}
-      <header ref={headerRef} className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-background p-3 md:h-14 md:flex-nowrap md:gap-3 md:px-5 md:py-0">
+      <header ref={headerRef} className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-background p-3 md:h-14 md:flex-nowrap md:gap-6 md:border-b-2 md:px-5 md:py-0">
         <h1 className="hidden text-base font-semibold md:block">Tasks</h1>
-        <div className="inline-flex gap-0.5 rounded-md bg-muted p-[3px]">
+        <div data-slot="overview-tabs" className="inline-flex gap-0.5 rounded-md bg-muted p-[3px]">
           <OverviewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
             Active
           </OverviewTab>
@@ -204,7 +217,7 @@ export function TasksOverview({
             aria-busy={archivePending}
             onClick={onArchiveFinished}
           >
-            <ArchiveIcon className="size-3.5" aria-hidden="true" />
+            <ArchiveIcon className="size-3.5 text-icon" aria-hidden="true" />
             Archive finished
           </Button>
         ) : null}
@@ -250,7 +263,7 @@ export function TasksOverview({
         ) : null}
         <div className="relative order-first w-full md:order-none md:w-60">
           <SearchIcon
-            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-soft-foreground"
+            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-icon-soft"
             aria-hidden="true"
           />
           <input
@@ -259,7 +272,9 @@ export function TasksOverview({
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search tasks…"
             aria-label="Search tasks"
-            className="h-9 w-full rounded-md border border-input bg-card pr-3 pl-8 text-[13px] text-foreground outline-none placeholder:text-soft-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            // 44px tall below `md` (the redesign's mobile search is the page's first touch
+            // target), the toolbar's 36px with a 2px frame from `md` up.
+            className="h-11 w-full rounded-md border border-border bg-card pr-3 pl-8 text-[13px] text-foreground outline-none placeholder:text-soft-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 md:h-9 md:border-2"
           />
         </div>
       </header>
@@ -272,7 +287,7 @@ export function TasksOverview({
             {/* ≥md: the table. */}
             <div
               data-slot="tasks-table"
-              className="hidden overflow-x-auto rounded-lg border border-border bg-card shadow-xs md:block"
+              className="hidden overflow-x-auto rounded-lg border-2 border-border bg-card p-0.5 shadow-xs md:block"
             >
               <TooltipProvider>
                 <table className="w-full table-fixed border-collapse">
@@ -303,11 +318,12 @@ export function TasksOverview({
                     </tr>
                   </thead>
                   <tbody className="[&>tr:last-child>td]:border-b-0">
-                    {visible.map((run) => (
+                    {rows.map((row) => (
                       <TableRow
-                        key={run.id}
-                        run={run}
-                        queuePosition={run.status === 'queued' ? (positions.get(run.id) ?? null) : null}
+                        key={row.run.id}
+                        run={row.run}
+                        depth={row.depth}
+                        queuePosition={row.queuePosition}
                         onRename={onRename}
                         onTogglePin={pinToggle}
                         now={now}
@@ -320,18 +336,35 @@ export function TasksOverview({
               </TooltipProvider>
             </div>
 
-            {/* <md: the same runs as stacked cards. */}
+            {/* <md: the same runs as stacked cards, a task's workers hung under it on a rail. */}
             <div data-slot="task-cards" className="flex flex-col gap-2.5 md:hidden">
-              {visible.map((run) => (
-                <TaskCard
-                  key={run.id}
-                  run={run}
-                  queuePosition={run.status === 'queued' ? (positions.get(run.id) ?? null) : null}
-                  now={now}
-                  showTokens={showTokens}
-                  showCost={showCost}
-                  onTogglePin={pinToggle}
-                />
+              {cardGroups(rows).map((group) => (
+                <React.Fragment key={group.parent.run.id}>
+                  <TaskCard
+                    run={group.parent.run}
+                    queuePosition={group.parent.queuePosition}
+                    now={now}
+                    showTokens={showTokens}
+                    showCost={showCost}
+                    onTogglePin={pinToggle}
+                  />
+                  {group.workers.length > 0 ? (
+                    <div data-slot="task-card-workers" className="ml-3 flex flex-col gap-2.5 border-l-2 border-border pl-3">
+                      {group.workers.map((worker) => (
+                        <TaskCard
+                          key={worker.run.id}
+                          run={worker.run}
+                          worker
+                          queuePosition={worker.queuePosition}
+                          now={now}
+                          showTokens={showTokens}
+                          showCost={showCost}
+                          onTogglePin={pinToggle}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </React.Fragment>
               ))}
             </div>
           </>
@@ -362,12 +395,27 @@ export function TasksOverview({
         to="/new"
         data-slot="new-task-fab"
         aria-label="New task"
-        className="fixed right-4 bottom-[calc(16px+env(safe-area-inset-bottom))] z-20 inline-flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-modal md:hidden"
+        className="fixed right-4 bottom-[calc(16px+env(safe-area-inset-bottom))] z-20 inline-flex size-14 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-fab md:hidden"
       >
         <PlusIcon className="size-[22px]" aria-hidden="true" />
       </Link>
     </div>
   )
+}
+
+/**
+ * The card list's shape: each depth-0 row with the depth-1 rows that follow it. `nestWorkers`
+ * already guarantees a worker row only ever follows its own parent, so this is a fold, not a
+ * second lookup.
+ */
+function cardGroups(rows: readonly TaskRow[]): Array<{ parent: TaskRow; workers: TaskRow[] }> {
+  const groups: Array<{ parent: TaskRow; workers: TaskRow[] }> = []
+  for (const row of rows) {
+    const last = groups[groups.length - 1]
+    if (row.depth === 1 && last) last.workers.push(row)
+    else groups.push({ parent: row, workers: [] })
+  }
+  return groups
 }
 
 /**
@@ -443,12 +491,19 @@ function OverviewTab({
       aria-pressed={isActive}
       onClick={() => onSelect(view)}
       className={cn(
-        'flex h-7 items-center justify-center gap-1.5 rounded-[7px] px-3 text-[12.5px] font-medium text-muted-foreground',
-        isActive && 'bg-card font-semibold text-foreground shadow-xs'
+        // The redesign's segmented control: the selected segment is a translucent brand fill with
+        // accent ink and the surface ring; the count beside it is the one place the brand's gold
+        // is spent. 44px tall below `md`, where these are the page's filter under a thumb.
+        'flex h-11 items-center justify-center gap-1.5 rounded-[7px] px-3 text-[12.5px] font-medium text-muted-foreground md:h-7',
+        isActive && 'bg-brand/20 font-semibold text-accent-ink shadow-ring'
       )}
     >
       {children}
-      {count > 0 ? <span className="font-mono text-[11px] tabular-nums">{count}</span> : null}
+      {count > 0 ? (
+        <span className={cn('font-mono text-[11px] font-semibold tabular-nums', isActive && 'text-accent-count')}>
+          {count}
+        </span>
+      ) : null}
     </button>
   )
 }
@@ -470,7 +525,7 @@ function Th({
       data-column-id={columnId}
       data-folded={folded || undefined}
       className={cn(
-        'h-[38px] border-b border-border px-2.5 text-left text-[11px] font-semibold tracking-[0.05em] whitespace-nowrap text-supporting-foreground uppercase first:pl-4 last:pr-4',
+        'h-10 border-b-2 border-border px-2.5 text-left text-[11px] font-semibold tracking-[0.05em] whitespace-nowrap text-muted-foreground uppercase first:pl-4 last:pr-4',
         right && 'text-right',
         folded && 'px-0 first:pl-0 last:pr-0',
       )}
@@ -561,7 +616,7 @@ function TaskColumnIconView({ icon }: { icon?: TaskColumnIcon }) {
   }
 }
 
-const TD_BASE = 'h-11 border-b border-border px-2.5 whitespace-nowrap first:pl-4 last:pr-4'
+const TD_BASE = 'h-[52px] border-b-2 border-border px-2.5 whitespace-nowrap first:pl-4 last:pr-4'
 
 /**
  * One run, one row.
@@ -573,6 +628,7 @@ const TD_BASE = 'h-11 border-b border-border px-2.5 whitespace-nowrap first:pl-4
  */
 function TableRow({
   run,
+  depth,
   queuePosition,
   onRename,
   onTogglePin,
@@ -581,6 +637,8 @@ function TableRow({
   expandedColumns,
 }: {
   run: RunRecord
+  /** `1` for a worker nested under its parent row — see `nestWorkers`. */
+  depth: TaskRow['depth']
   queuePosition: number | null
   onRename: (id: string, title: string) => void
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
@@ -599,6 +657,7 @@ function TableRow({
     <tr
       data-slot="task-table-row"
       data-run-id={run.id}
+      data-depth={depth === 1 ? '1' : undefined}
       onClick={(event) => {
         if ((event.target as Element).closest('a, button, input')) return
         navigate(to)
@@ -638,6 +697,7 @@ function TableRow({
             reference={reference}
             cost={cost}
             to={to}
+            depth={depth}
             onRename={onRename}
             onTogglePin={onTogglePin}
             now={now}
@@ -657,6 +717,7 @@ function TaskTableCell({
   reference,
   cost,
   to,
+  depth,
   onRename,
   onTogglePin,
   now,
@@ -669,6 +730,7 @@ function TaskTableCell({
   reference: ReturnType<typeof taskReference>
   cost: string
   to: string
+  depth: TaskRow['depth']
   onRename: (id: string, title: string) => void
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
   now: number
@@ -702,12 +764,12 @@ function TaskTableCell({
     case 'task':
       return (
         <td data-column-id={column.id} className={cn(TD_BASE, 'min-w-[320px] max-w-0 whitespace-normal')}>
-          <TitleCell run={run} to={to} onRename={onRename} onTogglePin={onTogglePin} />
+          <TitleCell run={run} to={to} depth={depth} onRename={onRename} onTogglePin={onTogglePin} />
         </td>
       )
     case 'workflow':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'max-w-0 truncate text-[12.5px] text-muted-foreground')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'max-w-0 truncate text-[12.5px] text-accent-ink')}>
           {workflowLabel(run)}
         </td>
       )
@@ -719,13 +781,13 @@ function TaskTableCell({
       )
     case 'diff':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden text-right')}>
           {run.diffStat ? <DiffStatLabel stat={run.diffStat} compact className="block max-w-full" /> : <Dash />}
         </td>
       )
     case 'reference':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden text-right')}>
           {reference ? (
             <TaskReferenceChip run={run} reference={reference} compact className="max-w-full overflow-hidden" />
           ) : <Dash />}
@@ -756,7 +818,7 @@ function TaskTableCell({
       )
     case 'started':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'text-right text-xs text-supporting-foreground tabular-nums')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'text-right text-xs text-muted-foreground tabular-nums')}>
           {shortAge(run.startedAt ?? run.createdAt, now)}
         </td>
       )
@@ -787,11 +849,13 @@ function FoldedTd({ column }: { column: TaskColumnId }) {
 function TitleCell({
   run,
   to,
+  depth,
   onRename,
   onTogglePin,
 }: {
   run: RunRecord
   to: string
+  depth: TaskRow['depth']
   onRename: (id: string, title: string) => void
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
 }) {
@@ -806,15 +870,25 @@ function TitleCell({
     return <TitleEditInput editor={editor} className="text-[13px] font-medium" />
   }
 
+  const worker = run.delegation?.role === 'worker'
+
   return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
+    <span className={cn('flex min-w-0 items-center gap-2', depth === 1 && 'pl-3.5')}>
+      {/* A worker wears the redesign's connector glyph — indented under its parent when the parent
+          is on this page, flush-left with the glyph alone when it is not — and says the word for
+          assistive tech either way. */}
+      {worker ? (
+        <>
+          <CornerDownRightIcon className="size-3.5 shrink-0 text-soft-foreground" aria-hidden="true" />
+          <span className="sr-only">Worker</span>
+        </>
+      ) : null}
       <Link
         to={to}
         title={title}
         className={cn(
           'line-clamp-2 min-w-0 flex-1 whitespace-normal rounded-sm text-[13px] leading-[18px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
-          unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
+          unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : worker ? 'font-normal text-foreground' : 'font-medium'
         )}
       >
         {title}
@@ -913,7 +987,12 @@ function BoundedMetric({ text, accessibleText }: { text: string; accessibleText?
   )
 }
 
-/** One run, one card — the `<md` framing of the same row. */
+/**
+ * One run, one card — the `<md` framing of the same row, laid out as the redesign's mobile frame
+ * draws it: a title row (title, chevron, pin), a status row (pill · workflow · branch … age) and a
+ * metrics row (±diff · IN/OUT · cost). A `worker` card leads its title with the connector glyph;
+ * the caller hangs it under its parent on the rail.
+ */
 function TaskCard({
   run,
   queuePosition,
@@ -921,6 +1000,7 @@ function TaskCard({
   showTokens,
   showCost,
   onTogglePin,
+  worker = false,
 }: {
   run: RunRecord
   queuePosition: number | null
@@ -928,6 +1008,8 @@ function TaskCard({
   showTokens: boolean
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  /** Nested under the task that spawned it — see `cardGroups`. */
+  worker?: boolean
 }) {
   const navigate = useNavigate()
   const attention = deriveAttention(run)
@@ -939,32 +1021,45 @@ function TaskCard({
   const readDone = isReadDoneItem(run)
   const cost = formatCost(run.costUsd)
   const hasDirectionalUsage = run.inputTokens !== undefined || run.outputTokens !== undefined
+  const isWorker = worker || run.delegation?.role === 'worker'
+  const metrics: React.ReactNode[] = []
+  if (queuePosition !== null) {
+    metrics.push(<span key="queue" data-slot="queue-note">#{queuePosition} in queue</span>)
+  } else {
+    if (run.diffStat) metrics.push(<DiffStatLabel key="diff" stat={run.diffStat} className="text-[11.5px]" />)
+    if (showTokens && hasDirectionalUsage) {
+      metrics.push(<DirectionalUsage key="tokens" inputTokens={run.inputTokens} outputTokens={run.outputTokens} />)
+    }
+    if (showCost && cost) metrics.push(<span key="cost">{cost}</span>)
+  }
 
   return (
     <div
       data-slot="task-card"
       data-run-id={run.id}
+      data-depth={worker ? '1' : undefined}
       onClick={(event) => {
         // `button` as well as `a` since the card grew the pin (#935): a control inside the card
         // owns its own click, exactly as the desktop row has always had it.
         if ((event.target as Element).closest('a, button')) return
         navigate(to)
       }}
-      className="cursor-pointer rounded-lg border border-border bg-card px-3.5 py-3 shadow-xs"
+      className="flex cursor-pointer flex-col gap-2 rounded-lg border border-border bg-card px-3.5 py-3"
     >
-      <div className="flex items-start gap-2.5">
-        <Pill dot={attention.tone} pulse={attention.pulse} className="mt-px shrink-0" title={scheduled?.title}>
-          {attention.label}
-          {scheduled ? <span className="tabular-nums">{scheduled.label}</span> : null}
-        </Pill>
+      <div className="flex items-center gap-2">
+        {isWorker ? (
+          <>
+            <CornerDownRightIcon className="size-3.5 shrink-0 text-soft-foreground" aria-hidden="true" />
+            <span className="sr-only">Worker</span>
+          </>
+        ) : null}
         <Link
           to={to}
           className={cn(
             'min-w-0 flex-1 rounded-sm text-[13.5px] leading-[1.35] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
-            unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
+            unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : isWorker ? 'font-normal text-foreground' : 'font-medium text-foreground'
           )}
         >
-          {run.delegation?.role === 'worker' ? <span className="mr-2 text-xs text-muted-foreground">Worker</span> : null}
           {runTitle(run)}
         </Link>
         {/* The unread marker — trailing violet dot, as on the desktop row. */}
@@ -974,62 +1069,47 @@ function TaskCard({
             role="img"
             aria-label="unread"
             title="Unread — not opened since it finished"
-            className="mt-1.5 shrink-0"
+            className="shrink-0"
           />
         ) : null}
-        <span className="mt-0.5 shrink-0 text-[11.5px] text-supporting-foreground tabular-nums">
-          {shortAge(run.finishedAt ?? run.createdAt, now)}
-        </span>
         {/* Always visible here, not hover-revealed: a card has no hover to speak of on the
             device it exists for, and it is the only place a pin can be set or seen on mobile. */}
         {onTogglePin ? (
           <PinToggle
             pinned={Boolean(run.pinned)}
             onToggle={(pinned) => onTogglePin(run, pinned)}
-            className="-mr-1 mt-px"
+            className="-my-2"
           />
         ) : null}
+        <ChevronRightIcon className="size-4 shrink-0 text-icon" aria-hidden="true" />
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-[11.5px] font-medium text-muted-foreground tabular-nums">
-        <span>{workflowLabel(run)}</span>
-        {queuePosition !== null ? (
+      <div className="flex flex-wrap items-center gap-2 text-[11.5px] font-medium">
+        <Pill dot={attention.tone} pulse={attention.pulse} className="shrink-0" title={scheduled?.title}>
+          {attention.label}
+          {scheduled ? <span className="tabular-nums">{scheduled.label}</span> : null}
+        </Pill>
+        <span className="text-accent-ink">{workflowLabel(run)}</span>
+        {run.branch ? (
           <>
             <Sep />
-            <span data-slot="queue-note">#{queuePosition} in queue</span>
+            <span className="truncate font-mono text-[11px] text-muted-foreground">{run.branch}</span>
           </>
-        ) : (
-          <>
-            {run.branch ? (
-              <>
-                <Sep />
-                <span>{run.branch}</span>
-              </>
-            ) : null}
-            {/* Branch · ±diff · IN/OUT · cost — the compact card's meta order. */}
-            {run.diffStat ? (
-              <>
-                <Sep />
-                <DiffStatLabel stat={run.diffStat} className="text-[11.5px]" />
-              </>
-            ) : null}
-            {showTokens && hasDirectionalUsage ? (
-              <>
-                <Sep />
-                <DirectionalUsage inputTokens={run.inputTokens} outputTokens={run.outputTokens} />
-              </>
-            ) : null}
-            {showCost && cost ? (
-              <>
-                <Sep />
-                <span>{cost}</span>
-              </>
-            ) : null}
-          </>
-        )}
-        {reference ? (
-          <TaskReferenceChip run={run} reference={reference} className="h-5" />
         ) : null}
+        {reference ? <TaskReferenceChip run={run} reference={reference} className="h-5" /> : null}
+        <span className="ml-auto shrink-0 font-normal text-muted-foreground tabular-nums">
+          {shortAge(run.finishedAt ?? run.createdAt, now)}
+        </span>
       </div>
+      {metrics.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 font-mono text-[11.5px] font-medium text-muted-foreground tabular-nums">
+          {metrics.map((metric, index) => (
+            <React.Fragment key={index}>
+              {index > 0 ? <Sep /> : null}
+              {metric}
+            </React.Fragment>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
