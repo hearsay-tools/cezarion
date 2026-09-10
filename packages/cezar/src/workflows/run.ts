@@ -3236,6 +3236,7 @@ export class RunManager {
       this.clearAutoResume(runId);
       this.withdrawWorkerWait(runId);
       this.resetParentCompletion(runId);
+      this.store.setArchived(runId, false);
       this.store.updateRun(runId, { status: 'queued', stopping: undefined, error: undefined, finishedAt: undefined,
         currentStepId: undefined, ...(message ? { queuedMessages: [...(current.queuedMessages ?? []), message] } : {}) });
       this.store.flush();
@@ -3253,6 +3254,7 @@ export class RunManager {
     // bound UNATTENDED resumes.
     this.clearAutoResume(runId);
     if (!deferForCapacity) { this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); }
+    this.store.setArchived(runId, false);
 
     const continuations = run.steps.filter((s) => s.id.startsWith('continue-')).length;
     const stepId = `continue-${continuations + 1}`;
