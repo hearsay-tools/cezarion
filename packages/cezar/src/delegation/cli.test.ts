@@ -65,6 +65,43 @@ describe('bundled worker CLI', () => {
       expect(await runWorkerCommand(argv, env)).toBe(1); expect(json().code).toBe('invalid_input');
     }
   });
+  it('parses conversation commands and validates their returned contract', async () => {
+    const recipientRunId = randomUUID(), id = randomUUID(), requestId = randomUUID();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ message: { ...body, senderRunId: f.parent.id, createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted', timeoutSeconds: undefined }, delivery: 'queued' }));
+    });
+    for (const [command, kind, extra] of [['send', 'request', ['--kind', 'request']], ['progress', 'progress', []], ['reply', 'reply', ['--request-id', requestId]], ['follow-up', 'follow-up', ['--request-id', requestId]]] as const) {
+      expect(await runWorkerCommand([command, recipientRunId, 'message', '--id', id, ...extra], env), JSON.stringify(json())).toBe(0);
+      expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ id, recipientRunId, kind, text: 'message', timeoutSeconds: 600 });
+    }
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ messages: [], outcomes: [] })));
+    expect(await runWorkerCommand(['conversation', recipientRunId], env)).toBe(0);
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe(`${transport.url}/conversation`);
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toEqual({ recipientRunId });
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ requestId, status: 'cancelled', observedAt: new Date().toISOString() })));
+    expect(await runWorkerCommand(['cancel-request', requestId], env)).toBe(0);
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe(`${transport.url}/cancel-request`);
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ secret: 'unrecognized' })));
+    expect(await runWorkerCommand(['conversation', recipientRunId], env)).toBe(1);
+    expect(json().code).toBe('unavailable_transport');
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ code: 'incompatible_state', error: 'test' }), { status: 409 }));
+    await runWorkerCommand(['wait', '--request', requestId, '--mode', 'one'], env);
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe(`${transport.url}/wait`);
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ requestIds: [requestId], mode: 'one' });
+    for (const args of [['send', recipientRunId, 'text'], ['reply', recipientRunId, 'text', '--id', id], ['send', recipientRunId, 'text', '--id', id, '--kind', 'request', '--request-id', requestId], ['wait', recipientRunId, '--request', requestId]]) {
+      expect(await runWorkerCommand(args, env)).toBe(1); expect(json().code).toBe('invalid_input');
+    }
+  });
+  it('routes both request wait forms through the real private wait endpoint', async () => {
+    const requestId = randomUUID();
+    const waitRequests = vi.spyOn(f.service, 'waitRequests').mockResolvedValue({ wait: { id: randomUUID(), workerIds: [], requestIds: [requestId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [] }, instruction: 'End your turn' });
+    for (const args of [['wait', '--request', requestId], ['wait-requests', requestId]]) {
+      expect(await runWorkerCommand(args, env)).toBe(0);
+      expect(json()).toMatchObject({ wait: { requestIds: [requestId] } });
+    }
+    expect(waitRequests).toHaveBeenCalledTimes(2);
+  });
   it.each([['spawn', 'task'], ['inspect', 'bad-id'], ['wait', randomUUID(), '--timeout-seconds', '0'], ['wait', randomUUID(), '--timeout-seconds', '1801'], ['wait', randomUUID(), '--timeout-seconds', '1e2'], ['inspect', randomUUID(), '--origin', 'http://evil'], ['inspect', randomUUID(), '--token', 'override'], ['inspect', randomUUID(), '--url', 'http://evil'], ['stop', randomUUID(), 'extra'], ['stop', randomUUID(), '--baseline', 'HEAD']])('rejects invalid arguments %j', async (...argv) => {
     expect(await runWorkerCommand(argv, env)).toBe(1); expect(json().code).toBe('invalid_input');
   });

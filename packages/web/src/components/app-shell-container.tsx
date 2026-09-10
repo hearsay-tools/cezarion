@@ -108,9 +108,8 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   const projects = registry && registry.projects.length > 1 ? registry : null
 
   return (
-    // The Active/Archived filter is shared by the quick-list below and the Tasks table (Step 3.4),
-    // which renders in `children`. The provider goes here because this is the lowest node that has
-    // both of them under it — the spec requires the two sets of tabs to be one filter.
+    // The sidebar's Active/Archived filter. The Tasks table owns a separate copy and is not a
+    // consumer.
     <ListViewProvider>
       <AppShell
         repo={repoChipOf(health.data)}
