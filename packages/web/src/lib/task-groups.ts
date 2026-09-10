@@ -3,7 +3,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 
 /**
  * How the task list is bucketed, sorted and collapsed — the pure half of the sidebar quick-list
- * (and, from Step 3.4, of the Tasks table, which shares this view state).
+ * and of the Tasks table. Each surface passes its own `ListView`; they do not share one.
  *
  * Pure on purpose: this is the behavior worth testing, and it is testable as a table because
  * nothing here touches React, the router or the clock. The component below it only paints.
@@ -13,9 +13,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
  * collapsing, same queue numbers.
  */
 
-/** Active/Archived. One value shared by the quick-list and the table (spec, "Task list & table":
- *  the filter tabs "share state with the sidebar quick-list tabs"), as the legacy UI's single
- *  `state.listView` did. */
+/** Active/Archived. The same type on both surfaces; each surface holds its own value. */
 export type ListView = 'active' | 'archived'
 
 export type BucketLabel = 'Pinned' | 'Needs you' | 'Working' | 'Recent' | 'Archived'

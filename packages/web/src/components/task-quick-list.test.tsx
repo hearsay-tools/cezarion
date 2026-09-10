@@ -706,7 +706,7 @@ describe('TaskQuickListContainer', () => {
     )
   })
 
-  it('drives the shared Active/Archived view', async () => {
+  it('drives the sidebar Active/Archived view', async () => {
     renderContainer([run({ id: 'a', status: 'running' }), run({ id: 'b', status: 'done', archived: true })])
 
     fireEvent.click(await screen.findByRole('button', { name: /Archived/ }))
