@@ -16,7 +16,7 @@ async function sweepCiFailures({github,owner,repo,start='',end='',now=Date.now,l
   if(!/^[\w.-]+$/.test(owner)||!/^[\w.-]+$/.test(repo)) {api.problem('invalid-repository');return manifest;}
   const manual=Boolean(start||end);
   const first=manual?parseUtc(start):launched-14*DAY,last=manual?parseUtc(end):launched;
-  if(!Number.isFinite(first)||!Number.isFinite(last)||first>=last||last-first>14*DAY||first<launched-90*DAY||last>launched) {
+  if(!Number.isFinite(first)||!Number.isFinite(last)||first>last||last-first>14*DAY||first<launched-90*DAY||last>launched) {
     api.problem('invalid-window');return manifest;
   }
   manifest.start=iso(first);manifest.end=iso(last);

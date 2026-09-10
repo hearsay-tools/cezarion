@@ -64,3 +64,10 @@ test('two diagnostics for one test in one step remain distinct source occurrence
  for(const id of [10,20,30])h.state.logs.set(id,log);
  const m=await sweep(h);assert.equal(m.patterns,2);assert.equal(m.reports.issues,2);assert.equal(m.reports.occurrences,6);
 });
+test('manual replay accepts an inclusive single-second creation window',async()=>{
+ const h=harness();h.state.runs=[];
+ const instant='2026-09-01T00:00:00Z';
+ const m=await sweep(h,{start:instant,end:instant});
+ assert.equal(m.complete,true);assert.equal(m.start,instant);assert.equal(m.end,instant);
+ assert.ok(h.calls.length>0);
+});
