@@ -321,3 +321,9 @@ upstream and are never written to from here.
 - Server flows accept pinned previews too:
   `npx cezarion@<version> server-deploy --platform <id>`
   (see [Remote access](server-install/README.md)).
+
+### Automatic failure reports
+
+Failed Release and Nightly attempts create durable issues with job/step evidence.
+See [failure reporting](failure-reporting.md) for matching, permissions, duplicate
+handling, missing logs, and how to rerun a failed reporter without retrying a release.
