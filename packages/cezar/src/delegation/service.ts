@@ -1,9 +1,12 @@
+import { reconcileConversationState, projectConversationEvents } from './conversations.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
 import { join } from 'node:path';
 import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, requestWaitRequestSchema,
+  type ConversationSendRequest, type ConversationSendResult, type ConversationInspectRequest, type ConversationCancelRequest, type ConversationState, type RequestWaitRequest, type RequestOutcome,
   workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
   type WorkerCollectedResult, type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
   type WorkerParams, type WorkerSpawnRequest, type WorkerSteerRequest, type WorkerWaitRequest,
@@ -49,6 +52,121 @@ export class DelegationService {
     const worker = project.store.getRun(workerId);
     authorizeWorker(caller, worker, operation, parent, project.id);
     return { project, parent: parent!, worker: worker! };
+  }
+  private conversationPair(caller: Caller, recipientRunId: string, send = false) {
+    const project = this.context(caller);
+    const sender = project.store.getRun(caller.runId);
+    const recipient = project.store.getRun(recipientRunId);
+    const root = sender?.delegation?.role === 'root' ? sender : recipient;
+    const worker = sender?.delegation?.role === 'worker' ? sender : recipient;
+    if (!sender || !recipient || sender.id === recipient.id || root?.delegation?.role !== 'root' || worker?.delegation?.role !== 'worker' ||
+      worker.delegation.parentRunId !== root.id || worker.delegation.workspace.ownerRunId !== worker.id ||
+      !root.delegation.receipts.some(receipt => receipt.workerId === worker.id && !receipt.deletion) || root.delegation.historyDeletion) {
+      throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    }
+    if (send && sender.id === root.id && !root.delegation.permissions.includes('steer')) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    if (send && (!['running', 'waiting'].includes(sender.status) || (sender.id === root.id && root.delegation.finishRequestedAt) ||
+      (sender.delegation?.role === 'worker' && sender.delegation.destroy))) throw new DelegationPolicyError('incompatible_state', 'Sender session is not active');
+    return { project, sender, recipient, root, worker };
+  }
+  private currentConversation(project: DelegationProject, root: RunRecord): ConversationState {
+    const state = reconcileConversationState(root, project.store.listRuns(), new Date().toISOString(), run => run.delegation?.role === 'worker'
+      ? project.store.readWorkerExecution(run.id)?.phase === 'complete' : !project.manager.isActive(run.id));
+    if (root.delegation?.role === 'root' && state && state !== root.delegation.conversation) project.store.commitConversation(root.id, state);
+    return state ?? { messages: [], outcomes: [] };
+  }
+  private conversationReceipt(project: DelegationProject, root: RunRecord, message: ConversationSendResult['message']): ConversationSendResult {
+    const recipient = project.store.getRun(message.recipientRunId);
+    const input = recipient?.agentInputs?.find(input => input.id === message.id);
+    const state = root.delegation?.role === 'root' ? root.delegation.conversation : undefined;
+    const outcome = state?.outcomes.find(outcome => outcome.requestId === (message.requestId ?? message.id));
+    return { message, delivery: input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered', ...(outcome ? { outcome } : {}) };
+  }
+  async send(caller: Caller, value: ConversationSendRequest): Promise<ConversationSendResult> {
+    const request = conversationSendRequestSchema.parse(value);
+    const initial = this.conversationPair(caller, request.recipientRunId, true);
+    return this.serialized(`conversation:${initial.project.id}:${initial.root.id}`, async () => {
+      const { project, root, sender, recipient } = this.conversationPair(caller, request.recipientRunId, true);
+      if (project.store.containsSessionSecret(JSON.stringify(request))) throw new DelegationPolicyError('invalid_input', 'Credentials cannot be included in delegated input');
+      const requestHash = createHash('sha256').update(JSON.stringify({ senderRunId: sender.id, ...request })).digest('hex');
+      const state = this.currentConversation(project, root);
+      const existing = state.messages.find(message => message.id === request.id);
+      if (existing) {
+        if (existing.requestHash !== requestHash) throw new DelegationPolicyError('invalid_input', 'Message ID payload conflict');
+        projectConversationEvents(project.store, root);
+        project.manager.reconcileWorkerWaits();
+        if (recipient.agentInputs?.some(input => input.id === existing.id && !input.deliveredAt)) project.manager.deliverConversationInput(recipient.id);
+        return this.conversationReceipt(project, root, existing);
+      }
+      const original = request.requestId ? state.messages.find(message => message.id === request.requestId && message.kind === 'request' && message.state === 'accepted') : undefined;
+      if (request.requestId && (!original || (request.kind === 'reply'
+        ? original.recipientRunId !== sender.id || original.senderRunId !== recipient.id
+        : original.senderRunId !== sender.id || original.recipientRunId !== recipient.id))) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+      const settled = state.outcomes.find(outcome => outcome.requestId === request.requestId);
+      const now = new Date().toISOString();
+      const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
+      const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy);
+      const message: ConversationSendResult['message'] = { id: request.id, senderRunId: sender.id, recipientRunId: recipient.id,
+        kind: request.kind, ...(request.requestId ? { requestId: request.requestId } : {}), text: project.store.redactText(request.text), createdAt: now, requestHash,
+        ...(request.kind === 'request' && !destroyed && !resumable ? { deadline: new Date(Date.parse(now) + request.timeoutSeconds * 1000).toISOString() } : {}),
+        state: request.kind === 'reply' && settled ? 'late' : destroyed ? 'destroyed' : resumable ? 'continuation-required' : 'accepted' };
+      const enqueue = !destroyed && !resumable;
+      if (state.messages.length >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
+        (enqueue && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
+      const outcomes = [...state.outcomes];
+      if (request.kind === 'reply' && !settled) outcomes.push({ requestId: request.requestId!, status: 'replied', observedAt: now, replyId: request.id });
+      project.store.commitConversation(root.id, { messages: [...state.messages, message], outcomes }, enqueue ? { recipientRunId: recipient.id,
+        input: { id: message.id, source: 'agent', parentRunId: root.id, text: message.text, createdAt: now,
+          conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}) } } } : undefined);
+      projectConversationEvents(project.store, root);
+      project.manager.reconcileWorkerWaits();
+      if (enqueue) project.manager.deliverConversationInput(recipient.id);
+      return this.conversationReceipt(project, root, message);
+    });
+  }
+  async followUp(caller: Caller, value: ConversationSendRequest): Promise<ConversationSendResult> {
+    if (value.kind !== 'follow-up') throw new DelegationPolicyError('invalid_input', 'Expected follow-up');
+    return this.send(caller, value);
+  }
+  async reply(caller: Caller, value: ConversationSendRequest): Promise<ConversationSendResult> {
+    if (value.kind !== 'reply') throw new DelegationPolicyError('invalid_input', 'Expected reply');
+    return this.send(caller, value);
+  }
+  async conversation(caller: Caller, value: ConversationInspectRequest): Promise<ConversationState> {
+    const request = conversationInspectRequestSchema.parse(value);
+    const { project, root, sender, recipient } = this.conversationPair(caller, request.recipientRunId);
+    const state = this.currentConversation(project, root);
+    projectConversationEvents(project.store, root);
+    const messages = state.messages.filter(message => (message.senderRunId === sender.id && message.recipientRunId === recipient.id) || (message.senderRunId === recipient.id && message.recipientRunId === sender.id));
+    return { messages, outcomes: state.outcomes.filter(outcome => messages.some(message => message.id === outcome.requestId)) };
+  }
+  private ownRequest(caller: Caller, requestId: string) {
+    const project = this.context(caller); const sender = project.store.getRun(caller.runId);
+    const root = sender?.delegation?.role === 'root' ? sender : sender?.delegation?.role === 'worker' ? project.store.getRun(sender.delegation.parentRunId) : undefined;
+    const message = root?.delegation?.role === 'root' ? root.delegation.conversation?.messages.find(message => message.id === requestId && message.kind === 'request' && message.state === 'accepted' && message.senderRunId === caller.runId) : undefined;
+    if (!message) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    return { ...this.conversationPair(caller, message.recipientRunId), message };
+  }
+  async cancelRequest(caller: Caller, value: ConversationCancelRequest): Promise<RequestOutcome> {
+    const { requestId } = conversationCancelRequestSchema.parse(value);
+    const { project, root } = this.ownRequest(caller, requestId);
+    const state = this.currentConversation(project, root);
+    const existing = state.outcomes.find(outcome => outcome.requestId === requestId);
+    if (existing) {
+      projectConversationEvents(project.store, root); project.manager.reconcileWorkerWaits();
+      return existing;
+    }
+    const outcome: RequestOutcome = { requestId, status: 'cancelled', observedAt: new Date().toISOString() };
+    project.store.commitConversation(root.id, { ...state, outcomes: [...state.outcomes, outcome] });
+    projectConversationEvents(project.store, root); project.manager.reconcileWorkerWaits();
+    return outcome;
+  }
+  async waitRequests(caller: Caller, value: RequestWaitRequest) {
+    const request = requestWaitRequestSchema.parse(value);
+    for (const id of request.requestIds) this.ownRequest(caller, id);
+    const project = this.context(caller);
+    const wait = project.manager.registerRequestWait(caller.runId, request);
+    return { wait, instruction: `Wait registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you on request settlement, incoming messages, deadline or cancellation; no automatic re-wait.` };
   }
   async spawn(caller: Caller, value: WorkerSpawnRequest) {
     const request = workerSpawnRequestSchema.parse(value);
@@ -170,7 +288,13 @@ export class DelegationService {
   async cancelWait(caller: Caller, value: WorkerCancelWaitRequest) {
     const { waitId } = workerCancelWaitRequestSchema.parse(value);
     const project = this.context(caller);
-    authorizeCancelWait(caller, project.store.getRun(caller.runId), project.id);
+    const sender = project.store.getRun(caller.runId);
+    if (sender?.delegation?.role === 'worker') {
+      this.conversationPair(caller, sender.delegation.parentRunId);
+      const wait = sender.delegation.wait?.id === waitId ? sender.delegation.wait : sender.delegation.lastWait?.id === waitId ? sender.delegation.lastWait : undefined;
+      if (!wait?.requestIds?.length) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+      for (const requestId of wait.requestIds) this.ownRequest(caller, requestId);
+    } else authorizeCancelWait(caller, sender, project.id);
     return { wait: project.manager.cancelWorkerWait(caller.runId, waitId) };
   }
   async destroy(caller: Caller, params: WorkerParams) {

@@ -137,7 +137,7 @@ describe('BACKWARD_COMPATIBILITY.md §2 route inventory', () => {
     const privateApp = createDelegationApp(createDelegationRoutes(new DelegationService(), new CredentialRegistry()));
     const paths = registeredApiRoutes(privateApp.routes);
     const inventory = inventoriedApiRoutes(doc);
-    expect(paths.size).toBe(9);
+    expect(paths.size).toBe(14);
     expect([...paths].filter(path => !inventory.has(path))).toEqual([]);
     expect([...paths].every(path => path.startsWith('/api/v1/delegation/'))).toBe(true);
   });

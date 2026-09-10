@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { createDelegationRoutes } from './routes.ts';
 import { fixture } from './service.testkit.ts';
-import { delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract';
+import { conversationSendResultSchema, conversationStateSchema, requestOutcomeSchema, delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract';
 
 describe('authenticated delegation HTTP family', () => {
   let f: ReturnType<typeof fixture>, app: ReturnType<typeof createDelegationRoutes>;
@@ -18,6 +18,25 @@ describe('authenticated delegation HTTP family', () => {
     const response = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     expect(response.status).toBe(201); return workerSpawnResultSchema.parse(await response.json());
   }
+  it('validates and routes conversations while deriving sender from the authenticated credential', async () => {
+    const { workerId } = await spawn();
+    const input = { id: randomUUID(), recipientRunId: workerId, kind: 'request', text: 'Which file?' };
+    for (const body of [{ ...input, senderRunId: workerId }, { ...input, requestId: randomUUID() }, { ...input, timeoutSeconds: 0 }, { ...input, text: '   ' }]) {
+      expect((await request('/send', body)).status).toBe(400);
+    }
+    const response = await request('/send', input);
+    expect(response.status).toBe(200);
+    expect(conversationSendResultSchema.parse(await response.json())).toMatchObject({ message: { senderRunId: f.parent.id, recipientRunId: workerId, kind: 'request' }, delivery: 'queued' });
+    const followup = await request('/follow-up', { id: randomUUID(), recipientRunId: workerId, kind: 'follow-up', requestId: input.id, text: 'More detail' });
+    expect(followup.status).toBe(200); conversationSendResultSchema.parse(await followup.json());
+    const token = f.credentials.issue('project', workerId, randomUUID()); f.store.updateRun(workerId, { status: 'running' });
+    const reply = await request('/reply', { id: randomUUID(), recipientRunId: f.parent.id, kind: 'reply', requestId: input.id, text: 'index.ts' }, { authorization: `Bearer ${token}` });
+    expect(reply.status).toBe(200); expect(conversationSendResultSchema.parse(await reply.json()).outcome?.status).toBe('replied');
+    const inspected = await request('/conversation', { recipientRunId: workerId });
+    expect(conversationStateSchema.parse(await inspected.json()).messages).toHaveLength(3);
+    const cancelled = await request('/cancel-request', { requestId: input.id });
+    expect(requestOutcomeSchema.parse(await cancelled.json()).status).toBe('replied');
+  });
   it('collects under legacy inspect-only authority with strict middleware', async () => {
     const { workerId } = await spawn(); const parent = f.store.getRun(f.parent.id)!;
     if (parent.delegation?.role !== 'root') throw Error('fixture');

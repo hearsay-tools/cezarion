@@ -4,7 +4,7 @@ import type { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import type { DelegationApp } from '../delegation/transport.ts';
 import type { AppType } from './app-type.ts';
-import type { workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, runRelationshipsSchema, runIdParamSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema, workerDiffSchema, workerWaitResultSchema, workerSpawnRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerSteerRequestSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
+import type { conversationSendRequestSchema, conversationSendResultSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, conversationStateSchema, requestOutcomeSchema, requestWaitRequestSchema, workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, runRelationshipsSchema, runIdParamSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema, workerDiffSchema, workerWaitResultSchema, workerSpawnRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerSteerRequestSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
 
 describe('delegation contract and chained type surface', () => {
   const client = hc<DelegationApp>('http://127.0.0.1');
@@ -15,6 +15,17 @@ describe('delegation contract and chained type surface', () => {
   type Schema = ExtractSchema<DelegationApp>;
   type HumanSchema = ExtractSchema<AppType>;
   type _Checks = [
+    Assert<Mutual<z.infer<typeof conversationSendResultSchema>, InferResponseType<typeof family.send.$post, 200>>>,
+    Assert<Mutual<z.infer<typeof conversationSendResultSchema>, InferResponseType<typeof family['follow-up']['$post'], 200>>>,
+    Assert<Mutual<z.infer<typeof conversationSendResultSchema>, InferResponseType<typeof family.reply.$post, 200>>>,
+    Assert<Mutual<z.infer<typeof conversationStateSchema>, InferResponseType<typeof family.conversation.$post, 200>>>,
+    Assert<Mutual<z.infer<typeof requestOutcomeSchema>, InferResponseType<typeof family['cancel-request']['$post'], 200>>>,
+    Assert<Mutual<z.input<typeof conversationSendRequestSchema>, Schema['/api/v1/delegation/send']['$post']['input']['json']>>,
+    Assert<Mutual<z.input<typeof conversationSendRequestSchema>, Schema['/api/v1/delegation/follow-up']['$post']['input']['json']>>,
+    Assert<Mutual<z.input<typeof conversationSendRequestSchema>, Schema['/api/v1/delegation/reply']['$post']['input']['json']>>,
+    Assert<Mutual<z.input<typeof conversationInspectRequestSchema>, Schema['/api/v1/delegation/conversation']['$post']['input']['json']>>,
+    Assert<Mutual<z.input<typeof conversationCancelRequestSchema>, Schema['/api/v1/delegation/cancel-request']['$post']['input']['json']>>,
+
     Assert<Mutual<z.infer<typeof workerCollectedResultSchema>, InferResponseType<typeof family[':workerId']['collect']['$post'], 200>>>,
     Assert<Mutual<z.input<typeof workerParamsSchema>, Schema['/api/v1/delegation/:workerId/collect']['$post']['input']['param']>>,
     Assert<Mutual<z.input<typeof workerEmptyRequestSchema>, Schema['/api/v1/delegation/:workerId/collect']['$post']['input']['json']>>,
@@ -32,7 +43,7 @@ describe('delegation contract and chained type surface', () => {
     Assert<Mutual<z.infer<typeof workerWaitResultSchema>, InferResponseType<typeof family.wait.$post, 200>>>,
     Assert<Mutual<z.infer<typeof workerDestroyResultSchema>, InferResponseType<typeof human.api.v1.runs[':id']['worker-destroy']['$post'], 200>>>,
     Assert<Mutual<z.input<typeof workerSpawnRequestSchema>, Schema['/api/v1/delegation/spawn']['$post']['input']['json']>>,
-    Assert<Mutual<z.input<typeof workerWaitRequestSchema>, Schema['/api/v1/delegation/wait']['$post']['input']['json']>>,
+    Assert<Mutual<z.input<typeof workerWaitRequestSchema> | z.input<typeof requestWaitRequestSchema>, Schema['/api/v1/delegation/wait']['$post']['input']['json']>>,
     Assert<Mutual<z.input<typeof workerSteerRequestSchema>, Schema['/api/v1/delegation/:workerId/steer']['$post']['input']['json']>>,
     Assert<Mutual<z.input<typeof workerEmptyRequestSchema>, Schema['/api/v1/delegation/:workerId/stop']['$post']['input']['json']>>,
     Assert<Mutual<z.input<typeof workerEmptyRequestSchema>, Schema['/api/v1/delegation/:workerId/destroy']['$post']['input']['json']>>,

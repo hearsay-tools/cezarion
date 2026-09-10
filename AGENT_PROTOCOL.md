@@ -126,7 +126,7 @@ with the teardown grace as an upper bound. An unresponsive ACK is aborted and
 remains undelivered; explicit end/interrupt still abort immediately.
 Human `sendMessage` keeps its existing synchronous semantics. The `agent-input` event
 carries `{input: {id, source: 'agent'|'lifecycle', parentRunId, text, createdAt,
-deliveredAt?}}`; it is not a `user-message`, does not resolve an ask card, and
+deliveredAt?, conversation?: {senderRunId, recipientRunId, kind, requestId?}}}`; it is not a `user-message`, does not resolve an ask card, and
 never expands registry slash skills. The queue cap is 32 **undelivered** inputs, including the in-flight reservation.
 Only one exact current state/session/input can be in flight. ACK merges into the
 current durable queue, preserving concurrent enqueues; duplicate readiness hints
@@ -143,6 +143,32 @@ with the answered `askSeq`. Live sends checkpoint only on true; continuation ope
 answers checkpoint at their first successful, open-session turn boundary (never
 a fatal, cancelled or shutdown boundary). A checkpoint for an older
 ask cannot clear a newer question; absent checkpoints retain the ask conservatively.
+
+Parent/worker conversations use the same `sendAgentInput` seam in both directions.
+The root's durable conversation ledger is authoritative; `conversation-message`
+`{message, delivery}` and `request-outcome` `{outcome}` events are replayable projections in
+both participants' transcripts, keyed by message/request identity. Agent-input ACK
+updates delivery display without creating a second conversation row. Replayed
+projections never enqueue input or resolve a human ask. Attribution carries actual
+sender and recipient IDs; the legacy `parentRunId` remains the ownership root.
+
+Kinds are `request`, `progress`, `follow-up`, and `reply`. A request's message ID is
+its obligation ID; follow-ups and replies name `requestId`. Exact message retries
+reuse the existing durable input; changed payloads are rejected. Follow-ups and
+progress cannot discharge obligations. Explicit reply and completed-without-reply
+are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
+sender-closed. Late replies remain recorded without replacing a first settlement.
+Both roles can wait on their own requests using the existing bounded scheduler wake
+queue. An incoming message can interrupt that wait with reason `message`, retaining
+unresolved obligations; there is no automatic re-wait or terminal continuation.
+
+Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
+1,024 messages per family, and 32 pending obligations. Requests and waits expire
+in 600 seconds by default (1–1,800 seconds accepted). One active wait per run.
+Review/terminal delivery requires explicit human Continue; destroyed recipients
+receive no input. Only a human can answer an outstanding human ask. Durable queue
+insertion is atomic with acceptance, while provider acceptance and the local ACK
+checkpoint retain the documented crash ambiguity below.
 
 Already accepted input precedes automatic `CEZ:DONE` closure at a safe boundary,
 not explicit Finish, cancellation, destruction or fatal failure. Empty queues

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { conversationMessageSchema, requestOutcomeSchema } from './conversations.ts';
 import { agentInputSchema, workerOutcomeSchema } from './delegation.ts';
 
 /**
@@ -29,6 +30,11 @@ export const runEventSchema = z.looseObject({
 export type RunEvent = z.infer<typeof runEventSchema>;
 
 /** Non-human input never masquerades as a user-message/ask answer. */
+export const conversationMessageEventSchema = runEventSchema.extend({ type: z.literal('conversation-message'), message: conversationMessageSchema, delivery: z.enum(['queued', 'delivered', 'not-delivered']) });
+export type ConversationMessageEvent = z.infer<typeof conversationMessageEventSchema>;
+export const requestOutcomeEventSchema = runEventSchema.extend({ type: z.literal('request-outcome'), outcome: requestOutcomeSchema });
+export type RequestOutcomeEvent = z.infer<typeof requestOutcomeEventSchema>;
+
 export const agentInputEventSchema = runEventSchema.extend({
   type: z.literal('agent-input'),
   input: agentInputSchema,
