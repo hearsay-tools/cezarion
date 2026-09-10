@@ -7,6 +7,7 @@ test('Release fixture creates actionable issue and durable metadata comment, ski
  const h=harness(); await reportFailure(h.options);
  assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,1);
  assert.deepEqual(h.state.issues[0].labels,['area-ci']);
+ assert.equal(h.state.issues[0].title,'[Task]: Investigate delegation-integration.test.ts failure');
  assert.match(h.state.issues[0].body,/Acceptance Criteria/);
  assert.match(h.state.comments[0].body,/34473233122.*attempts\/1/);
  assert.match(h.state.comments[0].body,/Run server and cockpit unit suites/);

@@ -113,7 +113,8 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
         target ||= matches.find(issue=>issue.state==='open');
         if(!target) {
           const previous=matches.find(issue=>issue.state==='closed');
-          const {data:created}=await github.request('POST /repos/{owner}/{repo}/issues',{...base,title:`[Task]: Investigate ${cause.stage} failure`,labels:['area-ci'],body:bodyFor({cause,runUrl,signature,occurrence,previous:previous ? `https://github.com/${owner}/${repo}/issues/${previous.number}` : undefined})});
+          const subject = cause.title.match(/([a-z0-9_.-]+\.(?:test|spec)\.[cm]?[jt]sx?)/i)?.[1] || cause.stage;
+          const {data:created}=await github.request('POST /repos/{owner}/{repo}/issues',{...base,title:`[Task]: Investigate ${subject} failure`,labels:['area-ci'],body:bodyFor({cause,runUrl,signature,occurrence,previous:previous ? `https://github.com/${owner}/${repo}/issues/${previous.number}` : undefined})});
           target=created;issues.push(created);comments.set(created.number,[]);
         }
         const comment=commentFor({cause,run,job,step,runUrl,jobUrl:`https://github.com/${owner}/${repo}/actions/runs/${run.id}/job/${job.id}`,occurrence});
