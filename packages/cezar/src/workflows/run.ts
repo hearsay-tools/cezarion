@@ -687,6 +687,7 @@ export class RunManager {
     }
     if (this.executions.get(runId) === execution) this.executions.delete(runId);
     execution.resolve();
+    if (!this.disposed && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
     if (!this.disposed) this.releaseSlot();
   }
 
@@ -1117,6 +1118,7 @@ export class RunManager {
       title: makeRunTitle(input.task, workflow) + (group ? ` (${group.variant})` : ''),
       workflow: workflow.name,
       task: input.task,
+      systemPrompt: input.systemPrompt,
       model: effectiveInput.model,
       effort: effectiveInput.effort,
       runner: input.runner,
@@ -1503,6 +1505,8 @@ export class RunManager {
       // already-folded `input.task`, so re-hydrating at dequeue yields the same string.
       input: this.hydrateQueuedInput(run.id, {
         task: run.task,
+        agentProfile: run.agentProfile,
+        systemPrompt: run.systemPrompt,
         model: run.model,
         effort: run.effort,
         runner: run.runner,
@@ -1670,6 +1674,7 @@ export class RunManager {
     this.workerWakeAdmitted.delete(runId);
     if (state) this.clearMonitoringWakeTimer(state, runId);
     this.active.delete(runId);
+    if (!this.executions.has(runId) && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
     this.memoryPausing.delete(runId);
     this.lastNamerKey.delete(runId);
     this.forceStarted.delete(runId);
@@ -2115,11 +2120,17 @@ export class RunManager {
       this.pendingContinuations.delete(runId);
       this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
+      this.store.flush();
       if (this.executions.get(runId)?.admitted === false) void this.finishWorkerExecution(runId);
       return true;
     }
     const state = this.active.get(runId);
     if (!state) {
+      if (this.starting.has(runId)) {
+        this.store.updateRun(runId, { stopping: true });
+        this.store.flush();
+        return true;
+      }
       if (cancelledFinish) return true;
       const run = this.store.getRun(runId);
       if (run?.delegation && ['queued', 'running', 'waiting'].includes(run.status)) {
@@ -2129,6 +2140,8 @@ export class RunManager {
       return false;
     }
     state.cancelled = true;
+    this.store.updateRun(runId, { stopping: true });
+    this.store.flush();
     state.revokeDelegation?.(); state.revokeDelegation = undefined;
     this.clearIdleTimer(state);
     state.interrupt();
@@ -2302,7 +2315,7 @@ export class RunManager {
   enqueueMessage(runId: string, content: PastedContent[]): QueuedMessage | null {
     if (!this.isQueued(runId)) return null;
     const run = this.store.getRun(runId);
-    if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return null;
+    if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return null;
     const message = this.toQueuedMessage(runId, content);
     if (this.workerWait(runId)) this.withdrawWorkerWait(runId, message);
     else this.store.updateRun(runId, { queuedMessages: [...(run.queuedMessages ?? []), message] });
@@ -2416,7 +2429,7 @@ export class RunManager {
    */
   deferMessage(runId: string, content: PastedContent[]): boolean {
     const run = this.store.getRun(runId);
-    if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
+    if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
     // The window spans two sub-states: `starting` (no `ActiveRun` yet) and the
     // longer stretch where the `ActiveRun` exists but the backend is still being
     // spawned. `execute()` deletes the run from `starting` as soon as it builds
@@ -2983,7 +2996,7 @@ export class RunManager {
     const state = this.active.get(runId);
     if (!state?.session?.open || state.cancelled) return false;
     const run = this.store.getRun(runId);
-    if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
+    if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
 
     const text = content
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
@@ -3086,9 +3099,10 @@ export class RunManager {
     if (agentModelsLocked(this.repoRoot) && (opts.model?.trim() || opts.effort?.trim())) {
       return { ok: false, error: AGENT_MODELS_LOCKED_ERROR };
     }
-    if (this.active.has(runId) || this.executions.has(runId)) return { ok: false, error: 'run is still active' };
+    if (this.isActive(runId)) return { ok: false, error: 'run is still active' };
     const run = this.store.getRun(runId);
     if (!run) return { ok: false, error: 'not found' };
+    if (run.stopping) return { ok: false, error: 'run is still stopping' };
     if (this.historyDeletionPending(runId)) return { ok: false, error: 'Parent history deletion is pending; retry deletion' };
     if (run.delegation?.role === 'worker' && this.store.getRun(run.delegation.parentRunId)?.status === 'review') {
       return { ok: false, error: 'Continue the reviewing parent before continuing its worker' };
@@ -3117,18 +3131,22 @@ export class RunManager {
       return { ok: false, error: `cannot continue a ${run.status} run` };
     }
     const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
-    if (!sessionStep?.sessionId) return { ok: false, error: 'no agent session to resume' };
+    // Absence of a session alone is insufficient: command/check steps can already
+    // have changed the repository. Only the untouched original workflow may restart.
+    const untouched = run.status === 'cancelled' && !run.startedAt && !!run.workflowDef &&
+      run.steps.every(step => step.status === 'pending' && !step.startedAt && !step.sessionId);
+    if (!sessionStep?.sessionId && !untouched) return { ok: false, error: 'no agent session to resume' };
     const targetRunner = opts.runner ?? run.runner ?? 'claude';
     // Session ids are provider-owned opaque values. New records carry explicit
     // affinity; for legacy records, the run's current runner is the conservative
     // owner until a continuation emits a new, attributed session id (#562).
-    const sessionBackend = sessionStep.backend ?? run.runner ?? 'claude';
+    const sessionBackend = sessionStep?.backend ?? run.runner ?? 'claude';
     // A session id only resolves inside the config dir that created it (spec
     // 2026-07-29-agent-profiles), so switching ACCOUNT ends the session exactly like switching
     // backend does: `claude --resume <id>` under another login finds nothing and would silently
     // open a fresh conversation while the thread claimed it had resumed. A step that recorded no
     // account predates the feature and therefore ran under the discovered one.
-    const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
+    const sessionAccount = sessionStep?.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
     const accountSwitched = (opts.agentProfile ?? run.agentProfile ?? sessionAccount) !== sessionAccount;
     const resume = sessionBackend === targetRunner && !accountSwitched;
 
@@ -3190,6 +3208,35 @@ export class RunManager {
       });
     }
 
+    if (untouched) {
+      const current = this.store.getRun(runId)!;
+      let job: { workflow: WorkflowDef; input: StartRunInput };
+      try {
+        job = current.delegation?.role === 'worker'
+          ? this.ownedJob({ ...current, status: 'queued' })
+          : { workflow: current.workflowDef!, input: {
+            task: current.task, runner: current.runner, model: current.model, effort: current.effort,
+            agentProfile: current.agentProfile, systemPrompt: current.systemPrompt,
+            autonomous: current.autonomous, generateFollowups: current.generateFollowups, worktree: current.worktree,
+          } };
+        this.beginWorkerExecution(runId, false);
+      } catch { return { ok: false, error: 'original execution checkpoint unavailable' }; }
+      const content: PastedContent[] = [
+        ...(opts.text?.trim() ? [{ type: 'text' as const, text: opts.text.trim() }] : []), ...(opts.images ?? []),
+      ];
+      const message = content.length ? this.toQueuedMessage(runId, content) : undefined;
+      this.clearAutoResume(runId);
+      this.withdrawWorkerWait(runId);
+      this.resetParentCompletion(runId);
+      this.store.updateRun(runId, { status: 'queued', stopping: undefined, error: undefined, finishedAt: undefined,
+        currentStepId: undefined, ...(message ? { queuedMessages: [...(current.queuedMessages ?? []), message] } : {}) });
+      this.store.flush();
+      this.pendingJobs.set(runId, job);
+      this.queue.push(runId);
+      void this.pump();
+      return { ok: true };
+    }
+
     try { this.beginWorkerExecution(runId, !deferForCapacity); }
     catch { return { ok: false, error: 'worker execution checkpoint unavailable' }; }
     // Everything that could refuse this continuation has now passed, so a pending usage-limit
@@ -3233,7 +3280,7 @@ export class RunManager {
     if (deferForCapacity) {
       this.pendingContinuations.set(runId, {
         stepId,
-        sessionId: resume ? sessionStep.sessionId : undefined,
+        sessionId: resume ? sessionStep?.sessionId : undefined,
         backend: targetRunner,
         prompt,
         images,
@@ -3251,7 +3298,7 @@ export class RunManager {
     void this.runContinuation(
       runId,
       stepId,
-      resume ? sessionStep.sessionId : undefined,
+      resume ? sessionStep?.sessionId : undefined,
       targetRunner,
       prompt,
       images,
@@ -3317,6 +3364,12 @@ export class RunManager {
     } else {
       await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
       cwd = record?.worktreePath && existsSync(record.worktreePath) ? record.worktreePath : this.repoRoot;
+    }
+    if (this.store.getRun(runId)?.stopping) {
+      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+      this.starting.delete(runId);
+      this.dropActive(runId);
+      return;
     }
     // The env is a live ceiling: a run created while the inbox was on must not keep writing
     // follow-ups after it is switched off.
@@ -3773,6 +3826,11 @@ export class RunManager {
     // Resolve the agent backend for this run: the task choice (GUI) wins over
     // the config default. Per-step `runner` can still override it below.
     const config = await loadConfig(this.repoRoot);
+    if (state.cancelled || this.store.getRun(runId)?.stopping) {
+      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+      this.dropActive(runId);
+      return;
+    }
     const taskBackend: RunnerId = input.runner ?? config.defaultRunner;
     // The account may have gone into a usage-limit hold since this run was dequeued — the queue
     // gate cannot be the only one, because dequeue is not the moment of no return. Nothing has
@@ -3799,6 +3857,11 @@ export class RunManager {
     } catch {
       // An unresolvable task-level model surfaces loudly at the step below; the
       // metadata echo stays absent rather than guessing.
+    }
+    if (state.cancelled) {
+      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+      this.dropActive(runId);
+      return;
     }
     const ownedRun = this.store.getRun(runId);
     const owned = ownedRun?.delegation?.role === 'worker' ? ownedRun.delegation.workspace : undefined;
@@ -4912,7 +4975,7 @@ export class RunManager {
   private armMonitoringWakeTimer(runId: string, state: ActiveRun): void {
     if (this.parentCompletionAttention(runId)) { this.clearMonitoringWakeTimer(state, runId); return; }
     const run = this.store.getRun(runId);
-    if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
+    if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
     const minutes = this.semaphore.monitoringWakeIntervalMinutes();
     if (minutes === null) {
       this.clearMonitoringWakeTimer(state, runId);
@@ -4939,7 +5002,7 @@ export class RunManager {
       state.monitoringWakeTimer = undefined;
       if (this.parentCompletionAttention(runId)) { this.clearMonitoringWakeTimer(state, runId); return; }
       const run = this.store.getRun(runId);
-      if (!run || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
+      if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
       this.store.updateRun(runId, { monitoringWakeAt: undefined });
       if (!this.monitoring.has(runId) || !state.session?.open || state.cancelled) return;
       const wakeups = state.monitoringWakeups ?? 0;

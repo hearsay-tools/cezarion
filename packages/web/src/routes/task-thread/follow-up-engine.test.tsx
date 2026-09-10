@@ -171,6 +171,7 @@ function Harness({ run, draft = '' }: { run: ApiRun; draft?: string }) {
   return (
     <>
       {action.pills}
+      {action.startsNewConversation ? <p>Starts a new agent conversation.</p> : null}
       <button type="button" onClick={() => void action.continueWith(draft, [])}>
         Continue
       </button>
@@ -631,6 +632,8 @@ describe('the follow-up runner pill carries the account', () => {
 
     await pickFrom(runnerPill()!, 'Klaudiusz')
     await waitFor(() => expect(runnerPill()?.textContent).toContain('claude · Klaudiusz'))
+    expect(screen.getByText('Starts a new agent conversation.')).toBeTruthy()
+    expect(continueBody()).toBeUndefined()
     fireEvent.click(screen.getByRole('button', { name: /continue/i }))
 
     // The runner did not change, so only the account rides the request.
@@ -677,5 +680,26 @@ describe('the follow-up runner pill carries the account', () => {
     renderAction(makeRun())
     await screen.findByRole('button', { name: 'Model' })
     expect(runnerPill()).toBeNull()
+  })
+})
+
+describe('continuation conversation hint (#201)', () => {
+  it('warns before a provider switch without starting work on selection', async () => {
+    serve()
+    renderAction(makeRun())
+    expect(screen.queryByText('Starts a new agent conversation.')).toBeNull()
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'Runner' }))
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /codex/ }))
+    expect(screen.getByText('Starts a new agent conversation.')).toBeTruthy()
+    expect(continueBody()).toBeUndefined()
+  })
+
+  it('does not warn for a model-only change', async () => {
+    serve()
+    renderAction(makeRun())
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'Model' }))
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /opus/ }))
+    expect(screen.queryByText('Starts a new agent conversation.')).toBeNull()
+    expect(continueBody()).toBeUndefined()
   })
 })

@@ -429,7 +429,7 @@ describe('task thread', () => {
     const actions = browser.evaluate(
       `[...document.querySelectorAll('[data-slot="run-actions"] button')].map((b) => b.textContent.trim())`,
     ) as string[]
-    expect(actions).toEqual(['Continue', 'Open in…', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
+    expect(actions).toEqual(['Open in…', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
 
     // The take-over hint, per-backend (the fixture's last agent session, in its worktree).
     const hint = browser.evaluate(
@@ -590,7 +590,7 @@ describe('task thread', () => {
       .toEqual([true, 'first line\nsecond line\nthird line', 2, 8])
     expect(browser.count('[data-slot="composer-thumbs"] button')).toBe(3)
     expect(browser.isVisible('[aria-label="Attach files"]')).toBe(true)
-    expect(browser.isVisible('[aria-label="Continue"]')).toBe(true)
+    expect(browser.isVisible('[aria-label="Send"]')).toBe(true)
     expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     for (const label of ['Expand composer', 'Show run details', 'Run actions']) {
       expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)

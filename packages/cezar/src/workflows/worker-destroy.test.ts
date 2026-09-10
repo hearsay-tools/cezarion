@@ -72,6 +72,24 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     const other = new RunManager(reopened, root); expect(await other.awaitRunTermination(w.id, 10)).toBe(true); other.dispose(); reopened.flush();
   });
 
+  it('requeues a stopped untouched owned worker under normal capacity and preserves parent guards', async () => {
+    const w = await worker();
+    store.updateRun(w.id, { workflowDef: { name: 'quick-task', source: 'built-in', steps: [{ id: 'task', prompt: '{{task}}' }] } });
+    expect(manager.requestWorkerStop(w.id).state).toBe('terminated');
+    manager.dispose();
+    manager = new RunManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    store.updateRun(parent.id, { status: 'review' });
+    expect(manager.continueRun(w.id)).toMatchObject({ ok: false });
+    store.updateRun(parent.id, { status: 'waiting' });
+    expect(manager.continueRun(w.id, { text: 'keep working' })).toEqual({ ok: true });
+    expect(store.getRun(w.id)?.status).toBe('queued');
+    expect(store.getRun(w.id)?.steps.map(step => step.id)).toEqual(['task']);
+    expect(manager.continueRun(w.id)).toMatchObject({ ok: false });
+    expect(manager.requestWorkerStop(w.id).state).toBe('stopping');
+    expect(await manager.awaitRunTermination(w.id, 1000)).toBe(true);
+    expect(existsSync(workspace(w).path)).toBe(false);
+  });
+
   it('stop in starting-before-ActiveRun waits for startup finalization and prevents launch', async () => {
     const w = await worker(); const hold = gate(); releases.push(hold.release);
     const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>; starting: Set<string> };
