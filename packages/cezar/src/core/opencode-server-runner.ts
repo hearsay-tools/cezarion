@@ -126,6 +126,9 @@ class OpencodeSession implements AgentSession {
   private agentRequest: AbortController | undefined;
   /** Human prompts scheduled behind the active turn, through their HTTP ack. */
   private pendingPromptRequests = 0;
+  /** A provider error must not abort its own independently arriving receipt. */
+  private agentAcknowledgement?: Promise<void>;
+  private providerErrorPending?: { message: string; reported: boolean };
   /** `finishTurn` ran for the current turn — repeats and stray idles no-op. */
   private turnEnded = false;
   /** Monotonic identity used to reject async work completed by an older turn. */
@@ -267,14 +270,16 @@ class OpencodeSession implements AgentSession {
     this.agentInputReady = false;
     const request = new AbortController();
     this.agentRequest = request;
-    return this.prompt(textOf(content), 'agent', request.signal).finally(() => {
+    const acknowledgement = this.prompt(textOf(content), 'agent', request.signal).finally(() => {
       if (this.agentRequest === request) this.agentRequest = undefined;
-      if (this.serverOpen && !this.turnActive && !this.pendingQuestion && !this.questionReply) {
+      if (this.serverOpen && !this.providerErrorPending && !this.turnActive && !this.pendingQuestion && !this.questionReply) {
         this.agentInputReady = true;
         this.opts.onAgentInputReady?.();
         this.scheduleAutoEnd();
       }
     });
+    this.agentAcknowledgement = acknowledgement;
+    return acknowledgement;
   }
 
   sendMessage(content: ContentBlock[]): boolean {
@@ -487,7 +492,12 @@ class OpencodeSession implements AgentSession {
       // No turn started server-side, so no `session.idle` will ever close it —
       // surface the failure and end the turn here instead of parking the run.
       const message = err instanceof Error ? err.message : String(err);
-      if (origin === 'agent') {
+      if (origin === 'agent' && this.providerErrorPending) {
+        // Latch the initiating provider failure before rejection reaches the
+        // manager's ACK handler (including grace expiry and explicit abort).
+        this.providerErrorPending.reported = true;
+        if (this.serverOpen) this.emit({ type: 'error', message: this.providerErrorPending.message });
+      } else if (origin === 'agent') {
         // Fatal BEFORE the synthetic boundary: the rejected submission stays
         // queued and must not drain more input or settle DONE.
         if (this.serverOpen) {
@@ -504,7 +514,7 @@ class OpencodeSession implements AgentSession {
           this.interrupt();
         }
       }
-      this.finishTurn();
+      if (!this.providerErrorPending) this.finishTurn();
       // Bootstrap still rejects; its result catch suppresses the already
       // reported opening error. Human follow-ups keep their nonfatal note.
       throw err;
@@ -587,7 +597,7 @@ class OpencodeSession implements AgentSession {
         while ((sep = buffer.indexOf('\n\n')) >= 0) {
           const frame = buffer.slice(0, sep);
           buffer = buffer.slice(sep + 2);
-          this.handleFrame(frame);
+          await this.handleFrame(frame);
         }
       }
     } catch {
@@ -608,7 +618,7 @@ class OpencodeSession implements AgentSession {
     }
   }
 
-  private handleFrame(frame: string): void {
+  private async handleFrame(frame: string): Promise<void> {
     const dataLines = frame
       .split('\n')
       .filter((l) => l.startsWith('data:'))
@@ -621,7 +631,27 @@ class OpencodeSession implements AgentSession {
       return;
     }
     this.emitUi((state) => mapOpencodeEvent(evt, state));
-    this.handleEvent(evt);
+    const sid = stringField(evt.properties ?? {}, 'sessionID');
+    if (evt.type === 'session.error' && (sid === undefined || sid === this.sessionId) && this.agentRequest) {
+      // HTTP and SSE are independent sockets: the error can overtake a positive
+      // prompt ACK. Let that exact request settle before v1 makes RunManager
+      // interrupt it. Keep later SSE idle frames behind the same barrier.
+      // Reuse the teardown grace as a hard bound: a wedged ACK cannot keep a
+      // failed turn alive indefinitely. Explicit end/interrupt still abort now.
+      const failure = { message: this.sessionErrorMessage(evt.properties?.error), reported: false };
+      this.providerErrorPending = failure;
+      const request = this.agentRequest;
+      const timer = setTimeout(() => request.abort(), KILL_GRACE_MS);
+      try {
+        await this.agentAcknowledgement?.catch(() => undefined);
+        if (this.serverOpen && !failure.reported) this.handleEvent(evt);
+      } finally {
+        clearTimeout(timer);
+        this.providerErrorPending = undefined;
+      }
+    } else {
+      this.handleEvent(evt);
+    }
   }
 
   /** #53 — a forwarded session error must never read like a missing
