@@ -630,6 +630,12 @@ interface PersistedAttachments {
   attachments: PersistedAttachment[];
 }
 
+/** Only an original workflow that has never executed may return to its queue. */
+export function isUntouchedCancelledRun(run: RunRecord): boolean {
+  return run.status === 'cancelled' && !run.startedAt && !!run.workflowDef &&
+    run.steps.every(step => step.status === 'pending' && !step.startedAt && !step.sessionId);
+}
+
 /**
  * The mini workflow engine: executes a `WorkflowDef` against a repo, one step
  * at a time, persisting every event to the RunStore (which the SSE endpoints
@@ -3085,6 +3091,8 @@ export class RunManager {
       text?: string;
       images?: PastedContent[];
       runner?: RunnerId;
+      /** Internal configured fallback for an untouched workflow, resolved by the route. */
+      originalRunner?: RunnerId;
       model?: string;
       /** Reasoning-effort pin (#45). Omitted keeps the run's pin; empty string clears it. */
       effort?: string;
@@ -3133,10 +3141,10 @@ export class RunManager {
     const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
     // Absence of a session alone is insufficient: command/check steps can already
     // have changed the repository. Only the untouched original workflow may restart.
-    const untouched = run.status === 'cancelled' && !run.startedAt && !!run.workflowDef &&
-      run.steps.every(step => step.status === 'pending' && !step.startedAt && !step.sessionId);
+    const untouched = isUntouchedCancelledRun(run);
     if (!sessionStep?.sessionId && !untouched) return { ok: false, error: 'no agent session to resume' };
-    const targetRunner = opts.runner ?? run.runner ?? 'claude';
+    const originalRunner = run.runner ?? (untouched ? opts.originalRunner : undefined) ?? 'claude';
+    const targetRunner = opts.runner ?? originalRunner;
     // Session ids are provider-owned opaque values. New records carry explicit
     // affinity; for legacy records, the run's current runner is the conservative
     // owner until a continuation emits a new, attributed session id (#562).
@@ -3187,7 +3195,7 @@ export class RunManager {
       const inheritedAccountIsForeign =
         opts.agentProfile === undefined &&
         run.agentProfile !== undefined &&
-        targetRunner !== (run.runner ?? 'claude');
+        targetRunner !== originalRunner;
       this.store.updateRun(runId, {
         ...(opts.runner !== undefined ? { runner: opts.runner } : {}),
         ...(opts.model !== undefined
