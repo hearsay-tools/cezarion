@@ -2,6 +2,9 @@ import type { RunEvent, RunStatus } from '@open-mercato/cezar-api-client'
 import {
   toolDisplay,
   agentInputEventSchema,
+  conversationMessageEventSchema,
+  requestOutcomeEventSchema,
+  type ConversationMessage,
   type PlanEntry,
   type PlanStatus,
   type StopReason,
@@ -41,6 +44,7 @@ export interface ThreadNote {
   id: string
   text: string
   tone: 'dim' | 'danger'
+  conversation?: Pick<ConversationMessage, 'id' | 'senderRunId' | 'recipientRunId' | 'kind' | 'requestId'> & { delivery: 'queued' | 'delivered' | 'not-delivered'; state?: ConversationMessage['state'] }
   attribution?: { source: 'agent' | 'lifecycle'; parentRunId: string }
 }
 
@@ -375,13 +379,50 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
     itemsById.set(key, { turn, entry: draft })
   }
 
+  const conversationNotes = new Map<string, ThreadNote>()
+  const seenOutcomes = new Set<string>()
+  const seenInputs = new Set<string>()
   for (const event of events) {
     switch (event.type) {
       // ---- turn boundaries ------------------------------------------------------------
+      case 'conversation-message': {
+        const parsed = conversationMessageEventSchema.safeParse(event)
+        if (!parsed.success) break
+        const { message } = parsed.data
+        const existing = conversationNotes.get(message.id)
+        if (existing) {
+          if (existing.conversation && existing.conversation.delivery !== 'delivered') existing.conversation.delivery = parsed.data.delivery
+          break
+        }
+        const note: ThreadNote = { kind: 'note', id: `conversation-message:${message.id}`, text: message.text, tone: 'dim', conversation: { ...message, delivery: parsed.data.delivery } }
+        conversationNotes.set(message.id, note)
+        currentTurn().entries.push({ origin: 'meta', entry: note })
+        break
+      }
+      case 'request-outcome': {
+        const parsed = requestOutcomeEventSchema.safeParse(event)
+        if (!parsed.success || seenOutcomes.has(parsed.data.outcome.requestId)) break
+        const { outcome } = parsed.data
+        seenOutcomes.add(outcome.requestId)
+        currentTurn().entries.push({ origin: 'meta', entry: { kind: 'note', id: `request-outcome:${outcome.requestId}`, text: `Request outcome: ${outcome.status} · Request ${outcome.requestId}${outcome.replyId ? ` · Reply ${outcome.replyId}` : ''}`, tone: 'dim' } })
+        break
+      }
       case 'agent-input': {
         const parsed = agentInputEventSchema.safeParse(event)
         if (!parsed.success) break
         const { input } = parsed.data
+        if (seenInputs.has(input.id)) break
+        seenInputs.add(input.id)
+        if (input.conversation) {
+          const existing = conversationNotes.get(input.id)
+          if (existing?.conversation) existing.conversation.delivery = 'delivered'
+          else {
+            const note: ThreadNote = { kind: 'note', id: `conversation-message:${input.id}`, text: input.text, tone: 'dim', conversation: { id: input.id, ...input.conversation, delivery: 'delivered' } }
+            conversationNotes.set(input.id, note)
+            currentTurn().entries.push({ origin: 'meta', entry: note })
+          }
+          break
+        }
         currentTurn().entries.push({ origin: 'meta', entry: {
           kind: 'note', id: `agent-input:${input.id}`, text: input.text, tone: 'dim',
           attribution: { source: input.source, parentRunId: input.parentRunId },

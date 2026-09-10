@@ -80,3 +80,23 @@ describe('wait modes and stable settlement', () => {
     expect(workerWaitRequestSchema.safeParse({ workerIds: [workerId], mode: 'unknown' }).success).toBe(false);
   });
 });
+
+describe('request selections in the shared wait', () => {
+  const requestId = randomUUID(); const other = randomUUID();
+  const selected: WorkerWait = { ...wait, workerIds: [], requestIds: [requestId, other], requestOutcomes: [], mode: 'all' };
+  it('accumulates early replies and concurrent failures until every request settles', () => {
+    const reply = { requestId, status: 'replied' as const, observedAt: now, replyId: randomUUID() };
+    const partial = reconcileWorkerWait(selected, [], now, [reply]);
+    expect(partial.phase).toBe('registered');
+    expect(partial.requestOutcomes).toEqual([reply]);
+    const failed = { requestId: other, status: 'failed' as const, observedAt: now };
+    const settled = reconcileWorkerWait(partial, [], now, [reply, failed]);
+    expect(settled).toMatchObject({ phase: 'wake-pending', reason: 'outcome', requestOutcomes: [reply, failed] });
+    expect(reconcileWorkerWait(settled, [], wait.deadline, [])).toEqual(settled);
+  });
+  it('request wait timeout keeps partial outcomes and ignores unrelated replies', () => {
+    const partial = reconcileWorkerWait(selected, [], wait.deadline, [{ requestId, status: 'replied', observedAt: now }, { requestId: randomUUID(), status: 'failed', observedAt: now }]);
+    expect(partial.reason).toBe('timeout');
+    expect(partial.requestOutcomes).toEqual([{ requestId, status: 'replied', observedAt: now }]);
+  });
+});

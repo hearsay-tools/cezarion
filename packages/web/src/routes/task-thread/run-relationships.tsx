@@ -18,13 +18,15 @@ function Relationships({ run }: { run: ApiRun }) {
   const knownIds = metadata?.role === 'root' ? metadata.receipts.map(receipt => receipt.workerId) : []
   const workers = new Map(query.data?.workers.map(worker => [worker.workerId, worker]))
   const ids = [...new Set([...knownIds, ...workers.keys()])].slice(0, 32)
-  const wait = metadata?.role === 'root' ? metadata.wait : undefined
+  const wait = metadata && metadata.role !== 'invalid' ? metadata.wait : undefined
   return (
     <section aria-label="Task relationships" className="min-w-0 border-t border-border py-2 text-sm text-muted-foreground">
       {parentId ? <ParentLink id={parentId} /> : null}
       {metadata?.role === 'worker' && metadata.destroy ? <Cleanup state={metadata.destroy} /> : null}
       {wait ? <p className="px-2 break-words">
-        {wait.phase === 'parked' ? 'Waiting on workers' : wait.phase === 'wake-pending'
+        {wait.requestIds ? (wait.phase === 'parked' ? 'Waiting on request replies' : wait.phase === 'wake-pending'
+          ? 'Conversation update queued for this task' : 'Request wait registered — the agent is finishing its turn')
+          : wait.phase === 'parked' ? 'Waiting on workers' : wait.phase === 'wake-pending'
           ? 'Worker update queued for the parent' : 'Worker wait registered — the agent is finishing its turn'}.
         {' '}Deadline: <time dateTime={wait.deadline}>{wait.deadline}</time>
       </p> : null}

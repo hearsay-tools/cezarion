@@ -24,6 +24,21 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
   const run = options.store.getRun(options.runId);
   if (!run || run.delegation?.role === 'invalid') return;
   const invocation = bundledWorkerInvocation();
+  const conversationGuidance = [
+    `Both parents and their owned workers can exchange messages through ${invocation}; workers may address only their parent.`,
+    `Use ${invocation} send <recipient-run-id> '<text>' --id <message-UUID> --kind request to request an explicit reply; use progress <recipient-run-id> '<text>' --id <message-UUID> for an update without an obligation.`,
+    `Use ${invocation} follow-up <recipient-run-id> '<text>' --id <message-UUID> --request-id <request-UUID> to clarify your request, or ${invocation} reply <recipient-run-id> '<text>' --id <message-UUID> --request-id <request-UUID> to answer an incoming request.`,
+    `A request's ID is its message ID. Reuse a message ID only for an exact retry, including timeout; changed payloads are rejected.`,
+    `Use conversation <recipient-run-id> to inspect messages/outcomes, cancel-request <request-UUID> to cancel your obligation, and wait --request <request-UUID> [--request <another-UUID>] --mode <one|any|all> --timeout-seconds <1-1800> to register a request wait.`,
+    `Request and wait deadlines default to 600 seconds. One active wait per run; cancel-wait <wait-id> stops waiting without cancelling requests or work.`,
+    `Wait returns immediately: end your turn to release capacity; incoming messages may interrupt waiting without resolving pending requests. No automatic re-wait.`,
+    `Acceptance, provider delivery, explicit reply, and task completion are distinct. Only reply resolves a request as replied; a late reply remains visible without reopening a settled obligation.`,
+    `Review or terminal recipients require explicit human Continue; sending never continues them or answers a human question. Destroyed recipients receive no input.`,
+    `At most 100,000 characters per message, 32 undelivered inputs per recipient, 1,024 family messages, and 32 pending requests.`,
+    `Controller persistence prevents duplicate queue entries; a crash between provider acceptance and its delivery checkpoint can still make delivery ambiguous.`,
+    `Credentials stay in the environment: never read, echo, forward, or persist them.`,
+  ].join(' ');
+
   // No metadata on ordinary off/unavailable paths. Root authority is durable before a token exists.
   if (!run.delegation) options.store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: [...workerOperationSchema.options], receipts: [] } }]);
   const generation = randomUUID();
@@ -34,7 +49,8 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
     env: { CEZ_DELEGATION_URL: options.url, CEZ_DELEGATION_TOKEN: token },
     instructions: run.delegation?.role === 'worker'
       ? [
-        `You are an owned cezar worker.`,
+        `You are an owned cezar worker. Your parent run ID is ${run.delegation.parentRunId}.`,
+        conversationGuidance,
         `You cannot delegate, control peers, merge automatically, or accept your own review.`,
         `Follow your assigned task and selected input context; only a human can answer a pending human question.`,
         `Native workers are not tracked by cezar: do not spawn them.`,
@@ -47,6 +63,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `Per-run controls suppress verified native entry points only; custom extensions and same-user unrestricted shell are not hard isolation.`,
         `Owned workers are available through the bundled command ${invocation}.`,
         `Commands return JSON.`,
+        conversationGuidance,
         `Use ${invocation} spawn --baseline parent-head --request-id <UUID> '<task>' (or an explicit committed ref).`,
         `Reuse the request ID only for the exact same task/baseline/context/backend/model on a retry.`,
         `Optional spawn flags: --context '<selected text>' or --context-file <local-UTF-8-file> (mutually exclusive), --backend <claude|codex|opencode|pi>, --model <model>.`,
