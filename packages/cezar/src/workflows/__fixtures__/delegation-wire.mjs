@@ -2,9 +2,15 @@
 // follow core/__fixtures__; every turn waits on a file so tests choose ordering,
 // never provider latency. Production runners, transport and process proof stay real.
 import { createInterface } from 'node:readline';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+
+export function publishJson(path, value) {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value));
+  renameSync(tmp, path);
+}
 
 export function runWire(control) {
   const id = process.env.CEZ_TASK_ID;
@@ -17,7 +23,7 @@ export function runWire(control) {
   if (!codex) emit({ type: 'system', subtype: 'init', session_id: id });
   async function turn(text, number) {
     const turnId = `turn-${number}`;
-    writeFileSync(join(control, `${id}.${number}.input.json`), JSON.stringify({ text, cwd: process.cwd(), backend: codex ? 'codex' : 'claude' }));
+    publishJson(join(control, `${id}.${number}.input.json`), { text, cwd: process.cwd(), backend: codex ? 'codex' : 'claude' });
     const gate = join(control, `${id}.${number}.reply.json`);
     while (!existsSync(gate)) await new Promise(done => setTimeout(done, 10));
     const result = JSON.parse(readFileSync(gate, 'utf8'));
