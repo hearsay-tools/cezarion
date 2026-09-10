@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -78,5 +79,36 @@ describe('continueRun unarchives', () => {
     expect(manager.continueRun(run.id, { text: 'keep going' })).toMatchObject({ ok: false });
     expect(store.getRun(run.id)?.archived).toBe(true);
     expect(store.getRun(run.id)?.archivedAt).toBeDefined();
+  });
+
+  it('a refused worker continuation checkpoint leaves the run archived', () => {
+    const { store, manager } = fixture();
+    const parent = store.createRun({
+      title: 'parent', task: 'parent', workflow: 'original',
+      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+    });
+    store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    const workerId = randomUUID();
+    const worker = store.createOwnedRun(
+      { title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude',
+        steps: [{ id: 'task', name: 'Task', kind: 'agent' }] },
+      parent.id, randomUUID(),
+      { role: 'worker', permissions: [], parentRunId: parent.id, workspace: {
+        ownerRunId: workerId, resourceId: randomUUID(), kind: 'owned-isolated',
+        path: `/managed/${workerId}`, branch: `cez/${workerId.slice(0, 8)}`, baselineSha: 'a'.repeat(40),
+      } },
+      'a'.repeat(64),
+    );
+    store.updateStep(worker.id, 'task', { status: 'done', sessionId: 'old-session' });
+    store.updateRun(worker.id, { status: 'done' });
+    store.setArchived(worker.id, true);
+    const commit = vi.spyOn(store, 'commitWorkerContinuation').mockImplementation(() => {
+      throw new Error('checkpoint failed');
+    });
+
+    expect(manager.continueRun(worker.id, { text: 'keep going' })).toMatchObject({ ok: false });
+    expect(store.getRun(worker.id)?.archived).toBe(true);
+    expect(store.getRun(worker.id)?.archivedAt).toBeDefined();
+    commit.mockRestore();
   });
 });

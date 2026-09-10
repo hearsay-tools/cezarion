@@ -3372,7 +3372,6 @@ export class RunManager {
     // bound UNATTENDED resumes.
     this.clearAutoResume(runId);
     if (!deferForCapacity) { this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); }
-    this.store.setArchived(runId, false);
 
     const continuations = run.steps.filter((s) => s.id.startsWith('continue-')).length;
     const stepId = `continue-${continuations + 1}`;
@@ -3392,6 +3391,8 @@ export class RunManager {
       error: undefined,
       finishedAt: undefined,
       currentStepId: deferForCapacity ? undefined : stepId,
+      archived: false,
+      archivedAt: undefined,
     };
     if (run.delegation?.role === 'worker') {
       try { this.store.commitWorkerContinuation(runId, acceptedPatch, { id: stepId, name: 'Continue', kind: 'agent' }); }
