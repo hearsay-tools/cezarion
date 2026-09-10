@@ -1,0 +1,148 @@
+{
+  "provenance": "GitHub Actions run 34473233122 attempt 1, job 102857807749, retrieved 2026-09-10; selected metadata and first failure excerpt only.",
+  "run": {
+    "id": 34473233122,
+    "name": "Release",
+    "path": ".github/workflows/release.yml",
+    "head_sha": "d9bcf8c70eecf41d53902577ea6ca3718633a375",
+    "head_branch": "main",
+    "run_attempt": 1,
+    "status": "completed",
+    "conclusion": "failure",
+    "created_at": "2026-09-10T11:48:20Z",
+    "updated_at": "2026-09-10T11:53:30Z",
+    "run_started_at": "2026-09-10T11:48:20Z",
+    "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/34473233122",
+    "head_repository": {
+      "full_name": "hearsay-tools/cezarion"
+    }
+  },
+  "jobs": [
+    {
+      "id": 102857807749,
+      "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/34473233122/job/102857807749",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-09-10T11:48:30Z",
+      "completed_at": "2026-09-10T11:53:29Z",
+      "name": "Verify before release",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-09-10T11:48:31Z",
+          "completed_at": "2026-09-10T11:48:33Z"
+        },
+        {
+          "name": "Set up runner",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-09-10T11:48:33Z",
+          "completed_at": "2026-09-10T11:48:33Z"
+        },
+        {
+          "name": "Check out repository",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-09-10T11:48:33Z",
+          "completed_at": "2026-09-10T11:48:36Z"
+        },
+        {
+          "name": "Set up Node.js",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-09-10T11:48:36Z",
+          "completed_at": "2026-09-10T11:48:38Z"
+        },
+        {
+          "name": "Install dependencies",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-09-10T11:48:38Z",
+          "completed_at": "2026-09-10T11:48:41Z"
+        },
+        {
+          "name": "Typecheck",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-09-10T11:48:41Z",
+          "completed_at": "2026-09-10T11:48:47Z"
+        },
+        {
+          "name": "Run unit tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-09-10T11:48:47Z",
+          "completed_at": "2026-09-10T11:49:06Z"
+        },
+        {
+          "name": "Run server and cockpit unit suites",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 8,
+          "started_at": "2026-09-10T11:49:06Z",
+          "completed_at": "2026-09-10T11:53:26Z"
+        },
+        {
+          "name": "Build application",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 9,
+          "started_at": "2026-09-10T11:53:26Z",
+          "completed_at": "2026-09-10T11:53:26Z"
+        },
+        {
+          "name": "Post Set up Node.js",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 16,
+          "started_at": "2026-09-10T11:53:26Z",
+          "completed_at": "2026-09-10T11:53:26Z"
+        },
+        {
+          "name": "Post Check out repository",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 17,
+          "started_at": "2026-09-10T11:53:26Z",
+          "completed_at": "2026-09-10T11:53:26Z"
+        },
+        {
+          "name": "Complete runner",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 18,
+          "started_at": "2026-09-10T11:53:26Z",
+          "completed_at": "2026-09-10T11:53:26Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 19,
+          "started_at": "2026-09-10T11:53:26Z",
+          "completed_at": "2026-09-10T11:53:26Z"
+        }
+      ]
+    },
+    {
+      "id": 102859276630,
+      "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/34473233122/job/102859276630",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-09-10T11:53:30Z",
+      "completed_at": "2026-09-10T11:53:29Z",
+      "name": "Release ${{ inputs.bump }} to npm (latest)",
+      "steps": []
+    }
+  ],
+  "log": "2026-09-10T11:53:26.3601379Z  FAIL   server  src/workflows/delegation-integration.test.ts > public delegation completion integration > reports a real provider failure and a stopped worker without allowing peer authority or premature success\n2026-09-10T11:53:26.3604293Z AssertionError: expected { \u2026(18) } to match object { outcome: 'failed', \u2026(4) }\n2026-09-10T11:53:26.3604645Z (31 matching properties omitted from actual)\n2026-09-10T11:53:26.3605598Z \n2026-09-10T11:53:26.3605859Z - Expected\n2026-09-10T11:53:26.3606117Z + Received\n2026-09-10T11:53:26.3606288Z \n2026-09-10T11:53:26.3606390Z   {\n2026-09-10T11:53:26.3606690Z -   \"error\": StringContaining \"integration provider unavailable\",\n2026-09-10T11:53:26.3607801Z +   \"error\": \"step \\\"task\\\" failed: codex app-server exited with code 1 \u2014     at turn (file:///home/runner/_work/cezarion/cezarion/packages/cezar/src/workflows/__fixtures__/delegation-wire.mjs:23:25) |  | Node.js v24.13.0\",\n2026-09-10T11:53:26.3608484Z     \"lastExecutionOutcome\": \"failed\",\n2026-09-10T11:53:26.3608733Z     \"outcome\": \"failed\",\n2026-09-10T11:53:26.3608955Z     \"partial\": true,\n2026-09-10T11:53:26.3609176Z     \"settled\": true,\n2026-09-10T11:53:26.3609370Z   }\n2026-09-10T11:53:26.3609478Z \n2026-09-10T11:53:26.3609742Z  \u276f src/workflows/delegation-integration.test.ts:224:41\n2026-09-10T11:53:26.3633944Z \n2026-09-10T11:53:26.3634937Z \n2026-09-10T11:53:26.3635797Z \u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n2026-09-10T11:53:26.3635963Z \n2026-09-10T11:53:26.3637605Z \n2026-09-10T11:53:26.3644670Z  Test Files  1 failed | 376 passed (377)\n2026-09-10T11:53:26.3664899Z       Tests  1 failed | 7875 passed (7876)\n2026-09-10T11:53:26.3665278Z    Start at  11:49:06\n2026-09-10T11:53:26.3666920Z    Duration  259.73s (transform 6.13s, setup 1.21s, import 54.37s, tests 660.71s, environment 34.22s)\n2026-09-10T11:53:26.3667611Z \n2026-09-10T11:53:26.3690911Z \n2026-09-10T11:53:26.3713845Z ##[error]AssertionError: expected { \u2026(18) } to match object { outcome: 'failed', \u2026(4) }\n(31 matching properties omitted from actual)"
+}
