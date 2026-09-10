@@ -112,7 +112,7 @@ function serve(
       if (url === '/api/v1/config' && method === 'GET')
         return json({
           baseBranch: null,
-          defaultRunner: 'claude',
+          defaultRunner: health.defaultRunner,
           systemPrompt: null,
           defaultModels,
           modelsLocked,
@@ -701,5 +701,47 @@ describe('continuation conversation hint (#201)', () => {
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /opus/ }))
     expect(screen.queryByText('Starts a new agent conversation.')).toBeNull()
     expect(continueBody()).toBeUndefined()
+  })
+})
+
+
+describe('untouched workflow provider requirements', () => {
+  const untouched = (steps: NonNullable<ApiRun['workflowDef']>['steps'], runner: ApiRun['runner'] = 'claude') => makeRun({
+    status: 'cancelled', runner,
+    steps: steps.map(def => step({ id: def.id, status: 'pending', sessionId: undefined })),
+    workflowDef: { name: 'original', source: 'built-in', steps },
+  })
+
+  it('blocks Continue when any original step provider is unavailable', async () => {
+    serve({ ...HEALTH_MULTI, checks: [{ name: 'claude', available: true }] })
+    renderAction(untouched([{ id: 'one', prompt: 'first' }, { id: 'two', prompt: 'second', runner: 'codex' }]))
+    await screen.findByText(/required workflow providers.*codex/i)
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
+    expect(requests.filter(request => request.method === 'POST')).toEqual([])
+  })
+
+  it('allows a step-only Codex workflow without requiring its unused Claude fallback', async () => {
+    serve({ ...HEALTH_MULTI, checks: [{ name: 'codex', available: true }] })
+    renderAction(untouched([{ id: 'task', prompt: 'work', runner: 'codex' }]))
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(requests.some(request => request.method === 'POST')).toBe(true))
+    expect(requests.find(request => request.url.endsWith('/continue'))?.body).toMatchObject({ runner: 'codex' })
+  })
+
+  it('offers an explicit connected fallback for unpinned workflow steps', async () => {
+    serve({ ...HEALTH_MULTI, checks: [{ name: 'claude', available: true }] })
+    renderAction(untouched([{ id: 'task', prompt: 'work' }], 'codex'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(requests.some(request => request.method === 'POST')).toBe(true))
+    expect(requests.find(request => request.url.endsWith('/continue'))?.body).toMatchObject({ runner: 'claude' })
+  })
+
+  it('keeps the configured fallback for a never-started task with no recorded runner', async () => {
+    serve({ ...HEALTH_MULTI, defaultRunner: 'codex' })
+    renderAction({ ...untouched([{ id: 'task', prompt: 'work' }]), runner: undefined })
+    expect((await screen.findByRole('button', { name: 'Runner' })).textContent).toContain('codex')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(requests.some(request => request.method === 'POST')).toBe(true))
+    expect(requests.find(request => request.url.endsWith('/continue'))?.body).not.toHaveProperty('runner')
   })
 })

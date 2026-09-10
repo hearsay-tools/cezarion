@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { runnerSchema } from './health.ts';
+import { runnerSchema, type Runner } from './health.ts';
 
 /**
  * The WORKFLOWS family: the chain catalog, the save/parse routes, and the planner.
@@ -55,6 +55,16 @@ export const workflowDefSchema = z.object({
   path: z.string().optional(),
 });
 export type WorkflowDef = z.infer<typeof workflowDefSchema>;
+
+/** Providers an original workflow executes; command-only steps need no agent. */
+export function providersRequiredByWorkflow(workflow: WorkflowDef, fallback: Runner): Runner[] {
+  const required = new Set<Runner>();
+  for (const step of workflow.steps) {
+    if (!step.command) required.add(step.runner ?? fallback);
+  }
+  return runnerSchema.options.filter(provider => required.has(provider));
+}
+
 
 /** A workflow file that failed to load. Reported, never fatal — the catalog still answers. */
 export const workflowLoadIssueSchema = z.object({
