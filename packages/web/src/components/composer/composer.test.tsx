@@ -863,3 +863,83 @@ it('retained submission prevents dictation insertion and dictation send while pe
   expect(onSubmit).toHaveBeenCalledTimes(1)
   await act(async () => resolve())
 })
+
+describe('unified execution actions (#201)', () => {
+  it('shows Stop on empty active drafts without making Enter a Stop shortcut', async () => {
+    const onStop = vi.fn(async () => {})
+    const { textarea, onSubmit } = renderComposer({ onStop, stopOnEmpty: true, quickReplies: true })
+    expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    type(textarea, '   ')
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(onStop).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+    type(textarea, 'new instructions')
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('disabled')).toBe(false)
+    type(textarea, '')
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(onStop).toHaveBeenCalledTimes(1))
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('labels empty continuation Continue and attachment-only continuation Send', async () => {
+    const { textarea } = renderComposer({ allowEmptySubmit: true, emptySubmitLabel: 'Continue' })
+    expect(screen.getByRole('button', { name: 'Continue' }).textContent).toContain('Continue')
+    type(textarea, 'next')
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false)
+    type(textarea, '')
+    paste(textarea, [pngFile()])
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: /remove shot.png/i }))
+    expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('preserves attachments and text through failed Stop and locks competing submissions', async () => {
+    let reject!: (error: Error) => void
+    const onStop = vi.fn(() => new Promise<void>((_, no) => { reject = no }))
+    const { textarea, onSubmit } = renderComposer({ onStop, stopOnEmpty: true, retainDraftUntilSuccess: true, compactFeedback: true })
+    type(textarea, 'keep this')
+    paste(textarea, [pngFile()])
+    await screen.findByRole('button', { name: /remove shot.png/i })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
+    expect(textarea.value).toBe('keep this')
+    expect(onSubmit).not.toHaveBeenCalled()
+    await act(async () => reject(new Error('Network unavailable. Retry Stop.')))
+    expect(screen.getByRole('alert').textContent).toContain('Retry Stop')
+    expect(textarea.value).toBe('keep this')
+    expect(screen.getByRole('button', { name: /remove shot.png/i }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('keeps Stop usable when provider availability disables sending', async () => {
+    const onStop = vi.fn(async () => {})
+    renderComposer({ onStop, stopOnEmpty: true, disabled: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(onStop).toHaveBeenCalledOnce())
+  })
+
+  it('renders authoritative stopping without allowing shortcuts or draft changes', () => {
+    const { textarea, onSubmit } = renderComposer({ stopping: true, value: '', allowEmptySubmit: true, quickReplies: true })
+    expect(screen.getByRole('button', { name: 'Stopping…' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(window, { code: 'KeyC', altKey: true })
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
+
+it('retains an attachment already being read when Stop is requested (#201)', async () => {
+  let read!: (bytes: ArrayBuffer) => void
+  let reject!: (error: Error) => void
+  const { textarea } = renderComposer({ onStop: () => new Promise<void>((_, no) => { reject = no }), stopOnEmpty: true, retainDraftUntilSuccess: true })
+  const late = pngFile('late.png')
+  Object.defineProperty(late, 'arrayBuffer', { value: () => new Promise<ArrayBuffer>(done => { read = done }) })
+  paste(textarea, [late])
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+  await act(async () => read(new ArrayBuffer(1)))
+  await act(async () => reject(new Error('Stop failed')))
+  expect(screen.getByRole('button', { name: 'Remove late.png' })).toBeTruthy()
+})

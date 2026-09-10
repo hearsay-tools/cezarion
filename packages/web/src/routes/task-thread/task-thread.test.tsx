@@ -1112,3 +1112,53 @@ it.each([false, true].flatMap(fallback => (['pending', 'refused-human-attempt', 
   expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(expectedPending ? 'waiting for your reply' : 'Waiting on workers')
   expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(expectedPending ? 'needs you' : 'waiting on workers')
 })
+
+describe('composer execution actions (#201)', () => {
+  it.each(['queued', 'running', 'waiting'] as const)('keeps Stop reachable for %s tasks', async (status) => {
+    renderView(<ThreadView run={run(status)} thread={reduceThread([])} />)
+    expect(await screen.findByRole('button', { name: 'Stop' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    const textarea = screen.getByRole('textbox', { name: 'Reply to the agent' })
+    if (status === 'waiting') {
+      expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
+    }
+    fireEvent.change(textarea, { target: { value: 'next instructions' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false))
+    expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('requeues a stopped unstarted task through the same composer Continue action', async () => {
+    renderView(<ThreadView run={run('cancelled', { workflowDef: { name: 'quick-task', source: 'built-in' as const, steps: [{ id: 'task', name: 'Task', prompt: '{{task}}' }] } })} thread={reduceThread([])} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(false))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'and tests' } })
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
+  })
+
+  it('requires an answer instead of offering empty Continue for a pending human question', async () => {
+    renderView(<ThreadView run={run('done', { hasPendingHumanAsk: true, steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)
+    await waitFor(() => expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(false))
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('preserves a draft after Stop acceptance until the run terminates', async () => {
+    renderView(<ThreadView run={run('running')} thread={reduceThread([])} />)
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    await waitFor(() => expect(textarea.disabled).toBe(false))
+    const previousFetch = globalThis.fetch
+    let stops = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/cancel')) { stops++; return new Response(JSON.stringify({ cancelled: true }), { headers: { 'content-type': 'application/json' } }) }
+      return previousFetch(input, init)
+    }))
+    fireEvent.change(textarea, { target: { value: 'keep this draft' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(stops).toBe(1))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stopping…' }).hasAttribute('disabled')).toBe(true))
+    expect(textarea.value).toBe('keep this draft')
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(stops).toBe(1)
+  })
+})

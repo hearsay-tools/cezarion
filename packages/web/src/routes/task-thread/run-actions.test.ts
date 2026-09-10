@@ -306,3 +306,20 @@ describe('queuePosition — the legacy FIFO math (web/app.js), 1-based among que
     expect(queuePosition([], 'anything')).toBeUndefined()
   })
 })
+
+describe('unstarted continuation (#201)', () => {
+  const workflowDef = { name: 'quick-task', source: 'built-in' as const, steps: [{ id: 'task', name: 'Task', prompt: '{{task}}' }] }
+  it('offers Continue for an untouched cancelled workflow but never Terminal', () => {
+    const flags = runActionFlags(run('cancelled', { workflowDef, steps: [step({ status: 'pending' })] }))
+    expect(flags.continueRun).toBe(true)
+    expect(flags.terminal).toBe(false)
+  })
+  it.each([
+    { startedAt: '2026-09-10T00:00:00Z', steps: [] },
+    { steps: [step({ status: 'done' })] },
+    { steps: [step({ status: 'pending', startedAt: '2026-09-10T00:00:00Z' })] },
+    { stopping: true, steps: [] },
+  ])('does not offer replay or continuation during termination: %j', (extra) => {
+    expect(runActionFlags(run('cancelled', { workflowDef, ...extra })).continueRun).toBe(false)
+  })
+})

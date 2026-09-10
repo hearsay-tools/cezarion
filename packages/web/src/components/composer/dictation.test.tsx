@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createQueryClient } from '@/api/query-client'
 import { resetToasts, Toaster } from '@/components/ui/toaster'
 
-import { Composer } from './composer'
+import { Composer, type ComposerProps } from './composer'
 import {
   foldResults,
   formatElapsed,
@@ -63,11 +63,11 @@ const result = (transcript: string, isFinal: boolean, resultIndex = 0): SpeechRe
   results: [{ isFinal, 0: { transcript } }],
 })
 
-function renderComposer(onSubmit = vi.fn(() => Promise.resolve({}))) {
+function renderComposer(onSubmit = vi.fn(() => Promise.resolve({})), props: Partial<ComposerProps> = {}) {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('[]', { status: 200 }))))
   render(
     <QueryClientProvider client={createQueryClient()}>
-      <Composer onSubmit={onSubmit} />
+      <Composer onSubmit={onSubmit} {...props} />
       <Toaster />
     </QueryClientProvider>,
   )
@@ -110,9 +110,9 @@ describe('the dictation overlay (paseo pattern)', () => {
     renderComposer()
     const mic = screen.getByLabelText('Start dictation')
     expect(mic.textContent).toContain('Dictation')
-    const bar = mic.parentElement!
-    const children = [...bar.children]
-    expect(children.indexOf(mic)).toBeLessThan(children.indexOf(screen.getByLabelText('Send')))
+    const send = screen.getByRole('button', { name: 'Send' })
+    expect(mic.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+
   })
 
   it('recording swaps the footer for the overlay: timer, pulsing dot, growing partial transcript', () => {
@@ -194,4 +194,18 @@ describe('the dictation overlay (paseo pattern)', () => {
     ).toBeTruthy()
     expect(document.querySelector('[data-slot="dictation-overlay"]')).toBeNull()
   })
+})
+
+
+it('keeps execution Stop reachable while dictating without discarding either draft (#201)', async () => {
+  stubSpeech()
+  const onStop = vi.fn(async () => {})
+  const { textarea } = renderComposer(undefined, { onStop, stopOnEmpty: true })
+  fireEvent.change(textarea, { target: { value: 'typed draft' } })
+  const recognition = startDictation()
+  act(() => recognition.onresult?.(result('spoken draft', true)))
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+  await waitFor(() => expect(onStop).toHaveBeenCalledOnce())
+  expect(textarea.value).toBe('typed draft')
+  expect(screen.getByText('spoken draft')).toBeTruthy()
 })

@@ -103,7 +103,7 @@ import {
   runIdParamSchema,
 } from '@open-mercato/cezar-contract';
 import { resolveAttachmentPath } from '../workflows/attachment-path.ts';
-import { toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
+import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
 import { removeWorktree, worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
 import { isReclaimable, reclaimWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLog, getRepoInfo, getStatus } from './git.ts';
@@ -3894,21 +3894,32 @@ export function createApp(deps: ServerDeps) {
       ) {
         return c.json({ error: AGENT_MODELS_LOCKED_ERROR }, 409);
       }
-      const blocked = await providerActionError([providerForExistingRun(run, parsed.data.runner)]);
+      // Untouched tasks execute their original workflow, including step-level runners.
+      // Resolve the same fallback as POST /runs, and pass it through so validation
+      // and execution use the same provider even when the record inherited config.
+      const untouched = isUntouchedCancelledRun(run);
+      const originalProvider = untouched
+        ? run.runner ?? (await loadConfig(repoRoot)).defaultRunner
+        : providerForExistingRun(run);
+      const provider = parsed.data.runner ?? originalProvider;
+      const required = untouched
+        ? providersRequiredByWorkflow(run.workflowDef!, provider)
+        : [provider];
+      const blocked = await providerActionError(required);
       if (blocked) return c.json({ error: blocked }, 409);
       // The follow-up pill names an account the user just picked, so an id that has been deleted
       // since the thread loaded is answered honestly — the same asymmetry `POST /runs` keeps: a
       // USER can act on "unknown account", and reopening the session on another login silently
       // would cross the very billing boundary accounts exist to draw.
       if (parsed.data.agentProfile !== undefined) {
-        const provider = providerForExistingRun(run, parsed.data.runner);
         const account = await resolveWorkspaceProfile(provider, parsed.data.agentProfile);
         if ('error' in account) return c.json({ error: account.error }, 400);
       }
       const result = manager.continueRun(id, {
         text: parsed.data.text,
         images: parsed.data.images?.map(toPastedContent),
-        runner: parsed.data.runner,
+        runner: untouched ? provider : parsed.data.runner,
+        ...(untouched ? { originalRunner: originalProvider } : {}),
         model: parsed.data.model,
         effort: parsed.data.effort,
         agentProfile: parsed.data.agentProfile,

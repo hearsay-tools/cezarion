@@ -109,12 +109,22 @@ export interface RunActionFlags {
   deleteRun: boolean
 }
 
+/** Only a saved original workflow that has never executed may be requeued. */
+export function isStoppedBeforeStarting(run: RunRecord): boolean {
+  return run.status === 'cancelled' && run.startedAt === undefined &&
+    run.workflowDef !== undefined &&
+    run.steps.every(step => step.status === 'pending' && step.startedAt === undefined && !step.sessionId)
+}
+
 export function runActionFlags(run: RunRecord): RunActionFlags {
   const active = isRunActive(run.status)
   const hasSession = lastSessionId(run) !== undefined
   return {
     finish: run.status === 'waiting' || run.status === 'review',
-    continueRun: !active && hasSession,
+    continueRun: !active && !run.stopping &&
+      run.delegation?.role !== 'invalid' &&
+      !(run.delegation?.role === 'worker' && run.delegation.destroy) &&
+      (hasSession || isStoppedBeforeStarting(run)),
     terminal: !active && hasSession,
     notes: true,
     archive: !active,

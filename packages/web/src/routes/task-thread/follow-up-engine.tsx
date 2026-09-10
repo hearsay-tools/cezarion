@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 
 import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
-import { continueRun } from '@/api/client'
+import { ApiError, continueRun } from '@/api/client'
 import { queryKeys, useConfig, useRunnerModels } from '@/api/queries'
 import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client'
 import type { ApiRun, ContinueResponse, AttachmentInput, Runner } from '@open-mercato/cezar-api-client'
@@ -28,6 +28,7 @@ export interface ContinueAction {
   reason?: string
   /** True while provider status is still loading. */
   providerPending: boolean
+  startsNewConversation: boolean
   /** The runner + model pills — which backend and model the reopened session runs on. */
   pills: ReactNode
   /**
@@ -104,8 +105,9 @@ export function useContinueAction(run: ApiRun): ContinueAction {
   // `sessionId` and `profileId` are a pair, so that step is the account a resume reattaches to and
   // therefore the row that is selected until the user picks another. A run from before accounts
   // existed recorded none and ran under the discovered one.
+  const sessionStep = [...run.steps].reverse().find((step) => step.sessionId)
   const runAccount =
-    [...run.steps].reverse().find((step) => step.profileId)?.profileId
+    sessionStep?.profileId
     ?? run.agentProfile
     ?? DEFAULT_AGENT_ACCOUNT_ID
   // The run's own account stands in for the project's selection only while the runner is
@@ -146,11 +148,21 @@ export function useContinueAction(run: ApiRun): ContinueAction {
       })
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
+      }
+    },
   })
 
   return {
     available,
     canContinue,
+    startsNewConversation: !!sessionStep && (
+      runner !== (sessionStep.backend ?? currentRunner) ||
+      (account ?? run.agentProfile ?? sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID) !==
+        (sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID)
+    ),
     reason: continuation.reason,
     providerPending: continuation.providerPending,
     pills: (
