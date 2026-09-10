@@ -61,7 +61,7 @@ export async function withDelayedCommand(backend: 'codex' | 'opencode' | 'pi', b
     else send({id:command.id,type:'response',command:'prompt',success:true});
     send({type:'agent_start'}); send({type:'turn_start'}); sendText([command.message]);`);
     }
-    source = source.replace("turnText.includes('mock:agent-echo')", `(turnText.includes('mock:agent-echo') || turnText.includes(${JSON.stringify(marker)}))`)
+    if (marker !== 'mock:provider-error') source = source.replace("turnText.includes('mock:agent-echo')", `(turnText.includes('mock:agent-echo') || turnText.includes(${JSON.stringify(marker)}))`)
       .replace("body.includes('mock:agent-echo')", `(body.includes('mock:agent-echo') || body.includes(${JSON.stringify(marker)}))`)
       .replace("command.message.includes('mock:agent-echo')", `(command.message.includes('mock:agent-echo') || command.message.includes(${JSON.stringify(marker)}))`);
     writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
