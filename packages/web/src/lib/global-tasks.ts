@@ -361,8 +361,7 @@ const GROUP_BY_VALUES = new Set<string>(GROUP_BY_OPTIONS.map((option) => option.
 export interface GlobalTasksUrlState {
   filters: GlobalTaskFilters
   groupBy: GroupBy
-  /** Active/Archived. Also mirrored into the shared `useListView()` context by the route, so the
-   *  rest of the cockpit keeps answering the same question. */
+  /** Active/Archived for this table only. The sidebar keeps its own in-memory filter. */
   view: ListViewValue
 }
 
