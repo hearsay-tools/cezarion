@@ -1,9 +1,9 @@
 /**
- * The composer submit rule (spec, cross-cutting keyboard rule): **Enter sends, Shift+Enter
- * inserts a newline, and ⌘↵ / Ctrl+↵ also send — in every prompting surface.** One predicate,
- * shared by the thread composer and (R4) the new-task composer, in the same family as
- * `use-command-shortcut.ts`: macOS and Windows/Linux modifiers are decided together, never as
- * two bindings that can drift.
+ * The composer submit rule (spec, cross-cutting keyboard rule): **desktop Enter sends,
+ * coarse-pointer Enter inserts a newline, Shift+Enter inserts a newline, and ⌘↵ / Ctrl+↵
+ * also send — in every prompting surface.** One predicate, shared by the thread composer and
+ * (R4) the new-task composer, in the same family as `use-command-shortcut.ts`: macOS and
+ * Windows/Linux modifiers are decided together, never as two bindings that can drift.
  *
  * Unlike the ⌘K family this is not a global listener — it reads the keydown of the composer's
  * own textarea — so the module exports the predicate only; the composer wires it into its
@@ -24,10 +24,18 @@ export type SubmitShortcutEvent = {
   isComposing?: boolean
 }
 
+const COARSE_POINTER_QUERY = '(hover: none) and (pointer: coarse)'
+
+function isCoarsePointerSurface(): boolean {
+  return typeof globalThis.matchMedia === 'function'
+    && globalThis.matchMedia(COARSE_POINTER_QUERY).matches
+}
+
 /**
  * Does this keydown mean "send the message"?
  *
- *  - Plain Enter sends (the legacy message bar's rule — muscle memory to keep).
+ *  - Plain Enter sends on desktop (the legacy message bar's rule — muscle memory to keep).
+ *  - Plain Enter stays a newline on coarse-pointer surfaces; the visible button sends there.
  *  - ⌘↵ and Ctrl+↵ ALSO send — the spec's cross-surface chord, both platforms together.
  *  - Shift+Enter never sends: it is the newline. Shift wins even combined with ⌘/Ctrl.
  *  - Alt+Enter is left alone (unbound — on some layouts it types, and we must not eat it).
@@ -39,7 +47,8 @@ export function isSubmitShortcut(event: SubmitShortcutEvent): boolean {
   if (event.shiftKey || event.altKey) return false
   if (event.repeat) return false
   if (event.isComposing) return false
-  return true
+  if (event.metaKey || event.ctrlKey) return true
+  return !isCoarsePointerSurface()
 }
 
 /** The kbd hint next to a submit button, in the platform's own symbols (spec: "kbd hints

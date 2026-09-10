@@ -130,6 +130,24 @@ describe('submit shortcuts', () => {
     expect(textarea.value).toBe('line one')
   })
 
+  it('uses the send button instead of bare Enter on a coarse-pointer surface', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      media: query,
+      matches: query === '(hover: none) and (pointer: coarse)',
+    }) as MediaQueryList)
+    const { onSubmit, textarea } = renderComposer()
+    type(textarea, 'line one')
+
+    const enterWasNotPrevented = fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    expect(enterWasNotPrevented).toBe(true)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('line one')
+
+    fireEvent.click(screen.getByLabelText('Send'))
+    expect(onSubmit).toHaveBeenCalledWith('line one', [])
+  })
+
   it('⌘↵ and Ctrl+↵ both send (the cross-platform chord)', async () => {
     const { onSubmit, textarea } = renderComposer()
     type(textarea, 'one')
