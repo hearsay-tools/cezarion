@@ -61,3 +61,17 @@ test('malformed rows in paginated API data fail closed with an explicit coverage
  const api=create({github:{request:async()=>({data:{total_count:1,jobs:[null]}})}});
  await assert.rejects(api.paginate('GET /jobs',{}));assert.equal(api.manifest.complete,false);
 });
+test('signed log download aborts at the remaining sweep deadline',async()=>{
+ let clock=0;
+ const api=create({now:()=>clock,limits:{durationMs:100},github:{request:async()=>{
+  clock=90;return {headers:{location:'https://example.com/log'}};
+ }},fetchImpl:async(url,{signal})=>new Promise((resolve,reject)=>{
+  signal.addEventListener('abort',()=>{clock=100;reject(signal.reason);},{once:true});
+ })});
+ let timer;
+ const result=await Promise.race([api.downloadLog({job_id:1}),new Promise(resolve=>{timer=setTimeout(()=>resolve('deadline missed'),200);})]);
+ clearTimeout(timer);
+ assert.equal(result,null);
+ assert.ok(api.manifest.problems.some(p=>p.code==='time-limit'));
+ assert.equal(api.stopped,true);
+});

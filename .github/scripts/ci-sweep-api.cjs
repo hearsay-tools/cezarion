@@ -83,7 +83,10 @@ function createSweepApi({github,now=Date.now,limits={},fetchImpl=fetch}) {
         if(!response.headers?.location && typeof response.data==='string')countBytes(Buffer.byteLength(response.data));
         return response;
       }},args,async(url,options)=>{
-        const response=await fetchImpl(url,options);
+        checkTime();
+        const remaining=Math.max(1,Math.ceil(caps.durationMs-(now()-started)));
+        const signal=AbortSignal.any([options.signal,AbortSignal.timeout(remaining)]);
+        const response=await fetchImpl(url,{...options,signal});
         if(!response.body)return response;
         const reader=response.body.getReader();
         // Stream into the existing per-log limiter while enforcing total bytes.
@@ -100,6 +103,7 @@ function createSweepApi({github,now=Date.now,limits={},fetchImpl=fetch}) {
         return {ok:response.ok,body};
       });
     } catch(error) {
+      try {checkTime();} catch { /* deadline is recorded by checkTime */ }
       problem(error instanceof SweepError ? error.code : 'logs-unavailable',{jobId:args.job_id});
       return null;
     }
