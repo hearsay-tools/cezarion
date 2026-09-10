@@ -3354,6 +3354,7 @@ export class RunManager {
       this.clearAutoResume(runId);
       this.withdrawWorkerWait(runId);
       this.resetParentCompletion(runId);
+      this.store.setArchived(runId, false);
       this.store.updateRun(runId, { status: 'queued', stopping: undefined, error: undefined, finishedAt: undefined,
         currentStepId: undefined, ...(message ? { queuedMessages: [...(current.queuedMessages ?? []), message] } : {}) });
       this.store.flush();
@@ -3390,6 +3391,8 @@ export class RunManager {
       error: undefined,
       finishedAt: undefined,
       currentStepId: deferForCapacity ? undefined : stepId,
+      archived: false,
+      archivedAt: undefined,
     };
     if (run.delegation?.role === 'worker') {
       try { this.store.commitWorkerContinuation(runId, acceptedPatch, { id: stepId, name: 'Continue', kind: 'agent' }); }
