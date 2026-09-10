@@ -52,7 +52,10 @@ function causesForStep({run, job, step, log}) {
   const stage = stageFor(step);
   const tests = lines.flatMap((line, index) => {
     const match = line.match(/\bFAIL\s+(?:\S+\s+)?((?:[\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)(?:\s+>\s+.+)?)/);
-    return match ? [{key: 'test:' + normalizeIdentity(match[1]), title: match[1], index}] : [];
+    if (!match) return [];
+    const testIdentity=normalizeIdentity(match[1]);
+    const testFile=match[1].match(/^([\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)/)[1];
+    return [{key:'test:'+testIdentity,title:match[1],index,kind:'test',testIdentity,testFile,hasTestName:/\s+>\s+.+/.test(match[1])}];
   });
   for (let i=0; i<tests.length; i++) {
     const diagnostic = lines.slice(tests[i].index+1, tests[i+1]?.index ?? lines.length)
@@ -67,11 +70,11 @@ function causesForStep({run, job, step, log}) {
     const normalized = normalizeIdentity(line);
     // Generic error code lines alone cannot distinguish unrelated causes.
     if (/^(?:npm (?:ERR!|error) code \w+|\[REDACTED.*\])$/.test(normalized)) return [];
-    return [{key: `${stage}:${normalizeIdentity(step.name)}:${normalized}`, title: normalized, index}];
+    return [{key:`${stage}:${normalizeIdentity(step.name)}:${normalized}`,title:normalized,index,kind:'error',failureIdentity:normalized}];
   }).slice(0, 1);
   const found = tests.length ? tests.filter(item => item.hasDiagnostic || !tests.some(other => other.testKey === item.testKey && other.hasDiagnostic)) : errors;
-  if (!found.length) return [{signature: hash(`unknown:${run.id}:${run.run_attempt}:${job.id}:${step.number}`), title:`${stage} failure in ${sanitize(step.name)}`, stage, excerpt:sanitize('Logs unavailable or no recognizable failure diagnostic. Inspect the linked job and failed step.\n' + safeLines.slice(-30).join('\n'))}];
+  if (!found.length) return [{signature:hash(`unknown:${run.id}:${run.run_attempt}:${job.id}:${step.number}`),title:`${stage} failure in ${sanitize(step.name)}`,stage,kind:'unknown',excerpt:sanitize('Logs unavailable or no recognizable failure diagnostic. Inspect the linked job and failed step.\n'+safeLines.slice(-30).join('\n'))}];
   const unique = [...new Map(found.map(item => [item.key,item])).values()];
-  return unique.map(item => ({signature:hash(item.key), title:sanitize(item.title).slice(0,180), stage, excerpt:sanitize(safeLines.slice(item.index, Math.min(item.index+30, found.find(next => next.index > item.index)?.index ?? Infinity)).join('\n'))}));
+  return unique.map(item => ({signature:hash(item.key),title:sanitize(item.title).slice(0,180),stage,kind:item.kind,...(item.testIdentity ? {testIdentity:item.testIdentity,testFile:item.testFile,hasTestName:item.hasTestName,hasDiagnostic:item.hasDiagnostic} : {}),failureIdentity:item.failureIdentity||item.key,excerpt:sanitize(safeLines.slice(item.index,Math.min(item.index+30,found.find(next=>next.index>item.index)?.index??Infinity)).join('\n'))}));
 }
 module.exports = {causesForStep, sanitize, hash};
