@@ -35,6 +35,17 @@ The recovery job executes only the default-branch script, with `actions: write` 
 
 **Post-merge observation:** use a dedicated same-repository draft PR against `main`, never a shared PR or a main-branch run. On its next genuine CI failure (or deliberately cancel only that disposable PR's CI run), wait for the original review's `wait-for-ci` to fail. Record the PR head, CI run/attempt, and review run/attempt. Retry that CI run with `gh run rerun <ci-run-id> --failed`; do not push or restart review. After successful verification and CI completion, check the **Recover Automated Review** summary: it must identify that CI attempt and the original review run/job. Confirm the original review has a new attempt, the selected provider alone runs, and exactly one automated review is posted on the unchanged head. Re-run the recovery listener once through GitHub's **Re-run jobs** control: it must explain an active/completed-review skip without another model job or review. Record the run URLs and close the disposable PR without merging. If the CI retry fails again, recovery must remain skipped; do not weaken a test to manufacture success.
 
+### Stable release recovery
+
+Stable releases keep the explicitly selected bump. When npm rejects publication,
+`scripts/release.mjs` accepts an existing version only if its registry `gitHead`
+matches the checkout commit. Missing or different source metadata stops the run
+before GitHub finalization. Same-source retries can finish a partially published
+set; a new source must wait for the original bump PR to merge before the next bump.
+The workflow never overwrites an existing branch or tag. See
+[release recovery](../publishing.md#retrying-an-interrupted-release) for the
+organization/repository PR permission settings and historical recovery steps.
+
 ### Release and Nightly failure reporting
 
 `report-workflow-failure.yml` listens for completed Release and Nightly failures and files `area-ci` issues with failed-job/step metadata and bounded sanitized diagnostics. It reads the exact failed attempt, so a later retry does not erase the original failure. Success, cancellation, intentional skips, and unrelated workflows do not create reports. Verification, publishing, finalization, and setup remain distinct in occurrence context.

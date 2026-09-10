@@ -88,6 +88,9 @@ async function makeFixture(version = '0.1.5'): Promise<string> {
     )}\n`,
   );
   await writeFile(join(root, 'alias-cezarion', 'bin.js'), '#!/usr/bin/env node\n');
+  await execFile('git', ['init', '-b', 'main'], { cwd: root });
+  await execFile('git', ['add', '.'], { cwd: root });
+  await execFile('git', ['-c', 'user.name=Release test', '-c', 'user.email=release@example.test', 'commit', '-m', 'source'], { cwd: root });
   return root;
 }
 
@@ -288,12 +291,13 @@ test('a mid-set collision skips the already-published name and publishes the res
     await writeFile(
       stub,
       `import { appendFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 const args = process.argv.slice(2);
 appendFileSync(process.env.NPM_STUB_LOG, \`\${process.cwd()} \${args.join(' ')}\\n\`);
 if (args[0] === 'view') {
   const spec = args[1] ?? '';
   if (spec === '@scope/fake-root@0.1.6') {
-    process.stdout.write('0.1.6\\n');
+    process.stdout.write(JSON.stringify({ version: '0.1.6', gitHead: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() }));
     process.exit(0);
   }
   process.exit(1);
@@ -368,3 +372,33 @@ test('an unknown bump exits non-zero without touching the manifests', { timeout:
     await rm(root, { recursive: true, force: true });
   }
 });
+
+for (const recordedHead of ['different', 'missing', 'matching']) {
+  test(`an existing publication with ${recordedHead} source is verified before finalization`, async () => {
+    const root = await makeFixture();
+    try {
+      const { stdout: head } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: root });
+      const gitHead = recordedHead === 'matching' ? head.trim() : 'a'.repeat(40);
+      const metadata = {
+        version: '0.1.6',
+        ...(recordedHead === 'missing' ? {} : { gitHead }),
+      };
+      const stub = join(root, 'npm-stub.mjs');
+      await writeFile(stub, `
+if (process.argv[2] === 'publish') process.exit(1);
+if (process.argv[2] === 'view') console.log(process.argv.includes('gitHead') ? ${JSON.stringify(JSON.stringify(metadata))} : '0.1.6');
+`);
+      await writeFile(join(root, 'github-output.txt'), '');
+      const run = runScript(root, ['patch'], { NODE_AUTH_TOKEN: 'fake', npm_execpath: stub });
+      if (recordedHead === 'matching') {
+        await run;
+        assert.match(await readFile(join(root, 'github-output.txt'), 'utf8'), /^published=true$/m);
+      } else {
+        await assert.rejects(run, /published source|source commit/i);
+        assert.doesNotMatch(await readFile(join(root, 'github-output.txt'), 'utf8'), /^published=true$/m);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}

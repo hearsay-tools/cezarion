@@ -117,7 +117,10 @@ The summary confirms the tag only after resolving it to the published source
 commit; npm success alone does not prove that a tag or Release exists.
 
 Retry the release job from the **same source commit and bump input**. Packages
-already published at that version count as successful publication. For
+already published at that version count as successful publication only when npm’s
+`gitHead` matches the checkout commit. A different or missing published source
+stops the run before GitHub finalization; it never advances the version automatically.
+Merge the original version-bump PR before dispatching a new release from newer code. For
 patch/minor/major releases, finalization regenerates the lockfile and compares the
 expected full tree and source parent with `release/v<version>`. A matching branch
 keeps its original commit, even if the retry would create a different commit
@@ -153,7 +156,11 @@ for different code. For that historical run, recover the PR through the link
 above and have a maintainer create or verify `v0.12.1` and its GitHub Release at
 the original published source `d9d3c542fdd0fa06ded6089656513ee5c5090eaf`, listing
 `@wjarka/cezarion@0.12.1` and `cezarion@0.12.1`. Inspect any existing tag or Release
-before creating it. Subsequent runs using the fixed workflow support retries as
+before creating it. Issues #213 and #214 confirmed that later dispatches reused
+`0.12.1` from newer commits and created a tag at `7e986833` even though both npm
+packages record `d9d3c542` as their source. The source check prevents that false
+success. An existing incorrect tag requires explicit maintainer repair; the
+workflow never moves it automatically. Subsequent runs using the fixed workflow support retries as
 described above.
 
 ## Nightlies

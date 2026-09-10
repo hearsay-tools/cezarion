@@ -35,8 +35,8 @@
 //
 // A mid-set failure (one name on the registry, the next not) is recoverable:
 // re-dispatch the same bump. An already-published name@version is treated as
-// success so the remaining names, the GitHub Release, and the bump PR can
-// finish (#42). A missing trusted publisher still fails — npm reports that as
+// success only when its registry gitHead matches this checkout, so the remaining
+// names, the GitHub Release, and the bump PR can finish (#42). A missing trusted publisher still fails — npm reports that as
 // E404, not ENEEDAUTH, and the version is not on the registry.
 //
 // Usage: node scripts/release.mjs <patch|minor|major|existing> [--dry-run]
@@ -136,8 +136,8 @@ const runNpm = (args, cwd, capture = false) => {
 };
 const versionOnRegistry = (name, ver) => {
   try {
-    const out = runNpm(['view', `${name}@${ver}`, 'version'], repoRoot, true);
-    return (out ?? '').trim() === ver;
+    const out = runNpm(['view', `${name}@${ver}`, 'version', 'gitHead', '--json'], repoRoot, true);
+    return JSON.parse(out ?? 'null');
   } catch {
     return false;
   }
@@ -169,7 +169,12 @@ for (const key of order) {
     publish(dirs[key], name);
     published.push(name);
   } catch (err) {
-    if (!dryRun && versionOnRegistry(name, version)) {
+    const existing = !dryRun && versionOnRegistry(name, version);
+    if (existing && existing.version === version) {
+      const source = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+      if (existing.gitHead !== source) {
+        throw new Error(`release: ${name}@${version} has published source ${existing.gitHead ?? 'unknown'}, not source commit ${source}. Retry the original run, or merge its version-bump PR before dispatching a new release. No finalization will run.`);
+      }
       console.log(`release: ${name}@${version} already on the registry — skipping`);
       published.push(name);
       continue;
