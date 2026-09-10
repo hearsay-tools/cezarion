@@ -98,8 +98,8 @@ export function ProjectGroups({
   const collapseAnchorId = scopedProjectId ?? bootProjectId
   const { collapsed, toggle } = useSidebarCollapse(collapseAnchorId)
 
-  // One filter for the whole cockpit (`ListViewProvider`): switching the Tasks table to Archived
-  // switches every group with it, rather than leaving the sidebar answering a different question.
+  // One filter for every sidebar group (`ListViewProvider`). Independent of the Tasks table:
+  // switching that table to Archived must not hide the live runs these groups still navigate.
   const [view] = useListView()
   const activeTo = activeNavPath(stripProjectPrefix(pathname))
   const runMatch = useProjectMatch('/tasks/:id/*')

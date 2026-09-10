@@ -5,7 +5,7 @@ import { ListViewProvider, useListView } from '@/components/list-view'
 
 afterEach(cleanup)
 
-/** Two consumers in two subtrees — the sidebar and the table's shapes. */
+/** Two sidebar consumers in two subtrees — project groups share one filter. */
 function Consumer({ name }: { name: string }) {
   const [view, setView] = useListView()
   return (
@@ -25,7 +25,7 @@ describe('ListViewProvider', () => {
     expect((screen.getByRole('button'))?.textContent).toContain('a:active')
   })
 
-  it('keeps every consumer on the same view — the sidebar and the table cannot disagree', async () => {
+  it('keeps every sidebar consumer on the same view', async () => {
     render(
       <ListViewProvider>
         <div>

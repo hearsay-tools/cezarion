@@ -241,7 +241,7 @@ function LocationProbe() {
 
 const search = () => screen.getByTestId('search').textContent ?? ''
 
-/** Reads the SHARED Active/Archived context — the one the sidebar and the per-project table use. */
+/** Reads the sidebar Active/Archived context — the table must not write it. */
 function SharedViewProbe() {
   const [view] = useListView()
   return <span data-testid="shared-view">{view}</span>
@@ -500,10 +500,8 @@ describe('global tasks page', () => {
       await waitFor(() => expect(search()).toBe('?tag=storefront'))
     })
 
-    it('publishes the view to the shared filter context, so other surfaces agree', async () => {
-      // The context is what keeps this page, the per-project table and the sidebar quick-list
-      // answering one question. Here the URL is the authority and the context follows it.
-      stubFetch()
+    it('shows archived rows from the URL without changing the sidebar filter', async () => {
+      stubFetch({ runs: RUNS.map((run) => (run.id === 'i1' ? { ...run, archived: true } : run)) })
       render(
         <QueryClientProvider client={createQueryClient()}>
           <MemoryRouter initialEntries={['/tasks?archived=1']}>
@@ -515,7 +513,12 @@ describe('global tasks page', () => {
         </QueryClientProvider>,
       )
 
-      await waitFor(() => expect(screen.getByTestId('shared-view').textContent).toBe('archived'))
+      await screen.findByText('Bump the runner')
+      expect(rowIds()).toEqual(['i1'])
+      expect(screen.getByRole('button', { name: 'Archived' }).getAttribute('aria-pressed')).toBe(
+        'true',
+      )
+      expect(screen.getByTestId('shared-view').textContent).toBe('active')
     })
 
     it('keeps the untagged bucket readable in a shared link', async () => {

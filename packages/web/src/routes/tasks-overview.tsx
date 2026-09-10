@@ -32,7 +32,6 @@ import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { DirectionalUsage, directionalUsageLabel } from '@/components/directional-usage'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
-import { useListView } from '@/components/list-view'
 import { Pill } from '@/components/pill'
 import { PinToggle } from '@/components/pin-toggle'
 import { TaskReferenceChip } from '@/components/reference-conflict-action'
@@ -78,8 +77,8 @@ import { cn } from '@/lib/utils'
 
 /**
  * The Tasks overview — the table that IS the home at `/` (spec, "Task list & table", per PR
- * #392: the Tasks nav always lands here, there is no list/table presentation toggle, and the
- * Active/Archived tabs in this header are the *same state* as the sidebar quick-list's tabs).
+ * #392: the Tasks nav always lands here, there is no list/table presentation toggle). The
+ * Active/Archived tabs in this header are this table's own, independent of the sidebar.
  *
  * Presentational: sorting, search, queue numbers, usage-cell decisions and the compare strip
  * all come from the pure modules (`lib/task-groups.ts`, `lib/tasks-table.ts`,
@@ -1059,8 +1058,8 @@ function BranchChip({ branch }: { branch: string }) {
 }
 
 /**
- * The overview wired to live data: `useRuns()` (kept fresh by the global SSE stream), the shared
- * Active/Archived context (the sidebar's tabs and these are one state), and the archive-finished
+ * The overview wired to live data: `useRuns()` (kept fresh by the global SSE stream), a local
+ * Active/Archived filter (independent of the sidebar quick-list), and the archive-finished
  * mutation. The invalidate on success is the authoritative half of the doctrine — the stream will
  * likely have patched each archived run already, but the endpoint's answer is the truth.
  */
@@ -1068,7 +1067,7 @@ export function TasksOverviewRoute() {
   const runs = useRuns()
   const health = useHealth()
   const metricVisibility = usageMetricVisibility(health.data)
-  const [view, setView] = useListView()
+  const [view, setView] = React.useState<ListView>('active')
   const queryClient = useQueryClient()
   const archive = useMutation({
     mutationFn: archiveFinished,
