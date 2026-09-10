@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { conversationAttributionSchema, conversationStateSchema, requestOutcomeSchema } from './conversations.ts';
 
 /** Owned workers (spec 2026-09-06). No import from runs: runs embeds this metadata. */
 export const workerOperationSchema = z.enum(['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait']);
@@ -38,11 +39,13 @@ export const workerWaitModeSchema = z.enum(['one', 'any', 'all']);
 
 export const workerWaitSchema = z.object({
   id: z.uuid(),
-  workerIds: workerIdsSchema,
+  workerIds: z.array(z.uuid()).max(32).refine(ids => new Set(ids).size === ids.length),
+  requestIds: z.array(z.uuid()).min(1).max(32).optional(),
+  requestOutcomes: z.array(requestOutcomeSchema).max(32).optional(),
   deadline: z.iso.datetime(),
   mode: workerWaitModeSchema.optional(),
   revisions: z.array(z.object({ workerId: z.uuid(), revision: z.number().int().nonnegative() }).strict()).max(32).optional(),
-  reason: z.enum(['outcome', 'timeout', 'cancelled']).optional(),
+  reason: z.enum(['outcome', 'timeout', 'cancelled', 'message']).optional(),
   phase: z.enum(['registered', 'parked', 'wake-pending']),
   outcomes: z.array(workerOutcomeSchema).max(32),
   wakeId: z.uuid().optional(),
@@ -139,6 +142,7 @@ export const workerResultReferenceSchema = z.object({
 export const delegationStateSchema = z.discriminatedUnion('role', [
   z.object({
     role: z.literal('root'),
+    conversation: conversationStateSchema.optional(),
     permissions: permissionsSchema,
     receipts: z.array(workerCreationReceiptSchema).max(32).refine(receipts =>
       new Set(receipts.map(receipt => receipt.requestId)).size === receipts.length &&
@@ -152,6 +156,8 @@ export const delegationStateSchema = z.discriminatedUnion('role', [
   }).strict(),
   z.object({
     role: z.literal('worker'),
+    wait: workerWaitSchema.optional(),
+    lastWait: workerWaitSchema.optional(),
     permissions: permissionsSchema,
     parentRunId: z.uuid(),
     workspace: workerWorkspaceSchema,
@@ -198,6 +204,7 @@ export const workerWaitRequestSchema = z.object({
 export type WorkerWaitRequest = z.infer<typeof workerWaitRequestSchema>;
 
 export const agentInputSchema = z.object({
+  conversation: conversationAttributionSchema.optional(),
   id: z.uuid(),
   source: z.enum(['agent', 'lifecycle']),
   parentRunId: z.uuid(),

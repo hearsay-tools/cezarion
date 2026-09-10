@@ -480,6 +480,14 @@ cez worker wait <worker-id> --mode one --timeout-seconds 600
 cez worker wait <first-id> <second-id> --mode any --timeout-seconds 600
 cez worker wait <first-id> <second-id> --mode all --timeout-seconds 600
 cez worker cancel-wait <wait-id>
+cez worker send <recipient-run-id> 'Please check this decision' --id <message-UUID> --kind request
+cez worker progress <recipient-run-id> 'Parser tests pass' --id <message-UUID>
+cez worker follow-up <recipient-run-id> 'Include empty input' --id <message-UUID> --request-id <request-UUID>
+cez worker reply <recipient-run-id> 'Checked; empty input is covered' --id <message-UUID> --request-id <request-UUID>
+cez worker conversation <recipient-run-id>
+cez worker wait --request <request-UUID> --request <another-request-UUID> --mode all
+cez worker wait-requests <request-UUID> --mode one
+cez worker cancel-request <request-UUID>
 cez worker stop <worker-id>
 cez worker destroy <worker-id>
 ```
@@ -489,6 +497,13 @@ Commands return bounded JSON and a nonzero exit on failure or incomplete cleanup
 Omitted `--backend` inherits the parent's active backend. Same-backend workers inherit omitted model/account/effort; `--backend <claude|codex|opencode|pi>` selecting another backend resolves that backend's project/default account and model without forwarding another provider's settings. `--model <model>` selects a supported model, subject to existing locks. Accepted identity and grants remain fixed across queuing, restart and Continue, including explicit empty grants. Changing or deleting an account registry entry does not rebind a worker. Missing accepted identity evidence or account homes, incompatible Claude state-file layouts, and conflicting later model locks refuse execution explicitly. Credentials and vendor configuration are never copied; each worker receives its own delegation credential, and unspecified native models stay unspecified.
 
 Wait registers immediately. End the parent turn to release scheduler capacity; Cezar resumes it on a selected settled outcome or the finite deadline. `any` is the default, `one` requires exactly one worker, and `all` waits for every selected worker. Review, completion, failure, cancellation with proven termination, and destruction are outcomes. Timeout defaults to 600 seconds (1–1800 accepted). `cancel-wait` is idempotent for the retained wait ID and cannot cancel a newer wait. Timeout and wait cancellation report partial outcomes and unresolved workers, never cancel workers, and never automatically re-wait. Steering is attributed agent input and cannot answer a pending human question.
+
+Parents and owned workers can converse in both directions; a worker may address only its parent. `send --kind request` opens a reply obligation whose ID is the message ID; `send --kind progress` (or `progress`) does not. Follow-ups clarify an existing request; only an explicit correlated `reply` settles it as replied. Retry a message with the same ID and exact payload, including deadline duration; changed payloads are rejected. Acceptance, provider delivery, reply, and task completion are separate facts, visible in the task transcript and `conversation` JSON.
+
+Messages allow 100,000 characters each, with at most 32 undelivered inputs per recipient, 1,024 messages per family, and 32 pending requests. Request deadlines default to 600 seconds, configurable per message with `--timeout-seconds 1–1800`. Request waits use the same limits and `one`/`any`/`all` modes as worker waits, and each run has one active wait. Incoming conversation can interrupt a parked wait without settling its requests. `cancel-request` cancels an obligation; `cancel-wait` only stops waiting. Completion without a reply, failure, cancellation, destruction, timeout, or sender closure settle obligations distinctly. Late replies remain visible without reopening them.
+
+Sending to a review or terminal participant reports `continuation-required`; only explicit human Continue resumes that participant. Destroyed recipients receive no input. Conversation never answers a pending human question. Durable IDs deduplicate accepted queue entries and event replay, but a crash between provider acceptance and its durable delivery checkpoint can leave transport delivery ambiguous; this is not an exactly-once execution guarantee.
+
 
 Collect returns the worker's execution revision, status/outcome, `settled` and `partial` flags, and typed availability for assistant summary, HEAD, bounded diff and artifact descriptors. Missing evidence is explicit; running output is partial. An available `diff.path` points to a **JSON result file** containing `{ result, diffSnapshot }`; its `diffSnapshot` field holds the patch. Read and review that field before applying any changes. The latest collected result is stored under the parent and survives restart. Collection acknowledges observation, not Git integration or successful work. Review desired worker commits and deliberately integrate them into the parent before destroying their worktrees/branches; there is no automatic merge.
 
