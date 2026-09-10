@@ -4,15 +4,14 @@ import type { ReactNode } from 'react'
 import type { ListView } from '@/lib/task-groups'
 
 /**
- * The Active/Archived filter, shared by the sidebar quick-list and (Step 3.4) the Tasks table.
+ * The sidebar quick-list's Active/Archived filter.
  *
- * The spec requires the table's tabs to "share state with the sidebar quick-list tabs", and the
- * legacy UI got that for free by keeping a single `state.listView` global. Two surfaces in two
- * subtrees need one value, so it is context rather than a `useState` in either of them — a
- * quick-list that switched to Archived while the table still showed Active would be two answers
- * to one question.
+ * The Tasks table owns its own copy: per-project as local state, global `/tasks` as `archived=1`
+ * in the URL. Switching one must not change the other — browsing archived rows on the table still
+ * needs the live runs in the sidebar. Context is what keeps every sidebar group on the same
+ * question; the table is not a consumer.
  *
- * In-memory, not persisted: the legacy filter reset to Active on every reload, and a filter that
+ * In-memory, not persisted: the filter resets to Active on every reload, and a filter that
  * silently survives a restart hides runs the user does not know are hidden.
  */
 const ListViewContext = React.createContext<[ListView, (view: ListView) => void] | null>(null)
@@ -25,8 +24,8 @@ export function ListViewProvider({ children }: { children: ReactNode }) {
   return <ListViewContext.Provider value={value}>{children}</ListViewContext.Provider>
 }
 
-/** Throws without a provider, on purpose: a default would let a consumer mount outside the shell
- *  and quietly keep its own private filter — the exact desync this context exists to prevent. */
+/** Throws without a provider, on purpose: a default would let a sidebar consumer mount outside
+ *  the shell and quietly keep its own private filter. */
 export function useListView(): [ListView, (view: ListView) => void] {
   const value = React.useContext(ListViewContext)
   if (!value) throw new Error('useListView must be used inside a <ListViewProvider>')

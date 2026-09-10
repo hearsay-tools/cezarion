@@ -359,3 +359,40 @@ describe('UserBubble attachments', () => {
     expect(screen.getByText('pasted-2.txt')).toBeTruthy()
   })
 })
+
+
+describe('parent/worker conversation transcript', () => {
+  it('deduplicates replay, links both participants and preserves a human ask', () => {
+    const senderRunId = '11111111-1111-4111-8111-111111111111', recipientRunId = '22222222-2222-4222-8222-222222222222', id = '33333333-3333-4333-8333-333333333333';
+    const message = { id, senderRunId, recipientRunId, kind: 'request', text: 'Please inspect the parser', createdAt: '2026-09-08T12:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' };
+    const outcome = { requestId: id, status: 'replied', observedAt: message.createdAt };
+    const events = asRunEvents([{ type: 'ask.requested', requestId: 'human', questions: [{ header: 'Proceed?', question: 'Proceed?', options: [] }] }, { type: 'conversation-message', message, delivery: 'queued' }, { type: 'conversation-message', message, delivery: 'queued' }, { type: 'request-outcome', outcome }, { type: 'request-outcome', outcome }]);
+    const state = reduceThread(events);
+    const entries = state.turns.flatMap(turn => turn.items);
+    expect(entries.filter(entry => entry.kind === 'note')).toHaveLength(2);
+    expect(entries.find(entry => entry.kind === 'ask')).toMatchObject({ resolved: false });
+    render(<MemoryRouter initialEntries={['/p/acme/tasks/current']}><SessionTranscript runId="current" viewId="main" sections={[{ id: 'conversation', entries }]} mode="document" /></MemoryRouter>);
+    expect(screen.getByRole('link', { name: `Sender task ${senderRunId}` }).getAttribute('href')).toBe(`/p/acme/tasks/${senderRunId}`);
+    expect(screen.getByRole('link', { name: `Recipient task ${recipientRunId}` }).getAttribute('href')).toBe(`/p/acme/tasks/${recipientRunId}`);
+    expect(screen.getByText(/Please inspect the parser/)).toBeTruthy();
+    expect(screen.getByText(/Request outcome: replied/)).toBeTruthy();
+    expect(screen.getByText(/Delivery: queued/)).toBeTruthy();
+  });
+});
+
+
+describe('conversation delivery replay', () => {
+  it.each([false, true])('merges delivery ACK and stale projection in either order (ACK first: %s)', ackFirst => {
+    const id = '33333333-3333-4333-8333-333333333333', senderRunId = '11111111-1111-4111-8111-111111111111', recipientRunId = '22222222-2222-4222-8222-222222222222';
+    const attribution = { senderRunId, recipientRunId, kind: 'progress' };
+    const message = { id, ...attribution, text: 'Updated', createdAt: '2026-09-08T12:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' };
+    const projection = { type: 'conversation-message', message, delivery: 'queued' };
+    const ack = { type: 'agent-input', input: { id, source: 'agent', parentRunId: senderRunId, text: message.text, createdAt: message.createdAt, deliveredAt: message.createdAt, conversation: attribution } };
+    const entries = reduceThread(asRunEvents(ackFirst ? [ack, projection, ack] : [projection, ack, projection])).turns.flatMap(turn => turn.items);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ conversation: { delivery: 'delivered', senderRunId, recipientRunId } });
+    const senderEntries = reduceThread(asRunEvents([projection, { ...projection, delivery: 'delivered' }, projection])).turns.flatMap(turn => turn.items);
+    expect(senderEntries).toHaveLength(1);
+    expect(senderEntries[0]).toMatchObject({ conversation: { delivery: 'delivered' } });
+  });
+});

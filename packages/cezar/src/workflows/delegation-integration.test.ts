@@ -1,6 +1,6 @@
 import { execFile as execFileCallback, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,7 +68,10 @@ describe('public delegation completion integration', () => {
     return JSON.parse(readFileSync(path, 'utf8')) as { text: string; cwd: string; backend: string };
   }
   function reply(id: string, turn: number, value: { text?: string; commit?: string; error?: string } = {}) {
-    writeFileSync(join(control, `${id}.${turn}.reply.json`), JSON.stringify(value));
+    const path = join(control, `${id}.${turn}.reply.json`);
+    const tmp = `${path}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(value));
+    renameSync(tmp, path);
   }
   async function command<T = Record<string, unknown>>(id: string, args: string[], code = 0): Promise<T> {
     const result = await execFile(process.execPath, ['--import', import.meta.resolve('tsx'), entry, 'worker', ...args], {

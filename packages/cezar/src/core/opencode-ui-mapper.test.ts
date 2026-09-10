@@ -10,9 +10,10 @@
  * from the `prompt_async` HTTP response (#4).
  */
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentEvent } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
@@ -985,6 +986,23 @@ function isBareTool(frame: unknown): boolean {
 
 describe('OpencodeServerRunner v2 wiring (against the bundled mock server)', () => {
   const mockBin = join(FIXTURES, 'mock-opencode-serve.mjs');
+
+  it('uses the mock’s announced port when the runner’s requested port is occupied', async () => {
+    const occupied = createServer();
+    await new Promise<void>(resolve => occupied.listen(0, '127.0.0.1', resolve));
+    const address = occupied.address();
+    if (!address || typeof address === 'string') throw Error('missing test port');
+    const random = vi.spyOn(Math, 'random').mockReturnValue((address.port - 40000) / 20000);
+    try {
+      const events: AgentEvent[] = [];
+      const session = new OpencodeServerRunner({ bin: mockBin, timeoutMs: 60_000 }).startSession(
+        { userPrompt: 'check the working tree', cwd: process.cwd() }, event => events.push(event), { autoEndAfterFirstTurn: true },
+      );
+      await session.result;
+      expect(events.filter(event => event.type === 'error')).toEqual([]);
+      expect(events.map(event => event.type)).toContain('session');
+    } finally { random.mockRestore(); await new Promise<void>(resolve => occupied.close(() => resolve())); }
+  });
 
   it('emits v2 events through opts.onUiEvent while v1 events keep flowing; turn.completed comes from session.idle, not the HTTP response', async () => {
     const runner = new OpencodeServerRunner({ bin: mockBin, timeoutMs: 60_000 });

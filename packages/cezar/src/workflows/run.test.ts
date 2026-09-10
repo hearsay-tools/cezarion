@@ -537,7 +537,9 @@ describe('RunManager.continueRun override', () => {
     store.updateRun(id, { effort: 'medium' });
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     expect(store.getRun(id)?.effort).toBe('medium');
-    // The stubbed session must finish before a second Continue is accepted.
+    // The stub bypasses startup teardown; simulate its completed lifecycle before
+    // accepting a second Continue (terminal status alone never proves termination).
+    (manager as unknown as { starting: Set<string> }).starting.delete(id);
     store.updateRun(id, { status: 'done' });
 
     expect(manager.continueRun(id, { effort: 'xhigh' })).toEqual({ ok: true });

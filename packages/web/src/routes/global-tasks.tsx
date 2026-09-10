@@ -25,7 +25,6 @@ import {
 import type { ProjectListEntry, RunIndexEntry, RunsIndexResponse } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { FacetFilter, SegmentedControl, ToggleChip } from '@/components/facet-filter'
-import { useListView } from '@/components/list-view'
 import { Pill } from '@/components/pill'
 import { ReferenceChip } from '@/components/reference-chip'
 import { ResolveConflictsForRun } from '@/components/reference-conflict-action'
@@ -98,10 +97,8 @@ import { cn } from '@/lib/utils'
  * a `replace`, so Back leaves the page instead of undoing one chip at a time.
  *
  * The Active/Archived split is in there too, as `archived=1` present-or-absent: Active is the
- * default and the common case, so a normal link carries no key for it. The shared
- * `useListView()` context still exists and this page publishes to it, so walking from an
- * archived view into a project keeps answering the same question — but here the URL is the
- * authority and the context follows, not the reverse.
+ * default and the common case, so a normal link carries no key for it. That flag is this
+ * table's own: the sidebar quick-list keeps a separate in-memory filter and does not follow.
  *
  * Presentational logic lives in `lib/global-tasks.ts`; what is here is markup, the router and the
  * local filter state.
@@ -239,15 +236,6 @@ export function GlobalTasksRoute() {
     () => urlStateFromSearchParams(searchParams),
     [searchParams],
   )
-  // …and the Active/Archived split is published to the SHARED filter context, one way. That
-  // context is what keeps this page, the per-project table and the sidebar quick-list answering
-  // one question; here the URL is the authority, so the context follows it rather than the other
-  // way round. Nothing else on this route can change it — the multi-project sidebar's groups
-  // only READ the view — so there is no loop to break.
-  const [sharedView, setSharedView] = useListView()
-  React.useEffect(() => {
-    if (sharedView !== view) setSharedView(view)
-  }, [view, sharedView, setSharedView])
   const now = useNow(30_000)
 
   /**

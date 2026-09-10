@@ -98,12 +98,63 @@ Run **Actions → Release → Run workflow** from `main` and choose a bump:
 The workflow verifies, builds, then `scripts/release.mjs` stamps every manifest
 (intra-release dependencies keep a **caret** range — stable follows compatible
 releases, unlike the exact-pinned snapshots), publishes them in dependency order
-with `--tag latest` (no `--provenance` — trusted publishing attaches it), commits
-the bump, tags `v<version>`, and cuts a GitHub Release. It's gated behind the
-`production` environment, so a release can require reviewer approval — and the
+with `--tag latest` (no `--provenance` — trusted publishing attaches it), opens
+a version-bump PR, and cuts a GitHub Release tagged `v<version>` at the published
+source commit. The bump PR targets the dispatched branch (`main` or a
+`release/*` maintenance branch); the workflow never pushes to that branch. It's
+gated behind the `production` environment, so a release can require reviewer
+approval — and the
 trusted publisher on npmjs.com is pinned to that same environment name. Outside
 Actions, with neither `NODE_AUTH_TOKEN` nor the OIDC request env, the script
 degrades to a loud dry run.
+
+### Retrying an interrupted release
+
+Publication, the version-bump PR, and the GitHub Release have separate outcomes
+in the workflow summary. A failed bump PR leaves the job failed and visible, but
+does not prevent GitHub Release finalization after successful npm publication.
+The summary confirms the tag only after resolving it to the published source
+commit; npm success alone does not prove that a tag or Release exists.
+
+Retry the release job from the **same source commit and bump input**. Packages
+already published at that version count as successful publication. For
+patch/minor/major releases, finalization regenerates the lockfile and compares the
+expected full tree and source parent with `release/v<version>`. A matching branch
+keeps its original commit, even if the retry would create a different commit
+timestamp. A matching open or merged PR is reused; a deleted branch belonging to
+a matching merged PR stays deleted. A matching GitHub Release and source tag are
+also reused. The `existing` input needs no bump PR.
+
+Conflicting branch contents, a different source parent, a closed unmerged PR, or
+a different release/tag produce an error with a recovery link. No existing remote
+work is overwritten. Inspect the linked comparison or Release and resolve the
+mismatch manually before retrying; do not delete or force-push another person's
+work to make a retry pass.
+
+If PR creation reports **“GitHub Actions is not permitted to create or approve
+pull requests”**, an administrator must enable **Settings → Actions → General →
+Workflow permissions → Allow GitHub Actions to create and approve pull requests**.
+The job also needs `pull-requests: write`, which this workflow already declares.
+An organization or enterprise policy may prevent enabling the repository setting;
+ask that administrator to allow it, or open the PR manually using the comparison
+link printed in the error. Repository default workflow permissions can remain
+read-only. See [GitHub's permission documentation](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository).
+
+For the interrupted `0.12.1` release in issue #192, the original branch is
+[`release/v0.12.1`](https://github.com/hearsay-tools/cezarion/tree/release/v0.12.1).
+[Open its bump PR against main](https://github.com/hearsay-tools/cezarion/compare/main...release%2Fv0.12.1?expand=1)
+if the permission remains disabled. Opening that PR does not create the GitHub
+Release: check the Release and tag outcomes separately.
+
+**[Re-runs retain their original source commit](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).**
+Re-running run `34386025582` will not pick up this fix after it merges. Do not dispatch a new patch from a
+newer source merely to recover that publication: it may reuse a published version
+for different code. For that historical run, recover the PR through the link
+above and have a maintainer create or verify `v0.12.1` and its GitHub Release at
+the original published source `d9d3c542fdd0fa06ded6089656513ee5c5090eaf`, listing
+`@wjarka/cezarion@0.12.1` and `cezarion@0.12.1`. Inspect any existing tag or Release
+before creating it. Subsequent runs using the fixed workflow support retries as
+described above.
 
 ## Nightlies
 
@@ -250,10 +301,12 @@ On **GitHub** (this repository):
 5. Settings → Secrets and variables → Actions → repository secret **`NPM_TOKEN`**
    with the narrowed token from step 3. Rotate the existing value rather than
    adding a second secret. `release.yml` does not read this secret.
-6. Nothing else — the workflows declare their own `permissions:` blocks, so
-   repo-level Actions defaults can stay read-only. The `production` environment
-   already gates the Release workflow; add reviewers there if a release should
-   require approval.
+6. Enable **Settings → Actions → General → Workflow permissions → Allow GitHub
+   Actions to create and approve pull requests** for version-bump PRs. Organization
+   policy may require an administrator to enable it there first. The workflows
+   declare their own `permissions:` blocks, so repo-level Actions defaults can
+   stay read-only. The `production` environment already gates the Release
+   workflow; add reviewers there if a release should require approval.
 
 Nothing is deprecated on the upstream side: this clone publishes under names npm
 has never seen, so `@open-mercato/cezar` and `cezar-cli` keep belonging to
@@ -268,3 +321,9 @@ upstream and are never written to from here.
 - Server flows accept pinned previews too:
   `npx cezarion@<version> server-deploy --platform <id>`
   (see [Remote access](server-install/README.md)).
+
+### Automatic failure reports
+
+Failed Release and Nightly attempts create durable issues with job/step evidence.
+See [failure reporting](failure-reporting.md) for matching, permissions, duplicate
+handling, missing logs, and how to rerun a failed reporter without retrying a release.

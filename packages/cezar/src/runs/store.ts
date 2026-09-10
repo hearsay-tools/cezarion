@@ -8,7 +8,7 @@ import {
   continuationMessageSchema,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
-import type { AgentInput, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
+import type { ConversationState, AgentInput, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
@@ -200,6 +200,7 @@ export const runRecordSchema = z.object({
     })
     .optional(),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
+  stopping: contractRunRecordSchema.shape.stopping.catch(undefined),
   /** Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):
    *  `monitoring` while the agent is still working on its own downstream work.
    *  Optional/absent on old runs; cleared when the run resumes or ends. */
@@ -631,6 +632,15 @@ function createdPrUrl(haystack: string): string | undefined {
  * are marked failed so no ghost stays behind.
  */
 export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }): RunRecord {
+  // An accepted Stop is durable intent, never an interrupted run to auto-resume.
+  if (run.stopping) {
+    run.status = 'cancelled';
+    run.finishedAt ??= new Date().toISOString();
+    for (const step of run.steps) {
+      if (step.status === 'running' || step.status === 'waiting') step.status = 'cancelled';
+    }
+  }
+  run.stopping = undefined;
   // A run that was live when the previous process exited can never finish —
   // surface that instead of a forever-"running" ghost. `review` survives
   // restarts on purpose: the gate is pure data (worktree + branch + record)
@@ -869,6 +879,25 @@ export class RunStore extends EventEmitter {
     return run;
   }
 
+  /** Accept the family ledger and its recipient queue in a single durable index replacement. */
+  commitConversation(rootId: string, conversation: ConversationState, delivery?: { recipientRunId: string; input: AgentInput }): void {
+    const root = this.runs.get(rootId);
+    if (root?.delegation?.role !== 'root') throw new Error('missing conversation root');
+    const proposed = new Map(this.runs);
+    proposed.set(rootId, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation,
+      messages: conversation.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
+    } }) });
+    const changed = new Set([rootId]);
+    if (delivery) {
+      const recipient = proposed.get(delivery.recipientRunId);
+      if (!recipient) throw new Error('missing conversation recipient');
+      const input = agentInputSchema.parse({ ...delivery.input, text: this.redactText(delivery.input.text) });
+      proposed.set(recipient.id, { ...recipient, agentInputs: [...(recipient.agentInputs ?? []), input] });
+      changed.add(recipient.id);
+    }
+    this.commitIndex(proposed, changed);
+  }
+
   /** Observable atomic input checkpoint: a failed write publishes nothing. */
   commitAgentInputs(id: string, inputs: readonly AgentInput[]): void {
     const run = this.runs.get(id);
@@ -882,7 +911,7 @@ export class RunStore extends EventEmitter {
   /** Retain the settled receipt and retire exactly one wait together with any human message that superseded it. */
   commitWorkerWaitWithdrawal(id: string, waitId: string, acceptedHumanMessage?: QueuedMessage): void {
     const run = this.runs.get(id);
-    if (run?.delegation?.role !== 'root' || run.delegation.wait?.id !== waitId) {
+    if (!run?.delegation || run.delegation.role === 'invalid' || run.delegation.wait?.id !== waitId) {
       throw new Error('worker wait changed before withdrawal');
     }
     const { wait, ...delegation } = run.delegation;
@@ -891,7 +920,8 @@ export class RunStore extends EventEmitter {
     proposed.set(id, { ...run, delegation: { ...delegation, lastWait: wait.phase === 'wake-pending'
       ? reconcileWorkerWait(wait, [], new Date().toISOString())
       : { ...wait, phase: 'wake-pending', reason: wait.reason ?? 'cancelled', wakeId: wait.wakeId ?? wait.id } },
-      ...(run.agentInputs ? { agentInputs: run.agentInputs.filter(input => input.id !== wait.wakeId || input.deliveredAt) } : {}),
+      // An adopted agent input belongs to its sender, even when it carries the wait receipt.
+      ...(run.agentInputs ? { agentInputs: run.agentInputs.filter(input => input.id !== wait.wakeId || input.deliveredAt || input.source === 'agent') } : {}),
       ...(message ? {
         queuedMessages: [...(run.queuedMessages ?? []), message],
         ...(run.continuationMessage ? { continuationMessage: {
@@ -1620,7 +1650,7 @@ export class RunStore extends EventEmitter {
 
   /** Best-effort scrub of one free-text string bound for `runs.json`. Honors
    *  the `CEZ_REDACT_SECRETS=0` opt-out itself so every caller inherits it. */
-  private redactText(text: string): string {
+  redactText(text: string): string {
     const safe = this.sessionSecrets.size ? redactSecrets(text, [...this.sessionSecrets]) : text;
     if (process.env.CEZ_REDACT_SECRETS === '0') return safe;
     return redactSecrets(safe, this.hostSecrets());

@@ -19,7 +19,7 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 export const terminal = ['review', 'done', 'failed', 'cancelled'];
 export async function until(predicate: () => boolean) { await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 }); }
-export const waitOf = (run: RunRecord | undefined) => run?.delegation?.role === 'root' ? run.delegation.wait : undefined;
+export const waitOf = (run: RunRecord | undefined) => run?.delegation && run.delegation.role !== 'invalid' ? run.delegation.wait : undefined;
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.

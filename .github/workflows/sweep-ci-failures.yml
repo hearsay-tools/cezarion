@@ -1,0 +1,85 @@
+name: Sweep Recurring CI Failures
+
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      start:
+        description: 'Optional inclusive run-creation start (UTC YYYY-MM-DDTHH:mm:ssZ); supply both endpoints'
+        required: false
+        type: string
+      end:
+        description: 'Optional inclusive run-creation end (UTC YYYY-MM-DDTHH:mm:ssZ); at most 14 days after start'
+        required: false
+        type: string
+
+permissions: {}
+
+# Shared with the immediate reporter: this serializes all marker owners.
+concurrency:
+  group: release-nightly-failure-reports
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    # Manual dispatch must use the default branch too. Untrusted branch workflow
+    # revisions never get to execute a report against privileged issue APIs.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Check out trusted sweep code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Collect and report recurring failures
+        if: always()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 0
+          script: |
+            let manifest = { version: 1, complete: false, problems: [{ code: 'entrypoint-failure' }], reports: { issues: 0, occurrences: 0 } };
+            try {
+              const { sweepCiFailures } = require('./.github/scripts/sweep-ci-failures.cjs');
+              manifest = await sweepCiFailures({
+                github,
+                ...context.repo,
+                start: context.payload.inputs?.start || '',
+                end: context.payload.inputs?.end || '',
+              });
+            } catch {
+              // Never print raw API errors, source metadata or input values.
+            }
+            try {
+              require('node:fs').writeFileSync('ci-sweep-coverage.json', JSON.stringify(manifest, null, 2) + '\n');
+            } catch {
+              manifest.complete = false;
+              core.setFailed('Could not preserve the sweep coverage manifest.');
+            }
+            const state = manifest.complete ? 'complete' : 'incomplete';
+            core.summary.addRaw(`# CI failure sweep: ${state}\n\n`);
+            core.summary.addRaw(`Run-creation window: ${manifest.start || 'invalid/unavailable'} through ${manifest.end || 'invalid/unavailable'}.\n\n`);
+            core.summary.addRaw(`New issues: ${manifest.reports.issues}; new failure occurrences: ${manifest.reports.occurrences}.\n\n`);
+            core.summary.addRaw(`Observed reporting-workflow failures: ${manifest.reporterFailures || 0}.\n\n`);
+            core.summary.addRaw('The coverage artifact lists processed intervals, numeric source IDs, fixed problem codes and replay windows. Later retries of runs created before this window require a manual replay of their creation window.\n');
+            if (!manifest.complete) {
+              core.setFailed('CI failure sweep incomplete. Inspect the coverage artifact and replay the indicated window; split it into smaller windows if a limit was reached.');
+            }
+            await core.summary.write();
+
+      - name: Preserve coverage and replay evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-sweep-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-sweep-coverage.json
+          if-no-files-found: error
+          retention-days: 90

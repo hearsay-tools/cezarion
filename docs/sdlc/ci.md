@@ -34,3 +34,30 @@ The recovery job executes only the default-branch script, with `actions: write` 
 **Validation limit:** GitHub loads `workflow_run` listeners from the default branch. A PR changing this listener cannot exercise its new trigger before merge. Local mocked API histories execute the recovery helper and the workflow entry script, including failure→success, changing caps/reviews, stale heads/attempts, duplicates, and completion ordering. They do not prove delivery of a live GitHub event.
 
 **Post-merge observation:** use a dedicated same-repository draft PR against `main`, never a shared PR or a main-branch run. On its next genuine CI failure (or deliberately cancel only that disposable PR's CI run), wait for the original review's `wait-for-ci` to fail. Record the PR head, CI run/attempt, and review run/attempt. Retry that CI run with `gh run rerun <ci-run-id> --failed`; do not push or restart review. After successful verification and CI completion, check the **Recover Automated Review** summary: it must identify that CI attempt and the original review run/job. Confirm the original review has a new attempt, the selected provider alone runs, and exactly one automated review is posted on the unchanged head. Re-run the recovery listener once through GitHub's **Re-run jobs** control: it must explain an active/completed-review skip without another model job or review. Record the run URLs and close the disposable PR without merging. If the CI retry fails again, recovery must remain skipped; do not weaken a test to manufacture success.
+
+### Release and Nightly failure reporting
+
+`report-workflow-failure.yml` listens for completed Release and Nightly failures and files `area-ci` issues with failed-job/step metadata and bounded sanitized diagnostics. It reads the exact failed attempt, so a later retry does not erase the original failure. Success, cancellation, intentional skips, and unrelated workflows do not create reports. Verification, publishing, finalization, and setup remain distinct in occurrence context.
+
+A recognized test and its error diagnostic can match across both workflows. Existing open reports receive deduplicated occurrence comments; failures recurring after closure create linked issues. A shared queued concurrency group serializes all issue writes, and durable issue/comment markers support retry after partial API writes. Missing logs still produce metadata reports; reporter failures surface in its own Actions job and summary without changing or retrying the source workflow.
+
+The listener executes trusted default-branch code with Actions-read, contents-read, and issue-write permissions. It does not use publishing credentials or depend on issue-intake being triggered. See [failure reporting](../failure-reporting.md) for matching examples, redaction, limits, marker maintenance, and manual recovery. The daily cross-CI sweep described below reuses these reporting conventions.
+
+**Validation limit:** GitHub activates this completion listener only after merge to the default branch. Local fixtures execute the reporting helper and workflow entrypoint, including the original Release incident, Nightly failures, deduplication, partial writes, and concurrent queued deliveries. Observe the first genuine eligible failure after merge and confirm its report; do not deliberately break or rerun a publishing workflow for this check.
+
+
+### Recurring CI failure sweeps
+
+`sweep-ci-failures.yml` runs daily at 04:23 UTC and supports bounded manual replays
+on the default branch. It scans all workflow runs created in a 14-day window,
+including historical failed attempts hidden by later successes. Conservative
+thresholds require unrelated change contexts; passing retries indicate possible
+flakiness, never proof. Reports share the immediate reporter's writer, markers
+and queued concurrency group, and reconcile matching remediation issues.
+
+The sweep bounds API calls, logs, writes and runtime. Incomplete coverage fails
+visibly and uploads a safe coverage/replay artifact. Overlapping scans rebuild
+from GitHub and durable issue markers; missing state does not block startup.
+See [failure reporting](../failure-reporting.md#daily-sweep-across-ci-workflows)
+for exact thresholds, creation-window limitations, permissions, retention,
+positive/negative examples and manual recovery.

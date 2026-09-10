@@ -114,86 +114,46 @@ jobs:
         # docs/publishing.md.
         run: node scripts/release.mjs "${{ inputs.bump }}"
 
-      # `main` is a protected branch (PR-only, signed commits required), so a
-      # release never pushes a commit to it directly — that push is rejected with
-      # GH013 "Cannot update this protected ref". Instead:
-      #   - `existing` (the version is already on main via its own PR) records
-      #     nothing new here; the tag + Release below capture the release point.
-      #   - patch/minor/major bump the manifests to a version that is NOT yet on
-      #     main, so they open a follow-up PR with the bump instead of pushing.
-      # The release tag itself is created from the released commit by the
-      # `Create GitHub Release` step via the API, which branch protection allows.
+      # Keep protected branches PR-only. Retries verify and reuse prior work;
+      # a failed bump PR must not prevent the published version's Release.
       - name: Open version-bump PR (patch/minor/major only)
+        id: bump_pr
         if: steps.release.outputs.published == 'true' && inputs.bump != 'existing'
-        env:
-          VERSION: ${{ steps.release.outputs.version }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          BRANCH="release/v${VERSION}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          npm install --package-lock-only --ignore-scripts
-          git add packages/*/package.json alias-cezarion/package.json package-lock.json
-          git commit -m "chore(release): v${VERSION}"
-          git push origin "$BRANCH"
-          gh pr create --base "${{ github.ref_name }}" --head "$BRANCH" \
-            --title "chore(release): v${VERSION}" \
-            --body "Record the \`v${VERSION}\` version bump that the Release workflow published to npm \`latest\`. Merge to keep \`${{ github.ref_name }}\`'s manifests in sync with the published version."
-
-      - name: Create GitHub Release
-        if: steps.release.outputs.published == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          RESULT: ${{ steps.release.outputs.version }}
+          VERSION: ${{ steps.release.outputs.version }}
+          BASE_BRANCH: ${{ github.ref_name }}
+        with:
+          script: |
+            await require('./.github/scripts/release-finalization.cjs').bumpPr({ github, context, core });
+
+      - name: Create GitHub Release
+        id: github_release
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
           PUBLISHED_NAMES: ${{ steps.release.outputs.publishedNames }}
           ALIAS_NAME: ${{ steps.release.outputs.aliasName }}
         with:
           script: |
-            const version = process.env.RESULT;
-            const alias = process.env.ALIAS_NAME;
-            const published = (process.env.PUBLISHED_NAMES ?? '').split(',').filter(Boolean);
-            const rows = published.map((name) => `| \`${name}\` | \`${version}\` |`);
-            const body = [
-              '## Published packages',
-              '',
-              '| Package | Version |',
-              '|---|---|',
-              ...rows,
-              '',
-              '### Install',
-              '',
-              '```bash',
-              `npx ${alias}@${version}`,
-              '```',
-            ].join('\n');
-            // Creates the tag at the released commit if it doesn't exist yet —
-            // this is the release's only write to the repo, and one the branch
-            // protection ruleset permits (unlike a direct push to main).
-            await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: `v${version}`,
-              target_commitish: context.sha,
-              name: `v${version}`,
-              body,
-              draft: false,
-              prerelease: false,
-            });
+            await require('./.github/scripts/release-finalization.cjs').githubRelease({ github, context, core });
 
       - name: Write workflow summary
         if: always() && steps.release.outputs.version != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERSION: ${{ steps.release.outputs.version }}
           PUBLISHED: ${{ steps.release.outputs.published }}
           ALIAS_NAME: ${{ steps.release.outputs.aliasName }}
-        run: |
-          {
-            echo "## 🚀 Release ${VERSION}"
-            echo ""
-            if [ "$PUBLISHED" = "true" ]; then
-              echo "Published \`${ALIAS_NAME}@${VERSION}\` to \`latest\` and tagged \`v${VERSION}\`."
-            else
-              echo "⚠️ Dry run — nothing was published. See \`docs/publishing.md\`."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          BUMP: ${{ inputs.bump }}
+          PR_STATUS: ${{ steps.bump_pr.outputs.status }}
+          PR_URL: ${{ steps.bump_pr.outputs.url }}
+          PR_REASON: ${{ steps.bump_pr.outputs.reason }}
+          RELEASE_STATUS: ${{ steps.github_release.outputs.status }}
+          RELEASE_URL: ${{ steps.github_release.outputs.url }}
+          RELEASE_REASON: ${{ steps.github_release.outputs.reason }}
+          TAG_VERIFIED: ${{ steps.github_release.outputs.tag_verified }}
+        with:
+          script: |
+            require('./.github/scripts/release-finalization.cjs').summary();

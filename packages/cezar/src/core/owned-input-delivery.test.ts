@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { expect, it } from 'vitest';
+import { createServer } from 'node:net';
+import { expect, it, vi } from 'vitest';
 import { withDelayedCommand, withRejectedCommand } from './owned-input-delivery.testkit.ts';
 import { driveSeam, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 
@@ -159,3 +160,73 @@ for (const backend of ['claude', 'codex', 'opencode', 'pi'] as const) {
     });
   }, 60_000);
 }
+
+// The HTTP response and SSE error travel over independent sockets. Force the
+// error to reach the manager before releasing the successful transport ACK.
+it.each(['fresh', 'continuation'] as const)('opencode %s provider failure before HTTP ACK retains the accepted input receipt', async mode => {
+  await withDelayedCommand('opencode', async release => {
+    await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId, parentRunId }) => {
+      manager.enqueueOwnedRun(runId);
+      await waitFor(() => store.getRun(runId)?.status === 'waiting');
+      if (mode === 'continuation') {
+        manager.finish(runId);
+        await waitFor(() => !manager.isActive(runId));
+        expect(manager.continueRun(runId, { text: 'baseline continuation' }).ok).toBe(true);
+        await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
+      }
+      const input = { id: randomUUID(), source: 'agent' as const, parentRunId,
+        text: 'mock:provider-error', createdAt: new Date().toISOString() };
+      expect(manager.steerWorker(runId, input)).toBe('queued');
+      await waitFor(() => store.readEvents(runId).some(event => event.type === 'session.error'));
+      release();
+      await waitFor(() => !manager.isActive(runId));
+      expect(store.getRun(runId)?.status).toBe('failed');
+      expect(store.getRun(runId)?.agentInputs).toEqual([{ ...input, deliveredAt: expect.any(String) }]);
+      expect(store.readEvents(runId).filter(event => event.type === 'agent-input')).toHaveLength(1);
+    });
+  }, 'mock:provider-error');
+}, 60_000);
+
+it('opencode fixture reaches waiting when the requested runner port is occupied', async () => {
+  const occupied = createServer();
+  await new Promise<void>(resolve => occupied.listen(0, '127.0.0.1', resolve));
+  const address = occupied.address();
+  if (!address || typeof address === 'string') throw new Error('expected TCP address');
+  // Force the runner's candidate port to collide with a real listening socket.
+  const random = vi.spyOn(Math, 'random').mockReturnValue((address.port - 40_000 + 0.5) / 20_000);
+  try {
+    await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId }) => {
+      manager.enqueueOwnedRun(runId);
+      await waitFor(() => store.getRun(runId)?.status === 'waiting' || store.getRun(runId)?.status === 'failed');
+      expect(store.getRun(runId)?.status).toBe('waiting');
+      expect(manager.isActive(runId)).toBe(true);
+    });
+  } finally {
+    random.mockRestore();
+    await new Promise<void>((resolve, reject) => occupied.close(error => error ? reject(error) : resolve()));
+  }
+}, 60_000);
+
+it.each(['unresponsive', 'cancel', 'finish'] as const)('opencode provider failure with %s ACK terminates without inventing delivery', async stop => {
+  await withDelayedCommand('opencode', async () => {
+    await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId, parentRunId }) => {
+      manager.enqueueOwnedRun(runId);
+      await waitFor(() => store.getRun(runId)?.status === 'waiting');
+      const input = { id: randomUUID(), source: 'agent' as const, parentRunId,
+        text: 'mock:provider-error', createdAt: new Date().toISOString() };
+      expect(manager.steerWorker(runId, input)).toBe('queued');
+      await waitFor(() => store.readEvents(runId).some(event => event.type === 'session.error'));
+      if (stop !== 'unresponsive') manager[stop](runId);
+      await waitFor(() => !manager.isActive(runId));
+      expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+      expect(store.readEvents(runId).filter(event => event.type === 'agent-input')).toEqual([expect.objectContaining({ input })]);
+      if (stop === 'unresponsive') {
+        expect(store.getRun(runId)?.status).toBe('failed');
+        const errors = store.readEvents(runId).filter(event => event.type === 'error').map(event => event.message);
+        expect(errors).toEqual([expect.stringContaining('API key expired')]);
+      } else {
+        expect(stop === 'cancel' ? ['cancelled'] : ['done', 'review']).toContain(store.getRun(runId)?.status);
+      }
+    });
+  }, 'mock:provider-error');
+}, 60_000);

@@ -260,7 +260,7 @@ describe('the thread composer against a live waiting session', () => {
 
     // …and typing a prompt then sending reopens the session on it.
     browser.fill('[data-slot="composer"] textarea', 'one more thing: add a note')
-    browser.click('[aria-label="Continue"]')
+    browser.click('[aria-label="Send"]')
     await waitForStatus(baseUrl, runId, ['running', 'waiting'])
     browser.waitForFunction(
       `[...document.querySelectorAll('[data-slot="user-bubble"]')].some((b) =>

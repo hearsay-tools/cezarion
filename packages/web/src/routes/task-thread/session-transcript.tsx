@@ -1,4 +1,5 @@
 import { useMemo, type ReactNode } from 'react'
+import { Link } from '@/lib/project-router'
 
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 
@@ -297,6 +298,20 @@ function ThreadEntryRenderer({
     case 'tool':
       return <ToolCard item={entry} cacheKey={`${scope}:${entry.id}`} />
     case 'note':
+      if (entry.conversation) {
+        const message = entry.conversation
+        const linkClass = 'inline-flex min-h-11 max-w-full items-center break-all underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        return <div data-slot="conversation-message" className="min-w-0 rounded-md border border-border px-4 py-3 text-sm">
+          <div className="mb-2 min-w-0 space-y-1 break-all text-xs text-muted-foreground">
+            <p className="capitalize">Agent {message.kind}</p>
+            <p><Link className={linkClass} to={`/tasks/${message.senderRunId}`} aria-label={`Sender task ${message.senderRunId}`}>Sender task {message.senderRunId}</Link></p>
+            <p><Link className={linkClass} to={`/tasks/${message.recipientRunId}`} aria-label={`Recipient task ${message.recipientRunId}`}>Recipient task {message.recipientRunId}</Link></p>
+            <p>Message {message.id}{message.kind === 'request' || message.requestId ? ` · Request ${message.requestId ?? message.id}` : ''}</p>
+            <p>Delivery: {message.delivery}{message.state && message.state !== 'accepted' ? ` · ${message.state}` : ''}</p>
+          </div>
+          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"><NoteLine note={entry} /></div>
+        </div>
+      }
       return entry.attribution ? <div className="min-w-0 rounded-md border border-border px-4 py-3 text-sm">
         <p className="mb-2 break-all text-xs text-muted-foreground">{entry.attribution.source === 'agent'
           ? `Agent input from parent ${entry.attribution.parentRunId}`

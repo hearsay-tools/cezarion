@@ -157,6 +157,37 @@ describe('RunStore durable delegation', () => {
   }
   function disk() { return JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8')); }
 
+  it('withdrawing a message wake preserves accepted conversation input across restart', () => {
+    const run = store.createRun(input);
+    const messageId = randomUUID(); const waitId = randomUUID();
+    store.commitDelegation([{ id: run.id, delegation: { ...root, wait: {
+      id: waitId, workerIds: [], outcomes: [], deadline: now, phase: 'wake-pending', reason: 'message', wakeId: messageId,
+    } } }]);
+    const accepted = { id: messageId, source: 'agent' as const, parentRunId: run.id, text: 'Please inspect parser', createdAt: now,
+      conversation: { senderRunId: workerId, recipientRunId: run.id, kind: 'request' as const } };
+    store.commitAgentInputs(run.id, [accepted]);
+    store.commitWorkerWaitWithdrawal(run.id, waitId);
+    expect(store.getRun(run.id)?.agentInputs).toEqual([accepted]);
+    const reopened = RunStore.open(dataDir, { keepLive: true });
+    expect(reopened.getRun(run.id)?.agentInputs).toEqual([accepted]);
+    expect(reopened.getRun(run.id)?.delegation).not.toHaveProperty('wait');
+  });
+
+  it('withdrawing an adopted wake preserves accepted legacy steer input across restart', () => {
+    const run = store.createRun(input);
+    const messageId = randomUUID(); const waitId = randomUUID();
+    store.commitDelegation([{ id: run.id, delegation: { ...root, wait: {
+      id: waitId, workerIds: [], outcomes: [], deadline: now, phase: 'wake-pending', reason: 'message', wakeId: messageId,
+    } } }]);
+    const accepted = { id: messageId, source: 'agent' as const, parentRunId: run.id, text: 'Please inspect parser', createdAt: now };
+    store.commitAgentInputs(run.id, [accepted]);
+    store.commitWorkerWaitWithdrawal(run.id, waitId);
+    expect(store.getRun(run.id)?.agentInputs).toEqual([accepted]);
+    const reopened = RunStore.open(dataDir, { keepLive: true });
+    expect(reopened.getRun(run.id)?.agentInputs).toEqual([accepted]);
+    expect(reopened.getRun(run.id)?.delegation).not.toHaveProperty('wait');
+  });
+
   it('atomically withdraws only the selected wait and preserves human FIFO, attachments and other inputs', () => {
     const run = parent(); const wakeId = randomUUID();
     const selected = workerWaitSchema.parse({ ...wait, phase: 'wake-pending', wakeId });

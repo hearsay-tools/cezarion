@@ -2,28 +2,15 @@ import type {
   ProviderId,
   ProviderStatusResponse,
 } from '../core/provider-auth.ts';
-import { PROVIDER_IDS } from '../core/provider-auth.ts';
 import type { RunRecord } from '../runs/store.ts';
-import { stepKind, type WorkflowDef } from '../workflows/types.ts';
+export { providersRequiredByWorkflow } from '@open-mercato/cezar-contract';
 
-const ORDER: readonly ProviderId[] = PROVIDER_IDS;
 const LABEL: Record<ProviderId, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
   opencode: 'OpenCode',
   pi: 'pi',
 };
-
-export function providersRequiredByWorkflow(
-  workflow: WorkflowDef,
-  fallback: ProviderId,
-): ProviderId[] {
-  const required = new Set<ProviderId>();
-  for (const step of workflow.steps) {
-    if (stepKind(step) === 'agent') required.add(step.runner ?? fallback);
-  }
-  return ORDER.filter((provider) => required.has(provider));
-}
 
 export function providerForExistingRun(
   run: RunRecord,

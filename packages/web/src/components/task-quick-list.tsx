@@ -511,8 +511,8 @@ function variantLabel(run: RunRecord, showTokens: boolean, showCost: boolean): s
 
 /**
  * The quick-list wired to live data: `useRuns()` for the list (kept fresh by the global SSE
- * stream, Step 3.2), the router for which row is open, and the shared Active/Archived context so
- * the sidebar and the Tasks table (Step 3.4) always show the same filter.
+ * stream, Step 3.2), the router for which row is open, and the sidebar Active/Archived context —
+ * independent of the Tasks table's own tabs.
  */
 export function TaskQuickListContainer() {
   const runs = useRuns()
