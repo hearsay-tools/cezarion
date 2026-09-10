@@ -15,6 +15,7 @@ dist/
 
 # locally installed agent skills (per-machine installs, not repo content)
 .agents/
+.superpowers/
 skills-lock.json
 
 # agent-pipeline scratch state (worktrees, per-run QA artifacts, test-env working files)
