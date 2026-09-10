@@ -609,7 +609,7 @@ export function GithubRoute({
       >
         <header data-slot="gh-header" className="sticky top-0 z-10 border-b border-border bg-background/95 px-4 pt-3 backdrop-blur">
           <div className="flex min-w-0 items-center gap-2.5">
-            <h1 className="text-lg font-semibold">GitHub</h1>
+            <h1 className="sr-only text-lg font-semibold md:not-sr-only">GitHub</h1>
             {gh.repo ? (
               <span data-slot="gh-repo" className="min-w-0 truncate font-mono text-[11px] text-soft-foreground">
                 {gh.repo}
@@ -851,18 +851,18 @@ function GithubRow({
           active && 'bg-muted',
         )}
       >
-        <span className="flex min-w-0 items-center gap-2">
+        <span className="flex min-w-0 items-start gap-2 md:items-center">
           <Icon
             aria-hidden="true"
-            className={cn('size-3.5 shrink-0', item.kind === 'issue' ? 'text-success' : 'text-violet')}
+            className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-violet')}
           />
-          <span className={cn('min-w-0 truncate text-[13px] font-medium', active && 'font-semibold')}>
+          <span className={cn('line-clamp-2 min-w-0 text-[13px] font-medium md:block md:truncate', active && 'font-semibold')}>
             {item.title}
           </span>
         </span>
-        <span className="flex items-center gap-2 pl-[22px] font-mono text-[10.5px] text-muted-foreground">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] font-mono text-[10.5px] text-muted-foreground md:flex-nowrap md:gap-y-0">
           <span>#{item.number}</span>
-          <span className="min-w-0 truncate">{item.author}</span>
+          <span className="max-w-full shrink-0 truncate md:min-w-0 md:shrink">{item.author}</span>
           <span>{shortAge(item.createdAt)}</span>
           <CommentCount count={item.comments} />
           {checks ? <ChecksGlyph checks={checks} /> : null}

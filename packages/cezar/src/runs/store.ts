@@ -200,6 +200,7 @@ export const runRecordSchema = z.object({
     })
     .optional(),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
+  stopping: contractRunRecordSchema.shape.stopping.catch(undefined),
   /** Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):
    *  `monitoring` while the agent is still working on its own downstream work.
    *  Optional/absent on old runs; cleared when the run resumes or ends. */
@@ -631,6 +632,15 @@ function createdPrUrl(haystack: string): string | undefined {
  * are marked failed so no ghost stays behind.
  */
 export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }): RunRecord {
+  // An accepted Stop is durable intent, never an interrupted run to auto-resume.
+  if (run.stopping) {
+    run.status = 'cancelled';
+    run.finishedAt ??= new Date().toISOString();
+    for (const step of run.steps) {
+      if (step.status === 'running' || step.status === 'waiting') step.status = 'cancelled';
+    }
+  }
+  run.stopping = undefined;
   // A run that was live when the previous process exited can never finish —
   // surface that instead of a forever-"running" ghost. `review` survives
   // restarts on purpose: the gate is pure data (worktree + branch + record)

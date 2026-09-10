@@ -83,6 +83,7 @@ import {
 } from './new-task-autostart'
 import {
   clearStartedDraft,
+  draftRevision,
   composerRunModeNote,
   readDraft,
   resolveComposerRunMode,
@@ -96,6 +97,7 @@ import {
   modelCatalogStatus,
   pushRecentSource,
   QUICK_TASK,
+  RUNNERS,
   resolveEffort,
   resolveModel,
   resolveRunner,
@@ -163,11 +165,25 @@ export function NewTaskRoute() {
         : {}),
     }
   })
+  const currentDraft = useRef(draft)
   useEffect(() => {
-    writeDraft(draft, draftProjectId)
-  }, [draft, draftProjectId])
-  const update = (patch: Partial<NewTaskDraft>) =>
-    setDraft((current) => ({ ...current, ...patch }))
+    // Claim this mounted draft even when its text matches the previous visit.
+    writeDraft(currentDraft.current, draftProjectId)
+  }, [draftProjectId])
+  const submissionPending = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const update = (patch: Partial<NewTaskDraft>) => {
+    if (!mounted.current || submissionPending.current) return
+    const next = { ...currentDraft.current, ...patch }
+    currentDraft.current = next
+    // Dictation can edit and submit in one event. Persist before submit captures its revision.
+    writeDraft(next, draftProjectId)
+    setDraft(next)
+  }
 
   // ---- effective picker values (rules in new-task-form.ts, mirrored from legacy) -----------
   const recentSources = uiState.data?.recentSources
@@ -209,7 +225,7 @@ export function NewTaskRoute() {
   useEffect(() => {
     // Wait for the pickers' data: before it lands `source` is still a provisional guess, and
     // auto-applying against it would flash text in for a skill the user may not end up on.
-    if (!sourcesReady) return
+    if (!sourcesReady || submissionPending.current) return
     const resolved = resolveAutoApply(draftTextRef.current, autoAppliedRef.current, autoText)
     autoAppliedRef.current = resolved.applied
     if (resolved.text !== draftTextRef.current) update({ text: resolved.text })
@@ -360,6 +376,7 @@ export function NewTaskRoute() {
       setAutoStarting(false)
       return
     }
+    const submittedRevision = draftRevision(draftProjectId)
     void (async () => {
       let launchKey = ''
       try {
@@ -370,9 +387,9 @@ export function NewTaskRoute() {
       if (launchKey !== '' && deepLink.key === launchKey) {
         try {
           const created = await createRun(bookmarkletRunBody(deepLink, runner, defaultRunner))
-          clearStartedDraft(draftProjectId)
+          clearStartedDraft(draftProjectId, submittedRevision)
           void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-          void navigate(startedRunPath(created))
+          if (mounted.current) void navigate(startedRunPath(created))
           return
         } catch (error) {
           setNotice({
@@ -413,6 +430,7 @@ export function NewTaskRoute() {
   }, [notice, sourcesReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (text: string, images: AttachmentInput[]) => {
+    const submittedRevision = draftRevision(draftProjectId)
     if (!providersReady || runner === null) {
       throw new Error(
         providers.isPending
@@ -427,14 +445,11 @@ export function NewTaskRoute() {
       throw new Error('Still loading workflows and skills — try again in a second.')
     }
     if (draft.planFirst) {
-      // Plan mode: submit means PLAN. A rejection propagates — the composer toasts and
-      // restores the draft; a success restores the text ourselves (the composer already
-      // cleared optimistically) so Discard hands back exactly what was typed. The review
-      // overlay is deliberate: it's where steps are edited and saved as a reusable chain.
+      // Keep the original draft while planning so Discard returns to it unchanged.
       setPlanning(true)
       try {
-        setPlan(pendingPlanOf(text, images, await postPlan(text)))
-        update({ text })
+        const planned = await postPlan(text)
+        if (mounted.current) setPlan(pendingPlanOf(text, images, planned))
       } finally {
         setPlanning(false)
       }
@@ -486,15 +501,16 @@ export function NewTaskRoute() {
     })
       .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.uiState }))
       .catch(() => {})
-    clearStartedDraft(draftProjectId)
+    clearStartedDraft(draftProjectId, submittedRevision)
     void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-    navigate(startedRunPath(created))
+    if (mounted.current) navigate(startedRunPath(created))
   }
 
   /** ▶ Start on the reviewed plan: the (possibly edited) steps go INLINE, with the composer's
    *  current picker choices — legacy `startPlannedRun` semantics on the new surface. */
   const startPlanned = async () => {
     if (plan === null || plan.steps.length === 0 || starting || !providersReady || runner === null) return
+    const submittedRevision = draftRevision(draftProjectId)
     setStarting(true)
     try {
       const created = await createRun(
@@ -521,10 +537,10 @@ export function NewTaskRoute() {
           .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.uiState }))
           .catch(() => {})
       }
-      clearStartedDraft(draftProjectId)
+      clearStartedDraft(draftProjectId, submittedRevision)
       setPlan(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-      navigate(startedRunPath(created))
+      if (mounted.current) navigate(startedRunPath(created))
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })
     } finally {
@@ -576,6 +592,11 @@ export function NewTaskRoute() {
         <Composer
           ref={composerRef}
           onSubmit={submit}
+          retainDraftUntilSuccess
+          pendingLabel={draft.planFirst ? 'Planning task…' : 'Starting task…'}
+          failureHint={draft.planFirst ? 'Could not create the plan. Your draft is kept. Please retry.' : undefined}
+          clearOnSuccess={!draft.planFirst}
+          onPendingChange={(pending) => { submissionPending.current = pending }}
           value={draft.text}
           onValueChange={(text) => update({ text })}
           autoFocus
@@ -616,117 +637,136 @@ export function NewTaskRoute() {
                 workflows={workflowList}
                 onPick={(next) => update({ source: next })}
               />
-              {/* Icon-only: this row already carries source/runner/model/variants/worktree/
-                  autonomous/branch, and templates is the least-used of them. */}
+              {/* Templates stay beside prompt context and attachments. */}
               <PromptTemplateMenu
                 templates={templates}
                 iconOnly
                 onInsert={(text) => composerRef.current?.insertAtCaret(text)}
               />
-              {/* Shown when there is a choice to make: more than one runner, or more than one
-                  login for one of them. A host with neither sees no pill, exactly as before. */}
-              {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
-                <RunnerPill
-                  runners={runners}
-                  value={displayRunner}
-                  accounts={accountChoices}
-                  account={agentProfile}
-                  repoAccount={repoAccount}
-                  // Changing the AGENT clears the model pin: presets are per-runner, so a kept
-                  // model would be one the new runner does not have. Changing only the account
-                  // keeps it — the model catalog is the same either way.
-                  onPick={(next, picked) =>
-                    update({
-                      runner: next,
-                      agentProfile: picked,
-                      ...(next === displayRunner ? {} : { model: null }),
-                    })
-                  }
-                  disabled={!providersReady}
-                />
-              ) : null}
-              <PickerPill
-                slot="model-pill"
-                ariaLabel="Model"
-                label={models.find((m) => m.id === model)?.label ?? 'auto'}
-                value={model}
-                disabled={!providersReady}
-                readOnly={modelsLocked}
-                disabledHint={
-                  modelsLocked
-                    ? 'Model selection is locked to native coding-agent settings.'
-                    : undefined
-                }
-                onPick={(next) => {
-                  const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
-                  update({
-                    model: next,
-                    effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
-                  })
-                }}
-                options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
-                status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
-              />
-              <PickerPill
-                slot="effort-pill"
-                ariaLabel="Effort"
-                label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
-                value={effort}
-                disabled={!providersReady}
-                readOnly={modelsLocked}
-                disabledHint={
-                  modelsLocked
-                    ? 'Effort selection is locked to native coding-agent settings.'
-                    : undefined
-                }
-                onPick={(next) => update({ effort: next })}
-                options={effortOptions.map((option) => ({
-                  value: option.value,
-                  label: option.label,
-                  desc: option.desc,
-                }))}
-              />
-              <PickerPill
-                slot="variants-pill"
-                ariaLabel="Parallel variants"
-                label={variants > 1 ? `×${variants} variants` : '×1'}
-                value={String(variants)}
-                onPick={(next) => update({ variants: Number(next) })}
-                disabled={!hasGit}
-                hint="How many times to run this task in parallel — each variant gets its own worktree, and you pick the diff you keep. ×1 runs it once."
-                disabledHint="Parallel variants need a git repository — each variant runs in its own worktree."
-                options={[
-                  { value: '1', label: '×1', desc: 'One run' },
-                  { value: '2', label: '×2 variants', desc: 'Two competing runs — pick the diff you keep' },
-                  { value: '3', label: '×3 variants', desc: 'Three competing runs — pick the diff you keep' },
-                ]}
-              />
-              {worktreeToggleShown ? (
-                <WorktreeToggle
-                  on={worktreeOn}
-                  disabled={worktreeForced}
-                  disabledReason="Parallel variants always use isolated worktrees"
-                  onChange={(on) => update({ worktree: on })}
-                />
-              ) : null}
-              <AutonomousToggle
-                on={autonomousOn}
-                disabled={draft.planFirst}
-                onChange={(on) => update({ autonomous: on })}
-              />
-              {selectedSkill?.interactive && (draft.autonomous === null || draft.worktree === null) ? (
-                <p className="basis-full text-xs text-muted-foreground" data-slot="interactive-skill-hint">
-                  This skill recommends an interactive run in the current checkout. You can change either setting.
-                </p>
-              ) : null}
-              {followupsToggleShown ? (
-                <GenerateFollowupsToggle
-                  on={generateFollowupsOn}
-                  onChange={(on) => update({ generateFollowups: on })}
-                />
-              ) : null}
-              {repo.data ? <BaseBranchPill repo={repo.data} /> : null}
             </>
+          }
+          executionOptions={
+            <details data-slot="execution-options" className="group border-t border-border">
+              <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
+                <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
+                <span className="font-medium text-foreground">Execution options</span>
+                <span data-slot="execution-summary" className="min-w-0 basis-full truncate pl-5 md:ml-auto md:basis-auto md:pl-0">
+                  {RUNNERS.find((runner) => runner.id === displayRunner)?.label ?? displayRunner}
+                  {' · '}{models.find((item) => item.id === model)?.label ?? 'auto'}
+                </span>
+              </summary>
+              <div className="space-y-3 px-3 pb-3">
+                <div role="group" aria-label="Agent settings" className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="basis-full text-xs font-medium text-muted-foreground">Agent</span>
+                  {/* Shown when there is a choice to make: more than one runner, or more than one
+                      login for one of them. A host with neither sees no pill, exactly as before. */}
+                  {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
+                    <RunnerPill
+                      runners={runners}
+                      value={displayRunner}
+                      accounts={accountChoices}
+                      account={agentProfile}
+                      repoAccount={repoAccount}
+                      // Changing the AGENT clears the model pin: presets are per-runner, so a kept
+                      // model would be one the new runner does not have. Changing only the account
+                      // keeps it — the model catalog is the same either way.
+                      onPick={(next, picked) =>
+                        update({
+                          runner: next,
+                          agentProfile: picked,
+                          ...(next === displayRunner ? {} : { model: null }),
+                        })
+                      }
+                      disabled={!providersReady}
+                    />
+                  ) : null}
+                  <PickerPill
+                    slot="model-pill"
+                    ariaLabel="Model"
+                    label={models.find((m) => m.id === model)?.label ?? 'auto'}
+                    value={model}
+                    disabled={!providersReady}
+                    readOnly={modelsLocked}
+                    disabledHint={
+                      modelsLocked
+                        ? 'Model selection is locked to native coding-agent settings.'
+                        : undefined
+                    }
+                    onPick={(next) => {
+                      const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
+                      update({
+                        model: next,
+                        effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
+                      })
+                    }}
+                    options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
+                    status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
+                  />
+                  <PickerPill
+                    slot="effort-pill"
+                    ariaLabel="Effort"
+                    label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
+                    value={effort}
+                    disabled={!providersReady}
+                    readOnly={modelsLocked}
+                    disabledHint={
+                      modelsLocked
+                        ? 'Effort selection is locked to native coding-agent settings.'
+                        : undefined
+                    }
+                    onPick={(next) => update({ effort: next })}
+                    options={effortOptions.map((option) => ({
+                      value: option.value,
+                      label: option.label,
+                      desc: option.desc,
+                    }))}
+                  />
+                </div>
+                <div role="group" aria-label="Run settings" className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="basis-full text-xs font-medium text-muted-foreground">Run</span>
+                  <PickerPill
+                    slot="variants-pill"
+                    ariaLabel="Parallel variants"
+                    label={variants > 1 ? `×${variants} variants` : '×1'}
+                    value={String(variants)}
+                    onPick={(next) => update({ variants: Number(next) })}
+                    disabled={!hasGit}
+                    hint="How many times to run this task in parallel — each variant gets its own worktree, and you pick the diff you keep. ×1 runs it once."
+                    disabledHint="Parallel variants need a git repository — each variant runs in its own worktree."
+                    options={[
+                      { value: '1', label: '×1', desc: 'One run' },
+                      { value: '2', label: '×2 variants', desc: 'Two competing runs — pick the diff you keep' },
+                      { value: '3', label: '×3 variants', desc: 'Three competing runs — pick the diff you keep' },
+                    ]}
+                  />
+                  {worktreeToggleShown ? (
+                    <WorktreeToggle
+                      on={worktreeOn}
+                      disabled={worktreeForced}
+                      disabledReason="Parallel variants always use isolated worktrees"
+                      onChange={(on) => update({ worktree: on })}
+                    />
+                  ) : null}
+                  <AutonomousToggle
+                    on={autonomousOn}
+                    disabled={draft.planFirst}
+                    onChange={(on) => update({ autonomous: on })}
+                  />
+                  {selectedSkill?.interactive && (draft.autonomous === null || draft.worktree === null) ? (
+                    <p className="basis-full text-xs text-muted-foreground" data-slot="interactive-skill-hint">
+                      This skill recommends an interactive run in the current checkout. You can change either setting.
+                    </p>
+                  ) : null}
+                  {followupsToggleShown ? (
+                    <GenerateFollowupsToggle
+                      on={generateFollowupsOn}
+                      onChange={(on) => update({ generateFollowups: on })}
+                    />
+                  ) : null}
+                  {repo.data ? <BaseBranchPill repo={repo.data} /> : null}
+                </div>
+              </div>
+            </details>
           }
           footerEnd={
             <>
@@ -745,7 +785,7 @@ export function NewTaskRoute() {
               />
               <kbd
                 aria-hidden="true"
-                className="rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[10.5px] font-medium text-muted-foreground"
+                className="hidden rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[10.5px] font-medium text-muted-foreground md:inline"
               >
                 {submitShortcutHint()}
               </kbd>
@@ -1134,9 +1174,8 @@ function SourcePill({
   }
 
   const SourceIcon = source === null ? PlusIcon : source.source === 'skill' ? SparklesIcon : WorkflowIcon
-  // An empty picker looks empty: dashed, quiet, an invitation rather than a value. Every other
-  // pill in this row shows a resolved choice, so a filled-looking pill that nobody chose was
-  // read as one that could not be changed.
+  // The + and generic label distinguish an empty choice. Keep its enabled boundary and ink
+  // consistent with the other selectors; dashed boundaries mark disabled pills (#171).
   const trigger = (
     <button
       type="button"
@@ -1161,13 +1200,13 @@ function SourcePill({
         chipClass,
         'font-mono text-[11.5px]',
         source === null
-          ? 'border-dashed text-soft-foreground'
+          ? 'text-muted-foreground'
           : 'rounded-r-none border-r-0 border-foreground/60 pr-1.5 font-semibold text-foreground',
       )}
     >
       <SourceIcon
         aria-hidden="true"
-        className={cn('size-3 shrink-0', source === null ? 'text-soft-foreground' : 'text-violet')}
+        className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-violet')}
       />
       <span className="max-w-44 truncate">{!ready ? '…' : (source?.ref ?? 'Skill')}</span>
       {chevron}

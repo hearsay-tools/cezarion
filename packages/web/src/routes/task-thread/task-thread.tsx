@@ -35,7 +35,8 @@ import { PlanDock, planCounts } from './plan-dock'
 import { collectSubagents, findSubagent, subagentChildren } from './subagent-dock'
 import { SubagentSheet } from './subagent-sheet'
 import { AcceptCelebration, ReviewPanel } from './review-panel'
-import { queuePosition } from './run-actions'
+import { queuePosition, runActionFlags } from './run-actions'
+import { useStopAction } from './stop-action'
 import { RunHeader } from './run-header'
 import { AskCard } from './ask-card'
 import { useRunRecordReconcile } from './run-reconcile'
@@ -191,11 +192,7 @@ export function ThreadView({
   // The legacy session-open rule (web/app.js `updateDetail`): the composer can deliver while
   // the engine owns a live session — running queues the message, waiting answers it.
   const sessionOpen = run.status === 'running' || run.status === 'waiting'
-  // …and the third state (#472): a queued run has not started, so its prompt is still
-  // authorable. "Session closed — Continue to reopen." was wrong on its own terms here —
-  // the session is not closed, it was never opened, and Continue means nothing for a run
-  // that has not run. Deliberately `queued` only: review/done/failed/cancelled keep the
-  // existing copy and their Continue action.
+  // Queued sends amend the original prompt; they do not open a provider session.
   const queued = run.status === 'queued'
   // …and the fourth: a closed run whose last session can be reopened. Continue used to be a
   // bare button beside a DISABLED textarea, so "reopen it and say what to do next" meant
@@ -203,6 +200,8 @@ export function ThreadView({
   // stays authorable here instead: the draft is the prompt the reopened session starts on, and
   // submitting an empty one is still the plain one-click Continue.
   const continueAction = useContinueAction(run)
+  const stopAction = useStopAction(run)
+  const needsAnswer = hasPendingHumanAsk || run.hasPendingHumanAsk === true
   const hasContinuation = !sessionOpen && !queued && continueAction.available
   const continuable = hasContinuation && continueAction.canContinue
   // A closed session can never settle its in-flight items — nothing in the reducer rewrites a
@@ -453,7 +452,18 @@ export function ThreadView({
             </div>
           ) : null}
 
+          {continuable && continueAction.startsNewConversation ? (
+            <p className="px-1 text-xs text-muted-foreground" role="status">Starts a new agent conversation.</p>
+          ) : null}
+
           <Composer
+            onStop={runActionFlags(run).cancel ? stopAction.stop : undefined}
+            stopOnEmpty={run.status === 'queued' || run.status === 'running' || (run.status === 'waiting' && attention.label === 'waiting on workers' && !needsAnswer)}
+            stopping={stopAction.stopping}
+            retainDraftUntilSuccess
+            compactFeedback
+            pendingLabel={continuable ? 'Continuing…' : 'Sending…'}
+            failureHint="Your draft is kept. Check the task status and connection, then retry."
             mobileCollapsible={!providerBlocked}
             mobileDisclosureKey={JSON.stringify([projectId, run.id])}
             onSubmit={
@@ -462,9 +472,6 @@ export function ThreadView({
                 : (text, images) => sendMessage.mutateAsync({ text, images })
             }
             disabled={providerBlocked || (!sessionOpen && !queued && !continuable)}
-            // Only reachable now by a closed run with NO session to resume — which is exactly
-            // the one case where Continue is not on offer either. Left honest rather than
-            // rewritten: "closed" is all such a run can be told.
             disabledReason={providerBlocked ? providerReason : 'Session closed — no session to resume.'}
             // The engine pills ride the enabled footer, so the picked runner/model and the
             // typed prompt reach `POST /continue` in one request.
@@ -479,8 +486,8 @@ export function ThreadView({
               ) : continuable ? continueAction.pills : undefined
             }
             // Continuing with nothing typed is the legacy one-click Continue.
-            allowEmptySubmit={continuable}
-            sendAriaLabel={continuable ? 'Continue' : 'Send'}
+            allowEmptySubmit={continuable && !needsAnswer}
+            emptySubmitLabel={continuable && !needsAnswer ? 'Continue' : undefined}
             placeholder={
               queued ? 'Add to the prompt — sent when the run starts…'
               : continuable ? 'Continue — add a prompt, or send to just reopen the session…'

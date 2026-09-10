@@ -9,6 +9,7 @@ interface DirectionalUsageProps {
   /** Historical compact surfaces disappear when neither direction was persisted. */
   omitWhenUnknown?: boolean
   className?: string
+  title?: string
 }
 
 function exactTokens(value: number | undefined): string {
@@ -36,6 +37,7 @@ export function DirectionalUsage({
   variant = 'compact',
   omitWhenUnknown = true,
   className,
+  title,
 }: DirectionalUsageProps) {
   if (omitWhenUnknown && inputTokens === undefined && outputTokens === undefined) return null
 
@@ -43,6 +45,7 @@ export function DirectionalUsage({
     <span
       data-slot="directional-usage"
       aria-label={directionalUsageLabel(inputTokens, outputTokens)}
+      title={title}
       className={cn('font-mono tabular-nums', className)}
     >
       {directionalUsageText(inputTokens, outputTokens, variant)}

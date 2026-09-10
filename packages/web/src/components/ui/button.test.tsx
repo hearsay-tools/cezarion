@@ -21,7 +21,7 @@ describe('Button', () => {
     it.each([
       { variant: 'primary', expected: ['bg-primary', 'text-primary-foreground'] },
       { variant: 'contrast', expected: ['bg-contrast', 'text-contrast-foreground'] },
-      { variant: 'outline', expected: ['border-border', 'bg-card'] },
+      { variant: 'outline', expected: ['border-control-border', 'bg-card'] },
       { variant: 'ghost', expected: ['text-muted-foreground'] },
       { variant: 'danger-ghost', expected: ['text-danger'] },
     ] as const)('$variant', ({ variant, expected }) => {

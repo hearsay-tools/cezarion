@@ -7,6 +7,14 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import {
+  applyContrastQaVariant,
+  contrastQaVariants,
+  contrastSampleExpression,
+  focusWithKeyboard,
+  restoreContrastQaDefaults,
+  type ContrastSample,
+} from './contrast'
 
 /**
  * The task quick-list, in a real browser, against a real cezar serving real runs.
@@ -50,7 +58,11 @@ const FIXTURE = [
     createdAt: ago(40 * 60_000),
     finishedAt: ago(26 * 60_000),
     tokensUsed: 128_400,
+    inputTokens: 999_900,
+    outputTokens: 888_800,
+    costUsd: 123.45,
     diffStat: { adds: 128, dels: 14, files: 6 },
+    peakRssBytes: 1023 * 1024 ** 2,
     pullRequestUrl: 'https://github.com/open-mercato/cezar/pull/396',
     archived: false,
     steps: [],
@@ -236,6 +248,37 @@ describe('task quick-list', () => {
     expect(rowsIn('Recent')).toEqual(['README parallel-agents tagline+9 −22h', 'Bump zod to v43h'])
   })
 
+  it('keeps selected and hovered sidebar task metadata AA-readable', () => {
+    const selectedRow = '[data-slot="task-row"][data-run-id="fix-done"]'
+    const hoveredRow = '[data-slot="task-row"][data-run-id="fix-failed"]'
+    const age = (row: string) => `${row} > a > span.tabular-nums`
+
+    browser.goto(`${baseUrl}${scoped('/tasks/fix-done')}`)
+    browser.waitForFunction(`document.querySelector('${selectedRow}[data-active="true"]') !== null`)
+    try {
+      for (const variant of contrastQaVariants.filter(({ viewport }) => viewport.width === 1440)) {
+        applyContrastQaVariant(browser, variant)
+        const selected = browser.evaluate(contrastSampleExpression(age(selectedRow))) as ContrastSample
+        expect(
+          selected.ratio,
+          `${variant.id} selected: ${selected.foreground} on ${selected.background}`,
+        ).toBeGreaterThanOrEqual(4.5)
+
+        browser.hover(hoveredRow)
+        const hovered = browser.evaluate(contrastSampleExpression(age(hoveredRow))) as ContrastSample
+        expect(
+          hovered.ratio,
+          `${variant.id} hover: ${hovered.foreground} on ${hovered.background}`,
+        ).toBeGreaterThanOrEqual(4.5)
+        browser.screenshot(`${artifactsDir}/issue-165-task-sidebar-${variant.id}.png`, { viewport: true })
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+      browser.goto(`${baseUrl}${scoped('/')}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="quick-list"]') !== null`)
+    }
+  })
+
   it('renders the diff pair through the success/danger tokens, not as plain text', () => {
     const pair = browser.evaluate(`(() => {
       const el = document.querySelector('[data-slot="task-row"][data-run-id="fix-review-pr"] [data-slot="diff-stat"]')
@@ -385,14 +428,237 @@ describe('tasks table overview', () => {
       const pr = tr.querySelector('[data-slot="pr-chip"]')
       return { text: tr.textContent, prHref: pr.href, prTarget: pr.target }
     })()`) as { text: string; prHref: string; prTarget: string }
-    // Historical fixtures have only tokensUsed; directional usage stays explicitly unknown.
-    expect(browser.evaluate(`document.querySelector('[data-run-id="fix-review-pr"] [aria-label="Input tokens: unknown; output tokens: unknown"]') !== null`)).toBe(true)
+    expect(browser.evaluate(`document.querySelector('[data-run-id="fix-review-pr"] [aria-label="Input tokens: 999,900; output tokens: 888,800"]') !== null`)).toBe(true)
     expect(reviewRow.text).toContain('Structured changes endpoint for the git view')
     expect(reviewRow.text).not.toContain('add a structured changes endpoint plz')
     expect(reviewRow.prHref).toBe('https://github.com/open-mercato/cezar/pull/396')
     expect(reviewRow.prTarget).toBe('_blank')
 
     browser.screenshot(`${artifactsDir}/tasks-table.png`)
+  })
+
+  it('allocates two contained title lines without crowding desktop metadata or actions', () => {
+    const title = 'Review shared task title prefix — documentation outcome'
+    const unbroken = `Review-shared-task-title-prefix-${'distinguishing'.repeat(18)}`
+
+    try {
+      for (const theme of ['light', 'dark'] as const) {
+        for (const density of ['comfortable', 'ultra'] as const) {
+          browser.setViewport(1440, 900)
+          browser.evaluate(`(() => {
+            document.documentElement.classList.toggle('light', ${theme === 'light'})
+            ${density === 'ultra'
+              ? "document.documentElement.dataset.density = 'ultra'"
+              : "delete document.documentElement.dataset.density"}
+            const links = [...document.querySelectorAll('${TABLE_ROW} td[data-column-id="task"] a[href*="/tasks/"]')]
+            links[0].textContent = ${JSON.stringify(title)}
+            links[0].setAttribute('title', ${JSON.stringify(title)})
+            links[1].textContent = ${JSON.stringify(unbroken)}
+            links[1].setAttribute('title', ${JSON.stringify(unbroken)})
+          })()`)
+
+          const facts = browser.evaluate(`(() => {
+            const rows = [...document.querySelectorAll('${TABLE_ROW}')]
+            const firstCell = rows[0].querySelector('td[data-column-id="task"]')
+            const firstLink = firstCell.querySelector('a[href*="/tasks/"]')
+            const secondCell = rows[1].querySelector('td[data-column-id="task"]')
+            const secondLink = secondCell.querySelector('a[href*="/tasks/"]')
+            const suffix = 'documentation outcome'
+            const textNode = firstLink.firstChild
+            const range = document.createRange()
+            range.setStart(textNode, textNode.textContent.indexOf(suffix))
+            range.setEnd(textNode, textNode.textContent.length)
+            const suffixRect = range.getBoundingClientRect()
+            const firstRect = firstLink.getBoundingClientRect()
+            const secondRect = secondLink.getBoundingClientRect()
+            const secondCellRect = secondCell.getBoundingClientRect()
+            const lineHeight = Number.parseFloat(getComputedStyle(firstLink).lineHeight)
+            const workflow = rows[0].querySelector('td[data-column-id="workflow"]')
+            workflow.textContent = 'workflow-name-that-is-deliberately-too-long-for-its-column'
+            const status = rows[0].querySelector('td[data-column-id="status"]')
+            const statusPill = status.querySelector('[data-slot="pill"]')
+            statusPill.textContent = 'waiting on workers'
+            const reference = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"] td[data-column-id="reference"]')
+            const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
+            const referenceLabel = [...referenceChip.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
+            referenceLabel.textContent = '#1234'
+            const referenceGlyph = referenceChip.querySelector('svg')
+            referenceChip.insertBefore(referenceGlyph.cloneNode(true), referenceChip.firstChild)
+            const diff = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"] td[data-column-id="diff"]')
+            const [adds, dels] = diff.querySelectorAll('[data-slot="diff-stat"] > span')
+            adds.textContent = '+12k'
+            dels.textContent = '−1k'
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('title', '+12345 −1234 across 37 files')
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('aria-label', '+12345 −1234 across 37 files')
+            const workflowHeader = document.querySelector('th[data-column-id="workflow"]')
+            const workflowHeaderButton = workflowHeader.querySelector('button')
+            const metricsRow = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"]')
+            const cpuCell = metricsRow.querySelector('td[data-column-id="cpu"]')
+            const cpuMetric = cpuCell.firstElementChild
+            cpuMetric.textContent = '100%'
+            cpuMetric.setAttribute('title', '100%')
+            cpuMetric.setAttribute('aria-label', '100%')
+            const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
+            const secondary = secondaryIds.map((id) => {
+              const cell = metricsRow.querySelector('td[data-column-id="' + id + '"]')
+              const style = getComputedStyle(cell)
+              const rect = cell.getBoundingClientRect()
+              const target = cell.firstElementChild || cell
+              const targetRect = target.getBoundingClientRect()
+              const targetStyle = getComputedStyle(target)
+              const range = document.createRange()
+              range.selectNodeContents(target)
+              const content = range.getBoundingClientRect()
+              const textFits = content.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && content.right <= rect.right - Number.parseFloat(style.paddingRight) + 1
+              const clipsOverflow = targetStyle.overflowX === 'hidden' && target.scrollWidth > target.clientWidth
+              return {
+                id,
+                width: rect.width,
+                contained: targetRect.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && targetRect.right <= rect.right - Number.parseFloat(style.paddingRight) + 1 && (textFits || clipsOverflow),
+                right: targetRect.right,
+                clipsOverflow,
+                label: cell.textContent,
+                accessible: cell.firstElementChild?.getAttribute('aria-label') || cell.getAttribute('aria-label'),
+                title: cell.firstElementChild?.getAttribute('title') || cell.getAttribute('title'),
+              }
+            })
+            const memoryCell = metricsRow.querySelector('td[data-column-id="memory"]')
+            const workflowStyle = getComputedStyle(workflow)
+            const diffStyle = getComputedStyle(diff)
+            const diffRect = diff.getBoundingClientRect()
+            const diffRange = document.createRange()
+            diffRange.selectNodeContents(diff.querySelector('[data-slot="diff-stat"]'))
+            const diffTextRect = diffRange.getBoundingClientRect()
+            const referenceContentRect = referenceChip.getBoundingClientRect()
+            const workflowHeaderStyle = getComputedStyle(workflowHeader)
+            const workflowHeaderRect = workflowHeader.getBoundingClientRect()
+            const workflowHeaderContentRight = workflowHeaderRect.right - Number.parseFloat(workflowHeaderStyle.paddingRight)
+            const workflowHeaderChildren = [...workflowHeaderButton.children].map((child) => child.getBoundingClientRect())
+            return {
+              taskWidth: firstCell.getBoundingClientRect().width,
+              titleWidth: firstRect.width,
+              workflowWidth: workflow.getBoundingClientRect().width,
+              lineCount: Math.round(firstRect.height / lineHeight),
+              suffixRect: { left: suffixRect.left, right: suffixRect.right, bottom: suffixRect.bottom },
+              titleRect: { left: firstRect.left, right: firstRect.right, bottom: firstRect.bottom },
+              suffixVisible: suffixRect.left >= firstRect.left - 1 && suffixRect.right <= firstRect.right + 1 && suffixRect.bottom <= firstRect.bottom + 1,
+              unbrokenContained: getComputedStyle(secondLink).overflow === 'hidden' && secondLink.scrollWidth > secondLink.clientWidth && secondRect.right <= secondCellRect.right + 1,
+              workflowContained: workflowStyle.overflow === 'hidden' && workflow.scrollWidth > workflow.clientWidth,
+              statusContained: status.scrollWidth <= status.clientWidth + 1 && statusPill.getBoundingClientRect().right <= status.getBoundingClientRect().right + 1,
+              referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1 && [...referenceChip.querySelectorAll('svg')].every((glyph) => glyph.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1),
+              referenceLabel: referenceChip.textContent,
+              diffContained: diffTextRect.left >= diffRect.left + Number.parseFloat(diffStyle.paddingLeft) - 1 && diffTextRect.right <= diffRect.right - Number.parseFloat(diffStyle.paddingRight) + 1 && diffTextRect.right < referenceContentRect.left,
+              workflowHeaderContained: workflowHeaderChildren.every((rect) => rect.left >= workflowHeaderRect.left + Number.parseFloat(workflowHeaderStyle.paddingLeft) - 1 && rect.right <= workflowHeaderContentRight + 1),
+              memoryLabel: memoryCell.textContent,
+              metricsBeforeNeighbors: secondary.slice(0, -1).every((metric, index) => {
+                const nextCell = metricsRow.querySelector('td[data-column-id="' + secondaryIds[index + 1] + '"]')
+                const nextStyle = getComputedStyle(nextCell)
+                return metric.right < nextCell.getBoundingClientRect().left + Number.parseFloat(nextStyle.paddingLeft)
+              }),
+              secondary,
+              pageContained: document.documentElement.scrollWidth <= window.innerWidth,
+            }
+          })()`) as {
+            taskWidth: number
+            titleWidth: number
+            workflowWidth: number
+            lineCount: number
+            suffixRect: { left: number; right: number; bottom: number }
+            titleRect: { left: number; right: number; bottom: number }
+            suffixVisible: boolean
+            unbrokenContained: boolean
+            workflowContained: boolean
+            statusContained: boolean
+            referenceContained: boolean
+            referenceLabel: string
+            diffContained: boolean
+            workflowHeaderContained: boolean
+            memoryLabel: string
+            metricsBeforeNeighbors: boolean
+            secondary: Array<{ id: string; width: number; contained: boolean; right: number; clipsOverflow: boolean; label: string; accessible: string | null; title: string | null }>
+            pageContained: boolean
+          }
+
+          expect(facts.taskWidth, `${theme}/${density}: task width`).toBeGreaterThanOrEqual(315)
+          expect(facts.taskWidth, `${theme}/${density}: task vs workflow`).toBeGreaterThan(facts.workflowWidth * 2.5)
+          expect(facts.lineCount, `${theme}/${density}: title lines`).toBe(2)
+          expect(facts.suffixVisible, `${theme}/${density}: distinguishing suffix; ${JSON.stringify(facts)}`).toBe(true)
+          expect(facts.unbrokenContained, `${theme}/${density}: unbroken title`).toBe(true)
+          expect(facts.workflowContained, `${theme}/${density}: workflow ellipsis`).toBe(true)
+          expect.soft(facts.statusContained, `${theme}/${density}: status pill`).toBe(true)
+          expect.soft(facts.referenceContained, `${theme}/${density}: reference chip`).toBe(true)
+          expect(facts.referenceLabel, `${theme}/${density}: compact reference label`).toBe('#1234')
+          expect.soft(facts.diffContained, `${theme}/${density}: diff stat`).toBe(true)
+          expect.soft(facts.workflowHeaderContained, `${theme}/${density}: workflow header`).toBe(true)
+          expect(facts.memoryLabel, `${theme}/${density}: persisted memory metric`).toBe('peak 1023 MB')
+          expect.soft(facts.metricsBeforeNeighbors, `${theme}/${density}: metrics before neighboring content`).toBe(true)
+          expect(facts.secondary.slice(0, -1).every(({ width, contained }) => width > 0 && contained), `${theme}/${density}: ${JSON.stringify(facts.secondary)}`).toBe(true)
+          expect(facts.secondary.filter(({ clipsOverflow }) => clipsOverflow).map(({ id }) => id)).toEqual(['tokens', 'memory'])
+          expect(facts.secondary.slice(0, -1).map(({ id, label, accessible, title }) => ({ id, label, accessible, title }))).toEqual([
+            { id: 'tokens', label: '999.9k / 888.8k', accessible: 'Input tokens: 999,900; output tokens: 888,800', title: 'Input tokens: 999,900; output tokens: 888,800' },
+            { id: 'cost', label: '$123', accessible: '$123.45', title: '$123.45' },
+            { id: 'cpu', label: '100%', accessible: '100%', title: '100%' },
+            { id: 'memory', label: 'peak 1023 MB', accessible: 'peak 1023 MB; peak — run finished', title: 'peak 1023 MB; peak — run finished' },
+          ])
+          expect(facts.pageContained, `${theme}/${density}: page overflow`).toBe(true)
+
+          const row = `${TABLE_ROW}[data-run-id="fix-review-pr"]`
+          focusWithKeyboard(browser, `${row} [data-slot="row-rename"]`)
+          browser.waitForFunction(
+            `getComputedStyle(document.querySelector('${row} [data-slot="row-rename"]')).opacity === '1'`,
+          )
+          const actions = browser.evaluate(`(() => {
+            const cell = document.querySelector('${row} td[data-column-id="task"]')
+            const bounds = cell.getBoundingClientRect()
+            return [...cell.querySelectorAll('button')].map((button) => {
+              const rect = button.getBoundingClientRect()
+              return {
+                label: button.getAttribute('aria-label'),
+                active: document.activeElement === button,
+                focusVisible: button.matches(':focus-visible'),
+                opacity: getComputedStyle(button).opacity,
+                contained: rect.left >= bounds.left && rect.right <= bounds.right,
+              }
+            })
+          })()`) as Array<{ label: string; active: boolean; focusVisible: boolean; opacity: string; contained: boolean }>
+          expect(actions.map(({ label }) => label)).toEqual(['Rename task', 'Pin task'])
+          expect(actions.every(({ opacity, contained }) => opacity === '1' && contained), JSON.stringify(actions)).toBe(true)
+
+          browser.screenshot(`${artifactsDir}/issue-167-tasks-1440-${theme}-${density}.png`, { viewport: true })
+        }
+      }
+
+      const widthBeforeFold = Number(browser.evaluate(
+        `document.querySelector('${TABLE_ROW} td[data-column-id="task"]').getBoundingClientRect().width`,
+      ))
+      browser.click('button[aria-label="Fold Workflow column"]')
+      browser.waitForFunction(`document.querySelector('button[aria-label="Expand Workflow column"]') !== null`)
+      const widthAfterFold = Number(browser.evaluate(
+        `document.querySelector('${TABLE_ROW} td[data-column-id="task"]').getBoundingClientRect().width`,
+      ))
+      expect(widthAfterFold).toBeGreaterThanOrEqual(widthBeforeFold)
+      browser.click('button[aria-label="Expand Workflow column"]')
+      browser.waitForFunction(`document.querySelector('button[aria-label="Fold Workflow column"]') !== null`)
+
+      browser.evaluate(`localStorage.setItem('cez-sidebar-width', '360')`)
+      browser.goto(`${baseUrl}${scoped('/')}`)
+      browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+      const resized = browser.evaluate(`({
+        preference: localStorage.getItem('cez-sidebar-width'),
+        sidebarWidth: document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width,
+        taskWidth: document.querySelector('${TABLE_ROW} td[data-column-id="task"]').getBoundingClientRect().width,
+      })`) as { preference: string; sidebarWidth: number; taskWidth: number }
+      expect(resized).toEqual({ preference: '360', sidebarWidth: 360, taskWidth: 320 })
+    } finally {
+      browser.evaluate(`(() => {
+        localStorage.removeItem('cez-sidebar-width')
+        document.documentElement.classList.remove('light')
+        delete document.documentElement.dataset.density
+      })()`)
+      browser.setViewport(1440, 900)
+      browser.goto(`${baseUrl}${scoped('/')}`)
+      browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    }
   })
 
   it('fills the ± column where a run recorded a diff, and keeps the honest dash where none exists', () => {
@@ -453,6 +719,48 @@ describe('tasks table overview', () => {
     browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
   })
 
+  it('keeps task metadata AA-readable on normal and hovered rows with visible title focus', () => {
+    browser.goto(`${baseUrl}${scoped('/')}`)
+    browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    try {
+      for (const variant of contrastQaVariants) {
+        applyContrastQaVariant(browser, variant)
+        const mobile = variant.viewport.width === 360
+        const row = mobile
+          ? `[data-slot="task-card"][data-run-id="fix-review-pr"]`
+          : `${TABLE_ROW}[data-run-id="fix-review-pr"]`
+        const metadata = mobile
+          ? `${row} > div:first-child > span.tabular-nums`
+          : `${row} [data-column-id="started"]`
+        const normal = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
+        expect(normal.ratio, `${variant.id} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)
+        browser.hover(row)
+        const hovered = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
+        expect(hovered.ratio, `${variant.id} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
+        focusWithKeyboard(browser, `${row} a[href]`)
+        const focusStyle = browser.evaluate(`(() => {
+          const link = document.querySelector(${JSON.stringify(`${row} a[href]`)})
+          const probe = document.createElement('span')
+          probe.style.color = 'var(--link-foreground)'
+          document.body.append(probe)
+          const color = getComputedStyle(probe).color
+          probe.remove()
+          const style = getComputedStyle(link)
+          return { active: document.activeElement === link, color, outline: style.outlineStyle, width: style.outlineWidth }
+        })()` ) as { active: boolean; color: string; outline: string; width: string }
+        const focus = browser.evaluate(contrastSampleExpression(`${row} a[href]`, 'outline-color')) as ContrastSample
+        expect(focusStyle.active).toBe(true)
+        expect(focusStyle.outline).not.toBe('none')
+        expect(Number.parseFloat(focusStyle.width)).toBeGreaterThanOrEqual(2)
+        expect(focus.foreground).toBe(focusStyle.color)
+        expect(focus.ratio, `${variant.id} focus: ${focus.foreground} on ${focus.background}`).toBeGreaterThanOrEqual(3)
+        browser.screenshot(`${artifactsDir}/issue-165-tasks-${variant.id}.png`, { viewport: true })
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+    }
+  })
+
   it('renames a task inline from its row — the hover pencil, committed by Enter, stored for real', async () => {
     const row = `${TABLE_ROW}[data-run-id="fix-failed"]`
     // The pencil is a hover affordance (mockup `.task-title .pencil`): produce a real pointer.
@@ -485,8 +793,8 @@ describe('tasks table overview', () => {
     expect(renamed?.titleSummary).toBe('Bump zod to v4 — second attempt')
   })
 
-  it('reflows to cards plus a New-task FAB at phone width, with no horizontal overflow', () => {
-    browser.setViewport(390, 844)
+  it('reflows to cards plus a New-task FAB at 360×640, with no horizontal overflow', () => {
+    browser.setViewport(360, 640)
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelectorAll('[data-slot="task-card"]').length > 0`)
 

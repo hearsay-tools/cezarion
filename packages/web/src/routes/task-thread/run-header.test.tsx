@@ -198,14 +198,14 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
   // Pin (#935) is in every row: unlike every other action here it asks nothing of the engine,
   // so it is offered whatever the run is doing — only archiving takes it away.
   const matrix: Array<{ status: RunStatus; visible: string[] }> = [
-    { status: 'queued', visible: ['Notes', 'Pin', 'Cancel'] },
-    { status: 'running', visible: ['Notes', 'Pin', 'Cancel'] },
-    { status: 'waiting', visible: ['Finish', 'Notes', 'Pin', 'Cancel'] },
+    { status: 'queued', visible: ['Notes', 'Pin'] },
+    { status: 'running', visible: ['Notes', 'Pin'] },
+    { status: 'waiting', visible: ['Finish', 'Notes', 'Pin'] },
     // Terminal folded into the Open in… menu — it shows whenever the session can be resumed.
-    { status: 'review', visible: ['Finish', 'Continue', 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
-    { status: 'done', visible: ['Continue', 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
-    { status: 'failed', visible: ['Continue', 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
-    { status: 'cancelled', visible: ['Continue', 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
+    { status: 'review', visible: ['Finish', 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
+    { status: 'done', visible: [ 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
+    { status: 'failed', visible: [ 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
+    { status: 'cancelled', visible: [ 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
   ]
 
   it.each(matrix)('$status → $visible', ({ status, visible }) => {
@@ -250,7 +250,7 @@ describe('Mark unread (#775)', () => {
     const names = actionBar()
       .getAllByRole('button')
       .map((el) => el.textContent?.trim())
-    expect(names).toEqual(['Continue', 'Open in…', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
+    expect(names).toEqual([ 'Open in…', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
   })
 
   it.each([
@@ -321,83 +321,14 @@ describe('actions hit their endpoints', () => {
     })
   })
 
-  it('Continue → POST /continue', async () => {
+  it.each(['done', 'running'] as const)('does not duplicate composer execution actions on desktop or mobile (%s)', async (status) => {
     const sent = stubFetch()
-    renderHeader(run('done'))
-    const button = actionBar().getByRole<HTMLButtonElement>('button', { name: 'Continue' })
-    await waitFor(() => expect(button.disabled).toBe(false))
-    fireEvent.click(button)
-    await waitFor(() => {
-      expect(sent.some((r) => r.method === 'POST' && r.path === '/api/v1/runs/r1/continue')).toBe(true)
-    })
-  })
-
-  it('disables desktop Continue and its mutation guard blocks a forced click without a provider', async () => {
-    const sent = stubFetch({
-      '/api/v1/providers/status': () =>
-        jsonResponse({
-          providers: [
-            { provider: 'claude', status: 'disconnected', enabled: true },
-            { provider: 'codex', status: 'unknown', enabled: true },
-            { provider: 'opencode', status: 'not-installed', enabled: true },
-          ],
-        }),
-    })
-    renderHeader(run('done', { runner: 'claude' }))
-
-    const button = actionBar().getByRole<HTMLButtonElement>('button', { name: 'Continue' })
-    await waitFor(() => expect(button.disabled).toBe(true))
-    button.removeAttribute('disabled')
-    fireEvent.click(button)
-    await act(() => Promise.resolve())
-
-    expect(sent.some((request) => request.path === '/api/v1/runs/r1/continue')).toBe(false)
-  })
-
-  it('disables mobile Continue and does not post when its menu item is selected', async () => {
-    const sent = stubFetch({
-      '/api/v1/providers/status': () =>
-        jsonResponse({
-          providers: [
-            { provider: 'claude', status: 'disconnected', enabled: true },
-            { provider: 'codex', status: 'unknown', enabled: true },
-            { provider: 'opencode', status: 'not-installed', enabled: true },
-          ],
-        }),
-    })
-    renderHeader(run('done', { runner: 'claude' }))
-
+    renderHeader(run(status))
+    expect(actionBar().queryByRole('button', { name: /^(Continue|Cancel|Stop)$/ })).toBeNull()
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Run actions' }))
-    const item = await screen.findByRole('menuitem', { name: 'Continue' })
-    await waitFor(() => expect(item.getAttribute('data-disabled')).not.toBeNull())
-    fireEvent.click(item)
-    await act(() => Promise.resolve())
-
-    expect(sent.some((request) => request.path === '/api/v1/runs/r1/continue')).toBe(false)
-  })
-
-  it('sends a connected fallback runner when the run provider is disconnected', async () => {
-    const sent = stubFetch({
-      '/api/v1/providers/status': () =>
-        jsonResponse({
-          providers: [
-            { provider: 'claude', status: 'disconnected', enabled: true },
-            { provider: 'codex', status: 'connected', enabled: true },
-            { provider: 'opencode', status: 'not-installed', enabled: true },
-          ],
-        }),
-    })
-    renderHeader(run('done', { runner: 'claude' }))
-
-    const button = actionBar().getByRole<HTMLButtonElement>('button', { name: 'Continue' })
-    await waitFor(() => expect(button.disabled).toBe(false))
-    fireEvent.click(button)
-
-    await waitFor(() =>
-      expect(sent.find((request) => request.path === '/api/v1/runs/r1/continue')?.body).toEqual({
-        runner: 'codex',
-      }),
-    )
+    await screen.findByRole('menu')
+    expect(screen.queryByRole('menuitem', { name: /^(Continue|Cancel|Stop)$/ })).toBeNull()
+    expect(sent.some((request) => /\/(continue|cancel)$/.test(request.path))).toBe(false)
   })
 
   it('Archive → POST /archive with the flipped flag', async () => {
@@ -441,20 +372,6 @@ describe('actions hit their endpoints', () => {
     expect(menu.getByRole('menuitemcheckbox', { name: 'Pin', checked: false })).not.toBeNull()
   })
 
-  it('Cancel asks first — the POST fires only after the confirm dialog', async () => {
-    const sent = stubFetch()
-    renderHeader(run('running'))
-    fireEvent.click(actionBar().getByRole('button', { name: 'Cancel' }))
-
-    // Nothing sent yet; the AlertDialog (never a native confirm) is up instead.
-    expect(sent.some((r) => r.path === '/api/v1/runs/r1/cancel')).toBe(false)
-    const dialog = await screen.findByRole('alertdialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel the run' }))
-    await waitFor(() => {
-      expect(sent.some((r) => r.method === 'POST' && r.path === '/api/v1/runs/r1/cancel')).toBe(true)
-    })
-  })
-
   it('Delete confirms, DELETEs, and navigates home', async () => {
     const sent = stubFetch()
     renderHeader(run('failed'))
@@ -496,14 +413,14 @@ describe('actions hit their endpoints', () => {
 
   it('a mutation failure surfaces the server message as a danger toast', async () => {
     stubFetch({
-      '/api/v1/runs/r1/continue': () => jsonResponse({ error: 'no agent session to resume' }, 409),
+      '/api/v1/runs/r1/archive': () => jsonResponse({ error: 'run is still active' }, 409),
     })
     renderHeader(run('done'))
-    const button = actionBar().getByRole<HTMLButtonElement>('button', { name: 'Continue' })
+    const button = actionBar().getByRole<HTMLButtonElement>('button', { name: 'Archive' })
     await waitFor(() => expect(button.disabled).toBe(false))
     fireEvent.click(button)
     const item = await screen.findByRole('status')
-    expect(item.textContent).toBe('no agent session to resume')
+    expect(item.textContent).toBe('run is still active')
     expect(item.getAttribute('data-tone')).toBe('danger')
   })
 })

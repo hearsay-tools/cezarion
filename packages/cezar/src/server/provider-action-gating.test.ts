@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProviderAuthService, type ProviderId } from '../core/provider-auth.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { defaultWorkspaceConfig, type WorkspaceConfig } from '../workspace/config.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager, type StartRunInput } from '../workflows/run.ts';
 import type { WorkflowDef } from '../workflows/types.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -200,6 +201,58 @@ describe('provider action gating', () => {
 
     await expectDisabled(response);
     expect(continueRun).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'step-level Codex', steps: [{ id: 'task', prompt: '{{task}}', runner: 'codex' as const }], fallback: 'claude' },
+    { name: 'configured Codex fallback', steps: [{ id: 'task', prompt: '{{task}}' }], fallback: 'codex' },
+  ])('blocks untouched replay using $name when Codex is disabled', async ({ steps, fallback }) => {
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ defaultRunner: fallback }));
+    const run = store.createRun({ title: 'Untouched', task: 'Task', workflow: 'original',
+      workflowDef: { name: 'original', source: 'built-in', steps },
+      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+    });
+    store.updateRun(run.id, { status: 'cancelled' });
+    const response = await apiRequest(app, `/api/v1/runs/${run.id}/continue`, { method: 'POST' });
+    await expectDisabled(response);
+    expect(continueRun).not.toHaveBeenCalled();
+  });
+
+  it.each(['step', 'config'] as const)('allows a Codex-only untouched replay via %s when Claude is disabled', async (source) => {
+    app = createApp({ repoRoot, store, manager: { continueRun } as unknown as RunManager,
+      version: 'test', providerAuth: providerAuth(), workspaceConfig: memoryWorkspaceConfig(['claude']),
+    });
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ defaultRunner: source === 'config' ? 'codex' : 'claude' }));
+    const run = store.createRun({ title: 'Untouched', task: 'Task', workflow: 'original',
+      workflowDef: { name: 'original', source: 'built-in', steps: [{ id: 'task', prompt: '{{task}}', ...(source === 'step' ? { runner: 'codex' as const } : {}) }] },
+      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+    });
+    store.updateRun(run.id, { status: 'cancelled' });
+    const response = await apiRequest(app, `/api/v1/runs/${run.id}/continue`, { method: 'POST' });
+    expect(response.status).toBe(200);
+    expect(continueRun).toHaveBeenCalledOnce();
+    expect(continueRun).toHaveBeenCalledWith(run.id, expect.objectContaining({ runner: source === 'config' ? 'codex' : 'claude' }));
+  });
+
+  it.each([false, true])('preserves inherited account affinity through a real replay (switch provider: %s)', async (switchProvider) => {
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ defaultRunner: 'codex' }));
+    const manager = new RunManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    try {
+      app = createApp({ repoRoot, store, manager, version: 'test', providerAuth: providerAuth(),
+        workspaceConfig: memoryWorkspaceConfig([]),
+      });
+      const run = store.createRun({ title: 'Untouched', task: 'Task', workflow: 'original', agentProfile: 'saved-codex-account',
+        workflowDef: { name: 'original', source: 'built-in', steps: [{ id: 'task', prompt: '{{task}}' }] },
+        steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      });
+      store.updateRun(run.id, { status: 'cancelled' });
+      const response = await apiRequest(app, `/api/v1/runs/${run.id}/continue`, { method: 'POST',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify(switchProvider ? { runner: 'claude' } : {}),
+      });
+      expect(response.status).toBe(200);
+      expect(store.getRun(run.id)).toMatchObject({ status: 'queued', runner: switchProvider ? 'claude' : 'codex' });
+      expect(store.getRun(run.id)?.agentProfile).toBe(switchProvider ? undefined : 'saved-codex-account');
+    } finally { manager.dispose(); }
   });
 
   it('uses the run runner, not a historical step backend, for a no-override continue', async () => {

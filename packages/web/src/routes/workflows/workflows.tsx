@@ -354,7 +354,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
           {/* ---- canvas ---------------------------------------------------------------- */}
           <section data-slot="wb-main" className="mx-auto w-full min-w-0 max-w-3xl flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <div className="flex min-w-0 flex-1 items-center gap-2.5 max-md:basis-full">
                 <Input
                   ref={nameInput}
                   data-slot="wb-name"
@@ -368,11 +368,14 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
                   {stepCountLabel(steps)}
                 </span>
               </div>
-              <div className="flex shrink-0 items-center gap-1.5">
+              <div
+                data-slot="wb-actions"
+                className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 md:w-auto"
+              >
                 {savedFile ? (
                   <Button
                     type="button"
-                    variant="danger-ghost"
+                    variant="ghost"
                     size="sm"
                     data-slot="wb-delete"
                     title="Delete the saved workflow file"
@@ -424,7 +427,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
                 </Button>
                 <Button
                   type="button"
-                  variant="contrast"
+                  variant="primary"
                   size="sm"
                   data-slot="wb-save"
                   disabled={save.isPending}
@@ -850,57 +853,62 @@ function StepCardBody({
       className={cn(
         // `bg-card-2` + a slightly stronger border: a white-on-white card with a `#ebebeb`
         // border all but vanished on the light page (the workflows low-contrast finding).
-        'flex items-center gap-2.5 rounded-md border border-muted-foreground/20 bg-card-2 px-2.5 py-2 shadow-xs',
+        'rounded-md border border-muted-foreground/20 bg-card-2 px-2.5 py-2 shadow-xs',
         overlay && 'shadow-md',
       )}
     >
-      <button
-        type="button"
-        data-slot="wb-step-grip"
-        aria-label={`Reorder step ${index + 1}: ${title}`}
-        className="shrink-0 cursor-grab rounded text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        {...gripProps}
-      >
-        <GripVerticalIcon aria-hidden="true" className="size-3.5" />
-      </button>
-      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-        {String(index + 1).padStart(2, '0')}
-      </span>
-      {isCheck ? (
-        <SquareTerminalIcon aria-hidden="true" className="size-3.5 shrink-0 text-success" />
-      ) : (
-        <SparklesIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-[13px] font-medium">{title}</div>
-        {description ? (
-          <div className="truncate text-xs text-muted-foreground">{description}</div>
-        ) : null}
-      </div>
-      {badge ? (
-        <span
-          data-slot="wb-step-badge"
-          className={cn(
-            'shrink-0 rounded-full border px-2 py-px font-mono text-[10.5px]',
-            badge === 'check' && 'border-success/30 text-success',
-            badge === 'unknown' && 'border-danger/35 text-danger',
-            badge === 'prompt' && 'border-border text-soft-foreground',
-          )}
-        >
-          {badge}
-        </span>
-      ) : null}
-      {onRemove ? (
+      <div data-slot="wb-step-heading" className="flex min-w-0 items-center gap-2.5">
         <button
           type="button"
-          data-slot="wb-step-remove"
-          aria-label={`Remove step ${index + 1}: ${title}`}
-          title="Remove from flow"
-          onClick={onRemove}
-          className="shrink-0 rounded p-0.5 text-soft-foreground transition-colors outline-none hover:text-danger focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          data-slot="wb-step-grip"
+          aria-label={`Reorder step ${index + 1}: ${title}`}
+          className="inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          {...gripProps}
         >
-          <XIcon aria-hidden="true" className="size-3.5" />
+          <GripVerticalIcon aria-hidden="true" className="size-3.5" />
         </button>
+        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+          {String(index + 1).padStart(2, '0')}
+        </span>
+        {isCheck ? (
+          <SquareTerminalIcon aria-hidden="true" className="size-3.5 shrink-0 text-success" />
+        ) : (
+          <SparklesIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+        )}
+        <div className="min-w-0 flex-1 truncate font-mono text-[13px] font-medium">{title}</div>
+        {badge ? (
+          <span
+            data-slot="wb-step-badge"
+            className={cn(
+              'shrink-0 rounded-full border px-2 py-px font-mono text-[10.5px]',
+              badge === 'check' && 'border-success/30 text-success',
+              badge === 'unknown' && 'border-danger/35 text-danger',
+              badge === 'prompt' && 'border-border text-soft-foreground',
+            )}
+          >
+            {badge}
+          </span>
+        ) : null}
+        {onRemove ? (
+          <button
+            type="button"
+            data-slot="wb-step-remove"
+            aria-label={`Remove step ${index + 1}: ${title}`}
+            title="Remove from flow"
+            onClick={onRemove}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-soft-foreground transition-colors outline-none hover:text-danger focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <XIcon aria-hidden="true" className="size-3.5" />
+          </button>
+        ) : null}
+      </div>
+      {description ? (
+        <div
+          data-slot="wb-step-summary"
+          className="mt-1.5 break-words text-xs leading-relaxed text-muted-foreground"
+        >
+          {description}
+        </div>
       ) : null}
     </div>
   )
@@ -997,7 +1005,7 @@ function PaletteSkill({
         aria-label={`Add ${skill.name} to the flow`}
         title="Add to the flow"
         onClick={() => onAdd(skill.name)}
-        className="shrink-0 rounded p-0.5 text-soft-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-soft-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
         <PlusIcon aria-hidden="true" className="size-3.5" />
       </button>

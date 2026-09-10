@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowUpIcon, CheckIcon, ChevronDownIcon, MicIcon, PaperclipIcon, XIcon } from 'lucide-react'
+import { ArrowUpIcon, CheckIcon, ChevronDownIcon, MicIcon, PaperclipIcon, PlayIcon, SquareIcon, XIcon } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -55,9 +55,21 @@ import { formatElapsed, useDictation } from './dictation'
 const mobileOpenByTask = new Map<string, boolean>()
 
 export interface ComposerProps {
-  /** Deliver the message. Rejection = the message did NOT land: the composer toasts the error
-   *  and restores the draft (nothing the user typed is ever lost). */
+  /** Deliver the message. A rejection restores optimistic replies; retained task drafts show
+   *  the error without assuming a timeout means creation failed. */
   onSubmit: (text: string, attachments: AttachmentInput[]) => Promise<unknown>
+  /** Keep text and attachments visible until submission succeeds. */
+  retainDraftUntilSuccess?: boolean
+  /** Execution actions stay in the composer; keyboard submission never invokes Stop. */
+  onStop?: () => Promise<unknown>
+  stopOnEmpty?: boolean
+  stopping?: boolean
+  emptySubmitLabel?: string
+  compactFeedback?: boolean
+  pendingLabel?: string
+  failureHint?: string
+  clearOnSuccess?: boolean
+  onPendingChange?: (pending: boolean) => void
   /**
    * Controlled text (pass BOTH or neither): the /new host owns the draft so it survives
    * navigation (spec: "Queued form state survives navigation"). Every internal edit — typing,
@@ -75,6 +87,8 @@ export interface ComposerProps {
   footerStart?: ReactNode
   /** Rendered between Dictation and the send button — the /new mode segment + kbd hint. */
   footerEnd?: ReactNode
+  /** New-task settings below a dedicated submission row; replies keep their compact footer. */
+  executionOptions?: ReactNode
   /** The send button's accessible name. */
   sendAriaLabel?: string
   disabled?: boolean
@@ -118,6 +132,16 @@ const QUICK_REPLIES: Record<string, string> = { KeyA: 'Yes, approved.', KeyC: 'C
 
 export function Composer({
   onSubmit,
+  retainDraftUntilSuccess = false,
+  onStop,
+  stopOnEmpty = false,
+  stopping = false,
+  emptySubmitLabel,
+  compactFeedback = false,
+  pendingLabel = 'Starting task…',
+  failureHint = 'Could not confirm submission. Check Tasks before you retry. Your draft is kept.',
+  clearOnSuccess = true,
+  onPendingChange,
   value,
   onValueChange,
   autoFocus = false,
@@ -125,6 +149,7 @@ export function Composer({
   mobileDisclosureKey,
   footerStart,
   footerEnd,
+  executionOptions,
   sendAriaLabel = 'Send',
   disabled = false,
   disabledReason = 'Session closed — Continue to reopen.',
@@ -154,7 +179,24 @@ export function Composer({
   // (StrictMode double-invokes those in dev — see addFiles / #double-paste).
   const imagesRef = useRef(images)
   imagesRef.current = images
+  const [stoppingLocally, setStoppingLocally] = useState(false)
+  const stopPending = stopping || stoppingLocally
+  const stopPendingRef = useRef(stopPending)
+  stopPendingRef.current = stopPending
+  const hasContent = text.trim() !== '' || images.length > 0
+  const primaryStop = !hasContent && ((onStop !== undefined && stopOnEmpty) || stopPending)
+  const submitLabel = !hasContent && emptySubmitLabel ? emptySubmitLabel : sendAriaLabel
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
+  const attachmentEpoch = useRef(0)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const [submissionError, setSubmissionError] = useState<string | null>(null)
+  const readOnly = stopPending || (retainDraftUntilSuccess && busy)
+  const editsBlocked = () => stopPendingRef.current || (retainDraftUntilSuccess && busyRef.current)
   const [trigger, setTrigger] = useState<TriggerState | null>(null)
   const [menuValue, setMenuValue] = useState('')
   // Skills load on the FIRST `/` trigger and stay cached — not on every thread visit.
@@ -190,6 +232,7 @@ export function Composer({
     ref,
     () => ({
       insertAtCaret: (snippet: string) => {
+        if (editsBlocked()) return
         const el = textareaRef.current
         const result = insertTemplate(textRef.current, el?.selectionStart ?? textRef.current.length, snippet)
         setText(result.text)
@@ -197,7 +240,7 @@ export function Composer({
         el?.focus()
       },
     }),
-    [setText],
+    [setText, retainDraftUntilSuccess],
   )
 
   // ---- autocomplete ------------------------------------------------------------------------
@@ -205,7 +248,7 @@ export function Composer({
   /** Re-read the trigger from the real textarea (value + caret) — the one source of truth. */
   const syncTrigger = useCallback(() => {
     const el = textareaRef.current
-    if (!el || disabled) {
+    if (!el || disabled || editsBlocked()) {
       setTrigger(null)
       return
     }
@@ -214,7 +257,7 @@ export function Composer({
     if (next?.trigger === '@' && getMentionCandidates === undefined) return setTrigger(null)
     if (next?.trigger === '/') setSkillsWanted(true)
     setTrigger(next)
-  }, [autocompleteSkills, disabled, getMentionCandidates])
+  }, [autocompleteSkills, disabled, getMentionCandidates, retainDraftUntilSuccess])
 
   interface MenuCandidate {
     value: string
@@ -251,7 +294,7 @@ export function Composer({
 
   const pick = (candidate: MenuCandidate) => {
     const el = textareaRef.current
-    if (!el || trigger === null) return
+    if (!el || trigger === null || editsBlocked()) return
     const caret = el.selectionStart ?? el.value.length
     const next = applyCompletion(el.value, trigger, caret, candidate.insert)
     // Frequency sort (#519): a `/` completion is a skill pick, so it counts — same guard as
@@ -292,7 +335,8 @@ export function Composer({
 
   const addFiles = useCallback(
     (files: readonly File[]) => {
-      if (disabled) return
+      if (disabled || editsBlocked()) return
+      const epoch = attachmentEpoch.current
       // Side effects (screening toasts + async encode) run OUTSIDE any setState updater: React
       // StrictMode double-invokes updater functions in dev, so screening here would encode and
       // append each pasted file twice (#double-paste). `imagesRef` gives the current count
@@ -301,12 +345,16 @@ export function Composer({
       for (const reason of intake.rejected) toast(reason, { tone: 'danger' })
       for (const file of intake.accepted) {
         void fileToPendingAttachment(file).then(
-          (attachment) => setImages((prev) => (prev.length >= MAX_ATTACHMENTS ? prev : [...prev, attachment])),
+          (attachment) => {
+            // Stop never submits the draft: finish reads already accepted before it.
+            if (!mounted.current || (retainDraftUntilSuccess && busyRef.current && !stopPendingRef.current) || epoch !== attachmentEpoch.current) return
+            setImages((prev) => (prev.length >= MAX_ATTACHMENTS ? prev : [...prev, attachment]))
+          },
           () => toast(`${file.name || 'Attachment'} could not be read — try attaching it again`, { tone: 'danger' }),
         )
       }
     },
-    [disabled],
+    [disabled, retainDraftUntilSuccess],
   )
 
   const onPaste = (event: ClipboardEvent) => {
@@ -334,39 +382,72 @@ export function Composer({
   const send = useCallback(
     async (messageText: string, messageImages: PendingAttachment[], restoreOnError: boolean) => {
       const body = messageText.trim()
-      if (disabled || busy) return
+      if (disabled || stopping || busyRef.current) return
       if (body === '' && messageImages.length === 0 && !allowEmptySubmit) return
+      // Lock before any callback/state update: two keyboard events can share a render.
+      busyRef.current = true
+      if (retainDraftUntilSuccess) attachmentEpoch.current += 1
       setBusy(true)
+      setSubmissionError(null)
+      onPendingChange?.(true)
+      setTrigger(null)
+      if (restoreOnError && !retainDraftUntilSuccess) {
+        setText('')
+        setImages([])
+      }
       try {
-        await onSubmit(
-          body,
-          messageImages.map(({ mediaType, data }) => ({ mediaType, data })),
-        )
+        await onSubmit(body, messageImages.map(({ mediaType, data }) => ({ mediaType, data })))
+        if (mounted.current && retainDraftUntilSuccess && clearOnSuccess) {
+          // A controlled host may have supplied a newer draft while the request was pending.
+          if (textRef.current === messageText) setText('')
+          if (imagesRef.current === messageImages) setImages([])
+        }
       } catch (error) {
-        toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })
-        if (restoreOnError) {
-          // The optimistic clear already happened — put the message back, in front of anything
-          // typed since, so nothing the user wrote is lost.
-          setText((current) => (current === '' ? messageText : `${messageText}\n${current}`))
-          setImages((current) => [...messageImages, ...current].slice(0, MAX_ATTACHMENTS))
+        if (!mounted.current && retainDraftUntilSuccess) return
+        const message = error instanceof Error ? error.message : String(error)
+        if (retainDraftUntilSuccess) {
+          setSubmissionError(message)
+        } else {
+          toast(message, { tone: 'danger' })
+          if (restoreOnError) {
+            setText((current) => (current === '' ? messageText : `${messageText}\n${current}`))
+            setImages((current) => [...messageImages, ...current].slice(0, MAX_ATTACHMENTS))
+          }
         }
       } finally {
-        setBusy(false)
+        busyRef.current = false
+        if (mounted.current) {
+          onPendingChange?.(false)
+          setBusy(false)
+        }
       }
     },
-    [allowEmptySubmit, busy, disabled, onSubmit],
+    [allowEmptySubmit, disabled, stopping, onSubmit, retainDraftUntilSuccess, clearOnSuccess, onPendingChange, setText],
   )
 
   const submitDraft = useCallback(() => {
-    if (text.trim() === '' && images.length === 0 && !allowEmptySubmit) return
-    const draftText = text
-    const draftImages = images
-    // Optimistic clear — the reply feels instant; a rejection restores it above.
-    setText('')
-    setImages([])
-    setTrigger(null)
-    void send(draftText, draftImages, true)
-  }, [allowEmptySubmit, images, send, text])
+    if (disabled || stopping || busyRef.current) return
+    void send(textRef.current, imagesRef.current, true)
+  }, [disabled, stopping, send])
+
+  const stop = async () => {
+    if (!onStop || stopping || busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setStoppingLocally(true)
+    setSubmissionError(null)
+    try {
+      await onStop()
+    } catch (error) {
+      if (mounted.current) setSubmissionError(error instanceof Error ? error.message : String(error))
+    } finally {
+      busyRef.current = false
+      if (mounted.current) {
+        setBusy(false)
+        setStoppingLocally(false)
+      }
+    }
+  }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen) {
@@ -431,12 +512,12 @@ export function Composer({
   // ---- dictation actions -----------------------------------------------------------------------
 
   const insertTranscript = (alsoSend: boolean) => {
+    if (disabled || stopPendingRef.current || (busyRef.current && (alsoSend || retainDraftUntilSuccess))) return
     const transcript = dictation.finish()
     if (transcript === '') return
     const merged = text.trim() === '' ? transcript : `${text.replace(/\s*$/, '')} ${transcript}`
     if (alsoSend) {
-      setText('')
-      setImages([])
+      if (retainDraftUntilSuccess) setText(merged)
       void send(merged, images, true)
       return
     }
@@ -446,6 +527,39 @@ export function Composer({
   }
 
   const recording = dictation.recording
+
+  const dictationButton = dictation.supported ? (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={disabled || readOnly}
+      aria-label="Start dictation"
+      title="Dictation"
+      className={cn('h-11 gap-1.5 px-2.5 text-xs font-medium text-muted-foreground md:h-8', mobileCompact && 'hidden md:inline-flex')}
+      onClick={() => { if (!editsBlocked()) dictation.start() }}
+    >
+      <MicIcon aria-hidden="true" className="size-3.5" />
+      Dictation
+    </Button>
+  ) : null
+
+  const stopControl = onStop || stopPending ? (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon-sm"
+      aria-label={stopPending ? 'Stopping…' : 'Stop'}
+      aria-busy={stopPending || undefined}
+      title={stopPending ? 'Waiting for execution to stop' : 'Stop execution; keep existing work'}
+      disabled={busy || stopPending}
+      className={cn('h-11 min-w-11 active:opacity-80', primaryStop ? 'w-auto px-3' : 'w-11')}
+      onClick={() => void stop()}
+    >
+      <SquareIcon aria-hidden="true" className="size-3 fill-current" />
+      {primaryStop ? (stopPending ? 'Stopping…' : 'Stop') : null}
+    </Button>
+  ) : null
 
   return (
     <Popover open={menuOpen} onOpenChange={(open) => (open ? undefined : closeMenu())}>
@@ -469,14 +583,15 @@ export function Composer({
                   key={`${attachment.name}-${index}`}
                   type="button"
                   aria-label={`Remove ${attachment.name}`}
-                  title="Click to remove"
+                  title={readOnly ? 'Attachment submitted' : 'Click to remove'}
+                  disabled={readOnly}
                   className={cn(
                     'group relative overflow-hidden rounded-md border border-border',
                     attachment.isImage
                       ? 'size-12'
                       : 'flex h-12 min-w-11 max-w-[200px] items-center gap-1.5 bg-muted/40 px-2.5 text-xs text-muted-foreground',
                   )}
-                  onClick={() => setImages((current) => current.filter((_, i) => i !== index))}
+                  onClick={() => { if (!editsBlocked()) setImages((current) => current.filter((_, i) => i !== index)) }}
                 >
                   {/* An image previews; a file (#950) has nothing to look at, so it gets its own
                       name instead — the one place the user's filename is used at all. */}
@@ -507,6 +622,9 @@ export function Composer({
             rows={1}
             value={text}
             disabled={disabled}
+            readOnly={readOnly}
+            aria-busy={readOnly || undefined}
+            aria-describedby={retainDraftUntilSuccess ? `${textareaId}-submission` : undefined}
             aria-label={ariaLabel}
             placeholder={disabled ? disabledReason : placeholder}
             // 16px on touch widths — iOS zooms any focused input below 16px (spec mobile rule).
@@ -515,6 +633,7 @@ export function Composer({
               mobileCompact ? 'max-h-11 md:max-h-[220px]' : 'max-h-[220px]',
             )}
             onChange={(event) => {
+              if (editsBlocked()) return
               setText(event.target.value)
               syncTrigger()
             }}
@@ -524,22 +643,25 @@ export function Composer({
           />
 
           {recording ? (
-            <DictationBar
-              transcript={recording.transcript}
-              startedAt={recording.startedAt}
-              onCancel={dictation.cancel}
-              onInsert={() => insertTranscript(false)}
-              onInsertAndSend={() => insertTranscript(true)}
-            />
+            <div>
+              <DictationBar
+                transcript={recording.transcript}
+                startedAt={recording.startedAt}
+                insertionDisabled={readOnly}
+                onCancel={dictation.cancel}
+                onInsert={() => insertTranscript(false)}
+                onInsertAndSend={() => insertTranscript(true)}
+              />
+              {stopControl ? <div className="flex justify-end px-2 pb-2">{stopControl}</div> : null}
+            </div>
           ) : (
             // The footer may WRAP (the /new pill row on narrow widths), but the trailing
             // controls wrap on phones to keep long model/account labels inside the viewport.
             <div className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pt-1 pb-1.5 md:gap-y-1.5 md:px-2 md:pt-1.5 md:pb-2">
-              {/* The paperclip shares ONE wrapping row with the footer pills — otherwise the
-                  pill group is a single flex item that wraps as a block, stranding the
-                  paperclip alone on the line above it (#composer-attach-line). */}
-              <div data-slot="composer-footer-start" className="flex min-w-0 flex-wrap items-center gap-1">
-                <AttachButton disabled={disabled} onFiles={addFiles} />
+              {/* Tools and context wrap together. New-task execution options get their own
+                  section; thread composers retain their compact, wrapping footer. */}
+              <div data-slot="composer-footer-start" className={cn('flex min-w-0 flex-wrap items-center gap-1', executionOptions && 'w-full')}>
+                <AttachButton disabled={disabled || readOnly} onFiles={addFiles} />
                 {mobileCollapsible ? (
                   <Button
                     type="button"
@@ -557,44 +679,60 @@ export function Composer({
                     <ChevronDownIcon aria-hidden="true" className={cn('transition-transform motion-reduce:transition-none', !mobileOpen && 'rotate-180')} />
                   </Button>
                 ) : null}
-                {footerStart}
+                <div className="contents" inert={readOnly || undefined}>{footerStart}</div>
+                {executionOptions ? <div className="ml-auto">{dictationButton}</div> : null}
               </div>
-              <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap">
-                {dictation.supported ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={disabled}
-                    aria-label="Start dictation"
-                    title="Dictation"
-                    className={cn('h-11 gap-1.5 px-2.5 text-xs font-medium text-muted-foreground md:h-8', mobileCompact && 'hidden md:inline-flex')}
-                    onClick={dictation.start}
-                  >
-                    <MicIcon aria-hidden="true" className="size-3.5" />
-                    Dictation
-                  </Button>
-                ) : null}
+              <div data-slot="composer-submit-row" className={cn('ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap', executionOptions && 'mt-1 w-full border-t border-border pt-2')}>
+                {executionOptions ? null : dictationButton}
                 {footerEnd ? (
-                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
-                    {footerEnd}
+                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', executionOptions && 'mr-auto', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
+                    <div className="contents" inert={readOnly || undefined}>{footerEnd}</div>
                   </div>
                 ) : null}
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  aria-label={sendAriaLabel}
-                  disabled={
-                    disabled || busy || (text.trim() === '' && images.length === 0 && !allowEmptySubmit)
-                  }
-                  className="size-11 md:size-8"
-                  onClick={submitDraft}
-                >
-                  <ArrowUpIcon aria-hidden="true" />
-                </Button>
+                <div className="flex min-w-[100px] items-center justify-end gap-1" data-slot="composer-actions">
+                  {stopControl}
+                  {!primaryStop ? (
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      aria-label={submitLabel}
+                      aria-busy={busy && !stopPending || undefined}
+                      disabled={disabled || busy || stopPending || (!hasContent && !allowEmptySubmit)}
+                      className={cn(
+                        executionOptions ? 'h-11 w-auto gap-1.5 px-3 md:h-8' : 'size-11',
+                        !hasContent && emptySubmitLabel && 'w-auto px-3',
+                        'active:opacity-80',
+                      )}
+                      onClick={submitDraft}
+                    >
+                      {!hasContent && emptySubmitLabel ? <PlayIcon aria-hidden="true" /> : null}
+                      {executionOptions || (!hasContent && emptySubmitLabel) ? submitLabel : null}
+                      {hasContent || !emptySubmitLabel ? <ArrowUpIcon aria-hidden="true" /> : null}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </div>
           )}
+          {executionOptions ? <div inert={readOnly || undefined}>{executionOptions}</div> : null}
+          {retainDraftUntilSuccess || onStop || stopping ? (
+            <div className={cn("overflow-y-auto px-3 pb-2 text-xs leading-5 text-muted-foreground md:px-4", compactFeedback ? "min-h-6" : "h-24 md:h-20")}>
+              <div
+                id={`${textareaId}-submission`}
+                role={submissionError === null ? 'status' : 'alert'}
+                aria-atomic="true"
+                tabIndex={submissionError === null ? undefined : 0}
+                className="break-words"
+              >
+                {stopPending ? 'Stopping execution. Your draft is kept.' : busy ? pendingLabel : submissionError !== null ? (
+                  <>
+                    <p className="font-medium text-foreground">{submissionError}</p>
+                    <p>{failureHint}</p>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </div>
       </PopoverAnchor>
 
@@ -709,12 +847,14 @@ function AttachButton({
 function DictationBar({
   transcript,
   startedAt,
+  insertionDisabled,
   onCancel,
   onInsert,
   onInsertAndSend,
 }: {
   transcript: string
   startedAt: number
+  insertionDisabled: boolean
   onCancel: () => void
   onInsert: () => void
   onInsertAndSend: () => void
@@ -759,6 +899,7 @@ function DictationBar({
         type="button"
         variant="outline"
         size="icon-sm"
+        disabled={insertionDisabled}
         aria-label="Insert transcription"
         className="size-11 md:size-8"
         onClick={onInsert}
@@ -768,6 +909,7 @@ function DictationBar({
       <Button
         type="button"
         size="icon-sm"
+        disabled={insertionDisabled}
         aria-label="Insert transcription and send"
         className="size-11 md:size-8"
         onClick={onInsertAndSend}

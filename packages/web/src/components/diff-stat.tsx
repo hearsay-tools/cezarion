@@ -31,7 +31,24 @@ import { cn } from '@/lib/utils'
  * stopped existing hours ago. What the flag can honestly say is what was true when the
  * numbers were taken.
  */
-export function DiffStatLabel({ stat, className }: { stat: DiffStat; className?: string }) {
+function compactDiffCount(count: number): string {
+  if (count < 1_000) return String(count)
+  const units = ['k', 'M', 'B', 'T'] as const
+  const unit = Math.floor(Math.log10(count) / 3)
+  if (unit > units.length) return count.toExponential(0).replace('+', '')
+  return `${Math.floor(count / 1_000 ** unit)}${units[unit - 1]}`
+}
+
+export function DiffStatLabel({
+  stat,
+  className,
+  compact = false,
+}: {
+  stat: DiffStat
+  className?: string
+  /** A bounded table representation; the exact counts remain in the tooltip and accessible name. */
+  compact?: boolean
+}) {
   const counts = `+${stat.adds} −${stat.dels} across ${stat.files} ${stat.files === 1 ? 'file' : 'files'}`
   const caveat = stat.repointed
     ? `${counts} — measured against another branch checked out in this task's worktree, as this task found it`
@@ -40,6 +57,7 @@ export function DiffStatLabel({ stat, className }: { stat: DiffStat; className?:
     <span
       data-slot="diff-stat"
       {...(caveat ? { 'data-repointed': 'true', 'aria-label': caveat } : {})}
+      {...(compact && !caveat ? { 'aria-label': counts } : {})}
       title={caveat ?? counts}
       className={cn(
         'font-mono text-xs font-semibold tabular-nums',
@@ -47,7 +65,8 @@ export function DiffStatLabel({ stat, className }: { stat: DiffStat; className?:
         className
       )}
     >
-      <span className="text-success">+{stat.adds}</span> <span className="text-danger">−{stat.dels}</span>
+      <span className="text-success">+{compact ? compactDiffCount(stat.adds) : stat.adds}</span>{' '}
+      <span className="text-danger">−{compact ? compactDiffCount(stat.dels) : stat.dels}</span>
     </span>
   )
 }

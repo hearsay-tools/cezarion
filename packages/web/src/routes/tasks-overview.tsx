@@ -13,6 +13,7 @@ import {
   ListChecksIcon,
   LinkIcon,
   MemoryStickIcon,
+  MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
   ScaleIcon,
@@ -29,7 +30,7 @@ import { queryKeys, useHealth, usePinRun, useReferenceProjectId, useRuns } from 
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
-import { DirectionalUsage } from '@/components/directional-usage'
+import { DirectionalUsage, directionalUsageLabel } from '@/components/directional-usage'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
 import { useListView } from '@/components/list-view'
 import { Pill } from '@/components/pill'
@@ -38,6 +39,12 @@ import { TaskReferenceChip } from '@/components/reference-conflict-action'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { StatusDot } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { deriveAttention } from '@/lib/attention'
@@ -86,6 +93,7 @@ export function TasksOverview({
   view,
   onViewChange,
   onArchiveFinished,
+  archivePending = false,
   onMarkAllRead,
   onRename,
   onTogglePin,
@@ -101,6 +109,7 @@ export function TasksOverview({
   runs: RunRecord[] | undefined
   view: ListView
   onViewChange: (view: ListView) => void
+  archivePending?: boolean
   onArchiveFinished: () => void
   /** "Mark all read" (#unread-done-items) — stamps every unread finished run. */
   onMarkAllRead: () => void
@@ -123,6 +132,18 @@ export function TasksOverview({
   columnsPending?: boolean
 }) {
   const [query, setQuery] = React.useState('')
+  const headerRef = React.useRef<HTMLElement>(null)
+  const archiveSelected = React.useRef(false)
+  const [actionsOpen, setActionsOpen] = React.useState(false)
+  // A CSS-hidden Radix menu would keep its modal focus trap after a desktop resize.
+  React.useEffect(() => {
+    const media = window.matchMedia?.('(min-width: 768px)')
+    if (!media) return
+    const closeOnDesktop = () => { if (media.matches) setActionsOpen(false) }
+    closeOnDesktop()
+    media.addEventListener('change', closeOnDesktop)
+    return () => media.removeEventListener('change', closeOnDesktop)
+  }, [])
   const all = runs ?? []
   const counts = listCounts(all)
   const visible = sortRuns(filterRuns(all, query), view)
@@ -142,10 +163,10 @@ export function TasksOverview({
 
   return (
     <div data-route="tasks" className="flex min-h-full flex-col">
-      {/* Desktop header. Below `md` the shell's top bar already says "Tasks", and the drawer
-          carries the shared Active/Archived tabs — repeating them here would be a third copy. */}
-      <header className="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-5 md:flex">
-        <h1 className="text-base font-semibold">Tasks</h1>
+      {/* One set of search/view controls across breakpoints keeps query and selection intact.
+          Mobile places search above the list filters; the shell already supplies its title. */}
+      <header ref={headerRef} className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-background p-3 md:h-14 md:flex-nowrap md:gap-3 md:px-5 md:py-0">
+        <h1 className="hidden text-base font-semibold md:block">Tasks</h1>
         <div className="inline-flex gap-0.5 rounded-md bg-muted p-[3px]">
           <OverviewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
             Active
@@ -164,6 +185,7 @@ export function TasksOverview({
             variant="ghost"
             size="sm"
             data-slot="mark-all-read"
+            className="hidden md:inline-flex"
             onClick={onMarkAllRead}
           >
             <CheckCheckIcon className="size-3.5" aria-hidden="true" />
@@ -177,13 +199,56 @@ export function TasksOverview({
             variant="ghost"
             size="sm"
             data-slot="archive-finished"
+            className="hidden md:inline-flex"
+            disabled={archivePending}
+            aria-busy={archivePending}
             onClick={onArchiveFinished}
           >
             <ArchiveIcon className="size-3.5" aria-hidden="true" />
             Archive finished
           </Button>
         ) : null}
-        <div className="relative w-60">
+        {view === 'active' && (finished > 0 || archivePending) ? (
+          <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="md:hidden"
+                aria-label="Task actions"
+                aria-busy={archivePending}
+              >
+                <MoreHorizontalIcon aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="md:hidden"
+              onCloseAutoFocus={(event) => {
+                // The successful mutation removes its trigger. Return to the stable filter,
+                // without focusing search and summoning the phone keyboard.
+                if (archiveSelected.current || window.matchMedia?.('(min-width: 768px)').matches) {
+                  event.preventDefault()
+                  archiveSelected.current = false
+                  headerRef.current?.querySelector<HTMLButtonElement>('[data-view="active"]')?.focus()
+                }
+              }}
+            >
+              <DropdownMenuItem
+                disabled={archivePending || finished === 0}
+                onSelect={() => {
+                  archiveSelected.current = true
+                  onArchiveFinished()
+                }}
+              >
+                <ArchiveIcon aria-hidden="true" />
+                {archivePending ? 'Archiving…' : 'Archive finished'}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+        <div className="relative order-first w-full md:order-none md:w-60">
           <SearchIcon
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-soft-foreground"
             aria-hidden="true"
@@ -210,7 +275,7 @@ export function TasksOverview({
               className="hidden overflow-x-auto rounded-lg border border-border bg-card shadow-xs md:block"
             >
               <TooltipProvider>
-                <table className="w-full border-collapse">
+                <table className="w-full table-fixed border-collapse">
                   <colgroup>
                     {columns.map((column) => {
                       const expanded = isColumnExpanded(column.id, expandedColumns)
@@ -405,7 +470,7 @@ function Th({
       data-column-id={columnId}
       data-folded={folded || undefined}
       className={cn(
-        'h-[38px] border-b border-border px-2.5 text-left text-[11px] font-semibold tracking-[0.05em] whitespace-nowrap text-soft-foreground uppercase first:pl-4 last:pr-4',
+        'h-[38px] border-b border-border px-2.5 text-left text-[11px] font-semibold tracking-[0.05em] whitespace-nowrap text-supporting-foreground uppercase first:pl-4 last:pr-4',
         right && 'text-right',
         folded && 'px-0 first:pl-0 last:pr-0',
       )}
@@ -549,7 +614,7 @@ function TableRow({
               data-slot="queue-note"
               data-column-id="cpu-memory"
               colSpan={2}
-              className={cn(TD_BASE, 'text-right font-mono text-[11.5px] text-soft-foreground')}
+              className={cn(TD_BASE, 'text-right font-mono text-[11.5px] text-supporting-foreground')}
             >
               #{queuePosition} in queue
             </td>
@@ -613,46 +678,61 @@ function TaskTableCell({
   switch (column.id) {
     case 'status':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
           {/* A scheduled run wears its appointment in the pill, the way a queued one wears its
               queue position — the row's whole answer to "what is this waiting for?". */}
-          <Pill dot={attention.tone} pulse={attention.pulse} title={scheduled?.title}>
-            {attention.label}
-            {scheduled ? <span className="tabular-nums">{scheduled.label}</span> : null}
+          <Pill
+            dot={attention.tone}
+            pulse={attention.pulse}
+            title={scheduled?.title ?? attention.label}
+            className="w-full max-w-full overflow-hidden"
+          >
+            <span className="min-w-0 truncate">
+              {attention.label}
+              {scheduled ? (
+                <>
+                  {' '}
+                  <span className="tabular-nums">{scheduled.label}</span>
+                </>
+              ) : null}
+            </span>
           </Pill>
         </td>
       )
     case 'task':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'min-w-[220px] max-w-0')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'min-w-[320px] max-w-0 whitespace-normal')}>
           <TitleCell run={run} to={to} onRename={onRename} onTogglePin={onTogglePin} />
         </td>
       )
     case 'workflow':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'text-[12.5px] text-muted-foreground')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'max-w-0 truncate text-[12.5px] text-muted-foreground')}>
           {workflowLabel(run)}
         </td>
       )
     case 'branch':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'max-w-0 overflow-hidden')}>
           {run.branch ? <BranchChip branch={run.branch} /> : <Dash />}
         </td>
       )
     case 'diff':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
-          {run.diffStat ? <DiffStatLabel stat={run.diffStat} /> : <Dash />}
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
+          {run.diffStat ? <DiffStatLabel stat={run.diffStat} compact className="block max-w-full" /> : <Dash />}
         </td>
       )
     case 'reference':
       return (
-        <td data-column-id={column.id} className={TD_BASE}>
-          {reference ? <TaskReferenceChip run={run} reference={reference} /> : <Dash />}
+        <td data-column-id={column.id} className={cn(TD_BASE, 'overflow-hidden')}>
+          {reference ? (
+            <TaskReferenceChip run={run} reference={reference} compact className="max-w-full overflow-hidden" />
+          ) : <Dash />}
         </td>
       )
     case 'tokens':
+      const tokensLabel = directionalUsageLabel(run.inputTokens, run.outputTokens)
       return (
         <td data-column-id={column.id} className={cn(TD_BASE, 'text-right text-xs text-muted-foreground')}>
           <DirectionalUsage
@@ -660,6 +740,8 @@ function TaskTableCell({
             outputTokens={run.outputTokens}
             variant="table"
             omitWhenUnknown={false}
+            title={tokensLabel}
+            className="block max-w-full overflow-hidden text-ellipsis"
           />
         </td>
       )
@@ -669,12 +751,12 @@ function TaskTableCell({
           data-column-id={column.id}
           className={cn(TD_BASE, 'text-right font-mono text-xs text-muted-foreground tabular-nums')}
         >
-          {cost || <Dash />}
+          {cost ? <BoundedMetric text={cost} accessibleText={`$${run.costUsd}`} /> : <Dash />}
         </td>
       )
     case 'started':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'text-right text-xs text-soft-foreground tabular-nums')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'text-right text-xs text-supporting-foreground tabular-nums')}>
           {shortAge(run.startedAt ?? run.createdAt, now)}
         </td>
       )
@@ -731,7 +813,7 @@ function TitleCell({
         to={to}
         title={title}
         className={cn(
-          'min-w-0 truncate text-[13px]',
+          'line-clamp-2 min-w-0 flex-1 whitespace-normal rounded-sm text-[13px] leading-[18px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
           unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
         )}
       >
@@ -799,22 +881,35 @@ function UsageTds({
 }
 
 function UsageTd({ column, cell }: { column: 'cpu' | 'memory'; cell: UsageCell }) {
+  const accessibleText = cell.text && cell.title ? `${cell.text}; ${cell.title}` : cell.text
   return (
     <td
       data-usage={column === 'memory' ? 'mem' : column}
       data-column-id={column}
       data-usage-kind={cell.kind}
-      title={cell.title}
       className={cn(
         TD_BASE,
+        'overflow-hidden',
         'text-right font-mono tabular-nums',
         cell.kind === 'live' && 'bg-violet/5 text-xs font-medium text-foreground',
-        cell.kind === 'peak' && 'text-[11.5px] text-soft-foreground',
+        cell.kind === 'peak' && 'text-[11.5px] text-supporting-foreground',
         cell.kind === 'none' && 'text-xs text-soft-foreground'
       )}
     >
-      {cell.text || '—'}
+      <BoundedMetric text={cell.text || '—'} accessibleText={accessibleText || undefined} />
     </td>
+  )
+}
+
+function BoundedMetric({ text, accessibleText }: { text: string; accessibleText?: string }) {
+  return (
+    <span
+      data-slot="bounded-metric"
+      {...(accessibleText ? { 'aria-label': accessibleText, title: accessibleText } : {})}
+      className="block max-w-full overflow-hidden text-ellipsis"
+    >
+      {text}
+    </span>
   )
 }
 
@@ -865,7 +960,7 @@ function TaskCard({
         <Link
           to={to}
           className={cn(
-            'min-w-0 flex-1 text-[13.5px] leading-[1.35]',
+            'min-w-0 flex-1 rounded-sm text-[13.5px] leading-[1.35] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
             unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
           )}
         >
@@ -882,7 +977,7 @@ function TaskCard({
             className="mt-1.5 shrink-0"
           />
         ) : null}
-        <span className="mt-0.5 shrink-0 text-[11.5px] text-soft-foreground tabular-nums">
+        <span className="mt-0.5 shrink-0 text-[11.5px] text-supporting-foreground tabular-nums">
           {shortAge(run.finishedAt ?? run.createdAt, now)}
         </span>
         {/* Always visible here, not hover-revealed: a card has no hover to speak of on the
@@ -954,7 +1049,10 @@ function Sep() {
 
 function BranchChip({ branch }: { branch: string }) {
   return (
-    <span className="rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[11.5px] font-medium text-muted-foreground">
+    <span
+      title={branch}
+      className="block truncate rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[11.5px] font-medium text-muted-foreground"
+    >
       {branch}
     </span>
   )
@@ -975,6 +1073,7 @@ export function TasksOverviewRoute() {
   const archive = useMutation({
     mutationFn: archiveFinished,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+    onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })
   // "Mark all read" (#unread-done-items): one call stamps every unread finished run; the
   // invalidate is the authoritative half — each stamped run also rides the `run` SSE.
@@ -1018,7 +1117,8 @@ export function TasksOverviewRoute() {
         runs={runs.data}
         view={view}
         onViewChange={setView}
-        onArchiveFinished={() => archive.mutate()}
+        onArchiveFinished={() => { if (!archive.isPending) archive.mutate() }}
+        archivePending={archive.isPending}
         onMarkAllRead={() => markAllRead.mutate()}
         onRename={(id, title) => rename.mutate({ id, title })}
         onTogglePin={(run, pinned) =>

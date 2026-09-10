@@ -10,6 +10,7 @@ import { createQueryClient } from '@/api/query-client'
 import type { ProcessUsage, RunRecord } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
 import { TaskQuickListContainer } from '@/components/task-quick-list'
+import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { TasksOverview, TasksOverviewRoute } from '@/routes/tasks-overview'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
@@ -79,6 +80,36 @@ const cellsOf = (id: string): string[] => [...(tableRow(id)?.querySelectorAll('t
 
 afterEach(cleanup)
 
+describe('TasksOverview — mobile actions', () => {
+  it('opens the keyboard actions menu and uses the existing archive handler', () => {
+    const { onArchiveFinished } = renderOverview({ runs: [run({ status: 'done' })] })
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive finished' }))
+    expect(onArchiveFinished).toHaveBeenCalledOnce()
+  })
+
+  it('disables the shared archive controls while a request is pending', () => {
+    const { onArchiveFinished } = renderOverview({ runs: [run()], archivePending: true })
+    const desktop = screen.getByRole('button', { name: 'Archive finished' })
+    expect(desktop.hasAttribute('disabled')).toBe(true)
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
+    const pending = screen.getByRole('menuitem', { name: 'Archiving…' })
+    expect(pending.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(pending)
+    expect(onArchiveFinished).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { runs: undefined, view: 'active' as const },
+    { runs: [], view: 'active' as const },
+    { runs: [run({ status: 'running' }), run({ status: 'review' })], view: 'active' as const },
+    { runs: [run({ status: 'done' })], view: 'archived' as const },
+  ])('withholds the mobile archive action when ineligible (%#)', (props) => {
+    renderOverview(props)
+    expect(screen.queryByRole('button', { name: 'Task actions' })).toBeNull()
+  })
+})
+
 describe('TasksOverview — the table', () => {
   it('starts with Branch folded while keeping fixed columns and an in-place restore control', () => {
     const onToggleColumn = vi.fn()
@@ -137,6 +168,61 @@ describe('TasksOverview — the table', () => {
     expect(ids).toEqual(['rev1', 'run1', 'done1'])
   })
 
+  it('gives long desktop task titles a two-line readable region without changing their link', () => {
+    const title = 'Review the desktop task table with several shared prefix words before the distinguishing detail'
+    renderOverview({ runs: [run({ id: 'long-title', title })] })
+
+    const row = tableRow('long-title') as HTMLElement
+    const taskCell = row.querySelector<HTMLElement>('td[data-column-id="task"]')
+    const titleLink = within(taskCell as HTMLElement).getByRole('link', { name: title })
+
+    expect(taskCell?.className).toContain('min-w-[320px]')
+    expect(titleLink.getAttribute('href')).toBe('/tasks/long-title')
+    expect(titleLink.className).toContain('line-clamp-2')
+    expect(titleLink.className).toContain('whitespace-normal')
+    expect(titleLink.className).not.toContain('truncate')
+  })
+
+  it('contains secondary desktop content inside the compact column geometry', () => {
+    renderOverview({
+      runs: [
+        run({
+          id: 'compact-secondary',
+          workflow: 'a-very-long-workflow-name-that-must-not-steal-title-space',
+          pullRequestUrl: 'https://github.com/o/r/pull/1234',
+          inputTokens: 999_900,
+          outputTokens: 888_800,
+          costUsd: 123.45,
+          peakRssBytes: 1023 * 1024 ** 2,
+        }),
+      ],
+    })
+
+    const table = document.querySelector<HTMLElement>('[data-slot="tasks-table"] table')
+    const status = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="status"]')
+    const workflow = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="workflow"]')
+    const workflowHeader = document.querySelector<HTMLElement>('th[data-column-id="workflow"]')
+    const reference = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="reference"]')
+    const diff = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="diff"]')
+    const tokens = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="tokens"] > span')
+    const cost = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="cost"] > span')
+    const memory = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="memory"] > span')
+
+    expect(table?.className).toContain('table-fixed')
+    expect(status?.className).toContain('overflow-hidden')
+    expect(workflow?.className).toContain('truncate')
+    expect(workflowHeader?.textContent).toContain('Workflow')
+    expect(reference?.className).toContain('overflow-hidden')
+    expect(reference?.querySelector('[data-slot="pr-chip"]')?.className).toContain('max-w-full')
+    expect(diff?.className).toContain('overflow-hidden')
+    expect(tokens?.className).toContain('overflow-hidden')
+    expect(tokens?.getAttribute('title')).toBe('Input tokens: 999,900; output tokens: 888,800')
+    expect(cost?.className).toContain('overflow-hidden')
+    expect(cost?.getAttribute('aria-label')).toBe('$123.45')
+    expect(memory?.className).toContain('overflow-hidden')
+    expect(memory?.getAttribute('aria-label')).toBe('peak 1023 MB; peak — run finished')
+  })
+
   it('says the run status through the attention pill', () => {
     renderOverview({
       runs: [
@@ -187,8 +273,9 @@ describe('TasksOverview — the table', () => {
       ],
     })
     const chip = tableRow('queued-issue')?.querySelector('[data-slot="issue-chip"]')
-    expect(chip?.textContent).toBe('Issue #554')
+    expect(chip?.textContent).toBe('#554')
     expect(chip?.getAttribute('href')).toBe('https://github.com/open-mercato/cezar/issues/554')
+    expect(chip?.getAttribute('aria-label')).toContain('Open the issue')
   })
 
   it('fills the columns with the run facts, and honest dashes where no fact exists', () => {
@@ -692,6 +779,7 @@ describe('TasksOverview — usage cells', () => {
     expect(usageCell('live1', 'cpu')?.getAttribute('data-usage-kind')).toBe('live')
     expect(usageCell('live1', 'mem')?.textContent).toBe('612 MB')
     expect(usageCell('live1', 'mem')?.getAttribute('data-usage-kind')).toBe('live')
+    expect(usageCell('live1', 'cpu')?.querySelector('[data-slot="bounded-metric"]')?.getAttribute('title')).toBe('38%')
   })
 
   it('shows a finished run its dimmed peaks, and never a live sample', () => {
@@ -703,7 +791,10 @@ describe('TasksOverview — usage cells', () => {
     expect(usageCell('done1', 'cpu')?.textContent).toBe('—')
     expect(usageCell('done1', 'mem')?.textContent).toBe('peak 401 MB')
     expect(usageCell('done1', 'mem')?.getAttribute('data-usage-kind')).toBe('peak')
-    expect(usageCell('done1', 'mem')?.getAttribute('title')).toBe('peak — run finished · 7 procs')
+    const metric = usageCell('done1', 'mem')?.querySelector('[data-slot="bounded-metric"]')
+    expect(metric?.className).toContain('overflow-hidden')
+    expect(metric?.getAttribute('title')).toBe('peak 401 MB; peak — run finished · 7 procs')
+    expect(metric?.getAttribute('aria-label')).toBe(metric?.getAttribute('title'))
   })
 })
 
@@ -999,6 +1090,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
 
   afterEach(() => {
     cleanup()
+    resetToasts()
     fetchMock.mockReset()
     vi.unstubAllGlobals()
   })
@@ -1018,6 +1110,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
             {/* The sidebar and the overview together, under ONE provider — the point under test. */}
             <TaskQuickListContainer />
             <TasksOverviewRoute />
+            <Toaster />
           </ListViewProvider>
         </MemoryRouter>
       </QueryClientProvider>
@@ -1131,6 +1224,20 @@ describe('TasksOverviewRoute — wired to the app', () => {
       const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/runs')
       expect(listFetches.length).toBeGreaterThan(1)
     })
+  })
+
+  it('keeps query and rows on archive failure and exposes a retryable action', async () => {
+    renderApp([run({ id: 'failure', title: 'Keep me' })])
+    await waitFor(() => expect(tableRow('failure')).not.toBeNull())
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'Keep' } })
+    fetchMock.mockImplementation(async input => String(input).endsWith('archive-finished')
+      ? json({ error: 'Archive unavailable. Try again.' }, 503)
+      : json([]))
+    fireEvent.click(screen.getByRole('button', { name: 'Archive finished' }))
+    expect(await screen.findByText('Archive unavailable. Try again.')).not.toBeNull()
+    expect(tableRow('failure')).not.toBeNull()
+    expect((screen.getByRole('textbox', { name: 'Search tasks' }) as HTMLInputElement).value).toBe('Keep')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Archive finished' }).hasAttribute('disabled')).toBe(false))
   })
 
   it('PATCHes a table rename to /api/v1/runs/:id and refetches the authoritative list', async () => {

@@ -163,18 +163,18 @@ function SkillsCatalog() {
               data-slot="import-skills-row"
               aria-current={selection === IMPORT ? 'page' : undefined}
               className={cn(
-                'mb-1 flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
+                'selection-row mb-1 flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
                 selection === IMPORT && 'bg-muted',
               )}
             >
               <span className="flex min-w-0 items-center gap-2">
                 <DownloadIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
                 <span className="min-w-0 truncate text-[13px] font-medium">Manage skills</span>
-                <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-soft-foreground">
+                <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-supporting-foreground">
                   open-mercato
                 </span>
               </span>
-              <span className="pl-[22px] text-xs text-soft-foreground">
+              <span className="pl-[22px] text-xs text-supporting-foreground">
                 Choose which open-mercato skills appear in your catalog.
               </span>
             </Link>
@@ -184,18 +184,18 @@ function SkillsCatalog() {
             data-slot="bookmarklets-row"
             aria-current={selection === BOOKMARKLETS ? 'page' : undefined}
             className={cn(
-              'flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
+              'selection-row flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
               selection === BOOKMARKLETS && 'bg-muted',
             )}
           >
             <span className="flex min-w-0 items-center gap-2">
               <ZapIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
               <span className="min-w-0 truncate text-[13px] font-medium">Run from GitHub</span>
-              <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-soft-foreground">
+              <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-supporting-foreground">
                 bookmarklets
               </span>
             </span>
-            <span className="pl-[22px] text-xs text-soft-foreground">
+            <span className="pl-[22px] text-xs text-supporting-foreground">
               One-click skill launch from any GitHub PR or issue.
             </span>
           </Link>
@@ -252,7 +252,7 @@ function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
         data-project={project ? 'true' : undefined}
         aria-current={active ? 'page' : undefined}
         className={cn(
-          'flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
+          'selection-row flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
           active && 'bg-muted',
         )}
       >
@@ -273,7 +273,7 @@ function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
           <SkillSourceTag source={skill.source} className="ml-auto" />
         </span>
         {skill.description ? (
-          <span className="line-clamp-2 pl-[22px] text-xs text-soft-foreground">{skill.description}</span>
+          <span className="line-clamp-2 pl-[22px] text-xs text-supporting-foreground">{skill.description}</span>
         ) : null}
       </Link>
     </li>

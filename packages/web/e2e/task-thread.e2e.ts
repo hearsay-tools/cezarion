@@ -6,6 +6,15 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import {
+  applyContrastQaVariant,
+  contrastQaVariants,
+  contrastSampleExpression,
+  focusWithKeyboard,
+  hoverVisiblePoint,
+  restoreContrastQaDefaults,
+  type ContrastSample,
+} from './contrast'
 import record from './fixtures/thread-run.record.json'
 
 /**
@@ -146,6 +155,55 @@ describe('task thread', () => {
     // The dedup rule end-to-end: the fixture file carries the v1 `text` twin of this message —
     // exactly one copy renders.
     expect(browser.count('[data-slot="assistant-message"] [data-streamdown="heading-2"]')).toBe(1)
+  })
+
+  it('keeps transcript links AA-readable with a permanent affordance and visible focus across the QA matrix', () => {
+    const link = '[data-slot="assistant-message"] [data-streamdown="link"]'
+    browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(link)}) !== null`)
+    try {
+      for (const variant of contrastQaVariants) {
+        applyContrastQaVariant(browser, variant)
+        const normal = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
+        browser.evaluate(`(() => {
+          const target = document.querySelector(${JSON.stringify(link)})
+          const scroller = document.querySelector('[data-slot="main"]')
+          scroller.scrollTop += target.getBoundingClientRect().top - 180
+        })()`)
+        hoverVisiblePoint(browser, link)
+        const hovered = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
+        expect(normal.ratio, `${variant.id} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)
+        expect(hovered.ratio, `${variant.id} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
+        focusWithKeyboard(browser, link)
+        browser.evaluate(`(() => {
+          const target = document.querySelector(${JSON.stringify(link)})
+          const scroller = document.querySelector('[data-slot="main"]')
+          scroller.scrollTop += target.getBoundingClientRect().top - 180
+        })()`)
+        const affordance = browser.evaluate(`(() => {
+          const link = document.querySelector(${JSON.stringify(link)})
+          const style = getComputedStyle(link)
+          const probe = document.createElement('span')
+          probe.style.color = 'var(--link-foreground)'
+          document.body.append(probe)
+          const semantic = getComputedStyle(probe).color
+          probe.remove()
+          return { active: document.activeElement === link, decoration: style.textDecorationLine, outline: style.outlineStyle, width: style.outlineWidth, semantic }
+        })()` ) as { active: boolean; decoration: string; outline: string; width: string; semantic: string }
+        const focus = browser.evaluate(contrastSampleExpression(link, 'outline-color')) as ContrastSample
+        expect(affordance.decoration).toContain('underline')
+        expect(affordance.active).toBe(true)
+        expect(affordance.outline).not.toBe('none')
+        expect(Number.parseFloat(affordance.width)).toBeGreaterThanOrEqual(2)
+        expect(focus.foreground).toBe(affordance.semantic)
+        expect(focus.ratio, `${variant.id} focus: ${focus.foreground} on ${focus.background}`).toBeGreaterThanOrEqual(3)
+        browser.screenshot(`${artifactsDir}/issue-165-thread-${variant.id}.png`, { viewport: true })
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+      browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
+      browser.waitForFunction(`document.querySelectorAll('[data-slot="user-bubble"]').length >= 2`)
+    }
   })
 
   it('highlights the ts fence through the lazy Shiki singleton, themed by the --syn-* tokens', () => {
@@ -371,7 +429,7 @@ describe('task thread', () => {
     const actions = browser.evaluate(
       `[...document.querySelectorAll('[data-slot="run-actions"] button')].map((b) => b.textContent.trim())`,
     ) as string[]
-    expect(actions).toEqual(['Continue', 'Open in…', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
+    expect(actions).toEqual(['Open in…', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
 
     // The take-over hint, per-backend (the fixture's last agent session, in its worktree).
     const hint = browser.evaluate(
@@ -532,7 +590,7 @@ describe('task thread', () => {
       .toEqual([true, 'first line\nsecond line\nthird line', 2, 8])
     expect(browser.count('[data-slot="composer-thumbs"] button')).toBe(3)
     expect(browser.isVisible('[aria-label="Attach files"]')).toBe(true)
-    expect(browser.isVisible('[aria-label="Continue"]')).toBe(true)
+    expect(browser.isVisible('[aria-label="Send"]')).toBe(true)
     expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     for (const label of ['Expand composer', 'Show run details', 'Run actions']) {
       expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)

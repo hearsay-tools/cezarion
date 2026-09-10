@@ -395,7 +395,7 @@ function RunRow({
       // `aria-current`.
       data-active={isActive ? 'true' : undefined}
       className={cn(
-        'group/task-row flex items-center gap-2 rounded-sm pl-2.5 hover:bg-muted',
+        'selection-row group/task-row flex items-center gap-2 rounded-sm pl-2.5 hover:bg-muted',
         isActive && 'bg-muted',
         // The indent a member row wears under an expanded group tile. One padding declaration,
         // not two: `cn` is tailwind-merge, so this REPLACES the `pl-2.5` above rather than losing
@@ -422,7 +422,7 @@ function RunRow({
         // visible text drop — so hover always gives back everything the column could not show.
         title={title}
         aria-current={isActive ? 'page' : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2 py-[7px] pr-2.5"
+        className="flex min-w-0 flex-1 items-center gap-2 py-[7px] pr-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground"
       >
         {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
         {variant ? (
@@ -469,7 +469,7 @@ function RunRow({
             reference" alone would have silently deleted the queue position from every
             issue-driven queued row. */}
         {age && (queuePosition !== null || !reference) ? (
-          <span className="shrink-0 text-[11px] text-soft-foreground tabular-nums">{age}</span>
+          <span className="shrink-0 text-[11px] text-supporting-foreground tabular-nums">{age}</span>
         ) : null}
         {/* The unread marker (#unread-done-items): a trailing violet dot, opposite end and
             different hue from the leading status dot, so the two read as two signals. */}

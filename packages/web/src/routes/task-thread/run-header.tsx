@@ -5,7 +5,6 @@ import {
   BotIcon,
   CheckIcon,
   ChevronDownIcon,
-  CircleStopIcon,
   CopyIcon,
   EllipsisVerticalIcon,
   FileTextIcon,
@@ -13,14 +12,13 @@ import {
   PencilIcon,
   PinIcon,
   PinOffIcon,
-  PlayIcon,
   SquareTerminalIcon,
   Trash2Icon,
 } from 'lucide-react'
 import { Fragment, useId, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
 
-import { ApiError, archiveRun, cancelRun, continueRun, deleteRun, openRunIn, openRunInCli } from '@/api/client'
+import { ApiError, archiveRun, deleteRun, openRunIn, openRunInCli } from '@/api/client'
 import {
   queryKeys,
   useAgentProfiles,
@@ -82,7 +80,6 @@ import { usageMetricVisibility } from '@/lib/token-metrics'
 import { cn, isHttpUrl } from '@/lib/utils'
 
 import { Markdown } from './markdown'
-import { useContinuationProvider } from './continuation-provider'
 import { cliTargetResumes, cliTargetRunner, finishTitle, resumeHint, runActionFlags } from './run-actions'
 import { RunRelationshipsPanel } from './run-relationships'
 import { WorkflowSteps } from './step-rail'
@@ -246,18 +243,6 @@ export function RunHeader({
                 Finish
               </Button>
             ) : null}
-            {flags.continueRun ? (
-              <Button
-                variant="outline"
-                size="sm"
-                title={actions.continuation.reason ?? 'Reopen the session'}
-                disabled={actions.continueRun.isPending || !actions.continuation.canContinue}
-                onClick={() => actions.continueRun.mutate()}
-              >
-                <PlayIcon aria-hidden="true" />
-                Continue
-              </Button>
-            ) : null}
             {/* Terminal is folded into the Open in… menu to save room in the actions row. */}
             <OpenInMenuForRun run={run} canResume={flags.terminal} onResume={() => actions.terminal.mutate()} />
             <Button
@@ -304,12 +289,6 @@ export function RunHeader({
               <Button variant="ghost" size="sm" onClick={() => actions.archive.mutate()}>
                 {run.archived ? <ArchiveRestoreIcon aria-hidden="true" /> : <ArchiveIcon aria-hidden="true" />}
                 {run.archived ? 'Unarchive' : 'Archive'}
-              </Button>
-            ) : null}
-            {flags.cancel ? (
-              <Button variant="danger-ghost" size="sm" onClick={() => actions.setConfirming('cancel')}>
-                <CircleStopIcon aria-hidden="true" />
-                Cancel
               </Button>
             ) : null}
             {flags.deleteRun ? (
@@ -431,7 +410,7 @@ function OpenInMenuForRun({
 function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const [confirming, setConfirming] = useState<'cancel' | 'delete' | null>(null)
+  const [confirming, setConfirming] = useState<'delete' | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
   const onError = (error: Error) => toast(error.message, { tone: 'danger' })
@@ -439,17 +418,6 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
   // Shared with the review panel's ✓ Accept (use-finish-run.ts) — the review-accept semantics
   // must be ONE implementation, not two buttons that happen to agree today.
   const finish = useFinishRun(run.id)
-  const continuation = useContinuationProvider(run)
-  const continueMutation = useMutation({
-    mutationFn: async () => {
-      if (!continuation.canContinue) return null
-      return continueRun(run.id, { runner: continuation.runnerOverride })
-    },
-    onSuccess: (result) => {
-      if (result !== null) invalidate()
-    },
-    onError,
-  })
   const archive = useMutation({
     mutationFn: () => archiveRun(run.id, !run.archived),
     onSuccess: invalidate,
@@ -477,7 +445,6 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
       markUnreadMutation.mutate(run.id, { onError })
     },
   }
-  const cancel = useMutation({ mutationFn: () => cancelRun(run.id), onSuccess: invalidate, onError })
   const deleteMutation = useMutation({
     mutationFn: () => deleteRun(run.id),
     onSuccess: () => {
@@ -502,12 +469,9 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
 
   return {
     finish,
-    continuation,
-    continueRun: continueMutation,
     archive,
     pin,
     markUnread,
-    cancel,
     delete: deleteMutation,
     terminal,
     confirming,
@@ -909,15 +873,6 @@ function ActionsKebab({
             <CheckIcon aria-hidden="true" /> Finish
           </DropdownMenuItem>
         ) : null}
-        {flags.continueRun ? (
-          <DropdownMenuItem
-            disabled={!actions.continuation.canContinue || actions.continueRun.isPending}
-            title={actions.continuation.reason}
-            onSelect={() => actions.continueRun.mutate()}
-          >
-            <PlayIcon aria-hidden="true" /> Continue
-          </DropdownMenuItem>
-        ) : null}
         {flags.terminal ? (
           <DropdownMenuItem onSelect={() => actions.terminal.mutate()}>
             <SquareTerminalIcon aria-hidden="true" /> Terminal
@@ -952,12 +907,7 @@ function ActionsKebab({
             {run.archived ? 'Unarchive' : 'Archive'}
           </DropdownMenuItem>
         ) : null}
-        {flags.cancel || flags.deleteRun ? <DropdownMenuSeparator /> : null}
-        {flags.cancel ? (
-          <DropdownMenuItem variant="destructive" onSelect={() => actions.setConfirming('cancel')}>
-            <CircleStopIcon aria-hidden="true" /> Cancel
-          </DropdownMenuItem>
-        ) : null}
+        {flags.deleteRun ? <DropdownMenuSeparator /> : null}
         {flags.deleteRun ? (
           <DropdownMenuItem variant="destructive" onSelect={() => actions.setConfirming('delete')}>
             <Trash2Icon aria-hidden="true" /> Delete
@@ -968,16 +918,15 @@ function ActionsKebab({
   )
 }
 
-/** The destructive confirms — one dialog, two scripts. Never a native confirm(). */
+/** Deleting history and work still requires confirmation. */
 function ConfirmDialog({ run, actions }: { run: ApiRun; actions: RunActions }) {
   const confirming = actions.confirming
   return (
     <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && actions.setConfirming(null)}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{confirming === 'delete' ? 'Delete this task?' : 'Cancel this task?'}</AlertDialogTitle>
+          <AlertDialogTitle>Delete this task?</AlertDialogTitle>
           <AlertDialogDescription>
-            {confirming === 'delete' ? (
               <>
                 This removes the run, its transcript, its worktree and its branch. There is no
                 undo.
@@ -985,9 +934,6 @@ function ConfirmDialog({ run, actions }: { run: ApiRun; actions: RunActions }) {
                   {runTitle(run)}
                 </span>
               </>
-            ) : (
-              'The agent is stopped and the run completes as cancelled. The worktree stays.'
-            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -995,12 +941,11 @@ function ConfirmDialog({ run, actions }: { run: ApiRun; actions: RunActions }) {
           <AlertDialogAction
             className="bg-danger text-danger-foreground hover:brightness-[0.96]"
             onClick={() => {
-              if (confirming === 'delete') actions.delete.mutate()
-              else actions.cancel.mutate()
+              actions.delete.mutate()
               actions.setConfirming(null)
             }}
           >
-            {confirming === 'delete' ? 'Delete' : 'Cancel the run'}
+            Delete
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

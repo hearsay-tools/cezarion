@@ -100,8 +100,15 @@
   --muted: #262626;
   --muted-foreground: #a3a3a3;
   --soft-foreground: #7b7b7b;
+  /* Semantic ink: brand lime remains the dark-theme link, while supporting copy uses the
+   * already-readable muted step instead of the intentionally faint decorative soft step. */
+  --link-foreground: var(--primary);
+  --supporting-foreground: var(--muted-foreground);
   --border: #262626;
   --input: #262626;
+  /* Functional boundaries need more contrast than decorative surface separators. */
+  --control-border: #808080;
+  --selection-indicator: var(--supporting-foreground);
   --contrast: #ebebeb;
   --contrast-foreground: #171717;
 
@@ -196,6 +203,9 @@
   --muted: #f7f7f7;
   --muted-foreground: #5c5c5c;
   --soft-foreground: #a3a3a3;
+  /* Lime stays available for fills; olive-800 carries its identity as readable ink on white. */
+  --link-foreground: #3f6212;
+  --supporting-foreground: var(--muted-foreground);
   --border: #ebebeb;
   --input: #ebebeb;
   --contrast: #262626;
@@ -242,7 +252,13 @@
 :root[data-accent='violet'] {
   --primary: var(--violet);
   --primary-foreground: var(--violet-foreground);
+  --link-foreground: var(--primary);
   --ring: var(--violet);
+}
+
+/* Violet-700 is the light-theme ink partner for the unchanged violet fill. */
+:root.light[data-accent='violet'] {
+  --link-foreground: #6d28d9;
 }
 
 /* Compact density: Tailwind v4's whole numeric spacing scale keys off ONE token (`--spacing`,
@@ -258,6 +274,54 @@
  * lever as compact, just smaller; the type scale still stays untouched. */
 :root[data-density='ultra'] {
   --spacing: 0.1875rem;
+}
+
+/* Mobile actions reserve their real hit area in layout (#166). Numeric Tailwind sizes
+ * follow density, so `size-11` is only 33px in ultra. Keep the floor in CSS pixels and
+ * outside layers so local size/min-size utilities cannot shrink it. No pseudo-element
+ * expansion: neighboring actions must never share a target. Desktop density is unchanged.
+ * Include native controls and Radix menu rows as well as our shared Button (including
+ * asChild links); inline prose links deliberately keep their text layout.
+ */
+@media (width < 48rem) {
+  :where(button, select, [role='button'], [role='menuitem'], [role='menuitemradio'],
+    [role='menuitemcheckbox'], [role='option'], nav a, a[data-slot='button'], [data-slot='run-tabs'] a,
+    input:not([type='hidden'], [type='checkbox'], [type='radio'], [type='range'], [type='file'])) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  :where(button, select, [role='button'], nav a, a[data-slot='button']):focus-visible {
+    /* Use semantic ink: the violet fill/ring is below 3:1 on the light sidebar. */
+    outline: 2px solid var(--link-foreground);
+    outline-offset: 2px;
+  }
+
+  /* The settings row scrolls; its labels must keep their intrinsic width rather than
+   * shrinking to the 44px floor. Preserve its existing overflow/reveal controller. */
+  [data-slot='settings-nav-mobile'] a {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* A switch reserves a 44px square while its familiar track stays compact. The
+   * transparent border belongs to the button, so even its edges toggle the switch. */
+  [role='switch'] {
+    box-sizing: content-box;
+    min-width: 32px;
+    min-height: 18px;
+    width: 32px;
+    height: 18px;
+    border-width: 13px 6px;
+    border-color: transparent;
+    background-clip: padding-box;
+    box-shadow: none;
+  }
+  [data-slot='switch-thumb'] {
+    width: 16px;
+    height: 16px;
+  }
 }
 
 /* Wide reading width (Settings → Appearance → Reading width): open the task-view column from the
@@ -307,7 +371,10 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-soft-foreground: var(--soft-foreground);
+  --color-link-foreground: var(--link-foreground);
+  --color-supporting-foreground: var(--supporting-foreground);
   --color-border: var(--border);
+  --color-control-border: var(--control-border);
   --color-input: var(--input);
   --color-contrast: var(--contrast);
   --color-contrast-foreground: var(--contrast-foreground);
@@ -532,7 +599,35 @@
   padding: 1.5px 5px;
   font-size: 0.9em;
 }
+.thread-markdown [data-streamdown='link'] {
+  color: var(--link-foreground);
+  text-decoration-line: underline;
+  text-decoration-thickness: from-font;
+  text-underline-offset: 0.16em;
+}
+.thread-markdown [data-streamdown='link']:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--link-foreground);
+  outline-offset: 2px;
+}
 .thread-markdown [data-streamdown='code-block'] pre {
   font-size: 12px;
   line-height: 1.55;
+}
+
+/* A persistent shape distinguishes current navigation from its hover fill. Positioned inside
+ * the existing row: no layout shift, target-size change, or interference with focus rings. */
+.selection-row {
+  position: relative;
+}
+
+.selection-row:is([aria-current='page'], [data-active='true'])::before {
+  content: '';
+  position: absolute;
+  inset-block: 6px;
+  inset-inline-start: 0;
+  width: 3px;
+  border-radius: 99px;
+  background: var(--selection-indicator);
+  pointer-events: none;
 }

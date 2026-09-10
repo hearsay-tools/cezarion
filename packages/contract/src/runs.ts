@@ -151,6 +151,8 @@ export const runRecordSchema = z.object({
   /** Prompt messages stacked onto the run while it waited for a free agent slot (#472). Folded
    *  into the prompt at dequeue — never delivered as their own turns. Absent on pre-#472 runs. */
   queuedMessages: z.array(queuedMessageSchema).optional(),
+  /** Stop was accepted; execution termination is still pending. */
+  stopping: z.boolean().optional(),
   /** Opening Continue message, retained until its first completed turn for crash recovery. */
   continuationMessage: continuationMessageSchema.optional(),
   /** Owned-run authority; absence is legacy, invalid is explicitly quarantined. */

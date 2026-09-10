@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import * as React from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -128,6 +128,24 @@ describe('submit shortcuts', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     expect(onSubmit).not.toHaveBeenCalled()
     expect(textarea.value).toBe('line one')
+  })
+
+  it('uses the send button instead of bare Enter on a coarse-pointer surface', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      media: query,
+      matches: query === '(hover: none) and (pointer: coarse)',
+    }) as MediaQueryList)
+    const { onSubmit, textarea } = renderComposer()
+    type(textarea, 'line one')
+
+    const enterWasNotPrevented = fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    expect(enterWasNotPrevented).toBe(true)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('line one')
+
+    fireEvent.click(screen.getByLabelText('Send'))
+    expect(onSubmit).toHaveBeenCalledWith('line one', [])
   })
 
   it('⌘↵ and Ctrl+↵ both send (the cross-platform chord)', async () => {
@@ -736,4 +754,192 @@ describe('phone composer disclosure', () => {
     renderComposer()
     expect(screen.queryByRole('button', { name: 'Expand composer' })).toBeNull()
   })
+})
+
+
+describe('retained submission (#164)', () => {
+  it('holds the draft through same-turn keyboard duplicates and clears only on success', async () => {
+    let resolve!: () => void
+    const onSubmit = vi.fn(() => new Promise<void>(done => { resolve = done }))
+    const { textarea } = renderComposer({ onSubmit, retainDraftUntilSuccess: true })
+    type(textarea, 'Keep me')
+    act(() => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))
+    })
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(textarea.value).toBe('Keep me')
+    await act(async () => resolve())
+    expect(textarea.value).toBe('')
+  })
+
+  it('blocks attachment mutations, templates and late file reads while pending', async () => {
+    let resolve!: () => void
+    let read!: (bytes: ArrayBuffer) => void
+    const handle = React.createRef<import('./composer').ComposerHandle>()
+    const { textarea } = renderComposer({ retainDraftUntilSuccess: true, ref: handle, onSubmit: () => new Promise<void>(done => { resolve = done }) })
+    type(textarea, 'Original')
+    paste(textarea, [pngFile()])
+    await screen.findByRole('button', { name: 'Remove shot.png' })
+    const late = pngFile('late.png')
+    Object.defineProperty(late, 'arrayBuffer', { value: () => new Promise<ArrayBuffer>(done => { read = done }) })
+    paste(textarea, [late])
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    fireEvent.change(textarea, { target: { value: 'Blocked edit' } })
+    act(() => handle.current?.insertAtCaret('Blocked template'))
+    paste(textarea, [pngFile('paste.png')])
+    fireEvent.drop(textarea, { dataTransfer: { files: [pngFile('drop.png')] } })
+    await act(async () => read(new ArrayBuffer(1)))
+    expect(textarea.value).toBe('Original')
+    expect(screen.getAllByRole('button', { name: /^Remove / })).toHaveLength(1)
+    expect((screen.getByRole('button', { name: 'Attach files' }) as HTMLButtonElement).disabled).toBe(true)
+    await act(async () => resolve())
+    expect(screen.queryByRole('button', { name: /^Remove / })).toBeNull()
+  })
+
+  it('retains attachments and text on a network timeout without automatically retrying', async () => {
+    let reject!: (error: Error) => void
+    const onSubmit = vi.fn(() => new Promise<void>((_, fail) => { reject = fail }))
+    const { textarea } = renderComposer({ onSubmit, retainDraftUntilSuccess: true })
+    type(textarea, 'Uncertain task')
+    paste(textarea, [pngFile()])
+    await screen.findByRole('button', { name: 'Remove shot.png' })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await act(async () => reject(new DOMException('Request timed out', 'TimeoutError')))
+    expect(textarea.value).toBe('Uncertain task')
+    expect(screen.getByRole('button', { name: 'Remove shot.png' })).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('Check Tasks')
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+})
+
+
+it('retained success cannot clear a newer controlled draft', async () => {
+  let resolve!: () => void
+  let replace!: (value: string) => void
+  stubSkillsFetch()
+  function Host() {
+    const [value, setValue] = React.useState('Submitted')
+    replace = setValue
+    return <Composer value={value} onValueChange={setValue} retainDraftUntilSuccess onSubmit={() => new Promise<void>(done => { resolve = done })} />
+  }
+  render(<QueryClientProvider client={createQueryClient()}><Host /></QueryClientProvider>)
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+  act(() => replace('Newer controlled draft'))
+  await act(async () => resolve())
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Newer controlled draft')
+})
+
+it('retained submission prevents dictation insertion and dictation send while pending', async () => {
+  const abort = vi.fn()
+  let recognition!: { onresult: ((event: unknown) => void) | null }
+  vi.stubGlobal('SpeechRecognition', class {
+    onresult = null
+    onerror = null
+    onend = null
+    start() { recognition = this }
+    stop() {}
+    abort = abort
+  })
+  let resolve!: () => void
+  const onSubmit = vi.fn(() => new Promise<void>(done => { resolve = done }))
+  const { textarea } = renderComposer({ onSubmit, retainDraftUntilSuccess: true })
+  type(textarea, 'Original')
+  fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+  act(() => recognition.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'spoken words' } }] }))
+  fireEvent.keyDown(textarea, { key: 'Enter' })
+  fireEvent.click(screen.getByRole('button', { name: 'Insert transcription' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Insert transcription and send' }))
+  expect(textarea.value).toBe('Original')
+  expect(onSubmit).toHaveBeenCalledTimes(1)
+  const cancel = screen.getByRole('button', { name: 'Cancel dictation' })
+  expect(cancel.closest('[inert]')).toBeNull()
+  expect((screen.getByRole('button', { name: 'Insert transcription' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((screen.getByRole('button', { name: 'Insert transcription and send' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(cancel)
+  expect(abort).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('button', { name: 'Cancel dictation' })).toBeNull()
+  expect(textarea.value).toBe('Original')
+  expect(onSubmit).toHaveBeenCalledTimes(1)
+  await act(async () => resolve())
+})
+
+describe('unified execution actions (#201)', () => {
+  it('shows Stop on empty active drafts without making Enter a Stop shortcut', async () => {
+    const onStop = vi.fn(async () => {})
+    const { textarea, onSubmit } = renderComposer({ onStop, stopOnEmpty: true, quickReplies: true })
+    expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    type(textarea, '   ')
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(onStop).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+    type(textarea, 'new instructions')
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('disabled')).toBe(false)
+    type(textarea, '')
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(onStop).toHaveBeenCalledTimes(1))
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('labels empty continuation Continue and attachment-only continuation Send', async () => {
+    const { textarea } = renderComposer({ allowEmptySubmit: true, emptySubmitLabel: 'Continue' })
+    expect(screen.getByRole('button', { name: 'Continue' }).textContent).toContain('Continue')
+    type(textarea, 'next')
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false)
+    type(textarea, '')
+    paste(textarea, [pngFile()])
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: /remove shot.png/i }))
+    expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('preserves attachments and text through failed Stop and locks competing submissions', async () => {
+    let reject!: (error: Error) => void
+    const onStop = vi.fn(() => new Promise<void>((_, no) => { reject = no }))
+    const { textarea, onSubmit } = renderComposer({ onStop, stopOnEmpty: true, retainDraftUntilSuccess: true, compactFeedback: true })
+    type(textarea, 'keep this')
+    paste(textarea, [pngFile()])
+    await screen.findByRole('button', { name: /remove shot.png/i })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
+    expect(textarea.value).toBe('keep this')
+    expect(onSubmit).not.toHaveBeenCalled()
+    await act(async () => reject(new Error('Network unavailable. Retry Stop.')))
+    expect(screen.getByRole('alert').textContent).toContain('Retry Stop')
+    expect(textarea.value).toBe('keep this')
+    expect(screen.getByRole('button', { name: /remove shot.png/i }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('keeps Stop usable when provider availability disables sending', async () => {
+    const onStop = vi.fn(async () => {})
+    renderComposer({ onStop, stopOnEmpty: true, disabled: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(onStop).toHaveBeenCalledOnce())
+  })
+
+  it('renders authoritative stopping without allowing shortcuts or draft changes', () => {
+    const { textarea, onSubmit } = renderComposer({ stopping: true, value: '', allowEmptySubmit: true, quickReplies: true })
+    expect(screen.getByRole('button', { name: 'Stopping…' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(window, { code: 'KeyC', altKey: true })
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
+
+it('retains an attachment already being read when Stop is requested (#201)', async () => {
+  let read!: (bytes: ArrayBuffer) => void
+  let reject!: (error: Error) => void
+  const { textarea } = renderComposer({ onStop: () => new Promise<void>((_, no) => { reject = no }), stopOnEmpty: true, retainDraftUntilSuccess: true })
+  const late = pngFile('late.png')
+  Object.defineProperty(late, 'arrayBuffer', { value: () => new Promise<ArrayBuffer>(done => { read = done }) })
+  paste(textarea, [late])
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+  await act(async () => read(new ArrayBuffer(1)))
+  await act(async () => reject(new Error('Stop failed')))
+  expect(screen.getByRole('button', { name: 'Remove late.png' })).toBeTruthy()
 })

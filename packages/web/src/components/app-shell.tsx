@@ -493,14 +493,18 @@ function SidebarContent({
     >
       <div className="flex items-center gap-[9px] px-3.5 pt-3.5 pb-2.5">
         {/* The wordmark lockup IS the brand (issue #143) — no tile-plus-label pairing beside it.
-            26px tall, like the tile it replaced: ~64px wide at the kit's aspect, inside the
-            264px column with room for the repo chip. The alt carries the name the old text
-            label used to, so screen readers say "Cezarion" once. */}
+            Its cropped canvas removes the kit's presentation whitespace, so 34px gives the word
+            a readable painted height without taking navigation space from the 264px drawer. The
+            intrinsic dimensions reserve identical geometry while resolved-theme assets swap.
+            The alt carries the name the old text label used to, so screen readers say
+            "Cezarion" once. */}
         <img
           src={brandLockupUrl(resolvedTheme)}
           alt="Cezarion"
+          width={103}
+          height={34}
           data-slot="brand-lockup"
-          className="h-[26px] w-auto shrink-0"
+          className="h-[34px] w-auto shrink-0"
         />
         {/* With project groups mounted the boot repo/branch is one group header among many —
             a chip repeating it up here would just be the first group's header said twice. */}
@@ -581,7 +585,7 @@ function SidebarContent({
                   className={cn(
                     // h-[34px] is the mockup's desktop row. In the drawer these are touch targets, so
                     // they relax to 44px — the one place the two framings legitimately differ.
-                    'flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[34px]',
+                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[34px]',
                     isActive && 'bg-muted font-semibold text-foreground'
                   )}
                 >
@@ -676,7 +680,7 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
       // rows are muted. The violet icon is the one spot of accent — the same hue the tag chips
       // and this page's own selected filters use, so the door and the room match.
       className={cn(
-        'flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-semibold text-foreground transition-colors hover:bg-muted md:h-9',
+        'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-semibold text-foreground transition-colors hover:bg-muted md:h-9',
         isActive && 'bg-muted',
       )}
     >
@@ -843,7 +847,7 @@ function MobileTopBar({ title }: { title: string }) {
       data-slot="mobile-top-bar"
       className="row-start-1 border-b border-border bg-card pt-[env(safe-area-inset-top)] md:hidden"
     >
-      <div className="flex h-11 items-center gap-2.5 px-3">
+      <div className="flex h-[44px] items-center gap-2.5 px-3">
         {/* A real SheetTrigger rather than an onClick that flips our state: it is what registers
             the button as the dialog's trigger, which is what Radix restores focus to on close —
             with a bare onClick, closing the drawer drops focus on <body>. It also carries the
