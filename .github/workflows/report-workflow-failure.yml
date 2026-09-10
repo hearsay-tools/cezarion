@@ -1,0 +1,60 @@
+name: Report Release and Nightly Failures
+
+on:
+  workflow_run:
+    workflows: [Release, Nightly]
+    types: [completed]
+
+permissions: {}
+
+# This group is the reporter's cross-process issue-write lock. Every future
+# writer sharing its markers must join this same group. Never scope it per run.
+concurrency:
+  group: release-nightly-failure-reports
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Check out trusted reporting code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Report failed attempt
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          # A write may have succeeded before an HTTP error reached us. Retrying
+          # the entire reporter rechecks durable markers before any next write.
+          retries: 0
+          script: |
+            try {
+              const { reportFailure } = require('./.github/scripts/report-workflow-failure.cjs');
+              const result = await reportFailure({
+                github,
+                ...context.repo,
+                event: context.payload,
+                log: message => {
+                  core.info(message);
+                  core.summary.addRaw(message + '\n');
+                },
+              });
+              core.summary.addRaw(`Failure reporting completed: ${result.reported} new occurrence(s).\n`);
+            } catch {
+              // Never print API error objects: they can include request headers,
+              // signed log URLs, source log text, or issue payloads.
+              const message = 'Failure reporting failed. Check Actions/Issues permissions and API availability, then rerun this reporting job. Existing issue markers make retries safe.';
+              core.setFailed(message);
+              core.summary.addRaw(message + '\n');
+            } finally {
+              await core.summary.write();
+            }
