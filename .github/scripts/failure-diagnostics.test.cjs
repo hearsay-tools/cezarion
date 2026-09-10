@@ -52,6 +52,48 @@ test('different diagnostics in the same test do not claim one shared cause',()=>
  const a=release(),b=release();a.log='FAIL src/a.test.ts > works\nTypeError: cannot read property';b.log='FAIL src/a.test.ts > works\nAssertionError: expected 1 to equal 2';
  assert.notEqual(causesForStep(a)[0].signature,causesForStep(b)[0].signature);
 });
+test('test diagnoses expose full internal identity without changing v1 signatures',()=>{
+ const a=release();a.log='FAIL src/a.test.ts > works\nError: bad';
+ const cause=causesForStep(a)[0];
+ assert.equal(cause.kind,'test');
+ assert.equal(cause.testIdentity,'src/a.test.ts > works');
+ assert.equal(cause.testFile,'src/a.test.ts');
+ assert.equal(cause.hasTestName,true);
+ assert.equal(cause.hasDiagnostic,true);
+ assert.equal(cause.failureIdentity,'test:src/a.test.ts > works:Error: bad');
+ assert.equal(cause.signature,'d4797b81a9bda7af004af4674dde129eafdb5f71df59add3ad3d2112d20a5f88');
+});
+test('test diagnoses expose missing names and diagnostics without changing rendered output',()=>{
+ const named=release();named.log='FAIL src/a.test.ts > works';
+ const namedCause=causesForStep(named)[0];
+ assert.equal(namedCause.title,'src/a.test.ts › works');
+ assert.equal(namedCause.hasTestName,true);
+ assert.equal(namedCause.hasDiagnostic,false);
+ const unnamed=release();unnamed.log='FAIL src/a.test.ts\nError: bad';
+ const unnamedCause=causesForStep(unnamed)[0];
+ assert.equal(unnamedCause.title,'src/a.test.ts');
+ assert.equal(unnamedCause.hasTestName,false);
+ assert.equal(unnamedCause.hasDiagnostic,true);
+});
+test('structured identity is untruncated while rendered test titles stay bounded',()=>{
+ const a=release(), testFile=`src/${'a'.repeat(4200)}.test.ts`;
+ a.log=`FAIL ${testFile} > works\nError: bad`;
+ const cause=causesForStep(a)[0];
+ assert.equal(cause.testIdentity,`${testFile} > works`);
+ assert.equal(cause.testFile,testFile);
+ assert.ok(cause.title.length<=180);
+ assert.doesNotMatch(cause.title,/a{4000}/);
+});
+test('generic and unknown diagnoses expose conservative source identities',()=>{
+ const error=release();error.log='TypeError: cannot open 0x123 after 14ms';
+ const diagnosed=causesForStep(error)[0];
+ assert.equal(diagnosed.kind,'error');
+ assert.equal(diagnosed.failureIdentity,'TypeError: cannot open <address> after <duration>');
+ assert.equal(diagnosed.signature,'8ed1686950e781321d61b07e444bfea33b77a99c2938559c2bc41433398ed783');
+ const unknown=release();unknown.log='';
+ assert.equal(causesForStep(unknown)[0].kind,'unknown');
+ assert.equal(causesForStep(unknown)[0].failureIdentity,undefined);
+});
 test('unrecognized failure keeps bounded evidence after Actions logs expire',()=>{
  const a=release();a.log='src/index.ts(12,3): error TS2307: Cannot find module x';
  assert.match(causesForStep(a)[0].excerpt,/TS2307: Cannot find module x/);
