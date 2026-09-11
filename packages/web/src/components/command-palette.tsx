@@ -501,7 +501,7 @@ function PaletteContent({ close }: { close: () => void }) {
                     </span>
                   ) : null}
                   {active ? (
-                    <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+                    <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
                   ) : null}
                 </CommandItem>
               )

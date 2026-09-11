@@ -843,8 +843,15 @@ function MobileTopBar({ title }: { title: string }) {
             <MenuIcon className="size-[17px]" aria-hidden="true" />
           </Button>
         </SheetTrigger>
-        <span className="truncate text-[19px] font-semibold tracking-[-0.03em]">cezarion</span>
-        <span className="sr-only">{title}</span>
+        <span className="shrink-0 text-[19px] font-semibold tracking-[-0.03em]">cezarion</span>
+        {title !== 'cezar' ? (
+          <>
+            <span aria-hidden="true" className="text-soft-foreground">·</span>
+            <span data-slot="mobile-route-title" className="truncate text-[13px] font-medium text-muted-foreground">
+              {title}
+            </span>
+          </>
+        ) : null}
         {/* SLOT — the run status dot / kebab land with the thread view (Step R3). */}
         <div data-slot="mobile-status" className="ml-auto flex items-center gap-2" />
       </div>

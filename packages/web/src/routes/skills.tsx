@@ -168,7 +168,7 @@ function SkillsCatalog() {
               )}
             >
               <span className="flex min-w-0 items-center gap-2">
-                <DownloadIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+                <DownloadIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
                 <span className="min-w-0 truncate text-[13px] font-medium">Manage skills</span>
                 <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-supporting-foreground">
                   open-mercato
@@ -189,7 +189,7 @@ function SkillsCatalog() {
             )}
           >
             <span className="flex min-w-0 items-center gap-2">
-              <ZapIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+              <ZapIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
               <span className="min-w-0 truncate text-[13px] font-medium">Run from GitHub</span>
               <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-supporting-foreground">
                 bookmarklets

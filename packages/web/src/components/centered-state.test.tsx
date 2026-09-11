@@ -16,7 +16,7 @@ function tileOf(container: HTMLElement): Element {
 describe('CenteredState', () => {
   // The design system's tile grammar, tone by tone (spec, "Design system": tinted border+fill).
   it.each([
-    ['primary', ['border-primary/25', 'bg-primary/15', 'text-primary']],
+    ['primary', ['border-violet/25', 'bg-violet/15', 'text-link-foreground']],
     ['neutral', ['border-border', 'bg-card', 'shadow-xs']],
     ['danger', ['border-danger/20', 'bg-danger/15', 'text-danger']],
   ] as const)('tints the tile for the %s tone', (tone, classes) => {

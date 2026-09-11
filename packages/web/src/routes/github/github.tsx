@@ -618,7 +618,7 @@ export function GithubRoute({
             {automationsAvailable ? (
               <Link
                 to="/automations/new"
-                className="ml-auto shrink-0 text-[10px] font-medium text-primary hover:underline"
+                className="ml-auto shrink-0 text-[10px] font-medium text-link-foreground hover:underline"
               >
                 Set up automations
               </Link>
@@ -936,7 +936,7 @@ function LabelFilter({
                     style={labelChipStyle(colors[label])}
                   />
                   <span className="min-w-0 flex-1 truncate">{label}</span>
-                  {on ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" /> : null}
+                  {on ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
                 </CommandItem>
               )
             })}

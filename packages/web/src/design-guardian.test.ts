@@ -68,6 +68,13 @@ const RULES: Rule[] = [
     applies: styleSources,
   },
   {
+    name: 'no-primary-action-color-as-ink',
+    why: 'gold is an action fill; standalone chrome ink uses link-foreground so it keeps AA contrast in light mode',
+    pattern: /\btext-primary(?!-foreground)\b/g,
+    applies: styleSources,
+    allowed: (rel) => rel === 'src/styles/index.css',
+  },
+  {
     name: 'no-raw-black-white',
     why: 'use surface/foreground tokens so both themes work; bg/text-white/black bypass them',
     pattern: /\b(?:bg|text)-(?:white|black)\b/g,

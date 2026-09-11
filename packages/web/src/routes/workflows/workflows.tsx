@@ -628,7 +628,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
         <DragOverlay>
           {dragging?.type === 'palette' ? (
             <div className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 font-mono text-[13px] font-medium shadow-md">
-              <SparklesIcon aria-hidden="true" className="size-3.5 text-primary" />
+              <SparklesIcon aria-hidden="true" className="size-3.5 text-link-foreground" />
               {dragging.skill}
             </div>
           ) : dragging?.type === 'step' ? (
@@ -716,7 +716,7 @@ function Canvas({
         <p
           className={cn(
             'rounded-md px-3 py-10 text-center text-[13px] transition-colors',
-            isOver ? 'text-primary' : 'text-muted-foreground',
+            isOver ? 'text-link-foreground' : 'text-muted-foreground',
           )}
         >
           Drop a skill here — or Import a workflow.yaml
@@ -873,7 +873,7 @@ function StepCardBody({
         {isCheck ? (
           <SquareTerminalIcon aria-hidden="true" className="size-3.5 shrink-0 text-success" />
         ) : (
-          <SparklesIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+          <SparklesIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
         )}
         <div className="min-w-0 flex-1 truncate font-mono text-[13px] font-medium">{title}</div>
         {badge ? (

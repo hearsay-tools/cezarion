@@ -664,6 +664,13 @@ describe('host seams (R4: the /new hero)', () => {
     expect(screen.queryByLabelText('Send')).toBeNull()
   })
 
+  it('waits for a wide desktop before placing execution options beside the editor', () => {
+    renderComposer({ executionOptions: <div>execution settings</div> })
+    const composer = document.querySelector('[data-slot="composer"]') as HTMLElement
+    expect(composer.className).toContain('xl:grid-cols-[minmax(0,1fr)_330px]')
+    expect(composer.className).not.toContain('md:grid-cols-[minmax(0,1fr)_330px]')
+  })
+
   it('autoFocus puts the caret in the textarea on mount (⌘N lands ready to type)', () => {
     const { textarea } = renderComposer({ autoFocus: true })
     expect(document.activeElement).toBe(textarea)

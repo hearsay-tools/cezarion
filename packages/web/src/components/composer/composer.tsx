@@ -571,7 +571,7 @@ export function Composer({
           onDrop={onDrop}
           onDragOver={(event) => event.preventDefault()}
           className={cn(
-            executionOptions && 'grid gap-4 md:grid-cols-[minmax(0,1fr)_330px] md:items-start md:gap-6',
+            executionOptions && 'grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px] xl:items-start xl:gap-6',
             disabled && 'opacity-80',
           )}
         >
@@ -579,7 +579,7 @@ export function Composer({
             data-slot="composer-editor"
             className="rounded-xl border border-[var(--composer-border)] bg-card shadow-none transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15"
           >
-          {images.length > 0 ? (
+            {images.length > 0 ? (
             <div data-slot="composer-thumbs" className="flex flex-wrap items-center gap-2 px-4 pt-3">
               {images.map((attachment, index) => (
                 <button
@@ -612,7 +612,7 @@ export function Composer({
                 </button>
               ))}
             </div>
-          ) : null}
+            ) : null}
 
           {/* A real label keeps password managers from treating nearby page text as a
               one-time-code prompt on client-side navigation (#71); aria-label alone doesn't. */}

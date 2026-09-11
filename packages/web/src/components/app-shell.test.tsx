@@ -476,7 +476,8 @@ describe('AppShell', () => {
     it('titles the mobile bar from the active route', () => {
       renderShell('/skills')
       const bar = document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
-      expect(within(bar).getByText('Skills')).toBeTruthy()
+      const title = within(bar).getByText('Skills')
+      expect(title.className).not.toContain('sr-only')
     })
 
   })
