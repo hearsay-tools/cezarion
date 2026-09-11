@@ -1,5 +1,6 @@
 /* GitHub reference 9 and supplemental 27: document flow, readable forms and real filters. */
-[data-route='github'] { width: 100%; max-width: var(--measure); margin-inline: auto; }
+/* Reading width is a task-session preference; GitHub uses all available page space. */
+[data-route='github'] { width: 100%; }
 [data-slot='gh-hand'] { display: flex; flex-direction: column; gap: 16px; padding: 20px; border-radius: 12px; }
 [data-slot='gh-hand'] { border-color: color-mix(in srgb, var(--accent-strong) 24%, var(--border)); background: var(--background); }
 [data-slot='gh-hand'] > h3 { margin: 0; }

@@ -404,6 +404,14 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
     return { promptFirst: prompt.bottom < workflow.top, fullWidth: Math.abs(workflow.width - model.width) < 2, order: model.bottom < effort.top && effort.bottom < account.top, overflow: document.documentElement.scrollWidth > innerWidth };
   })()`)
   expect(facts).toEqual({ promptFirst: true, fullWidth: true, order: true, overflow: false })
+  expect(browser.evaluate(`(() => {
+    const page = document.querySelector('[data-route="github"]');
+    document.documentElement.dataset.width = 'narrow';
+    const narrow = page.getBoundingClientRect().width;
+    document.documentElement.dataset.width = 'wide';
+    return Math.abs(page.getBoundingClientRect().width - narrow);
+  })()`)).toBeLessThan(1)
+
   browser.fill('[data-slot="gh-custom-prompt"]', 'Review this issue and keep this draft')
   browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')
   browser.screenshot(`${artifactsDir}/revised-github-handoff-${width}-${theme}.png`, { viewport: true })

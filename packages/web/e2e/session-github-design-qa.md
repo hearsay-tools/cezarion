@@ -84,3 +84,12 @@ height at 1440, 402 and 360 in both themes: desktop failed before the fix, all s
 pass afterwards. Web build passes; session browser suite 30/30 and scroll suite
 12/12 pass with the fix. The Notes screenshot uses viewport capture so stitching
 does not scroll the transcript between its unchanged menu-toggle assertions.
+
+## Parent integration clarification: reading width
+
+Frame 18 limits reading-width preferences to Task Session, task Commits and task
+header. GitHub now fills its available page width and has no `--measure` constraint.
+A browser assertion switches narrow/wide and verifies unchanged GitHub width at
+1440, 402 and 360 in both themes (desktop failed before removal). Web build and
+18 focused browser cases pass: handoff layouts plus ready/unknown/conflicting PR
+review, with the existing controls and merge-permission assertions preserved.
