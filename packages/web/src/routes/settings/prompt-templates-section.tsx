@@ -126,8 +126,8 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
       className="mx-auto flex w-full max-w-2xl flex-col gap-7 p-4 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-6 md:pb-6"
     >
       <Field
-        title="Prompt templates"
-        hint="Reusable snippets you can insert into a prompt — the new-task composer, the GitHub hand-over, and the Inbox's “Add instructions” box all offer this list. Assign a template to a skill and it fills the prompt in for you when you pick that skill, as long as you have not typed anything yet."
+        title="Reusable instructions"
+        hint="Insert templates from task composers, or apply them automatically with selected skills when the prompt is empty."
       >
         <div data-slot="prompt-template-list" className="flex flex-col gap-3">
           {templates.length === 0 ? (
@@ -142,8 +142,10 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
                 data-template={template.id}
                 className="flex flex-col gap-1.5 rounded-md border border-border bg-card p-3"
               >
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2">
+                  <label htmlFor={`template-label-${template.id}`} className="text-sm">Template label</label>
                   <Input
+                    id={`template-label-${template.id}`}
                     aria-label={`Label for ${template.label || 'this template'}`}
                     data-slot="prompt-template-label-input"
                     value={template.label}
@@ -151,18 +153,11 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
                     onChange={(event) => updateTemplate(template.id, { label: event.target.value })}
                     className="flex-1"
                   />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    data-action="prompt-template-remove"
-                    title="Remove this template"
-                    onClick={() => removeTemplate(template.id)}
-                  >
-                    <XIcon aria-hidden="true" className="size-3.5" />
-                  </Button>
+
                 </div>
+                <label htmlFor={`template-text-${template.id}`} className="text-sm">Instructions</label>
                 <Textarea
+                  id={`template-text-${template.id}`}
                   aria-label={`Text for ${template.label || 'this template'}`}
                   data-slot="prompt-template-text-input"
                   value={template.text}
@@ -170,6 +165,7 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
                   onChange={(event) => updateTemplate(template.id, { text: event.target.value })}
                   className="min-h-14 text-[13px]"
                 />
+                <p className="mt-3 text-sm">Apply automatically with skills</p>
                 <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                   <TemplateSkillsPicker
                     label={template.label}
@@ -195,6 +191,17 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
                     </button>
                   ))}
                 </div>
+                  <Button
+                    type="button"
+                    className="self-start"
+                    variant="outline"
+                    size="sm"
+                    data-action="prompt-template-remove"
+                    title="Remove this template"
+                    onClick={() => removeTemplate(template.id)}
+                  >
+                    Delete template
+                  </Button>
               </div>
             ))
           )}
@@ -204,7 +211,10 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
           data-slot="prompt-template-new"
           className="flex flex-col gap-1.5 rounded-md border border-dashed border-border p-3"
         >
+          <h3 className="text-lg">New template</h3>
+          <label htmlFor="new-template-label" className="text-sm">Label</label>
           <Input
+            id="new-template-label"
             aria-label="New template label"
             data-slot="prompt-template-new-label"
             placeholder='Label (e.g. "Add tests")'
@@ -212,7 +222,9 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
             maxLength={80}
             onChange={(event) => setNewLabel(event.target.value)}
           />
+          <label htmlFor="new-template-text" className="text-sm">Instructions to insert</label>
           <Textarea
+            id="new-template-text"
             aria-label="New template text"
             data-slot="prompt-template-new-text"
             placeholder="The instructions to insert…"
@@ -390,7 +402,7 @@ function TemplateSkillsPicker({
 /** The Appearance/Agents sections' field chassis — same rhythm, so Settings reads as one surface. */
 function Field({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section className="settings-field flex flex-col gap-2">
       <div>
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <p className="text-[13px] text-muted-foreground">{hint}</p>

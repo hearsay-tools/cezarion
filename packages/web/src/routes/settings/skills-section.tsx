@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router'
 import { PackageCheckIcon } from 'lucide-react'
 
 import { putWorkspaceConfig } from '@/api/client'
@@ -33,14 +34,16 @@ export function SkillsSection() {
       />
     )
   }
-  return <SkillsForm config={config.data} update={update.data} updateError={update.error} />
+  return <SkillsForm projectId={projectId} config={config.data} update={update.data} updateError={update.error} />
 }
 
 function SkillsForm({
+  projectId,
   config,
   update,
   updateError,
 }: {
+  projectId: string
   config: WorkspaceConfigResponse
   update?: ReturnType<typeof useSkillsUpdate>['data']
   updateError: Error | null
@@ -110,6 +113,7 @@ function SkillsForm({
             Use default
           </Button>
         </div>
+        <h3 className="mt-4 text-lg">Installation status</h3>
         <p
           data-slot="skills-installation-status"
           role={updateError || update?.status === 'unavailable' ? 'status' : undefined}
@@ -117,6 +121,8 @@ function SkillsForm({
         >
           {status}
         </p>
+        <p className="mt-3 text-[13px] text-muted-foreground">Manage installed skills and sources from the Skills catalog.</p>
+        {projectId ? <Button asChild variant="outline" className="mt-2 self-start"><Link to={`/p/${encodeURIComponent(projectId)}/skills`}>Open Skills</Link></Button> : null}
       </section>
     </div>
   )

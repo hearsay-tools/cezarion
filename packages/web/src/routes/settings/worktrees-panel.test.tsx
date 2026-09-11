@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
@@ -25,6 +25,8 @@ function serve(data: WorktreesResponse) {
       const url = String(input)
       const method = init?.method ?? 'GET'
       requests.push({ method, url })
+      if (url === '/api/v1/open-targets') return json({ targets: [{ id: 'finder', label: 'Files', icon: 'folder' }] })
+      if (url.endsWith('/open-in') && method === 'POST') return json({ opened: true, path: '/tmp/worktree' })
       if (url === '/api/v1/worktrees' && method === 'GET') return json(data)
       if (url === '/api/v1/worktrees/reclaim' && method === 'POST') return json({ reclaimed: ['r1'] })
       if (/\/api\/v1\/runs\/.+\/remove-worktree$/.test(url) && method === 'POST') return json({ removed: true })
@@ -79,6 +81,13 @@ const sample: WorktreesResponse = {
 }
 
 describe('Settings → Resources: worktrees panel (#483)', () => {
+  it('opens a worktree through the discovered local folder target', async () => {
+    serve(sample)
+    renderPanel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Open folder for review dialog' }))
+    await waitFor(() => expect(posts(/bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb\/open-in$/)).toHaveLength(1))
+  })
+
   it('renders a row per worktree with size (or — when unavailable) and the keep footer', async () => {
     serve(sample)
     renderPanel()

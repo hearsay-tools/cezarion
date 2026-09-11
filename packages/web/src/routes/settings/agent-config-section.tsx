@@ -117,8 +117,8 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-        <nav data-slot="agent-config-nav" className="flex flex-col gap-5">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6">
+        <nav data-slot="agent-config-nav" className="flex min-w-0 flex-col gap-5">
           <AgentPane
             agent={agent}
             listing={listing}
@@ -127,7 +127,7 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
           />
         </nav>
 
-        <div data-slot="agent-config-editor-pane">
+        <div data-slot="agent-config-editor-pane" className="min-w-0">
           {selected ? (
             <FileEditor key={selected.id} file={selected} />
           ) : (

@@ -1,4 +1,5 @@
-import { ChevronRightIcon, SlidersHorizontalIcon } from 'lucide-react'
+import './settings-interiors.css'
+import { ChevronRightIcon } from 'lucide-react'
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { Link as RouterLink, NavLink as RouterNavLink } from 'react-router'
 import type { Capabilities } from '@open-mercato/cezar-api-client'
@@ -105,7 +106,6 @@ function SectionNav({
             : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
         )}
       >
-        <SlidersHorizontalIcon aria-hidden="true" className="size-4 shrink-0" />
         General
       </NavLink>
       {visibleSettingsSections(scope, capabilities).map((section) => (
@@ -121,7 +121,6 @@ function SectionNav({
               : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
           )}
         >
-          <section.icon aria-hidden="true" className="size-4 shrink-0" />
           {section.title}
         </NavLink>
       ))}
@@ -268,15 +267,15 @@ export function SettingsSectionRoute({
   return (
     <div
       data-route={scope === 'global' ? `settings-global-${section.id}` : `settings-${section.id}`}
-      className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9"
+      className="mx-auto flex min-h-full w-full max-w-[calc(var(--measure)+72px)] flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9"
     >
       {/* Desktop header — below `md` the shell's top bar already says "Settings". The
           breadcrumb is what tells the two areas apart at a glance (mockup: "Global settings"). */}
       <header className="flex shrink-0 flex-col gap-2">
-        <h1 className="text-[28px] font-semibold tracking-tight">{section.title}</h1>
-        <p className="text-[13px] text-soft-foreground">{section.description}</p>
+        <h1 className="text-[28px] font-semibold tracking-tight">{scope === 'global' ? 'Global settings' : 'Project settings'}</h1>
+        <p className="text-[13px] text-soft-foreground">{scope === 'global' ? 'Preferences for you and this machine, shared by every project.' : 'Configure this project and its agents.'}</p>
         {scope === 'global' ? (
-          <span data-slot="settings-scope-chip" className="ml-auto text-[11px] text-soft-foreground">
+          <span data-slot="settings-scope-chip" className="sr-only">
             Global settings
           </span>
         ) : null}
@@ -284,9 +283,10 @@ export function SettingsSectionRoute({
       <div className="flex min-w-0 flex-1 flex-col gap-6 md:flex-row">
         <SectionNav scope={scope} activeId={section.id} capabilities={capabilities} />
         <SectionPills scope={scope} activeId={section.id} capabilities={capabilities} />
-        <div className="flex min-w-0 flex-1 flex-col">
+        <section className="settings-panel min-w-0 self-start md:flex-1" aria-label={section.title}>
+          <h2 className="settings-panel-title">{section.title}</h2>
           <Body />
-        </div>
+        </section>
       </div>
     </div>
   )
@@ -301,7 +301,7 @@ export function SettingsIndexRoute({ scope, capabilities }: {
   const { Link } = navComponents(scope)
   const global = scope === 'global'
   return (
-    <div data-route={global ? 'settings-global' : 'settings'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <div data-route={global ? 'settings-global' : 'settings'} className="mx-auto flex min-h-full w-full max-w-[calc(var(--measure)+72px)] flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       <header className="flex shrink-0 flex-col gap-2">
         <h1 className="text-[28px] font-semibold tracking-tight">{global ? 'Global settings' : 'Project settings'}</h1>
         <p className="text-[13px] text-soft-foreground">
@@ -320,7 +320,7 @@ export function SettingsIndexRoute({ scope, capabilities }: {
               the machine is per-project — so there the cards are the whole page.
               `capabilities` travels because the registry half of that page is exactly what
               single-project mode disables, the same gate `visibleSettingsSections` applies. */}
-          {global ? <section className="mb-5 rounded-lg border border-border bg-card p-5"><h2 className="text-lg font-semibold">Workspace settings</h2><p className="mt-2 text-[13px] text-muted-foreground">Preferences apply across every project on this machine. Choose a section below to manage your workspace.</p></section> : <ProjectGeneral capabilities={capabilities} />}
+          {global ? <section className="mb-5 rounded-lg border border-border bg-card p-5"><span className="inline-flex rounded bg-accent-strong/10 px-2 py-1 text-[11px] text-accent-text">Stored locally · ~/.cezar</span><p className="mt-4 text-[13px] text-muted-foreground">Changes here apply across every connected project. Agent instructions and worktree settings remain project-specific.</p></section> : <ProjectGeneral capabilities={capabilities} />}
           <ul
             data-slot="settings-index"
             className={cn(
@@ -335,9 +335,9 @@ export function SettingsIndexRoute({ scope, capabilities }: {
                 <Link
                   to={settingsSectionPath(scope, section.id)}
                   data-section={section.id}
-                  className="flex items-center gap-3.5 rounded-lg border border-border bg-card p-4 shadow-xs transition-colors hover:bg-card-2"
+                  className="flex items-center gap-3.5 rounded-lg border border-border bg-card p-4 transition-colors hover:bg-card-2"
                 >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
+                  <span className="flex size-9 shrink-0 items-center justify-center text-accent-text">
                     <section.icon aria-hidden="true" className="size-4" />
                   </span>
                   <span className="min-w-0 flex-1">

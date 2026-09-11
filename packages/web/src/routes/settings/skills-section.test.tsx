@@ -117,6 +117,12 @@ afterEach(() => {
 const puts = () => requests.filter((request) => request.method === 'PUT')
 
 describe('Global settings → Skills', () => {
+  it('links installation status to the boot project skill catalog', async () => {
+    serve()
+    renderSkills()
+    const link = await screen.findByRole('link', { name: 'Open Skills' })
+    expect(link.getAttribute('href')).toBe('/p/boot/skills')
+  })
   it('renders the inherited default and quiet no-installation state', async () => {
     serve()
     renderSkills()

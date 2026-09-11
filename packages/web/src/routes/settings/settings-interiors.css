@@ -1,0 +1,70 @@
+/* Settings interiors follow the same section card in both scopes. The outer app
+   owns reading width and density; this file never changes either preference. */
+.settings-panel {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 24px;
+}
+.settings-panel-title { margin: 0 0 24px; font-size: 20px; font-weight: 400; }
+.settings-panel > [data-slot] {
+  width: 100%; max-width: none; margin: 0; padding: 0;
+}
+.settings-panel .settings-field { gap: 12px; }
+.settings-panel .settings-field + .settings-field {
+  border-top: 1px solid var(--border); padding-top: 22px;
+}
+.settings-panel .settings-field h2 { font-size: 14px; font-weight: 400; }
+.settings-panel .settings-field h2 + p { margin-top: 8px; line-height: 1.6; }
+.settings-panel :is(input:not([type=checkbox]):not([type=radio]), select, textarea:not([data-slot="code-editor-input"])) {
+  min-width: 0; max-width: 100%; min-height: 44px;
+  background: var(--background); box-shadow: none; font-size: 13px;
+}
+.settings-panel .settings-field > :is(input, select, textarea:not([data-slot="code-editor-input"])),
+.settings-panel [data-slot="agents-default-runner"],
+.settings-panel [data-slot="projects-browse-root"],
+.settings-panel [data-slot="projects-checkout-root"] { width: 100%; max-width: none; }
+.settings-panel button:not([role=switch]):not([data-slot=project-tag-suggestion]) { min-height: 40px; }
+.settings-panel [data-slot="resources-composer-defaults"] { grid-template-columns: 1fr; gap: 24px; }
+.settings-panel [data-slot="prompt-template-row"],
+.settings-panel [data-slot="prompt-template-new"] { padding: 20px 0; border: 0; border-radius: 0; gap: 12px; border-bottom: 1px solid var(--border); }
+.settings-panel [data-slot="agent-config-agents"] { padding: 0; background: transparent; gap: 8px; }
+.settings-panel [data-slot="agent-config-agent"] { border: 1px solid var(--border); }
+.settings-panel [data-slot="agent-config-agent"][aria-selected=true] { background: var(--accent-strong); color: white; }
+.settings-panel [data-slot="accounts-tabs"] { flex-wrap: wrap; height: auto; }
+/* Keep the complete table semantics/data while arranging each record as the
+   reference's vertical card, so long paths and tag editors fit at any width. */
+.settings-panel :is([data-slot="projects-section"], [data-slot="worktrees-panel"]) table { display: block; }
+.settings-panel :is([data-slot="projects-section"], [data-slot="worktrees-panel"]) :is(tbody, tr) { display: grid; min-width: 0; }
+.settings-panel :is([data-slot="projects-section"], [data-slot="worktrees-panel"]) thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.settings-panel [data-slot="projects-section"] colgroup { display: none; }
+.settings-panel :is([data-slot="project-row"], [data-slot="worktree-row"]) { padding: 16px 0; gap: 8px; }
+.settings-panel :is([data-slot="project-row"], [data-slot="worktree-row"]) > :is(th, td) { display: block; max-width: none; width: 100%; min-width: 0; text-align: left; padding: 0 12px; }
+.settings-panel :is([data-slot="project-row"], [data-slot="worktree-row"]) .truncate { white-space: normal; overflow-wrap: anywhere; }
+.settings-panel :is([data-slot="project-row"], [data-slot="worktree-row"]) td:last-child { border-top: 1px solid var(--border); padding-top: 12px; }
+@media (max-width: 767px) {
+  .settings-panel { padding: 20px; }
+  .settings-panel button:not([role=switch]) { min-height: 44px; }
+  .settings-panel [data-slot="notifications-section"] > section > div:first-child,
+  .settings-panel [data-slot="skills-settings-section"] > section > div:first-child { flex-direction: column; align-items: flex-start; }
+  .settings-panel [data-slot="agent-config-agents"] { flex-direction: column; }
+  .settings-panel [data-slot="accounts-tabs"] { flex-wrap: wrap; }
+}
+.settings-panel .settings-resource-controls input { flex: 1; width: 100%; }
+.settings-panel .settings-field:has([data-slot="resources-auto-resume"]),
+.settings-panel .settings-field:has([data-slot="resources-monitoring-wake-mode"]) { position: relative; }
+.settings-panel .settings-field:has([data-slot="resources-auto-resume"]) > div:first-child,
+.settings-panel .settings-field:has([data-slot="resources-monitoring-wake-mode"]) > div:first-child { padding-right: 60px; }
+.settings-panel [data-slot="resources-auto-resume"],
+.settings-panel [data-slot="resources-monitoring-wake-mode"] { position: absolute; right: 0; top: 24px; }
+.settings-panel [data-slot="agent-config-group"] ul { flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.settings-panel [data-slot="agent-config-file"] { border: 1px solid var(--border); padding: 10px 12px; }
+.settings-panel [data-slot="agent-config-file"][data-selected=true] { border-color: var(--accent-strong); color: var(--accent-text); }
+@media (max-width: 767px) {
+  .settings-panel [data-slot="resources-auto-resume"],
+  .settings-panel [data-slot="resources-monitoring-wake-mode"] { position: static; }
+  .settings-panel .settings-field:has([data-slot="resources-auto-resume"]) > div:first-child,
+  .settings-panel .settings-field:has([data-slot="resources-monitoring-wake-mode"]) > div:first-child { padding-right: 0; }
+  .settings-panel [data-slot="agent-config-group"] li { max-width: 100%; }
+}

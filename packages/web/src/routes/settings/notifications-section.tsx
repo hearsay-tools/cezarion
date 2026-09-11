@@ -107,6 +107,9 @@ export function NotificationsSection() {
           />
         </div>
 
+        {!unsupported ? <p data-slot="notifications-permission" className="mt-4 text-[13px] text-muted-foreground">Browser permission · {permission === 'granted' ? 'Allowed' : permission === 'denied' ? 'Blocked' : 'Not requested'}</p> : null}
+        <p className="text-[13px] text-muted-foreground">Permission is requested only when you enable notifications.</p>
+
         {unsupported ? (
           <p data-slot="notifications-unsupported" className="text-[13px] text-muted-foreground">
             This browser does not support notifications, so the toggle is unavailable here.

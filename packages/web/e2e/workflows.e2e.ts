@@ -154,6 +154,8 @@ describe('workflow builder against the live dry-run server', () => {
             document.documentElement.classList.toggle('light', ${JSON.stringify(theme)} === 'light');
           })()`)
 
+          // Measure the settled theme, rather than an intermediate button color transition.
+          browser.waitForFunction(`document.querySelector('[data-slot="wb-actions"]').getAnimations({ subtree: true }).every(animation => animation.playState !== 'running')`)
           const presentation = browser.evaluate(`(() => {
             const save = document.querySelector('[data-slot="wb-save"]');
             const removeFile = document.querySelector('[data-slot="wb-delete"]');
@@ -162,7 +164,7 @@ describe('workflow builder against the live dry-run server', () => {
             const summary = step.querySelector('[data-slot="wb-step-summary"]');
             const sr = summary.getBoundingClientRect(), hr = heading.getBoundingClientRect(), cr = step.getBoundingClientRect();
             const style = getComputedStyle(summary), saveStyle = getComputedStyle(save), deleteStyle = getComputedStyle(removeFile);
-            const controls = ['[data-slot="wb-step-grip"]', '[data-slot="wb-step-remove"]', '${addButton(ALPHA)}']
+            const controls = ['[data-slot="wb-step-grip"]', '[data-slot="wb-step-actions"]', '${addButton(ALPHA)}']
               .map(selector => document.querySelector(selector).getBoundingClientRect())
               .map(rect => ({ width: rect.width, height: rect.height }));
             return {
@@ -226,7 +228,7 @@ describe('workflow builder against the live dry-run server', () => {
               '[data-slot="wb-delete"]',
               '[data-slot="wb-save"]',
               '[data-slot="wb-step-grip"]',
-              '[data-slot="wb-step-remove"]',
+              '[data-slot="wb-step-actions"]',
               addButton(ALPHA),
             ]) {
               focusWithKeyboard(browser, selector)
@@ -321,23 +323,27 @@ describe('workflow builder against the live dry-run server', () => {
     browser.click('[data-slot="wb-import"]')
     browser.waitForFunction(`document.querySelector('[data-slot="wb-import-text"]') !== null`)
     browser.fill('[data-slot="wb-import-text"]', pasted)
+    // The expanded import card can place its actions below the nested page viewport.
+    browser.evaluate(`document.querySelector('[data-slot="wb-import-run"]').scrollIntoView({ block: 'center' })`)
     browser.click('[data-slot="wb-import-run"]')
 
-    browser.waitForFunction(`${stepIdsJs} === 'fix,tests'`)
+    browser.waitForFunction(`${stepIdsJs} === 'fix,tests' || document.querySelector('[data-slot="wb-import-error"]') !== null`)
+    expect(browser.evaluate(`document.querySelector('[data-slot="wb-import-error"]')?.textContent ?? ''`)).toBe('')
+    expect(String(browser.evaluate(stepIdsJs))).toBe('fix,tests')
     expect(browser.text('[data-slot="wb-count"]')).toBe('2 steps')
-    // The check step wears its badge; the preview switched to the full steps form.
-    expect(browser.text('[data-slot="wb-step"][data-id="tests"] [data-slot="wb-step-badge"]')).toBe('check')
+    // The check step retains its kind and retry count below the summary; YAML stays complete.
+    expect(browser.text('[data-slot="wb-step"][data-id="tests"] [data-slot="wb-step-kind"]')).toBe('Command step · Retry ×2')
     expect(browser.text('[data-slot="wb-yaml"]')).toContain('steps:')
     expect(browser.text('[data-slot="wb-yaml"]')).toContain('command: npm test')
     const separation = browser.evaluate(`(() => {
       const step = document.querySelector('[data-slot="wb-step"][data-id="tests"]');
       const heading = step.querySelector('[data-slot="wb-step-heading"]').getBoundingClientRect();
       const summary = step.querySelector('[data-slot="wb-step-summary"]').getBoundingClientRect();
-      const badge = step.querySelector('[data-slot="wb-step-badge"]').getBoundingClientRect();
-      return { summaryTop: summary.top, headingBottom: heading.bottom, badgeBottom: badge.bottom };
-    })()`) as { summaryTop: number; headingBottom: number; badgeBottom: number }
+      const kind = step.querySelector('[data-slot="wb-step-kind"]').getBoundingClientRect();
+      return { summaryTop: summary.top, summaryBottom: summary.bottom, headingBottom: heading.bottom, kindTop: kind.top };
+    })()`) as { summaryTop: number; summaryBottom: number; headingBottom: number; kindTop: number }
     expect(separation.summaryTop).toBeGreaterThanOrEqual(separation.headingBottom)
-    expect(separation.summaryTop).toBeGreaterThanOrEqual(separation.badgeBottom)
+    expect(separation.kindTop).toBeGreaterThanOrEqual(separation.summaryBottom)
     browser.screenshot(`${artifactsDir}/workflows-imported.png`)
   })
 

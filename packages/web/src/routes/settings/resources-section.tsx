@@ -7,6 +7,7 @@ import { putWorkspaceConfig } from '@/api/client'
 import { useWorkspaceConfig, workspaceQueryKeys } from '@/api/queries'
 import type { SetWorkspaceConfigInput, WorkspaceConfigResponse } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
+import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { SettingsField } from './settings-field'
@@ -133,7 +134,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
     >
       <SettingsField
         title="Max parallel tasks"
-        hint="How many tasks run at once across every project. The rest wait in the queue. A non-git directory always runs one at a time."
+        hint="Limit simultaneously running tasks across projects. The rest wait in the queue; non-git folders run one at a time."
       >
         <select
           aria-label="Max parallel tasks"
@@ -166,7 +167,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
 
       <SettingsField
         title="Extra monitoring sessions"
-        hint="How many agent sessions may wait on CI, sub-agents, or monitored commands without using an active task slot. Extra sessions stay alive but pause the queue."
+        hint="Additional capacity reserved for agents monitoring CI, workers, or commands."
       >
         <select
           aria-label="Extra monitoring sessions"
@@ -189,21 +190,19 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
         title="Monitoring wake-up"
         hint="Park uses no model turns. Re-check sends the same agent a follow-up on this cadence until work completes or the 40-wakeup safety cap is reached."
       >
-        <div className="flex flex-wrap items-center gap-2">
-          <select
+        <div className="settings-resource-controls flex flex-wrap items-center gap-2">
+          <Switch
             aria-label="Monitoring wake-up"
             data-slot="resources-monitoring-wake-mode"
-            value={wakeMode}
+            checked={wakeMode === 'interval'}
             disabled={save.isPending}
-            onChange={(event) => setWakeMode(event.target.value as 'park' | 'interval')}
-            className="rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
-          >
-            <option value="park">Park until resumed</option>
-            <option value="interval">Re-check on an interval</option>
-          </select>
+            onCheckedChange={(enabled) => setWakeMode(enabled ? 'interval' : 'park')}
+          />
           {wakeMode === 'interval' ? (
             <>
+              <label htmlFor="monitoring-wake-interval" className="w-full text-sm">Wake interval</label>
               <input
+                id="monitoring-wake-interval"
                 type="number"
                 min={WAKE_INTERVAL_MIN}
                 max={WAKE_INTERVAL_MAX}
@@ -228,19 +227,15 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
 
       <SettingsField
         title="Auto-resume after a usage limit"
-        hint="When an agent stops because its provider usage limit is reached, cezar waits for the reset the provider named and continues the task 30 seconds later — up to 12 times in a row without you. Off leaves the task failed with its Continue button."
+        hint="Resume eligible tasks 30 seconds after the provider usage limit resets, up to 12 times. When off, resume manually with Continue."
       >
-        <select
+        <Switch
           aria-label="Auto-resume after a usage limit"
           data-slot="resources-auto-resume"
-          value={autoResume ? 'on' : 'off'}
+          checked={autoResume}
           disabled={save.isPending}
-          onChange={(event) => saveAutoResume(event.target.value === 'on')}
-          className="block w-28 rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
-        >
-          <option value="on">On</option>
-          <option value="off">Off</option>
-        </select>
+          onCheckedChange={saveAutoResume}
+        />
         <p className="text-[11px] text-soft-foreground">
           Applies to Claude, Codex and OpenCode — whenever the provider says when the limit lifts.
         </p>
@@ -250,7 +245,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
         title="Per-task memory limit"
         hint="When a task's whole process tree crosses this, the engine pauses it with a warning and starts the next queued task. Leave empty for no limit."
       >
-        <div className="flex items-center gap-2">
+        <div className="settings-resource-controls flex flex-wrap items-center gap-2">
           <input
             type="number"
             inputMode="numeric"

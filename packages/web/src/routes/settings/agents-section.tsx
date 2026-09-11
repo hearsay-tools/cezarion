@@ -138,7 +138,7 @@ function AgentsForm({
             : 'The model preselected in the composer for each runner. Auto lets the runner decide per task.'
         }
       >
-        <div className="flex max-w-md flex-col gap-2">
+        <div className="flex w-full flex-col gap-5">
           {RUNNERS.map((runner) => {
             const provider = providerStatusFor(providerStatus.data, runner.id)
             const providerConnected =
@@ -166,8 +166,8 @@ function AgentsForm({
               configuredModel ??
               'auto (default)'
             return (
-              <label key={runner.id} className="flex items-center gap-3">
-                <span className="w-24 shrink-0 font-mono text-xs text-muted-foreground">{runner.label}</span>
+              <label key={runner.id} className="flex flex-col gap-2">
+                <span className="shrink-0 text-sm text-muted-foreground">{runner.label}</span>
                 {config.modelsLocked ? (
                   <output
                     aria-label={`Default model for ${runner.label}`}
@@ -219,9 +219,9 @@ function AgentsForm({
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           placeholder="Extra rules for every agent run — conventions, tone, review requirements…"
-          className="min-h-32 max-w-xl"
+          className="min-h-24 w-full"
         />
-        <div className="flex max-w-xl items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Button
             type="button"
             variant="outline"
@@ -422,7 +422,7 @@ function DefaultAgentField({
 /** The Appearance section's field chassis — same rhythm, so Settings reads as one surface. */
 function Field({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section className="settings-field flex flex-col gap-2">
       <div>
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <p className="text-[13px] text-muted-foreground">{hint}</p>

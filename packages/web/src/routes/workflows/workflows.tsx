@@ -19,19 +19,16 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowDownIcon,
   CheckIcon,
   CopyIcon,
   DownloadIcon,
-  GripVerticalIcon,
+  EllipsisIcon,
   PlusIcon,
   SparklesIcon,
-  SquareTerminalIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UploadIcon,
   WandSparklesIcon,
-  XIcon,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router'
@@ -52,6 +49,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toaster'
@@ -133,6 +132,9 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [query, setQuery] = useState('')
+  const [addOpen, setAddOpen] = useState(false)
+  const [addQuery, setAddQuery] = useState('')
+  const [selectedSkill, setSelectedSkill] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [importText, setImportText] = useState('')
   const [importError, setImportError] = useState('')
@@ -145,6 +147,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
   // indicator between cards, the affordance the legacy `.wb-gap` slots gave (#wb-drop-line).
   const [overId, setOverId] = useState<string | null>(null)
   const nameInput = useRef<HTMLInputElement>(null)
+  const addStepButton = useRef<HTMLButtonElement>(null)
 
   const workflows = workflowsQuery.data?.workflows ?? []
   const skills = skillsQuery.data ?? []
@@ -547,9 +550,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
               data-slot="wb-import-panel"
               className="rounded-xl border border-border bg-card p-5 [&_button]:min-h-11"
             >
-              <div className="text-[11px] font-medium tracking-wide text-soft-foreground uppercase">
-                Import workflow YAML
-              </div>
+              <h2 className="text-xl font-normal">Import workflow YAML</h2>
               <Textarea
                 data-slot="wb-import-text"
                 aria-label="Workflow YAML to import"
@@ -558,10 +559,11 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
                 placeholder={'name: my-flow\nskills:\n  - test-conventions\n  - commit-style'}
                 value={importText}
                 onChange={(event) => setImportText(event.target.value)}
-                className="mt-2 min-h-28 font-mono text-xs"
+                className="mt-4 min-h-32 bg-background p-4 font-mono text-[13px] leading-relaxed"
               />
+              <p className="mt-4 text-[13px] text-muted-foreground">Paste a portable workflow definition. Imported steps appear in execution order.</p>
               {importError !== '' ? (
-                <p data-slot="wb-import-error" className="mt-2 text-xs text-danger">
+                <p data-slot="wb-import-error" role="alert" className="mt-2 text-xs text-danger">
                   {importError}
                 </p>
               ) : null}
@@ -611,9 +613,10 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
                 onMove={(from, to) => setSteps(moveStep(steps, from, to))}
               />
               <Button
+                ref={addStepButton}
                 variant="outline"
                 className="mt-4 min-h-11"
-                onClick={() => document.querySelector<HTMLInputElement>('[data-slot="wb-filter"]')?.focus()}
+                onClick={() => { setSelectedSkill(null); setAddQuery(''); setAddOpen(true) }}
               >
                 <PlusIcon aria-hidden="true" className="size-4" />
                 Add step
@@ -706,6 +709,32 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
         </DragOverlay>
       </DndContext>
 
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent data-slot="wb-add-dialog" onCloseAutoFocus={(event) => { event.preventDefault(); addStepButton.current?.focus() }} className="max-h-[85dvh] overflow-y-auto [&_button]:min-h-11">
+          <DialogHeader>
+            <DialogTitle>Add step</DialogTitle>
+            <DialogDescription>Append a skill, then reorder it in the existing canvas.</DialogDescription>
+          </DialogHeader>
+          <Input aria-label="Filter skills" placeholder="Filter skills…" value={addQuery} onChange={(event) => setAddQuery(event.target.value)} />
+          {skillsQuery.isError ? <p role="alert" className="text-sm text-danger">Could not load skills: {skillsQuery.error.message}</p> : (
+            <div role="radiogroup" aria-label="Available skills" className="grid max-h-80 gap-2 overflow-y-auto">
+              {paletteSkills.filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(addQuery.trim().toLowerCase())).map((skill) => (
+                <label key={skill.name} className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 has-[:checked]:border-accent-strong has-[:checked]:bg-accent-strong/5">
+                  <input type="radio" name="workflow-add-skill" className="mt-1 accent-[var(--accent-strong)]" value={skill.name} checked={selectedSkill === skill.name} onChange={() => setSelectedSkill(skill.name)} />
+                  <span className="min-w-0 break-words text-sm"><span className="block">{skill.name}</span><span className="mt-2 block text-xs text-muted-foreground">{skill.description}</span></span>
+                </label>
+              ))}
+              {paletteSkills.filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(addQuery.trim().toLowerCase())).length === 0 ? <p className="text-sm text-muted-foreground">{skills.length === 0 ? 'No skills available in this project.' : 'No matching skills.'}</p> : null}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button variant="primary" disabled={!selectedSkill || steps.length >= WB_MAX_STEPS} onClick={() => { if (selectedSkill) { addSkill(selectedSkill); setAddOpen(false) } }}>Add selected skill</Button>
+          </div>
+          {steps.length >= WB_MAX_STEPS ? <p role="status" className="text-sm text-muted-foreground">A workflow can contain up to {WB_MAX_STEPS} steps. Remove a step before adding another.</p> : null}
+        </DialogContent>
+      </Dialog>
+
       {/* Save-over confirm: the server answered 409 `exists` — legacy `confirm()`, as a dialog. */}
       <AlertDialog open={confirmOverwrite} onOpenChange={(open) => !open && setConfirmOverwrite(false)}>
         <AlertDialogContent data-slot="wb-overwrite-dialog">
@@ -717,7 +746,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep the file</AlertDialogCancel>
-            <AlertDialogAction data-slot="wb-overwrite-confirm" onClick={() => save.mutate(true)}>
+            <AlertDialogAction data-slot="wb-overwrite-confirm" className="bg-danger text-danger-foreground" onClick={() => save.mutate(true)}>
               Overwrite
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -820,10 +849,7 @@ function Canvas({
               appendActive ? 'bg-accent-strong' : 'bg-transparent',
             )}
           />
-          <div className="flex items-center justify-center gap-1.5 pt-1.5 pb-1 text-[11px] text-muted-foreground">
-            <ArrowDownIcon aria-hidden="true" className="size-3" />
-            runs top to bottom
-          </div>
+
         </SortableContext>
       )}
     </div>
@@ -920,12 +946,13 @@ function StepCardBody({
   const known = skills.find((skill) => skill.name === step.skill)
   const isCheck = Boolean(step.command)
   const title = step.name ?? step.skill ?? step.id
+  const specificPrompt = step.prompt?.trim() === '{{task}}' ? undefined : step.prompt?.trim()
   const description = isCheck
     ? `$ ${step.command}${step.onFail ? ` — on fail retry from "${step.onFail.retry}" (×${step.onFail.max ?? 2})` : ''}`
     : step.skill
-      ? (known?.description ?? 'Not in this repo or the team skills — the step runs on its plain prompt.')
+      ? (specificPrompt || known?.description || 'Not in this repo or the team skills — the step runs on its plain prompt.')
       : (step.prompt ?? '')
-  const badge = isCheck ? 'check' : step.skill ? (known ? null : 'unknown') : 'prompt'
+  const badge = step.skill && !known ? 'unknown' : null
 
   return (
     <div
@@ -947,41 +974,33 @@ function StepCardBody({
           className="inline-flex size-11 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
           {...gripProps}
         >
-          <GripVerticalIcon aria-hidden="true" className="size-3.5" />
+          <span className="rounded bg-accent-strong/10 px-2 py-1 font-mono text-[10px] text-link-foreground">{String(index + 1).padStart(2, '0')}</span>
         </button>
-        <span className="shrink-0 rounded bg-accent-strong/10 px-2 py-1 font-mono text-[10px] text-link-foreground">
-          {String(index + 1).padStart(2, '0')}
-        </span>
-        {isCheck ? (
-          <SquareTerminalIcon aria-hidden="true" className="size-3.5 shrink-0 text-success" />
-        ) : (
-          <SparklesIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
-        )}
         <div className="min-w-0 flex-1 break-words text-sm font-medium [overflow-wrap:anywhere]">{title}</div>
         {badge ? (
           <span
             data-slot="wb-step-badge"
             className={cn(
               'shrink-0 rounded-full border px-2 py-px font-mono text-[10.5px]',
-              badge === 'check' && 'border-success/30 text-success',
               badge === 'unknown' && 'border-danger/35 text-danger',
-              badge === 'prompt' && 'border-border text-soft-foreground',
             )}
           >
             {badge}
           </span>
         ) : null}
         {onRemove ? (
-          <button
-            type="button"
-            data-slot="wb-step-remove"
-            aria-label={`Remove step ${index + 1}: ${title}`}
-            title="Remove from flow"
-            onClick={onRemove}
-            className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-soft-foreground transition-colors outline-none hover:text-danger focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          >
-            <XIcon aria-hidden="true" className="size-3.5" />
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button data-slot="wb-step-actions" variant="ghost" size="icon" className="size-11" aria-label={`Step ${index + 1} actions: ${title}`}>
+                <EllipsisIcon aria-hidden="true" className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem data-slot="wb-step-remove" aria-label={`Remove step ${index + 1}: ${title}`} onSelect={onRemove}>
+                <Trash2Icon aria-hidden="true" /> Remove step
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
       </div>
       {description ? (
@@ -992,7 +1011,7 @@ function StepCardBody({
           {description}
         </div>
       ) : null}
-      <p className="mt-3 text-[10px] text-link-foreground">
+      <p data-slot="wb-step-kind" className="mt-3 text-[10px] text-link-foreground">
         {isCheck
           ? `Command step${step.onFail ? ` · Retry ×${step.onFail.max ?? 2}` : ''}`
           : step.skill

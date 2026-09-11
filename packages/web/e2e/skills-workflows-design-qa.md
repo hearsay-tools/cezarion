@@ -1,4 +1,7 @@
-# Skills and Workflows — design.pen verification
+# Skills and Workflows — earlier reference verification
+
+The revised `cezarion.pen` frame mapping and current verification are recorded in
+[settings-workflows-revised-qa.md](./settings-workflows-revised-qa.md). The notes below describe the earlier baseline.
 
 Issue #224, continuing the approved PR #227 baseline. Scope: Skills and Workflows only.
 

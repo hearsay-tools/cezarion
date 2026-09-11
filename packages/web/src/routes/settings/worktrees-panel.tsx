@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { reclaimWorktrees, removeRunWorktree } from '@/api/client'
-import { queryKeys, useWorktrees } from '@/api/queries'
+import { openRunIn, reclaimWorktrees, removeRunWorktree } from '@/api/client'
+import { queryKeys, useOpenTargets, useWorktrees } from '@/api/queries'
 import type { WorktreeInfo } from '@open-mercato/cezar-api-client'
 import {
   AlertDialog,
@@ -33,6 +33,12 @@ type Confirming = { kind: 'reclaim' } | { kind: 'delete'; runId: string; title: 
  */
 export function WorktreesPanel() {
   const worktrees = useWorktrees()
+  const targets = useOpenTargets()
+  const folderTarget = targets.data?.targets.find((target) => target.id === 'finder')
+  const openFolder = useMutation({
+    mutationFn: (runId: string) => openRunIn(runId, folderTarget!.id),
+    onError: (error: Error) => toast(error.message, { tone: 'danger' }),
+  })
   const queryClient = useQueryClient()
   const [confirming, setConfirming] = useState<Confirming>(null)
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.worktrees })
@@ -108,6 +114,8 @@ export function WorktreesPanel() {
                   key={w.runId}
                   worktree={w}
                   disabled={busy}
+                  onOpen={folderTarget ? () => openFolder.mutate(w.runId) : undefined}
+                  opening={openFolder.isPending}
                   onDelete={() => setConfirming({ kind: 'delete', runId: w.runId, title: w.title })}
                 />
               ))}
@@ -174,10 +182,14 @@ export function WorktreesPanel() {
 function WorktreeRow({
   worktree,
   disabled,
+  onOpen,
+  opening,
   onDelete,
 }: {
   worktree: WorktreeInfo
   disabled: boolean
+  onOpen?: () => void
+  opening: boolean
   onDelete: () => void
 }) {
   return (
@@ -201,6 +213,7 @@ function WorktreeRow({
       </td>
       <td className="px-3 py-2 tabular-nums text-soft-foreground">{shortAge(worktree.finishedAt ?? undefined) || '—'}</td>
       <td className="px-3 py-2 text-right">
+        {onOpen ? <Button variant="outline" className="mr-2" aria-label={`Open folder for ${worktree.title}`} disabled={opening} onClick={onOpen}>Open folder</Button> : null}
         <Button
           type="button"
           variant="ghost"

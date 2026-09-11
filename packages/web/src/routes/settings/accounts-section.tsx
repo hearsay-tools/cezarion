@@ -152,7 +152,7 @@ function AccountsPane({ data }: { data: AgentProfilesResponse }) {
         data-slot="accounts-section"
         className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4 md:p-6"
       >
-        <h2 className="text-sm font-semibold text-foreground">Agent accounts</h2>
+
         <p data-slot="accounts-hosted" className="text-[13px] text-soft-foreground">
           Agent accounts are managed from the machine that owns the checkout — this cockpit runs in
           hosted mode.
@@ -167,7 +167,7 @@ function AccountsPane({ data }: { data: AgentProfilesResponse }) {
       className="mx-auto flex w-full max-w-2xl flex-col gap-5 p-4 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-6 md:pb-6"
     >
       <div>
-        <h2 className="text-sm font-semibold text-foreground">Agent accounts</h2>
+
         <p className="text-[13px] text-muted-foreground">
           One agent per tab: whether it is installed, and which logins you have. Add a second
           config folder to keep a work account beside a personal one; each project picks which it
