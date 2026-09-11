@@ -205,7 +205,7 @@
   --supporting-foreground: var(--text-secondary);
   --border: var(--border-subtle);
   --input: var(--border-subtle);
-  --control-border: #8a94a6;
+  --control-border: var(--text-muted);
   --selection-indicator: var(--accent-text);
   --contrast: var(--text-primary);
   --contrast-foreground: var(--surface-raised);
