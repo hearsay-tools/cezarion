@@ -38,17 +38,19 @@ export function RepoCommitsSection({ log }: { log: LogEntry[] }) {
     )
   }
   return (
-    <CommitList
-      slot="repo-commits"
-      commits={log.map((commit) => ({
-        sha: commit.hash,
-        shaLabel: commit.hash,
-        subject: commit.subject,
-        author: commit.author,
-        when: commit.when,
-        href: `/git/commits/${commit.hash}`,
-      }))}
-    />
+    <div className="px-[18px] py-[22px] md:px-9">
+      <CommitList
+        slot="repo-commits"
+        commits={log.map((commit) => ({
+          sha: commit.hash,
+          shaLabel: commit.hash,
+          subject: commit.subject,
+          author: commit.author,
+          when: commit.when,
+          href: `/git/commits/${commit.hash}`,
+        }))}
+      />
+    </div>
   )
 }
 

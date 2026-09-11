@@ -89,8 +89,8 @@ import { useFinishRun } from './use-finish-run'
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
  * the Session | Changes | Files tabs with the action bar, the workflow step rail and the plan
  * mirror — the whole header region above the thread. It scrolls away on phones so the transcript
- * owns the small viewport, and stays sticky from `md` upward where there is room for persistent
- * run context.
+ * owns the small viewport, and scrolls with the document on desktop too: the spacious page heading must not
+ * cover the diff or transcript while reading.
  *
  * Two deliberate omissions, both seams rather than gaps:
  *  - **VS Code** (spec: `POST /api/runs/:id/open-in-editor`) — the endpoint does not exist yet;
@@ -160,10 +160,10 @@ export function RunHeader({
   return (
     <header
       data-slot="run-header"
-      className="relative z-20 border-b border-border bg-background/95 px-3 pt-2 backdrop-blur md:sticky md:top-0 md:px-6 md:pt-3"
+      className="relative z-20 bg-background px-[18px] pt-[18px] md:px-9 md:pt-7"
     >
-      <div className="mx-auto w-full max-w-[var(--measure)]">
-        <div className="flex min-w-0 items-center gap-2">
+      <div className="w-full">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
           <EditableTitle run={run} />
           <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">
             {planTally ? (
@@ -222,7 +222,7 @@ export function RunHeader({
             metadata — it belongs with the pill above, not behind a tap with the diff stats. */}
         <MonitoringSchedule run={run} />
 
-        <div data-slot="run-tabs" className="mt-1.5 flex items-end gap-1 md:mt-2.5 max-md:[&>a]:min-h-11">
+        <div data-slot="run-tabs" className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:[&>a]:min-h-11">
           <TabLink to={`/tasks/${run.id}`} active={tab === 'session'}>
             Session
           </TabLink>
@@ -302,7 +302,7 @@ export function RunHeader({
 
         <RunRelationshipsPanel run={run} />
 
-        {run.steps.length > 0 ? (
+        {tab !== 'session' && run.steps.length > 0 ? (
           <div className="border-t border-border pt-1 pb-0 md:pt-2 md:pb-1">
             <WorkflowSteps runId={run.id} steps={run.steps} />
           </div>
@@ -509,8 +509,8 @@ function EditableTitle({ run }: { run: ApiRun }) {
   }
 
   return (
-    <span className="group flex min-w-0 items-center gap-1">
-      <h1 className="min-w-0 truncate text-[15px] font-semibold" title={run.task}>
+    <span className="group flex min-w-0 basis-full items-center gap-1 md:basis-auto">
+      <h1 className="line-clamp-2 min-w-0 break-words text-2xl font-semibold tracking-tight" title={run.task}>
         {title}
       </h1>
       <button

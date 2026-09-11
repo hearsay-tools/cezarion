@@ -161,7 +161,7 @@ describe('the repo view Changes segment', () => {
     renderAt('/git')
 
     await waitFor(() => expect(document.querySelector('[data-slot="repo-header"]')).not.toBeNull())
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Git')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Git · Changes')
     expect(document.querySelector('[data-slot="branch-chip"]')?.textContent).toContain('main')
 
     const tabs = [...document.querySelectorAll('[data-slot="repo-tabs"] a')].map((a) => ({

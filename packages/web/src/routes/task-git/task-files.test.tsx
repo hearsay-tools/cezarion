@@ -136,7 +136,7 @@ describe('the Files tab route', () => {
     await waitFor(() => expect(document.querySelector('[data-slot="files-tree-pane"]')).not.toBeNull())
     const pane = document.querySelector('[data-slot="files-tree-pane"]') as HTMLElement
     // Pin and cap both read the one var the parent declares, so they cannot drift apart.
-    expect(pane.parentElement?.className).toContain('[--diff-sticky-top:7rem]')
+    expect(pane.parentElement?.className).toContain('[--diff-sticky-top:1rem]')
     expect(pane.className).toContain('md:top-[var(--diff-sticky-top)]')
     expect(pane.className).toContain('md:max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)]')
     expect(pane.className).toContain('md:overflow-y-auto')
@@ -258,4 +258,25 @@ describe('the Files tab route', () => {
     )
     expect(document.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe('danger')
   })
+})
+
+
+it('opens a known worktree path without fetching unopened directories', async () => {
+  const sent = stubFetch()
+  renderFilesRoute()
+  const input = await screen.findByRole('textbox', { name: 'File path in the worktree' })
+  fireEvent.change(input, { target: { value: 'src/nested.md' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+  await waitFor(() => expect(sent).toContain('GET /api/v1/runs/r1/files?path=src%2Fnested.md'))
+  expect(sent).not.toContain('GET /api/v1/runs/r1/files?path=src')
+})
+
+
+it('explains a directory entered in the file-path control instead of blanking the preview', async () => {
+  stubFetch()
+  renderFilesRoute()
+  const input = await screen.findByRole('textbox', { name: 'File path in the worktree' })
+  fireEvent.change(input, { target: { value: 'src' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+  expect(await screen.findByRole('heading', { name: 'Choose a file inside this directory' })).toBeTruthy()
 })

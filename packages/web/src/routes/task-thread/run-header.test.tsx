@@ -714,7 +714,7 @@ describe('dense run details (#765)', () => {
 })
 
 describe('meta line, tabs, pill and resume hint', () => {
-  it('scrolls the run header on phones but restores sticky context on desktop', () => {
+  it('lets the spacious page heading scroll away on both viewport sizes', () => {
     stubFetch()
     renderHeader(run('done'))
 
@@ -723,10 +723,10 @@ describe('meta line, tabs, pill and resume hint', () => {
     expect(classes).toContain('relative')
     expect(classes).not.toContain('sticky')
     expect(classes).not.toContain('top-0')
-    expect(classes).toContain('md:sticky')
-    expect(classes).toContain('md:top-0')
-    expect(classes).toContain('px-3')
-    expect(classes).toContain('md:px-6')
+    expect(classes).not.toContain('md:sticky')
+    expect(classes).not.toContain('md:top-0')
+    expect(classes).toContain('px-[18px]')
+    expect(classes).toContain('md:px-9')
   })
 
   // The plan mirror hides on phones so the title row keeps its space for the status pill and

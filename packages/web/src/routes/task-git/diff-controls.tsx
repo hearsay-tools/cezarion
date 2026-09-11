@@ -27,7 +27,7 @@ export function DiffViewToggles({
         data-slot="diff-mode-toggle"
         role="group"
         aria-label="Diff layout"
-        className="flex items-center rounded-md border border-border p-0.5"
+        className="flex items-center gap-2"
       >
         <ModeButton current={mode} value="unified" onModeChange={onModeChange} />
         <ModeButton current={mode} value="split" onModeChange={onModeChange} />
@@ -39,7 +39,7 @@ export function DiffViewToggles({
         aria-pressed={wrap}
         aria-label="Wrap long lines"
         title="Wrap long lines"
-        className={cn(wrap && 'bg-muted text-foreground')}
+        className={cn('size-11', wrap && 'bg-muted text-foreground')}
         onClick={() => onWrapChange(!wrap)}
       >
         <WrapTextIcon aria-hidden="true" />
@@ -65,8 +65,8 @@ function ModeButton({
       aria-pressed={active}
       onClick={() => onModeChange(value)}
       className={cn(
-        'rounded-[5px] px-2 py-0.5 text-[11px] font-medium capitalize',
-        active ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+        'min-h-11 rounded-lg border border-border bg-card px-3 text-xs font-medium capitalize',
+        active ? 'border-accent-text/40 text-accent-text' : 'text-muted-foreground hover:text-foreground',
       )}
     >
       {value}

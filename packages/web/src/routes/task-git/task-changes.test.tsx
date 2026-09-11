@@ -192,8 +192,8 @@ describe('the Changes tab route', () => {
     // …and a wheel that bottoms out inside the tree must not chain into the diff.
     expect(pane.className).toContain('overscroll-contain')
     // The cap is measured from the offset the pane is actually pinned at (`top-40` = 10rem).
-    expect(pane.className).toContain('sticky top-40')
-    expect(pane.parentElement?.className).toContain('[--diff-sticky-top:0px] md:[--diff-sticky-top:10rem]')
+    expect(pane.className).toContain('sticky top-4')
+    expect(pane.parentElement?.className).toContain('[--diff-sticky-top:0px] md:[--diff-sticky-top:1rem]')
   })
 
   it('shows the empty state when the worktree is clean', async () => {

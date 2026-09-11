@@ -163,14 +163,14 @@ function ChangesView({ run }: { run: ApiRun }) {
       />
 
       {changes.data?.repointedHead ? (
-        <p data-slot="repointed-head-note" className="border-b px-4 py-2 text-xs text-soft-foreground md:px-6">
+        <p data-slot="repointed-head-note" className="border-b px-4 py-2 text-xs text-soft-foreground md:px-9">
           HEAD is on <code>{changes.data.repointedHead.headBranch}</code>, not this task&apos;s branch{' '}
           <code>{changes.data.repointedHead.taskBranch}</code> — showing only what this task changed there.
         </p>
       ) : null}
 
       {changes.isPending ? (
-        <p data-slot="changes-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-6">
+        <p data-slot="changes-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-9">
           Loading changes…
         </p>
       ) : changes.isError ? (
@@ -190,7 +190,7 @@ function ChangesView({ run }: { run: ApiRun }) {
           subtitle="The worktree matches its base branch. Changes appear here as the agent works."
         />
       ) : (
-        <div className="flex min-h-0 flex-1 items-start gap-5 px-4 py-4 [--diff-sticky-top:0px] md:[--diff-sticky-top:10rem] md:px-6">
+        <div className="flex min-h-0 flex-1 items-start gap-5 px-[18px] pb-9 pt-0 [--diff-sticky-top:0px] md:[--diff-sticky-top:1rem] md:px-9">
           {/* The tree column: sticky under the header so long diffs scroll beside it, and its OWN
               scroller. Sticky alone is not enough — a tree taller than the viewport grows the page
               instead, so the only way to reach its last file was to drag the shared `main` scroller
@@ -199,8 +199,9 @@ function ChangesView({ run }: { run: ApiRun }) {
               inside it from chaining into the diff once it bottoms out. */}
           <aside
             data-slot="changes-tree-pane"
-            className="sticky top-40 hidden max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)] w-60 shrink-0 overflow-y-auto overscroll-contain md:block lg:w-72"
+            className="sticky top-4 hidden max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)] w-60 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-3.5 md:block lg:w-[250px]"
           >
+            <h2 className="mb-3 border-b border-border pb-3 text-xs font-semibold">Changed files</h2>
             <ChangesTree root={tree} selected={selected} onSelect={selectFile} />
           </aside>
           <Diff

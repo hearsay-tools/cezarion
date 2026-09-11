@@ -118,3 +118,17 @@ it.each([root, child])('shows request waiting for either participant ($id)', run
   setup({ ...run, delegation: { ...run.delegation, wait: { id: '10000000-0000-4000-8000-000000000003', workerIds: [], requestIds: [workerId], phase: 'parked', deadline: at, outcomes: [] } } });
   expect(screen.getByText(/Waiting on request replies/)).toBeTruthy();
 });
+
+
+it('collapses worker navigation on phones and preserves its scoped links when reopened', async () => {
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })))
+  setup(root, async () => json({ workers: [worker] }))
+  const switcher = await screen.findByRole('button', { name: /Parent.*Workers 1/ })
+  expect(switcher.getAttribute('aria-expanded')).toBe('false')
+  expect(screen.queryByRole('link', { name: `Worker task ${workerId}` })).toBeNull()
+  fireEvent.click(switcher)
+  expect(switcher.getAttribute('aria-expanded')).toBe('true')
+  expect(screen.getByRole('link', { name: `Worker task ${workerId}` }).getAttribute('href')).toBe(`/p/sample/tasks/${workerId}`)
+  fireEvent.click(switcher)
+  expect(screen.queryByRole('link', { name: `Worker task ${workerId}` })).toBeNull()
+})

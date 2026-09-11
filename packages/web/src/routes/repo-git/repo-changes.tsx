@@ -50,7 +50,7 @@ export function RepoChangesSection() {
     <section data-slot="repo-changes" className="flex min-h-0 flex-1 flex-col">
       <div
         data-slot="repo-changes-toolbar"
-        className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border px-4 py-2 md:px-6"
+        className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 px-[18px] py-[22px] md:px-9"
       >
         <span className="text-xs text-muted-foreground">Uncommitted changes</span>
         {changes.data ? <AnimatedDiffStat stat={changes.data.stat} /> : null}
@@ -61,7 +61,7 @@ export function RepoChangesSection() {
       </div>
 
       {changes.isPending ? (
-        <p data-slot="changes-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-6">
+        <p data-slot="changes-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-9">
           Loading changes…
         </p>
       ) : changes.isError ? (
@@ -81,13 +81,14 @@ export function RepoChangesSection() {
           subtitle="No uncommitted changes in the main working tree. Edits show up here as they happen."
         />
       ) : (
-        <div className="flex min-h-0 flex-1 items-start gap-5 px-4 py-4 [--diff-sticky-top:7rem] md:px-6">
+        <div className="flex min-h-0 flex-1 items-start gap-5 px-[18px] pb-9 pt-0 [--diff-sticky-top:1rem] md:px-9">
           {/* Same deal as the task Changes tab: sticky AND its own scroller, so a long file list
               never has to drag the diff to the bottom to show its last row. */}
           <aside
             data-slot="changes-tree-pane"
-            className="sticky top-28 hidden max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)] w-60 shrink-0 overflow-y-auto overscroll-contain md:block lg:w-72"
+            className="sticky top-4 hidden max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)] w-60 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-3.5 md:block lg:w-[250px]"
           >
+            <h2 className="mb-3 border-b border-border pb-3 text-xs font-semibold">Changed files</h2>
             <ChangesTree root={tree} selected={selected} onSelect={selectFile} />
           </aside>
           <Diff files={files} viewRef={diffRef} mode={effectiveMode} wrap={effectiveWrap} className="min-w-0 flex-1" />

@@ -80,7 +80,7 @@ export function RepoPull({ repo, info }: { repo: RepoResponse; info: RepoInfo })
 
   return (
     <>
-      <div data-slot="repo-pull" className="w-full md:ml-auto md:w-auto">
+      <div data-slot="repo-pull" className="max-w-full md:w-auto">
         <div className="flex min-w-0 items-center gap-2">
           <label htmlFor="repo-pull-branch" className="sr-only">
             Branch to pull
@@ -115,7 +115,7 @@ export function RepoPull({ repo, info }: { repo: RepoResponse; info: RepoInfo })
             {switchesBranch ? 'Switch & pull' : 'Pull'}
           </Button>
         </div>
-        <p data-slot="repo-pull-note" className="mt-1 break-all text-[11px] text-soft-foreground md:text-right">
+        <p data-slot="repo-pull-note" className="mt-1 break-all text-[11px] text-soft-foreground md:text-left">
           {unavailableReason ?? `${selectedBranch} stays checked out after the pull.`}
         </p>
       </div>

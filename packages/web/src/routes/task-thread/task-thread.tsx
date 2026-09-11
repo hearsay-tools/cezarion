@@ -37,6 +37,7 @@ import { SubagentSheet } from './subagent-sheet'
 import { AcceptCelebration, ReviewPanel } from './review-panel'
 import { queuePosition, runActionFlags } from './run-actions'
 import { useStopAction } from './stop-action'
+import { WorkflowSteps } from './step-rail'
 import { RunHeader } from './run-header'
 import { AskCard } from './ask-card'
 import { useRunRecordReconcile } from './run-reconcile'
@@ -419,6 +420,11 @@ export function ThreadView({
           </div>
         ) : null}
         <div className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-1.5 md:gap-2.5">
+          {run.steps.length > 0 ? (
+            <div data-slot="session-workflow-summary" className="rounded-xl border border-border bg-card px-3 py-2">
+              <WorkflowSteps runId={run.id} steps={run.steps} />
+            </div>
+          ) : null}
           {/* Agents above the plan: the fan-out is the more urgent "what is happening now",
               and it is transient — the plan outlives it. Keyed by run id like the plan dock. */}
           <AgentsDock key={`agents:${run.id}`} runId={run.id} agents={agents} onSelect={setOpenAgentId} />

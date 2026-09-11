@@ -58,8 +58,18 @@ export function FilePreview({ runId, path, className }: { runId: string; path: s
     )
   }
   if (entry.data.type !== 'file') {
-    // Directories are the tree's business; a stale selection that became a dir shows nothing.
-    return null
+    // An exact-path entry (or a stale file selection) can resolve to a directory.
+    return (
+      <Pane className={className}>
+        <CenteredState
+          icon={<FileQuestionIcon />}
+          tone="neutral"
+          heading="h2"
+          title="Choose a file inside this directory"
+          subtitle="Expand the folder in the tree, or enter the full path to a file."
+        />
+      </Pane>
+    )
   }
   return <FileEntryView runId={runId} entry={entry.data} className={className} />
 }

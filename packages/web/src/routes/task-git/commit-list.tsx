@@ -1,6 +1,8 @@
+import { GitCommitHorizontalIcon, SearchIcon } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { Virtualizer } from 'virtua'
 
+import { Input } from '@/components/ui/input'
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
 
@@ -10,7 +12,7 @@ import { cn } from '@/lib/utils'
  *
  * Same two-tier rule as the transcript and the diff (`components/diff/diff-scroll.ts` §"THE
  * PERFORMANCE RULE"): flat with `content-visibility: auto` up to
- * {@link COMMIT_VIRTUALIZE_THRESHOLD} rows, virtua past it. Rows are a fixed single line, which
+ * {@link COMMIT_VIRTUALIZE_THRESHOLD} rows, virtua past it. Rows have a fixed two-line layout, which
  * makes this the easy case — `ROW_HEIGHT_PX` is exact rather than an estimate, so the flat
  * tier's placeholders and virtua's initial guesses are right the first time.
  *
@@ -29,8 +31,8 @@ import { cn } from '@/lib/utils'
 /** Commit rows past which the list goes through virtua. */
 export const COMMIT_VIRTUALIZE_THRESHOLD = 150
 
-/** One row: `py-2.5` (20px) + a `text-[13px]`/`leading-normal` line ≈ 40px, plus the divider. */
-const ROW_HEIGHT_PX = 41
+/** Two-line history row (76px), plus the divider. Keep the virtual estimate and flat placeholder aligned. */
+const ROW_HEIGHT_PX = 77
 
 export interface CommitListItem {
   sha: string
@@ -44,7 +46,10 @@ export interface CommitListItem {
 }
 
 export function CommitList({ slot, commits, className }: { slot: string; commits: CommitListItem[]; className?: string }) {
-  const virtual = commits.length > COMMIT_VIRTUALIZE_THRESHOLD
+  const [query, setQuery] = useState('')
+  const normalizedQuery = query.trim().toLowerCase()
+  const filtered = normalizedQuery ? commits.filter(commit => commit.subject.toLowerCase().includes(normalizedQuery)) : commits
+  const virtual = filtered.length > COMMIT_VIRTUALIZE_THRESHOLD
   const containerRef = useRef<HTMLDivElement | null>(null)
   const scrollElRef = useRef<HTMLElement | null>(null)
 
@@ -71,28 +76,35 @@ export function CommitList({ slot, commits, className }: { slot: string; commits
     return () => window.removeEventListener('resize', measure)
   }, [virtual])
 
-  const rows = commits.map((commit) => <CommitRow key={commit.sha} commit={commit} />)
+  const rows = filtered.map((commit) => <CommitRow key={commit.sha} commit={commit} />)
 
   return (
-    <div
-      ref={(el) => {
-        containerRef.current = el
-        if (el) scrollElRef.current = el.closest<HTMLElement>('[data-slot="main"]')
-      }}
-      data-slot={slot}
-      data-virtualized={virtual}
-      className={cn('flex flex-col divide-y divide-border px-2 py-1 md:px-4', className)}
-    >
-      {virtual ? (
-        // No `shift`: commit logs are newest-first and only ever grow at the start on a
-        // refetch that REPLACES the list, so there is no prepend to anchor against.
-        <Virtualizer scrollRef={scrollElRef} startMargin={startMargin} itemSize={ROW_HEIGHT_PX}>
-          {rows}
-        </Virtualizer>
-      ) : (
-        rows
-      )}
-    </div>
+    <>
+      <label className="relative mb-[22px] block">
+        <SearchIcon aria-hidden="true" className="pointer-events-none absolute top-3.5 left-3 size-4 text-muted-foreground" />
+        <Input aria-label="Search commit messages" placeholder="Search commit messages…" value={query} onChange={event => setQuery(event.target.value)} className="h-11 bg-card pl-10" />
+      </label>
+      <div
+        ref={(el) => {
+          containerRef.current = el
+          if (el) scrollElRef.current = el.closest<HTMLElement>('[data-slot="main"]')
+        }}
+        data-slot={slot}
+        data-virtualized={virtual}
+        className={cn('flex flex-col divide-y divide-border rounded-xl border border-border bg-card px-4 py-1 md:px-5', className)}
+      >
+        {filtered.length === 0 ? <p role="status" className="py-5 text-sm text-muted-foreground">No loaded commits match your search.</p> : null}
+        {virtual ? (
+          // No `shift`: commit logs are newest-first and only ever grow at the start on a
+          // refetch that REPLACES the list, so there is no prepend to anchor against.
+          <Virtualizer scrollRef={scrollElRef} startMargin={startMargin} itemSize={ROW_HEIGHT_PX}>
+            {rows}
+          </Virtualizer>
+        ) : (
+          rows
+        )}
+      </div>
+    </>
   )
 }
 
@@ -101,18 +113,21 @@ function CommitRow({ commit }: { commit: CommitListItem }) {
     // Not a <ul>/<li>: virtua inserts its own positioned wrapper between the list and the
     // items, which would break that parent/child contract. A plain list of links reads the
     // same to a screen reader here — each row's accessible name is its own link text.
-    <div className="[contain-intrinsic-block-size:auto_41px] [content-visibility:auto]">
+    <div className="[contain-intrinsic-block-size:auto_77px] [content-visibility:auto]">
       <Link
         data-slot="commit-row"
         data-sha={commit.sha}
         to={commit.href}
-        className="flex min-w-0 items-baseline gap-3 rounded-sm px-2 py-2.5 hover:bg-muted"
+        className="flex min-h-[76px] min-w-0 items-center gap-3 rounded-sm py-3 hover:bg-muted"
       >
-        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{commit.shaLabel}</span>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{commit.subject}</span>
-        <span className="hidden shrink-0 text-[11px] text-soft-foreground sm:inline">
-          {commit.author} · {commit.when}
+        <GitCommitHorizontalIcon aria-hidden="true" className="size-4 shrink-0 text-accent-text" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] font-medium">{commit.subject}</span>
+          <span className="mt-1 block truncate text-[11px] text-soft-foreground">
+            {commit.author} · {commit.when}
+          </span>
         </span>
+        <span className="shrink-0 rounded-md bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">{commit.shaLabel}</span>
       </Link>
     </div>
   )

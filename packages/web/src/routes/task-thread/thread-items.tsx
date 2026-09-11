@@ -117,7 +117,7 @@ export function UserBubble({
       <div
         data-slot="user-bubble"
         data-editing="true"
-        className="max-w-[78%] self-end rounded-2xl rounded-br-md bg-muted px-[15px] py-2.5 text-[13.5px] leading-[1.55] md:max-w-[70%]"
+        className="w-full self-stretch rounded-xl bg-muted px-[15px] py-2.5 text-[13.5px] leading-[1.55] md:px-[18px] md:py-4"
       >
         <textarea
           autoFocus
@@ -163,8 +163,9 @@ export function UserBubble({
   return (
     <div
       data-slot="user-bubble"
-      className="group max-w-[78%] min-w-0 self-end rounded-2xl rounded-br-md bg-muted px-[15px] py-2.5 text-[13.5px] leading-[1.55] md:max-w-[70%]"
+      className="group w-full min-w-0 self-stretch rounded-xl bg-muted px-[15px] py-2.5 text-[13.5px] leading-[1.55] md:px-[18px] md:py-4"
     >
+      <p className="mb-2 text-[9px] font-semibold tracking-[0.16em] text-soft-foreground">YOU</p>
       {onEdit || onRemove ? (
         <span
           data-slot="bubble-actions"

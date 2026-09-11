@@ -67,15 +67,18 @@ function CommitsView({ run }: { run: ApiRun }) {
           subtitle="This task hasn't committed anything on its branch. Autosave commits and any the agent makes appear here."
         />
       ) : (
-        <CommitList
-          slot="task-commits"
-          className="mx-auto w-full max-w-[var(--measure)]"
-          commits={commits.data.commits.map((commit: RunCommit) => ({
-            ...commit,
-            shaLabel: commit.sha.slice(0, 8),
-            href: `/tasks/${run.id}/commits/${commit.sha}`,
-          }))}
-        />
+        <div className="px-[18px] py-[22px] md:px-9">
+          <h2 className="mb-4 text-sm font-semibold">{commits.data.commits.length} {commits.data.commits.length === 1 ? 'commit' : 'commits'} in this task</h2>
+          <CommitList
+            slot="task-commits"
+            className="w-full"
+            commits={commits.data.commits.map((commit: RunCommit) => ({
+              ...commit,
+              shaLabel: commit.sha.slice(0, 8),
+              href: `/tasks/${run.id}/commits/${commit.sha}`,
+            }))}
+          />
+        </div>
       )}
     </div>
   )

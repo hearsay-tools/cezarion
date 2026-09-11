@@ -77,23 +77,23 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
   }
 
   return (
-    <section data-slot="repo-branches" className="flex flex-col gap-6 px-4 py-4 md:px-6">
-      <div>
+    <section data-slot="repo-branches" className="grid min-w-0 grid-cols-1 gap-5 px-[18px] py-[22px] md:grid-cols-[minmax(0,1fr)_290px] md:px-9">
+      <div className="min-w-0 rounded-xl border border-border bg-card p-5">
         <h2 className="text-xs font-semibold tracking-wide text-soft-foreground uppercase">Branches</h2>
         <Input
           aria-label="Filter branches"
           placeholder="Filter branches…"
           value={branchQuery}
           onChange={(event) => setBranchQuery(event.target.value)}
-          className="mt-2 max-w-xl"
+          className="mt-3 h-11"
         />
-        <ul data-slot="repo-branch-list" className="mt-2 flex max-w-xl flex-col divide-y divide-border">
+        <ul data-slot="repo-branch-list" className="mt-2 flex max-h-[28rem] min-w-0 flex-col divide-y divide-border overflow-y-auto overscroll-contain">
           {filteredBranches.map((name) => {
             const current = name === info.branch
             return (
-              <li key={name} data-slot="branch-row" data-branch={name} className="flex min-h-9 items-center gap-2 py-1">
+              <li key={name} data-slot="branch-row" data-branch={name} className="flex min-h-11 items-center gap-2 py-1">
                 <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className={cn('min-w-0 truncate font-mono text-xs', current && 'font-semibold')}>{name}</span>
+                <span className={cn('min-w-0 truncate text-[13px]', current && 'font-semibold')}>{name}</span>
                 {current ? (
                   <span
                     data-slot="branch-current"
@@ -123,11 +123,15 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
             </li>
           ) : null}
         </ul>
+      </div>
 
-        <form data-slot="branch-create" className="mt-3 flex max-w-md items-center gap-2" onSubmit={submitCreate}>
+      <div className="min-w-0 self-start rounded-xl border border-border bg-card p-5">
+        <h2 className="text-sm font-semibold">Create a branch</h2>
+        <form data-slot="branch-create" className="mt-3 flex flex-col items-stretch gap-3" onSubmit={submitCreate}>
           <Input
             aria-label="New branch name"
             placeholder="new-branch-name"
+            className="h-11"
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
           />
@@ -135,6 +139,7 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
             type="submit"
             variant="outline"
             size="sm"
+            className="min-h-11 self-start"
             data-action="create-branch"
             disabled={!newName.trim() || branchAction.isPending}
           >
@@ -142,33 +147,33 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
             Create
           </Button>
         </form>
-      </div>
-
-      <div className="max-w-md">
-        <label
-          htmlFor="base-branch-picker"
-          className="text-xs font-semibold tracking-wide text-soft-foreground uppercase"
-        >
-          Agents’ base branch
-        </label>
-        {/* A native <select>: a handful of branch names needs no popover machinery, and the
-            OS picker is the better control on phones. */}
-        <select
-          id="base-branch-picker"
-          data-slot="base-branch-picker"
-          value={repo.baseBranch ?? ''}
-          disabled={setBase.isPending}
-          onChange={(event) => setBase.mutate(event.target.value === '' ? null : event.target.value)}
-          className="mt-1.5 block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
-        >
-          <option value="">follow checked-out branch (default)</option>
-          {repo.branches.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-        <p className="mt-1 text-[11px] text-soft-foreground">New task worktrees branch from this.</p>
+        <div className="mt-5">
+          <label
+            htmlFor="base-branch-picker"
+            className="text-xs font-semibold tracking-wide text-soft-foreground uppercase"
+          >
+            Agents’ base branch
+          </label>
+          {/* A native <select>: a handful of branch names needs no popover machinery, and the
+              OS picker is the better control on phones. */}
+          <select
+            id="base-branch-picker"
+            data-slot="base-branch-picker"
+            value={repo.baseBranch ?? ''}
+            disabled={setBase.isPending}
+            onChange={(event) => setBase.mutate(event.target.value === '' ? null : event.target.value)}
+            className="mt-1.5 block min-h-11 w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
+          >
+            <option value="">follow checked-out branch (default)</option>
+            {repo.branches.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-soft-foreground">New task worktrees branch from this.</p>
+        </div>
+        <p className="mt-4 text-xs leading-relaxed text-muted-foreground">Switching branches changes your working tree. Review uncommitted changes first.</p>
       </div>
 
       {health.data?.forge?.available ? <ForgePullRequests /> : null}
