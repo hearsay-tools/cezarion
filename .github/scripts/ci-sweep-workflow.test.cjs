@@ -40,3 +40,9 @@ test('empty successful scan still produces a coverage artifact and summary',asyn
  const h=harness();h.state.runs=[];const result=await execute(h);
  assert.equal(result.errors.length,0);assert.equal(JSON.parse(result.written['ci-sweep-coverage.json']).complete,true);assert.match(result.summary.join(''),/complete/i);
 });
+test('unavailable logs surface as evidence gaps in a complete summary',async()=>{
+ const h=harness();h.state.logs.clear();const result=await execute(h);
+ assert.equal(result.errors.length,0);
+ assert.equal(JSON.parse(result.written['ci-sweep-coverage.json']).complete,true);
+ assert.match(result.summary.join(''),/Evidence gaps \(unavailable, expired or oversized logs\): 1\./);
+});

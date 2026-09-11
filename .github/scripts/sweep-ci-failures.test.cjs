@@ -25,9 +25,10 @@ test('manual replay validates a paired bounded creation window before API calls'
  }
  const h=harness();assert.equal((await sweep(h,{start:'2026-09-01T00:00:00Z',end:'2026-09-02T00:00:00Z'})).complete,true);
 });
-test('isolated development failure and unavailable logs create no recurring issue',async()=>{
+test('isolated development failure creates no issue and unavailable logs stay recorded gaps',async()=>{
  const h=harness();assert.equal((await sweep(h)).patterns,0);assert.equal(h.state.issues.length,0);
- h.state.logs.clear();const m=await sweep(h);assert.equal(m.complete,false);assert.equal(h.state.issues.length,0);assert.deepEqual(m.replay,[{start:m.start,end:m.end}]);
+ h.state.logs.clear();const m=await sweep(h);assert.equal(m.complete,true);assert.equal(h.state.issues.length,0);
+ assert.deepEqual(m.replay,[]);assert.ok(m.problems.some(p=>p.code==='logs-unavailable'));
 });
 test('successful latest run comparison can establish possible flakiness across two PRs',async()=>{
  const h=harness();recurring(h);h.state.runs.pop();

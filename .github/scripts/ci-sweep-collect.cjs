@@ -60,12 +60,15 @@ async function collectSweep({api,owner,repo,start,end}) {
         else ({data:run}=await api.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}',{...base,run_id:source.id,attempt_number:number}));
         if(!validRun(run)||run.id!==source.id||run.run_attempt!==number||run.path!==source.path||run.head_sha!==source.head_sha)throw new Error('invalid-attempt');
       } catch {api.problem('attempt-unavailable',{runId:source.id,attempt:number});continue;}
-      if(run.status!=='completed') {api.problem('attempt-in-progress',{runId:run.id,attempt:number});continue;}
+      // Reporting machinery is skipped before the in-progress check: this
+      // sweep's own attempt is always running during collection, and a queued
+      // sibling reporter is not a coverage gap either.
       if(reporter) {
         manifest.processed.attempts.push({runId:run.id,attempt:number});
         if(failed(run.conclusion))manifest.reporterFailures++;
         continue;
       }
+      if(run.status!=='completed') {api.problem('attempt-in-progress',{runId:run.id,attempt:number});continue;}
       if(['cancelled','skipped'].includes(run.conclusion))continue;
       let jobs;
       try {jobs=await api.paginate('GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/jobs',{...base,run_id:run.id,attempt_number:number});}
