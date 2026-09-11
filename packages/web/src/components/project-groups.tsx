@@ -272,7 +272,7 @@ function ProjectGroup({
           <span
             data-slot="project-attention"
             title={`${waiting} task${waiting === 1 ? '' : 's'} need${waiting === 1 ? 's' : ''} you`}
-            className="shrink-0 rounded-full bg-violet px-1.5 py-px text-[10.5px] font-semibold text-violet-foreground"
+            className="shrink-0 rounded-full bg-accent-strong px-1.5 py-px text-[10.5px] font-semibold text-accent-strong-foreground"
           >
             {waiting}
           </span>
@@ -333,14 +333,14 @@ function ProjectGroup({
                   {item.badge === 'inbox-count' && active && inboxCount ? (
                     <span
                       data-slot="nav-badge"
-                      className="ml-auto rounded-full bg-violet px-1.5 py-px text-[10.5px] font-semibold text-violet-foreground"
+                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10.5px] font-semibold text-accent-strong-foreground"
                     >
                       {inboxCount}
                     </span>
                   ) : null}
                   {item.badge === 'skills-update' && active && skillsUpdateAvailable ? (
                     <span data-slot="nav-update-marker" className="ml-auto flex items-center">
-                      <span className="size-1.5 rounded-full bg-violet" aria-hidden="true" />
+                      <span className="size-1.5 rounded-full bg-accent-strong" aria-hidden="true" />
                       <span className="sr-only">Skills update available</span>
                     </span>
                   ) : null}

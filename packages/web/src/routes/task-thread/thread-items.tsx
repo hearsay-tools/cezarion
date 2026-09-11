@@ -150,7 +150,7 @@ export function UserBubble({
             type="button"
             onClick={() => void save()}
             disabled={busy}
-            className="rounded-sm bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground hover:brightness-[0.96] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+            className="rounded-sm bg-action px-2 py-1 text-xs font-semibold text-action-foreground hover:brightness-[0.96] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
           >
             {busy ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : 'Save'}
           </button>

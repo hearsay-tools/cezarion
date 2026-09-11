@@ -455,7 +455,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
                   onClick={() => setDraft(draftFrom(workflow))}
                   className={cn(
                     'rounded-full border border-border bg-card px-2.5 py-1 font-mono text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                    trimmedName === workflow.name && 'border-primary/40 bg-primary/10 text-foreground',
+                    trimmedName === workflow.name && 'border-accent-strong/40 bg-accent-strong/10 text-foreground',
                   )}
                 >
                   {workflow.name}
@@ -709,7 +709,7 @@ function Canvas({
       data-dragging={dragging || undefined}
       className={cn(
         'mt-4 rounded-lg border border-dashed p-2 transition-colors',
-        isOver ? 'border-primary/60 bg-primary/5' : 'border-muted-foreground/25',
+        isOver ? 'border-accent-strong/60 bg-accent-strong/5' : 'border-muted-foreground/25',
       )}
     >
       {steps.length === 0 ? (
@@ -744,7 +744,7 @@ function Canvas({
             aria-hidden="true"
             className={cn(
               'mx-1 mt-2.5 h-[3px] rounded-full transition-colors',
-              appendActive ? 'bg-primary' : 'bg-transparent',
+              appendActive ? 'bg-accent-strong' : 'bg-transparent',
             )}
           />
           <div className="flex items-center justify-center gap-1.5 pt-1.5 pb-1 text-[11px] text-muted-foreground">
@@ -800,7 +800,7 @@ function StepCard({
         <span
           aria-hidden="true"
           data-slot="wb-drop-line"
-          className="pointer-events-none absolute -top-[7px] right-0 left-0 h-[3px] rounded-full bg-primary"
+          className="pointer-events-none absolute -top-[7px] right-0 left-0 h-[3px] rounded-full bg-accent-strong"
         />
       ) : null}
       <StepCardBody
@@ -988,7 +988,7 @@ function PaletteSkill({
     >
       <SparklesIcon
         aria-hidden="true"
-        className={cn('size-3.5 shrink-0', isProjectSkill(skill) ? 'text-violet' : 'text-soft-foreground')}
+        className={cn('size-3.5 shrink-0', isProjectSkill(skill) ? 'text-accent-strong' : 'text-soft-foreground')}
       />
       <span
         className={cn(

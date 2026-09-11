@@ -119,7 +119,7 @@ export function SkillPreviewDialog({ skill, onClose }: { skill: Skill | null; on
                 to={`/skills?skill=${encodeURIComponent(skill.name)}`}
                 data-slot="skill-preview-manage"
                 onClick={onClose}
-                className="text-xs font-semibold text-violet hover:underline"
+                className="text-xs font-semibold text-accent-strong hover:underline"
               >
                 Open in the Skills catalog
               </Link>

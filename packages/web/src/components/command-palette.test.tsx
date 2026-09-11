@@ -769,7 +769,7 @@ describe('Tasks across projects', () => {
     const tasks = [...document.querySelectorAll('[data-slot="palette-task"]')]
     expect(tasks.map((task) => task.getAttribute('data-run-id'))).toEqual(['r-mine', 'r-shop'])
     // review → violet, not the index's stale running.
-    expect(tasks[0]?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('violet')
+    expect(tasks[0]?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('accent')
   })
 
   it('lists the boot project once from an unscoped screen like global settings', async () => {

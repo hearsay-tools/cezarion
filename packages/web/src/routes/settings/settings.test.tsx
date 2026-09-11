@@ -428,7 +428,7 @@ describe('the appearance section (global scope)', () => {
     renderAt('/settings/global/appearance')
 
     await waitFor(() => {
-      expect(localStorage.getItem('cez-accent')).toBe('violet')
+      expect(localStorage.getItem('cez-accent')).toBe('cezarion')
     })
     expect(document.documentElement.hasAttribute('data-accent')).toBe(false)
     expect(document.documentElement.dataset.density).toBe('compact')
@@ -449,10 +449,10 @@ describe('the appearance section (global scope)', () => {
 
     await waitFor(() => {
       expect(requests.find((r) => r.method === 'PUT' && r.url === '/api/v1/workspace/ui-state')?.body).toEqual({
-        appearance: { accent: 'violet', density: 'compact', width: 'wide' },
+        appearance: { accent: 'cezarion', density: 'compact', width: 'wide' },
       })
     })
-    expect(localStorage.getItem('cez-accent')).toBe('violet')
+    expect(localStorage.getItem('cez-accent')).toBe('cezarion')
   })
 
   it('density flips back to the default and the attribute comes OFF the root', async () => {
@@ -466,7 +466,7 @@ describe('the appearance section (global scope)', () => {
     expect(document.documentElement.hasAttribute('data-density')).toBe(false)
     await waitFor(() => {
       expect(requests.find((r) => r.method === 'PUT' && r.url === '/api/v1/workspace/ui-state')?.body).toEqual({
-        appearance: { accent: 'violet', density: 'comfortable', width: 'narrow' },
+        appearance: { accent: 'cezarion', density: 'comfortable', width: 'narrow' },
       })
     })
   })
@@ -476,7 +476,7 @@ describe('the appearance section (global scope)', () => {
     renderAt('/settings/global/appearance')
     // Wait for the server value to normalize so the pending load cannot clobber the width write.
     await waitFor(() => {
-      expect(localStorage.getItem('cez-accent')).toBe('violet')
+      expect(localStorage.getItem('cez-accent')).toBe('cezarion')
     })
     expect(screen.getByRole('radio', { name: 'Narrow' }).getAttribute('aria-checked')).toBe('true')
 
@@ -484,7 +484,7 @@ describe('the appearance section (global scope)', () => {
     expect(document.documentElement.dataset.width).toBe('wide')
     await waitFor(() => {
       expect(requests.find((r) => r.method === 'PUT' && r.url === '/api/v1/workspace/ui-state')?.body).toEqual({
-        appearance: { accent: 'violet', density: 'comfortable', width: 'wide' },
+        appearance: { accent: 'cezarion', density: 'comfortable', width: 'wide' },
       })
     })
 
@@ -532,7 +532,7 @@ describe('the settings split writes the right store', () => {
 
     await waitFor(() => expect(putsTo('/api/v1/workspace/ui-state')).toHaveLength(1))
     expect(putsTo('/api/v1/workspace/ui-state')[0]?.body).toEqual({
-      appearance: { accent: 'violet', density: 'comfortable', width: 'wide' },
+      appearance: { accent: 'cezarion', density: 'comfortable', width: 'wide' },
     })
     expect(putsTo('/api/v1/ui-state')).toHaveLength(0)
   })

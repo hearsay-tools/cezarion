@@ -1209,7 +1209,7 @@ function SourcePill({
     >
       <SourceIcon
         aria-hidden="true"
-        className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-violet')}
+        className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-accent-strong')}
       />
       <span className="max-w-44 truncate">{!ready ? '…' : (source?.ref ?? 'Skill')}</span>
       {chevron}

@@ -140,7 +140,7 @@ function CompareView({
     <div data-route="compare" className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-5 md:px-6">
       <header className="flex flex-col gap-1">
         <h1 className="flex items-center gap-2 text-xl font-semibold">
-          <ScaleIcon className="size-5 shrink-0 text-violet" aria-hidden="true" />
+          <ScaleIcon className="size-5 shrink-0 text-accent-strong" aria-hidden="true" />
           <span className="min-w-0 truncate" title={title}>
             {title}
           </span>
@@ -237,7 +237,7 @@ function VariantColumn({
         <span
           data-slot="variant-letter"
           aria-label={`Variant ${variant.variant}`}
-          className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-violet/15 font-mono text-xs font-semibold text-violet"
+          className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-strong/15 font-mono text-xs font-semibold text-accent-strong"
         >
           {variant.variant}
         </span>

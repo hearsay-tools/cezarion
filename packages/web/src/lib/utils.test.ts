@@ -17,7 +17,7 @@ describe('cn', () => {
   describe('conflict resolution — the later utility wins', () => {
     it.each([
       { name: 'spacing', input: ['p-2', 'p-4'], expected: 'p-4' },
-      { name: 'color', input: ['bg-primary', 'bg-contrast'], expected: 'bg-contrast' },
+      { name: 'color', input: ['bg-action', 'bg-contrast'], expected: 'bg-contrast' },
       { name: 'text color', input: ['text-muted-foreground', 'text-foreground'], expected: 'text-foreground' },
       { name: 'radius', input: ['rounded-md', 'rounded-sm'], expected: 'rounded-sm' },
       { name: 'arbitrary height over a scale step', input: ['h-9', 'h-[30px]'], expected: 'h-[30px]' },
@@ -37,7 +37,7 @@ describe('cn', () => {
   })
 
   it('lets a caller className override a component default', () => {
-    expect(cn('rounded-md bg-primary px-3.5', 'bg-contrast')).toBe('rounded-md px-3.5 bg-contrast')
+    expect(cn('rounded-md bg-action px-3.5', 'bg-contrast')).toBe('rounded-md px-3.5 bg-contrast')
   })
 })
 

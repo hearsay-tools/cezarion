@@ -18,7 +18,7 @@ export const WIDTH_STORAGE_KEY = 'cez-width'
 /** The brand accent applied through the appearance mechanism. Keeping this as a named option,
  * rather than deleting the field, preserves the persisted shape and leaves one deliberate
  * extension point for a future second accent. */
-export type Accent = 'violet'
+export type Accent = 'cezarion'
 
 /** Density shrinks Tailwind v4's one spacing token (`--spacing`, default 4px/unit) so every
  *  padding/gap/control height tightens while type stays full-size: `compact` → 3.5px (~12%),
@@ -30,7 +30,7 @@ export type Density = 'comfortable' | 'compact' | 'ultra'
  *  to 1180px so long transcripts use more of the screen. Type size and spacing stay untouched. */
 export type Width = 'narrow' | 'wide'
 
-export const DEFAULT_ACCENT: Accent = 'violet'
+export const DEFAULT_ACCENT: Accent = 'cezarion'
 export const DEFAULT_DENSITY: Density = 'comfortable'
 export const DEFAULT_WIDTH: Width = 'narrow'
 
@@ -42,8 +42,8 @@ export interface Appearance {
 
 /** Coerce anything (missing key, a future value, garbage) into an Accent. */
 export function normalizeAccent(raw: unknown): Accent {
-  // `lime` is the legacy value; `violet` stays as the wire-compatible key for the sole Cezarion
-  // accent. Every stored value converges on it without requiring a server-side migration.
+  // `lime` and `violet` are legacy color-named values. Every stored value converges on the
+  // role-based Cezarion family without requiring an eager server-side migration.
   void raw
   return DEFAULT_ACCENT
 }

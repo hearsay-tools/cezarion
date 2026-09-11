@@ -79,7 +79,7 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
       data-slot="ask-card"
       data-resolved="false"
       data-delivery={delivery.mode}
-      className="rounded-lg border border-primary/25 bg-primary/[0.04] px-4 pt-3.5 pb-3.5"
+      className="rounded-lg border border-accent-strong/25 bg-accent-strong/[0.04] px-4 pt-3.5 pb-3.5"
     >
       <div className="mb-2.5 flex items-center gap-2">
         <span className="text-xs font-medium text-link-foreground">The agent is asking</span>
@@ -171,7 +171,7 @@ function AskQuestionBlock({
   return (
     <div role="group" aria-label={question.question}>
       <div className="mb-0.5 flex items-center gap-2">
-        <span className="rounded-md bg-primary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">
+        <span className="rounded-md bg-accent-strong px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-strong-foreground">
           {question.header}
         </span>
         {multiSelect ? (
@@ -191,8 +191,8 @@ function AskQuestionBlock({
               onClick={() => pick(option.label)}
               className={cn(
                 'flex w-full flex-col gap-0.5 rounded-md border px-3.5 py-2.5 text-left transition-colors',
-                'hover:border-primary/50 hover:bg-primary/[0.06] disabled:pointer-events-none disabled:opacity-50',
-                isSelected ? 'border-primary/60 bg-primary/[0.06]' : 'border-border bg-card',
+                'hover:border-accent-strong/50 hover:bg-accent-strong/[0.06] disabled:pointer-events-none disabled:opacity-50',
+                isSelected ? 'border-accent-strong/60 bg-accent-strong/[0.06]' : 'border-border bg-card',
               )}
             >
               <span className="flex min-w-0 items-start gap-2 text-[13.5px] font-semibold text-foreground">
@@ -202,7 +202,7 @@ function AskQuestionBlock({
                     className={cn(
                       'flex size-4 shrink-0 items-center justify-center rounded border text-[10px]',
                       isSelected
-                        ? 'border-primary bg-primary text-primary-foreground'
+                        ? 'border-accent-strong bg-accent-strong text-accent-strong-foreground'
                         : 'border-soft-foreground',
                     )}
                   >

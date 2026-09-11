@@ -16,7 +16,7 @@ import type { Theme } from '@/lib/theme'
  *  - ACCENT + DENSITY persist in `ui-state.json` through the AppearanceProvider (additive
  *    `appearance` key), mirrored to localStorage for pre-paint.
  *
- * Every control is a real one: accent swaps the `--primary` token family, density shrinks
+ * Every control is a real one: accent swaps the action + chrome token family, density shrinks
  * the Tailwind spacing token (see index.css). No dead knobs.
  */
 
@@ -29,7 +29,7 @@ const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: ComponentType<SV
 /** Keep the option list even while it contains one entry: the field below appears automatically
  * when a future second accent is added, and the provider stays wired in the meantime. */
 const ACCENT_OPTIONS: Array<{ value: Accent; label: string; swatch: string }> = [
-  { value: 'violet', label: 'Cezarion', swatch: 'var(--brand-purple)' },
+  { value: 'cezarion', label: 'Cezarion', swatch: 'var(--accent-strong)' },
 ]
 
 const DENSITY_OPTIONS: Array<{ value: Density; label: string }> = [

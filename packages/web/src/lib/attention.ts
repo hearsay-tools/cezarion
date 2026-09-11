@@ -28,10 +28,10 @@ export const ATTENTION_RANK = {
 
 export type AttentionBucket = keyof typeof ATTENTION_RANK
 
-/** The dot tones the design system defines (`--success`/`--pending`/`--danger`/`--violet`, plus
+/** The dot tones the design system defines (`--success`/`--pending`/`--danger`/`--accent-strong`, plus
  *  the neutral `--soft-foreground`). Named here rather than imported from `StatusDot` to keep
  *  this module UI-free; `attention.test.ts` asserts the two sets stay identical. */
-export type AttentionTone = 'success' | 'pending' | 'danger' | 'violet' | 'neutral'
+export type AttentionTone = 'success' | 'pending' | 'danger' | 'accent' | 'neutral'
 
 export interface Attention {
   bucket: AttentionBucket
@@ -94,7 +94,7 @@ export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResume
  */
 export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false): Attention {
   if (hasPendingPermission(run)) {
-    return { bucket: 'permission', tone: 'violet', pulse: true, label: 'needs permission' }
+    return { bucket: 'permission', tone: 'accent', pulse: true, label: 'needs permission' }
   }
   // A run a provider usage limit stopped is `failed` on the record, but it is not an outcome —
   // it is a task with an appointment (spec 2026-08-03-auto-resume-after-usage-limit). Painting
@@ -109,25 +109,25 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     return { bucket: 'error', tone: 'danger', pulse: false, label: 'failed' }
   }
   if (!hasPendingHumanAsk && !run.hasPendingHumanAsk && run.status === 'waiting' && run.delegation?.role === 'root' && run.delegation.wait?.phase === 'parked') {
-    return { bucket: 'none', tone: 'violet', pulse: false, label: 'waiting on workers' }
+    return { bucket: 'none', tone: 'accent', pulse: false, label: 'waiting on workers' }
   }
   if (run.status === 'waiting') {
     return { bucket: 'waiting', tone: 'pending', pulse: true, label: 'needs you' }
   }
   if (run.status === 'review') {
-    return { bucket: 'waiting', tone: 'violet', pulse: true, label: 'needs review' }
+    return { bucket: 'waiting', tone: 'accent', pulse: true, label: 'needs review' }
   }
   if (run.status === 'running' && run.activity === 'monitoring') {
     // Still working, but on its OWN downstream work (a sub-agent / a monitored
     // command), not on you (#490). A sub-state of `running`, so it stays in the
     // `running` bucket — no notification, no "Needs you" — with its own label.
-    return { bucket: 'running', tone: 'violet', pulse: true, label: 'monitoring' }
+    return { bucket: 'running', tone: 'accent', pulse: true, label: 'monitoring' }
   }
   if (run.status === 'running') {
-    return { bucket: 'running', tone: 'violet', pulse: true, label: 'running' }
+    return { bucket: 'running', tone: 'accent', pulse: true, label: 'running' }
   }
   if (isUnseen(run)) {
-    return { bucket: 'unseen', tone: 'violet', pulse: false, label: 'unseen' }
+    return { bucket: 'unseen', tone: 'accent', pulse: false, label: 'unseen' }
   }
   if (run.status === 'queued') {
     return { bucket: 'none', tone: 'neutral', pulse: false, label: 'queued' }

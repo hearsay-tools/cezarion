@@ -262,7 +262,7 @@ function Row({
           data-slot="group-compare"
           title="Compare the variants"
           aria-label={`Compare the variants of ${row.title}`}
-          className="mr-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-violet/10 hover:text-violet"
+          className="mr-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-accent-strong/10 hover:text-accent-strong"
         >
           <ScaleIcon className="size-3.5" aria-hidden="true" />
         </Link>
@@ -426,7 +426,7 @@ function RunRow({
       >
         {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
         {variant ? (
-          <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-violet/15 font-mono text-[9.5px] font-semibold text-violet">
+          <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-accent-strong/15 font-mono text-[9.5px] font-semibold text-accent-strong">
             {run.variant ?? '?'}
           </span>
         ) : null}
@@ -475,7 +475,7 @@ function RunRow({
             different hue from the leading status dot, so the two read as two signals. */}
         {unread ? (
           <StatusDot
-            tone="violet"
+            tone="accent"
             role="img"
             aria-label="unread"
             title="Unread — not opened since it finished"

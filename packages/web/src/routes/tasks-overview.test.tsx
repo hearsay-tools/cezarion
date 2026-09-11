@@ -850,7 +850,7 @@ describe('TasksOverview — header', () => {
     const unreadDot = (id: string) =>
       tableRow(id)?.querySelector('[data-slot="status-dot"][aria-label="unread"]')
     expect(unreadDot('unread')).not.toBeNull()
-    expect(unreadDot('unread')?.getAttribute('data-tone')).toBe('violet')
+    expect(unreadDot('unread')?.getAttribute('data-tone')).toBe('accent')
     expect(unreadDot('read')).toBeNull()
     expect(unreadDot('cancelled')).toBeNull()
   })

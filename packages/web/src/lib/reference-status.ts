@@ -23,7 +23,7 @@ export interface ReferenceStatusPresentation {
 export type ReferenceStatusTone =
   | 'success'
   | 'danger'
-  | 'violet'
+  | 'accent'
   | 'neutral'
   | 'pending'
   | 'info'
@@ -68,7 +68,7 @@ export const REFERENCE_STATUS: Record<ReferenceStatus, ReferenceStatusPresentati
   merged: {
     label: 'Merged',
     hint: 'this landed on its base branch',
-    tone: 'violet',
+    tone: 'accent',
   },
   closed: {
     label: 'Closed',
@@ -84,7 +84,7 @@ export const REFERENCE_STATUS: Record<ReferenceStatus, ReferenceStatusPresentati
   completed: {
     label: 'Closed as completed',
     hint: 'the issue was resolved',
-    tone: 'violet',
+    tone: 'accent',
   },
   'not-planned': {
     label: 'Closed as not planned',

@@ -22,8 +22,8 @@ afterEach(() => {
 
 describe('normalize', () => {
   it('maps legacy and unknown accents onto the sole Cezarion accent', () => {
-    for (const raw of ['violet', 'lime', null, undefined, 'magenta', 42, {}]) {
-      expect(normalizeAccent(raw)).toBe('violet')
+    for (const raw of ['cezarion', 'violet', 'lime', null, undefined, 'magenta', 42, {}]) {
+      expect(normalizeAccent(raw)).toBe('cezarion')
     }
   })
 
@@ -40,22 +40,22 @@ describe('normalize', () => {
 
   it('normalizeAppearance survives any ui-state shape', () => {
     expect(normalizeAppearance(undefined)).toEqual({
-      accent: 'violet',
+      accent: 'cezarion',
       density: 'comfortable',
       width: 'narrow',
     })
     expect(normalizeAppearance('not-an-object')).toEqual({
-      accent: 'violet',
+      accent: 'cezarion',
       density: 'comfortable',
       width: 'narrow',
     })
     expect(normalizeAppearance({ accent: 'violet' })).toEqual({
-      accent: 'violet',
+      accent: 'cezarion',
       density: 'comfortable',
       width: 'narrow',
     })
     expect(normalizeAppearance({ accent: 'nope', density: 'compact', width: 'wide' })).toEqual({
-      accent: 'violet',
+      accent: 'cezarion',
       density: 'compact',
       width: 'wide',
     })
@@ -64,28 +64,28 @@ describe('normalize', () => {
 
 describe('the localStorage mirror', () => {
   it('round-trips through the same keys the index.html pre-paint script reads', () => {
-    writeStoredAppearance({ accent: 'violet', density: 'compact', width: 'wide' })
-    expect(localStorage.getItem(ACCENT_STORAGE_KEY)).toBe('violet')
+    writeStoredAppearance({ accent: 'cezarion', density: 'compact', width: 'wide' })
+    expect(localStorage.getItem(ACCENT_STORAGE_KEY)).toBe('cezarion')
     expect(localStorage.getItem(DENSITY_STORAGE_KEY)).toBe('compact')
     expect(localStorage.getItem(WIDTH_STORAGE_KEY)).toBe('wide')
-    expect(readStoredAppearance()).toEqual({ accent: 'violet', density: 'compact', width: 'wide' })
+    expect(readStoredAppearance()).toEqual({ accent: 'cezarion', density: 'compact', width: 'wide' })
   })
 
   it('defaults when the mirror is empty', () => {
-    expect(readStoredAppearance()).toEqual({ accent: 'violet', density: 'comfortable', width: 'narrow' })
+    expect(readStoredAppearance()).toEqual({ accent: 'cezarion', density: 'comfortable', width: 'narrow' })
   })
 })
 
 describe('applyAppearance', () => {
   it('keeps the sole accent implicit and stamps only non-default density and width', () => {
     const root = document.documentElement
-    root.dataset.accent = 'violet'
-    applyAppearance(root, { accent: 'violet', density: 'compact', width: 'wide' })
+    root.dataset.accent = 'legacy'
+    applyAppearance(root, { accent: 'cezarion', density: 'compact', width: 'wide' })
     expect(root.hasAttribute('data-accent')).toBe(false)
     expect(root.dataset.density).toBe('compact')
     expect(root.dataset.width).toBe('wide')
 
-    applyAppearance(root, { accent: 'violet', density: 'comfortable', width: 'narrow' })
+    applyAppearance(root, { accent: 'cezarion', density: 'comfortable', width: 'narrow' })
     expect(root.hasAttribute('data-accent')).toBe(false)
     expect(root.hasAttribute('data-density')).toBe(false)
     expect(root.hasAttribute('data-width')).toBe(false)

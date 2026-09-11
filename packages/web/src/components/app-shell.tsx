@@ -396,7 +396,7 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
       // A 5px grab strip straddling the border, invisible until you reach for it. `touch-none`
       // is load-bearing rather than decorative: without it a touch drag is claimed by the
       // browser's own panning and scrolls the page instead of resizing the column.
-      className="absolute inset-y-0 -right-[2px] z-20 w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-violet/40 focus-visible:bg-violet/60 focus-visible:outline-none"
+      className="absolute inset-y-0 -right-[2px] z-20 w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent-strong/40 focus-visible:bg-accent-strong/60 focus-visible:outline-none"
     />
   )
 }
@@ -520,7 +520,7 @@ function SidebarContent({
                 reserves ⌘N for a new window — so the chip advertises the one that always works.) */}
             <kbd
               aria-hidden="true"
-              className="absolute right-2.5 rounded-[5px] border border-b-2 border-primary-foreground/25 bg-transparent px-[5px] py-px font-mono text-[10.5px] font-medium text-primary-foreground/60"
+              className="absolute right-2.5 rounded-[5px] border border-b-2 border-action-foreground/25 bg-transparent px-[5px] py-px font-mono text-[10.5px] font-medium text-action-foreground/60"
             >
               C
             </kbd>
@@ -579,7 +579,7 @@ function SidebarContent({
                   {item.badge === 'inbox-count' && inboxCount ? (
                     <span
                       data-slot="nav-badge"
-                      className="ml-auto rounded-full bg-violet px-1.5 py-px text-[10.5px] font-semibold text-violet-foreground"
+                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10.5px] font-semibold text-accent-strong-foreground"
                     >
                       {inboxCount}
                     </span>
@@ -590,7 +590,7 @@ function SidebarContent({
                     <span
                       data-slot="nav-unread-badge"
                       title={`${unreadCount} unread finished ${unreadCount === 1 ? 'task' : 'tasks'}`}
-                      className="ml-auto rounded-full bg-violet px-1.5 py-px text-[10.5px] font-semibold text-violet-foreground"
+                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10.5px] font-semibold text-accent-strong-foreground"
                     >
                       {unreadCount}
                     </span>
@@ -600,7 +600,7 @@ function SidebarContent({
                       data-slot="nav-update-marker"
                       className="ml-auto flex items-center"
                     >
-                      <span className="size-1.5 rounded-full bg-violet" aria-hidden="true" />
+                      <span className="size-1.5 rounded-full bg-accent-strong" aria-hidden="true" />
                       <span className="sr-only">Skills update available</span>
                     </span>
                   ) : null}
@@ -665,7 +665,7 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
       )}
     >
       <LayersIcon
-        className={cn('size-4 shrink-0', isActive ? 'text-violet' : 'text-violet/70')}
+        className={cn('size-4 shrink-0', isActive ? 'text-accent-strong' : 'text-accent-strong/70')}
         aria-hidden="true"
       />
       All tasks

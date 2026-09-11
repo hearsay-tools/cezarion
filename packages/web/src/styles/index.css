@@ -69,10 +69,11 @@
 :root {
   color-scheme: dark;
 
-  /* Brand is fixed; appearance.accent still owns the extension seam for future families. */
-  --brand-purple: #7c3aed;
-  --brand-gold: #f4c542;
-  --on-gold: #0b0f17;
+  /* Role-named family selected by appearance.accent. Cezarion is the sole family today. */
+  --action: #f4c542;
+  --action-foreground: #0b0f17;
+  --accent-strong: #7c3aed;
+  --accent-strong-foreground: #ffffff;
 
   /* Cezarion surfaces from design.pen. Elevation comes from surface steps, not shadows. */
   --surface-base: #0b0f17;
@@ -106,17 +107,13 @@
   --contrast: var(--text-primary);
   --contrast-foreground: var(--surface-raised);
 
-  --primary: var(--brand-gold);
-  --primary-foreground: var(--on-gold);
-  --violet: var(--brand-purple);
-  --violet-foreground: #ffffff;
   --ring: var(--accent-text);
 
   /* status */
   --danger: #ef4444;
   --danger-foreground: #ffffff;
   --success: #74d5a1;
-  --pending: var(--brand-gold);
+  --pending: var(--action);
   /* Waiting on a PERSON — a reference that needs a reviewer, as opposed to one that is done
    * (violet), finished well (success) or broken (danger). The palette had no blue outside the
    * syntax theme, which is exactly why this reads as its own thing: nothing else in the cockpit
@@ -137,7 +134,7 @@
    * this theme's near-black and fails badly against the light theme's white, which is why the
    * design guardian bans `text-pending` outright. This token is the sanctioned way to write amber
    * words — same hue, per-theme luminance, AA against each theme's background. */
-  --pending-strong: var(--brand-gold);
+  --pending-strong: var(--action);
 
   /* diff tints */
   --diff-add-bg: #132c24;
@@ -145,7 +142,7 @@
   --diff-del-bg: rgba(239, 68, 68, 0.1);
   --diff-del-strong: rgba(239, 68, 68, 0.3);
 
-  --grad: linear-gradient(135deg, var(--brand-purple) 12%, var(--accent-text) 52%, var(--brand-gold) 100%);
+  --grad: linear-gradient(135deg, var(--accent-strong) 12%, var(--accent-text) 52%, var(--action) 100%);
 
   /* type stacks — the woff2 above, then platform fallbacks */
   --sans: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -367,10 +364,10 @@
   --color-contrast: var(--contrast);
   --color-contrast-foreground: var(--contrast-foreground);
 
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-violet: var(--violet);
-  --color-violet-foreground: var(--violet-foreground);
+  --color-action: var(--action);
+  --color-action-foreground: var(--action-foreground);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-strong-foreground: var(--accent-strong-foreground);
   --color-ring: var(--ring);
 
   --color-danger: var(--danger);
@@ -516,11 +513,11 @@
 @keyframes ghost-type {
   from {
     width: 0;
-    border-right-color: var(--primary);
+    border-right-color: var(--action);
   }
   to {
     width: calc(var(--n) * 1ch);
-    border-right-color: var(--primary);
+    border-right-color: var(--action);
   }
 }
 @keyframes ghost-caret-off {

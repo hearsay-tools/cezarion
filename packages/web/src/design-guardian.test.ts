@@ -68,11 +68,26 @@ const RULES: Rule[] = [
     applies: styleSources,
   },
   {
-    name: 'no-primary-action-color-as-ink',
-    why: 'gold is an action fill; standalone chrome ink uses link-foreground so it keeps AA contrast in light mode',
-    pattern: /\btext-primary(?!-foreground)\b/g,
+    name: 'no-color-named-or-ambiguous-brand-utilities',
+    why: 'UI consumes action and accent roles, never the ambiguous primary or color-named violet utilities',
+    pattern: /\b(?:accent|bg|border|text|ring)-(?:primary|violet)(?:-[\w-]+)?(?:\/(?:\[[^\]]+\]|[\w.-]+))?/g,
     applies: styleSources,
+    // The token sheet's `--text-primary` means primary BODY TEXT, not a brand-color utility.
     allowed: (rel) => rel === 'src/styles/index.css',
+  },
+  {
+    name: 'no-action-color-as-chrome',
+    why: 'action is reserved for action fills; selection, focus, and other chrome use the accent token family',
+    pattern: /\b(?:border-action(?!-foreground)|(?:selection:)?bg-action(?!-foreground))(?:\/(?:\[[^\]]+\]|[\w.-]+))?/g,
+    applies: styleSources,
+    // These are the deliberate gold surfaces: shared action buttons, the mobile create action,
+    // the inline Save action, and decorative gold points in the sparse twinkle backdrop.
+    allowed: (rel) =>
+      rel === 'src/components/ui/button.tsx' ||
+      rel === 'src/routes/tasks-overview.tsx' ||
+      rel === 'src/routes/task-thread/thread-items.tsx' ||
+      rel === 'src/components/centered-state.tsx' ||
+      rel === 'src/styles/index.css',
   },
   {
     name: 'no-raw-black-white',
@@ -252,12 +267,14 @@ describe('design guardian', () => {
   it('defines the approved purple chrome and gold action token vocabulary', () => {
     const css = readFileSync(path.join(APP_ROOT, 'src/styles/index.css'), 'utf8')
     for (const token of [
-      '--brand-purple:',
-      '--brand-gold:',
+      '--action:',
+      '--action-foreground:',
+      '--accent-strong:',
+      '--accent-strong-foreground:',
       '--task-brand-bg:',
       '--task-brand-selected:',
       '--accent-text:',
-      '--primary: var(--brand-gold)',
+      '--pending: var(--action)',
     ]) {
       expect(css).toContain(token)
     }

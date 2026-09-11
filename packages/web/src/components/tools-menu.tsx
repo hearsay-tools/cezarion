@@ -188,7 +188,7 @@ function UnavailableToolRow({ check }: { check: BackendCheck }) {
               {check.hint}
             </span>
           ) : null}
-          <span data-slot="tool-setup" className="ml-auto shrink-0 text-[11.5px] font-semibold text-violet">
+          <span data-slot="tool-setup" className="ml-auto shrink-0 text-[11.5px] font-semibold text-accent-strong">
             Set up →
           </span>
         </span>

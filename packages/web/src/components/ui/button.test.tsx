@@ -13,13 +13,13 @@ describe('Button', () => {
 
     expect(button.dataset.variant).toBe('primary')
     expect(button.dataset.size).toBe('default')
-    expect(button.className).toContain('bg-primary')
+    expect(button.className).toContain('bg-action')
     expect(button.className).toContain('h-11')
   })
 
   describe('variant → class mapping', () => {
     it.each([
-      { variant: 'primary', expected: ['bg-primary', 'text-primary-foreground'] },
+      { variant: 'primary', expected: ['bg-action', 'text-action-foreground'] },
       { variant: 'contrast', expected: ['bg-contrast', 'text-contrast-foreground'] },
       { variant: 'outline', expected: ['border-border', 'bg-card'] },
       { variant: 'ghost', expected: ['text-muted-foreground'] },
@@ -59,7 +59,7 @@ describe('Button', () => {
     const button = screen.getByRole('button')
 
     expect(button.className).toContain('bg-muted')
-    expect(button.className).not.toContain('bg-primary')
+    expect(button.className).not.toContain('bg-action')
   })
 
   it('renders the child element instead of a button when asChild is set', () => {

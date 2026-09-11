@@ -69,7 +69,7 @@ export function PromptTemplateMenu({
             triggerClassName,
           )}
         >
-          <NotebookPenIcon aria-hidden="true" className="size-3 shrink-0 text-violet" />
+          <NotebookPenIcon aria-hidden="true" className="size-3 shrink-0 text-accent-strong" />
           {iconOnly ? null : (
             <>
               templates
@@ -125,7 +125,7 @@ export function PromptTemplateMenu({
                       <span
                         data-slot="prompt-template-assigned"
                         title={`Applied automatically with: ${template.skills.join(', ')}`}
-                        className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-violet"
+                        className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-accent-strong"
                       >
                         <SparklesIcon aria-hidden="true" className="size-2.5" />
                         {template.skills.length}
