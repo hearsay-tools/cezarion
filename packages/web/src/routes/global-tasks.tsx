@@ -628,7 +628,7 @@ function FilterBar({
         // since the pane that fixes it is two clicks away and outside this page.
         <p data-slot="no-tags-hint" className="text-[11px] text-soft-foreground">
           Tag connected repositories in{' '}
-          <Link to="/settings/global/projects" className="font-medium text-accent-strong hover:underline">
+          <Link to="/settings/global/projects" className="font-medium text-accent-text hover:underline">
             Settings → Projects
           </Link>{' '}
           to group their tasks together here.
@@ -891,7 +891,7 @@ function ReadToggle({
           onClick={() => onSetRead(task, unread)}
           className={cn(
             'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-wait disabled:opacity-50',
-            unread ? 'text-accent-strong' : 'text-soft-foreground',
+            unread ? 'text-accent-text' : 'text-soft-foreground',
           )}
         >
           <Icon className="size-3.5" aria-hidden="true" />

@@ -346,7 +346,7 @@ function TemplateSkillsPicker({
             selected.length > 0 && 'border-foreground/60 font-semibold text-foreground',
           )}
         >
-          <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-accent-strong" />
+          <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
           {skills.length === 0 ? 'no skills found' : 'apply with…'}
           <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
         </button>

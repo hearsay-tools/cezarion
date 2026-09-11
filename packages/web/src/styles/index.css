@@ -368,6 +368,8 @@
   --color-action-foreground: var(--action-foreground);
   --color-accent-strong: var(--accent-strong);
   --color-accent-strong-foreground: var(--accent-strong-foreground);
+  --color-accent-text: var(--accent-text);
+  --color-accent-icon: var(--accent-icon);
   --color-ring: var(--ring);
 
   --color-danger: var(--danger);

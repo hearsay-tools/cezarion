@@ -44,7 +44,7 @@ export function PinToggle({
       }}
       className={cn(
         'inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-soft-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
-        pinned && 'text-accent-strong hover:text-accent-strong',
+        pinned && 'text-accent-icon hover:text-accent-icon',
         className,
         'max-md:min-h-11 max-md:min-w-11 no-hover:min-h-11 no-hover:min-w-11',
       )}

@@ -90,6 +90,12 @@ const RULES: Rule[] = [
       rel === 'src/styles/index.css',
   },
   {
+    name: 'no-fill-accent-as-ink',
+    why: 'accent-strong is a fill and border role; readable labels use accent-text and icons use accent-icon',
+    pattern: /\btext-accent-strong(?!-foreground)\b/g,
+    applies: styleSources,
+  },
+  {
     name: 'no-raw-black-white',
     why: 'use surface/foreground tokens so both themes work; bg/text-white/black bypass them',
     pattern: /\b(?:bg|text)-(?:white|black)\b/g,
@@ -271,9 +277,10 @@ describe('design guardian', () => {
       '--action-foreground:',
       '--accent-strong:',
       '--accent-strong-foreground:',
+      '--accent-text:',
+      '--accent-icon:',
       '--task-brand-bg:',
       '--task-brand-selected:',
-      '--accent-text:',
       '--pending: var(--action)',
     ]) {
       expect(css).toContain(token)

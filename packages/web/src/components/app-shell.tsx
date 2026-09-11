@@ -665,7 +665,7 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
       )}
     >
       <LayersIcon
-        className={cn('size-4 shrink-0', isActive ? 'text-accent-strong' : 'text-accent-strong/70')}
+        className={cn('size-4 shrink-0', isActive ? 'text-accent-icon' : 'text-accent-icon/70')}
         aria-hidden="true"
       />
       All tasks

@@ -988,7 +988,7 @@ function PaletteSkill({
     >
       <SparklesIcon
         aria-hidden="true"
-        className={cn('size-3.5 shrink-0', isProjectSkill(skill) ? 'text-accent-strong' : 'text-soft-foreground')}
+        className={cn('size-3.5 shrink-0', isProjectSkill(skill) ? 'text-accent-icon' : 'text-soft-foreground')}
       />
       <span
         className={cn(

@@ -181,7 +181,7 @@ export function ToggleChip({
       className={cn(
         'inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors',
         tone === 'tag'
-          ? 'border-accent-strong/25 bg-accent-strong/10 text-accent-strong hover:bg-accent-strong/20'
+          ? 'border-accent-strong/25 bg-accent-strong/10 text-accent-text hover:bg-accent-strong/20'
           : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
         selected && 'border-accent-strong bg-accent-strong text-accent-strong-foreground hover:bg-accent-strong',
       )}

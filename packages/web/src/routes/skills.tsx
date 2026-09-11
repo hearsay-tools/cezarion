@@ -259,7 +259,7 @@ function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
         <span className="flex min-w-0 items-center gap-2">
           <SparklesIcon
             aria-hidden="true"
-            className={cn('size-3.5 shrink-0', project ? 'text-accent-strong' : 'text-soft-foreground')}
+            className={cn('size-3.5 shrink-0', project ? 'text-accent-icon' : 'text-soft-foreground')}
           />
           {/* Project skills read bold (#377) — the visual half of the ordering rule. */}
           <span

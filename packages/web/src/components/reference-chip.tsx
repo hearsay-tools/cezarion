@@ -33,7 +33,7 @@ import { cn, isHttpUrl } from '@/lib/utils'
 const TONE_CLASS: Record<ReferenceStatusTone, string> = {
   success: 'border-success/40 text-success',
   danger: 'border-danger/40 text-danger',
-  accent: 'border-accent-strong/35 text-accent-strong',
+  accent: 'border-accent-strong/35 text-accent-text',
   info: 'border-info/40 text-info',
   neutral: 'border-border text-muted-foreground',
   // The WHOLE chip goes amber while checks run, not just its dot: "something is happening to this

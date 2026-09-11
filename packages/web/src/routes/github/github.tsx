@@ -854,7 +854,7 @@ function GithubRow({
         <span className="flex min-w-0 items-start gap-2 md:items-center">
           <Icon
             aria-hidden="true"
-            className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-accent-strong')}
+            className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-accent-icon')}
           />
           <span className={cn('line-clamp-2 min-w-0 text-[13px] font-medium md:block md:truncate', active && 'font-semibold')}>
             {item.title}
@@ -867,7 +867,7 @@ function GithubRow({
           <CommentCount count={item.comments} />
           {checks ? <ChecksGlyph checks={checks} /> : null}
           {queued ? (
-            <span data-slot="gh-queued-flag" className="font-sans font-medium text-accent-strong">
+            <span data-slot="gh-queued-flag" className="font-sans font-medium text-accent-text">
               ↗ run queued
             </span>
           ) : null}

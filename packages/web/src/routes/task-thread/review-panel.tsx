@@ -41,7 +41,7 @@ export function ReviewPanel({ run }: { run: ApiRun }) {
         data-slot="review-banner"
         className="flex items-center gap-2.5 rounded-md border border-accent-strong/30 bg-accent-strong/10 px-3.5 py-2.5"
       >
-        <EyeIcon className="size-4 shrink-0 text-accent-strong" aria-hidden="true" />
+        <EyeIcon className="size-4 shrink-0 text-accent-icon" aria-hidden="true" />
         <p className="min-w-0 text-[13px]">
           <span className="font-semibold">Review the changes before anything lands.</span>{' '}
           <span className="text-muted-foreground">
@@ -282,7 +282,7 @@ export function AcceptCelebration({ status }: { status: RunStatus }) {
     >
       <TwinkleBackdrop />
       <div className="flex justify-center pt-24">
-        <span className="rounded-full border border-accent-strong/30 bg-accent-strong/15 px-4 py-1.5 text-[13px] font-medium text-accent-strong shadow-modal">
+        <span className="rounded-full border border-accent-strong/30 bg-accent-strong/15 px-4 py-1.5 text-[13px] font-medium text-accent-text shadow-modal">
           ✓ Changes accepted
         </span>
       </div>
