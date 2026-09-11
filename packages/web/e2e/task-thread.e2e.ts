@@ -451,7 +451,10 @@ describe('task thread', () => {
       `document.querySelector('[data-slot="notes-panel"]').textContent.includes('No notes yet')`,
     )
     // The 1.4 money shot: full header (title, meta, tabs+actions, rail, hint) + open notes.
-    browser.screenshot(`${artifactsDir}/thread-header-desktop.png`)
+    // Full-page capture scroll-stitches the transcript and changes the live header state.
+    // Keep this interaction proof in its viewport, like the other scroll-sensitive shots.
+    browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') === null`)
+    browser.screenshot(`${artifactsDir}/thread-header-desktop.png`, { viewport: true })
     browser.click('[aria-label="Run actions"]')
     browser.waitForFunction(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].some(el => el.textContent.trim() === 'Notes')`)
     browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent.trim() === 'Notes').click()`)
@@ -688,6 +691,7 @@ describe('revised session layout', () => {
       return { stacked: innerWidth >= 768 ? settings.bottom <= model.top + 1 : model.bottom <= settings.top + 1, fits: model.left >= 0 && model.right <= innerWidth, overflow: document.documentElement.scrollWidth > innerWidth, position: getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).position };
     })()`) as { stacked: boolean; fits: boolean; overflow: boolean; position: string }
     expect(facts).toEqual({ stacked: true, fits: true, overflow: false, position: 'relative' })
+    expect(browser.evaluate(`document.querySelector('[data-slot="follow-up-model-pill"]').getBoundingClientRect().height`)).toBeGreaterThanOrEqual(44)
     browser.fill('[data-slot="composer"] textarea', 'Keep these follow-up instructions')
     expect(browser.text('[data-slot="composer-submit-row"]')).toContain('Send')
     browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')

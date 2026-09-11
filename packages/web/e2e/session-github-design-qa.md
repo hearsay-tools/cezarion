@@ -75,3 +75,12 @@ merge POSTs; precise-head mutations and capability gates are asserted in unit te
   equivalent unknown-requirements mobile fixture was exercised in both themes.
 - Real-device iOS keyboard behavior remains a manual check; headless tests verify the
   viewport inset seam, document flow and non-overlap, not a physical keyboard.
+
+## Parent review follow-up: Model target
+
+The desktop Model button measured 26px. Its shared rule now has `min-height: 44px`,
+with no separate mobile override. The browser matrix asserts the actual button
+height at 1440, 402 and 360 in both themes: desktop failed before the fix, all six
+pass afterwards. Web build passes; session browser suite 30/30 and scroll suite
+12/12 pass with the fix. The Notes screenshot uses viewport capture so stitching
+does not scroll the transcript between its unchanged menu-toggle assertions.
