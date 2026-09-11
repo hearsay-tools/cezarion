@@ -580,7 +580,7 @@ export function Composer({
             className="rounded-xl border border-[var(--composer-border)] bg-card shadow-none transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15"
           >
             {images.length > 0 ? (
-            <div data-slot="composer-thumbs" className="flex flex-wrap items-center gap-2 px-4 pt-3">
+            <div data-slot="composer-thumbs" className="flex flex-nowrap items-center gap-2 overflow-x-auto px-4 pt-3 md:flex-wrap md:overflow-visible">
               {images.map((attachment, index) => (
                 <button
                   key={`${attachment.name}-${index}`}
@@ -589,7 +589,7 @@ export function Composer({
                   title={readOnly ? 'Attachment submitted' : 'Click to remove'}
                   disabled={readOnly}
                   className={cn(
-                    'group relative overflow-hidden rounded-md border border-border',
+                    'group relative shrink-0 overflow-hidden rounded-md border border-border',
                     attachment.isImage
                       ? 'size-12'
                       : 'flex h-12 min-w-11 max-w-[200px] items-center gap-1.5 bg-muted/40 px-2.5 text-xs text-muted-foreground',
