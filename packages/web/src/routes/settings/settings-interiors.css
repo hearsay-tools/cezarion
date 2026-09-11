@@ -1,5 +1,4 @@
-/* Settings interiors follow the same section card in both scopes. The outer app
-   owns reading width and density; this file never changes either preference. */
+/* Settings interiors follow the same section card in both scopes. Settings remain full width; reading width applies only to task views. */
 .settings-panel {
   width: 100%;
   border: 1px solid var(--border);

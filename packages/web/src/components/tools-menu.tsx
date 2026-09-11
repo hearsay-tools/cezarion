@@ -1,5 +1,6 @@
 import { ChevronDownIcon, SettingsIcon } from 'lucide-react'
 import { Link } from '@/lib/project-router'
+import { Link as RouterLink } from 'react-router'
 
 import type { BackendCheck, HealthResponse, Runner } from '@open-mercato/cezar-api-client'
 import { StatusDot } from '@/components/status-dot'
@@ -90,7 +91,7 @@ export function ToolsMenu({ health }: { health: HealthResponse | undefined }) {
           type="button"
           data-slot="tools-menu-trigger"
           title={toolsTooltip(health)}
-          className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:min-h-9"
         >
           <StatusDot tone={blocker ? 'pending' : 'success'} />
           Tools
@@ -120,6 +121,9 @@ export function ToolsMenu({ health }: { health: HealthResponse | undefined }) {
           </>
         ) : null}
         <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <RouterLink to="/tools">Tools diagnostics</RouterLink>
+        </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link
             to="/settings/agents"

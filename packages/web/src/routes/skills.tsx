@@ -52,7 +52,7 @@ export function SkillsRoute() {
   return (
     <div
       data-route="skills"
-      className="mx-auto min-h-full w-full max-w-[calc(var(--measure)+72px)] px-[18px] py-6 md:p-9"
+      className="mx-auto min-h-full w-full px-[18px] py-6 md:p-9"
     >
       <SkillsCatalog />
     </div>

@@ -336,6 +336,32 @@ describe('sidebar wiring', () => {
     expect(repoChip()).toBeNull()
   })
 
+  it('keeps the shared archive filter reachable above a multi-project session tree', async () => {
+    const active = run({ id: 'active-session', titleSummary: 'Current session' })
+    const archived = run({ id: 'archived-session', titleSummary: 'Archived session', status: 'done', archived: true })
+    serve({
+      '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
+      '/api/v1/todos': [],
+      '/api/v1/projects': {
+        projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop' }],
+        bootProject: 'cezar', projectsDir: '/projects',
+      },
+      '/api/v1/runs': [active, archived],
+      '/api/v1/p/cezar/runs': [active, archived],
+      '/api/v1/workspace/ui-state': {},
+    })
+    renderShell('/p/cezar/new')
+    await screen.findByRole('link', { name: /Current session/ })
+    const archivedTab = screen.getByRole('button', { name: /^Archived/ })
+    const tree = document.querySelector('[data-slot="project-groups"]')!
+    expect(archivedTab.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(archivedTab)
+    await screen.findByRole('link', { name: /Archived session/ })
+    expect(screen.queryByRole('link', { name: /Current session/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Active/ }))
+    await screen.findByRole('link', { name: /Current session/ })
+  })
+
   it('shows the version chip even outside a git repo', async () => {
     serve({ '/api/v1/health': { ...HEALTH, repo: null }, '/api/v1/todos': [] })
     renderShell()

@@ -50,6 +50,7 @@ function LocationProbe() {
 const nav = () => screen.getByRole('navigation', { name: 'Main' })
 const sidebar = () => document.querySelector('[data-slot="sidebar"]') as HTMLElement
 const footer = () => document.querySelector('[data-slot="sidebar-footer"]') as HTMLElement
+const allNavLinks = (root = sidebar()) => Array.from(root.querySelectorAll<HTMLAnchorElement>('nav a'))
 
 describe('AppShell', () => {
   it('renders the routed view in the main region', () => {
@@ -117,24 +118,24 @@ describe('AppShell', () => {
 
   it('renders the whole nav as real router links', () => {
     renderShell()
-    const links = within(nav()).getAllByRole('link')
+    const links = allNavLinks()
     expect(links.map((a) => a.textContent)).toEqual([
-      'Tasks',
       'Inbox',
+      'Automations',
+      'Tasks',
       'Git',
       'GitHub',
-      'Automations',
       'Skills',
       'Workflows',
       'Settings',
     ])
     // Deep-linkable per Step 2.1: every nav row is an <a href>, not a button with an onClick.
     expect(links.map((a) => a.getAttribute('href'))).toEqual([
-      '/',
       '/inbox',
+      '/automations',
+      '/',
       '/git',
       '/github',
-      '/automations',
       '/skills',
       '/workflows',
       '/settings',
@@ -145,7 +146,7 @@ describe('AppShell', () => {
   // degradation table), it does not render disabled.
   it('drops the GitHub item when the forge is unavailable', () => {
     renderShell('/', { forgeAvailable: false })
-    const links = within(nav()).getAllByRole('link')
+    const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/github')
     expect(links).toHaveLength(NAV_ITEMS.filter((item) => !item.forge).length)
   })
@@ -154,14 +155,14 @@ describe('AppShell', () => {
   // not render disabled. The two gates on that item are independent: a forge alone is not enough.
   it('drops the Automations item when the capability is off', () => {
     renderShell('/', { automationsAvailable: false })
-    const links = within(nav()).getAllByRole('link')
+    const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/automations')
     expect(links).toHaveLength(NAV_ITEMS.filter((item) => !item.automations).length)
   })
 
   it('shows the Automations item once the capability is on', () => {
     renderShell('/', { automationsAvailable: true })
-    expect(within(nav()).getAllByRole('link').map((a) => a.getAttribute('href')))
+    expect(allNavLinks().map((a) => a.getAttribute('href')))
       .toContain('/automations')
   })
 
@@ -240,7 +241,7 @@ describe('AppShell', () => {
       expect(footer().firstElementChild?.getAttribute('data-slot')).toBe('global-settings-link')
     })
 
-    it('keeps every control a sibling inside the one controls row', () => {
+    it('keeps tools and theme together, with version below and global settings above', () => {
       renderShell('/', { version: '1.2.3', toolsMenu: <button type="button">Tools</button> })
       // The gear and the toggle are the pair that came apart in #702 — assert they share a parent,
       // and that the row is the whole of the footer's chrome rather than a subset of it.
@@ -248,7 +249,10 @@ describe('AppShell', () => {
       expect(footer().querySelector('[data-slot="global-settings-link"]')).not.toBeNull()
       expect(row.querySelector('[data-slot="theme-toggle"]')).not.toBeNull()
       expect(row.querySelector('[data-slot="tools-menu"]')).not.toBeNull()
-      expect(row.querySelector('[data-slot="version-chip"]')).not.toBeNull()
+      const version = footer().querySelector('[data-slot="version-chip"]')!
+      expect(version).not.toBeNull()
+      expect(row.contains(version)).toBe(false)
+      expect(row.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       // The gear pushes itself right; the toggle rides along at the end of the same row.
       const gear = footer().querySelector('[data-slot="global-settings-link"]') as HTMLElement
       expect(gear.closest('a,button')?.parentElement).toBe(footer())
@@ -273,7 +277,7 @@ describe('AppShell', () => {
 
     it('still shows the version chip update affordance (#368) in the narrower row', () => {
       renderShell('/', { version: '1.2.3', latestVersion: '1.3.0' })
-      const chip = controls().querySelector('[data-slot="version-chip"]') as HTMLElement
+      const chip = footer().querySelector('[data-slot="version-chip"]') as HTMLElement
       expect(chip.getAttribute('data-update-available')).toBe('true')
       expect(chip.querySelector('[data-slot="status-dot"]')).not.toBeNull()
     })
@@ -287,7 +291,7 @@ describe('AppShell', () => {
         version: '0.9.2-nightly.20260813.1',
         toolsMenu: <button type="button">Tools</button>,
       })
-      const chip = controls().querySelector('[data-slot="version-chip"]') as HTMLElement
+      const chip = footer().querySelector('[data-slot="version-chip"]') as HTMLElement
       expect(chip.className).not.toContain('shrink-0')
       expect(chip.className).toContain('min-w-0')
       // The text truncates inside the pill rather than widening it past what the row can hold.
@@ -296,11 +300,10 @@ describe('AppShell', () => {
       expect(label.textContent).toBe('v0.9.2-nightly.20260813.1')
       // …and the full string stays legible on hover, since the visible one may be clipped.
       expect(chip.getAttribute('title')).toBe('v0.9.2-nightly.20260813.1')
-      // Everything else in the row still refuses to shrink — that is what keeps them readable.
-      for (const slot of ['tools-menu', 'theme-toggle']) {
-        const el = controls().querySelector(`[data-slot="${slot}"]`) as HTMLElement
-        expect(el.className).toContain('shrink-0')
-      }
+      const theme = controls().querySelector('[data-slot="theme-toggle"]') as HTMLElement
+      expect(theme.className).toContain('shrink-0')
+      expect(controls().contains(chip)).toBe(false)
+      expect(within(controls()).getByRole('button', { name: 'Tools' })).toBeTruthy()
     })
   })
 
@@ -351,7 +354,7 @@ describe('AppShell', () => {
 
     it('renders the Inbox badge only for a non-zero count', () => {
       renderShell('/', { inboxCount: 2 })
-      const inbox = within(nav()).getByRole('link', { name: /Inbox/ })
+      const inbox = within(sidebar()).getByRole('link', { name: /Inbox/ })
       expect(within(inbox).getByText('2')).toBeTruthy()
 
       cleanup()
@@ -599,12 +602,13 @@ describe('AppShell', () => {
       expect(localStorage.getItem('cez-sidebar-width')).toBe('232')
     })
 
-    it('does not follow the drawer: the `<md` overlay keeps its fixed 232px and no handle', () => {
+    it('keeps the drawer independent of desktop resizing and reserves its dismissal strip', () => {
       localStorage.setItem('cez-sidebar-width', '400')
       renderShell('/', { taskQuickList: <p>list</p> })
       fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
       const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
-      expect(drawer.className).toContain('w-[232px]')
+      expect(drawer.className).toContain('w-[calc(100%-68px)]')
+      expect(drawer.className).toContain('max-w-[334px]')
       expect(drawer.style.width).toBe('')
       expect(within(drawer).queryByRole('separator', { name: 'Resize the sidebar' })).toBeNull()
     })
@@ -782,16 +786,15 @@ describe('AppShell', () => {
 
     it('renders the same nav as the desktop sidebar', () => {
       renderShell()
+      const desktopLinks = allNavLinks().map((a) => [a.getAttribute('href'), a.textContent])
       openMenu()
 
-      const inDrawer = within(drawer() as HTMLElement)
-        .getByRole('navigation', { name: 'Main' })
-      const links = within(inDrawer).getAllByRole('link')
+      const links = allNavLinks(drawer() as HTMLElement)
 
       // Asserted against NAV_ITEMS, not a copy of it: the point of this test is that the drawer
       // reuses the sidebar's content, so adding a nav item must not need a second edit here.
-      expect(links.map((a) => a.getAttribute('href'))).toEqual(NAV_ITEMS.map((item) => item.to))
-      expect(links.map((a) => a.textContent)).toEqual(NAV_ITEMS.map((item) => item.label))
+      expect(links.map((a) => [a.getAttribute('href'), a.textContent])).toEqual(desktopLinks)
+      expect(links.map((a) => a.getAttribute('href')).sort()).toEqual(NAV_ITEMS.map((item) => item.to).sort())
 
       // …and the rest of the sidebar came along, not just the nav.
       expect(within(drawer() as HTMLElement).getByRole('link', { name: /New task/ })).toBeTruthy()

@@ -20,7 +20,7 @@ extracts in `.ai/design-reference/revised/`. This supersedes the earlier frame I
 | 32A `lRC5W`, mobile `djknR` | YAML import/error, selectable/filterable Add step dialog, delete/overwrite confirmations. Import errors keep the text. Closing Add step returns keyboard focus to its trigger. |
 | 10 `EKi57`, `cvBro`, `f2LGv`, `gqaUM` | Inspected catalog, reader, Manage skills and bookmarklets against updated PNGs. Existing structures and actions retained; tested in both themes and at all three widths. |
 | 11 `C2sfEo`, `s0JzCL`, Auto `VDDSI` | Number is the real keyboard/pointer drag handle; ellipsis opens removal. Explicit mobile Move up/down remains. Specific prompts precede catalog descriptions; generic `{{task}}` keeps the useful catalog description. Command type/retry information lives below the summary. |
-| 12/13 `PPxMw`, `aFFvV`, `oHH3V` | Scope heading, text-only section navigation, section cards and local-storage summary. Settings now consumes the existing reading-width token; default Narrow remains 820px. |
+| 12/13 `PPxMw`, `aFFvV`, `oHH3V` | Scope heading, text-only section navigation, section cards and local-storage summary. Settings remains full width, per frame 18. Reading width controls task views only. |
 
 Shared shell, global typography, primitive button colors and sidebar are the parent's scope.
 Actual server capabilities and save contracts take precedence over simplified fixture controls.
@@ -56,3 +56,5 @@ Evidence and replay drivers (local to this task):
 Recheck after integrating the parent's shared shell and primitive changes. Fixture screenshots
 prove these interiors and state transitions, not a pixel-identical match of arbitrary repository
 content or an authenticated provider session.
+
+Parent integration: all 84 fixture captures and add/remove/reorder/import-error/resource-save checks passed against the combined shell after removing reading-width caps from Settings, Skills and Workflows. Evidence: `/tmp/cez-integrated-settings-evidence/`.

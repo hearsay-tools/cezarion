@@ -111,7 +111,7 @@ import { PlanReview } from './plan-review'
 /**
  * `/new` — the full-screen new-task hero (spec §"New task (full-screen, #386)"; visual
  * contract docs/mockups/new-task.html): centered composer card on the twinkle surface, the
- * picker pill row inside the card below the textarea, suggested-task ghost chips underneath.
+ * runner/model controls below the editor, with suggested task starters above it.
  * In plan-first mode (#383, the `Start | Plan first` segment) submit runs `POST /api/plan`
  * and opens the review overlay (plan-review.tsx) instead of starting a run.
  *
@@ -591,6 +591,11 @@ export function NewTaskRoute() {
           </p>
         </header>
 
+        <section aria-label="Suggested task starters" className="mb-6">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">Start with a suggestion</p>
+          <SuggestedChips onPick={(text) => update({ text })} />
+        </section>
+
         <Composer
           ref={composerRef}
           onSubmit={submit}
@@ -712,6 +717,7 @@ export function NewTaskRoute() {
               </div>
           }
           executionOptions={
+            <div className="flex min-w-0 flex-col gap-4">
             <details data-slot="execution-options" open className="group rounded-xl border border-border bg-card xl:self-start">
               <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
                 <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
@@ -757,17 +763,16 @@ export function NewTaskRoute() {
                       This skill recommends an interactive run in the current checkout. You can change either setting.
                     </p>
                   ) : null}
-                  {followupsToggleShown ? (
-                    <GenerateFollowupsToggle
-                      on={generateFollowupsOn}
-                      onChange={(on) => update({ generateFollowups: on })}
-                    />
-                  ) : null}
                   {repo.data ? <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Base branch</span><BaseBranchPill repo={repo.data} /></div> : null}
                 </div>
                 <p className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block">{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
               </div>
             </details>
+            {followupsToggleShown ? <section data-slot="followups-options" aria-label="Follow-ups preference" className="rounded-xl border border-border bg-card p-4">
+              <GenerateFollowupsToggle on={generateFollowupsOn} onChange={(on) => update({ generateFollowups: on })} />
+              <p className="mt-2 text-[11px] leading-5 text-muted-foreground">Generate suggestions in Inbox after this task. Enabled by default; your choice is remembered.</p>
+            </section> : null}
+            </div>
           }
           footerEnd={
             <>
@@ -794,7 +799,6 @@ export function NewTaskRoute() {
           }
         />
 
-        <details className="mt-8 text-xs text-muted-foreground"><summary className="cursor-pointer">Try a suggested task</summary><SuggestedChips onPick={(text) => update({ text })} /></details>
       </div>
 
       {plan !== null ? (
@@ -916,12 +920,12 @@ function GenerateFollowupsToggle({
           ? 'Agents can add newly discovered follow-up work to the task inbox'
           : 'Follow-up generation is off; agents still maintain the handoff journal'
       }
-      className={cn(chipClass, on && 'border-[var(--composer-border)] bg-[var(--task-brand-selected)] text-foreground')}
+      className="flex min-h-11 w-full items-center gap-3 text-left text-[13px] font-medium text-foreground"
     >
       {on ? (
-        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-[var(--accent-text)]" />
+        <CheckIcon aria-hidden="true" className="size-5 shrink-0 rounded border border-accent-strong bg-accent-strong p-0.5 text-accent-strong-foreground" />
       ) : (
-        <SquareIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
+        <SquareIcon aria-hidden="true" className="size-5 shrink-0 text-muted-foreground" />
       )}
       Follow-ups
     </button>
@@ -1430,14 +1434,14 @@ const SUGGESTIONS = [
 
 function SuggestedChips({ onPick }: { onPick: (text: string) => void }) {
   return (
-    <div className="mt-7 flex flex-wrap justify-center gap-2 max-md:justify-start">
+    <div className="flex flex-wrap gap-2">
       {SUGGESTIONS.map((suggestion) => (
         <button
           key={suggestion}
           type="button"
           data-slot="suggested-chip"
           onClick={() => onPick(suggestion)}
-          className="inline-flex h-[30px] items-center gap-1.5 rounded-full border border-border px-3 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-muted"
         >
           <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
           {suggestion}

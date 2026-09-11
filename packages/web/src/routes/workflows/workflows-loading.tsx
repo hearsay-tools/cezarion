@@ -4,7 +4,7 @@ export function WorkflowsLoading() {
     <div
       data-route="workflows"
       aria-busy="true"
-      className="mx-auto min-h-full w-full max-w-[calc(var(--measure)+72px)] px-[18px] py-6 md:p-9"
+      className="mx-auto min-h-full w-full px-[18px] py-6 md:p-9"
     >
       <h1 className="text-[30px] font-semibold tracking-tight">Workflows</h1>
       <p className="mt-1 text-[13px] text-muted-foreground">

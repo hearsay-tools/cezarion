@@ -220,8 +220,8 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
   ['/inbox', 'inbox', 'Inbox'],
   // The real workflow builder (R6 Step 1.6): with fetch never answering both the list URL
   // and a named deep link are honestly loading.
-  ['/workflows', 'workflows', 'Loading workflows…'],
-  ['/workflows/ship-it', 'workflows', 'Loading workflows…'],
+  ['/workflows', 'workflows', 'Workflows'],
+  ['/workflows/ship-it', 'workflows', 'Workflows'],
   ['/skills', 'skills', 'Skills'],
   // Project settings only (step 3.5) — appearance/notifications/resources/projects moved to
   // the unscoped `/settings/global/*` area, covered in its own describe below.
@@ -234,11 +234,21 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
 ]
 
 describe('scoped route map (/p/:projectId)', () => {
+  it('opens shared workspace diagnostics without forcing a project redirect', () => {
+    renderAt('/tools')
+    expect(routeName()).toBe('workspace-tools')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Workspace tools')
+  })
   for (const [url, route, title] of ROUTE_CASES) {
     it(`/p/${BOOT}${url} → ${route}`, () => {
       renderAt(`/p/${BOOT}${url}`)
       expect(routeName()).toBe(route)
-      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title)
+      if (url.startsWith('/settings/')) {
+        expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Project settings')
+        expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
+      } else {
+        expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title)
+      }
     })
   }
 
@@ -345,7 +355,8 @@ describe('the global settings area (/settings/global)', () => {
       expect(routeName()).toBe(route)
       // Never redirected into a project: the pathname is the one that was asked for.
       expect(currentPathname()).toBe(url)
-      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title)
+      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Global settings')
+      if (url !== '/settings/global') expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
     })
   }
 

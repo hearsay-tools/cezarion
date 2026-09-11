@@ -267,7 +267,7 @@ export function SettingsSectionRoute({
   return (
     <div
       data-route={scope === 'global' ? `settings-global-${section.id}` : `settings-${section.id}`}
-      className="mx-auto flex min-h-full w-full max-w-[calc(var(--measure)+72px)] flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9"
+      className="mx-auto flex min-h-full w-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9"
     >
       {/* Desktop header — below `md` the shell's top bar already says "Settings". The
           breadcrumb is what tells the two areas apart at a glance (mockup: "Global settings"). */}
@@ -301,7 +301,7 @@ export function SettingsIndexRoute({ scope, capabilities }: {
   const { Link } = navComponents(scope)
   const global = scope === 'global'
   return (
-    <div data-route={global ? 'settings-global' : 'settings'} className="mx-auto flex min-h-full w-full max-w-[calc(var(--measure)+72px)] flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <div data-route={global ? 'settings-global' : 'settings'} className="mx-auto flex min-h-full w-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       <header className="flex shrink-0 flex-col gap-2">
         <h1 className="text-[28px] font-semibold tracking-tight">{global ? 'Global settings' : 'Project settings'}</h1>
         <p className="text-[13px] text-soft-foreground">

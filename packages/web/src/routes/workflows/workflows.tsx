@@ -249,7 +249,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
     return (
       <div
         data-route="workflows"
-        className="@container mx-auto min-h-full w-full max-w-[calc(var(--measure)+72px)] px-[18px] py-6 md:p-9"
+        className="@container mx-auto min-h-full w-full px-[18px] py-6 md:p-9"
       >
         <CenteredState
           icon={<TriangleAlertIcon />}
@@ -343,7 +343,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
   return (
     <div
       data-route="workflows"
-      className="@container mx-auto min-h-full w-full max-w-[calc(var(--measure)+72px)] px-[18px] py-6 md:p-9"
+      className="@container mx-auto min-h-full w-full px-[18px] py-6 md:p-9"
     >
       <header className="mb-[22px] flex flex-wrap items-center justify-between gap-4">
         <div>

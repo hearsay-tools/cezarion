@@ -1,5 +1,7 @@
 # Site features needing design coverage
 
+**Historical inventory.** The revised `cezarion.pen` now covers these gaps. See [revised reconciliation](revised-design-reconciliation.md) for implementation coverage and the remaining API-dependent differences.
+
 Compared the current implementation with `design.pen` for issue #224. Work paused at the user’s request on 2026-09-11. These are inputs for the next design iteration, not permission to remove capabilities or weaken their tests.
 
 ## No dedicated screen in the reference

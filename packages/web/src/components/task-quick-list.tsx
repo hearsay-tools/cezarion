@@ -45,6 +45,7 @@ export function TaskQuickList({
   showTokens = true,
   showCost = true,
   onTogglePin,
+  showViewControls = true,
 }: {
   runs: RunRecord[]
   view: ListView
@@ -59,6 +60,7 @@ export function TaskQuickList({
   /** Pin/unpin one row (#935). The container owns the mutation, because WHICH project a row
    *  belongs to is a container's question — this list is painted for other projects too. */
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  showViewControls?: boolean
 }) {
   const counts = listCounts(runs)
   const buckets = groupRuns(runs, view)
@@ -70,7 +72,7 @@ export function TaskQuickList({
     <div data-slot="quick-list">
       {/* Sticky, not scrolled away: the tabs say what you are looking at, and a long Recent list
           must not be able to hide that the view is filtered. */}
-      <div className="sticky top-0 z-10 bg-sidebar pt-2 pb-1">
+      {showViewControls ? <div className="sticky top-0 z-10 bg-sidebar pt-2 pb-1">
         <div className="inline-flex w-full gap-0.5 rounded-md bg-muted p-[3px]">
           <ViewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
             Active
@@ -83,7 +85,7 @@ export function TaskQuickList({
             Archived
           </ViewTab>
         </div>
-      </div>
+      </div> : null}
 
       {buckets.length === 0 ? (
         <p className="px-3 py-3.5 text-xs text-soft-foreground">
@@ -191,7 +193,7 @@ function ViewTab({
       aria-pressed={isActive}
       onClick={() => onSelect(view)}
       className={cn(
-        'flex h-7 flex-1 items-center justify-center gap-1.5 rounded-[7px] text-[12.5px] font-medium text-muted-foreground',
+        'flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[7px] text-[11px] font-medium text-muted-foreground md:min-h-[30px]',
         isActive && 'bg-card font-semibold text-foreground shadow-xs'
       )}
     >
@@ -519,7 +521,7 @@ function variantLabel(run: RunRecord, showTokens: boolean, showCost: boolean): s
  * stream, Step 3.2), the router for which row is open, and the sidebar Active/Archived context —
  * independent of the Tasks table's own tabs.
  */
-export function TaskQuickListContainer() {
+export function TaskQuickListContainer({ showViewControls = true }: { showViewControls?: boolean }) {
   const runs = useRuns()
   const pin = usePinRun()
   const health = useHealth()
@@ -550,6 +552,7 @@ export function TaskQuickListContainer() {
   return (
     <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
       <TaskQuickList
+        showViewControls={showViewControls}
         runs={runs.data}
         view={view}
         onViewChange={setView}
@@ -565,5 +568,21 @@ export function TaskQuickListContainer() {
         }
       />
     </ReferenceStatusProvider>
+  )
+}
+
+/** One scope switcher above the project tree, shared by every sidebar run list. */
+export function SidebarSessionScope() {
+  const [view, setView] = useListView()
+  const runs = useRuns()
+  const counts = listCounts(runs.data ?? [])
+  return (
+    <div data-slot="sidebar-session-scope" role="group" aria-label="Session scope" className="flex w-full gap-1 rounded-lg bg-muted p-[3px]">
+      <ViewTab view="active" current={view} onSelect={setView} count={counts.active}>
+        Active
+        {counts.waiting > 0 && view !== 'active' ? <StatusDot tone="pending" pulse data-slot="waiting-dot" aria-label="needs you" /> : null}
+      </ViewTab>
+      <ViewTab view="archived" current={view} onSelect={setView} count={counts.archived}>Archived</ViewTab>
+    </div>
   )
 }

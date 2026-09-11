@@ -72,6 +72,7 @@ export type AppShellProps = {
   latestVersion?: string | null
   /** Step 3.3's grouped task quick-list. */
   taskQuickList?: ReactNode
+  sessionScope?: ReactNode
   /** Step 4.2's Tools dropdown trigger. */
   toolsMenu?: ReactNode
   /** Forge gating (R6 Step 1.1): `false` drops the GitHub nav item — see `visibleNavItems`.
@@ -149,6 +150,7 @@ export function AppShell({
   version = null,
   latestVersion = null,
   taskQuickList,
+  sessionScope,
   toolsMenu,
   forgeAvailable = true,
   inboxAvailable = true,
@@ -221,6 +223,7 @@ export function AppShell({
     version,
     latestVersion,
     taskQuickList,
+    sessionScope,
     toolsMenu,
     projectGroups,
     singleProject,
@@ -235,8 +238,7 @@ export function AppShell({
         className="flex h-dvh overflow-hidden bg-background text-foreground pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
       >
         <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
-        {/* The drawer keeps its fixed 232px: it is a full-height overlay on a phone, where
-            there is no second column to trade width with and no pointer to drag a border. */}
+        {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
         <MobileNavDrawer {...nav} onNavigate={() => setMenuOpen(false)} />
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
@@ -284,6 +286,7 @@ type NavProps = {
   version: string | null
   latestVersion: string | null
   taskQuickList?: ReactNode
+  sessionScope?: ReactNode
   toolsMenu?: ReactNode
   projectGroups?: ReactNode
   singleProject: boolean
@@ -427,7 +430,7 @@ function MobileNavDrawer({ onNavigate, ...props }: NavProps & { onNavigate: () =
       showCloseButton={false}
       // The drawer is the sidebar: same width, same surface token, and no padding of its own —
       // SidebarContent brings its own. `sm:max-w-none` sheds the primitive's sheet width cap.
-      className="w-[232px] gap-0 border-border bg-sidebar p-0 sm:max-w-none md:hidden"
+      className="w-[calc(100%-68px)] max-w-[334px] gap-0 border-border bg-sidebar p-0 sm:max-w-[334px] md:hidden"
       // Nav needs no prose description, and Radix warns when it cannot find the one it links to.
       aria-describedby={undefined}
     >
@@ -439,7 +442,7 @@ function MobileNavDrawer({ onNavigate, ...props }: NavProps & { onNavigate: () =
         headerAction={
           <SheetClose asChild>
             {/* size-11: the ≥44px touch target the spec's mobile rules require. */}
-            <Button variant="ghost" size="icon" aria-label="Close menu" className="-mr-2 size-11">
+            <Button variant="ghost" size="icon" aria-label="Close menu" className="absolute top-5 -right-14 size-11 text-accent-strong-foreground hover:bg-accent-strong-foreground/10 hover:text-accent-strong-foreground">
               <XIcon className="size-[17px]" aria-hidden="true" />
             </Button>
           </SheetClose>
@@ -467,6 +470,7 @@ function SidebarContent({
   version,
   latestVersion,
   taskQuickList,
+  sessionScope,
   toolsMenu,
   projectGroups,
   singleProject,
@@ -525,10 +529,21 @@ function SidebarContent({
             </kbd>
           </Link>
         </Button>
-        {singleProject ? null : <AddProjectMenu />}
       </div>
 
-      {!singleProject ? <div className="shrink-0 px-1.5 pb-3"><AllTasksLink onNavigate={onNavigate} /></div> : null}
+      {!singleProject ? <div className="shrink-0 px-4 pb-1"><AllTasksLink onNavigate={onNavigate} /></div> : null}
+      <nav aria-label="Workspace" className="shrink-0 px-4">
+        {items.filter((item) => item.inbox || item.automations).map((item) => {
+          const Icon = item.icon
+          return <Link key={item.to} to={item.to} onClick={onNavigate} aria-current={activeTo === item.to ? 'page' : undefined}
+            className={cn('flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-muted md:min-h-[42px]', activeTo === item.to && 'bg-[var(--task-brand-selected)] text-accent-text')}>
+            <Icon aria-hidden="true" className="size-4 shrink-0" />{item.label}
+            {item.inbox && inboxCount ? <span data-slot="nav-badge" className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10px] text-accent-strong-foreground">{inboxCount}</span> : null}
+          </Link>
+        })}
+      </nav>
+      {singleProject ? null : <div className="shrink-0 px-4 py-1"><AddProjectMenu /></div>}
+      {sessionScope ? <div className="shrink-0 px-4 pb-3">{sessionScope}</div> : null}
       {projectGroups ? (
         <>
           {/* Step 3.3: one collapsible group per registered project — nav + task list per group.
@@ -543,10 +558,10 @@ function SidebarContent({
           </div>
         </>
       ) : (
-        <>
-          {repo ? <div className="mx-[18px] mt-7 mb-3 flex items-center gap-2 text-xs font-medium"><FolderIcon aria-hidden="true" className="size-4" /><span data-slot="repo-chip" className="min-w-0 truncate">{repo.name}</span><span className="ml-auto text-[10px] text-muted-foreground">{repo.branch}</span></div> : null}
+        <div data-slot="single-project-navigation" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {repo ? <div className="mx-[18px] mt-2 mb-3 flex min-h-10 items-center gap-2 text-xs font-medium"><FolderIcon aria-hidden="true" className="size-4" /><span data-slot="repo-chip" className="min-w-0 truncate">{repo.name}</span><span className="ml-auto text-[10px] text-muted-foreground">{repo.branch}</span></div> : null}
           <nav aria-label="Main" className="px-2.5 py-1.5">
-            {items.map((item) => {
+            {items.filter((item) => !item.inbox && !item.automations).map((item) => {
               const isActive = item.to === activeTo
               const Icon = item.icon
               // Link, not NavLink, on purpose. NavLink derives `aria-current` from its own prefix
@@ -604,27 +619,26 @@ function SidebarContent({
           {/* The single-project quick-list (Needs you / Working / Recent). */}
           <div
             data-slot="task-quick-list"
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2"
+            className="px-2.5 pb-2"
           >
             {taskQuickList}
           </div>
-        </>
+        </div>
       )}
 
       <div
         data-slot="sidebar-footer"
-        className="border-t border-border px-[18px] py-3"
+        className="shrink-0 px-4 pt-2 pb-3"
       >
-        <GlobalSettingsLink onNavigate={onNavigate} className="mb-3 w-full justify-start gap-3 text-xs" />
-        <div data-slot="sidebar-footer-controls" className="flex items-center gap-2">
+        <GlobalSettingsLink onNavigate={onNavigate} className="mb-2 w-full justify-start gap-3 text-xs" />
+        <div data-slot="sidebar-footer-controls" className="flex items-center gap-2 border-t border-border pt-2">
           {/* SLOT — Step 4.2 mounts the Tools dropdown (aggregate status dot + tool versions) here. */}
-          <div data-slot="tools-menu" className="shrink-0">
+          <div data-slot="tools-menu" className="min-w-0 flex-1">
             {toolsMenu}
           </div>
-          {version ? <VersionChip version={version} latestVersion={latestVersion} /> : null}
-
           <ThemeToggle />
         </div>
+        {version ? <div className="mt-2 flex min-w-0 items-center gap-2 px-2"><VersionChip version={version} latestVersion={latestVersion} />{latestVersion && latestVersion !== version ? <span className="min-w-0 text-[10px] text-accent-text">Update available</span> : null}</div> : null}
       </div>
     </div>
   )
@@ -723,13 +737,13 @@ function AddProjectMenu() {
       <DropdownMenuTrigger asChild>
         {/* size-11 in the drawer (touch target), the CTA's height on desktop. */}
         <Button
-          variant="outline"
-          size="icon"
+          variant="ghost"
           aria-label="Add project"
           title="Add project"
-          className="size-11 shrink-0 md:size-9"
+          className="min-h-11 w-full justify-start gap-2.5 px-2.5 text-[13px] font-medium text-muted-foreground md:min-h-9"
         >
           <FolderOpenIcon className="size-4" aria-hidden="true" />
+          Add project
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
@@ -771,7 +785,7 @@ function CommandPaletteHint() {
       data-slot="command-palette-hint"
       title="Search — command palette (⌘K / Ctrl+K)"
       onClick={() => openCommandPalette()}
-      className="flex h-10 w-full items-center gap-2 rounded-md border border-border bg-[var(--task-brand-bg)] px-2.5 text-left text-xs font-normal text-muted-foreground transition-colors hover:border-[var(--composer-border)] hover:text-foreground"
+      className="flex h-11 w-full items-center gap-2 rounded-lg border border-border bg-[var(--task-brand-bg)] px-2.5 text-left text-xs font-normal text-muted-foreground transition-colors hover:border-[var(--composer-border)] hover:text-foreground md:h-10"
     >
       <SearchIcon className="size-3.5 shrink-0" aria-hidden="true" />
       <span className="truncate">Search…</span>
@@ -806,7 +820,7 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
       data-slot="version-chip"
       data-update-available={updateAvailable ? 'true' : undefined}
       title={updateAvailable ? `v${version} — update available: v${latestVersion}` : `v${version}`}
-      className="flex min-w-0 items-center gap-1 rounded-full border border-border px-1.5 py-px font-mono text-[10px] font-medium text-soft-foreground"
+      className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
     >
       {updateAvailable ? <StatusDot tone="pending" pulse className="size-[5px] shrink-0" /> : null}
       <span className="truncate">v{version}</span>
