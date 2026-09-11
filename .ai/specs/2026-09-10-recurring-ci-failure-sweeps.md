@@ -161,11 +161,16 @@ budget is sized so the default 14-day window completes: a full window costs
 roughly one jobs request per attempt plus one request per failed-job log, so
 the request budget remains the binding global bound.
 
-Missing/expired/oversized source logs are unrecoverable per-job evidence gaps:
-the coverage artifact lists their fixed code and job IDs and the summary prints
-their count, but they never fail the scheduled job on their own, because no
-replay can recover them and the next overlapping sweep rechecks them anyway.
-Failed metadata requests, exhausted bounds, rate limits, pagination gaps, and
+Missing (404), expired (410) and oversized source logs are unrecoverable
+per-job evidence gaps: the coverage artifact lists their fixed code and job
+IDs and the summary prints their count, but they never fail the scheduled job
+on their own, because no replay can recover them and the next overlapping
+sweep rechecks them anyway. Transport failures — network errors, timeouts,
+non-OK signed-URL responses with any other status, invalid redirect URLs, and
+failed metadata requests outside 404/410 — are recorded as `logs-fetch-failed`
+and keep coverage visibly incomplete: a transient failure must never be
+summarized as a complete sweep with silently omitted evidence. Exhausted
+bounds, rate limits, pagination gaps, and
 ambiguous matches still make the scan visibly incomplete. Continue independent
 safe reads where possible, but stop issuing
 requests on a rate limit or exhausted global budget. Known qualifying evidence
@@ -200,6 +205,10 @@ Revised on 2026-09-11 (#225): the first scheduled sweep (run 34581855648) wrote
 14-day window, and four expired logs all marked coverage incomplete. Reporting
 machinery is now skipped before the in-progress check, the log budget is 400,
 and missing/expired/oversized logs are recorded gaps that do not fail the job.
+Revised again on 2026-09-11 (review of #228): only missing/expired/oversized
+logs stay non-fatal gaps; transient transport failures are recorded as
+`logs-fetch-failed` and keep `complete: false` so a temporary outage can never
+publish a complete-sweep artifact with evidence silently omitted.
 
 ## Permissions and trust
 

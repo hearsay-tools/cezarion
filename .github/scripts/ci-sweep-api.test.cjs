@@ -67,6 +67,29 @@ test('malformed rows in paginated API data fail closed with an explicit coverage
  const api=create({github:{request:async()=>({data:{total_count:1,jobs:[null]}})}});
  await assert.rejects(api.paginate('GET /jobs',{}));assert.equal(api.manifest.complete,false);
 });
+test('transient log-fetch failures keep coverage incomplete while missing signed-URL logs stay gaps',async()=>{
+ for(const thrown of [new Error('socket hung up'),Object.assign(new Error('upstream unavailable'),{status:503})]) {
+  const api=create({github:{request:async()=>{throw thrown;}}});
+  assert.equal(await api.downloadLog({job_id:1}),null);
+  assert.equal(api.manifest.complete,false);
+  assert.ok(api.manifest.problems.some(p=>p.code==='logs-fetch-failed' && p.jobId===1));
+ }
+ const redirect=status=>create({github:{request:async()=>({headers:{location:'https://example.com/log'}})},fetchImpl:async()=>new Response('storage error',{status})});
+ const transient=redirect(503);
+ assert.equal(await transient.downloadLog({job_id:2}),null);
+ assert.equal(transient.manifest.complete,false);
+ assert.ok(transient.manifest.problems.some(p=>p.code==='logs-fetch-failed' && p.jobId===2));
+ const vanished=redirect(404);
+ assert.equal(await vanished.downloadLog({job_id:3}),null);
+ assert.equal(vanished.manifest.complete,true);
+ assert.ok(vanished.manifest.problems.some(p=>p.code==='logs-unavailable' && p.jobId===3));
+});
+test('a single oversized log is a recorded gap that does not fail the sweep',async()=>{
+ const api=create({github:{request:async()=>({data:'x'.repeat(2*1024*1024+1)})}});
+ assert.equal(await api.downloadLog({job_id:5}),null);
+ assert.equal(api.manifest.complete,true);
+ assert.ok(api.manifest.problems.some(p=>p.code==='log-size' && p.jobId===5));
+});
 test('signed log download aborts at the remaining sweep deadline',async()=>{
  let clock=0;
  const api=create({now:()=>clock,limits:{durationMs:100},github:{request:async()=>{

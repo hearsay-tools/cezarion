@@ -69,7 +69,7 @@ jobs:
             core.summary.addRaw(`Run-creation window: ${manifest.start || 'invalid/unavailable'} through ${manifest.end || 'invalid/unavailable'}.\n\n`);
             core.summary.addRaw(`New issues: ${manifest.reports.issues}; new failure occurrences: ${manifest.reports.occurrences}.\n\n`);
             core.summary.addRaw(`Observed reporting-workflow failures: ${manifest.reporterFailures || 0}.\n\n`);
-            core.summary.addRaw(`Evidence gaps (unavailable, expired or oversized logs): ${(manifest.problems || []).filter(p => p.code === 'logs-unavailable').length}.\n\n`);
+            core.summary.addRaw(`Evidence gaps (unavailable, expired or oversized logs): ${(manifest.problems || []).filter(p => p.code === 'logs-unavailable' || p.code === 'log-size').length}.\n\n`);
             core.summary.addRaw('The coverage artifact lists processed intervals, numeric source IDs, fixed problem codes and replay windows. Later retries of runs created before this window require a manual replay of their creation window.\n');
             if (!manifest.complete) {
               core.setFailed('CI failure sweep incomplete. Inspect the coverage artifact and replay the indicated window; split it into smaller windows if a limit was reached.');

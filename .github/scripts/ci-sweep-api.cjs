@@ -3,11 +3,13 @@ const {downloadLog} = require('./report-workflow-failure.cjs');
 // one jobs request per attempt plus one request per failed-job log (~1,250 at
 // observed peak), leaving the 1,500-request budget as the binding global bound.
 const DEFAULT_LIMITS = Object.freeze({requests:1500,attempts:20,logs:400,logBytes:50*1024*1024,issues:10,occurrences:100,durationMs:12*60*1000});
-// Expired, missing or oversized source logs are unrecoverable per-job evidence
-// gaps: they are listed in the coverage artifact and rechecked by the next
-// overlapping sweep, but they never fail the job on their own. Caps, read
-// failures on metadata and rate limits remain fatal coverage problems.
-const GAPS = new Set(['logs-unavailable']);
+// Missing (404), expired (410) and oversized source logs are unrecoverable
+// per-job evidence gaps: they are listed in the coverage artifact and
+// rechecked by the next overlapping sweep, but they never fail the job on
+// their own. Transport failures, non-OK signed-URL responses and invalid
+// URLs are recorded as logs-fetch-failed and keep coverage incomplete. Caps,
+// read failures on metadata and rate limits remain fatal coverage problems.
+const GAPS = new Set(['logs-unavailable','log-size']);
 class SweepError extends Error {
   constructor(code) { super(code); this.code=code; }
 }
@@ -40,8 +42,9 @@ function createSweepApi({github,now=Date.now,limits={},fetchImpl=fetch}) {
     } catch(error) {
       if(error instanceof SweepError)throw error;
       if(error?.status===403 || error?.status===429)stop('rate-limit');
-      // Log absence gets its own problem at the download boundary.
-      if(route.endsWith('/logs'))throw new SweepError('logs-unavailable');
+      // Log absence (404 gone or 410 expired) gets its own problem at the
+      // download boundary; transport failures on the log route are not gaps.
+      if(route.endsWith('/logs'))throw new SweepError(error.status===404 || error.status===410 ? 'logs-unavailable' : 'logs-fetch-failed');
       const code=route.startsWith('GET ') ? 'api-read' : 'api-write';
       problem(code);throw new SweepError(code);
     }
@@ -108,11 +111,15 @@ function createSweepApi({github,now=Date.now,limits={},fetchImpl=fetch}) {
           },
           cancel:()=>reader.cancel(),
         });
-        return {ok:response.ok,body};
+        // downloadLog classifies 404/410 signed-URL responses as gaps, so the
+        // status must survive the wrapper.
+        return {ok:response.ok,status:response.status,body};
       });
     } catch(error) {
       try {checkTime();} catch { /* deadline is recorded by checkTime */ }
-      problem(error instanceof SweepError ? error.code : 'logs-unavailable',{jobId:args.job_id});
+      // downloadLog tags only unrecoverable gaps; anything else (network
+      // errors, timeouts, non-OK responses, invalid URLs) stays incomplete.
+      problem(error instanceof SweepError ? error.code : GAPS.has(error?.code) ? error.code : 'logs-fetch-failed',{jobId:args.job_id});
       return null;
     }
   }
