@@ -305,7 +305,7 @@ describe('task quick-list', () => {
       return { review: of('fix-review-pr'), done: of('fix-done'), failed: of('fix-failed') }
     })()`) as Record<string, { tone: string; pulses: boolean }>
 
-    expect(tones.review).toEqual({ tone: 'violet', pulses: true })
+    expect(tones.review).toEqual({ tone: 'accent', pulses: true })
     // Terminal rows are still — the pulse means "transitioning", and these are not.
     expect(tones.done).toEqual({ tone: 'success', pulses: false })
     expect(tones.failed).toEqual({ tone: 'danger', pulses: false })
@@ -378,7 +378,7 @@ describe('task quick-list', () => {
     browser.waitForFunction(`document.querySelector('[data-bucket="Archived"]') !== null`)
     expect(rowsIn('Archived')).toEqual(['Sync merged PR issues1d'])
     // The active runs are gone, not merely restyled.
-    expect(browser.count('[data-run-id="fix-review-pr"]')).toBe(0)
+    expect(browser.count(`${ROW}[data-run-id="fix-review-pr"]`)).toBe(0)
 
     browser.screenshot(`${artifactsDir}/quick-list-archived.png`)
 
@@ -688,27 +688,30 @@ describe('tasks table overview', () => {
     ).toBe(scoped('/compare/fix-group-1'))
   })
 
-  it('flips both the table and the sidebar from the header tabs — one shared state', () => {
+  it('keeps the table and sidebar archive filters independent', () => {
     browser.click('[data-slot="overview-tab"][data-view="archived"]')
     browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-archived"]') !== null`)
     expect(browser.count(TABLE_ROW)).toBe(1)
-    // The sidebar followed without being touched.
+    // The sidebar keeps showing live runs while the table browses archived history (#211).
     expect(
       browser.evaluate(
-        `document.querySelector('[data-slot="view-tab"][data-view="archived"]').getAttribute('aria-pressed')`
+        `document.querySelector('[data-slot="view-tab"][data-view="active"]').getAttribute('aria-pressed')`
       )
     ).toBe('true')
-    expect(browser.count('[data-slot="task-row"][data-run-id="fix-review-pr"]')).toBe(0)
+    expect(browser.count('[data-slot="task-row"][data-run-id="fix-review-pr"]')).toBe(1)
 
-    // And back, this time from the sidebar: the table follows.
-    browser.click('[data-slot="view-tab"][data-view="active"]')
-    browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"]') !== null`)
+    browser.click('[data-slot="view-tab"][data-view="archived"]')
     expect(
       browser.evaluate(
-        `document.querySelector('[data-slot="overview-tab"][data-view="active"]').getAttribute('aria-pressed')`
+        `document.querySelector('[data-slot="overview-tab"][data-view="archived"]').getAttribute('aria-pressed')`
       )
     ).toBe('true')
-    expect(browser.count(`${TABLE_ROW}[data-run-id="fix-archived"]`)).toBe(0)
+    expect(browser.count(`${TABLE_ROW}[data-run-id="fix-archived"]`)).toBe(1)
+
+    // Restore both independent controls so the following row-navigation case starts active.
+    browser.click('[data-slot="view-tab"][data-view="active"]')
+    browser.click('[data-slot="overview-tab"][data-view="active"]')
+    browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"]') !== null`)
   })
 
   it('opens the task from a row click', () => {
@@ -829,7 +832,7 @@ describe('tasks table overview', () => {
  * marker, all at once — and dropping it into the shared fixture above would rewrite every
  * ordering, count and screenshot assertion in this file for one row's sake.
  *
- * jsdom cannot answer any of this: the whole question is what the REAL CSS does with 264px, so
+ * jsdom cannot answer any of this: the whole question is what the REAL CSS does with 232px, so
  * every assertion below reads a resolved computed style or a measured rectangle.
  */
 describe('a row under width contention, in a column the user can widen', () => {
@@ -953,8 +956,8 @@ describe('a row under width contention, in a column the user can widen', () => {
     expect(painted.tooltip).toBe(FULL_TITLE)
   })
 
-  it('gives the name real width at the default 264px, and drops the diff pair to do it', () => {
-    expect(sidebarWidth()).toBe(264)
+  it('gives the name real width at the default 232px, and drops the diff pair to do it', () => {
+    expect(sidebarWidth()).toBe(232)
 
     const measured = browser.evaluate(`(() => {
       const row = document.querySelector('${ROW_ID}')
@@ -963,7 +966,7 @@ describe('a row under width contention, in a column the user can widen', () => {
       const scroller = document.querySelector('[data-slot="task-quick-list"]')
       return {
         titleWidth: title.getBoundingClientRect().width,
-        // The real CSS, not the class: this is the container query resolving at 264px.
+        // The real CSS, not the class: this is the container query resolving at 232px.
         diffDisplay: getComputedStyle(diff).display,
         diffTooltip: diff.getAttribute('title'),
         overflows: scroller.scrollWidth > scroller.clientWidth,
@@ -979,7 +982,7 @@ describe('a row under width contention, in a column the user can widen', () => {
     // A floor must not buy readability with a horizontal scrollbar.
     expect(measured.overflows).toBe(false)
 
-    browser.screenshot(`${artifactsDir}/quick-list-width-contention-264.png`, { viewport: true })
+    browser.screenshot(`${artifactsDir}/quick-list-width-contention-232.png`, { viewport: true })
   })
 
   it('grows the name as the column grows, without ever shrinking it', () => {
@@ -1002,12 +1005,12 @@ describe('a row under width contention, in a column the user can widen', () => {
 
   it('drags wider, brings the diff pair back, and remembers the width across a reload', () => {
     dragHandle(100)
-    expect(sidebarWidth()).toBe(364)
-    expect(browser.evaluate(`document.querySelector('${HANDLE}').getAttribute('aria-valuenow')`)).toBe('364')
+    expect(sidebarWidth()).toBe(332)
+    expect(browser.evaluate(`document.querySelector('${HANDLE}').getAttribute('aria-valuenow')`)).toBe('332')
     // Still below 23rem: the column is wider, and all of it went to the name.
     expect(diffDisplay()).toBe('none')
 
-    dragHandle(56)
+    dragHandle(88)
     expect(sidebarWidth()).toBe(420)
     // Past 23rem the row can afford its diff numbers again — the whole point of making the
     // metadata droppable rather than deleting it. `block`, not `inline`: the utility says
@@ -1026,7 +1029,7 @@ describe('a row under width contention, in a column the user can widen', () => {
     dragHandle(4000)
     expect(sidebarWidth()).toBe(420)
     dragHandle(-4000)
-    expect(sidebarWidth()).toBe(264)
+    expect(sidebarWidth()).toBe(232)
   })
 
   it('resizes from the keyboard and resets on double-click', () => {
@@ -1036,15 +1039,15 @@ describe('a row under width contention, in a column the user can widen', () => {
     browser.press('ArrowLeft')
     expect(sidebarWidth()).toBe(404)
     browser.press('Home')
-    expect(sidebarWidth()).toBe(264)
+    expect(sidebarWidth()).toBe(232)
 
     browser.press('ArrowRight')
-    expect(sidebarWidth()).toBe(280)
+    expect(sidebarWidth()).toBe(248)
     browser.evaluate(`(() => {
       const el = document.querySelector('${HANDLE}')
       el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
     })()`)
-    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width === 264`)
+    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width === 232`)
   })
 
   it('is a desktop affordance only: below md there is no handle to reach', () => {
@@ -1064,7 +1067,7 @@ describe('a row under width contention, in a column the user can widen', () => {
       browser.evaluate(
         `Math.round(document.querySelector('[data-slot="mobile-nav-drawer"]').getBoundingClientRect().width)`
       )
-    ).toBe(264)
+    ).toBe(232)
   })
 })
 

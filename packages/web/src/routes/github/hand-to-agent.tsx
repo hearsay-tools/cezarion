@@ -246,7 +246,7 @@ export function HandToAgent({
   return (
     <section data-slot="gh-hand" className="mt-7 rounded-lg border border-border bg-card p-4">
       <h3 className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[.04em] text-soft-foreground uppercase">
-        <ZapIcon aria-hidden="true" className="size-3.5 text-violet" />
+        <ZapIcon aria-hidden="true" className="size-3.5 text-accent-icon" />
         Hand this to the agent
       </h3>
 
@@ -322,7 +322,7 @@ export function HandToAgent({
 
       <div className="mt-4 flex flex-wrap items-center gap-2.5">
         <Button
-          variant="contrast"
+          variant="primary"
           data-action="gh-run"
           disabled={start.isPending || !resolved.canRun}
           onClick={() => start.mutate()}
@@ -345,7 +345,7 @@ export function HandToAgent({
             <Link
               to={`/tasks/${queuedRunId}`}
               data-slot="gh-view-run"
-              className="text-xs font-semibold text-violet hover:underline"
+              className="text-xs font-semibold text-accent-text hover:underline"
             >
               View task →
             </Link>
@@ -389,7 +389,7 @@ function WorkflowPicker({
           aria-label="Choose a workflow"
           className={cn(chipClass, value && 'border-foreground/60 font-mono text-[11.5px] font-semibold text-foreground')}
         >
-          <WorkflowIcon aria-hidden="true" className="size-3 shrink-0 text-violet" />
+          <WorkflowIcon aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
           <span className="max-w-44 truncate">{value ?? 'workflow'}</span>
           <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
         </button>
@@ -426,7 +426,7 @@ function WorkflowPicker({
                       </span>
                     ) : null}
                     {selected ? (
-                      <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-primary" />
+                      <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
                     ) : null}
                   </CommandItem>
                 )
@@ -496,7 +496,7 @@ function SkillsPicker({
         >
           <EyeIcon aria-hidden="true" className="size-3.5" />
         </button>
-        {isSelected ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" /> : null}
+        {isSelected ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
       </CommandItem>
     )
   }
@@ -519,7 +519,7 @@ function SkillsPicker({
             aria-label="Choose skills"
             className={cn(chipClass, selected.length > 0 && 'border-foreground/60 font-semibold text-foreground')}
           >
-            <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-violet" />
+            <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
             skills{selected.length > 0 ? ` · ${selected.length}` : ''}
             <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
           </button>

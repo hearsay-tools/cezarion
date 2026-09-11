@@ -181,7 +181,7 @@ function BookmarkletRow({ label, url, hint }: { label: string; url: string; hint
         }}
         className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 font-mono text-xs font-medium text-foreground shadow-xs transition-colors hover:bg-muted"
       >
-        <ZapIcon aria-hidden="true" className="size-3 text-primary" />
+        <ZapIcon aria-hidden="true" className="size-3 text-link-foreground" />
         {label}
       </a>
       <button

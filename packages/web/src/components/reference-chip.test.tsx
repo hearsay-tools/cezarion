@@ -40,7 +40,7 @@ describe('ReferenceChip without a status', () => {
     const chip = chipOf(<ReferenceChip reference={PR} taskTitle="Add checkout" />)
 
     expect(chip.getAttribute('data-status')).toBeNull()
-    expect(chip.className).toContain('text-violet')
+    expect(chip.className).toContain('text-accent-text')
     expect(chip.getAttribute('title')).toBe('https://github.com/o/r/pull/402')
     expect(chip.textContent).toBe('#402')
   })
@@ -64,14 +64,14 @@ describe('ReferenceChip with a status', () => {
   })
 
   it.each([
-    ['merged', 'text-violet'],
+    ['merged', 'text-accent-text'],
     ['ready', 'text-success'],
     ['review-required', 'text-info'],
     ['changes-requested', 'text-danger'],
     ['closed', 'text-danger'],
     ['draft', 'text-muted-foreground'],
     ['open', 'text-success'],
-    ['completed', 'text-violet'],
+    ['completed', 'text-accent-text'],
     ['not-planned', 'text-muted-foreground'],
   ] as const)('paints %s with the %s tone', (status, tone) => {
     const chip = chipOf(<ReferenceChip reference={PR} taskTitle="t" status={status} />)
@@ -87,7 +87,7 @@ describe('ReferenceChip with a status', () => {
     cleanup()
     const merged = toneOf('merged')
     expect(waiting).not.toBe(merged)
-    expect(waiting).not.toContain('text-violet')
+    expect(waiting).not.toContain('text-accent-text')
   })
 
   it('turns the WHOLE chip amber while checks run, and keeps the pulsing dot', () => {
@@ -134,7 +134,7 @@ describe('ReferenceChip with a status', () => {
       <ReferenceChip reference={PR} taskTitle="Add checkout" status={'queued-for-merge' as ReferenceStatus} />,
     )
 
-    expect(chip.className).toContain('text-violet')
+    expect(chip.className).toContain('text-accent-text')
     expect(chip.querySelector('svg[data-slot="status-dot"]')).toBeNull()
     // The neutral chip's own tooltip, not a described status: the URL, exactly as before statuses.
     expect(chip.getAttribute('title')).toBe('https://github.com/o/r/pull/402')

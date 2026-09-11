@@ -91,6 +91,7 @@ describe('settings → agents against the live dry-run server', () => {
     gotoAgents()
     browser.click('[data-slot="agents-runner"] [data-value="codex"]')
     await waitForConfig((c) => c.defaultRunner === 'codex')
+    browser.waitForFunction(`document.querySelector('[data-slot="agents-runner"] [data-value="codex"]')?.getAttribute('aria-checked') === 'true'`)
     expect(browser.count('[data-slot="agents-runner"] [data-value="codex"][aria-checked="true"]')).toBe(1)
   })
 

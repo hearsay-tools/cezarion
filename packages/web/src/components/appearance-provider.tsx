@@ -26,17 +26,17 @@ type AppearanceContextValue = {
 
 const AppearanceContext = React.createContext<AppearanceContextValue | null>(null)
 
-/** Owns the accent + density preference (Settings → Appearance, R6 Step 1.3).
+/** Owns accent, density and reading width (Settings → Appearance, R6 Step 1.3).
  *
  *  Boot order, mirroring the theme's no-flash contract:
- *   1. the pre-paint script in index.html stamped `data-accent`/`data-density` from the
- *      localStorage mirror before the bundle loaded;
+ *   1. the pre-paint script in index.html stamps density/width deviations from the localStorage
+ *      mirror before the bundle loads; the sole accent needs no DOM attribute;
  *   2. this provider seeds from the same mirror, so mounting never repaints;
  *   3. when `GET /api/workspace/ui-state` answers, the server value is authoritative — it is
  *      applied and mirrored, so the next cold load pre-paints the truth.
  *
  *  The store is the GLOBAL one (`~/.cezar/ui-state.json`) since the multi-project split
- *  (step 3.5, spec §"Settings split"): accent and density describe the person at the keyboard,
+ *  (step 3.5, spec §"Settings split"): appearance describes the person at the keyboard,
  *  not a repo, and this provider sits ABOVE the router — it has no project scope to write to
  *  in the first place. Migration 001 copied the pre-existing per-repo value up, so upgrading
  *  keeps whatever the boot project had; the per-repo key is left alone and simply ignored.

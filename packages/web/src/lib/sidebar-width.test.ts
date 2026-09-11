@@ -18,7 +18,7 @@ afterEach(() => {
 describe('clampSidebarWidth', () => {
   it.each([
     // In range — rounded to whole pixels, because a drag produces fractions.
-    [264, 264],
+    [232, 232],
     [300, 300],
     [420, 420],
     [317.4, 317],
@@ -26,7 +26,7 @@ describe('clampSidebarWidth', () => {
     // Out of range, both ends.
     [0, MIN_SIDEBAR_WIDTH],
     [-4000, MIN_SIDEBAR_WIDTH],
-    [263, MIN_SIDEBAR_WIDTH],
+    [231, MIN_SIDEBAR_WIDTH],
     [421, MAX_SIDEBAR_WIDTH],
     [99_999, MAX_SIDEBAR_WIDTH],
   ])('%s → %s', (raw, expected) => {

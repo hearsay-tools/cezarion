@@ -19,7 +19,7 @@ describe('StatusDot', () => {
       { tone: 'success', expected: 'bg-success' },
       { tone: 'pending', expected: 'bg-pending' },
       { tone: 'danger', expected: 'bg-danger' },
-      { tone: 'violet', expected: 'bg-violet' },
+      { tone: 'accent', expected: 'bg-accent-strong' },
       { tone: 'neutral', expected: 'bg-soft-foreground' },
     ] as const satisfies readonly { tone: StatusDotTone; expected: string }[])(
       '$tone',
@@ -55,9 +55,9 @@ describe('StatusDot', () => {
   })
 
   it('lets a caller className override the tone', () => {
-    const dot = renderDot(<StatusDot tone="success" className="bg-violet" />)
+    const dot = renderDot(<StatusDot tone="success" className="bg-accent-strong" />)
 
-    expect(dot.className).toContain('bg-violet')
+    expect(dot.className).toContain('bg-accent-strong')
     expect(dot.className).not.toContain('bg-success')
   })
 })

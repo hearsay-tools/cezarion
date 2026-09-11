@@ -16,7 +16,7 @@ import type { Theme } from '@/lib/theme'
  *  - ACCENT + DENSITY persist in `ui-state.json` through the AppearanceProvider (additive
  *    `appearance` key), mirrored to localStorage for pre-paint.
  *
- * Every control is a real one: accent swaps the `--primary` token family, density shrinks
+ * Every control is a real one: accent swaps the action + chrome token family, density shrinks
  * the Tailwind spacing token (see index.css). No dead knobs.
  */
 
@@ -26,11 +26,10 @@ const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: ComponentType<SV
   { value: 'dark', label: 'Dark', icon: MoonIcon },
 ]
 
-/** Swatches point at the STABLE family tokens (`--accent-lime`, `--violet`), not `--primary` —
- *  the whole point of the control is that `--primary` changes under it. */
+/** Keep the option list even while it contains one entry: the field below appears automatically
+ * when a future second accent is added, and the provider stays wired in the meantime. */
 const ACCENT_OPTIONS: Array<{ value: Accent; label: string; swatch: string }> = [
-  { value: 'lime', label: 'Lime', swatch: 'var(--accent-lime)' },
-  { value: 'violet', label: 'Violet', swatch: 'var(--violet)' },
+  { value: 'cezarion', label: 'Cezarion', swatch: 'var(--accent-strong)' },
 ]
 
 const DENSITY_OPTIONS: Array<{ value: Density; label: string }> = [
@@ -123,9 +122,11 @@ export function AppearanceSection() {
         <Segmented slot="appearance-theme" label="Theme" value={theme} options={THEME_OPTIONS} onChange={setTheme} />
       </Field>
 
-      <Field title="Accent" hint="The primary action color. Saved with this repo's cockpit state.">
-        <Segmented slot="appearance-accent" label="Accent" value={accent} options={ACCENT_OPTIONS} onChange={setAccent} />
-      </Field>
+      {ACCENT_OPTIONS.length > 1 ? (
+        <Field title="Accent" hint="The cockpit brand accent. Saved with your workspace appearance.">
+          <Segmented slot="appearance-accent" label="Accent" value={accent} options={ACCENT_OPTIONS} onChange={setAccent} />
+        </Field>
+      ) : null}
 
       <Field
         title="Density"

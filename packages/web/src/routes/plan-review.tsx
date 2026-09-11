@@ -172,7 +172,7 @@ export function PlanReview({
                       <span
                         data-slot="plan-badge-skill"
                         title="skill"
-                        className="shrink-0 rounded-full bg-violet/15 px-1.5 py-px font-mono text-[10.5px] font-medium text-violet"
+                        className="shrink-0 rounded-full bg-accent-strong/15 px-1.5 py-px font-mono text-[10.5px] font-medium text-accent-text"
                       >
                         {step.skill}
                       </span>

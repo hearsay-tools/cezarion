@@ -478,7 +478,7 @@ export function ProjectTagsEditor({
           data-slot="project-tag"
           // `whitespace-nowrap`: a hyphenated tag (`open-mercato`) was wrapping mid-word into a
           // two-line chip, which read as two tags.
-          className="inline-flex max-w-full items-center gap-1 rounded-full bg-violet/15 py-px pr-1 pl-2 text-[11px] font-medium whitespace-nowrap text-violet"
+          className="inline-flex max-w-full items-center gap-1 rounded-full bg-accent-strong/15 py-px pr-1 pl-2 text-[11px] font-medium whitespace-nowrap text-accent-text"
         >
           {tag}
           <button
@@ -489,7 +489,7 @@ export function ProjectTagsEditor({
             aria-label={`Remove tag ${tag} from ${project.name}`}
             disabled={update.isPending}
             onClick={() => remove(tag)}
-            className="rounded-full p-0.5 hover:bg-violet/25 disabled:opacity-50"
+            className="rounded-full p-0.5 hover:bg-accent-strong/25 disabled:opacity-50"
           >
             <XIcon className="size-3" aria-hidden="true" />
           </button>
@@ -621,7 +621,7 @@ export function ProjectTagsEditor({
               }}
               onMouseEnter={() => setHighlight(index)}
               className={cn(
-                'flex w-full items-center rounded-sm px-2 py-1 text-left text-[12px] font-medium text-violet',
+                'flex w-full items-center rounded-sm px-2 py-1 text-left text-[12px] font-medium text-accent-text',
                 index === highlight && 'bg-muted',
               )}
             >

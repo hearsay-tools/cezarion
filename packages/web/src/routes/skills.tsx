@@ -45,7 +45,7 @@ export function SkillsRoute() {
   return (
     <div data-route="skills" className="flex min-h-full flex-col">
       {/* Desktop header — below `md` the shell's top bar already says "Skills". */}
-      <header className="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-5 md:flex">
+      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center gap-3 border-b border-border bg-background px-11 md:flex">
         <h1 className="text-base font-semibold">Skills</h1>
         <p className="text-[13px] text-muted-foreground">Markdown playbooks agents can follow.</p>
       </header>
@@ -168,7 +168,7 @@ function SkillsCatalog() {
               )}
             >
               <span className="flex min-w-0 items-center gap-2">
-                <DownloadIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+                <DownloadIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
                 <span className="min-w-0 truncate text-[13px] font-medium">Manage skills</span>
                 <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-supporting-foreground">
                   open-mercato
@@ -189,7 +189,7 @@ function SkillsCatalog() {
             )}
           >
             <span className="flex min-w-0 items-center gap-2">
-              <ZapIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+              <ZapIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
               <span className="min-w-0 truncate text-[13px] font-medium">Run from GitHub</span>
               <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-supporting-foreground">
                 bookmarklets
@@ -259,7 +259,7 @@ function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
         <span className="flex min-w-0 items-center gap-2">
           <SparklesIcon
             aria-hidden="true"
-            className={cn('size-3.5 shrink-0', project ? 'text-violet' : 'text-soft-foreground')}
+            className={cn('size-3.5 shrink-0', project ? 'text-accent-icon' : 'text-soft-foreground')}
           />
           {/* Project skills read bold (#377) — the visual half of the ordering rule. */}
           <span

@@ -49,7 +49,7 @@ import { formatElapsed, useDictation } from './dictation'
  * the Dictation mic (paseo pattern), and the Alt+A / Alt+C quick replies.
  *
  * Visual contract: docs/mockups/thread.html `.composer` — card, borderless textarea, footer
- * bar with paperclip · spacer · labeled Dictation · lime send.
+ * bar with paperclip · spacer · labeled Dictation · gold send.
  */
 // Session memory, matching run details: task tab navigation may remount the composer.
 const mobileOpenByTask = new Map<string, boolean>()
@@ -571,13 +571,16 @@ export function Composer({
           onDrop={onDrop}
           onDragOver={(event) => event.preventDefault()}
           className={cn(
-            'rounded-xl border border-border bg-card shadow-xs transition-[border-color,box-shadow]',
-            'focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15',
+            executionOptions && 'grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px] xl:items-start xl:gap-6',
             disabled && 'opacity-80',
           )}
         >
-          {images.length > 0 ? (
-            <div data-slot="composer-thumbs" className="flex flex-wrap items-center gap-2 px-4 pt-3">
+          <div
+            data-slot="composer-editor"
+            className="rounded-xl border border-[var(--composer-border)] bg-card shadow-none transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15"
+          >
+            {images.length > 0 ? (
+            <div data-slot="composer-thumbs" className="flex flex-nowrap items-center gap-2 overflow-x-auto px-4 pt-3 md:flex-wrap md:overflow-visible">
               {images.map((attachment, index) => (
                 <button
                   key={`${attachment.name}-${index}`}
@@ -586,7 +589,7 @@ export function Composer({
                   title={readOnly ? 'Attachment submitted' : 'Click to remove'}
                   disabled={readOnly}
                   className={cn(
-                    'group relative overflow-hidden rounded-md border border-border',
+                    'group relative shrink-0 overflow-hidden rounded-md border border-border',
                     attachment.isImage
                       ? 'size-12'
                       : 'flex h-12 min-w-11 max-w-[200px] items-center gap-1.5 bg-muted/40 px-2.5 text-xs text-muted-foreground',
@@ -609,7 +612,7 @@ export function Composer({
                 </button>
               ))}
             </div>
-          ) : null}
+            ) : null}
 
           {/* A real label keeps password managers from treating nearby page text as a
               one-time-code prompt on client-side navigation (#71); aria-label alone doesn't. */}
@@ -714,7 +717,6 @@ export function Composer({
               </div>
             </div>
           )}
-          {executionOptions ? <div inert={readOnly || undefined}>{executionOptions}</div> : null}
           {retainDraftUntilSuccess || onStop || stopping ? (
             <div className={cn("overflow-y-auto px-3 pb-2 text-xs leading-5 text-muted-foreground md:px-4", compactFeedback ? "min-h-6" : "h-24 md:h-20")}>
               <div
@@ -733,6 +735,8 @@ export function Composer({
               </div>
             </div>
           ) : null}
+          </div>
+          {executionOptions ? <div inert={readOnly || undefined}>{executionOptions}</div> : null}
         </div>
       </PopoverAnchor>
 

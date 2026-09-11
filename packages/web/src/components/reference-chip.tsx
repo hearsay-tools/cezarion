@@ -28,12 +28,12 @@ import {
 } from '@/lib/reference-status'
 import { cn, isHttpUrl } from '@/lib/utils'
 
-/** Border + text per status tone. `violet` IS the chip's own resting look, which is why a
+/** Border + text per status tone. `accent` IS the chip's own resting look, which is why a
  *  reference with no status known keeps it: nothing has been learned, so nothing changes. */
 const TONE_CLASS: Record<ReferenceStatusTone, string> = {
   success: 'border-success/40 text-success',
   danger: 'border-danger/40 text-danger',
-  violet: 'border-violet/35 text-violet',
+  accent: 'border-accent-strong/35 text-accent-text',
   info: 'border-info/40 text-info',
   neutral: 'border-border text-muted-foreground',
   // The WHOLE chip goes amber while checks run, not just its dot: "something is happening to this
@@ -47,12 +47,12 @@ const TONE_CLASS: Record<ReferenceStatusTone, string> = {
 }
 
 /** The hover wash, per tone — a LINK chip only; the inert one has nothing to hover into. It
- *  follows the tone rather than staying violet, or a red "checks failing" chip would light up
- *  purple under the pointer. */
+ *  follows the tone rather than staying accented, or a red "checks failing" chip would light up
+ *  with brand color under the pointer. */
 const TONE_HOVER: Record<ReferenceStatusTone, string> = {
   success: 'hover:bg-success/10',
   danger: 'hover:bg-danger/10',
-  violet: 'hover:bg-violet/10',
+  accent: 'hover:bg-accent-strong/10',
   info: 'hover:bg-info/10',
   neutral: 'hover:bg-muted',
   pending: 'hover:bg-pending-strong/10',
@@ -146,7 +146,7 @@ export function ReferenceChip({
   const presentation = conflicting ? REFERENCE_CONFLICT : statusPresentation
   const chipClass = cn(
     'inline-flex h-[22px] items-center gap-1 rounded-full border px-2 font-mono text-[11px] font-semibold',
-    TONE_CLASS[presentation?.tone ?? 'violet'],
+    TONE_CLASS[presentation?.tone ?? 'accent'],
     className,
   )
   // The overridden status rides along into the tooltip whenever the conflict took the chip.
@@ -199,7 +199,7 @@ export function ReferenceChip({
         // element is a browser popup fighting a designed one.
         title={tooltip ? undefined : url}
         aria-label={ariaLabel}
-        className={cn(chipClass, TONE_HOVER[presentation?.tone ?? 'violet'])}
+        className={cn(chipClass, TONE_HOVER[presentation?.tone ?? 'accent'])}
       >
         {body}
         <ArrowUpRightIcon className="size-2.5" aria-hidden="true" />

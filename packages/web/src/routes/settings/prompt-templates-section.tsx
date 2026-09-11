@@ -238,7 +238,7 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
         <div className="flex items-center gap-3">
           <Button
             type="button"
-            variant="contrast"
+            variant="primary"
             size="sm"
             data-action="prompt-templates-save"
             disabled={!dirty || invalid || save.isPending}
@@ -320,7 +320,7 @@ function TemplateSkillsPicker({
           </span>
         ) : null}
         {isSelected ? (
-          <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-primary" />
+          <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
         ) : null}
       </CommandItem>
     )
@@ -346,7 +346,7 @@ function TemplateSkillsPicker({
             selected.length > 0 && 'border-foreground/60 font-semibold text-foreground',
           )}
         >
-          <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-violet" />
+          <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
           {skills.length === 0 ? 'no skills found' : 'apply with…'}
           <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
         </button>

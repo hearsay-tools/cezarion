@@ -365,21 +365,20 @@ const postedBody = () => requests.find((r) => r.method === 'POST' && r.url === '
 // ---- the hero surface -------------------------------------------------------------------------
 
 describe('the hero surface', () => {
-  it('keeps execution options in a disclosure separate from prompt context and submission', async () => {
+  it('keeps run options in a disclosure separate from prompt, agent selection, and submission', async () => {
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()
     await pillReady()
     const summary = screen.getByText('Execution options')
     const disclosure = summary.closest('details')!
     expect(disclosure).not.toBeNull()
-    expect(disclosure.open).toBe(false)
+    expect(disclosure.open).toBe(true)
     expect(disclosure.contains(sourcePill())).toBe(false)
     expect(disclosure.contains(screen.getByRole('radio', { name: 'Plan first' }))).toBe(false)
     expect(disclosure.contains(screen.getByRole('button', { name: 'Start task' }))).toBe(false)
     expect(summary.parentElement?.textContent).toContain('claude')
-    fireEvent.click(summary)
     const model = screen.getByRole('button', { name: 'Model' })
-    expect(disclosure.contains(model)).toBe(true)
+    expect(disclosure.contains(model)).toBe(false)
     fireEvent.pointerDown(model)
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /sonnet/ }))
     expect(summary.parentElement?.textContent).toContain('sonnet')
@@ -426,6 +425,21 @@ describe('the hero surface', () => {
 // ---- picker data flows ------------------------------------------------------------------------
 
 describe('picker data flows', () => {
+  it('keeps agent selection with the editor and run settings in the open execution panel', async () => {
+    serve()
+    renderNewTask()
+    await pillReady()
+
+    const editor = document.querySelector('[data-slot="composer-editor"]') as HTMLElement
+    const execution = document.querySelector('[data-slot="execution-options"]') as HTMLDetailsElement
+    const model = document.querySelector('[data-slot="model-pill"]') as HTMLElement
+    const variants = document.querySelector('[data-slot="variants-pill"]') as HTMLElement
+    expect(execution.open).toBe(true)
+    expect(editor.contains(model)).toBe(true)
+    expect(execution.contains(model)).toBe(false)
+    expect(execution.contains(variants)).toBe(true)
+  })
+
   it('hides the runner pill on a single-backend host (legacy rule)', async () => {
     serve()
     renderNewTask()

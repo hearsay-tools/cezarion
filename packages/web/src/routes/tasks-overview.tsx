@@ -164,7 +164,7 @@ export function TasksOverview({
     <div data-route="tasks" className="flex min-h-full flex-col">
       {/* One set of search/view controls across breakpoints keeps query and selection intact.
           Mobile places search above the list filters; the shell already supplies its title. */}
-      <header ref={headerRef} className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-background p-3 md:h-14 md:flex-nowrap md:gap-3 md:px-5 md:py-0">
+      <header ref={headerRef} className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-background p-3 md:h-[72px] md:flex-nowrap md:gap-3 md:px-11 md:py-0">
         <h1 className="hidden text-base font-semibold md:block">Tasks</h1>
         <div className="inline-flex gap-0.5 rounded-md bg-muted p-[3px]">
           <OverviewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
@@ -361,7 +361,7 @@ export function TasksOverview({
         to="/new"
         data-slot="new-task-fab"
         aria-label="New task"
-        className="fixed right-4 bottom-[calc(16px+env(safe-area-inset-bottom))] z-20 inline-flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-modal md:hidden"
+        className="fixed right-4 bottom-[calc(16px+env(safe-area-inset-bottom))] z-20 inline-flex size-14 items-center justify-center rounded-full bg-action text-action-foreground shadow-modal md:hidden"
       >
         <PlusIcon className="size-[22px]" aria-hidden="true" />
       </Link>
@@ -821,7 +821,7 @@ function TitleCell({
       {/* The unread marker — same trailing violet dot as the sidebar row. */}
       {unread ? (
         <StatusDot
-          tone="violet"
+          tone="accent"
           role="img"
           aria-label="unread"
           title="Unread — not opened since it finished"
@@ -890,7 +890,7 @@ function UsageTd({ column, cell }: { column: 'cpu' | 'memory'; cell: UsageCell }
         TD_BASE,
         'overflow-hidden',
         'text-right font-mono tabular-nums',
-        cell.kind === 'live' && 'bg-violet/5 text-xs font-medium text-foreground',
+        cell.kind === 'live' && 'bg-accent-strong/5 text-xs font-medium text-foreground',
         cell.kind === 'peak' && 'text-[11.5px] text-supporting-foreground',
         cell.kind === 'none' && 'text-xs text-soft-foreground'
       )}
@@ -969,7 +969,7 @@ function TaskCard({
         {/* The unread marker — trailing violet dot, as on the desktop row. */}
         {unread ? (
           <StatusDot
-            tone="violet"
+            tone="accent"
             role="img"
             aria-label="unread"
             title="Unread — not opened since it finished"

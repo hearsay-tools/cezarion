@@ -571,20 +571,27 @@ export function NewTaskRoute() {
   return (
     <div
       data-route="new"
-      className="relative isolate flex min-h-full flex-col items-center overflow-x-clip px-6 pt-[clamp(32px,7vh,84px)] pb-16 max-md:px-3.5 max-md:pt-7"
+      className="relative isolate flex min-h-full flex-col overflow-x-clip pb-16"
     >
       <TwinkleBackdrop />
       <GhostCodeBackdrop />
 
-      <div className="w-full max-w-[720px]">
-        <header className="mb-6 text-center max-md:mb-4">
-          <h1 className="text-lg font-semibold tracking-tight max-md:text-base">
+      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center border-b border-border bg-background/95 px-11 backdrop-blur md:flex">
+        <span className="text-[13px] font-medium text-foreground">New task</span>
+      </header>
+
+      <div className="relative z-[1] mx-auto w-full max-w-[1180px] px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
+        <header className="mb-7 max-md:mb-5">
+          <p className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
+            Start a task
+          </p>
+          <h1 className="text-[28px] leading-tight font-semibold tracking-[-0.025em] max-md:text-[22px]">
             What should the agent work on?
           </h1>
           {/* Follows the resolved run mode (#793). Printing the isolation promise
               unconditionally made this line false for every run the user opted out of — and
               for a non-git folder, where there is no worktree to opt into. */}
-          <p data-slot="run-mode-note" className="mt-1.5 text-[13.5px] text-muted-foreground max-md:text-xs">
+          <p data-slot="run-mode-note" className="mt-2 text-[13px] text-muted-foreground max-md:text-xs">
             {composerRunModeNote({ worktree: worktreeOn, hasGit })}
           </p>
         </header>
@@ -643,85 +650,81 @@ export function NewTaskRoute() {
                 iconOnly
                 onInsert={(text) => composerRef.current?.insertAtCaret(text)}
               />
+              <div data-slot="agent-options" role="group" aria-label="Agent settings" className="flex min-w-0 flex-wrap items-center gap-1.5 max-md:basis-full">
+                {/* Runner, model and effort stay with the editor in the approved desktop
+                    composition. Run isolation and automation choices live in the side panel. */}
+                {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
+                  <RunnerPill
+                    runners={runners}
+                    value={displayRunner}
+                    accounts={accountChoices}
+                    account={agentProfile}
+                    repoAccount={repoAccount}
+                    onPick={(next, picked) =>
+                      update({
+                        runner: next,
+                        agentProfile: picked,
+                        ...(next === displayRunner ? {} : { model: null }),
+                      })
+                    }
+                    disabled={!providersReady}
+                  />
+                ) : null}
+                <PickerPill
+                  slot="model-pill"
+                  ariaLabel="Model"
+                  label={models.find((m) => m.id === model)?.label ?? 'auto'}
+                  value={model}
+                  disabled={!providersReady}
+                  readOnly={modelsLocked}
+                  disabledHint={
+                    modelsLocked
+                      ? 'Model selection is locked to native coding-agent settings.'
+                      : undefined
+                  }
+                  onPick={(next) => {
+                    const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
+                    update({
+                      model: next,
+                      effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
+                    })
+                  }}
+                  options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
+                  status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
+                />
+                <PickerPill
+                  slot="effort-pill"
+                  ariaLabel="Effort"
+                  label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
+                  value={effort}
+                  disabled={!providersReady}
+                  readOnly={modelsLocked}
+                  disabledHint={
+                    modelsLocked
+                      ? 'Effort selection is locked to native coding-agent settings.'
+                      : undefined
+                  }
+                  onPick={(next) => update({ effort: next })}
+                  options={effortOptions.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                    desc: option.desc,
+                  }))}
+                />
+              </div>
             </>
           }
           executionOptions={
-            <details data-slot="execution-options" className="group border-t border-border">
+            <details data-slot="execution-options" open className="group rounded-xl border border-border bg-card xl:self-start">
               <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
                 <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
                 <span className="font-medium text-foreground">Execution options</span>
-                <span data-slot="execution-summary" className="min-w-0 basis-full truncate pl-5 md:ml-auto md:basis-auto md:pl-0">
+                <span data-slot="execution-summary" className="min-w-0 basis-full truncate pl-5 xl:ml-auto xl:basis-auto xl:pl-0">
                   {RUNNERS.find((runner) => runner.id === displayRunner)?.label ?? displayRunner}
                   {' · '}{models.find((item) => item.id === model)?.label ?? 'auto'}
                 </span>
               </summary>
-              <div className="space-y-3 px-3 pb-3">
-                <div role="group" aria-label="Agent settings" className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <span className="basis-full text-xs font-medium text-muted-foreground">Agent</span>
-                  {/* Shown when there is a choice to make: more than one runner, or more than one
-                      login for one of them. A host with neither sees no pill, exactly as before. */}
-                  {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
-                    <RunnerPill
-                      runners={runners}
-                      value={displayRunner}
-                      accounts={accountChoices}
-                      account={agentProfile}
-                      repoAccount={repoAccount}
-                      // Changing the AGENT clears the model pin: presets are per-runner, so a kept
-                      // model would be one the new runner does not have. Changing only the account
-                      // keeps it — the model catalog is the same either way.
-                      onPick={(next, picked) =>
-                        update({
-                          runner: next,
-                          agentProfile: picked,
-                          ...(next === displayRunner ? {} : { model: null }),
-                        })
-                      }
-                      disabled={!providersReady}
-                    />
-                  ) : null}
-                  <PickerPill
-                    slot="model-pill"
-                    ariaLabel="Model"
-                    label={models.find((m) => m.id === model)?.label ?? 'auto'}
-                    value={model}
-                    disabled={!providersReady}
-                    readOnly={modelsLocked}
-                    disabledHint={
-                      modelsLocked
-                        ? 'Model selection is locked to native coding-agent settings.'
-                        : undefined
-                    }
-                    onPick={(next) => {
-                      const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
-                      update({
-                        model: next,
-                        effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
-                      })
-                    }}
-                    options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
-                    status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
-                  />
-                  <PickerPill
-                    slot="effort-pill"
-                    ariaLabel="Effort"
-                    label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
-                    value={effort}
-                    disabled={!providersReady}
-                    readOnly={modelsLocked}
-                    disabledHint={
-                      modelsLocked
-                        ? 'Effort selection is locked to native coding-agent settings.'
-                        : undefined
-                    }
-                    onPick={(next) => update({ effort: next })}
-                    options={effortOptions.map((option) => ({
-                      value: option.value,
-                      label: option.label,
-                      desc: option.desc,
-                    }))}
-                  />
-                </div>
+              <div className="space-y-3 border-t border-border px-4 pt-4 pb-4">
                 <div role="group" aria-label="Run settings" className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span className="basis-full text-xs font-medium text-muted-foreground">Run</span>
                   <PickerPill
@@ -850,10 +853,10 @@ function WorktreeToggle({
           ? 'Runs in an isolated worktree — uncheck to run in the repo working tree'
           : 'Runs in the repo working tree — check to isolate in a worktree'
       }
-      className={cn(chipClass, on && 'border-primary/60 text-foreground')}
+      className={cn(chipClass, on && 'border-[var(--composer-border)] bg-[var(--task-brand-selected)] text-foreground')}
     >
       {on ? (
-        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-primary" />
+        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-[var(--accent-text)]" />
       ) : (
         <SquareIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
       )}
@@ -888,10 +891,10 @@ function AutonomousToggle({
             ? 'Autonomous — the agent runs to completion without pausing for you'
             : 'Runs interactively — check to let the agent finish without pausing for you'
       }
-      className={cn(chipClass, on && !disabled && 'border-primary/60 text-foreground')}
+      className={cn(chipClass, on && !disabled && 'border-[var(--composer-border)] bg-[var(--task-brand-selected)] text-foreground')}
     >
       {on ? (
-        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-primary" />
+        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-[var(--accent-text)]" />
       ) : (
         <SquareIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
       )}
@@ -921,10 +924,10 @@ function GenerateFollowupsToggle({
           ? 'Agents can add newly discovered follow-up work to the task inbox'
           : 'Follow-up generation is off; agents still maintain the handoff journal'
       }
-      className={cn(chipClass, on && 'border-primary/60 text-foreground')}
+      className={cn(chipClass, on && 'border-[var(--composer-border)] bg-[var(--task-brand-selected)] text-foreground')}
     >
       {on ? (
-        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-primary" />
+        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-[var(--accent-text)]" />
       ) : (
         <SquareIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
       )}
@@ -1050,7 +1053,7 @@ function ProjectPill({
                   </span>
                 ) : null}
                 {project.id === projectId ? (
-                  <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+                  <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
                 ) : null}
               </CommandItem>
             ))}
@@ -1168,7 +1171,7 @@ function SourcePill({
         >
           <EyeIcon aria-hidden="true" className="size-3.5" />
         </button>
-        {selected ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" /> : null}
+        {selected ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
       </CommandItem>
     )
   }
@@ -1206,7 +1209,7 @@ function SourcePill({
     >
       <SourceIcon
         aria-hidden="true"
-        className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-violet')}
+        className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-accent-icon')}
       />
       <span className="max-w-44 truncate">{!ready ? '…' : (source?.ref ?? 'Skill')}</span>
       {chevron}
@@ -1280,7 +1283,7 @@ function SourcePill({
                       {quickTask?.description ?? 'One agent run on your task — no ceremony.'}
                     </span>
                     {source === null ? (
-                      <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-primary" />
+                      <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
                     ) : null}
                   </CommandItem>
                 </CommandGroup>
@@ -1318,7 +1321,7 @@ function SourcePill({
                           </span>
                         ) : null}
                         {selected ? (
-                          <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-primary" />
+                          <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
                         ) : null}
                       </CommandItem>
                     )

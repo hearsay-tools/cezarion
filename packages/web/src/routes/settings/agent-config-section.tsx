@@ -174,7 +174,7 @@ function AgentPane({
                     onClick={() => onSelect(file.id)}
                     className={cn(
                       'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
-                      file.id === selectedId ? 'bg-primary/15 text-foreground' : 'hover:bg-muted/60',
+                      file.id === selectedId ? 'bg-accent-strong/15 text-foreground' : 'hover:bg-muted/60',
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{file.label}</span>

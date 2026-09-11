@@ -57,23 +57,18 @@ describe('AppShell', () => {
     expect(within(screen.getByRole('main')).getByText('route content')).toBeTruthy()
   })
 
-  it('renders the themed Cezarion lockup, not a tile plus a label (#143)', () => {
+  it('renders the Poppins Cezarion wordmark from the approved shared shell', () => {
     renderShell()
-    const lockup = document.querySelector('[data-slot="brand-lockup"]') as HTMLImageElement
-    expect(lockup).toBeTruthy()
-    // Dark is the default palette (the matchMedia stub reports no light preference).
-    expect(lockup.getAttribute('src')).toBe('/cezarion-lockup-dark.svg')
-    // The image carries the accessible name; the decorative `cezar` span is gone so the
-    // name is not spoken twice.
-    expect(lockup.getAttribute('alt')).toBe('Cezarion')
-    expect(within(sidebar()).queryByText(/^cezar$/i)).toBeNull()
+    const wordmark = document.querySelector('[data-slot="brand-wordmark"]') as HTMLElement
+    expect(wordmark.tagName).toBe('SPAN')
+    expect(wordmark.textContent).toBe('cezarion')
+    expect(wordmark.className).toContain('font-semibold')
   })
 
-  it('swaps the lockup with the resolved theme (#143)', () => {
+  it('uses the same token-driven wordmark in light mode', () => {
     localStorage.setItem('cez-theme', 'light')
     renderShell()
-    const lockup = document.querySelector('[data-slot="brand-lockup"]') as HTMLImageElement
-    expect(lockup.getAttribute('src')).toBe('/cezarion-lockup-light.svg')
+    expect(document.querySelectorAll('[data-slot="brand-wordmark"]')).toHaveLength(1)
   })
 
   it('resets the main scroller to the top on navigation (#mobile-scroll-top)', () => {
@@ -227,26 +222,22 @@ describe('AppShell', () => {
     expect(within(footer()).getByRole('button', { name: /^Theme:/ })).toBeTruthy()
   })
 
-  /* The footer used to be one wrapping row that overflowed the 264px column, so the theme toggle
-   * silently fell onto a line of its own (#702). jsdom cannot measure that — but it can pin the
-   * structure that makes the wrap impossible: two rows, by construction, not by luck. */
-  describe('sidebar footer is two intentional rows (#702)', () => {
+  describe('sidebar search and footer chrome', () => {
     const controls = () =>
       document.querySelector('[data-slot="sidebar-footer-controls"]') as HTMLElement
 
-    it('lays the footer out as a column, never a wrapping row', () => {
+    it('keeps the footer controls in one non-wrapping row', () => {
       renderShell()
-      expect(footer().className).toContain('flex-col')
       expect(footer().className).not.toContain('flex-wrap')
     })
 
-    it('has exactly two children: the search bar, then the controls row', () => {
+    it('keeps search near the wordmark and outside the footer', () => {
       renderShell('/', { version: '1.2.3' })
-      const children = Array.from(footer().children) as HTMLElement[]
-      expect(children.map((child) => child.dataset.slot)).toEqual([
-        'command-palette-hint',
-        'sidebar-footer-controls',
-      ])
+      const content = sidebar().querySelector('[data-slot="sidebar-content"]') as HTMLElement
+      const search = content.querySelector('[data-slot="command-palette-hint"]') as HTMLElement
+      expect(search).toBeTruthy()
+      expect(footer().contains(search)).toBe(false)
+      expect(footer().firstElementChild?.getAttribute('data-slot')).toBe('sidebar-footer-controls')
     })
 
     it('keeps every control a sibling inside the one controls row', () => {
@@ -267,7 +258,7 @@ describe('AppShell', () => {
       renderShell()
       // Named by its own visible label, not by an aria-label that would diverge from it
       // (WCAG 2.5.3) — jsdom reports no `navigator.platform`, so the chord reads Ctrl+K.
-      const search = within(footer()).getByRole('button', { name: 'Search…' })
+      const search = within(sidebar()).getByRole('button', { name: 'Search…' })
       expect(search.dataset.slot).toBe('command-palette-hint')
       expect(search.className).toContain('w-full')
       expect(search.textContent).toContain('Search…')
@@ -289,7 +280,7 @@ describe('AppShell', () => {
 
     /* The two-row footer holds only while something in the controls row can give: every icon
      * button is `shrink-0` (button base class), so a long version string — `0.9.2-nightly.…`,
-     * the nightly dist-tag of #876 — used to push the gear and the toggle outside the 264px
+     * the nightly dist-tag of #876 — used to push the gear and the toggle outside the 232px
      * column entirely. jsdom still measures nothing; what it can pin is which item yields. */
     it('makes the version chip the one control that gives, so a nightly version cannot push the row out', () => {
       renderShell('/', {
@@ -485,7 +476,8 @@ describe('AppShell', () => {
     it('titles the mobile bar from the active route', () => {
       renderShell('/skills')
       const bar = document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
-      expect(within(bar).getByText('Skills')).toBeTruthy()
+      const title = within(bar).getByText('Skills')
+      expect(title.className).not.toContain('sr-only')
     })
 
   })
@@ -510,17 +502,17 @@ describe('AppShell', () => {
       fireEvent.pointerUp(el, { pointerId: 1, clientX: to })
     }
 
-    it('starts at the shipped 264px when nothing has been stored', () => {
+    it('starts at the approved 232px when nothing has been stored', () => {
       renderShell()
-      expect(sidebar().style.width).toBe('264px')
+      expect(sidebar().style.width).toBe('232px')
       // No Tailwind width class left behind to fight the inline one.
-      expect(sidebar().className).not.toContain('w-[264px]')
+      expect(sidebar().className).not.toContain('w-[232px]')
     })
 
     it('restores the width the browser remembers', () => {
       localStorage.setItem('cez-sidebar-width', '350')
       renderShell()
-      // First paint, not an effect: a jump from 264 to 350 would be visible on every load.
+      // First paint, not an effect: a jump from 232 to 350 would be visible on every load.
       expect(sidebar().style.width).toBe('350px')
     })
 
@@ -531,14 +523,14 @@ describe('AppShell', () => {
       expect(el.getAttribute('aria-orientation')).toBe('vertical')
       expect(el.getAttribute('aria-label')).toBe('Resize the sidebar')
       expect(el.tabIndex).toBe(0)
-      expect(el.getAttribute('aria-valuenow')).toBe('264')
-      expect(el.getAttribute('aria-valuemin')).toBe('264')
+      expect(el.getAttribute('aria-valuenow')).toBe('232')
+      expect(el.getAttribute('aria-valuemin')).toBe('232')
       expect(el.getAttribute('aria-valuemax')).toBe('420')
     })
 
     it('widens on drag and persists what it landed on', () => {
       renderShell()
-      drag(264, 344)
+      drag(232, 344)
       expect(sidebar().style.width).toBe('344px')
       expect(handle().getAttribute('aria-valuenow')).toBe('344')
       expect(localStorage.getItem('cez-sidebar-width')).toBe('344')
@@ -546,17 +538,17 @@ describe('AppShell', () => {
 
     it('clamps a drag at both bounds rather than letting the column collapse or take over', () => {
       renderShell()
-      drag(264, 3000)
+      drag(232, 3000)
       expect(sidebar().style.width).toBe('420px')
       drag(420, -3000)
-      expect(sidebar().style.width).toBe('264px')
+      expect(sidebar().style.width).toBe('232px')
     })
 
     it('takes focus on grab, so the arrow keys work right after a mouse drag', () => {
       // `preventDefault()` on pointerdown (which stops the drag selecting the sidebar's text)
       // also suppresses the focus a press would otherwise give a tabIndex=0 element.
       renderShell()
-      drag(264, 320)
+      drag(232, 320)
       expect(document.activeElement).toBe(handle())
       fireEvent.keyDown(handle(), { key: 'ArrowRight' })
       expect(sidebar().style.width).toBe('336px')
@@ -571,23 +563,23 @@ describe('AppShell', () => {
       renderShell()
       const el = handle()
       el.setPointerCapture = vi.fn()
-      fireEvent.pointerDown(el, { button: 2, pointerId: 1, clientX: 264 })
+      fireEvent.pointerDown(el, { button: 2, pointerId: 1, clientX: 232 })
       fireEvent.pointerMove(el, { pointerId: 1, clientX: 400 })
-      expect(sidebar().style.width).toBe('264px')
+      expect(sidebar().style.width).toBe('232px')
       expect(el.setPointerCapture).not.toHaveBeenCalled()
     })
 
     it('steps with the arrow keys and jumps to the bounds with Home/End', () => {
       renderShell()
       fireEvent.keyDown(handle(), { key: 'ArrowRight' })
-      expect(sidebar().style.width).toBe('280px')
+      expect(sidebar().style.width).toBe('248px')
       fireEvent.keyDown(handle(), { key: 'ArrowLeft' })
-      expect(sidebar().style.width).toBe('264px')
+      expect(sidebar().style.width).toBe('232px')
       fireEvent.keyDown(handle(), { key: 'End' })
       expect(sidebar().style.width).toBe('420px')
       fireEvent.keyDown(handle(), { key: 'Home' })
-      expect(sidebar().style.width).toBe('264px')
-      expect(localStorage.getItem('cez-sidebar-width')).toBe('264')
+      expect(sidebar().style.width).toBe('232px')
+      expect(localStorage.getItem('cez-sidebar-width')).toBe('232')
     })
 
     it('leaves every other key to the browser — Tab must still move focus', () => {
@@ -595,7 +587,7 @@ describe('AppShell', () => {
       const event = createEvent.keyDown(handle(), { key: 'Tab' })
       fireEvent(handle(), event)
       expect(event.defaultPrevented).toBe(false)
-      expect(sidebar().style.width).toBe('264px')
+      expect(sidebar().style.width).toBe('232px')
     })
 
     it('resets to the default on double-click', () => {
@@ -603,16 +595,16 @@ describe('AppShell', () => {
       renderShell()
       expect(sidebar().style.width).toBe('400px')
       fireEvent.doubleClick(handle())
-      expect(sidebar().style.width).toBe('264px')
-      expect(localStorage.getItem('cez-sidebar-width')).toBe('264')
+      expect(sidebar().style.width).toBe('232px')
+      expect(localStorage.getItem('cez-sidebar-width')).toBe('232')
     })
 
-    it('does not follow the drawer: the `<md` overlay keeps its fixed 264px and no handle', () => {
+    it('does not follow the drawer: the `<md` overlay keeps its fixed 232px and no handle', () => {
       localStorage.setItem('cez-sidebar-width', '400')
       renderShell('/', { taskQuickList: <p>list</p> })
       fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
       const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
-      expect(drawer.className).toContain('w-[264px]')
+      expect(drawer.className).toContain('w-[232px]')
       expect(drawer.style.width).toBe('')
       expect(within(drawer).queryByRole('separator', { name: 'Resize the sidebar' })).toBeNull()
     })

@@ -182,7 +182,7 @@ function GithubListResizeHandle({ width, onWidthChange }: GithubListResize) {
       onKeyDown={onKeyDown}
       onDoubleClick={() => onWidthChange(DEFAULT_GITHUB_LIST_WIDTH)}
       title="Drag to resize the GitHub list — double-click to reset"
-      className="absolute inset-y-0 -right-[2px] z-20 hidden w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-violet/40 focus-visible:bg-violet/60 focus-visible:outline-none md:block"
+      className="absolute inset-y-0 -right-[2px] z-20 hidden w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent-strong/40 focus-visible:bg-accent-strong/60 focus-visible:outline-none md:block"
     />
   )
 }
@@ -618,7 +618,7 @@ export function GithubRoute({
             {automationsAvailable ? (
               <Link
                 to="/automations/new"
-                className="ml-auto shrink-0 text-[10px] font-medium text-primary hover:underline"
+                className="ml-auto shrink-0 text-[10px] font-medium text-link-foreground hover:underline"
               >
                 Set up automations
               </Link>
@@ -854,7 +854,7 @@ function GithubRow({
         <span className="flex min-w-0 items-start gap-2 md:items-center">
           <Icon
             aria-hidden="true"
-            className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-violet')}
+            className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-accent-icon')}
           />
           <span className={cn('line-clamp-2 min-w-0 text-[13px] font-medium md:block md:truncate', active && 'font-semibold')}>
             {item.title}
@@ -867,7 +867,7 @@ function GithubRow({
           <CommentCount count={item.comments} />
           {checks ? <ChecksGlyph checks={checks} /> : null}
           {queued ? (
-            <span data-slot="gh-queued-flag" className="font-sans font-medium text-violet">
+            <span data-slot="gh-queued-flag" className="font-sans font-medium text-accent-text">
               ↗ run queued
             </span>
           ) : null}
@@ -909,7 +909,7 @@ function LabelFilter({
           disabled={options.length === 0}
           className={cn(
             'flex min-h-11 min-w-11 shrink-0 items-center gap-1 rounded-md border border-input bg-card px-2 py-1 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50',
-            selected.length > 0 && 'border-primary/60 text-foreground',
+            selected.length > 0 && 'border-accent-strong/60 text-foreground',
           )}
         >
           <TagIcon aria-hidden="true" className="size-3.5" />
@@ -936,7 +936,7 @@ function LabelFilter({
                     style={labelChipStyle(colors[label])}
                   />
                   <span className="min-w-0 flex-1 truncate">{label}</span>
-                  {on ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" /> : null}
+                  {on ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
                 </CommandItem>
               )
             })}
@@ -1204,7 +1204,7 @@ function GithubMergeBox({ number }: { number: number }) {
                 type="checkbox"
                 checked={overrideRules}
                 onChange={(event) => setOverrideRules(event.target.checked)}
-                className="mt-0.5 size-4 accent-primary"
+                className="mt-0.5 size-4 accent-accent-strong"
               />
               <span>
                 <span className="block font-medium">Merge without waiting for requirements</span>
