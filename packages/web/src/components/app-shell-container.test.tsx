@@ -162,14 +162,14 @@ describe('skillsUpdateMarkerOf', () => {
 })
 
 describe('sidebar wiring', () => {
-  it('renders the repo and version chips from /api/v1/health', async () => {
+  it('renders the repo identity from /api/v1/health', async () => {
     serve({ '/api/v1/health': HEALTH, '/api/v1/todos': [] })
     renderShell()
 
     await waitFor(() => expect(repoChip()).not.toBeNull())
     // Basename of the root, then the branch — not the whole path.
     expect(repoChip()?.textContent).toBe('cezar')
-    expect(versionChip()?.textContent).toBe('v0.1.3')
+    expect(versionChip()).toBeNull()
   })
 
   it('renders the inbox badge from /api/v1/todos', async () => {
@@ -189,7 +189,7 @@ describe('sidebar wiring', () => {
     })
     renderShell()
 
-    await waitFor(() => expect(versionChip()).not.toBeNull())
+    await waitFor(() => expect(repoChip()).not.toBeNull())
     expect(screen.queryByRole('link', { name: /Inbox/ })).toBeNull()
     expect(navBadge()).toBeNull()
     // Every other view is untouched — the gate owns exactly one item.
@@ -204,7 +204,7 @@ describe('sidebar wiring', () => {
     })
     renderShell()
 
-    await waitFor(() => expect(versionChip()).not.toBeNull())
+    await waitFor(() => expect(repoChip()).not.toBeNull())
     // The badge query is keyed on the capability, so it never runs — unlike the /inbox route,
     // nothing here needs the list before health has spoken.
     const asked = fetchMock.mock.calls.map((call) => String(call[0]))
@@ -220,7 +220,7 @@ describe('sidebar wiring', () => {
     serve({ '/api/v1/health': WITH_FORGE, '/api/v1/todos': [] })
     renderShell()
 
-    await waitFor(() => expect(versionChip()).not.toBeNull())
+    await waitFor(() => expect(repoChip()).not.toBeNull())
     expect(screen.queryByRole('link', { name: /Automations/ })).toBeNull()
     // The gate owns exactly one item — GitHub is forge-gated, not automations-gated.
     expect(screen.getByRole('link', { name: /GitHub/ })).toBeTruthy()
@@ -233,7 +233,7 @@ describe('sidebar wiring', () => {
     })
     renderShell()
 
-    await waitFor(() => expect(versionChip()).not.toBeNull())
+    await waitFor(() => expect(repoChip()).not.toBeNull())
     expect(screen.getByRole('link', { name: /Automations/ })).toBeTruthy()
   })
 
@@ -241,7 +241,7 @@ describe('sidebar wiring', () => {
     serve({ '/api/v1/health': HEALTH, '/api/v1/todos': [] })
     renderShell()
 
-    await waitFor(() => expect(versionChip()).not.toBeNull())
+    await waitFor(() => expect(repoChip()).not.toBeNull())
     // Zero follow-ups is not "0 follow-ups" — a badge reading 0 is noise the spec's chrome
     // rules do not want.
     expect(navBadge()).toBeNull()
@@ -306,7 +306,7 @@ describe('sidebar wiring', () => {
     })
     renderShell()
 
-    await waitFor(() => expect(versionChip()).not.toBeNull())
+    await waitFor(() => expect(repoChip()).not.toBeNull())
     expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
     expect(screen.getByRole('link', { name: /New task/ })).toBeTruthy()
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
@@ -336,14 +336,15 @@ describe('sidebar wiring', () => {
     expect(repoChip()).toBeNull()
   })
 
-  it('shows the version chip even outside a git repo', async () => {
+  it('keeps the navigation available outside a git repo', async () => {
     serve({ '/api/v1/health': { ...HEALTH, repo: null }, '/api/v1/todos': [] })
     renderShell()
 
     // Running cezar outside a repo is supported: no repo chip, but the rest of the chrome is
     // real and must not vanish with it.
-    await waitFor(() => expect(versionChip()).not.toBeNull())
-    expect(versionChip()?.textContent).toBe('v0.1.3')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(screen.getByRole('link', { name: /New task/ })).toBeTruthy()
+    expect(versionChip()).toBeNull()
     expect(repoChip()).toBeNull()
   })
 

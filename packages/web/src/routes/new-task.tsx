@@ -794,7 +794,6 @@ export function NewTaskRoute() {
           }
         />
 
-        <details className="mt-8 text-xs text-muted-foreground"><summary className="cursor-pointer">Try a suggested task</summary><SuggestedChips onPick={(text) => update({ text })} /></details>
       </div>
 
       {plan !== null ? (
@@ -1420,29 +1419,3 @@ function ModeSegment({
   )
 }
 
-/** Honest static starters (the mockup's ghost chips): they only fill the textarea — the user
- *  still aims and submits. */
-const SUGGESTIONS = [
-  'Fix a failing or flaky test',
-  'Summarize recent commits on this branch',
-  'Update the README for recent changes',
-]
-
-function SuggestedChips({ onPick }: { onPick: (text: string) => void }) {
-  return (
-    <div className="mt-7 flex flex-wrap justify-center gap-2 max-md:justify-start">
-      {SUGGESTIONS.map((suggestion) => (
-        <button
-          key={suggestion}
-          type="button"
-          data-slot="suggested-chip"
-          onClick={() => onPick(suggestion)}
-          className="inline-flex h-[30px] items-center gap-1.5 rounded-full border border-border px-3 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
-          {suggestion}
-        </button>
-      ))}
-    </div>
-  )
-}

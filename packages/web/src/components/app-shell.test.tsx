@@ -203,56 +203,15 @@ describe('AppShell', () => {
     })
   })
 
-  describe('Add project menu', () => {
-    it('is shown by default', () => {
-      renderShell()
-      expect(within(sidebar()).getByRole('button', { name: 'Add project' })).toBeTruthy()
-    })
-
-    it('is omitted in single-project mode while normal navigation remains', () => {
-      renderShell('/', { singleProject: true })
-      expect(within(sidebar()).queryByRole('button', { name: 'Add project' })).toBeNull()
-      expect(within(nav()).getByRole('link', { name: 'Tasks' })).toBeTruthy()
-      expect(within(sidebar()).getByRole('link', { name: /New task/ })).toBeTruthy()
-    })
+  it('uses the designed footer and omits sidebar controls awaiting design coverage', () => {
+    renderShell('/', { version: '1.2.3', latestVersion: '1.3.0', toolsMenu: <button>Tools</button> })
+    expect(within(sidebar()).queryByRole('button', { name: 'Add project' })).toBeNull()
+    expect(within(footer()).getByRole('link', { name: /Global settings/ })).toBeTruthy()
+    expect(within(footer()).getByText('Your agents. Your machine.')).toBeTruthy()
+    expect(within(footer()).queryByRole('button', { name: /^Theme:/ })).toBeNull()
+    expect(document.querySelector('[data-slot="tools-menu"]')).toBeNull()
+    expect(document.querySelector('[data-slot="version-chip"]')).toBeNull()
   })
-
-  it('puts the theme toggle in the sidebar footer', () => {
-    renderShell()
-    expect(within(footer()).getByRole('button', { name: /^Theme:/ })).toBeTruthy()
-  })
-
-  describe('sidebar search and footer chrome', () => {
-    const controls = () =>
-      document.querySelector('[data-slot="sidebar-footer-controls"]') as HTMLElement
-
-    it('keeps the footer controls in one non-wrapping row', () => {
-      renderShell()
-      expect(footer().className).not.toContain('flex-wrap')
-    })
-
-    it('keeps search near the wordmark and outside the footer', () => {
-      renderShell('/', { version: '1.2.3' })
-      const content = sidebar().querySelector('[data-slot="sidebar-content"]') as HTMLElement
-      const search = content.querySelector('[data-slot="command-palette-hint"]') as HTMLElement
-      expect(search).toBeTruthy()
-      expect(footer().contains(search)).toBe(false)
-      expect(footer().firstElementChild?.getAttribute('data-slot')).toBe('global-settings-link')
-    })
-
-    it('keeps every control a sibling inside the one controls row', () => {
-      renderShell('/', { version: '1.2.3', toolsMenu: <button type="button">Tools</button> })
-      // The gear and the toggle are the pair that came apart in #702 — assert they share a parent,
-      // and that the row is the whole of the footer's chrome rather than a subset of it.
-      const row = controls()
-      expect(footer().querySelector('[data-slot="global-settings-link"]')).not.toBeNull()
-      expect(row.querySelector('[data-slot="theme-toggle"]')).not.toBeNull()
-      expect(row.querySelector('[data-slot="tools-menu"]')).not.toBeNull()
-      expect(row.querySelector('[data-slot="version-chip"]')).not.toBeNull()
-      // The gear pushes itself right; the toggle rides along at the end of the same row.
-      const gear = footer().querySelector('[data-slot="global-settings-link"]') as HTMLElement
-      expect(gear.closest('a,button')?.parentElement).toBe(footer())
-    })
 
     it('renders search as a full-width launcher that still opens the palette', () => {
       renderShell()
@@ -271,39 +230,6 @@ describe('AppShell', () => {
       expect(opened).toHaveBeenCalledTimes(1)
     })
 
-    it('still shows the version chip update affordance (#368) in the narrower row', () => {
-      renderShell('/', { version: '1.2.3', latestVersion: '1.3.0' })
-      const chip = controls().querySelector('[data-slot="version-chip"]') as HTMLElement
-      expect(chip.getAttribute('data-update-available')).toBe('true')
-      expect(chip.querySelector('[data-slot="status-dot"]')).not.toBeNull()
-    })
-
-    /* The two-row footer holds only while something in the controls row can give: every icon
-     * button is `shrink-0` (button base class), so a long version string — `0.9.2-nightly.…`,
-     * the nightly dist-tag of #876 — used to push the gear and the toggle outside the 232px
-     * column entirely. jsdom still measures nothing; what it can pin is which item yields. */
-    it('makes the version chip the one control that gives, so a nightly version cannot push the row out', () => {
-      renderShell('/', {
-        version: '0.9.2-nightly.20260813.1',
-        toolsMenu: <button type="button">Tools</button>,
-      })
-      const chip = controls().querySelector('[data-slot="version-chip"]') as HTMLElement
-      expect(chip.className).not.toContain('shrink-0')
-      expect(chip.className).toContain('min-w-0')
-      // The text truncates inside the pill rather than widening it past what the row can hold.
-      const label = chip.querySelector('span:not([data-slot])') as HTMLElement
-      expect(label.className).toContain('truncate')
-      expect(label.textContent).toBe('v0.9.2-nightly.20260813.1')
-      // …and the full string stays legible on hover, since the visible one may be clipped.
-      expect(chip.getAttribute('title')).toBe('v0.9.2-nightly.20260813.1')
-      // Everything else in the row still refuses to shrink — that is what keeps them readable.
-      for (const slot of ['tools-menu', 'theme-toggle']) {
-        const el = controls().querySelector(`[data-slot="${slot}"]`) as HTMLElement
-        expect(el.className).toContain('shrink-0')
-      }
-    })
-  })
-
   describe('data slots stay empty rather than showing invented data', () => {
     it('renders no repo chip, badge or version chip when unfed', () => {
       renderShell()
@@ -312,41 +238,9 @@ describe('AppShell', () => {
       expect(document.querySelector('[data-slot="version-chip"]')).toBeNull()
     })
 
-    it('renders the repo chip and version chip from props', () => {
-      renderShell('/', { repo: { name: 'cezar', branch: 'main' }, version: '1.2.3' })
+    it('renders the project identity from live props', () => {
+      renderShell('/', { repo: { name: 'cezar', branch: 'main' } })
       expect(document.querySelector('[data-slot="repo-chip"]')?.textContent).toBe('cezar')
-      // The chip prefixes the raw semver from /api/v1/health — `v1.2.3`, mono, muted.
-      expect(within(footer()).getByText('v1.2.3')).toBeTruthy()
-    })
-
-    describe('version chip update affordance (#368)', () => {
-      const chip = () => document.querySelector('[data-slot="version-chip"]') as HTMLElement
-
-      it('stays plain while the registry has nothing newer', () => {
-        renderShell('/', { version: '1.2.3' })
-        expect(chip().getAttribute('data-update-available')).toBeNull()
-        // A tooltip, but one that claims nothing: the chip truncates, so the full version has to
-        // stay reachable on hover even when there is no update to announce.
-        expect(chip().getAttribute('title')).toBe('v1.2.3')
-        expect(chip().querySelector('[data-slot="status-dot"]')).toBeNull()
-      })
-
-      it('stays plain when latestVersion equals the running version', () => {
-        renderShell('/', { version: '1.2.3', latestVersion: '1.2.3' })
-        expect(chip().getAttribute('data-update-available')).toBeNull()
-        expect(chip().querySelector('[data-slot="status-dot"]')).toBeNull()
-      })
-
-      it('pulses and names the newer version when one exists', () => {
-        renderShell('/', { version: '1.2.3', latestVersion: '1.3.0' })
-        expect(chip().getAttribute('data-update-available')).toBe('true')
-        expect(chip().getAttribute('title')).toBe('v1.2.3 — update available: v1.3.0')
-        const dot = chip().querySelector('[data-slot="status-dot"]') as HTMLElement
-        expect(dot.getAttribute('data-tone')).toBe('pending')
-        expect(dot.className).toContain('animate-pulse')
-        // The version shown is still the one actually running.
-        expect(chip().textContent).toContain('v1.2.3')
-      })
     })
 
     it('renders the Inbox badge only for a non-zero count', () => {
@@ -378,9 +272,9 @@ describe('AppShell', () => {
       expect(document.querySelector('[data-slot="nav-update-marker"]')).toBeNull()
     })
 
-    it('reserves the quick-list, tools and composer slots for later Steps', () => {
+    it('keeps the quick-list and composer slots', () => {
       renderShell()
-      for (const slot of ['task-quick-list', 'tools-menu', 'composer']) {
+      for (const slot of ['task-quick-list', 'composer']) {
         expect(document.querySelector(`[data-slot="${slot}"]`)).not.toBeNull()
       }
     })
@@ -795,7 +689,7 @@ describe('AppShell', () => {
 
       // …and the rest of the sidebar came along, not just the nav.
       expect(within(drawer() as HTMLElement).getByRole('link', { name: /New task/ })).toBeTruthy()
-      expect(within(drawer() as HTMLElement).getByRole('button', { name: /^Theme:/ })).toBeTruthy()
+      expect(within(drawer() as HTMLElement).getByRole('link', { name: /Global settings/ })).toBeTruthy()
     })
 
     it('marks the active nav item inside the drawer too', () => {

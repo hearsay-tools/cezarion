@@ -15,7 +15,6 @@ import { isReadDoneItem, isUnread } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
 import {
   groupRuns,
-  listCounts,
   refPrefixMatches,
   runTitle,
   splitRefPrefix,
@@ -29,7 +28,7 @@ import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
 
 /**
- * The sidebar's task quick-list (spec, "App shell & navigation"): Active/Archived tabs, then the
+ * The sidebar's session list. Archive access lives on the Tasks page; the
  * runs grouped Needs you / Working / Recent, with variant groups collapsed into one tile.
  *
  * Presentational — every decision it paints (which bucket, which order, which dot, whether a
@@ -60,7 +59,6 @@ export function TaskQuickList({
    *  belongs to is a container's question — this list is painted for other projects too. */
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
 }) {
-  const counts = listCounts(runs)
   const buckets = groupRuns(runs, view)
   // Withheld in the archived view, where `groupRuns` answers one `Archived` bucket and never
   // reads `run.pinned` — the same call the thread header makes on an archived run.
@@ -68,23 +66,6 @@ export function TaskQuickList({
 
   return (
     <div data-slot="quick-list">
-      {/* Sticky, not scrolled away: the tabs say what you are looking at, and a long Recent list
-          must not be able to hide that the view is filtered. */}
-      <div className="sticky top-0 z-10 bg-sidebar pt-2 pb-1">
-        <div className="inline-flex w-full gap-0.5 rounded-md bg-muted p-[3px]">
-          <ViewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
-            Active
-            {/* The one reason to look at a tab you are not on. */}
-            {counts.waiting > 0 && view !== 'active' ? (
-              <StatusDot tone="pending" pulse data-slot="waiting-dot" aria-label="needs you" />
-            ) : null}
-          </ViewTab>
-          <ViewTab view="archived" current={view} onSelect={onViewChange} count={counts.archived}>
-            Archived
-          </ViewTab>
-        </div>
-      </div>
-
       {buckets.length === 0 ? (
         <p className="px-3 py-3.5 text-xs text-soft-foreground">
           {view === 'archived' ? 'Nothing archived yet.' : 'No tasks yet — describe one.'}
@@ -164,41 +145,6 @@ export function QuickListBuckets({
         </div>
       ))}
     </>
-  )
-}
-
-function ViewTab({
-  view,
-  current,
-  onSelect,
-  count,
-  children,
-}: {
-  view: ListView
-  current: ListView
-  onSelect: (view: ListView) => void
-  count: number
-  children: React.ReactNode
-}) {
-  const isActive = view === current
-  return (
-    <button
-      type="button"
-      data-slot="view-tab"
-      data-view={view}
-      // Toggle buttons rather than a real tablist: these filter one list in place, they do not
-      // switch between panels — `aria-pressed` is what that actually is.
-      aria-pressed={isActive}
-      onClick={() => onSelect(view)}
-      className={cn(
-        'flex h-7 flex-1 items-center justify-center gap-1.5 rounded-[7px] text-[12.5px] font-medium text-muted-foreground',
-        isActive && 'bg-card font-semibold text-foreground shadow-xs'
-      )}
-    >
-      {children}
-      {/* No "0": an empty bucket says so by being empty. */}
-      {count > 0 ? <span className="font-mono text-[11px] tabular-nums">{count}</span> : null}
-    </button>
   )
 }
 

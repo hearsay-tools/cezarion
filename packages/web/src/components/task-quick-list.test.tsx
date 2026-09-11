@@ -585,36 +585,11 @@ describe('TaskQuickList', () => {
       run({ id: 'c', status: 'done', archived: true }),
     ]
 
-    it('shows counts and which view is on', () => {
+    it('leaves archive navigation on the Tasks page', () => {
       renderList({ runs: runs(), view: 'active' })
-      const active = screen.getByRole('button', { name: /Active/ })
-      const archived = screen.getByRole('button', { name: /Archived/ })
-      expect(active.textContent).toBe('Active2')
-      expect(archived.textContent).toBe('Archived1')
-      expect(active.getAttribute('aria-pressed')).toBe('true')
-      expect(archived.getAttribute('aria-pressed')).toBe('false')
-    })
-
-    it('reports the view the user picked', () => {
-      const { onViewChange } = renderList({ runs: runs(), view: 'active' })
-      fireEvent.click(screen.getByRole('button', { name: /Archived/ }))
-      expect(onViewChange).toHaveBeenCalledWith('archived')
-    })
-
-    it('renders no count for an empty bucket', () => {
-      renderList({ runs: [run({ status: 'running' })] })
-      // "Archived 0" is noise — an empty bucket says so by being empty.
-      expect(screen.getByRole('button', { name: /Archived/ }).textContent).toBe('Archived')
-    })
-
-    it('flags waiting runs on the Active tab only while you are looking elsewhere', () => {
-      const { unmount } = renderList({ runs: runs(), view: 'archived' })
-      expect(document.querySelector('[data-slot="waiting-dot"]')?.getAttribute('data-tone')).toBe('pending')
-      unmount()
-
-      // On the Active view the rows themselves say it — the tab dot would be noise.
-      renderList({ runs: runs(), view: 'active' })
-      expect(document.querySelector('[data-slot="waiting-dot"]')).toBeNull()
+      expect(screen.queryByRole('button', { name: /Active|Archived/ })).toBeNull()
+      expect(row('a')).not.toBeNull()
+      expect(row('c')).toBeNull()
     })
 
     it('shows the archived view when asked', () => {
@@ -713,13 +688,11 @@ describe('TaskQuickListContainer', () => {
     )
   })
 
-  it('drives the sidebar Active/Archived view', async () => {
+  it('shows active sessions without a duplicate archive switcher', async () => {
     renderContainer([run({ id: 'a', status: 'running' }), run({ id: 'b', status: 'done', archived: true })])
-
-    fireEvent.click(await screen.findByRole('button', { name: /Archived/ }))
-
-    await waitFor(() => expect(row('b')).not.toBeNull())
-    expect(row('a')).toBeNull()
+    await waitFor(() => expect(row('a')).not.toBeNull())
+    expect(row('b')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Archived/ })).toBeNull()
   })
 })
 
