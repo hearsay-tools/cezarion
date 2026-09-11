@@ -1,7 +1,6 @@
+import './task-flows.css'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowDownIcon,
-  ArrowUpIcon,
   GripVerticalIcon,
   PlayIcon,
   XIcon,
@@ -115,7 +114,7 @@ export function PlanReview({
           <DialogDescription
             data-slot="plan-task"
             title={plan.task}
-            className="truncate text-[13.5px] font-medium text-foreground"
+            className="text-[18px] font-medium text-foreground"
           >
             {planTaskLine(plan.task)}
           </DialogDescription>
@@ -165,7 +164,7 @@ export function PlanReview({
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate text-[13px] font-semibold">
+                    <span className="text-[13px] font-medium">
                       {step.name ?? step.id}
                     </span>
                     {step.skill ? (
@@ -186,11 +185,11 @@ export function PlanReview({
                       </span>
                     ) : null}
                   </div>
-                  <p className="truncate font-mono text-[11.5px] text-muted-foreground">
+                  <p className="mt-3 whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">
                     {stepHint(step)}
                   </p>
                 </div>
-                <span className="flex shrink-0 items-center">
+                <span data-slot="plan-step-actions" className="flex flex-wrap items-center gap-2">
                   <Button
                     type="button"
                     variant="ghost"
@@ -201,7 +200,7 @@ export function PlanReview({
                     className="size-7 text-muted-foreground"
                     onClick={() => onStepsChange(moveStep(plan.steps, index, index - 1))}
                   >
-                    <ArrowUpIcon aria-hidden="true" className="size-3.5" />
+                    Move up
                   </Button>
                   <Button
                     type="button"
@@ -213,7 +212,7 @@ export function PlanReview({
                     className="size-7 text-muted-foreground"
                     onClick={() => onStepsChange(moveStep(plan.steps, index, index + 1))}
                   >
-                    <ArrowDownIcon aria-hidden="true" className="size-3.5" />
+                    Move down
                   </Button>
                   <Button
                     type="button"
@@ -224,7 +223,7 @@ export function PlanReview({
                     className="size-7 text-muted-foreground hover:text-danger"
                     onClick={() => onStepsChange(removeStep(plan.steps, index))}
                   >
-                    <XIcon aria-hidden="true" className="size-3.5" />
+                    Remove
                   </Button>
                 </span>
               </li>

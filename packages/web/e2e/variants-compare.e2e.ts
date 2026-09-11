@@ -145,7 +145,8 @@ describe('the variants compare view against two settled dry runs', () => {
     browser.goto(`${baseUrl}${scoped(`/compare/${groupId}`)}`)
     browser.waitForFunction(`document.querySelectorAll('[data-slot="variant-column"]').length === 2`)
 
-    expect(browser.text('h1')).toContain('Improve the project notes')
+    expect(browser.text('h1')).toBe('Compare variants')
+    expect(browser.text('[data-route="compare"] header')).toContain('Improve the project notes')
     for (const letter of ['A', 'B']) {
       const col = `[data-slot="variant-column"][data-variant="${letter}"]`
       expect(browser.text(`${col} [data-slot="variant-letter"]`)).toBe(letter)

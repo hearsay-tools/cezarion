@@ -1,0 +1,52 @@
+/* Revised task flow frames 19–22. Scoped to these pages and the plan dialog. */
+.task-flow-page { padding: 36px; gap: 22px; }
+.task-flow-page > header h1 { font-size: 28px; font-weight: 500; }
+.task-flow-page > header h1 > svg { display: none; }
+[data-slot="todo-card"], [data-slot="variant-column"] { padding: 24px; gap: 20px; box-shadow: none; border-radius: 12px; }
+[data-slot="todo-summary"] { font-size: 18px; line-height: 1.55; }
+[data-slot="todo-card"] > div:first-child > svg { display: none; }
+[data-slot="todo-meta"] { margin-top: 16px; font-size: 13px; }
+[data-slot="todo-engine"], [data-slot="todo-instructions"] { padding-left: 0; }
+[data-slot="todo-actions"] { align-self: start; }
+[data-slot="todo-actions"] [data-action="todo-run"] { order: 2; }
+[data-slot="todo-card"] button { min-height: 40px; }
+[data-slot="variant-column"] > div:first-child { flex-wrap: wrap; }
+[data-slot="variant-letter"] { width: auto; height: auto; background: none; font: inherit; font-size: 18px; }
+[data-slot="variant-letter"]::before { content: 'Variant '; white-space: pre; }
+[data-slot="variant-token-metrics"] { flex-basis: 100%; margin-left: 0; }
+[data-slot="variant-diffstat"] { white-space: pre-wrap; overflow-wrap: anywhere; background: transparent; padding: 8px 0; color: var(--success); }
+[data-slot="variant-progress"] { max-height: none; mask-image: none; overflow-wrap: anywhere; font-size: 13px; }
+[data-slot="variant-pick"] { align-self: start; }
+[data-slot="variant-diff"] > button { min-height: 52px; }
+[data-slot="plan-review"] [data-slot="plan-step"] { display: grid; grid-template-columns: 14px 20px minmax(0, 1fr); align-items: start; padding: 16px; gap: 8px; }
+[data-slot="plan-review"] [data-slot="plan-step"] > div { display: contents; }
+[data-slot="plan-review"] [data-slot="plan-step"] > div > div { flex-wrap: wrap; }
+[data-slot="plan-review"] [data-slot="plan-step"] p { grid-column: 1 / -1; }
+[data-slot="plan-step-actions"] { grid-column: 1 / -1; }
+[data-slot="plan-step-actions"] button { width: auto; min-height: 40px; padding: 8px 14px; border: 1px solid var(--border); background: var(--card); font-size: 12px; }
+[data-slot="plan-review"] [data-slot="dialog-title"] { color: var(--accent-text); }
+.automation-editor fieldset { background: var(--card); padding: 24px; border-radius: 12px; min-width: 0; }
+.automation-editor legend { float: left; width: 100%; padding: 0; font-size: 18px; font-weight: 500; margin-bottom: 8px; }
+.automation-editor input:not([type="checkbox"]), .automation-editor textarea { min-height: 44px; background: var(--background); }
+.automation-editor label { line-height: 1.6; }
+.automation-editor label:has(input[type="checkbox"]) { align-items: start; }
+.automation-editor input[type="checkbox"] { margin-top: 5px; }
+[data-route="automations"] article { padding: 24px; }
+[data-route="automations"] article h2 { font-size: 18px; font-weight: 500; }
+.task-flow-page [data-slot="centered-state"] { border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+@media (max-width: 767px) {
+  .task-flow-page { padding: 22px 20px; gap: 20px; }
+  .task-flow-page > header h1 { font-size: 22px; }
+  [data-slot="todo-card"], [data-slot="variant-column"] { padding: 16px; }
+  [data-slot="todo-actions"] { flex-direction: column; align-items: start; }
+  [data-slot="todo-card"] button, [data-slot="variant-column"] button, [data-slot="variant-column"] a { min-height: 48px; }
+  [data-slot="plan-review"] { top: 52px; height: calc(100dvh - 52px); }
+  [data-slot="plan-review"] [data-slot="plan-task"] { white-space: normal; }
+  [data-slot="plan-step-actions"] button { min-height: 48px; padding: 8px 12px; }
+  .automation-editor fieldset { padding: 16px; }
+  .automation-editor button { min-height: 48px; }
+}
+.automation-editor fieldset { display: grid; gap: 16px; }
+.automation-editor fieldset > label { clear: both; }
+[data-slot="todo-summary"] { font-weight: 400; }
+[data-slot="todo-card"] [data-slot="todo-instructions-toggle"], [data-slot="todo-card"] [data-slot="todo-instructions-hide"] { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; text-decoration: none; }

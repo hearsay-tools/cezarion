@@ -70,7 +70,7 @@ function renderOverview(props: Partial<ComponentProps<typeof TasksOverview>> = {
       </Routes>
     </MemoryRouter>
   )
-  if (detailed) fireEvent.click(screen.getByRole("button", { name: "Resource columns" }))
+  if (!detailed) { fireEvent.click(screen.getByRole("button", { name: "Columns" })); fireEvent.click(screen.getByRole("button", { name: "Summary view" })); fireEvent.keyDown(document.activeElement!, { key: "Escape" }) }
   return { ...utils, onViewChange, onArchiveFinished, onMarkAllRead, onRename }
 }
 
@@ -1191,7 +1191,6 @@ describe('TasksOverviewRoute — wired to the app', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
     const restore = await screen.findByRole('button', { name: 'Expand Branch column', pressed: false })
     restore.focus()
     fireEvent.click(restore)
@@ -1222,7 +1221,6 @@ describe('TasksOverviewRoute — wired to the app', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
     expect(await screen.findByRole('button', { name: 'Fold Branch column', pressed: true })).not.toBeNull()
   })
 
@@ -1259,7 +1257,6 @@ describe('TasksOverviewRoute — wired to the app', () => {
     renderApp([run({ id: 'rn1', title: 'Old name', status: 'done' })])
     await waitFor(() => expect(tableRow('rn1')).not.toBeNull())
 
-    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
     fireEvent.click(within(tableRow('rn1') as HTMLElement).getByRole('button', { name: 'Rename task' }))
     const input = within(tableRow('rn1') as HTMLElement).getByLabelText('Task title')
     fireEvent.change(input, { target: { value: 'New name' } })
@@ -1312,4 +1309,40 @@ describe('design frame 4 task summary', () => {
     expect(within(summary).queryByText('Cost')).toBeNull()
     expect(within(summary).getByText('CPU')).toBeTruthy()
   })
+})
+
+it('shows the saved resource table by default and exposes saved column choices', () => {
+  renderOverview({ runs: [run({ id: 'default-resources' })] })
+  expect(document.querySelector('[data-slot="tasks-table"]')?.hasAttribute('hidden')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+  expect(screen.getByRole('checkbox', { name: 'Branch' })).not.toBeNull()
+})
+it('expands real mobile resource facts without opening a task', () => {
+  renderOverview({ runs: [run({ id: 'mobile-resource', title: 'Mobile resource', peakRssBytes: 1024 ** 3 })] })
+  const mobile = card('mobile-resource') as HTMLElement
+  fireEvent.click(within(mobile).getByRole('button', { name: 'Show resources' }))
+  expect(within(mobile).getByText('Memory')).not.toBeNull()
+  expect(location()).toBe('/')
+})
+
+it('keeps the task header visible and retries a failed task list', () => {
+  const onRetry = vi.fn()
+  renderOverview({ runs: undefined, error: 'Task list unavailable', onRetry })
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Project tasks')
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(onRetry).toHaveBeenCalledOnce()
+})
+
+it('offers explicit save and cancel for an inline table rename', () => {
+  const { onRename } = renderOverview({ runs: [run({ id: 'buttons', title: 'Original' })] })
+  const row = tableRow('buttons') as HTMLElement
+  fireEvent.click(within(row).getByRole('button', { name: 'Rename task' }))
+  fireEvent.change(within(row).getByLabelText('Task title'), { target: { value: 'Discard this' } })
+  fireEvent.mouseDown(within(row).getByRole('button', { name: 'Cancel rename' }))
+  fireEvent.click(within(row).getByRole('button', { name: 'Cancel rename' }))
+  expect(onRename).not.toHaveBeenCalled()
+  fireEvent.click(within(row).getByRole('button', { name: 'Rename task' }))
+  fireEvent.change(within(row).getByLabelText('Task title'), { target: { value: 'Saved title' } })
+  fireEvent.click(within(row).getByRole('button', { name: 'Save title' }))
+  expect(onRename).toHaveBeenCalledWith('buttons', 'Saved title')
 })

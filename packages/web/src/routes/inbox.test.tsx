@@ -947,3 +947,9 @@ describe('the inbox gate (#471)', () => {
     expect(screen.queryByText('The follow-up inbox is off')).toBeNull()
   })
 })
+
+it('shows a runnable suggestion before starting its follow-up', async () => {
+  stubFetch({}, [{ ...TODO_FULL, suggestedPrompt: 'Run the integration checks and report failures.' }])
+  renderInbox()
+  expect(await screen.findByText('Run the integration checks and report failures.')).not.toBeNull()
+})

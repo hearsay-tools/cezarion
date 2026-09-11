@@ -149,7 +149,8 @@ describe('the compare columns', () => {
     )
 
     // The shared header: the group title without the variant suffix.
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Add autocomplete')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Compare variants')
+    expect(screen.getByText(/Add autocomplete ·/)).not.toBeNull()
     expect(screen.getByRole('heading', { level: 1 }).textContent).not.toContain('(A)')
   })
 
@@ -197,6 +198,19 @@ describe('the compare columns', () => {
     renderCompare()
     await waitForColumns(3)
     expect(document.querySelector('[data-slot="compare-columns"]')?.className).toContain('md:grid-cols-3')
+  })
+
+  it('retries a failed group without losing the comparison URL', async () => {
+    let failed = true
+    stubFetch(group(), { 'GET /api/v1/groups/g1': () => failed
+      ? jsonResponse({ error: 'Temporarily unavailable' }, 503)
+      : jsonResponse(group(variant('A', 'done'), variant('B', 'done'))) })
+    renderCompare()
+    const retry = await screen.findByRole('button', { name: 'Retry' }, { timeout: 4000 })
+    failed = false
+    fireEvent.click(retry)
+    await waitForColumns(2)
+    expect(screen.getAllByRole('link', { name: 'Open task' }).map((link) => link.getAttribute('href'))).toEqual(['/tasks/va', '/tasks/vb'])
   })
 
   it('renders the 404 as a neutral CenteredState with a way home', async () => {

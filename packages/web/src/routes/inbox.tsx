@@ -1,3 +1,4 @@
+import './task-flows.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckIcon, InboxIcon, PlayIcon, TriangleAlertIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
@@ -79,18 +80,18 @@ export function InboxRoute() {
   const todos = todosQuery.data === undefined ? undefined : visibleTodos(todosQuery.data)
 
   return (
-    <div data-route="inbox" className="flex min-h-full flex-col">
+    <div data-route="inbox" className="task-flow-page flex min-h-full flex-col">
       {/* Desktop header — below `md` the shell's top bar already says "Inbox". */}
-      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center gap-3 border-b border-border bg-background px-11 md:flex">
-        <h1 className="text-base font-semibold">Inbox</h1>
+      <header className="flex shrink-0 flex-col gap-5">
+        <h1 className="text-[28px] font-medium">Inbox</h1>
         <p className="text-[13px] text-soft-foreground">
           {inboxOff
             ? 'Disabled for this server; per-task Notes still run.'
-            : 'Follow-ups agents suggested when they finished a task.'}
+            : 'Follow-ups from your agents. Review the suggestion, then start a new task.'}
         </p>
       </header>
 
-      <div className="flex flex-1 flex-col p-3 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-5 md:pb-5">
+      <div className="flex flex-1 flex-col">
         {inboxOff ? (
           <CenteredState
             icon={<InboxIcon />}
@@ -106,9 +107,10 @@ export function InboxRoute() {
               tone="danger"
               title="Could not load the inbox"
               subtitle={todosQuery.error.message}
+              actions={<Button variant="outline" onClick={() => void todosQuery.refetch()}>Retry</Button>}
               heading="h2"
             />
-          ) : null
+          ) : <div role="status" className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading follow-ups…</div>
         ) : todos.length === 0 ? (
           // Not while health is still in flight: an inbox-less server answers `[]` too, so
           // claiming "empty" here would flash the very lie this route exists to avoid, then
@@ -125,7 +127,7 @@ export function InboxRoute() {
             />
           )
         ) : (
-          <ul data-slot="todo-list" className="mx-auto flex w-full max-w-3xl flex-col gap-2.5">
+          <ul data-slot="todo-list" className="flex w-full flex-col gap-5">
             {todos.map((todo) => (
               <TodoCard
                 key={todo.id}
@@ -241,6 +243,7 @@ function TodoCard({
             data-slot="todo-meta"
             className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-soft-foreground"
           >
+            <span>{runnable ? 'Runnable follow-up' : 'Note only'}</span>
             {todo.ts ? <span>{shortAge(todo.ts)} ago</span> : null}
             {todo.action ? <span>{todo.action}</span> : null}
             {todo.taskId !== undefined ? (
@@ -275,7 +278,83 @@ function TodoCard({
             ) : null}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 self-center">
+
+      </div>
+
+      {runnable && todo.suggestedPrompt && todo.suggestedPrompt !== todo.summary ? <p data-slot="todo-prompt" className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-muted-foreground">{todo.suggestedPrompt}</p> : null}
+
+      {/* Only a runnable card gets pills (#401) — an acknowledge-only note has no run to aim.
+          Indented under the summary, above the instructions composer, so the two per-card
+          Run knobs (engine + prompt) read as one group. */}
+      {runnable ? (
+        <div data-slot="todo-engine" className="flex flex-wrap items-center gap-2 pl-5">
+          <EnginePills pick={engine} onChange={setEngine} disabled={busy || !resolved.canRun} />
+          {!resolved.providerPending && !resolved.canRun ? (
+            <span
+              data-slot="todo-provider-gate"
+              className="inline-flex flex-wrap items-center gap-1 text-xs text-muted-foreground"
+            >
+              {resolved.providerError
+                ? 'Provider authentication could not be verified.'
+                : 'Connect an agent provider to run this follow-up.'}
+              <Link
+                to="/settings/agents#providers"
+                className="font-medium text-foreground underline underline-offset-4"
+              >
+                Configure providers
+              </Link>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Instructions are carried by Run, so they only make sense on a runnable
+          follow-up (#440): a note-only entry has no Run to carry them, and a
+          composer there would be a dead end. */}
+      {runnable ? (
+        notesOpen ? (
+          <div data-slot="todo-instructions" className="flex flex-col gap-2 pl-5">
+            <label htmlFor={`todo-instructions-${todo.id}`} className="text-xs text-muted-foreground">Additional instructions</label>
+            <Textarea
+              ref={notesRef}
+              id={`todo-instructions-${todo.id}`}
+              data-slot="todo-instructions-input"
+              aria-label="Extra instructions for this follow-up"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Add instructions for the agent… (appended to the suggestion above)"
+              // Same cap the server enforces on the `prompt` body field, so an over-long note is
+              // stopped at the keystroke rather than by a 400 on Run (the Settings inputs cap the
+              // same way).
+              maxLength={20_000}
+              className="min-h-16 text-[13px]"
+            />
+            <div className="flex items-center gap-2">
+              <PromptTemplateMenu templates={templates} onInsert={insertNotesTemplate} />
+              <button
+                type="button"
+                data-slot="todo-instructions-hide"
+                onClick={() => setNotesOpen(false)}
+                className="text-xs font-medium text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground"
+              >
+                Hide
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            data-slot="todo-instructions-toggle"
+            onClick={() => setNotesOpen(true)}
+            className="self-start pl-5 text-xs font-medium text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground"
+          >
+            {/* A collapsed composer keeps its draft, and Run still carries it — so say so
+                rather than hiding instructions the next Run would silently send. */}
+            {notes.trim() ? 'Edit instructions (added)' : '+ Add instructions'}
+          </button>
+        )
+      ) : null}
+        <div data-slot="todo-actions" className="flex flex-wrap items-center gap-2">
           {runnable ? (
             <>
               <Button
@@ -317,77 +396,6 @@ function TodoCard({
             </Button>
           )}
         </div>
-      </div>
-
-      {/* Only a runnable card gets pills (#401) — an acknowledge-only note has no run to aim.
-          Indented under the summary, above the instructions composer, so the two per-card
-          Run knobs (engine + prompt) read as one group. */}
-      {runnable ? (
-        <div data-slot="todo-engine" className="flex flex-wrap items-center gap-2 pl-5">
-          <EnginePills pick={engine} onChange={setEngine} disabled={busy || !resolved.canRun} />
-          {!resolved.providerPending && !resolved.canRun ? (
-            <span
-              data-slot="todo-provider-gate"
-              className="inline-flex flex-wrap items-center gap-1 text-xs text-muted-foreground"
-            >
-              {resolved.providerError
-                ? 'Provider authentication could not be verified.'
-                : 'Connect an agent provider to run this follow-up.'}
-              <Link
-                to="/settings/agents#providers"
-                className="font-medium text-foreground underline underline-offset-4"
-              >
-                Configure providers
-              </Link>
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* Instructions are carried by Run, so they only make sense on a runnable
-          follow-up (#440): a note-only entry has no Run to carry them, and a
-          composer there would be a dead end. */}
-      {runnable ? (
-        notesOpen ? (
-          <div data-slot="todo-instructions" className="flex flex-col gap-2 pl-5">
-            <Textarea
-              ref={notesRef}
-              data-slot="todo-instructions-input"
-              aria-label="Extra instructions for this follow-up"
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder="Add instructions for the agent… (appended to the suggestion above)"
-              // Same cap the server enforces on the `prompt` body field, so an over-long note is
-              // stopped at the keystroke rather than by a 400 on Run (the Settings inputs cap the
-              // same way).
-              maxLength={20_000}
-              className="min-h-16 text-[13px]"
-            />
-            <div className="flex items-center gap-2">
-              <PromptTemplateMenu templates={templates} onInsert={insertNotesTemplate} />
-              <button
-                type="button"
-                data-slot="todo-instructions-hide"
-                onClick={() => setNotesOpen(false)}
-                className="text-xs font-medium text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground"
-              >
-                Hide
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            data-slot="todo-instructions-toggle"
-            onClick={() => setNotesOpen(true)}
-            className="self-start pl-5 text-xs font-medium text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground"
-          >
-            {/* A collapsed composer keeps its draft, and Run still carries it — so say so
-                rather than hiding instructions the next Run would silently send. */}
-            {notes.trim() ? 'Edit instructions (added)' : '+ Add instructions'}
-          </button>
-        )
-      ) : null}
     </li>
   )
 }

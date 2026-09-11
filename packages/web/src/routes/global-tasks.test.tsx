@@ -1041,12 +1041,12 @@ describe('global tasks page', () => {
     await waitFor(() => expect(unreadMarkers()).toHaveLength(0))
   })
 
-  it('offers no project filter — a project name is a link to its own page', async () => {
+  it('offers a project filter and keeps project names linked to their own page', async () => {
     stubFetch()
     renderPage()
     await screen.findByText('Add checkout endpoint')
 
-    expect(document.querySelector('[data-slot="facet-project"]')).toBeNull()
+    expect(document.querySelector('[data-slot="facet-project"]')).not.toBeNull()
     expect(screen.getByRole('link', { name: 'API' }).getAttribute('href')).toBe('/p/api/')
 
     // Grouping by project turns each heading into the same door.

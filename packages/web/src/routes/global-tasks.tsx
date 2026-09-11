@@ -1,3 +1,4 @@
+import './task-lists.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveIcon,
@@ -327,7 +328,7 @@ export function GlobalTasksRoute() {
   const truncated = truncatedProjectNames(index.data?.truncated ?? [], registry)
 
   const toggle = (facet: FacetId, value: string) =>
-    setFilters((current) => ({ ...current, [facet]: toggleFacetValue(current[facet], value) }))
+    setFilters((current) => ({ ...current, [facet]: toggleFacetValue(current[facet] ?? [], value) }))
   const clearFacet = (facet: FacetId) => setFilters((current) => ({ ...current, [facet]: [] }))
   const archive = useArchiveIndexedRun()
   const setRead = useReadIndexedRun()
@@ -340,6 +341,7 @@ export function GlobalTasksRoute() {
           tone="danger"
           title="Tasks across projects did not load"
           subtitle={(index.error ?? projects.error)?.message}
+          actions={<Button variant="outline" onClick={() => { void index.refetch(); void projects.refetch() }}>Retry</Button>}
         />
       </div>
     )
@@ -365,7 +367,7 @@ export function GlobalTasksRoute() {
   return (
     <div data-route="global-tasks" className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       <header className="flex shrink-0 flex-col gap-[22px]">
-        <div className="flex flex-col gap-2"><h1 className="text-[28px] font-semibold tracking-tight">All tasks</h1><p className="text-[13px] text-muted-foreground">Every project. One place to review what your agents have shipped.</p></div>
+        <div className="flex flex-col gap-2"><h1 className="text-[28px] font-semibold tracking-tight">All tasks</h1><p className="text-[13px] text-muted-foreground">Filter across projects and act on each run without opening the session.</p></div>
         <div className="flex items-center gap-6 border-b border-border">
           <ViewTab view="active" current={view} onSelect={setView}>
             Active
@@ -407,7 +409,7 @@ export function GlobalTasksRoute() {
           </p>
         ) : null}
 
-        {index.data === undefined ? null : visible.length === 0 ? (
+        {index.data === undefined ? <div role="status" className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading tasks…</div> : visible.length === 0 ? (
           <GlobalTasksEmptyState view={view} filtered={hasActiveFilters(filters)} />
         ) : (
           // No `projectId` on the provider, uniquely on this page: every chip under it names its
@@ -436,7 +438,7 @@ export function GlobalTasksRoute() {
                     </span>
                   </h2>
                 )}
-                <TaskTable
+                <TaskList
                   tasks={group.tasks}
                   now={now}
                   showProject={groupBy !== 'project'}
@@ -540,6 +542,7 @@ function FilterBar({
     const per = (facet: FacetId, valueOf: (task: GlobalTask) => readonly string[]) =>
       facetCounts(tasksExcludingFacet(tasks, filters, view, facet), valueOf)
     return {
+      projects: per('projects', (task) => [task.run.projectId]),
       tags: per('tags', tagValuesOf),
       statuses: per('statuses', (task) => [task.run.status]),
       workflows: per('workflows', (task) => [task.run.workflow]),
@@ -557,8 +560,16 @@ function FilterBar({
       className="flex flex-col gap-2"
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        {/* No project facet, deliberately — see the note in `lib/global-tasks.ts`. Narrowing to
-            one project is that project's own Tasks page, which every project name here links to. */}
+        <FacetFilter
+          slot="project"
+          label="Project"
+          selected={filters.projects ?? []}
+          onToggle={(value) => onToggle('projects', value)}
+          onClear={() => onClearFacet('projects')}
+          options={[...new Map(tasks.map((task) => [task.run.projectId, task.projectName])).entries()]
+            .map(([value, label]) => ({ value, label })).map(withCount(counts.projects))}
+          emptyLabel="No tasks to filter"
+        />
         <FacetFilter
           slot="status"
           label="Status"
@@ -646,9 +657,8 @@ function FilterBar({
   )
 }
 
-/** The rows. One table per group, so a group heading owns its own header row rather than
- *  floating above a shared one that would scroll away from it. */
-function TaskTable({
+/** Each group owns a list of task cards, with the same scoped actions on desktop and mobile. */
+function TaskList({
   tasks,
   now,
   showProject,
@@ -671,23 +681,6 @@ function TaskTable({
       className="overflow-x-auto rounded-lg border border-border bg-card p-5"
     >
       <TooltipProvider>
-        <table className="w-full border-collapse max-md:block">
-          <thead className="max-md:hidden">
-            {/* Every other column is pinned as narrow as its content allows, because Task is the
-                only one with NO width and therefore the only one that grows on what they give
-                up. A cross-project list is scanned by title; everything else is the answer to a
-                question you ask about a row you already found. */}
-            <tr>
-              <Th>Task</Th>
-              <Th className="w-[84px]">Ref</Th>
-              <Th className="hidden w-[108px] md:table-cell">Workflow</Th>
-              <Th className="w-[56px] text-right">Age</Th>
-              <Th className="w-[64px] text-right">
-                <span className="sr-only">Actions</span>
-              </Th>
-            </tr>
-          </thead>
-          <tbody className="max-md:block [&>tr:last-child>td]:border-b-0">
             {tasks.map((task) => (
               <TaskRow
                 key={`${task.run.projectId}/${task.run.id}`}
@@ -700,28 +693,10 @@ function TaskTable({
                 showCost={showCost}
               />
             ))}
-          </tbody>
-        </table>
       </TooltipProvider>
     </div>
   )
 }
-
-function Th({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <th
-      scope="col"
-      className={cn(
-        'h-[38px] border-b border-border px-2.5 text-left text-[11px] font-semibold tracking-[0.05em] whitespace-nowrap text-soft-foreground uppercase first:pl-4 last:pr-4',
-        className,
-      )}
-    >
-      {children}
-    </th>
-  )
-}
-
-const TD_BASE = 'h-[88px] border-b border-border px-2.5 whitespace-nowrap first:pl-4 last:pr-4 max-md:h-auto max-md:border-0 max-md:px-0 max-md:first:pl-0 max-md:last:pr-0'
 
 /**
  * One cross-project run.
@@ -768,11 +743,10 @@ function TaskRow({
   const usage = usageCells(run, run.usage)
 
   return (
-    <>
-    <tr data-slot="global-task-row" data-run-id={run.id} data-project={run.projectId} className="hover:bg-muted max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-border max-md:py-5 max-md:first:pt-0 max-md:last:border-0 max-md:last:pb-0">
+    <article data-slot="global-task-row" data-run-id={run.id} data-project={run.projectId} className="hover:bg-muted max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-border max-md:py-5 max-md:first:pt-0 max-md:last:border-0 max-md:last:pb-0">
       {/* The one column with no fixed width, so every pixel the others give up lands here — and
           dropping Branch gave up 140 of them. A cross-project list is read by TITLE. */}
-      <td className={cn(TD_BASE, 'min-w-0 max-md:order-first max-md:w-full md:min-w-[240px] md:max-w-0')}>
+      <div data-slot="global-task-title">
         <span className="flex min-w-0 items-center gap-1.5">
           {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
           <Link
@@ -821,35 +795,34 @@ function TaskRow({
       </span>
           <button type="button" aria-expanded={resourcesOpen} aria-label={`${resourcesOpen ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} onClick={() => setResourcesOpen((value) => !value)} className="min-h-11 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted">Resources</button>
         </div>
-      </td>
-      <td className={TD_BASE}>
+      </div>
+      <div data-slot="global-task-references">
         {references.length > 0 ? (
           <ReferenceChips references={references} run={run} />
         ) : (
           <Dash />
         )}
-      </td>
-      <td className={cn(TD_BASE, 'hidden text-[12.5px] text-muted-foreground md:table-cell')}>
+      </div>
+      <div data-slot="global-task-workflow" className="text-[12.5px] text-muted-foreground">
         {run.workflow}
-      </td>
-      <td className={cn(TD_BASE, 'text-right text-xs text-soft-foreground tabular-nums')}>
+      </div>
+      <div data-slot="global-task-age" className="text-right text-xs text-soft-foreground tabular-nums">
         {shortAge(run.startedAt ?? run.createdAt, now)}
-      </td>
-      <td className={cn(TD_BASE, 'text-right')}>
+      </div>
+      <div data-slot="global-task-actions">
         <span className="inline-flex items-center gap-0.5">
           <ReadToggle task={task} busy={busy} onSetRead={onSetRead} />
-          <ArchiveToggle task={task} busy={busy} onArchive={onArchive} />
+          <ArchiveToggle task={task} busy={busy} onArchive={onArchive} /><Button asChild variant="outline"><Link to={to}>Open task</Link></Button>
         </span>
-      </td>
-    </tr>
-    {resourcesOpen ? <tr className="max-md:block"><td colSpan={5} className="border-b border-border pb-5 max-md:block">
+      </div>
+    {resourcesOpen ? <div data-slot="global-task-resources" className="col-span-full">
       <dl className="grid grid-cols-2 gap-4 rounded-md bg-muted/50 p-4 text-xs md:grid-cols-3">
         {showCost ? <div><dt className="text-muted-foreground">Cost</dt><dd className="mt-1">{formatCost(run.costUsd) || '—'}</dd></div> : null}
         <div><dt className="text-muted-foreground">CPU</dt><dd data-usage="cpu" data-usage-kind={usage.cpu.kind} title={usage.cpu.title} className="mt-1">{usage.cpu.text || '—'}</dd></div>
         <div><dt className="text-muted-foreground">Memory</dt><dd data-usage="mem" data-usage-kind={usage.mem.kind} title={usage.mem.title} className="mt-1">{usage.mem.text || '—'}</dd></div>
       </dl>
-    </td></tr> : null}
-    </>
+    </div> : null}
+    </article>
   )
 }
 
@@ -893,7 +866,7 @@ function ReadToggle({
             unread ? 'text-accent-icon' : 'text-soft-foreground',
           )}
         >
-          <Icon className="size-3.5" aria-hidden="true" />
+          <Icon className="size-3.5" aria-hidden="true" /><span>{unread ? 'Mark read' : 'Mark unread'}</span>
         </button>
       </TooltipTrigger>
       <TooltipContent side="left">{unread ? 'Mark read' : 'Mark unread'}</TooltipContent>
@@ -938,7 +911,7 @@ function ArchiveToggle({
           onClick={() => onArchive(task, !archived)}
           className="inline-flex size-11 items-center justify-center md:size-8 rounded-md text-soft-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-wait disabled:opacity-50"
         >
-          <Icon className="size-3.5" aria-hidden="true" />
+          <Icon className="size-3.5" aria-hidden="true" /><span>{archived ? 'Unarchive' : 'Archive'}</span>
         </button>
       </TooltipTrigger>
       <TooltipContent side="left">{archived ? 'Restore' : 'Archive'}</TooltipContent>

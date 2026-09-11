@@ -1,0 +1,28 @@
+/* Revised project resource table (25), workspace cards (26), mobile FAB. */
+[data-route="tasks"], [data-route="global-tasks"] { min-width: 0; }
+[data-slot="tasks-table"] table { min-width: 1040px; }
+[data-slot="tasks-table"] thead { background: var(--muted); }
+[data-slot="tasks-table"] th { height: 48px; }
+[data-slot="tasks-table"] td { height: 50px; }
+[data-slot="global-tasks-table"] { padding: 0; overflow: visible; border: 0; background: transparent; }
+[data-slot="global-task-row"] { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 16px; padding: 22px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+[data-slot="global-task-row"] > div { height: auto; min-width: 0; max-width: none; padding: 0; border: 0; white-space: normal; }
+[data-slot="global-task-row"] > [data-slot="global-task-title"] { grid-column: 1 / -1; }
+[data-slot="global-task-row"] > [data-slot="global-task-title"] > span > a { font-size: 18px; white-space: normal; line-height: 1.5; }
+[data-slot="global-task-row"] > [data-slot="global-task-actions"] { grid-column: 1 / -1; text-align: left; margin-top: 4px; }
+[data-slot="global-task-row"] > [data-slot="global-task-actions"] > span { flex-wrap: wrap; gap: 8px; }
+[data-slot="global-task-row"] [data-action] { width: auto; min-height: 40px; padding: 8px 12px; gap: 6px; border: 1px solid var(--border); color: var(--foreground); font-size: 12px; }
+[data-slot="global-tasks-filters"] { gap: 20px; }
+[data-slot="global-tasks-filters"] button { min-height: 40px; }
+@media (max-width: 767px) {
+  [data-slot="global-task-row"] { padding: 16px; }
+  [data-slot="global-task-row"] > [data-slot="global-task-workflow"] { display: block; }
+  [data-slot="global-task-row"] [data-action] { min-height: 44px; }
+  [data-slot="new-task-fab"] { right: 20px; bottom: calc(24px + env(safe-area-inset-bottom)); }
+  [data-slot="task-card"] { overflow-wrap: anywhere; }
+}
+@media (max-width: 767px) {
+  [data-route="tasks"] h1, [data-route="global-tasks"] h1 { font-size: 24px; }
+  [data-slot="mark-all-read"] { display: inline-flex; }
+  [data-slot="new-task-fab"] { background: var(--accent-strong); color: white; }
+}

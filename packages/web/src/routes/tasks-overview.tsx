@@ -1,3 +1,4 @@
+import './task-lists.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveIcon,
@@ -33,6 +34,7 @@ import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { DirectionalUsage, directionalUsageLabel } from '@/components/directional-usage'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Pill } from '@/components/pill'
 import { PinToggle } from '@/components/pin-toggle'
 import { TaskReferenceChip } from '@/components/reference-conflict-action'
@@ -103,6 +105,8 @@ export function TasksOverview({
   expandedColumns = normalizeExpandedColumns(undefined),
   onToggleColumn = () => undefined,
   columnsPending = false,
+  error,
+  onRetry,
 }: {
   /** Undefined while `/api/runs` has not answered: the header renders, the body stays empty —
    *  an empty state before we know there are no runs would be a lie. */
@@ -130,9 +134,11 @@ export function TasksOverview({
   onToggleColumn?: (id: TaskColumnId) => void
   /** Prevent a shallow write before the authoritative workspace state can preserve siblings. */
   columnsPending?: boolean
+  error?: string
+  onRetry?: () => void
 }) {
   const [query, setQuery] = React.useState('')
-  const [detailedTable, setDetailedTable] = React.useState(false)
+  const [detailedTable, setDetailedTable] = React.useState(true)
   const headerRef = React.useRef<HTMLElement>(null)
   const archiveSelected = React.useRef(false)
   const [actionsOpen, setActionsOpen] = React.useState(false)
@@ -263,13 +269,18 @@ export function TasksOverview({
             className="h-11 w-full rounded-md border border-input bg-card pr-3 pl-8 text-[13px] text-foreground outline-none placeholder:text-soft-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           />
         </div>
-        <Button variant="outline" className="hidden min-h-11 md:inline-flex" aria-pressed={detailedTable} onClick={() => setDetailedTable((value) => !value)}>Resource columns</Button>
+        <Popover><PopoverTrigger asChild><Button data-slot="task-columns-trigger" variant="outline" className="hidden min-h-11 md:inline-flex">Columns</Button></PopoverTrigger><PopoverContent align="end" className="w-72">
+          <h2 className="mb-2 text-base font-medium">Visible columns</h2><p className="mb-4 text-xs text-muted-foreground">Status and Task · Always visible</p>
+          <div className="grid grid-cols-2 gap-3">{columns.filter((column) => column.canFold).map((column) => <label key={column.id} className="flex items-center gap-2 text-xs"><input data-column-toggle={column.id} type="checkbox" checked={isColumnExpanded(column.id, expandedColumns)} disabled={columnsPending} onChange={() => onToggleColumn(column.id)} />{column.id === 'diff' ? 'Diff' : column.id === 'reference' ? 'Reference' : column.id === 'memory' ? 'Memory' : column.label}</label>)}</div>
+          <p className="mt-4 text-xs text-muted-foreground">Saved automatically. Tokens and cost appear only when supported.</p>
+          <Button variant="outline" className="mt-4" onClick={() => setDetailedTable((value) => !value)}>{detailedTable ? 'Summary view' : 'Resource columns'}</Button>
+        </PopoverContent></Popover>
         <Button asChild className="hidden min-h-11 md:inline-flex"><Link to="/new"><PlusIcon aria-hidden="true" />New task</Link></Button>
         </div>
       </header>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {runs === undefined ? null : visible.length === 0 ? (
+        {runs === undefined ? error ? <div role="alert" className="rounded-xl border border-border bg-card p-6"><h2 className="text-lg">Could not load tasks</h2><p className="mt-2 text-sm text-muted-foreground">{error}</p><Button variant="outline" className="mt-4" onClick={onRetry}>Retry</Button></div> : <div role="status" aria-label="Loading tasks" className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading tasks…</div> : visible.length === 0 ? (
           <TasksEmptyState view={view} query={query} />
         ) : (
           <>
@@ -278,7 +289,7 @@ export function TasksOverview({
             <div
               data-slot="tasks-table"
               hidden={!detailedTable}
-              className={cn("hidden overflow-x-auto rounded-lg border border-border bg-card p-5", detailedTable && "md:block")}
+              className={cn("hidden overflow-x-auto rounded-lg border border-border bg-card", detailedTable && "md:block")}
             >
               <TooltipProvider>
                 <table className="w-full table-fixed border-collapse">
@@ -868,7 +879,11 @@ function TitleCell({
   const readDone = isReadDoneItem(run)
 
   if (editor.editing) {
-    return <TitleEditInput editor={editor} className="text-[13px] font-medium" />
+    return <div className="flex flex-wrap items-center gap-2" data-slot="table-title-editor">
+      <TitleEditInput editor={editor} className="basis-full text-[13px] font-medium" />
+      <Button size="sm" aria-label="Save title" onMouseDown={(event) => event.preventDefault()} onClick={editor.commit}>Save</Button>
+      <Button size="sm" variant="outline" aria-label="Cancel rename" onMouseDown={(event) => event.preventDefault()} onClick={editor.cancel}>Cancel</Button>
+    </div>
   }
 
   return (
@@ -995,6 +1010,7 @@ function TaskCard({
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
 }) {
   const navigate = useNavigate()
+  const [resourcesOpen, setResourcesOpen] = React.useState(false)
   const attention = deriveAttention(run)
   const scheduled = scheduledResume(run)
   const to = `/tasks/${run.id}`
@@ -1095,8 +1111,21 @@ function TaskCard({
           <TaskReferenceChip run={run} reference={reference} className="h-5" />
         ) : null}
       </div>
+      <button data-slot="mobile-resources-toggle" type="button" className="mt-3 min-h-11 rounded-md border border-border px-3 text-xs" aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}>{resourcesOpen ? 'Hide resources' : 'Show resources'}</button>
+      {resourcesOpen ? <MobileResources run={run} showTokens={showTokens} showCost={showCost} /> : null}
     </div>
   )
+}
+
+/** Subscribe to live resource samples only while this card's details are open. */
+function MobileResources({ run, showTokens, showCost }: { run: RunRecord; showTokens: boolean; showCost: boolean }) {
+  const sample = useRunUsage(run.id)
+  const resources = usageCells(run, sample)
+  return <dl className="mt-3 grid grid-cols-2 gap-3 rounded-md bg-muted p-3 text-xs">
+    <div><dt>CPU</dt><dd>{resources.cpu.text || '—'}</dd></div><div><dt>Memory</dt><dd>{resources.mem.text || '—'}</dd></div>
+    {showTokens ? <div><dt>IN / OUT</dt><dd><DirectionalUsage inputTokens={run.inputTokens} outputTokens={run.outputTokens} /></dd></div> : null}
+    {showCost ? <div><dt>Cost</dt><dd>{formatCost(run.costUsd) || '—'}</dd></div> : null}
+  </dl>
 }
 
 /** An honest em dash: this cell has nothing true to show. */
@@ -1180,6 +1209,8 @@ export function TasksOverviewRoute() {
     <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
       <TasksOverview
         runs={runs.data}
+        error={runs.error?.message}
+        onRetry={() => void runs.refetch()}
         view={view}
         onViewChange={setView}
         onArchiveFinished={() => { if (!archive.isPending) archive.mutate() }}

@@ -33,6 +33,7 @@ import { cn } from '@/lib/utils'
 
 import { Markdown } from './task-thread/markdown'
 import { CompareLoading } from './compare-loading'
+import './task-flows.css'
 
 /**
  * `/compare/:groupId` — the variants compare view (spec 010, §"Task thread" variants bullet),
@@ -85,9 +86,7 @@ export function CompareVariantsRoute() {
               : group.error.message
           }
           actions={
-            <Button asChild variant="outline">
-              <Link to="/">Back to tasks</Link>
-            </Button>
+            <div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link to="/">Back to tasks</Link></Button>{!notFound ? <Button variant="outline" onClick={() => void group.refetch()}>Retry</Button> : null}</div>
           }
         />
       </div>
@@ -137,20 +136,19 @@ function CompareView({
   })
 
   return (
-    <div data-route="compare" className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-5 md:px-6">
+    <div data-route="compare" className="task-flow-page flex w-full flex-col">
       <header className="flex flex-col gap-1">
         <h1 className="flex items-center gap-2 text-xl font-semibold">
           <ScaleIcon className="size-5 shrink-0 text-accent-icon" aria-hidden="true" />
-          <span className="min-w-0 truncate" title={title}>
-            {title}
-          </span>
+          <span>Compare variants</span>
         </h1>
         <p className="text-[13px] text-muted-foreground">
-          {variants.length} variants of the same task, each in its own worktree — pick the diff you
+          {title} · {variants.length} variants of the same task, each in its own worktree — pick the diff you
           want to keep. The others are cancelled and archived, their worktrees and branches removed.
         </p>
       </header>
 
+      {!allTerminal ? <p role="status" className="rounded-xl border border-border bg-card p-5 text-sm">Variants are still running. Picking a result is available when every variant finishes.</p> : null}
       <div
         data-slot="compare-columns"
         className={cn(
@@ -295,6 +293,7 @@ function VariantColumn({
         )}
       </div>
 
+      <Button asChild variant="outline" className="self-start"><Link to={`/tasks/${variant.id}`}>Open task</Link></Button>
       <Button
         data-slot="variant-pick"
         title={
@@ -306,7 +305,7 @@ function VariantColumn({
         onClick={onPick}
       >
         <CheckIcon aria-hidden="true" />
-        Pick this one
+        Pick variant {variant.variant}
       </Button>
     </article>
   )

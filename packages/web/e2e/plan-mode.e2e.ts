@@ -188,6 +188,19 @@ describe('plan mode against a live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/plan-overlay.png`)
   }, 90_000)
 
+  it('keeps proposed steps and their actions readable on both phone widths and themes', () => {
+    for (const width of [1440, 402, 360]) for (const theme of ['light', 'dark']) {
+      browser.setViewport(width, 1100)
+      browser.evaluate(`document.documentElement.classList.toggle('light', '${theme}' === 'light'); document.documentElement.classList.toggle('dark', '${theme}' === 'dark')`)
+      expect(browser.evaluate(`(() => { const sheet = document.querySelector('[data-slot="plan-review"]'); return sheet.scrollWidth <= sheet.clientWidth })()`)).toBe(true)
+      expect(browser.count('[data-slot="plan-step-up"]')).toBe(3)
+      expect(browser.count('[data-slot="plan-step-down"]')).toBe(3)
+      browser.evaluate('new Promise((done) => setTimeout(done, 250))')
+      browser.screenshot(join(artifactsDir, `plan-review-${width}-${theme}.png`))
+    }
+    browser.setViewport(1440, 900)
+  })
+
   it('save as chain lands in /api/v1/workflows; saving again asks before overwriting', async () => {
     browser.click('[data-slot="plan-save"]')
     browser.waitForFunction(`document.querySelector('[data-slot="plan-save-dialog"]') !== null`)
@@ -219,13 +232,14 @@ describe('plan mode against a live dry-run server', () => {
     expect(again.workflows.filter((w) => w.name === 'e2e planned chain')).toHaveLength(1)
   }, 90_000)
 
-  it('on an iPhone the overlay is a full-screen sheet and the ↑/↓ buttons still reorder', async () => {
+  it('on an iPhone the sheet sits below the mobile shell and the ↑/↓ buttons still reorder', async () => {
     browser.setViewport(390, 844)
     // The reflow must LAND before anything measures or clicks: a click computed against the
     // pre-resize layout dispatches into the gap between cards and silently does nothing.
     browser.waitForFunction(
       `window.innerWidth === 390 &&
-       document.querySelector('[data-slot="plan-review"]')?.getBoundingClientRect().width > 380`,
+       document.querySelector('[data-slot="plan-review"]')?.getBoundingClientRect().width > 380 &&
+       Math.round(document.querySelector('[data-slot="plan-review"]').getBoundingClientRect().y) === 52`,
     )
     // Rounded: Radix's zoom-in entrance leaves sub-pixel transform residue on the rect.
     const rect = browser.evaluate(
@@ -233,7 +247,7 @@ describe('plan mode against a live dry-run server', () => {
         return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width) } })()`,
     ) as { x: number; y: number; w: number }
     expect(rect.x).toBe(0)
-    expect(rect.y).toBe(0)
+    expect(rect.y).toBe(52)
     expect(rect.w).toBe(390)
 
     // The previous spec's "saved" toast sits over the step cards at this width — 360px of
