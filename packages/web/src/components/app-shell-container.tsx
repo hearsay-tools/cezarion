@@ -112,7 +112,8 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
     // consumer.
     <ListViewProvider>
       <AppShell
-        repo={repoChipOf(health.data)}
+        repo={globalSettings ? null : activeProject ? { name: activeProject.name, branch: activeProject.id === bootProjectId ? health.data?.repo?.branch ?? '' : '' } : repoChipOf(health.data)}
+        breadcrumb={{ project: projectName, page: titleRun ? `Tasks / ${pageLabel}` : pageLabel ?? 'Cezarion', branch: titleRun?.worktreePath ? 'Isolated worktree' : undefined }}
         version={health.data?.version ?? null}
         latestVersion={health.data?.latestVersion ?? null}
         // `?? null` rather than `?? 0`: no badge while the inbox is unknown, and no badge when it

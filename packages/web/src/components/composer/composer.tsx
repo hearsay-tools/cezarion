@@ -88,6 +88,7 @@ export interface ComposerProps {
   /** Rendered between Dictation and the send button — the /new mode segment + kbd hint. */
   footerEnd?: ReactNode
   /** New-task settings below a dedicated submission row; replies keep their compact footer. */
+  agentOptions?: ReactNode
   executionOptions?: ReactNode
   /** The send button's accessible name. */
   sendAriaLabel?: string
@@ -150,6 +151,7 @@ export function Composer({
   footerStart,
   footerEnd,
   executionOptions,
+  agentOptions,
   sendAriaLabel = 'Send',
   disabled = false,
   disabledReason = 'Session closed — Continue to reopen.',
@@ -540,7 +542,7 @@ export function Composer({
       onClick={() => { if (!editsBlocked()) dictation.start() }}
     >
       <MicIcon aria-hidden="true" className="size-3.5" />
-      Dictation
+      {executionOptions ? null : 'Dictation'}
     </Button>
   ) : null
 
@@ -561,6 +563,60 @@ export function Composer({
     </Button>
   ) : null
 
+  const feedback = <>
+          {retainDraftUntilSuccess || onStop || stopping ? (
+            <div className={cn("overflow-y-auto px-3 pb-2 text-xs leading-5 text-muted-foreground md:px-4", compactFeedback ? "min-h-6" : "h-24 md:h-20")}>
+              <div
+                id={`${textareaId}-submission`}
+                role={submissionError === null ? 'status' : 'alert'}
+                aria-atomic="true"
+                tabIndex={submissionError === null ? undefined : 0}
+                className="break-words"
+              >
+                {stopPending ? 'Stopping execution. Your draft is kept.' : busy ? pendingLabel : submissionError !== null ? (
+                  <>
+                    <p className="font-medium text-foreground">{submissionError}</p>
+                    <p>{failureHint}</p>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+  </>
+
+  const submissionControls = (
+              <div data-slot="composer-submit-row" className={cn('ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap', executionOptions && 'new-task-submission')}>
+                {executionOptions ? null : dictationButton}
+                {footerEnd ? (
+                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', executionOptions && 'mr-auto', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
+                    <div className="contents" inert={readOnly || undefined}>{footerEnd}</div>
+                  </div>
+                ) : null}
+                <div className="flex min-w-[100px] items-center justify-end gap-1" data-slot="composer-actions">
+                  {stopControl}
+                  {!primaryStop ? (
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      aria-label={submitLabel}
+                      aria-busy={busy && !stopPending || undefined}
+                      disabled={disabled || busy || stopPending || (!hasContent && !allowEmptySubmit)}
+                      className={cn(
+                        executionOptions ? 'h-12 w-full gap-2 px-6' : 'size-11',
+                        !hasContent && emptySubmitLabel && 'w-auto px-3',
+                        'active:opacity-80',
+                      )}
+                      onClick={submitDraft}
+                    >
+                      {!hasContent && emptySubmitLabel ? <PlayIcon aria-hidden="true" /> : null}
+                      {executionOptions || (!hasContent && emptySubmitLabel) ? submitLabel : null}
+                      {hasContent || !emptySubmitLabel ? <ArrowUpIcon aria-hidden="true" /> : null}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+  )
+
   return (
     <Popover open={menuOpen} onOpenChange={(open) => (open ? undefined : closeMenu())}>
       <PopoverAnchor asChild>
@@ -571,13 +627,13 @@ export function Composer({
           onDrop={onDrop}
           onDragOver={(event) => event.preventDefault()}
           className={cn(
-            executionOptions && 'grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px] xl:items-start xl:gap-6',
+            executionOptions && 'new-task-composer',
             disabled && 'opacity-80',
           )}
         >
           <div
             data-slot="composer-editor"
-            className="rounded-xl border border-[var(--composer-border)] bg-card shadow-none transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15"
+            className={cn("rounded-xl border border-[var(--composer-border)] bg-card shadow-none transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15", executionOptions && "new-task-editor")}
           >
             {images.length > 0 ? (
             <div data-slot="composer-thumbs" className="flex flex-nowrap items-center gap-2 overflow-x-auto px-4 pt-3 md:flex-wrap md:overflow-visible">
@@ -616,7 +672,7 @@ export function Composer({
 
           {/* A real label keeps password managers from treating nearby page text as a
               one-time-code prompt on client-side navigation (#71); aria-label alone doesn't. */}
-          <label htmlFor={textareaId} className="sr-only">{ariaLabel}</label>
+          <label htmlFor={textareaId} className={executionOptions ? "hidden px-5 pt-5 text-xs text-muted-foreground md:block" : "sr-only"}>{executionOptions ? "Task description" : ariaLabel}</label>
           <textarea
             ref={textareaRef}
             id={textareaId}
@@ -645,6 +701,7 @@ export function Composer({
             onPaste={onPaste}
           />
 
+          {executionOptions ? <p className="px-5 pt-3 pb-2 text-xs text-muted-foreground">⌁ &nbsp; Type / for a skill or workflow</p> : null}
           {recording ? (
             <div>
               <DictationBar
@@ -683,60 +740,21 @@ export function Composer({
                   </Button>
                 ) : null}
                 <div className="contents" inert={readOnly || undefined}>{footerStart}</div>
-                {executionOptions ? <div className="ml-auto">{dictationButton}</div> : null}
+                {executionOptions ? <div>{dictationButton}</div> : null}
               </div>
-              <div data-slot="composer-submit-row" className={cn('ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap', executionOptions && 'mt-1 w-full border-t border-border pt-2')}>
-                {executionOptions ? null : dictationButton}
-                {footerEnd ? (
-                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', executionOptions && 'mr-auto', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
-                    <div className="contents" inert={readOnly || undefined}>{footerEnd}</div>
-                  </div>
-                ) : null}
-                <div className="flex min-w-[100px] items-center justify-end gap-1" data-slot="composer-actions">
-                  {stopControl}
-                  {!primaryStop ? (
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      aria-label={submitLabel}
-                      aria-busy={busy && !stopPending || undefined}
-                      disabled={disabled || busy || stopPending || (!hasContent && !allowEmptySubmit)}
-                      className={cn(
-                        executionOptions ? 'h-11 w-auto gap-1.5 px-3 md:h-8' : 'size-11',
-                        !hasContent && emptySubmitLabel && 'w-auto px-3',
-                        'active:opacity-80',
-                      )}
-                      onClick={submitDraft}
-                    >
-                      {!hasContent && emptySubmitLabel ? <PlayIcon aria-hidden="true" /> : null}
-                      {executionOptions || (!hasContent && emptySubmitLabel) ? submitLabel : null}
-                      {hasContent || !emptySubmitLabel ? <ArrowUpIcon aria-hidden="true" /> : null}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
+              {executionOptions ? null : submissionControls}
+
             </div>
           )}
-          {retainDraftUntilSuccess || onStop || stopping ? (
-            <div className={cn("overflow-y-auto px-3 pb-2 text-xs leading-5 text-muted-foreground md:px-4", compactFeedback ? "min-h-6" : "h-24 md:h-20")}>
-              <div
-                id={`${textareaId}-submission`}
-                role={submissionError === null ? 'status' : 'alert'}
-                aria-atomic="true"
-                tabIndex={submissionError === null ? undefined : 0}
-                className="break-words"
-              >
-                {stopPending ? 'Stopping execution. Your draft is kept.' : busy ? pendingLabel : submissionError !== null ? (
-                  <>
-                    <p className="font-medium text-foreground">{submissionError}</p>
-                    <p>{failureHint}</p>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
+          {executionOptions ? null : feedback}
+
           </div>
-          {executionOptions ? <div inert={readOnly || undefined}>{executionOptions}</div> : null}
+          {executionOptions ? <>
+            <div data-slot="composer-agent-options" inert={readOnly || undefined}>{agentOptions}</div>
+            <div data-slot="composer-execution-panel" inert={readOnly || undefined}>{executionOptions}</div>
+            {submissionControls}
+            <div data-slot="composer-feedback">{feedback}</div>
+          </> : null}
         </div>
       </PopoverAnchor>
 

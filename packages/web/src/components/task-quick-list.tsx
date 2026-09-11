@@ -136,26 +136,30 @@ export function QuickListBuckets({
       return next
     })
 
+  const plainRows = buckets.flatMap(bucket => bucket.rows).filter((row): row is Extract<QuickListRow, { kind: 'run' }> => row.kind === 'run')
+  const parents = new Set(plainRows.filter(row => row.run.delegation?.role !== 'worker').map(row => row.run.id))
+  const children = new Map<string, typeof plainRows>()
+  for (const row of plainRows) {
+    const metadata = row.run.delegation
+    if (metadata?.role !== 'worker' || !parents.has(metadata.parentRunId)) continue
+    children.set(metadata.parentRunId, [...(children.get(metadata.parentRunId) ?? []), row])
+  }
+  const nested = new Set([...children.values()].flat().map(row => row.run.id))
+  const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} />
+
   return (
     <>
-      {buckets.map((bucket) => (
+      <h2 className="px-3 pt-4 pb-2 text-[9px] font-medium tracking-[0.14em] text-muted-foreground uppercase">Sessions</h2>
+      {buckets.filter(bucket => bucket.rows.some(row => row.kind !== 'run' || !nested.has(row.run.id))).map((bucket) => (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
-          <h2 className="px-3 pt-2.5 pb-1 text-[11px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
+          <h2 className="sr-only">
             {bucket.label}
           </h2>
-          {bucket.rows.map((row) => (
-            <Row
-              key={row.kind === 'group' ? row.groupId : row.run.id}
-              row={row}
-              currentRunId={currentRunId}
-              now={now}
-              scope={scope}
-              showTokens={showTokens}
-              showCost={showCost}
-              expanded={row.kind === 'group' && expanded.has(row.groupId)}
-              onToggle={toggleGroup}
-              onTogglePin={onTogglePin}
-            />
+          {bucket.rows.filter(row => row.kind !== 'run' || !nested.has(row.run.id)).map((row) => (
+            <div key={row.kind === 'group' ? row.groupId : row.run.id} data-session-family={row.kind === 'run' ? row.run.id : undefined}>
+              {renderRow(row)}
+              {row.kind === 'run' && children.has(row.run.id) ? <div className="ml-5 border-l border-border pl-3" data-slot="session-workers">{children.get(row.run.id)!.map(child => <div key={child.run.id}>{renderRow(child)}</div>)}</div> : null}
+            </div>
           ))}
         </div>
       ))}
@@ -396,7 +400,7 @@ function RunRow({
       data-active={isActive ? 'true' : undefined}
       className={cn(
         'selection-row group/task-row flex items-center gap-2 rounded-sm pl-2.5 hover:bg-muted',
-        isActive && 'bg-muted',
+        isActive && 'bg-[var(--task-brand-selected)]',
         // The indent a member row wears under an expanded group tile. One padding declaration,
         // not two: `cn` is tailwind-merge, so this REPLACES the `pl-2.5` above rather than losing
         // to it — 26px = the row's own 10px plus the 16px indent.
@@ -424,7 +428,7 @@ function RunRow({
         aria-current={isActive ? 'page' : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 py-[7px] pr-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground"
       >
-        {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
+
         {variant ? (
           <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-accent-strong/15 font-mono text-[9.5px] font-semibold text-accent-text">
             {run.variant ?? '?'}
@@ -483,6 +487,7 @@ function RunRow({
           />
         ) : null}
       </Link>
+      {!variant ? <span data-slot="session-role-status" className={cn("col-start-2 row-start-2 text-[10px] font-normal", run.status === 'done' ? 'text-success' : run.status === 'failed' ? 'text-danger' : 'text-accent-text')}>{run.delegation?.role === 'worker' ? 'Worker' : 'Parent'} · {attention.label}</span> : null}
       {/* The pin (#935), a SIBLING of the Link for the same reason the status dot and the
           reference chip are: a button inside an anchor is invalid, and this one has its own
           target. Reveal rules in `ROW_PIN_CLASS`. */}

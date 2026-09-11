@@ -61,7 +61,7 @@ describe('AppShell', () => {
     renderShell()
     const wordmark = document.querySelector('[data-slot="brand-wordmark"]') as HTMLElement
     expect(wordmark.tagName).toBe('SPAN')
-    expect(wordmark.textContent).toBe('cezarion')
+    expect(wordmark.textContent).toBe('Cezarion')
     expect(wordmark.className).toContain('font-semibold')
   })
 
@@ -237,7 +237,7 @@ describe('AppShell', () => {
       const search = content.querySelector('[data-slot="command-palette-hint"]') as HTMLElement
       expect(search).toBeTruthy()
       expect(footer().contains(search)).toBe(false)
-      expect(footer().firstElementChild?.getAttribute('data-slot')).toBe('sidebar-footer-controls')
+      expect(footer().firstElementChild?.getAttribute('data-slot')).toBe('global-settings-link')
     })
 
     it('keeps every control a sibling inside the one controls row', () => {
@@ -245,13 +245,13 @@ describe('AppShell', () => {
       // The gear and the toggle are the pair that came apart in #702 — assert they share a parent,
       // and that the row is the whole of the footer's chrome rather than a subset of it.
       const row = controls()
-      expect(row.querySelector('[data-slot="global-settings-link"]')).not.toBeNull()
+      expect(footer().querySelector('[data-slot="global-settings-link"]')).not.toBeNull()
       expect(row.querySelector('[data-slot="theme-toggle"]')).not.toBeNull()
       expect(row.querySelector('[data-slot="tools-menu"]')).not.toBeNull()
       expect(row.querySelector('[data-slot="version-chip"]')).not.toBeNull()
       // The gear pushes itself right; the toggle rides along at the end of the same row.
-      const gear = row.querySelector('[data-slot="global-settings-link"]') as HTMLElement
-      expect(gear.closest('a,button')?.parentElement).toBe(row)
+      const gear = footer().querySelector('[data-slot="global-settings-link"]') as HTMLElement
+      expect(gear.closest('a,button')?.parentElement).toBe(footer())
     })
 
     it('renders search as a full-width launcher that still opens the palette', () => {
@@ -297,7 +297,7 @@ describe('AppShell', () => {
       // …and the full string stays legible on hover, since the visible one may be clipped.
       expect(chip.getAttribute('title')).toBe('v0.9.2-nightly.20260813.1')
       // Everything else in the row still refuses to shrink — that is what keeps them readable.
-      for (const slot of ['tools-menu', 'global-settings-link', 'theme-toggle']) {
+      for (const slot of ['tools-menu', 'theme-toggle']) {
         const el = controls().querySelector(`[data-slot="${slot}"]`) as HTMLElement
         expect(el.className).toContain('shrink-0')
       }
@@ -314,7 +314,7 @@ describe('AppShell', () => {
 
     it('renders the repo chip and version chip from props', () => {
       renderShell('/', { repo: { name: 'cezar', branch: 'main' }, version: '1.2.3' })
-      expect(screen.getByText('cezar / main')).toBeTruthy()
+      expect(document.querySelector('[data-slot="repo-chip"]')?.textContent).toBe('cezar')
       // The chip prefixes the raw semver from /api/v1/health — `v1.2.3`, mono, muted.
       expect(within(footer()).getByText('v1.2.3')).toBeTruthy()
     })
@@ -390,9 +390,9 @@ describe('AppShell', () => {
   describe('All tasks link (multi-project only)', () => {
     const allTasks = () => document.querySelector('[data-slot="all-tasks-link"]') as HTMLElement | null
 
-    it('is absent without project groups — one project needs no "all projects" door', () => {
+    it('offers the workspace tasks page even with one project', () => {
       renderShell()
-      expect(allTasks()).toBeNull()
+      expect(allTasks()).not.toBeNull()
     })
 
     it('links out of every project scope', () => {
@@ -873,4 +873,13 @@ describe('AppShell', () => {
       expect(content.className).toContain('pb-[env(safe-area-inset-bottom)]')
     })
   })
+})
+
+it('keeps project and page context in the desktop breadcrumb', () => {
+  const { container } = renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main' } })
+  const breadcrumb = container.querySelector('[data-slot="desktop-breadcrumb"]')
+  expect(breadcrumb).not.toBeNull()
+  expect(breadcrumb?.textContent).toContain('demo')
+  expect(breadcrumb?.textContent).toContain('Skills')
+  expect(breadcrumb?.textContent).toContain('main')
 })

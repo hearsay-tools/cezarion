@@ -369,7 +369,7 @@ describe('the hero surface', () => {
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()
     await pillReady()
-    const summary = screen.getByText('Execution options')
+    const summary = screen.getByText('Execution settings')
     const disclosure = summary.closest('details')!
     expect(disclosure).not.toBeNull()
     expect(disclosure.open).toBe(true)
@@ -394,12 +394,12 @@ describe('the hero surface', () => {
     expect(screen.getByRole('button', { name: 'Model' })).toBe(model)
   })
 
-  it('renders the mockup hero: title, subtitle, twinkles, and focus lands in the textarea', async () => {
+  it('renders the design hero without decorative backdrops and focuses the textarea', async () => {
     serve()
     renderNewTask()
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('What should the agent work on?')
     expect(screen.getByText('Runs in an isolated worktree — review everything before it lands.')).toBeTruthy()
-    expect(document.querySelector('[data-route="new"] [data-slot="twinkle-backdrop"]')).not.toBeNull()
+    expect(document.querySelector('[data-route="new"] [data-slot="twinkle-backdrop"]')).toBeNull()
     // Asserted here for the DEFAULT run mode only. #793: this line used to be printed
     // unconditionally, so it also claimed isolation for runs that had opted out of it — the
     // per-state cases live in "the run-mode note" below.
@@ -435,7 +435,8 @@ describe('picker data flows', () => {
     const model = document.querySelector('[data-slot="model-pill"]') as HTMLElement
     const variants = document.querySelector('[data-slot="variants-pill"]') as HTMLElement
     expect(execution.open).toBe(true)
-    expect(editor.contains(model)).toBe(true)
+    expect(editor.contains(model)).toBe(false)
+    expect(document.querySelector('[data-slot="composer-agent-options"]')?.contains(model)).toBe(true)
     expect(execution.contains(model)).toBe(false)
     expect(execution.contains(variants)).toBe(true)
   })
@@ -660,7 +661,7 @@ describe('picker data flows', () => {
     await pillReady()
     const basePill = () => document.querySelector('[data-slot="base-pill"]') as HTMLElement
     await waitFor(() => expect(basePill()).not.toBeNull())
-    expect(basePill().textContent).toContain('base: develop')
+    expect(basePill().textContent).toContain('develop')
 
     fireEvent.pointerDown(basePill())
     const options = await screen.findAllByRole('menuitemradio')
@@ -2086,13 +2087,13 @@ describe('prompt templates on the new-task composer', () => {
     fireEvent.click(document.querySelector(`[data-slot="source-option"][data-source-ref="${ref}"]`)!)
   }
 
-  it('the trigger is icon-only here — the footer pill row is already full', async () => {
+  it('labels the template picker alongside the skill picker', async () => {
     serve()
     renderNewTask()
     await pillReady()
 
     // No "templates" word next to the icon, unlike the roomier GitHub/Inbox composers.
-    expect(templateTrigger().textContent).toBe('')
+    expect(templateTrigger().textContent).toContain('Template')
     expect(templateTrigger().querySelector('svg')).not.toBeNull()
   })
 
@@ -2369,7 +2370,7 @@ describe('retained task submission (#164)', () => {
     await startTask()
     expect(textarea().value).toBe('  Keep this prompt  ')
     expect(textarea().readOnly).toBe(true)
-    expect(screen.getByText('Execution options').closest('[inert]')).not.toBeNull()
+    expect(screen.getByText('Execution settings').closest('[inert]')).not.toBeNull()
     expect((screen.getByRole('button', { name: 'Remove notes.txt' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('Starting task…').getAttribute('role')).toBe('status')
     for (const keys of [{}, { ctrlKey: true }, { metaKey: true }]) fireEvent.keyDown(textarea(), { key: 'Enter', ...keys })

@@ -42,7 +42,6 @@ import type {
 } from '@open-mercato/cezar-api-client'
 import { TwinkleBackdrop } from '@/components/centered-state'
 import { Composer, type ComposerHandle } from '@/components/composer/composer'
-import { GhostCodeBackdrop } from '@/components/ghost-code-backdrop'
 import { PickerPill, RunnerPill, chevron, chipClass } from '@/components/picker-pill'
 import { PromptTemplateMenu } from '@/components/prompt-template-menu'
 import { SkillPreviewDialog } from '@/components/skill-detail'
@@ -573,17 +572,13 @@ export function NewTaskRoute() {
       data-route="new"
       className="relative isolate flex min-h-full flex-col overflow-x-clip pb-16"
     >
-      <TwinkleBackdrop />
-      <GhostCodeBackdrop />
 
-      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center border-b border-border bg-background/95 px-11 backdrop-blur md:flex">
-        <span className="text-[13px] font-medium text-foreground">New task</span>
-      </header>
+
 
       <div className="relative z-[1] mx-auto w-full max-w-[1180px] px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
         <header className="mb-7 max-md:mb-5">
-          <p className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
-            Start a task
+          <p className="mb-2 hidden md:block text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
+            New task
           </p>
           <h1 className="text-[28px] leading-tight font-semibold tracking-[-0.025em] max-md:text-[22px]">
             What should the agent work on?
@@ -591,7 +586,7 @@ export function NewTaskRoute() {
           {/* Follows the resolved run mode (#793). Printing the isolation promise
               unconditionally made this line false for every run the user opted out of — and
               for a non-git folder, where there is no worktree to opt into. */}
-          <p data-slot="run-mode-note" className="mt-2 text-[13px] text-muted-foreground max-md:text-xs">
+          <p data-slot="run-mode-note" className="mt-2 hidden text-[13px] text-muted-foreground md:block">
             {composerRunModeNote({ worktree: worktreeOn, hasGit })}
           </p>
         </header>
@@ -636,6 +631,11 @@ export function NewTaskRoute() {
                   onPick={(next) => navigate(`/p/${encodeURIComponent(next)}/new`, { replace: true })}
                 />
               ) : null}
+              <PromptTemplateMenu
+                label="Template"
+                templates={templates}
+                onInsert={(text) => composerRef.current?.insertAtCaret(text)}
+              />
               <SourcePill
                 source={source}
                 ready={sourcesReady}
@@ -644,13 +644,11 @@ export function NewTaskRoute() {
                 workflows={workflowList}
                 onPick={(next) => update({ source: next })}
               />
-              {/* Templates stay beside prompt context and attachments. */}
-              <PromptTemplateMenu
-                templates={templates}
-                iconOnly
-                onInsert={(text) => composerRef.current?.insertAtCaret(text)}
-              />
-              <div data-slot="agent-options" role="group" aria-label="Agent settings" className="flex min-w-0 flex-wrap items-center gap-1.5 max-md:basis-full">
+
+            </>
+          }
+          agentOptions={
+              <div data-slot="agent-options" role="group" aria-label="Agent settings" className="new-task-agent-options">
                 {/* Runner, model and effort stay with the editor in the approved desktop
                     composition. Run isolation and automation choices live in the side panel. */}
                 {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
@@ -673,7 +671,7 @@ export function NewTaskRoute() {
                 <PickerPill
                   slot="model-pill"
                   ariaLabel="Model"
-                  label={models.find((m) => m.id === model)?.label ?? 'auto'}
+                  label={<span className="flex min-w-0 flex-col text-left"><span className="text-[10px] text-muted-foreground uppercase">Model</span><span className="truncate text-sm text-foreground">{models.find((m) => m.id === model)?.label ?? 'auto'}</span></span>}
                   value={model}
                   disabled={!providersReady}
                   readOnly={modelsLocked}
@@ -695,7 +693,7 @@ export function NewTaskRoute() {
                 <PickerPill
                   slot="effort-pill"
                   ariaLabel="Effort"
-                  label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
+                  label={<span><span className="mr-2 text-[10px] text-muted-foreground">Effort</span>{effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}</span>}
                   value={effort}
                   disabled={!providersReady}
                   readOnly={modelsLocked}
@@ -712,22 +710,21 @@ export function NewTaskRoute() {
                   }))}
                 />
               </div>
-            </>
           }
           executionOptions={
             <details data-slot="execution-options" open className="group rounded-xl border border-border bg-card xl:self-start">
               <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
                 <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
-                <span className="font-medium text-foreground">Execution options</span>
-                <span data-slot="execution-summary" className="min-w-0 basis-full truncate pl-5 xl:ml-auto xl:basis-auto xl:pl-0">
+                <span className="font-medium text-foreground">Execution settings</span>
+                <span data-slot="execution-summary" hidden className="min-w-0 basis-full truncate pl-5 xl:ml-auto xl:basis-auto xl:pl-0">
                   {RUNNERS.find((runner) => runner.id === displayRunner)?.label ?? displayRunner}
                   {' · '}{models.find((item) => item.id === model)?.label ?? 'auto'}
                 </span>
               </summary>
-              <div className="space-y-3 border-t border-border px-4 pt-4 pb-4">
-                <div role="group" aria-label="Run settings" className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <span className="basis-full text-xs font-medium text-muted-foreground">Run</span>
-                  <PickerPill
+              <div className="space-y-3 border-t border-border px-5 pt-3 pb-5">
+                <p className="hidden text-[11px] text-muted-foreground xl:block">Control where and how this task runs.</p>
+                <div role="group" aria-label="Run settings" className="new-task-run-settings">
+                  <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Parallel variants</span><PickerPill
                     slot="variants-pill"
                     ariaLabel="Parallel variants"
                     label={variants > 1 ? `×${variants} variants` : '×1'}
@@ -741,7 +738,7 @@ export function NewTaskRoute() {
                       { value: '2', label: '×2 variants', desc: 'Two competing runs — pick the diff you keep' },
                       { value: '3', label: '×3 variants', desc: 'Three competing runs — pick the diff you keep' },
                     ]}
-                  />
+                  /></div>
                   {worktreeToggleShown ? (
                     <WorktreeToggle
                       on={worktreeOn}
@@ -766,8 +763,9 @@ export function NewTaskRoute() {
                       onChange={(on) => update({ generateFollowups: on })}
                     />
                   ) : null}
-                  {repo.data ? <BaseBranchPill repo={repo.data} /> : null}
+                  {repo.data ? <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Base branch</span><BaseBranchPill repo={repo.data} /></div> : null}
                 </div>
+                <p className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block">{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
               </div>
             </details>
           }
@@ -796,7 +794,7 @@ export function NewTaskRoute() {
           }
         />
 
-        <SuggestedChips onPick={(text) => update({ text })} />
+        <details className="mt-8 text-xs text-muted-foreground"><summary className="cursor-pointer">Try a suggested task</summary><SuggestedChips onPick={(text) => update({ text })} /></details>
       </div>
 
       {plan !== null ? (
@@ -844,6 +842,7 @@ function WorktreeToggle({
       role="checkbox"
       aria-checked={on}
       disabled={disabled}
+      aria-label="Worktree"
       data-slot="worktree-toggle"
       onClick={() => onChange(!on)}
       title={
@@ -853,14 +852,10 @@ function WorktreeToggle({
           ? 'Runs in an isolated worktree — uncheck to run in the repo working tree'
           : 'Runs in the repo working tree — check to isolate in a worktree'
       }
-      className={cn(chipClass, on && 'border-[var(--composer-border)] bg-[var(--task-brand-selected)] text-foreground')}
+      className="flex items-center justify-between gap-3 px-0 py-3 text-left"
     >
-      {on ? (
-        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-[var(--accent-text)]" />
-      ) : (
-        <SquareIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
-      )}
-      Worktree
+      <span><span className="block text-[13px] font-medium">Worktree</span><span className="block text-[10px] text-muted-foreground">Run in an isolated working copy</span></span>
+      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-card', on && 'ml-auto')} /></span>
     </button>
   )
 }
@@ -882,6 +877,7 @@ function AutonomousToggle({
       role="checkbox"
       aria-checked={on}
       disabled={disabled}
+      aria-label="Autonomous"
       data-slot="autonomous-toggle"
       onClick={() => onChange(!on)}
       title={
@@ -891,14 +887,10 @@ function AutonomousToggle({
             ? 'Autonomous — the agent runs to completion without pausing for you'
             : 'Runs interactively — check to let the agent finish without pausing for you'
       }
-      className={cn(chipClass, on && !disabled && 'border-[var(--composer-border)] bg-[var(--task-brand-selected)] text-foreground')}
+      className="flex items-center justify-between gap-3 px-0 py-3 text-left disabled:opacity-50"
     >
-      {on ? (
-        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-[var(--accent-text)]" />
-      ) : (
-        <SquareIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
-      )}
-      Autonomous
+      <span><span className="block text-[13px] font-medium">Autonomous</span><span className="block text-[10px] text-muted-foreground">Let the agent proceed without prompts</span></span>
+      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-card', on && 'ml-auto')} /></span>
     </button>
   )
 }
@@ -1362,7 +1354,7 @@ function BaseBranchPill({ repo }: { repo: RepoResponse }) {
     <PickerPill
       slot="base-pill"
       ariaLabel="Base branch"
-      label={<span className="font-mono text-[11.5px]">base: {current}</span>}
+      label={<span className="text-[11.5px]">{current}</span>}
       value={repo.baseBranch ?? ''}
       onPick={(value) => mutation.mutate(value === '' ? null : value)}
       options={[

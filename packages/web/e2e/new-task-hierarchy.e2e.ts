@@ -91,12 +91,12 @@ function geometry() {
     const controls = [...root.querySelectorAll('button, summary')].filter(el => el.checkVisibility());
     return {
       prompt: box('${prompt}'), context: box('[data-slot="composer-footer-start"]'),
-      submission: box('[data-slot="composer-submit-row"]'), execution: box('${disclosure}'),
+      submission: box('[data-slot="composer-actions"]'), execution: box('${disclosure}'), agent: box('[data-slot="composer-agent-options"]'), mode: box('[data-slot="mode-seg"]'),
       overflow: document.documentElement.scrollWidth > innerWidth,
       clipped: controls.filter(el => { const r = el.getBoundingClientRect(); return r.left < 0 || r.right > innerWidth; }).map(el => el.getAttribute('aria-label') || el.textContent),
       small: controls.filter(el => { const r = el.getBoundingClientRect(); return r.width < 43.9 || r.height < 43.9; }).map(el => el.getAttribute('aria-label') || el.textContent),
     };
-  })()` ) as { prompt: { bottom: number }; context: { top: number; bottom: number }; submission: { top: number; right: number; bottom: number }; execution: { top: number; left: number }; overflow: boolean; clipped: string[]; small: string[] }
+  })()` ) as { prompt: { bottom: number }; context: { top: number; bottom: number }; submission: { top: number; right: number; bottom: number }; execution: { top: number; left: number; bottom: number }; agent: { top: number; bottom: number }; mode: { top: number; bottom: number }; overflow: boolean; clipped: string[]; small: string[] }
 }
 
 beforeAll(() => {
@@ -111,7 +111,7 @@ describe('New Task hierarchy (#168)', () => {
     expect(browser.isVisible('[data-slot="source-pill"]')).toBe(true)
     expect(browser.isVisible('[aria-label="Start task"]')).toBe(true)
     expect(browser.evaluate(`document.querySelector('[data-slot="model-pill"]').checkVisibility()`)).toBe(true)
-    expect(browser.evaluate(`document.querySelector('[data-slot="composer-editor"]').contains(document.querySelector('[data-slot="model-pill"]'))`)).toBe(true)
+    expect(browser.evaluate(`document.querySelector('[data-slot="composer-agent-options"]').contains(document.querySelector('[data-slot="model-pill"]'))`)).toBe(true)
     expect(browser.evaluate(`document.querySelector('${disclosure}').contains(document.querySelector('[data-slot="variants-pill"]'))`)).toBe(true)
   })
 
@@ -134,7 +134,12 @@ describe('New Task hierarchy (#168)', () => {
         expect(layout.prompt.bottom).toBeLessThanOrEqual(layout.context.top)
         expect(layout.context.bottom).toBeLessThanOrEqual(layout.submission.top)
         if (width === 1440) expect(layout.submission.right).toBeLessThanOrEqual(layout.execution.left)
-        else expect(layout.submission.bottom).toBeLessThanOrEqual(layout.execution.top)
+        else {
+          expect(layout.context.bottom).toBeLessThanOrEqual(layout.mode.top)
+          expect(layout.mode.bottom).toBeLessThanOrEqual(layout.agent.top)
+          expect(layout.agent.bottom).toBeLessThanOrEqual(layout.execution.top)
+          expect(layout.execution.bottom).toBeLessThanOrEqual(layout.submission.top)
+        }
         expect(layout.overflow).toBe(false)
         expect(layout.clipped).toEqual([])
         if (width === 360) expect(layout.small).toEqual([])

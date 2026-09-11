@@ -39,12 +39,14 @@ export function PromptTemplateMenu({
   /** Drop the "templates" label and render just the icon — the /new composer footer, where the
    *  pill row is already full and every one of these competes with the send button for space. */
   iconOnly = false,
+  label = 'templates',
 }: {
   templates: readonly PromptTemplate[]
   onInsert: (text: string) => void
   triggerClassName?: string
   disabled?: boolean
   iconOnly?: boolean
+  label?: string
 }) {
   const [open, setOpen] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
@@ -72,7 +74,7 @@ export function PromptTemplateMenu({
           <NotebookPenIcon aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
           {iconOnly ? null : (
             <>
-              templates
+              {label}
               <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
             </>
           )}

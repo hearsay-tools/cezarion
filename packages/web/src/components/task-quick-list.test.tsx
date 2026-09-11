@@ -49,10 +49,17 @@ const bucket = (label: string): HTMLElement => {
 const row = (id: string) => document.querySelector(`[data-run-id="${id}"]`)
 const dotOf = (id: string) => document.querySelector(`[data-run-id="${id}"] [data-slot="status-dot"]`)
 
+/** Existing metadata assertions exclude the separate session role/status line. */
+function metadataText(element: Element | null | undefined): string {
+  const copy = element?.cloneNode(true) as Element | undefined
+  copy?.querySelectorAll('[data-slot="session-role-status"]').forEach(node => node.remove())
+  return copy?.textContent ?? ''
+}
+
 /** The rendered text of each row under one bucket header, in order. */
 const rowsIn = (label: string): string[] =>
   [...bucket(label).querySelectorAll('[data-slot="task-row"], [data-slot="group-tile"]')].map((el) =>
-    (el.textContent ?? '').trim()
+    metadataText(el).trim()
   )
 
 afterEach(cleanup)
@@ -96,7 +103,7 @@ describe('TaskQuickList', () => {
     const link = row('sum')?.querySelector('a[href="/tasks/sum"]') as HTMLElement
     expect(link.textContent).toContain('Catch AuthError in the login handler')
     expect(link.getAttribute('title')).toBe('Catch AuthError in the login handler')
-    expect(row('sum')?.textContent).not.toContain('fix the login bug plz')
+    expect(metadataText(row('sum'))).not.toContain('fix the login bug plz')
     expect(
       within(row('sum') as HTMLElement).getByRole('link', {
         name: 'Open the pull request for Catch AuthError in the login handler',
@@ -121,7 +128,7 @@ describe('TaskQuickList', () => {
     expect(pair?.querySelector('.text-danger')?.textContent).toBe('−7')
     // A sidebar row has no ± column to hold an em dash open for — absence is just absence.
     expect(row('plain')?.querySelector('[data-slot="diff-stat"]')).toBeNull()
-    expect(row('plain')?.textContent).not.toContain('—')
+    expect(metadataText(row('plain'))).not.toContain('—')
   })
 
   it('flags a repointed-worktree diff so the sidebar number explains itself (#751)', () => {
@@ -374,8 +381,8 @@ describe('TaskQuickList', () => {
           run({ id: 'new', title: 'New', status: 'running', createdAt: ago(4 * 60_000) }),
         ],
       })
-      expect(row('old')?.textContent).toBe('Old2h')
-      expect(row('new')?.textContent).toBe('New4m')
+      expect(metadataText(row('old'))).toBe('Old2h')
+      expect(metadataText(row('new'))).toBe('New4m')
     })
 
     it('shows the queue position instead of an age for queued runs', () => {
@@ -385,8 +392,8 @@ describe('TaskQuickList', () => {
           run({ id: 'q2', title: 'Second', status: 'queued', createdAt: ago(60_000) }),
         ],
       })
-      expect(row('q1')?.textContent).toBe('First#1')
-      expect(row('q2')?.textContent).toBe('Second#2')
+      expect(metadataText(row('q1'))).toBe('First#1')
+      expect(metadataText(row('q2'))).toBe('Second#2')
     })
 
     it('keeps the queue position even when the row has a reference chip', () => {
@@ -404,7 +411,7 @@ describe('TaskQuickList', () => {
           }),
         ],
       })
-      expect(row('qref')?.textContent).toBe('#788queued on an issue#1')
+      expect(metadataText(row('qref'))).toBe('#788queued on an issue#1')
     })
 
     it('still drops the age for a referenced row that is not queued', () => {
@@ -419,7 +426,7 @@ describe('TaskQuickList', () => {
           }),
         ],
       })
-      expect(row('aged')?.textContent).toBe('#9Finished with a PR')
+      expect(metadataText(row('aged'))).toBe('#9Finished with a PR')
     })
   })
 
@@ -468,8 +475,8 @@ describe('TaskQuickList', () => {
       expect(screen.getByRole('button', { expanded: true })).not.toBeNull()
 
       // The letter chip, its own dot, and what actually differs between the variants.
-      expect(row('va')?.textContent).toBe('Aclaude · IN 92.0k · OUT 4.2k · $0.31')
-      expect(row('vb')?.textContent).toBe('Bcodex · IN 40.0k · OUT 1.8k · $0.12')
+      expect(metadataText(row('va'))).toBe('Aclaude · IN 92.0k · OUT 4.2k · $0.31')
+      expect(metadataText(row('vb'))).toBe('Bcodex · IN 40.0k · OUT 1.8k · $0.12')
       expect(dotOf('va')?.getAttribute('data-tone')).toBe('accent')
       // Each variant is still its own deep link.
       expect(row('vb')?.querySelector('a')?.getAttribute('href')).toBe('/tasks/vb')
@@ -494,14 +501,14 @@ describe('TaskQuickList', () => {
         ),
       })
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(row('va')?.textContent).toBe('Aclaude · $0.31')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31')
     })
 
     it('gates variant token directions and cost independently', () => {
       renderList({ runs: variants(), showTokens: false, showCost: true })
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(row('va')?.textContent).toBe('Aclaude · $0.31')
-      expect(row('vb')?.textContent).toBe('Bcodex · $0.12')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31')
+      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12')
     })
   })
 
@@ -723,4 +730,13 @@ it('identifies owned worker rows without nested links or changing ordinary title
     expect(element?.querySelector('a a')).toBeNull()
   }
   expect(screen.getAllByRole('link', { name: /Ordinary/ }).length).toBeGreaterThan(0)
+})
+
+it('places a worker below its parent even when their statuses put them in different buckets', () => {
+  const child = run({ id: 'child', status: 'running', title: 'Check result', delegation: { role: 'worker', permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'child', resourceId: 'child', kind: 'owned-isolated', path: '/child', branch: 'cez/child', baselineSha: 'a'.repeat(40) } } })
+  renderList({ runs: [child, run({ id: 'parent', title: 'Build feature' })] })
+  const family = document.querySelector('[data-session-family="parent"]')
+  expect(family).not.toBeNull()
+  expect(family?.querySelector('[data-run-id="child"]')).not.toBeNull()
+  expect(document.querySelectorAll('[data-run-id="child"]')).toHaveLength(1)
 })

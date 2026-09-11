@@ -5,6 +5,7 @@ import {
   MenuIcon,
   PlusIcon,
   SearchIcon,
+  ShieldCheckIcon,
   SettingsIcon,
   XIcon,
 } from 'lucide-react'
@@ -53,6 +54,7 @@ export type RepoChip = {
 export type AppShellProps = {
   /** The routed view. Renders into the one scrolling region. */
   children: ReactNode
+  breadcrumb?: { project: string | null; page: string; branch?: string | null }
   /** Repo + branch for the brand chip. Null until Step 3.1/3.2 wires `/api/health` — the chip
    *  is simply absent rather than showing an invented repo name. */
   repo?: RepoChip | null
@@ -139,6 +141,7 @@ export function routeOwnsScrollArrival(pathname: string): boolean {
  */
 export function AppShell({
   children,
+  breadcrumb,
   repo = null,
   inboxCount = null,
   unreadCount = null,
@@ -158,7 +161,7 @@ export function AppShell({
   // The nav's area rules reason about the flat route map — strip any `/p/:projectId` prefix
   // (multi-project spec, step 3.2) so `/p/cezar/git/commits` still lights Git.
   const areaPathname = stripProjectPrefix(pathname)
-  const activeTo = activeNavPath(areaPathname)
+  const activeTo = areaPathname === '/new' ? '/new' : activeNavPath(areaPathname)
   const current = activeNavItem(areaPathname)
   const [menuOpen, setMenuOpen] = React.useState(false)
   const mainRef = React.useRef<HTMLElement>(null)
@@ -237,7 +240,13 @@ export function AppShell({
         <MobileNavDrawer {...nav} onNavigate={() => setMenuOpen(false)} />
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
-          <MobileTopBar title={current?.label ?? 'cezar'} />
+          <MobileTopBar title={current?.label ?? 'cezar'} repo={repo} />
+          <header data-slot="desktop-breadcrumb" className="row-start-1 hidden h-16 min-w-0 items-center gap-3 border-b border-border px-9 text-[13px] text-muted-foreground md:flex">
+            <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
+            {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
+            <span className="min-w-0 truncate">{breadcrumb?.page ?? current?.label ?? 'Cezarion'}</span>
+            {(breadcrumb?.branch ?? repo?.branch) ? <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]"><ShieldCheckIcon aria-hidden="true" className="size-4 text-accent-icon" />{breadcrumb?.branch ?? repo?.branch}</span> : null}
+          </header>
 
           {banner ? (
             <div data-slot="banner-slot" className="row-start-2">
@@ -485,18 +494,8 @@ function SidebarContent({
           data-slot="brand-wordmark"
           className="text-[23px] leading-none font-semibold tracking-[-0.03em] text-foreground"
         >
-          cezarion
+          Cezarion
         </span>
-        {/* With project groups mounted the boot repo/branch is one group header among many —
-            a chip repeating it up here would just be the first group's header said twice. */}
-        {repo && !projectGroups ? (
-          <span
-            data-slot="repo-chip"
-            className="ml-auto truncate font-mono text-[11px] font-medium text-soft-foreground"
-          >
-            {repo.name} / {repo.branch}
-          </span>
-        ) : null}
         {headerAction ? (
           <div className={cn('shrink-0', (!repo || projectGroups) && 'ml-auto')}>{headerAction}</div>
         ) : null}
@@ -507,7 +506,7 @@ function SidebarContent({
       </div>
 
       <div className="flex gap-1.5 px-[18px] pb-3">
-        <Button asChild variant="primary" className="relative min-w-0 flex-1 justify-center">
+        <Button asChild variant="ghost" className={cn("relative min-w-0 flex-1 justify-start text-muted-foreground", activeTo === "/new" && "bg-[var(--task-brand-selected)] text-accent-text")}>
           {/* A Router Link since R4 Step 1.1: the React /new composer is real, so deliberate
               New task affordances stay inside the SPA. Full document loads of /new (the
               bookmarklet contract) land on the shell like any route (static-ui.ts) — the
@@ -520,7 +519,7 @@ function SidebarContent({
                 reserves ⌘N for a new window — so the chip advertises the one that always works.) */}
             <kbd
               aria-hidden="true"
-              className="absolute right-2.5 rounded-[5px] border border-b-2 border-action-foreground/25 bg-transparent px-[5px] py-px font-mono text-[10.5px] font-medium text-action-foreground/60"
+              className="sr-only"
             >
               C
             </kbd>
@@ -529,17 +528,9 @@ function SidebarContent({
         {singleProject ? null : <AddProjectMenu />}
       </div>
 
+      {!singleProject ? <div className="shrink-0 px-1.5 pb-3"><AllTasksLink onNavigate={onNavigate} /></div> : null}
       {projectGroups ? (
         <>
-          {/* PINNED above the scroller, not the first row inside it. It is about every group
-              rather than a peer of them, and a workspace with enough projects to want this page
-              is exactly the workspace that scrolls it out of sight. Its own bordered band is
-              what stops it reading as an unusually-worded project. Only in a multi-project
-              workspace: with one project the page would be that project's own Tasks table
-              wearing a second name. */}
-          <div className="shrink-0 border-b border-border px-1.5 pt-0.5 pb-2">
-            <AllTasksLink onNavigate={onNavigate} />
-          </div>
           {/* Step 3.3: one collapsible group per registered project — nav + task list per group.
               The whole area scrolls as one (per the sidebar mockup); collapsed groups are one row. */}
           <div
@@ -553,6 +544,7 @@ function SidebarContent({
         </>
       ) : (
         <>
+          {repo ? <div className="mx-[18px] mt-7 mb-3 flex items-center gap-2 text-xs font-medium"><FolderIcon aria-hidden="true" className="size-4" /><span data-slot="repo-chip" className="min-w-0 truncate">{repo.name}</span><span className="ml-auto text-[10px] text-muted-foreground">{repo.branch}</span></div> : null}
           <nav aria-label="Main" className="px-2.5 py-1.5">
             {items.map((item) => {
               const isActive = item.to === activeTo
@@ -623,13 +615,14 @@ function SidebarContent({
         data-slot="sidebar-footer"
         className="border-t border-border px-[18px] py-3"
       >
+        <GlobalSettingsLink onNavigate={onNavigate} className="mb-3 w-full justify-start gap-3 text-xs" />
         <div data-slot="sidebar-footer-controls" className="flex items-center gap-2">
           {/* SLOT — Step 4.2 mounts the Tools dropdown (aggregate status dot + tool versions) here. */}
           <div data-slot="tools-menu" className="shrink-0">
             {toolsMenu}
           </div>
           {version ? <VersionChip version={version} latestVersion={latestVersion} /> : null}
-          <GlobalSettingsLink onNavigate={onNavigate} className="ml-auto" />
+
           <ThemeToggle />
         </div>
       </div>
@@ -660,12 +653,12 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
       // rows are muted. The violet icon is the one spot of accent — the same hue the tag chips
       // and this page's own selected filters use, so the door and the room match.
       className={cn(
-        'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-semibold text-foreground transition-colors hover:bg-muted md:h-9',
+        'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted md:h-9',
         isActive && 'bg-muted',
       )}
     >
       <LayersIcon
-        className={cn('size-4 shrink-0', isActive ? 'text-accent-icon' : 'text-accent-icon/70')}
+        className={cn('size-4 shrink-0', isActive ? 'text-accent-icon' : 'text-muted-foreground')}
         aria-hidden="true"
       />
       All tasks
@@ -689,7 +682,7 @@ function GlobalSettingsLink({
   onNavigate?: () => void
 }) {
   return (
-    <Button asChild variant="ghost" size="icon" className={cn('size-7', className)}>
+    <Button asChild variant="ghost" size="icon" className={cn('h-11', className)}>
       <RouterLink
         to="/settings/global"
         data-slot="global-settings-link"
@@ -698,6 +691,7 @@ function GlobalSettingsLink({
         onClick={onNavigate}
       >
         <SettingsIcon className="size-4" aria-hidden="true" />
+        Global settings
       </RouterLink>
     </Button>
   )
@@ -821,7 +815,7 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
 }
 
 /** Mobile chrome (<md): the sidebar's replacement. Its menu button opens `MobileNavDrawer`. */
-function MobileTopBar({ title }: { title: string }) {
+function MobileTopBar({ title, repo }: { title: string; repo: RepoChip | null }) {
   return (
     <header
       data-slot="mobile-top-bar"
@@ -843,11 +837,12 @@ function MobileTopBar({ title }: { title: string }) {
             <MenuIcon className="size-[17px]" aria-hidden="true" />
           </Button>
         </SheetTrigger>
-        <span className="shrink-0 text-[19px] font-semibold tracking-[-0.03em]">cezarion</span>
+        <span className="shrink-0 text-[19px] font-semibold tracking-[-0.03em]">Cezarion</span>
+        {repo ? <span className="ml-auto flex min-w-0 items-center gap-2 text-xs"><FolderIcon aria-hidden="true" className="size-4 shrink-0" /><span className="max-w-28 truncate">{repo.name}</span></span> : null}
         {title !== 'cezar' ? (
           <>
-            <span aria-hidden="true" className="text-soft-foreground">·</span>
-            <span data-slot="mobile-route-title" className="truncate text-[13px] font-medium text-muted-foreground">
+            <span aria-hidden="true" className={cn("text-soft-foreground", repo && "hidden")}>·</span>
+            <span data-slot="mobile-route-title" className={cn("truncate text-[13px] font-medium text-muted-foreground", repo && "sr-only")}>
               {title}
             </span>
           </>

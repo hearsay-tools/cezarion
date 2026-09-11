@@ -618,3 +618,91 @@
   background: var(--selection-indicator);
   pointer-events: none;
 }
+
+/* design.pen 1A–1D: prompt, agent choices, execution panel and submission are
+ * separate surfaces. Mobile follows the document order shown in the frame. */
+.new-task-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+.new-task-editor { grid-row: 1; }
+.new-task-editor textarea { min-height: 132px; padding: 16px 20px; font-size: 17px; }
+.new-task-composer [data-slot='composer-agent-options'] { grid-row: 3; }
+.new-task-composer [data-slot='composer-execution-panel'] { grid-row: 4; }
+.new-task-submission { display: contents; }
+.new-task-submission [data-slot='composer-footer-end'] { grid-row: 2; width: 100%; }
+.new-task-submission [data-slot='composer-actions'] { grid-row: 5; width: 100%; }
+.new-task-submission kbd { display: none; }
+.new-task-submission [data-slot='mode-seg'] { display: flex; width: 100%; height: 48px; }
+.new-task-submission [data-slot='mode-seg'] button { flex: 1; height: 42px; }
+.new-task-submission [data-slot='mode-seg'] [aria-checked='true'] {
+  background: var(--task-brand-selected); color: var(--accent-text);
+  border: 1px solid var(--composer-border); box-shadow: none;
+}
+.new-task-agent-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.new-task-agent-options > * { min-width: 0; }
+.new-task-agent-options [data-slot='model-pill'] { grid-column: 1 / -1; grid-row: 1; min-height: 60px; }
+.new-task-agent-options button { width: 100%; justify-content: flex-start; min-height: 44px; }
+.new-task-run-settings { display: flex; flex-direction: column; gap: 0; }
+.new-task-run-settings > * { min-height: 48px; }
+.new-task-run-settings > button { width: 100%; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
+.new-task-run-settings [data-slot='variants-pill'], .new-task-run-settings [data-slot='base-pill'] { border: 0; color: var(--accent-text); }
+.new-task-editor [data-slot='composer-footer-start'] { gap: 8px; padding: 8px 12px 12px; }
+.new-task-editor [data-slot='composer-footer-start'] button { min-height: 44px; }
+@media (min-width: 1280px) {
+  .new-task-composer { grid-template-columns: minmax(0, 1fr) 330px; column-gap: 24px; }
+  .new-task-editor { grid-column: 1; grid-row: 1; }
+  .new-task-editor textarea { min-height: 180px; }
+  .new-task-composer [data-slot='composer-agent-options'] { grid-column: 1; grid-row: 2; }
+  .new-task-composer [data-slot='composer-execution-panel'] { grid-column: 2; grid-row: 1 / 4; }
+  .new-task-submission { display: flex; grid-column: 1; grid-row: 3; gap: 18px; }
+  .new-task-submission [data-slot='composer-actions'] { width: auto; }
+}
+@media (max-width: 767px) {
+  .new-task-editor { border: 0; border-radius: 0; background: transparent; }
+  .new-task-editor textarea { padding-inline: 0; }
+  .new-task-editor [data-slot='composer-footer-start'] { padding-inline: 0; }
+  .new-task-editor > p { padding-inline: 0; }
+  .new-task-composer [data-slot='execution-options'] { border: 0; }
+}
+.new-task-agent-options button { border-radius: 10px; padding: 10px; background: var(--card); }
+.new-task-agent-options button > svg:last-child { margin-left: auto; }
+.new-task-agent-options [data-slot='runner-pill']::before { content: 'Runner'; font-size: 10px; color: var(--muted-foreground); }
+.new-task-editor [data-slot='prompt-template-trigger'], .new-task-editor [data-slot='source-pill'] { border-radius: 9px; padding-inline: 14px; font-family: inherit; }
+.new-task-submission [data-slot='composer-footer-end'] { flex: 1; margin-right: 0; }
+.new-task-submission [data-slot='composer-footer-end'] > .contents { display: flex; width: 100%; }
+.new-task-submission [data-slot='composer-actions'] { min-width: 170px; }
+.new-task-submission { margin-left: 0; width: 100%; }
+.new-task-editor [data-slot='composer-footer-start'] button[aria-label='Start dictation'],
+.new-task-editor [data-slot='composer-footer-start'] button[aria-label='Attach files'] { border: 1px solid var(--border); border-radius: 9px; width: 44px; padding: 0; }
+@media (max-width: 767px) {
+  .new-task-editor:focus-within { box-shadow: none; }
+  .new-task-editor textarea { min-height: 96px; }
+}
+/* Shared session navigation, including the mobile drawer (frames 2E/F and 17). */
+[data-slot='task-row'] { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; column-gap: 8px; align-items: start; padding-block: 4px; }
+[data-slot='task-row'] > a:not([data-slot]) { grid-column: 2; grid-row: 1; padding-block: 3px; }
+[data-slot='task-row'] > [data-slot='status-dot'] { grid-column: 1; grid-row: 1; margin-top: 25px; }
+[data-slot='task-row'] > [data-slot='reference-chip'] { grid-column: 2; grid-row: 2; justify-self: start; margin-bottom: 4px; }
+[data-slot='task-row-title'] { white-space: normal; min-width: 0; font-size: 12px; }
+[data-slot='task-row-title'] { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+[data-slot='task-row'][data-active='true'] [data-slot='task-row-title'] { color: var(--accent-text); }
+[data-slot='task-row'] > [data-slot='pr-chip'], [data-slot='task-row'] > [data-slot='issue-chip'] { grid-column: 2; grid-row: 3; justify-self: start; margin-bottom: 4px; }
+[data-slot='task-row'] > [data-slot='status-dot'] { grid-row: 2; margin-top: 4px; }
+
+.new-task-composer [data-slot='composer-feedback'] { grid-row: 6; }
+@media (min-width: 1280px) {
+  .new-task-composer [data-slot='composer-feedback'] { grid-row: 4; grid-column: 1; }
+}
+@media (max-width: 767px) {
+  .new-task-composer { gap: 10px; }
+  .new-task-editor textarea { padding-block: 0; }
+  .new-task-editor > div:has([data-slot='composer-footer-start']) { padding: 0; }
+  .new-task-editor [data-slot='composer-footer-start'] { padding-block: 8px; }
+  .new-task-composer [data-slot='execution-options'] > div { padding: 0; }
+  .new-task-composer [data-slot='execution-options'] summary { padding-inline: 0; }
+  .new-task-agent-options button { border-color: var(--border); }
+}
+
+.new-task-editor textarea { color: var(--muted-foreground); }

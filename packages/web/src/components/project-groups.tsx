@@ -257,7 +257,7 @@ function ProjectGroup({
           // 44px touch target in the drawer, the mockup's 34px row on desktop — the same
           // relaxation the flat nav makes.
           'flex h-11 w-full items-center gap-[7px] rounded-lg px-2 text-left text-[13px] font-semibold transition-colors hover:bg-muted md:h-[34px]',
-          active && 'bg-muted',
+
         )}
       >
         <ChevronDownIcon
@@ -291,12 +291,9 @@ function ProjectGroup({
         <div
           id={bodyId}
           data-slot="project-group-body"
-          // The gap and the rail are what make the header read as the PARENT of these rows.
-          // Without them the active group's `bg-muted` header sits flush against the active nav
-          // row's `bg-muted` and the two fuse into one block — the project name then reads as
-          // just another menu item. The rail is offset to sit under the chevron, so the whole
-          // body hangs off the same vertical the disclosure control is on.
-          className="mt-1 ml-[14px] border-l border-border pl-2"
+          // The project navigation aligns with the group heading; only owned workers get an
+          // indented relationship rail, inside QuickListBuckets (design.pen frames 17).
+          className="mt-3"
         >
           <nav aria-label={`${project.name} navigation`}>
             {/* Forge-gated per PROJECT (#698): the entry's own remote decides whether THIS
@@ -322,7 +319,7 @@ function ProjectGroup({
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
                     'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
-                    isActive && 'bg-muted font-semibold text-foreground',
+                    isActive && 'bg-[var(--task-brand-selected)] font-semibold text-accent-text',
                   )}
                 >
                   <Icon className="size-3.5 shrink-0" aria-hidden="true" />
