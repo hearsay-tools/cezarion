@@ -370,13 +370,12 @@ describe('task thread', () => {
   })
 
   it('a card is closed by default and expands to its mono output (the #381 behavior)', () => {
-    const bash = '[data-slot="tool-card"][data-kind="execute"]'
-    expect(browser.count(`${bash} [data-slot="tool-output"]`)).toBe(0)
-    browser.click(`${bash} [data-slot="collapsible-trigger"]`)
-    browser.waitForFunction(`document.querySelector('${bash} [data-slot="tool-output"] pre') !== null`)
-    expect(browser.evaluate(`document.querySelector('${bash} [data-slot="tool-output"] pre').textContent`)).toBe(
-      ' M src/example.ts',
-    )
+    const bash = `[...document.querySelectorAll('[data-slot="tool-card"][data-kind="execute"]')]
+      .find((card) => card.textContent.includes('git status --short'))`
+    expect(browser.evaluate(`${bash}.querySelector('[data-slot="tool-output"]') === null`)).toBe(true)
+    browser.evaluate(`${bash}.querySelector('[data-slot="collapsible-trigger"]').click()`)
+    browser.waitForFunction(`${bash}.querySelector('[data-slot="tool-output"] pre') !== null`)
+    expect(browser.evaluate(`${bash}.querySelector('[data-slot="tool-output"] pre').textContent`)).toBe(' M src/example.ts')
   })
 
   it('serves and renders the agent screenshot the transcript persisted', () => {
@@ -643,6 +642,7 @@ describe('task thread', () => {
     for (const [id, label] of [[RUN_ID, 'Show run details'], [LONG_RUN.id, 'Hide run details']]) {
       browser.click('[aria-label="Open menu"]')
       browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left >= 0`)
+      browser.evaluate(`document.querySelector('[data-slot="mobile-nav-drawer"] a[href="${scoped(`/tasks/${id}`)}"]').scrollIntoView({ block: 'center' })`)
       browser.click(`[data-slot="mobile-nav-drawer"] a[href="${scoped(`/tasks/${id}`)}"]`)
       browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
       browser.waitForFunction(`document.querySelector('[data-run-id="${id}"] [aria-label="${label}"]') !== null`)
