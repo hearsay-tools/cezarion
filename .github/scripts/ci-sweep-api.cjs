@@ -1,5 +1,13 @@
 const {downloadLog} = require('./report-workflow-failure.cjs');
-const DEFAULT_LIMITS = Object.freeze({requests:1500,attempts:20,logs:100,logBytes:50*1024*1024,issues:10,occurrences:100,durationMs:12*60*1000});
+// Sized so the default 14-day window completes: a full window costs roughly
+// one jobs request per attempt plus one request per failed-job log (~1,250 at
+// observed peak), leaving the 1,500-request budget as the binding global bound.
+const DEFAULT_LIMITS = Object.freeze({requests:1500,attempts:20,logs:400,logBytes:50*1024*1024,issues:10,occurrences:100,durationMs:12*60*1000});
+// Expired, missing or oversized source logs are unrecoverable per-job evidence
+// gaps: they are listed in the coverage artifact and rechecked by the next
+// overlapping sweep, but they never fail the job on their own. Caps, read
+// failures on metadata and rate limits remain fatal coverage problems.
+const GAPS = new Set(['logs-unavailable']);
 class SweepError extends Error {
   constructor(code) { super(code); this.code=code; }
 }
@@ -9,7 +17,7 @@ function createSweepApi({github,now=Date.now,limits={},fetchImpl=fetch}) {
   const manifest={version:1,complete:true,requests:0,logs:0,downloadedBytes:0,intervals:[],processed:{runs:[],attempts:[],jobs:[]},problems:[],reports:{issues:0,occurrences:0},reporterFailures:0};
   let stopped;
   function problem(code,ids={}) {
-    manifest.complete=false;
+    if(!GAPS.has(code))manifest.complete=false;
     const entry={code};
     for(const key of ['runId','attempt','jobId','issueNumber']) if(Number.isSafeInteger(ids[key]) && ids[key]>=0)entry[key]=ids[key];
     if(!manifest.problems.some(p=>JSON.stringify(p)===JSON.stringify(entry)))manifest.problems.push(entry);

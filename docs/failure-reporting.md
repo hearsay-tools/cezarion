@@ -61,6 +61,8 @@ Only failed/timed-out jobs contribute failures; passing jobs are comparison evid
 Cancelled attempts/jobs and skipped jobs never contribute failure occurrences.
 The reporting workflows contribute only a count of failed attempts in the summary,
 including failed attempts followed by successful reruns; they never create issues.
+Reporting machinery is skipped before the in-progress-attempt check, so the sweep's
+own running attempt and a queued sibling reporter never mark coverage incomplete.
 
 The default window covers **runs originally created in the preceding 14 days**.
 It is not an updated-time window. A new retry of an older run needs a manual replay
@@ -130,12 +132,17 @@ as described under **Refining matches**. Keep one open owner per signature.
 ### Bounds, coverage, and recovery
 
 Each invocation permits at most 1,500 GitHub requests, 20 attempts per run,
-100 downloaded logs, 2 MiB per log, 50 MiB total downloaded logs, 10 newly created
+400 downloaded logs, 2 MiB per log, 50 MiB total downloaded logs, 10 newly created
 issues, and 100 new failure-occurrence comments. Summary comments and updates also
 consume the shared API budget. The application deadline is 12 minutes; the Actions
-job timeout is 15 minutes. Requests and log fetches have bounded timeouts.
+job timeout is 15 minutes. Requests and log fetches have bounded timeouts. The log
+budget is sized so the default 14-day window completes under it; the request budget
+remains the binding global bound.
 
-A missing/expired log, partial page, invalid source identity, in-progress attempt,
+Missing, expired or oversized source logs are unrecoverable per-job evidence gaps:
+the coverage artifact lists them by fixed code and job ID, the summary prints their
+count, and they never fail the scheduled job on their own. A partial page, invalid
+source identity, in-progress attempt,
 rate limit, exhausted cap, ambiguous owner or failed write marks coverage incomplete.
 Known qualifying evidence may still be reported if lookup coverage and remaining
 budgets permit. A partial issue/comment index never authorizes a new report.

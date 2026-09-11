@@ -38,6 +38,12 @@ test('logs consume shared byte and count budgets and missing logs remain visible
  assert.ok(missing.manifest.problems.some(p=>p.code==='logs-unavailable' && p.jobId===3));
  assert.doesNotMatch(JSON.stringify(missing.manifest),/private/);
 });
+test('expired job logs are recorded evidence gaps that do not fail the sweep',async()=>{
+ const missing=create({github:{request:async()=>{throw Object.assign(new Error('signed private url'),{status:410});}}});
+ assert.equal(await missing.downloadLog({job_id:3}),null);
+ assert.equal(missing.manifest.complete,true);
+ assert.ok(missing.manifest.problems.some(p=>p.code==='logs-unavailable' && p.jobId===3));
+});
 test('signed log fetch streams into cumulative budget without forwarding authorization',async()=>{
  let fetched;
  const api=create({github:{request:async()=>({headers:{location:'https://example.com/log?signature=private'}})},limits:{logBytes:5},fetchImpl:async(url,options)=>{
