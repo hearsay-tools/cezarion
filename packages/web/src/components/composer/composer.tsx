@@ -87,6 +87,9 @@ export interface ComposerProps {
   footerStart?: ReactNode
   /** Rendered between Dictation and the send button — the /new mode segment + kbd hint. */
   footerEnd?: ReactNode
+  /** Session runner/effort row and model control, owned by the continuation hook. */
+  sessionControls?: ReactNode
+  sessionModel?: ReactNode
   /** New-task settings below a dedicated submission row; replies keep their compact footer. */
   agentOptions?: ReactNode
   executionOptions?: ReactNode
@@ -150,6 +153,8 @@ export function Composer({
   mobileDisclosureKey,
   footerStart,
   footerEnd,
+  sessionControls,
+  sessionModel,
   executionOptions,
   agentOptions,
   sendAriaLabel = 'Send',
@@ -542,7 +547,7 @@ export function Composer({
       onClick={() => { if (!editsBlocked()) dictation.start() }}
     >
       <MicIcon aria-hidden="true" className="size-3.5" />
-      {executionOptions ? null : 'Dictation'}
+      {executionOptions || sessionControls ? null : 'Dictation'}
     </Button>
   ) : null
 
@@ -586,7 +591,7 @@ export function Composer({
 
   const submissionControls = (
               <div data-slot="composer-submit-row" className={cn('ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap', executionOptions && 'new-task-submission')}>
-                {executionOptions ? null : dictationButton}
+                {executionOptions || sessionControls ? null : dictationButton}
                 {footerEnd ? (
                   <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', executionOptions && 'mr-auto', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
                     <div className="contents" inert={readOnly || undefined}>{footerEnd}</div>
@@ -602,15 +607,15 @@ export function Composer({
                       aria-busy={busy && !stopPending || undefined}
                       disabled={disabled || busy || stopPending || (!hasContent && !allowEmptySubmit)}
                       className={cn(
-                        executionOptions ? 'h-12 w-full gap-2 px-6' : 'size-11',
+                        executionOptions ? 'h-12 w-full gap-2 px-6' : sessionControls ? 'h-11 w-auto gap-2 px-5' : 'size-11',
                         !hasContent && emptySubmitLabel && 'w-auto px-3',
                         'active:opacity-80',
                       )}
                       onClick={submitDraft}
                     >
-                      {!hasContent && emptySubmitLabel ? <PlayIcon aria-hidden="true" /> : null}
-                      {executionOptions || (!hasContent && emptySubmitLabel) ? submitLabel : null}
-                      {hasContent || !emptySubmitLabel ? <ArrowUpIcon aria-hidden="true" /> : null}
+                      {!sessionControls && !hasContent && emptySubmitLabel ? <PlayIcon aria-hidden="true" /> : null}
+                      {executionOptions || sessionControls || (!hasContent && emptySubmitLabel) ? submitLabel : null}
+                      {sessionControls || hasContent || !emptySubmitLabel ? <ArrowUpIcon aria-hidden="true" /> : null}
                     </Button>
                   ) : null}
                 </div>
@@ -628,6 +633,7 @@ export function Composer({
           onDragOver={(event) => event.preventDefault()}
           className={cn(
             executionOptions && 'new-task-composer',
+            sessionControls && 'session-composer',
             disabled && 'opacity-80',
           )}
         >
@@ -702,6 +708,7 @@ export function Composer({
           />
 
           {executionOptions ? <p className="px-5 pt-3 pb-2 text-xs text-muted-foreground">⌁ &nbsp; Type / for a skill or workflow</p> : null}
+          {sessionControls && recording ? <div data-slot="session-controls" inert={readOnly || undefined}>{sessionControls}</div> : null}
           {recording ? (
             <div>
               <DictationBar
@@ -717,7 +724,8 @@ export function Composer({
           ) : (
             // The footer may WRAP (the /new pill row on narrow widths), but the trailing
             // controls wrap on phones to keep long model/account labels inside the viewport.
-            <div className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pt-1 pb-1.5 md:gap-y-1.5 md:px-2 md:pt-1.5 md:pb-2">
+            <div data-slot="composer-toolbar" className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pt-1 pb-1.5 md:gap-y-1.5 md:px-2 md:pt-1.5 md:pb-2">
+              {sessionControls ? <div data-slot="session-controls" inert={readOnly || undefined}>{sessionControls}</div> : null}
               {/* Tools and context wrap together. New-task execution options get their own
                   section; thread composers retain their compact, wrapping footer. */}
               <div data-slot="composer-footer-start" className={cn('flex min-w-0 flex-wrap items-center gap-1', executionOptions && 'w-full')}>
@@ -740,8 +748,9 @@ export function Composer({
                   </Button>
                 ) : null}
                 <div className="contents" inert={readOnly || undefined}>{footerStart}</div>
-                {executionOptions ? <div>{dictationButton}</div> : null}
+                {executionOptions || sessionControls ? <div>{dictationButton}</div> : null}
               </div>
+              {sessionModel ? <div data-slot="session-model" inert={readOnly || undefined}><span>Model</span>{sessionModel}</div> : null}
               {executionOptions ? null : submissionControls}
 
             </div>

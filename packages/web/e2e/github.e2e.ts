@@ -114,9 +114,9 @@ describe('the GitHub tab against the live dry-run server', () => {
     expect(first).toBeDefined()
     if (!first) return
 
-    browser.goto(`${baseUrl}${scoped('/github')}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="gh-row"]') !== null`)
-    // Bare `/github` restores the last-selected tab (#417) — pin it to Issues before picking one.
+    browser.goto(`${baseUrl}${scoped('/github/prs')}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="gh-tabs"] a[href="${scoped('/github')}"]') !== null`)
+    // Start on an explicit tab so the remembered bare-route redirect cannot race the click.
     browser.click(`[data-slot="gh-tabs"] a[href="${scoped('/github')}"]`)
     browser.waitForFunction(
       `document.querySelector('[data-slot="gh-row"][data-number="${first.number}"]') !== null`,
@@ -245,7 +245,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/github-pr-changes.png`)
   })
 
-  it('below md the list is the page, and a detail URL swaps to the detail with a way back', async () => {
+  it('below md the list and selected detail stack in document flow with a way back', async () => {
     if (!forgeAvailable) return
     const gh = await api<GithubPayload>('/api/v1/github')
     const first = gh.issues[0]
@@ -263,14 +263,22 @@ describe('the GitHub tab against the live dry-run server', () => {
 
       browser.goto(`${baseUrl}${scoped(`/github/issues/${first.number}`)}`)
       browser.waitForFunction(`document.querySelector('[data-slot="gh-detail-inner"]') !== null`)
-      // Now the detail is the page and the list yields; the back affordance is a link.
+      // The revised mobile layout keeps the list above the detail; the back link remains.
       browser.waitForFunction(
-        `(() => { const el = document.querySelector('[data-slot="gh-list"]'); return el === null || el.offsetParent === null })()`,
+        `(() => { const list = document.querySelector('[data-slot="gh-list"]'); const detail = document.querySelector('[data-slot="gh-detail"]'); return list.offsetParent !== null && detail.getBoundingClientRect().top >= list.getBoundingClientRect().bottom })()`,
       )
       expect(
         browser.evaluate(`document.querySelector('[data-slot="gh-back"]').getAttribute('href')`),
       ).toBe(scoped('/github'))
 
+      if (gh.issues.length > 2) {
+        const visibleRows = () => browser.evaluate(`[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length`)
+        expect(visibleRows()).toBe(2)
+        browser.click('[data-slot="gh-expand-list"]')
+        expect(visibleRows()).toBe(gh.issues.length)
+        browser.click('[data-slot="gh-expand-list"]')
+        expect(visibleRows()).toBe(2)
+      }
       browser.screenshot(`${artifactsDir}/github-iphone.png`)
     } finally {
       browser.setViewport(DESKTOP.width, DESKTOP.height)
@@ -382,3 +390,102 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)
   }, 60_000)
 })
+
+it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ width, theme }))))('keeps handoff fields usable at $width / $theme', async ({ width, theme }) => {
+  const gh = await api<GithubPayload>('/api/v1/github')
+  const first = gh.issues[0]!
+  browser.setViewport(width, 1000)
+  browser.goto(`${baseUrl}${scoped(`/github/issues/${first.number}`)}`)
+  browser.waitForFunction(`document.querySelector('[data-slot="gh-hand"]') !== null`)
+  browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; delete document.documentElement.dataset.density; document.querySelector('[data-slot="gh-hand"]').scrollIntoView({block:'start'})`)
+  const facts = browser.evaluate(`(() => {
+    const rect = selector => document.querySelector(selector).getBoundingClientRect();
+    const prompt = rect('[data-slot="gh-custom-prompt"]'), workflow = rect('[data-slot="gh-workflow-trigger"]'), model = rect('[data-slot="model-pill"]'), effort = rect('[data-slot="effort-pill"]'), account = rect('[aria-label="Account"]');
+    return { promptFirst: prompt.bottom < workflow.top, fullWidth: Math.abs(workflow.width - model.width) < 2, order: model.bottom < effort.top && effort.bottom < account.top, overflow: document.documentElement.scrollWidth > innerWidth };
+  })()`)
+  expect(facts).toEqual({ promptFirst: true, fullWidth: true, order: true, overflow: false })
+  browser.fill('[data-slot="gh-custom-prompt"]', 'Review this issue and keep this draft')
+  browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')
+  browser.screenshot(`${artifactsDir}/revised-github-handoff-${width}-${theme}.png`, { viewport: true })
+  browser.click('[data-slot="gh-workflow-trigger"]')
+  browser.press('Escape')
+  expect(browser.evaluate(`document.querySelector('[data-slot="gh-custom-prompt"]').value`)).toBe('Review this issue and keep this draft')
+}, 90_000)
+
+it.each(['loading', 'empty', 'error'].flatMap(state => ['light', 'dark'].map(theme => ({ state, theme }))))('renders GitHub $state in $theme without losing navigation', async ({ state, theme }) => {
+  const stateBrowser = AgentBrowser.open(`${sessionId}-${state}-${theme}`)
+  try {
+    stateBrowser.setViewport(402, 900)
+    stateBrowser.goto(`${baseUrl}${scoped('/')}`)
+    stateBrowser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
+    stateBrowser.evaluate(`(() => {
+      const nativeFetch = window.fetch;
+      window.fetch = (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+        if (new URL(url, location.href).pathname.endsWith('/github')) {
+          ${state === 'loading' ? 'return new Promise(() => {});' : `return Promise.resolve(new Response(JSON.stringify(${JSON.stringify(state === 'empty' ? { available: true, repo: 'fixture/repo', issues: [], prs: [], projects: [], viewerLogin: 'fixture' } : { error: 'Fixture connection unavailable' })}), { status: ${state === 'error' ? 500 : 200}, headers: { 'content-type': 'application/json' } }));`}
+        }
+        return nativeFetch(input, init);
+      };
+      document.querySelector('a[href="${scoped('/github')}"]').click();
+    })()`)
+    const expected = state === 'loading' ? 'Loading GitHub' : state === 'error' ? 'Could not load GitHub' : 'No open issues'
+    stateBrowser.waitForFunction(`document.querySelector('[data-route="github"]')?.textContent.includes(${JSON.stringify(expected)}) === true`)
+    stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; new Promise(resolve => setTimeout(resolve, 250))`)
+    expect(stateBrowser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    stateBrowser.screenshot(`${artifactsDir}/revised-github-${state}-${theme}.png`, { viewport: true })
+  } finally { stateBrowser.close() }
+}, 90_000)
+
+it.each(['ready', 'unknown', 'conflicting'].flatMap(state => [1440, 402].flatMap(width => ['light', 'dark'].map(theme => ({ state, width, theme })))))('preserves PR $state review at $width / $theme', async ({ state, width, theme }) => {
+  const gh = await api<GithubPayload>('/api/v1/github')
+  const item = gh.prs[0]!
+  const stateBrowser = AgentBrowser.open(`${sessionId}-pr-${state}-${width}-${theme}`)
+  try {
+    stateBrowser.setViewport(width, 1000)
+    stateBrowser.goto(`${baseUrl}${scoped('/')}`)
+    stateBrowser.waitForFunction(`document.querySelector('[data-slot="main"]') !== null`)
+    const mergeState = {
+      available: true,
+      mergeState: {
+        number: item.number, title: item.title, url: `https://github.com/mock/repo/pull/${item.number}`,
+        state: 'open', isDraft: false, headRef: 'fixture/review', baseRef: 'main', headSha: '0123456789abcdef0123456789abcdef01234567',
+        mergeable: state === 'conflicting' ? 'conflicting' : 'mergeable', reviewDecision: state === 'ready' ? 'approved' : 'unknown',
+        checks: [{ name: 'fixture-check', state: 'passing', required: state === 'unknown' ? null : true }],
+        methods: ['squash'], defaultMethod: 'squash', eligibility: state === 'ready' ? 'ready' : state === 'unknown' ? 'unknown' : 'blocked',
+        blockers: [], canMerge: state === 'ready', canOverride: state === 'unknown',
+      },
+    }
+    stateBrowser.evaluate(`(() => {
+      const nativeFetch = window.fetch; window.__mergePosts = 0;
+      window.fetch = (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+        if (url.includes('/merge-state')) return Promise.resolve(new Response(JSON.stringify(${JSON.stringify(mergeState)}), {headers:{'content-type':'application/json'}}));
+        if (url.includes('/merge') && init?.method === 'POST') { window.__mergePosts++; throw new Error('Fixture PRs must never merge'); }
+        return nativeFetch(input, init);
+      };
+      history.pushState(null, '', ${JSON.stringify(scoped(`/github/prs/${item.number}`))}); dispatchEvent(new PopStateEvent('popstate'));
+    })()`)
+    stateBrowser.waitForFunction(`document.querySelector('[data-slot="gh-merge-box"]') !== null`)
+    stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; document.querySelector('[data-slot="gh-merge-box"]').scrollIntoView({block:'center'}); new Promise(resolve => setTimeout(resolve, 250))`)
+    expect(stateBrowser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
+    expect(stateBrowser.text('[data-slot="gh-merge-box"]')).toContain(state === 'ready' ? 'Ready to merge' : state === 'unknown' ? 'Requirements unknown' : 'Conflicts must be resolved')
+    if (state === 'unknown') {
+      expect(stateBrowser.evaluate(`document.querySelector('[data-slot="gh-merge-box"] input[type="checkbox"]').checked`)).toBe(false)
+      expect(stateBrowser.evaluate(`[...document.querySelectorAll('[data-slot="gh-merge-box"] button')].find(el => el.textContent === 'Squash and merge').disabled`)).toBe(true)
+    }
+    stateBrowser.screenshot(`${artifactsDir}/revised-pr-${state}-${width}-${theme}.png`, { viewport: true })
+    if (state === 'ready') {
+      stateBrowser.evaluate(`[...document.querySelectorAll('[data-slot="gh-merge-box"] button')].find(el => el.textContent === 'Squash and merge').click()`)
+      stateBrowser.waitForFunction(`document.querySelector('[data-slot="gh-merge-confirm"]') !== null`)
+      expect(stateBrowser.text('[data-slot="gh-merge-confirm"]')).toContain('exact reviewed head')
+      stateBrowser.screenshot(`${artifactsDir}/revised-pr-confirm-${width}-${theme}.png`, { viewport: true })
+      stateBrowser.press('Escape')
+    }
+    if (state === 'conflicting') {
+      stateBrowser.evaluate(`[...document.querySelectorAll('[data-slot="gh-merge-box"] button')].find(el => el.textContent === 'Run agent on this PR').click()`)
+      expect(stateBrowser.evaluate(`document.activeElement === document.querySelector('[data-slot="gh-custom-prompt"]')`)).toBe(true)
+    }
+    expect(stateBrowser.evaluate('window.__mergePosts')).toBe(0)
+  } finally { stateBrowser.close() }
+}, 90_000)

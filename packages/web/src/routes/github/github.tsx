@@ -1,3 +1,4 @@
+import './github-layout.css'
 import { hashKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeftIcon,
@@ -322,6 +323,7 @@ export function GithubRoute({
   // than a persisted one, exactly like the runner and the model beside it.
   const [engine, setEngine] = useState<EnginePick>({ runner: null, model: null, effort: null, account: null })
   const [githubListWidth, setGithubListWidth] = useState(readStoredGithubListWidth)
+  const [mobileListExpanded, setMobileListExpanded] = useState(false)
   const changeGithubListWidth = (next: number) => {
     const width = clampGithubListWidth(next)
     setGithubListWidth(width)
@@ -592,11 +594,8 @@ export function GithubRoute({
   )
 
   return (
-    // Bounded to the viewport (`h-full min-h-0`) so the PAGE never scrolls — each pane owns its
-    // own scroll (`overflow-y-auto`), so scrolling starts inside the issues/PR list (and the
-    // detail), and the list header stays pinned. `overscroll-contain` keeps a pane's scroll from
-    // chaining out to the shell.
-    <div data-route="github" className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:h-full md:min-h-0 md:p-9">
+    // The list and detail stay in document flow; the shell remains the only page scroller.
+    <div data-route="github" data-pr-detail={view === 'prs' && n !== undefined || undefined} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
         <header data-slot="gh-header" className="flex shrink-0 flex-col gap-[22px]">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
             <h1 className="w-full text-[28px] font-semibold tracking-tight">GitHub</h1>
@@ -605,10 +604,19 @@ export function GithubRoute({
                 {gh.repo}
               </span>
             ) : null}
+
+          </div>
+          <div data-slot="gh-tabs" className="flex min-h-11 flex-wrap items-center gap-3">
+            <TabLink to="/github" active={view === 'issues'} onClick={() => saveGithubView('issues')}>
+              Issues · {countLabel(gh.issues.length)}
+            </TabLink>
+            <TabLink to="/github/prs" active={view === 'prs'} onClick={() => saveGithubView('prs')}>
+              Pull requests · {countLabel(gh.prs.length)}
+            </TabLink>
             {automationsAvailable ? (
               <Link
                 to="/automations/new"
-                className="ml-auto shrink-0 text-[10px] font-medium text-link-foreground hover:underline"
+                className="gh-utility"
               >
                 Set up automations
               </Link>
@@ -619,27 +627,14 @@ export function GithubRoute({
               title="Refresh from GitHub"
               disabled={refresh.isPending}
               onClick={() => refresh.mutate()}
-              // The automations link owns the `ml-auto` that pushes this cluster right; with the
-              // link gated away this button inherits it, so the header does not re-flow.
-              className={cn(
-                'flex shrink-0 items-center gap-1 rounded-full border border-border px-1.5 py-px text-[10px] font-medium text-soft-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-55',
-                !automationsAvailable && 'ml-auto',
-              )}
+              className="gh-utility"
             >
               <RefreshCwIcon
                 aria-hidden="true"
-                className={cn('size-[9px]', refresh.isPending && 'motion-safe:animate-spin')}
+                className={cn('size-3.5', refresh.isPending && 'motion-safe:animate-spin')}
               />
-              {gh.syncedAt ? `synced ${shortAge(gh.syncedAt)} ago` : 'refresh'}
+              Refresh
             </button>
-          </div>
-          <div data-slot="gh-tabs" className="flex min-h-11 items-end gap-6 border-b border-border">
-            <TabLink to="/github" active={view === 'issues'} onClick={() => saveGithubView('issues')}>
-              Issues · {countLabel(gh.issues.length)}
-            </TabLink>
-            <TabLink to="/github/prs" active={view === 'prs'} onClick={() => saveGithubView('prs')}>
-              Pull requests · {countLabel(gh.prs.length)}
-            </TabLink>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="relative min-w-0 basis-full md:flex-1 md:basis-auto">
@@ -666,18 +661,16 @@ export function GithubRoute({
           {view === 'issues' ? <IssueFilters data={{ ...gh, issues: [...gh.issues, ...(searchPayload?.items ?? [])] }} assignees={assigneeFilter} projectId={activeProject}
             onAssigneesChange={setAssigneeFilter} onProjectChange={setProjectFilter} /> : null}
           </div>
-          {filtering ? <button type="button" className="mb-2 min-h-11 min-w-11 rounded-md px-2 text-sm text-foreground hover:bg-muted" onClick={clearFilters}>Clear filters</button> : null}
+          <button type="button" disabled={!filtering} className="self-start min-h-11 rounded-md border border-border bg-card px-4 text-xs disabled:opacity-50" onClick={clearFilters}>Clear filters</button>
+          <p data-slot="gh-synced" className="text-xs text-success">{gh.syncedAt ? `Synced ${shortAge(gh.syncedAt)} ago` : 'Not synced yet'}</p>
         </header>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[22px] md:flex-row">
-      {/* List pane. Below md it IS the page when no item is in the URL, and yields entirely
-          to the detail when one is — the same two-surfaces-one-URL rule the git tabs use. */}
+      <div data-slot="gh-panes" className="flex min-h-0 min-w-0 flex-1 flex-col items-start gap-[22px] md:flex-row">
+      {/* Issue list and detail stack on mobile. A selected PR has a full-width review surface. */}
       <section
         data-slot="gh-list"
+        data-mobile-preview={view === 'issues' && n !== undefined && !mobileListExpanded || undefined}
         style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
-        className={cn(
-          'relative w-full min-h-0 flex-col overflow-y-auto overscroll-contain rounded-lg border border-border bg-card p-3 md:flex md:w-[var(--github-list-width)] md:shrink-0',
-          n === undefined ? 'flex' : 'flex max-md:max-h-64 max-md:shrink-0',
-        )}
+        className="relative flex w-full min-h-0 flex-col rounded-lg border border-border bg-card p-3 md:w-[var(--github-list-width)] md:shrink-0"
       >
 
 
@@ -706,6 +699,18 @@ export function GithubRoute({
             ))}
           </ul>
         )}
+
+        {view === 'issues' && n !== undefined && items.length > 2 ? (
+          <Button
+            variant="outline"
+            className="mt-2 self-start md:hidden"
+            data-slot="gh-expand-list"
+            aria-expanded={mobileListExpanded}
+            onClick={() => setMobileListExpanded(expanded => !expanded)}
+          >
+            {mobileListExpanded ? 'Show fewer issues' : `View all ${items.length} issues`}
+          </Button>
+        ) : null}
 
         {items.length > 0 && searchWanted && emptyState ? (
           <div data-slot="gh-search-status" role="status" className="px-4 py-4 text-sm text-soft-foreground">
@@ -742,7 +747,7 @@ export function GithubRoute({
       <section
         data-slot="gh-detail"
         className={cn(
-          'min-w-0 min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain rounded-lg border border-border bg-card',
+          'w-full min-w-0 min-h-0 flex-1 flex-col rounded-lg border border-border bg-card',
           n === undefined ? 'hidden md:flex' : 'flex',
         )}
       >
@@ -993,6 +998,7 @@ function GithubDetail({
         Back to the list
       </Link>
 
+      <div data-slot="gh-description-card" className={item.kind === 'pr' ? 'rounded-xl border border-border bg-card p-6' : undefined}>
       <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[10.5px] text-soft-foreground">
         <span>#{item.number}</span>·<span>{kindWord}</span>·<span>opened by {item.author}</span>·
         <span>{shortAge(item.createdAt)} ago</span>
@@ -1059,10 +1065,10 @@ function GithubDetail({
 
       <GithubThread item={item} colors={colors} />
 
-      {item.kind === 'pr' ? <GithubMergeBox number={item.number} /> : null}
-
-      {children}
       </>}
+      </div>
+      {item.kind === 'pr' ? <GithubMergeBox number={item.number} /> : null}
+      {children}
     </article>
   )
 }
@@ -1145,7 +1151,7 @@ function GithubMergeBox({ number }: { number: number }) {
         : state.isDraft ? 'Draft'
           : state.mergeable === 'conflicting' ? 'Conflicts must be resolved'
             : state.canMerge ? 'Ready to merge'
-              : 'Merge blocked'
+              : state.eligibility === 'unknown' ? 'Merge blocked · Requirements unknown' : 'Merge blocked'
   const reviewState: MergeRequirementState =
     state.reviewDecision === 'approved' ? 'passing'
       : state.reviewDecision === 'unknown' ? 'unknown'
@@ -1201,6 +1207,11 @@ function GithubMergeBox({ number }: { number: number }) {
             ))}
             {state.blockers.map((blocker) => <li key={blocker.code} className="text-soft-foreground">{blocker.message}</li>)}
           </ul>
+          {state.mergeable === 'conflicting' ? <Button className="mt-4" onClick={event => {
+            const prompt = event.currentTarget.closest('article')?.querySelector<HTMLTextAreaElement>('[data-slot="gh-custom-prompt"]')
+            prompt?.scrollIntoView({ block: 'center' })
+            prompt?.focus({ preventScroll: true })
+          }}>Run agent on this PR</Button> : null}
           {state.canOverride ? (
             <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-md border border-warning/40 bg-warning/5 p-3 text-xs">
               <input
@@ -1214,6 +1225,11 @@ function GithubMergeBox({ number }: { number: number }) {
                 <span className="mt-0.5 block text-soft-foreground">GitHub will allow this only if your permissions can bypass the repository rules.</span>
               </span>
             </label>
+          ) : null}
+          {state.eligibility === 'unknown' ? (
+            <p className="mt-4 text-xs text-muted-foreground">
+              GitHub could not confirm review and branch-protection requirements. Passing checks do not establish merge readiness.
+            </p>
           ) : null}
           {state.state === 'open' && state.methods.length > 0 ? (
             <div className="mt-4 flex flex-col gap-2 sm:flex-row">

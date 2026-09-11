@@ -31,6 +31,7 @@ export interface ContinueAction {
   startsNewConversation: boolean
   /** The runner + model pills — which backend and model the reopened session runs on. */
   pills: ReactNode
+  modelPicker: ReactNode
   /**
    * Reopen the session, starting it on this prompt. An empty draft is the legacy one-click
    * Continue: the engine opens with its own "Continue.". REJECTS with the server's message
@@ -166,7 +167,8 @@ export function useContinueAction(run: ApiRun): ContinueAction {
     reason: continuation.reason,
     providerPending: continuation.providerPending,
     pills: (
-      <div data-slot="follow-up-engine" className="flex flex-wrap items-center gap-1.5 max-md:min-w-0 max-md:max-w-full">
+      <div data-slot="follow-up-engine" className="session-engine-controls">
+        <div className="session-setting"><span>Runner</span>
         {/* Shown when there is a choice to make: more than one runner, or more than one login for
             one of them. A host with neither sees no pill, exactly as before. */}
         {runners.length > 1 || runners.some((id) => hasAccountChoice(accounts, id)) ? (
@@ -189,7 +191,27 @@ export function useContinueAction(run: ApiRun): ContinueAction {
               }
             }}
           />
-        ) : null}
+        ) : <span data-slot="session-runner-value">{runner}</span>}
+        </div>
+        <div className="session-setting"><span>Effort</span>
+        <PickerPill
+          slot="follow-up-effort-pill"
+          ariaLabel="Effort"
+          label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
+          value={effort}
+          readOnly={modelsLocked}
+          disabledHint="Effort selection is locked to native coding-agent settings."
+          onPick={(next) => setPickedEffort(next)}
+          options={effortOptions.map((option) => ({
+            value: option.value,
+            label: option.label,
+            desc: option.desc,
+          }))}
+        />
+        </div>
+      </div>
+    ),
+    modelPicker: (
         <PickerPill
           slot="follow-up-model-pill"
           ariaLabel="Model"
@@ -205,21 +227,6 @@ export function useContinueAction(run: ApiRun): ContinueAction {
           options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
           status={modelCatalogStatus(runner, catalog.data, catalog.isError, catalog.isFetching)}
         />
-        <PickerPill
-          slot="follow-up-effort-pill"
-          ariaLabel="Effort"
-          label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
-          value={effort}
-          readOnly={modelsLocked}
-          disabledHint="Effort selection is locked to native coding-agent settings."
-          onPick={(next) => setPickedEffort(next)}
-          options={effortOptions.map((option) => ({
-            value: option.value,
-            label: option.label,
-            desc: option.desc,
-          }))}
-        />
-      </div>
     ),
     continueWith: (text, images) => mutation.mutateAsync({ text, images }),
   }

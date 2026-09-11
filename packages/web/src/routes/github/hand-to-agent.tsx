@@ -1,3 +1,4 @@
+import './github-layout.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CheckIcon,
@@ -7,7 +8,6 @@ import {
   SparklesIcon,
   WorkflowIcon,
   XIcon,
-  ZapIcon,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Link } from '@/lib/project-router'
@@ -15,6 +15,7 @@ import { Link } from '@/lib/project-router'
 import { createRun, putUiState } from '@/api/client'
 import { queryKeys, useUiState } from '@/api/queries'
 import type { GithubItem, Skill, WorkflowDef } from '@open-mercato/cezar-api-client'
+import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client'
 import { EnginePills, engineRunBody, useResolvedEngine, type EnginePick } from '@/components/engine-pills'
 import { chipClass } from '@/components/picker-pill'
 import { Button } from '@/components/ui/button'
@@ -245,28 +246,70 @@ export function HandToAgent({
 
   return (
     <section data-slot="gh-hand" className="mt-7 rounded-lg border border-border bg-card p-4">
-      <h3 className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[.04em] text-soft-foreground uppercase">
-        <ZapIcon aria-hidden="true" className="size-3.5 text-accent-icon" />
+      <h3 className="text-xl font-medium text-foreground">
         Hand this to the agent
       </h3>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <WorkflowPicker workflows={workflows} value={workflow} onChange={onWorkflowChange} />
-        <SkillsPicker
+      <label className="gh-field"><span>Instructions for the agent</span>
+      <Textarea
+        ref={promptRef}
+        data-slot="gh-custom-prompt"
+        aria-label="Custom prompt"
+        aria-keyshortcuts="Control+Enter Meta+Enter"
+        value={prompt}
+        onChange={(event) => setPrompt(event.target.value)}
+        onKeyDown={submitShortcut}
+        placeholder={`Instructions for the agent… (#${item.number} and its link are always sent)`}
+        className="mt-3 min-h-20 text-[13px]"
+      />
+      </label>
+      <PromptTemplateMenu templates={templates} onInsert={insertPromptTemplate} />
+
+      <div className="gh-handoff-settings">
+        <div className="gh-field"><span>Workflow</span><WorkflowPicker workflows={workflows} value={workflow} onChange={onWorkflowChange} /></div>
+        <div className="gh-field"><span>Skills · select one or more</span><SkillsPicker
           skills={skills}
           skillUsage={uiState.data?.skillUsage}
           selected={validSkills}
           onToggle={toggleSkill}
-        />
+        /></div>
+      {/* Chips and the trigger's count render from `validSkills`, not `selectedSkills`: the run
+          POSTs `validSkills`, so showing a deleted skill here would promise the run a skill it
+          will not use. What the composer shows and what it sends are the same list. */}
+      {validSkills.length > 0 ? (
+        <div data-slot="gh-skill-chips" className="mt-2.5 flex flex-wrap gap-1.5">
+          {validSkills.map((name) => (
+            <button
+              key={name}
+              type="button"
+              data-slot="gh-skill-chip"
+              data-skill={name}
+              onClick={() => toggleSkill(name)}
+              title="Remove this skill"
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-danger/10 hover:text-danger"
+            >
+              {name}
+              <XIcon aria-hidden="true" className="size-3" />
+            </button>
+          ))}
+        </div>
+      ) : null}
+
         {/* `accounts`: this hand-off posts to `/api/v1/runs`, which takes `agentProfile` — so
             the runner pill may offer the agent's logins as rows (spec 2026-07-29-agent-profiles).
             The Inbox card deliberately does not; its endpoint has no such field yet. */}
-        <EnginePills
+        <div className="gh-engine-fields"><EnginePills
           pick={engine}
           onChange={onEngineChange}
           disabled={start.isPending || !resolved.canRun}
           accounts
         />
+        {resolved.runners.length <= 1 && !resolved.accounts.some(a => a.provider === resolved.runner && a.id !== DEFAULT_AGENT_ACCOUNT_ID) ? <div className="gh-fixed-runner"><span>Runner</span>{resolved.runner}</div> : null}
+        </div>
+        <label className="gh-field"><span>Account</span><select aria-label="Account" value={resolved.account ?? resolved.repoAccount?.[resolved.runner] ?? DEFAULT_AGENT_ACCOUNT_ID} disabled={start.isPending || !resolved.canRun} onChange={event => onEngineChange({ ...engine, account: event.target.value })}>
+          {!resolved.accounts.some(a => a.provider === resolved.runner && a.id === DEFAULT_AGENT_ACCOUNT_ID) ? <option value={DEFAULT_AGENT_ACCOUNT_ID}>Default</option> : null}
+          {resolved.accounts.filter(a => a.provider === resolved.runner).map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+        </select></label>
         {!resolved.providerPending && !resolved.canRun ? (
           <span
             data-slot="gh-provider-gate"
@@ -283,42 +326,10 @@ export function HandToAgent({
             </Link>
           </span>
         ) : null}
-        <PromptTemplateMenu templates={templates} onInsert={insertPromptTemplate} />
       </div>
 
-      {/* Chips and the trigger's count render from `validSkills`, not `selectedSkills`: the run
-          POSTs `validSkills`, so showing a deleted skill here would promise the run a skill it
-          will not use. What the composer shows and what it sends are the same list. */}
-      {validSkills.length > 0 ? (
-        <div data-slot="gh-skill-chips" className="mt-2.5 flex flex-wrap gap-1.5">
-          {validSkills.map((name) => (
-            <button
-              key={name}
-              type="button"
-              data-slot="gh-skill-chip"
-              data-skill={name}
-              onClick={() => toggleSkill(name)}
-              title="Remove this skill"
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-px font-mono text-[11px] font-medium text-foreground transition-colors hover:bg-danger/10 hover:text-danger"
-            >
-              {name}
-              <XIcon aria-hidden="true" className="size-3" />
-            </button>
-          ))}
-        </div>
-      ) : null}
 
-      <Textarea
-        ref={promptRef}
-        data-slot="gh-custom-prompt"
-        aria-label="Custom prompt"
-        aria-keyshortcuts="Control+Enter Meta+Enter"
-        value={prompt}
-        onChange={(event) => setPrompt(event.target.value)}
-        onKeyDown={submitShortcut}
-        placeholder={`Instructions for the agent… (#${item.number} and its link are always sent)`}
-        className="mt-3 min-h-20 text-[13px]"
-      />
+
 
       <div className="mt-4 flex flex-wrap items-center gap-2.5">
         <Button

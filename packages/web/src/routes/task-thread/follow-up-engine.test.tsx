@@ -170,7 +170,7 @@ function Harness({ run, draft = '' }: { run: ApiRun; draft?: string }) {
   }
   return (
     <>
-      {action.pills}
+      {action.pills}{action.modelPicker}
       {action.startsNewConversation ? <p>Starts a new agent conversation.</p> : null}
       <button type="button" onClick={() => void action.continueWith(draft, [])}>
         Continue
