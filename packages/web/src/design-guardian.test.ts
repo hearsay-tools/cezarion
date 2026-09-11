@@ -92,7 +92,7 @@ const RULES: Rule[] = [
   {
     name: 'no-fill-accent-as-ink',
     why: 'accent-strong is a fill and border role; readable labels use accent-text and icons use accent-icon',
-    pattern: /\btext-accent-strong(?!-foreground)\b/g,
+    pattern: /(?:\btext-accent-strong(?!-foreground)\b|\btext-\[var\(--accent-strong\)\]|\[color:\s*var\(--accent-strong\)\]|(?<![-\w])color\s*:\s*['"]?var\(--accent-strong\))/g,
     applies: styleSources,
   },
   {
@@ -296,6 +296,20 @@ describe('design guardian', () => {
     expect(input).toContain('h-11 w-full')
     expect(select).toContain('data-[size=default]:h-11')
     expect(composer).toContain('border-[var(--composer-border)]')
+  })
+
+  it('recognizes every direct fill-accent ink spelling the cockpit supports', () => {
+    const rule = RULES.find(({ name }) => name === 'no-fill-accent-as-ink')!
+    const pattern = new RegExp(rule.pattern.source)
+    for (const source of [
+      'text-accent-strong',
+      'text-[var(--accent-strong)]',
+      '[color:var(--accent-strong)]',
+      "style={{ color: 'var(--accent-strong)' }}",
+      'color: var(--accent-strong);',
+    ]) {
+      expect(source, source).toMatch(pattern)
+    }
   })
 
   for (const rule of RULES) {

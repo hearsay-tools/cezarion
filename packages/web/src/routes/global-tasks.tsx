@@ -891,7 +891,7 @@ function ReadToggle({
           onClick={() => onSetRead(task, unread)}
           className={cn(
             'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-wait disabled:opacity-50',
-            unread ? 'text-accent-text' : 'text-soft-foreground',
+            unread ? 'text-accent-icon' : 'text-soft-foreground',
           )}
         >
           <Icon className="size-3.5" aria-hidden="true" />
