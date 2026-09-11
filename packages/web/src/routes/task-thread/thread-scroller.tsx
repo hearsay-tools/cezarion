@@ -350,6 +350,11 @@ export function useThreadScroll(
         }
       })
       observer.observe(content)
+      const route = content.closest<HTMLElement>('[data-route="task-thread"]')
+      const header = route?.querySelector<HTMLElement>('[data-slot="run-header"]')
+      const dock = route?.querySelector<HTMLElement>('[data-slot="thread-dock"]')
+      if (header) observer.observe(header)
+      if (dock) observer.observe(dock)
     }
 
     return () => {

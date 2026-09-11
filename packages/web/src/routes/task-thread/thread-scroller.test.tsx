@@ -68,6 +68,34 @@ describe('ThreadRows — the threshold-switched renderer', () => {
 })
 
 describe('useThreadScroll — outside a shell scroller (jsdom, tests, storybook-ish hosts)', () => {
+  it('observes transcript, header, and dock growth that can move the live tail', () => {
+    const observed: Element[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      observe(element: Element) { observed.push(element) }
+      disconnect() {}
+    })
+    const Harness = () => {
+      const controls = useThreadScroll('r1')
+      return (
+        <main data-slot="main">
+          <section data-route="task-thread">
+            <header data-slot="run-header" />
+            <div data-slot="thread-rows" ref={controls.attachContent} />
+            <footer data-slot="thread-dock" />
+          </section>
+        </main>
+      )
+    }
+
+    render(<Harness />)
+
+    expect(observed.map((element) => element.getAttribute('data-slot'))).toEqual([
+      'thread-rows',
+      'run-header',
+      'thread-dock',
+    ])
+  })
+
   it('attaches without a [data-slot=main] ancestor and stays inert', () => {
     const { result } = renderHook(() => useThreadScroll('r1'))
     const el = document.createElement('div')
