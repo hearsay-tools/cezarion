@@ -138,7 +138,7 @@ describe('the Files tab route', () => {
     // Pin and cap both read the one var the parent declares, so they cannot drift apart.
     expect(pane.parentElement?.className).toContain('[--diff-sticky-top:1rem]')
     expect(pane.className).toContain('md:top-[var(--diff-sticky-top)]')
-    expect(pane.className).toContain('md:max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)]')
+    expect(pane.className).toContain('md:max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)]')
     expect(pane.className).toContain('md:overflow-y-auto')
     expect(pane.className).toContain('md:overscroll-contain')
     expect(pane.className.split(' ')).not.toContain('overflow-y-auto')

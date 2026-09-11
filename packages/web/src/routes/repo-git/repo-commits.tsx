@@ -111,7 +111,7 @@ function CommitDiffView({ sha }: { sha: string }) {
               subtitle="This commit carries no diff of its own — a merge commit's changes live on the commits it merged."
             />
           ) : (
-            <div className="px-4 py-4 [--diff-sticky-top:7rem] md:px-6">
+            <div className="px-4 py-4 [--diff-sticky-top:1rem] md:px-6">
               <Diff files={commit.data.files} mode={effectiveMode} wrap={effectiveWrap} className="min-w-0" />
             </div>
           )}

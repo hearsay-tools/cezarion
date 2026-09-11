@@ -187,11 +187,11 @@ describe('the Changes tab route', () => {
     await waitFor(() => expect(document.querySelector('[data-slot="changes-tree-pane"]')).not.toBeNull())
     const pane = document.querySelector('[data-slot="changes-tree-pane"]') as HTMLElement
     // Bounded by the room left under the sticky chrome — an unbounded pane cannot scroll at all.
-    expect(pane.className).toContain('max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)]')
+    expect(pane.className).toContain('max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)]')
     expect(pane.className).toContain('overflow-y-auto')
     // …and a wheel that bottoms out inside the tree must not chain into the diff.
     expect(pane.className).toContain('overscroll-contain')
-    // The cap is measured from the offset the pane is actually pinned at (`top-40` = 10rem).
+    // The cap deducts the shared 64px breadcrumb and the pane’s main-relative 1rem offset.
     expect(pane.className).toContain('sticky top-4')
     expect(pane.parentElement?.className).toContain('[--diff-sticky-top:0px] md:[--diff-sticky-top:1rem]')
   })

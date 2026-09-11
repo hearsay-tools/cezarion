@@ -81,7 +81,7 @@ function FilesView({ run }: { run: ApiRun }) {
               the two cannot drift when this tab's chrome height changes. */}
           <aside
             data-slot="files-tree-pane"
-            className="w-full shrink-0 rounded-xl border border-border bg-card p-3.5 md:sticky md:top-[var(--diff-sticky-top)] md:max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)] md:w-60 md:overflow-y-auto md:overscroll-contain lg:w-72"
+            className="w-full shrink-0 rounded-xl border border-border bg-card p-3.5 md:sticky md:top-[var(--diff-sticky-top)] md:max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] md:w-60 md:overflow-y-auto md:overscroll-contain lg:w-72"
           >
             <h2 className="mb-3 text-xs font-semibold">Worktree files</h2>
             <FilesTree runId={run.id} selected={selected} onSelect={setSelected} />
