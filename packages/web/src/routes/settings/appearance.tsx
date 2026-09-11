@@ -75,7 +75,7 @@ function Segmented<V extends string>({
             data-value={option.value}
             onClick={() => onChange(option.value)}
             className={cn(
-              'flex items-center gap-2 rounded-sm px-3 py-1.5 text-[13px] font-medium transition-colors',
+              'flex min-h-11 items-center gap-2 rounded-sm px-3 py-1.5 text-[13px] font-medium transition-colors',
               checked
                 ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:text-foreground',
@@ -116,7 +116,7 @@ export function AppearanceSection() {
   return (
     <div
       data-slot="appearance-section"
-      className="mx-auto flex w-full max-w-2xl flex-col gap-7 p-4 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-6 md:pb-6"
+      className="flex w-full flex-col gap-7 rounded-lg border border-border bg-card p-5"
     >
       <Field title="Theme" hint="System follows your OS preference. Applies to this browser.">
         <Segmented slot="appearance-theme" label="Theme" value={theme} options={THEME_OPTIONS} onChange={setTheme} />

@@ -388,7 +388,8 @@ describe('the GitHub tab lists', () => {
     stubFetch()
     renderAt('/github/issues/142')
     await screen.findByRole('heading', { name: 'GitHub' })
-    expect(ghList().className).toContain('hidden')
+    expect(ghList().className).toContain('max-md:max-h-64')
+    expect(ghList().className).not.toContain('hidden')
     expect(document.querySelector('[data-slot="gh-detail"]')?.className).toContain('flex')
   })
 

@@ -596,20 +596,10 @@ export function GithubRoute({
     // own scroll (`overflow-y-auto`), so scrolling starts inside the issues/PR list (and the
     // detail), and the list header stays pinned. `overscroll-contain` keeps a pane's scroll from
     // chaining out to the shell.
-    <div data-route="github" className="flex h-full min-h-0 items-stretch">
-      {/* List pane. Below md it IS the page when no item is in the URL, and yields entirely
-          to the detail when one is — the same two-surfaces-one-URL rule the git tabs use. */}
-      <section
-        data-slot="gh-list"
-        style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
-        className={cn(
-          'relative w-full min-h-0 flex-col overflow-y-auto overscroll-contain border-border md:flex md:w-[var(--github-list-width)] md:shrink-0 md:border-r',
-          n === undefined ? 'flex' : 'hidden',
-        )}
-      >
-        <header data-slot="gh-header" className="sticky top-0 z-10 border-b border-border bg-background/95 px-4 pt-3 backdrop-blur">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <h1 className="sr-only text-lg font-semibold md:not-sr-only">GitHub</h1>
+    <div data-route="github" className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:h-full md:min-h-0 md:p-9">
+        <header data-slot="gh-header" className="flex shrink-0 flex-col gap-[22px]">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            <h1 className="w-full text-[28px] font-semibold tracking-tight">GitHub</h1>
             {gh.repo ? (
               <span data-slot="gh-repo" className="min-w-0 truncate font-mono text-[11px] text-soft-foreground">
                 {gh.repo}
@@ -643,7 +633,7 @@ export function GithubRoute({
               {gh.syncedAt ? `synced ${shortAge(gh.syncedAt)} ago` : 'refresh'}
             </button>
           </div>
-          <div data-slot="gh-tabs" className="mt-2.5 flex items-end gap-1">
+          <div data-slot="gh-tabs" className="flex min-h-11 items-end gap-6 border-b border-border">
             <TabLink to="/github" active={view === 'issues'} onClick={() => saveGithubView('issues')}>
               Issues · {countLabel(gh.issues.length)}
             </TabLink>
@@ -651,8 +641,8 @@ export function GithubRoute({
               Pull requests · {countLabel(gh.prs.length)}
             </TabLink>
           </div>
-          <div className="mt-2.5 flex items-center gap-2 pb-3">
-            <div className="relative min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="relative min-w-0 basis-full md:flex-1 md:basis-auto">
               <SearchIcon
                 aria-hidden="true"
                 className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-soft-foreground"
@@ -673,11 +663,23 @@ export function GithubRoute({
               selected={labelFilter}
               onChange={setLabelFilter}
             />
-          </div>
           {view === 'issues' ? <IssueFilters data={{ ...gh, issues: [...gh.issues, ...(searchPayload?.items ?? [])] }} assignees={assigneeFilter} projectId={activeProject}
             onAssigneesChange={setAssigneeFilter} onProjectChange={setProjectFilter} /> : null}
+          </div>
           {filtering ? <button type="button" className="mb-2 min-h-11 min-w-11 rounded-md px-2 text-sm text-foreground hover:bg-muted" onClick={clearFilters}>Clear filters</button> : null}
         </header>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[22px] md:flex-row">
+      {/* List pane. Below md it IS the page when no item is in the URL, and yields entirely
+          to the detail when one is — the same two-surfaces-one-URL rule the git tabs use. */}
+      <section
+        data-slot="gh-list"
+        style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
+        className={cn(
+          'relative w-full min-h-0 flex-col overflow-y-auto overscroll-contain rounded-lg border border-border bg-card p-3 md:flex md:w-[var(--github-list-width)] md:shrink-0',
+          n === undefined ? 'flex' : 'flex max-md:max-h-64 max-md:shrink-0',
+        )}
+      >
+
 
         {items.length === 0 ? (
           // Nothing in the OPEN list matched. Rather than the old flat "no match" — which was a
@@ -690,7 +692,7 @@ export function GithubRoute({
             </div>
           )
         ) : (
-          <ul data-slot="gh-rows" className="flex flex-col gap-0.5 px-2 py-2">
+          <ul data-slot="gh-rows" className="flex flex-col gap-1">
             {items.map((item) => (
               <GithubRow
                 key={item.url}
@@ -740,7 +742,7 @@ export function GithubRoute({
       <section
         data-slot="gh-detail"
         className={cn(
-          'min-w-0 min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain',
+          'min-w-0 min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain rounded-lg border border-border bg-card',
           n === undefined ? 'hidden md:flex' : 'flex',
         )}
       >
@@ -784,6 +786,7 @@ export function GithubRoute({
           />
         )}
       </section>
+      </div>
     </div>
   )
 }
@@ -847,8 +850,8 @@ function GithubRow({
         aria-current={active ? 'page' : undefined}
         title="Drag into the composer to prefill a task"
         className={cn(
-          'flex flex-col gap-1 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
-          active && 'bg-muted',
+          'flex flex-col gap-2 rounded-md px-3 py-4 transition-colors hover:bg-muted',
+          active && 'bg-accent-strong/10 text-accent-text',
         )}
       >
         <span className="flex min-w-0 items-start gap-2 md:items-center">

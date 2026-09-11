@@ -848,6 +848,7 @@ describe('global tasks page', () => {
       renderPage()
       await screen.findByText('Add checkout endpoint')
 
+      fireEvent.click(screen.getByRole('button', { name: 'Show resources for Add checkout endpoint' }))
       expect(screen.getByText('$0.31')).toBeTruthy()
       const cpu = document.querySelector('[data-usage="cpu"]')!
       expect(cpu.textContent).toBe('84%')
@@ -864,10 +865,12 @@ describe('global tasks page', () => {
       renderPage()
       await screen.findByText('Bump the runner')
 
+      fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
       const mem = document.querySelector('[data-usage="mem"]')!
       expect(mem.textContent).toBe('peak 900 MB')
       expect(mem.getAttribute('data-usage-kind')).toBe('peak')
       // CPU has no persisted peak, so it says nothing rather than inventing one.
+      if (screen.queryByRole('button', { name: 'Show resources for Bump the runner' })) fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
       expect(document.querySelector('[data-usage="cpu"]')!.getAttribute('data-usage-kind')).toBe(
         'none',
       )
@@ -886,6 +889,7 @@ describe('global tasks page', () => {
       renderPage()
       await screen.findByText('Bump the runner')
 
+      if (screen.queryByRole('button', { name: 'Show resources for Bump the runner' })) fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
       expect(document.querySelector('[data-usage="cpu"]')!.getAttribute('data-usage-kind')).toBe(
         'none',
       )
@@ -1108,4 +1112,12 @@ it('shows a parked parent human question from the slim workspace index', async (
   const row = document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')
   expect(row?.textContent).toContain('needs you')
   expect(row?.textContent).not.toContain('waiting on workers')
+})
+
+
+it('starts a new task in the boot project from the workspace toolbar', async () => {
+  stubFetch()
+  renderPage()
+  await screen.findByText('Add checkout endpoint')
+  expect(screen.getByRole('link', { name: 'New task' }).getAttribute('href')).toBe('/p/api/new')
 })

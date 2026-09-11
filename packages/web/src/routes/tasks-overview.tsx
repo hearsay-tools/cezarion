@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveIcon,
   CheckCheckIcon,
+  ChevronDownIcon,
   ChevronsLeftIcon,
   ChevronsRightIcon,
   Clock3Icon,
@@ -131,6 +132,7 @@ export function TasksOverview({
   columnsPending?: boolean
 }) {
   const [query, setQuery] = React.useState('')
+  const [detailedTable, setDetailedTable] = React.useState(false)
   const headerRef = React.useRef<HTMLElement>(null)
   const archiveSelected = React.useRef(false)
   const [actionsOpen, setActionsOpen] = React.useState(false)
@@ -161,12 +163,12 @@ export function TasksOverview({
   const pinToggle = view === 'archived' ? undefined : onTogglePin
 
   return (
-    <div data-route="tasks" className="flex min-h-full flex-col">
+    <div data-route="tasks" className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       {/* One set of search/view controls across breakpoints keeps query and selection intact.
           Mobile places search above the list filters; the shell already supplies its title. */}
-      <header ref={headerRef} className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-background p-3 md:h-[72px] md:flex-nowrap md:gap-3 md:px-11 md:py-0">
-        <h1 className="hidden text-base font-semibold md:block">Tasks</h1>
-        <div className="inline-flex gap-0.5 rounded-md bg-muted p-[3px]">
+      <header ref={headerRef} className="flex shrink-0 flex-col gap-[22px]">
+        <div className="flex flex-col gap-2"><h1 className="text-[28px] font-semibold tracking-tight">Project tasks</h1><p className="text-[13px] text-muted-foreground">Review runs, pull requests and resource usage.</p></div>
+        <div className="flex gap-6 border-b border-border">
           <OverviewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
             Active
           </OverviewTab>
@@ -174,7 +176,7 @@ export function TasksOverview({
             Archived
           </OverviewTab>
         </div>
-        <div className="flex-1" />
+        <div data-slot="tasks-toolbar" className="flex flex-wrap items-center gap-2.5">
         {/* Count-gated, like the broom beside it: offered only while there is unread history to
             clear (#unread-done-items). Archived runs are never unread, so this only ever lights
             on the Active tab in practice — no need to also gate on `view`. */}
@@ -247,7 +249,7 @@ export function TasksOverview({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        <div className="relative order-first w-full md:order-none md:w-60">
+        <div className="relative order-first w-full md:w-auto md:flex-1">
           <SearchIcon
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-soft-foreground"
             aria-hidden="true"
@@ -258,20 +260,25 @@ export function TasksOverview({
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search tasks…"
             aria-label="Search tasks"
-            className="h-9 w-full rounded-md border border-input bg-card pr-3 pl-8 text-[13px] text-foreground outline-none placeholder:text-soft-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="h-11 w-full rounded-md border border-input bg-card pr-3 pl-8 text-[13px] text-foreground outline-none placeholder:text-soft-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           />
+        </div>
+        <Button variant="outline" className="hidden min-h-11 md:inline-flex" aria-pressed={detailedTable} onClick={() => setDetailedTable((value) => !value)}>Resource columns</Button>
+        <Button asChild className="hidden min-h-11 md:inline-flex"><Link to="/new"><PlusIcon aria-hidden="true" />New task</Link></Button>
         </div>
       </header>
 
-      <div className="flex flex-1 flex-col p-3 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-5 md:pb-5">
+      <div className="flex min-w-0 flex-1 flex-col">
         {runs === undefined ? null : visible.length === 0 ? (
           <TasksEmptyState view={view} query={query} />
         ) : (
           <>
-            {/* ≥md: the table. */}
+            {!detailedTable ? <SummaryTasksTable runs={visible} positions={positions} onRename={onRename} onTogglePin={pinToggle} now={now} showTokens={showTokens} showCost={showCost} /> : null}
+            {/* The detailed table retains every saved column preference. */}
             <div
               data-slot="tasks-table"
-              className="hidden overflow-x-auto rounded-lg border border-border bg-card shadow-xs md:block"
+              hidden={!detailedTable}
+              className={cn("hidden overflow-x-auto rounded-lg border border-border bg-card p-5", detailedTable && "md:block")}
             >
               <TooltipProvider>
                 <table className="w-full table-fixed border-collapse">
@@ -320,7 +327,7 @@ export function TasksOverview({
             </div>
 
             {/* <md: the same runs as stacked cards. */}
-            <div data-slot="task-cards" className="flex flex-col gap-2.5 md:hidden">
+            <div data-slot="task-cards" className="flex flex-col rounded-lg border border-border bg-card p-5 md:hidden">
               {visible.map((run) => (
                 <TaskCard
                   key={run.id}
@@ -418,6 +425,65 @@ function TasksEmptyState({ view, query }: { view: ListView; query: string }) {
   )
 }
 
+/** Frame 4: five scan columns, with resources disclosed per task. The optional detailed table
+ * above still owns workspace column preferences, so switching presentation never rewrites them. */
+function SummaryTasksTable({ runs, positions, onRename, onTogglePin, now, showTokens, showCost }: {
+  runs: RunRecord[]
+  positions: Map<string, number>
+  onRename: (id: string, title: string) => void
+  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  now: number
+  showTokens: boolean
+  showCost: boolean
+}) {
+  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set())
+  return <div data-slot="tasks-summary" className="hidden rounded-lg border border-border bg-card p-5 md:block">
+    <table className="w-full table-fixed border-collapse">
+      <colgroup><col /><col className="w-[13%]" /><col className="w-[11%]" /><col className="w-[14%]" /><col className="w-[8%]" /></colgroup>
+      <thead><tr>{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <th key={label} className="h-8 border-b border-border text-left text-[10px] font-medium uppercase text-muted-foreground">{label}</th>)}</tr></thead>
+      <tbody>{runs.map((run) => {
+        const attention = deriveAttention(run)
+        const scheduled = scheduledResume(run)
+        const reference = taskReference(run)
+        const open = expanded.has(run.id)
+        const detailId = `task-resources-${run.id}`
+        return <React.Fragment key={run.id}>
+          <tr data-slot="task-summary-row" className="group/row border-b border-border last:border-0">
+            <td className="py-5 pr-4 align-top">
+              <TitleCell run={run} to={`/tasks/${run.id}`} onRename={onRename} onTogglePin={onTogglePin} />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Pill dot={attention.tone} pulse={attention.pulse}>{attention.label}{scheduled ? ` ${scheduled.label}` : ''}</Pill>
+                {run.status === 'queued' ? <span className="text-xs text-muted-foreground">#{positions.get(run.id)} in queue</span> : null}
+                <button type="button" aria-label={`${open ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} aria-expanded={open} aria-controls={detailId} onClick={() => setExpanded((current) => { const next = new Set(current); if (open) next.delete(run.id); else next.add(run.id); return next })} className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
+                  Resources <ChevronDownIcon className={cn('size-3', open && 'rotate-180')} aria-hidden="true" />
+                </button>
+              </div>
+            </td>
+            <td className="truncate pr-3 text-xs text-muted-foreground" title={workflowLabel(run)}>{workflowLabel(run)}</td>
+            <td className="pr-2 text-xs">{run.diffStat ? <DiffStatLabel stat={run.diffStat} compact /> : <Dash />}</td>
+            <td className="pr-2">{reference ? <TaskReferenceChip run={run} reference={reference} compact /> : <Dash />}</td>
+            <td className="text-xs text-muted-foreground">{shortAge(run.startedAt ?? run.createdAt, now)}</td>
+          </tr>
+          {open ? <tr><td colSpan={5} className="border-b border-border pb-5"><div id={detailId} className="rounded-md bg-muted/50 p-4"><TaskResourceDetails run={run} showTokens={showTokens} showCost={showCost} /></div></td></tr> : null}
+        </React.Fragment>
+      })}</tbody>
+    </table>
+    <p className="mt-5 text-[11px] text-muted-foreground">Expand a task’s resources for details. Resource columns shows the full table and your saved column choices.</p>
+  </div>
+}
+
+function TaskResourceDetails({ run, showTokens, showCost }: { run: RunRecord; showTokens: boolean; showCost: boolean }) {
+  const sample = useRunUsage(run.id)
+  const usage = usageCells(run, sample)
+  return <dl className="grid grid-cols-2 gap-4 text-xs md:grid-cols-4">
+    {showTokens ? <div><dt className="text-muted-foreground">Tokens in / out</dt><dd className="mt-1"><DirectionalUsage inputTokens={run.inputTokens} outputTokens={run.outputTokens} omitWhenUnknown={false} /></dd></div> : null}
+    {showCost ? <div><dt className="text-muted-foreground">Cost</dt><dd className="mt-1">{formatCost(run.costUsd) || '—'}</dd></div> : null}
+    <div><dt className="text-muted-foreground">CPU</dt><dd className="mt-1" title={usage.cpu.title}>{usage.cpu.text || '—'}</dd></div>
+    <div><dt className="text-muted-foreground">Memory</dt><dd className="mt-1" title={usage.mem.title}>{usage.mem.text || '—'}</dd></div>
+    {run.branch ? <div className="col-span-2"><dt className="text-muted-foreground">Branch</dt><dd className="mt-1 break-all">{run.branch}</dd></div> : null}
+  </dl>
+}
+
 function OverviewTab({
   view,
   current,
@@ -442,8 +508,8 @@ function OverviewTab({
       aria-pressed={isActive}
       onClick={() => onSelect(view)}
       className={cn(
-        'flex h-7 items-center justify-center gap-1.5 rounded-[7px] px-3 text-[12.5px] font-medium text-muted-foreground',
-        isActive && 'bg-card font-semibold text-foreground shadow-xs'
+        'flex min-h-11 items-center justify-center gap-1.5 border-b-2 border-transparent text-[12.5px] font-medium text-muted-foreground',
+        isActive && 'border-accent-strong font-semibold text-accent-text'
       )}
     >
       {children}
@@ -560,7 +626,7 @@ function TaskColumnIconView({ icon }: { icon?: TaskColumnIcon }) {
   }
 }
 
-const TD_BASE = 'h-11 border-b border-border px-2.5 whitespace-nowrap first:pl-4 last:pr-4'
+const TD_BASE = 'h-[88px] border-b border-border px-2.5 whitespace-nowrap first:pl-4 last:pr-4'
 
 /**
  * One run, one row.
@@ -949,9 +1015,9 @@ function TaskCard({
         if ((event.target as Element).closest('a, button')) return
         navigate(to)
       }}
-      className="cursor-pointer rounded-lg border border-border bg-card px-3.5 py-3 shadow-xs"
+      className="cursor-pointer border-b border-border py-5 first:pt-0 last:border-0 last:pb-0"
     >
-      <div className="flex items-start gap-2.5">
+      <div className="flex flex-wrap items-start gap-2.5">
         <Pill dot={attention.tone} pulse={attention.pulse} className="mt-px shrink-0" title={scheduled?.title}>
           {attention.label}
           {scheduled ? <span className="tabular-nums">{scheduled.label}</span> : null}
@@ -959,7 +1025,7 @@ function TaskCard({
         <Link
           to={to}
           className={cn(
-            'min-w-0 flex-1 rounded-sm text-[13.5px] leading-[1.35] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
+            'order-first w-full min-w-0 rounded-sm text-[13.5px] leading-[1.35] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
             unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
           )}
         >

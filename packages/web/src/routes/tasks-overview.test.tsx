@@ -40,7 +40,7 @@ function LocationProbe() {
   return <output data-testid="location">{pathname}</output>
 }
 
-function renderOverview(props: Partial<ComponentProps<typeof TasksOverview>> = {}) {
+function renderOverview(props: Partial<ComponentProps<typeof TasksOverview>> = {}, detailed = true) {
   const onViewChange = props.onViewChange ?? vi.fn()
   const onArchiveFinished = props.onArchiveFinished ?? vi.fn()
   const onMarkAllRead = props.onMarkAllRead ?? vi.fn()
@@ -70,6 +70,7 @@ function renderOverview(props: Partial<ComponentProps<typeof TasksOverview>> = {
       </Routes>
     </MemoryRouter>
   )
+  if (detailed) fireEvent.click(screen.getByRole("button", { name: "Resource columns" }))
   return { ...utils, onViewChange, onArchiveFinished, onMarkAllRead, onRename }
 }
 
@@ -899,7 +900,7 @@ describe('TasksOverview — empty and loading states', () => {
     expect(document.querySelector('[data-slot="tasks-empty"]')).toBeNull()
     expect(document.querySelector('[data-slot="tasks-table"]')).toBeNull()
     // The header is still there: the surface exists, only its data is pending.
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Tasks')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Project tasks')
   })
 
   it('celebrates no-tasks-yet: primary tone, the twinkle backdrop, a New-task action', () => {
@@ -1190,6 +1191,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
     const restore = await screen.findByRole('button', { name: 'Expand Branch column', pressed: false })
     restore.focus()
     fireEvent.click(restore)
@@ -1220,6 +1222,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
     expect(await screen.findByRole('button', { name: 'Fold Branch column', pressed: true })).not.toBeNull()
   })
 
@@ -1256,6 +1259,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
     renderApp([run({ id: 'rn1', title: 'Old name', status: 'done' })])
     await waitFor(() => expect(tableRow('rn1')).not.toBeNull())
 
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
     fireEvent.click(within(tableRow('rn1') as HTMLElement).getByRole('button', { name: 'Rename task' }))
     const input = within(tableRow('rn1') as HTMLElement).getByLabelText('Task title')
     fireEvent.change(input, { target: { value: 'New name' } })
@@ -1281,4 +1285,31 @@ it('identifies owned worker rows without nested links or changing ordinary title
     expect(element?.querySelector('a a')).toBeNull()
   }
   expect(screen.getAllByRole('link', { name: /Ordinary/ }).length).toBeGreaterThan(0)
+})
+
+
+describe('design frame 4 task summary', () => {
+  it('starts with five summary columns and reveals live resource facts without navigation', () => {
+    renderOverview({ runs: [run({ id: 'summary', title: 'Review layout', inputTokens: 123, outputTokens: 45, costUsd: 0.2, peakRssBytes: 1024 ** 3 })] }, false)
+    const summary = document.querySelector('[data-slot="tasks-summary"]') as HTMLElement
+    expect([...summary.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Task', 'Workflow', 'Changes', 'Pull request', 'Started'])
+    expect(document.querySelector('[data-slot="tasks-table"]')?.hasAttribute('hidden')).toBe(true)
+    const toggle = within(summary).getByRole('button', { name: 'Show resources for Review layout' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(within(summary).getByText('Tokens in / out')).toBeTruthy()
+    expect(within(summary).getByText('Memory')).toBeTruthy()
+    expect(location()).toBe('/')
+    fireEvent.click(toggle)
+    expect(within(summary).queryByText('Memory')).toBeNull()
+  })
+  it('withholds capability-hidden tokens and cost in expanded resources', () => {
+    renderOverview({ runs: [run({ title: 'Private metrics' })], showTokens: false, showCost: false }, false)
+    fireEvent.click(screen.getByRole('button', { name: 'Show resources for Private metrics' }))
+    const summary = document.querySelector('[data-slot="tasks-summary"]') as HTMLElement
+    expect(within(summary).queryByText('Tokens in / out')).toBeNull()
+    expect(within(summary).queryByText('Cost')).toBeNull()
+    expect(within(summary).getByText('CPU')).toBeTruthy()
+  })
 })

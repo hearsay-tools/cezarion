@@ -195,7 +195,7 @@ describe('pageTitleContext', () => {
  *  `/p/:projectId` prefix (multi-project spec, step 3.2). These paths are pasteable links;
  *  changing one breaks a teammate's bookmark, so the map is asserted URL-by-URL. */
 const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
-  ['/', 'tasks', 'Tasks'],
+  ['/', 'tasks', 'Project tasks'],
   // The real full-screen composer (R4 Step 1.1): the hero title is the page heading.
   ['/new', 'new', 'What should the agent work on?'],
   // The real thread view (Step R3.1): with fetch never answering it is honestly loading.
@@ -225,7 +225,7 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
   ['/skills', 'skills', 'Skills'],
   // Project settings only (step 3.5) — appearance/notifications/resources/projects moved to
   // the unscoped `/settings/global/*` area, covered in its own describe below.
-  ['/settings', 'settings', 'Settings'],
+  ['/settings', 'settings', 'Project settings'],
   ['/settings/agents', 'settings-agents', 'Agents'],
   ['/settings/agent-config', 'settings-agent-config', 'Agent config'],
   ['/settings/worktrees', 'settings-worktrees', 'Worktrees'],

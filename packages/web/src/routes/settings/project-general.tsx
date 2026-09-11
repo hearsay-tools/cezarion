@@ -80,7 +80,9 @@ export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilit
   const managesRegistry = capabilities?.singleProject !== true
 
   return (
-    <div data-slot="project-general" className="mx-auto flex w-full max-w-2xl flex-col gap-7">
+    <div data-slot="project-general" className="flex w-full flex-col gap-5">
+      <section className="flex flex-col gap-5 rounded-lg border border-border bg-card p-5 [&_select]:min-h-11 [&_select]:w-full">
+      <h2 className="text-lg font-semibold">General</h2>
       <ProjectFolderField />
       <ProjectFacts project={project} canRemove={managesRegistry} />
       {managesRegistry ? (
@@ -101,9 +103,11 @@ export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilit
               <p className="text-[13px] text-soft-foreground">Loading the workspace limit…</p>
             )}
           </SettingsField>
-          <RemoveProject project={project} bootProject={registry.bootProject} />
+
         </>
       ) : null}
+      </section>
+      {managesRegistry ? <section className="rounded-lg border border-border bg-card p-5"><RemoveProject project={project} bootProject={registry.bootProject} /></section> : null}
     </div>
   )
 }
@@ -112,52 +116,15 @@ export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilit
  *  `canRemove` is whether the Remove field is rendered below — the missing-folder hint points at
  *  it, and must not point at a field single-project mode took away. */
 function ProjectFacts({ project, canRemove }: { project: ProjectListEntry; canRemove: boolean }) {
-  return (
-    <SettingsField
-      title="Project"
-      hint="The registry entry for this checkout — re-probed every time the project list is read."
-    >
-      <dl
-        data-slot="project-facts"
-        className="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-md border border-border bg-card p-3 text-[13px]"
-      >
-        <dt className="text-muted-foreground">Name</dt>
-        <dd className="min-w-0 truncate text-foreground">{project.name}</dd>
-
-        <dt className="text-muted-foreground">Status</dt>
-        <dd data-slot="project-general-status" className={project.status === 'missing' ? 'text-danger' : 'text-foreground'}>
-          {STATUS_LABEL[project.status]}
-          {/* A registered folder that has been deleted or moved is the one status worth acting
-              on, and "folder not found" alone does not say what to do about it. */}
-          {project.status === 'missing'
-            ? canRemove
-              ? ' — remove it below, or restore the folder'
-              : ' — restore the folder at the path above'
-            : null}
-        </dd>
-
-        {/* Omitted rather than dashed when git could not name one (unborn HEAD): an empty row
-            invites the reader to wonder which branch is checked out, a missing row does not. */}
-        {project.branch !== undefined ? (
-          <>
-            <dt className="text-muted-foreground">Branch</dt>
-            <dd className="min-w-0 truncate font-mono text-xs text-foreground">{project.branch}</dd>
-          </>
-        ) : null}
-
-        <dt className="text-muted-foreground">Added</dt>
-        <dd className="text-foreground">
-          {fullDate(project.addedAt)}
-          <span className="text-soft-foreground">
-            {project.source === 'checkout' ? ' · cloned from GitHub' : ' · opened locally'}
-          </span>
-        </dd>
-
-        <dt className="text-muted-foreground">Last opened</dt>
-        <dd className="text-foreground">{fullDate(project.lastOpenedAt)}</dd>
-      </dl>
-    </SettingsField>
-  )
+  return <dl data-slot="project-facts" className="grid grid-cols-1 gap-4 text-[13px] sm:grid-cols-3">
+    <div><dt className="text-[11px] text-muted-foreground">Project</dt><dd className="mt-1 font-medium">{project.name}</dd></div>
+    <div><dt className="text-[11px] text-muted-foreground">Branch</dt><dd className="mt-1 break-all">{project.branch ?? '—'}</dd></div>
+    <div><dt className="text-[11px] text-muted-foreground">Status</dt><dd data-slot="project-general-status" className={project.status === 'missing' ? 'mt-1 text-danger' : 'mt-1'}>
+      {STATUS_LABEL[project.status]}{project.status === 'missing' ? canRemove ? ' — remove it below, or restore the folder' : ' — restore the folder at the path above' : null}
+    </dd></div>
+    <div><dt className="text-[11px] text-muted-foreground">Added</dt><dd className="mt-1">{fullDate(project.addedAt)}<span className="text-soft-foreground">{project.source === 'checkout' ? ' · cloned from GitHub' : ' · opened locally'}</span></dd></div>
+    <div><dt className="text-[11px] text-muted-foreground">Last opened</dt><dd className="mt-1">{fullDate(project.lastOpenedAt)}</dd></div>
+  </dl>
 }
 
 /**

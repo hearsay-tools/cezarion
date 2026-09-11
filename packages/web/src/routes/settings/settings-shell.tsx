@@ -91,7 +91,7 @@ function SectionNav({
       aria-label="Settings sections"
       data-slot="settings-nav"
       data-scope={scope}
-      className="hidden w-52 shrink-0 flex-col gap-1 border-r border-border p-3 md:flex"
+      className="hidden w-[180px] shrink-0 flex-col gap-1 md:flex"
     >
       <NavLink
         to={settingsIndexPath(scope)}
@@ -99,9 +99,9 @@ function SectionNav({
         data-slot="settings-nav-index"
         aria-current={activeId === null ? 'page' : undefined}
         className={cn(
-          'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors',
+          'flex min-h-11 items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors',
           activeId === null
-            ? 'bg-muted text-foreground'
+            ? 'bg-accent-strong/10 text-accent-text'
             : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
         )}
       >
@@ -115,9 +115,9 @@ function SectionNav({
           data-section={section.id}
           aria-current={section.id === activeId ? 'page' : undefined}
           className={cn(
-            'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors',
+            'flex min-h-11 items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors',
             section.id === activeId
-              ? 'bg-muted text-foreground'
+              ? 'bg-accent-strong/10 text-accent-text'
               : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
           )}
         >
@@ -209,7 +209,7 @@ function SectionPills({
           to={settingsIndexPath(scope)}
           end
           data-slot="settings-nav-index"
-          className="rounded-full border border-border bg-card px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors"
+          className="inline-flex min-h-11 items-center rounded-full border border-border bg-card px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors"
         >
           General
         </NavLink>
@@ -220,7 +220,7 @@ function SectionPills({
             data-section={section.id}
             aria-current={section.id === activeId ? 'page' : undefined}
             className={cn(
-              'rounded-full border px-3 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors',
+              'inline-flex min-h-11 items-center rounded-full border px-3 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors',
               section.id === activeId
                 ? 'border-transparent bg-contrast text-contrast-foreground'
                 : 'border-border bg-card text-muted-foreground',
@@ -268,12 +268,12 @@ export function SettingsSectionRoute({
   return (
     <div
       data-route={scope === 'global' ? `settings-global-${section.id}` : `settings-${section.id}`}
-      className="flex min-h-full flex-col"
+      className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9"
     >
       {/* Desktop header — below `md` the shell's top bar already says "Settings". The
           breadcrumb is what tells the two areas apart at a glance (mockup: "Global settings"). */}
-      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center gap-3 border-b border-border bg-background px-11 md:flex">
-        <h1 className="text-base font-semibold">{section.title}</h1>
+      <header className="flex shrink-0 flex-col gap-2">
+        <h1 className="text-[28px] font-semibold tracking-tight">{section.title}</h1>
         <p className="text-[13px] text-soft-foreground">{section.description}</p>
         {scope === 'global' ? (
           <span data-slot="settings-scope-chip" className="ml-auto text-[11px] text-soft-foreground">
@@ -281,7 +281,7 @@ export function SettingsSectionRoute({
           </span>
         ) : null}
       </header>
-      <div className="flex flex-1 flex-col md:flex-row">
+      <div className="flex min-w-0 flex-1 flex-col gap-6 md:flex-row">
         <SectionNav scope={scope} activeId={section.id} capabilities={capabilities} />
         <SectionPills scope={scope} activeId={section.id} capabilities={capabilities} />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -301,30 +301,30 @@ export function SettingsIndexRoute({ scope, capabilities }: {
   const { Link } = navComponents(scope)
   const global = scope === 'global'
   return (
-    <div data-route={global ? 'settings-global' : 'settings'} className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center gap-3 border-b border-border bg-background px-11 md:flex">
-        <h1 className="text-base font-semibold">{global ? 'Global settings' : 'Settings'}</h1>
+    <div data-route={global ? 'settings-global' : 'settings'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+      <header className="flex shrink-0 flex-col gap-2">
+        <h1 className="text-[28px] font-semibold tracking-tight">{global ? 'Global settings' : 'Project settings'}</h1>
         <p className="text-[13px] text-soft-foreground">
           {global
             ? 'Preferences for you and this machine, shared by every project.'
             : 'Configure this project and its agents.'}
         </p>
       </header>
-      <div className="flex flex-1 flex-col md:flex-row">
+      <div className="flex min-w-0 flex-1 flex-col gap-6 md:flex-row">
         <SectionNav scope={scope} activeId={null} capabilities={capabilities} />
         {/* No second h1 for small screens: the app shell's mobile top bar already titles the
             page "Settings" from the nav registry. */}
-        <div className="flex min-w-0 flex-1 flex-col p-3 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-5 md:pb-5">
+        <div className="flex min-w-0 flex-1 flex-col">
           {/* The project area's index is a PAGE, not a menu: the folder, the registry facts, the
               concurrency ceiling and Remove. The global area has no such dashboard — nothing about
               the machine is per-project — so there the cards are the whole page.
               `capabilities` travels because the registry half of that page is exactly what
               single-project mode disables, the same gate `visibleSettingsSections` applies. */}
-          {global ? null : <ProjectGeneral capabilities={capabilities} />}
+          {global ? <section className="mb-5 rounded-lg border border-border bg-card p-5"><h2 className="text-lg font-semibold">Workspace settings</h2><p className="mt-2 text-[13px] text-muted-foreground">Preferences apply across every project on this machine. Choose a section below to manage your workspace.</p></section> : <ProjectGeneral capabilities={capabilities} />}
           <ul
             data-slot="settings-index"
             className={cn(
-              'mx-auto flex w-full max-w-2xl flex-col gap-2.5',
+              'flex w-full flex-col gap-5',
               // On desktop the left nav already lists every section, so in the project area the
               // cards would be the same menu twice. Small screens have no nav — there they ARE it.
               global ? null : 'mt-7 md:hidden',
@@ -351,7 +351,7 @@ export function SettingsIndexRoute({ scope, capabilities }: {
           </ul>
           {/* The cross-link between the two areas, both ways: the split is only discoverable if
               each half says where the other one is. */}
-          <p className="mx-auto mt-4 w-full max-w-2xl text-[12px] text-soft-foreground">
+          <p className="mt-5 w-full text-[12px] text-soft-foreground">
             {global ? (
               <>Agents, worktrees, bookmarklets and prompt templates are per project.</>
             ) : (
