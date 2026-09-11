@@ -409,12 +409,16 @@ describe('the hero surface', () => {
     await waitFor(() => expect(document.activeElement).toBe(textarea()))
   })
 
-  it('omits suggested tasks that have no design counterpart', async () => {
+  it('suggested chips fill the textarea (and only fill — no fetch, no navigation)', async () => {
     serve()
     renderNewTask()
     await pillReady()
-    expect(document.querySelector('[data-slot="suggested-chip"]')).toBeNull()
-    expect(textarea().value).toBe('')
+    const chips = document.querySelectorAll('[data-slot="suggested-chip"]')
+    expect(chips.length).toBe(3)
+    fireEvent.click(chips[0] as HTMLElement)
+    expect(textarea().value).toContain('failing or flaky test')
+    expect(requests.some((r) => r.method === 'POST')).toBe(false)
+    expect(location()).toBe('/new')
   })
 })
 

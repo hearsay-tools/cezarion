@@ -1,5 +1,6 @@
 import {
   FolderIcon,
+  FolderOpenIcon,
   LayersIcon,
   MenuIcon,
   PlusIcon,
@@ -12,10 +13,22 @@ import * as React from 'react'
 import type { ReactNode } from 'react'
 import { Link as RouterLink, matchPath, useLocation } from 'react-router'
 
+import { AddProjectDialog } from '@/components/add-project-dialog'
+import { CloneProjectDialog } from '@/components/clone-project-dialog'
 import { openCommandPalette } from '@/components/command-palette'
+import { GithubIcon } from '@/components/icons'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
 import { Link, stripProjectPrefix } from '@/lib/project-router'
+import { StatusDot } from '@/components/status-dot'
+import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { activeNavItem, activeNavPath, visibleNavItems, type NavItem } from '@/components/nav-items'
 import {
@@ -512,6 +525,7 @@ function SidebarContent({
             </kbd>
           </Link>
         </Button>
+        {singleProject ? null : <AddProjectMenu />}
       </div>
 
       {!singleProject ? <div className="shrink-0 px-1.5 pb-3"><AllTasksLink onNavigate={onNavigate} /></div> : null}
@@ -602,7 +616,15 @@ function SidebarContent({
         className="border-t border-border px-[18px] py-3"
       >
         <GlobalSettingsLink onNavigate={onNavigate} className="mb-3 w-full justify-start gap-3 text-xs" />
-        <p className="text-[11px] text-muted-foreground">Your agents. Your machine.</p>
+        <div data-slot="sidebar-footer-controls" className="flex items-center gap-2">
+          {/* SLOT — Step 4.2 mounts the Tools dropdown (aggregate status dot + tool versions) here. */}
+          <div data-slot="tools-menu" className="shrink-0">
+            {toolsMenu}
+          </div>
+          {version ? <VersionChip version={version} latestVersion={latestVersion} /> : null}
+
+          <ThemeToggle />
+        </div>
       </div>
     </div>
   )
@@ -676,6 +698,58 @@ function GlobalSettingsLink({
 }
 
 /**
+ * The "Add project" dropdown beside the New task CTA (multi-project spec, "Sidebar → Header").
+ *
+ * "Open local folder…" opens the folder-browser dialog (step 4.2); "Clone from GitHub…" opens
+ * the checkout dialog (step 4.3).
+ *
+ * Neither item is gh-gated here, deliberately. The spec's "disabled with a reason when `gh` is
+ * unavailable" would mean reading `GET /api/health` from this component — and the dialogs are
+ * mounted only while open precisely BECAUSE this shell must keep rendering where no QueryClient
+ * is provided. So the degradation lands one click later instead, in the dialog, which shows the
+ * server's own `gh CLI not found — install it and run 'gh auth login'` verbatim: the same
+ * information, at the moment it is actionable, without a query in the shell.
+ *
+ * The dialogs are mounted only while open, ON PURPOSE: they are the one part of this shell that
+ * talks to the API (queries + a mutation), and the shell itself must keep rendering in the
+ * places that mount it without a QueryClient. The cost is no close animation, which is the
+ * cheaper half of the trade.
+ */
+function AddProjectMenu() {
+  const [browsing, setBrowsing] = React.useState(false)
+  const [cloning, setCloning] = React.useState(false)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        {/* size-11 in the drawer (touch target), the CTA's height on desktop. */}
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Add project"
+          title="Add project"
+          className="size-11 shrink-0 md:size-9"
+        >
+          <FolderOpenIcon className="size-4" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuLabel className="text-xs text-soft-foreground">Add project</DropdownMenuLabel>
+        <DropdownMenuItem data-slot="add-project-local" onSelect={() => setBrowsing(true)}>
+          <FolderIcon aria-hidden="true" />
+          Open local folder…
+        </DropdownMenuItem>
+        <DropdownMenuItem data-slot="add-project-clone" onSelect={() => setCloning(true)}>
+          <GithubIcon aria-hidden="true" />
+          Clone from GitHub…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+      {browsing ? <AddProjectDialog open onOpenChange={setBrowsing} /> : null}
+      {cloning ? <CloneProjectDialog open onOpenChange={setCloning} /> : null}
+    </DropdownMenu>
+  )
+}
+
+/**
  * The ⌘K discoverability affordance (Step 4.3): the footer's first row, shaped like a search
  * input — magnifier, a muted `Search…` label, the chord parked on the right. It was a chip
  * cut from the version chip's cloth until #702, where the footer's five chips overflowed the
@@ -708,6 +782,35 @@ function CommandPaletteHint() {
         {commandShortcutHint('k')}
       </kbd>
     </button>
+  )
+}
+
+/**
+ * The footer's `v{version}` chip. When the server's npm-registry check found something newer
+ * (`latestVersion`, #368), the chip grows a pulsing pending-tone dot and names the version in
+ * its tooltip — an affordance, not an alert: updating is optional, so the chrome stays quiet.
+ *
+ * The chip is the controls row's ONE elastic item, and that is load-bearing. Every other control
+ * there is `shrink-0` (the icon buttons inherit it from the button base class), so whatever a
+ * version string costs beyond the column's width has to come out of somewhere — and while this
+ * chip was `shrink-0` too, there was nowhere for it to come from: a nightly version (#876's
+ * dist-tag, some 173px of it) shoved the gear and the theme toggle clean outside the sidebar
+ * rather than clipping anything. Truncating from the tail keeps the half that carries meaning,
+ * the semver, and the `title` keeps the whole string — which is why the tooltip is now there
+ * even with no update to announce.
+ */
+function VersionChip({ version, latestVersion }: { version: string; latestVersion: string | null }) {
+  const updateAvailable = Boolean(latestVersion && latestVersion !== version)
+  return (
+    <span
+      data-slot="version-chip"
+      data-update-available={updateAvailable ? 'true' : undefined}
+      title={updateAvailable ? `v${version} — update available: v${latestVersion}` : `v${version}`}
+      className="flex min-w-0 items-center gap-1 rounded-full border border-border px-1.5 py-px font-mono text-[10px] font-medium text-soft-foreground"
+    >
+      {updateAvailable ? <StatusDot tone="pending" pulse className="size-[5px] shrink-0" /> : null}
+      <span className="truncate">v{version}</span>
+    </span>
   )
 }
 
