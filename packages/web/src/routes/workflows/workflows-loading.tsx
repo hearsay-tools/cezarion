@@ -1,22 +1,22 @@
-import { LoaderCircleIcon } from 'lucide-react'
-
-import { CenteredState } from '@/components/centered-state'
-
-/**
- * The Workflows builder's loading state, in its own module ON PURPOSE (same rule as
- * GithubLoading): it is both the route's fetch-pending state and the `Suspense` fallback for
- * the lazily-loaded workflows chunk (routes.tsx) — and the fallback must not import anything
- * from that chunk, or the split that keeps dnd-kit off the main bundle quietly disappears.
- */
+/** Lightweight route skeleton; deliberately independent of the feature chunk. */
 export function WorkflowsLoading() {
   return (
-    <div data-route="workflows" className="flex min-h-full flex-col">
-      <CenteredState
-        icon={<LoaderCircleIcon className="motion-safe:animate-spin" />}
-        tone="neutral"
-        title="Loading workflows…"
-        subtitle="Fetching the saved chains and the skills palette."
-      />
+    <div
+      data-route="workflows"
+      aria-busy="true"
+      className="mx-auto min-h-full w-full max-w-[calc(var(--measure)+72px)] px-[18px] py-6 md:p-9"
+    >
+      <h1 className="text-[30px] font-semibold tracking-tight">Workflows</h1>
+      <p className="mt-1 text-[13px] text-muted-foreground">
+        Portable skill chains. Steps run from top to bottom.
+      </p>
+      <p data-slot="workflows-loading" role="status" className="mt-6 text-xs text-muted-foreground">
+        Loading workflows…
+      </p>
+      <div aria-hidden="true" className="mt-4 flex flex-col gap-[22px] motion-safe:animate-pulse">
+        <div className="h-11 rounded-lg border border-border bg-card" />
+        <div className="h-80 rounded-xl border border-border bg-card" />
+      </div>
     </div>
   )
 }

@@ -82,6 +82,8 @@ describe('workflow builder against the live dry-run server', () => {
     browser.waitForFunction(`${stepIdsJs} === '${ALPHA},${BETA}'`)
     expect(browser.text('[data-slot="wb-count"]')).toBe('2 skills')
 
+    browser.click('[data-slot="wb-yaml-toggle"]') // The portable source is disclosed on demand.
+
     // The preview speaks the portable compact form for a pure skill stack (spec 012).
     const yaml = browser.text('[data-slot="wb-yaml"]')
     expect(yaml).toContain('skills:')
@@ -136,8 +138,8 @@ describe('workflow builder against the live dry-run server', () => {
     const doc = parse(readFileSync(savedFlowPath, 'utf8')) as Record<string, unknown>
     expect(doc).toEqual({ name: FLOW, skills: [BETA, ALPHA] })
 
-    // The catalog refetched: the new chain has a chip, and Delete now exists for it.
-    browser.waitForFunction(`document.querySelector('[data-slot="wb-load-chip"][data-name="${FLOW}"]') !== null`)
+    // The catalog refetched: the new chain is selectable, and Delete now exists for it.
+    browser.waitForFunction(`document.querySelector('[data-slot="wb-load-option"][data-name="${FLOW}"]') !== null`)
     browser.waitForFunction(`document.querySelector('[data-slot="wb-delete"]') !== null`)
     browser.screenshot(`${artifactsDir}/workflows-saved.png`)
   })

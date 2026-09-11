@@ -10,7 +10,12 @@ import {
   useSensors,
 } from '@dnd-kit/core'
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from '@dnd-kit/core'
-import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -69,11 +74,11 @@ import { WorkflowsLoading } from './workflows-loading'
 
 /**
  * `/workflows` — the workflow builder rebuilt in React (R6 Step 1.6, spec §"Skills, Workflows,
- * Inbox"): same capabilities as the legacy tab (spec 012 — canvas, drag from palette, YAML
- * import/export/preview, the server's 8-step limit), visual language rebuilt on dnd-kit +
- * shadcn. No new behavior on purpose.
+ * Inbox"): same canvas, drag, YAML import/export, and eight-step limit as spec 012.
+ * The design.pen layout groups editable metadata above the step editor, with a native workflow
+ * selector, a disclosed YAML preview, and explicit reorder buttons on narrow screens.
  *
- * Functional parity with `web/app.js`:
+ * Existing workflow operations:
  *  - first visit seeds the canvas with the repo's first saved (file) workflow; `/workflows/:name`
  *    deep-links any workflow into the canvas;
  *  - palette skills COPY in (drag, or the keyboard/click "add" affordance); step cards MOVE;
@@ -239,7 +244,10 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
 
   if (workflowsQuery.isError) {
     return (
-      <div data-route="workflows" className="flex min-h-full flex-col">
+      <div
+        data-route="workflows"
+        className="@container mx-auto min-h-full w-full max-w-[calc(var(--measure)+72px)] px-[18px] py-6 md:p-9"
+      >
         <CenteredState
           icon={<TriangleAlertIcon />}
           tone="danger"
@@ -330,13 +338,26 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
   }
 
   return (
-    <div data-route="workflows" className="flex min-h-full flex-col">
-      {/* Desktop header — below `md` the shell's top bar already says "Workflows". */}
-      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center gap-3 border-b border-border bg-background px-11 md:flex">
-        <h1 className="text-base font-semibold">Workflows</h1>
-        <p className="text-[13px] text-muted-foreground">
-          Portable skill chains — the agent applies them top to bottom.
-        </p>
+    <div
+      data-route="workflows"
+      className="@container mx-auto min-h-full w-full max-w-[calc(var(--measure)+72px)] px-[18px] py-6 md:p-9"
+    >
+      <header className="mb-[22px] flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-[30px] font-semibold tracking-tight">Workflows</h1>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            Portable skill chains. Steps run from top to bottom.
+          </p>
+        </div>
+        <Button
+          variant="primary"
+          data-slot="wb-new"
+          className="min-h-11"
+          onClick={() => setDraft(emptyDraft())}
+        >
+          <PlusIcon aria-hidden="true" className="size-4" />
+          New workflow
+        </Button>
       </header>
 
       <DndContext
@@ -350,85 +371,266 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
           setOverId(null)
         }}
       >
-        <div className="flex flex-1 flex-col gap-6 p-3 pb-[calc(90px+env(safe-area-inset-bottom))] md:flex-row md:p-5 md:pb-5">
-          {/* ---- canvas ---------------------------------------------------------------- */}
-          <section data-slot="wb-main" className="mx-auto w-full min-w-0 max-w-3xl flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2.5 max-md:basis-full">
-                <Input
-                  ref={nameInput}
-                  data-slot="wb-name"
-                  aria-label="Workflow name"
-                  spellCheck={false}
-                  value={draft.name}
-                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                  className="h-8 max-w-56 font-mono text-[13px] font-semibold"
-                />
-                <span data-slot="wb-count" className="shrink-0 font-mono text-xs text-soft-foreground">
-                  {stepCountLabel(steps)}
-                </span>
-              </div>
-              <div
-                data-slot="wb-actions"
-                className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 md:w-auto"
+        <div className="flex min-w-0 flex-col gap-[22px] pb-[calc(32px+env(safe-area-inset-bottom))]">
+          <section data-slot="wb-metadata" className="flex min-w-0 flex-col gap-3">
+            <div data-slot="wb-load" className="flex flex-col items-start gap-2">
+              <label htmlFor="workflow-load" className="text-xs text-muted-foreground">
+                Load an existing workflow
+              </label>
+              <select
+                id="workflow-load"
+                value={workflows.some((w) => w.name === trimmedName) ? trimmedName : ''}
+                onChange={(event) => {
+                  const workflow = workflows.find((w) => w.name === event.target.value)
+                  if (workflow) setDraft(draftFrom(workflow))
+                }}
+                className="h-11 max-w-full rounded-lg border border-border bg-card px-3 text-[13px] focus-visible:outline-2 focus-visible:outline-ring"
               >
-                {savedFile ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    data-slot="wb-delete"
-                    title="Delete the saved workflow file"
-                    onClick={() => setConfirmDelete(true)}
+                <option value="" disabled>
+                  Choose a workflow
+                </option>
+                {workflows.map((workflow) => (
+                  <option
+                    key={workflow.name}
+                    value={workflow.name}
+                    data-slot="wb-load-option"
+                    data-name={workflow.name}
                   >
-                    <Trash2Icon aria-hidden="true" className="size-3" />
-                    Delete
-                  </Button>
-                ) : null}
+                    {workflow.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label htmlFor="workflow-name" className="text-xs font-semibold">
+              Workflow name
+            </label>
+            <Input
+              id="workflow-name"
+              ref={nameInput}
+              data-slot="wb-name"
+              aria-label="Workflow name"
+              spellCheck={false}
+              value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+              className="h-12 bg-card text-sm"
+            />
+            <label htmlFor="workflow-description" className="text-xs font-semibold">
+              Description
+            </label>
+            <Textarea
+              id="workflow-description"
+              data-slot="wb-description"
+              value={draft.description}
+              onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+              rows={2}
+              className="min-h-12 bg-card text-[13px]"
+            />
+          </section>
+          <div
+            data-slot="wb-actions"
+            className="flex flex-wrap items-center gap-2 [&_button]:min-h-11 [&_button]:border [&_button]:border-border [&_button]:bg-card"
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-slot="wb-import"
+              onClick={() => {
+                setImportError('')
+                setAutoOpen(false)
+                setImportOpen((open) => !open)
+              }}
+            >
+              <UploadIcon aria-hidden="true" className="size-3" />
+              Import
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-slot="wb-export"
+              title="Download workflow.yaml"
+              onClick={exportYaml}
+            >
+              <DownloadIcon aria-hidden="true" className="size-3" />
+              Export
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-slot="wb-auto"
+              aria-expanded={autoOpen}
+              title="Describe a chain — the agent builds it"
+              onClick={() => {
+                setImportOpen(false)
+                setAutoOpen((open) => !open)
+              }}
+            >
+              <WandSparklesIcon aria-hidden="true" className="size-3" />
+              Auto
+            </Button>
+            {savedFile ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                data-slot="wb-delete"
+                className="text-danger hover:text-danger"
+                title="Delete the saved workflow file"
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Trash2Icon aria-hidden="true" className="size-3" />
+                Delete
+              </Button>
+            ) : null}
+          </div>
+          {autoOpen ? (
+            <div
+              data-slot="wb-auto-panel"
+              className="rounded-xl border border-border bg-card p-5 [&_button]:min-h-11"
+            >
+              <h2 className="text-[15px] font-semibold">Build a chain from a prompt</h2>
+              <p className="mt-1 text-xs leading-relaxed text-soft-foreground">
+                Describe what the chain should do. An agent proposes a title and an ordered set of skill /
+                check steps. Review the result, edit it, then Save.
+              </p>
+              <Textarea
+                data-slot="wb-auto-text"
+                aria-label="Describe the chain to build"
+                rows={3}
+                autoFocus
+                placeholder="e.g. Fix the bug, run the tests, then review the diff for regressions."
+                value={autoText}
+                onChange={(event) => setAutoText(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                    event.preventDefault()
+                    runAuto()
+                  }
+                }}
+                className="mt-4 min-h-[108px] text-[13px]"
+              />
+              <div className="mt-3 flex items-center gap-1.5">
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="primary"
                   size="sm"
-                  data-slot="wb-auto"
-                  aria-expanded={autoOpen}
-                  title="Describe a chain — the agent builds it"
-                  onClick={() => {
-                    setImportOpen(false)
-                    setAutoOpen((open) => !open)
-                  }}
+                  data-slot="wb-auto-run"
+                  disabled={autoPlan.isPending || autoText.trim() === ''}
+                  onClick={runAuto}
                 >
                   <WandSparklesIcon aria-hidden="true" className="size-3" />
-                  Auto
+                  {autoPlan.isPending ? 'Building…' : 'Build chain'}
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  data-slot="wb-import"
+                  data-slot="wb-auto-cancel"
                   onClick={() => {
-                    setImportError('')
                     setAutoOpen(false)
-                    setImportOpen((open) => !open)
+                    setAutoText('')
                   }}
                 >
-                  <UploadIcon aria-hidden="true" className="size-3" />
+                  Cancel
+                </Button>
+              </div>
+              <p className="mt-4 text-xs text-muted-foreground">
+                Creates an editable draft. Review the generated name and steps before saving.
+              </p>
+            </div>
+          ) : null}
+
+          {importOpen ? (
+            <div
+              data-slot="wb-import-panel"
+              className="rounded-xl border border-border bg-card p-5 [&_button]:min-h-11"
+            >
+              <div className="text-[11px] font-medium tracking-wide text-soft-foreground uppercase">
+                Import workflow YAML
+              </div>
+              <Textarea
+                data-slot="wb-import-text"
+                aria-label="Workflow YAML to import"
+                rows={6}
+                spellCheck={false}
+                placeholder={'name: my-flow\nskills:\n  - test-conventions\n  - commit-style'}
+                value={importText}
+                onChange={(event) => setImportText(event.target.value)}
+                className="mt-2 min-h-28 font-mono text-xs"
+              />
+              {importError !== '' ? (
+                <p data-slot="wb-import-error" className="mt-2 text-xs text-danger">
+                  {importError}
+                </p>
+              ) : null}
+              <div className="mt-3 flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  data-slot="wb-import-run"
+                  disabled={importMutation.isPending}
+                  onClick={runImport}
+                >
                   Import
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  data-slot="wb-export"
-                  title="Download workflow.yaml"
-                  onClick={exportYaml}
+                  data-slot="wb-import-cancel"
+                  onClick={() => {
+                    setImportOpen(false)
+                    setImportText('')
+                    setImportError('')
+                  }}
                 >
-                  <DownloadIcon aria-hidden="true" className="size-3" />
-                  Export
+                  Cancel
                 </Button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid min-w-0 items-start gap-[22px] @min-[700px]:grid-cols-[minmax(0,1fr)_260px]">
+            <section data-slot="wb-main" className="min-w-0 rounded-xl border border-border bg-card p-5">
+              <p className="text-xs text-muted-foreground">
+                Steps · {steps.length} of {WB_MAX_STEPS}
+                <span data-slot="wb-count" className="sr-only">
+                  {stepCountLabel(steps)}
+                </span>
+              </p>
+              <Canvas
+                steps={steps}
+                skills={skills}
+                dragging={dragging !== null}
+                overId={overId}
+                activeStepId={dragging?.type === 'step' ? dragging.step.id : null}
+                onRemove={(index) => setSteps(removeStep(steps, index))}
+                onMove={(from, to) => setSteps(moveStep(steps, from, to))}
+              />
+              <Button
+                variant="outline"
+                className="mt-4 min-h-11"
+                onClick={() => document.querySelector<HTMLInputElement>('[data-slot="wb-filter"]')?.focus()}
+              >
+                <PlusIcon aria-hidden="true" className="size-4" />
+                Add step
+              </Button>
+              <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+                Drag to reorder, or use Move up / Move down. The agent follows this sequence from top to
+                bottom.
+              </p>
+              <footer className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4">
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Review the name and steps, then save to a workflow file.
+                </p>
                 <Button
                   type="button"
                   variant="primary"
                   size="sm"
+                  className="min-h-11 max-sm:w-full"
                   data-slot="wb-save"
                   disabled={save.isPending}
                   onClick={runSave}
@@ -436,192 +638,54 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
                   <CheckIcon aria-hidden="true" className="size-3" />
                   Save
                 </Button>
-              </div>
-            </div>
+              </footer>
+            </section>
 
-            {/* Load chips: every known workflow, plus "+ new" — the legacy edit row. */}
-            <div data-slot="wb-load" className="mt-3 flex flex-wrap items-center gap-1.5">
-              <span className="mr-0.5 text-[11px] font-medium tracking-wide text-soft-foreground uppercase">
-                edit
-              </span>
-              {workflows.map((workflow) => (
-                <button
-                  key={workflow.name}
-                  type="button"
-                  data-slot="wb-load-chip"
-                  data-name={workflow.name}
-                  title={workflow.description ?? ''}
-                  aria-pressed={trimmedName === workflow.name}
-                  onClick={() => setDraft(draftFrom(workflow))}
-                  className={cn(
-                    'rounded-full border border-border bg-card px-2.5 py-1 font-mono text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                    trimmedName === workflow.name && 'border-accent-strong/40 bg-accent-strong/10 text-foreground',
-                  )}
+            {/* ---- palette + YAML preview ------------------------------------------------- */}
+            <aside data-slot="wb-aside" className="min-w-0 rounded-xl border border-border bg-card p-5">
+              <h2 className="text-[15px] font-semibold">Available skills</h2>
+              <p className="mt-1 text-xs leading-relaxed text-soft-foreground">
+                Drag into the flow. Order is execution order — the agent applies them top to bottom.
+              </p>
+              <Input
+                data-slot="wb-filter"
+                placeholder="Filter skills…"
+                aria-label="Filter skills"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="mt-4 h-11 text-[13px]"
+              />
+              <Palette
+                skills={paletteSkills}
+                query={query}
+                error={skillsQuery.isError ? skillsQuery.error.message : null}
+                inFlow={new Set(steps.map((s) => s.skill).filter((s): s is string => Boolean(s)))}
+                onAdd={(skill) => addSkill(skill)}
+              />
+
+              <h3 className="mt-5 text-sm font-semibold">workflow.yaml</h3>
+              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                Export the workflow to use this chain in another project.
+              </p>
+              <details className="mt-4 min-w-0">
+                <summary
+                  data-slot="wb-yaml-toggle"
+                  className="inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-border px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-ring"
                 >
-                  {workflow.name}
-                </button>
-              ))}
-              <button
-                type="button"
-                data-slot="wb-new"
-                title="Start an empty workflow"
-                onClick={() => setDraft(emptyDraft())}
-                className="rounded-full border border-dashed border-border px-2.5 py-1 font-mono text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                + new
-              </button>
-            </div>
-
-            {autoOpen ? (
-              <div data-slot="wb-auto-panel" className="mt-4 rounded-lg border border-border bg-card p-3 shadow-xs">
-                <div className="text-[11px] font-medium tracking-wide text-soft-foreground uppercase">
-                  Build a chain from a prompt
+                  View YAML
+                </summary>
+                <div className="mt-3 flex justify-end">
+                  <CopyYamlButton yaml={yaml} />
                 </div>
-                <p className="mt-1 text-xs leading-relaxed text-soft-foreground">
-                  Describe what the chain should do. An agent proposes a title and an ordered set of
-                  skill / check steps — land it on the canvas, then tweak and Save.
-                </p>
-                <Textarea
-                  data-slot="wb-auto-text"
-                  aria-label="Describe the chain to build"
-                  rows={3}
-                  autoFocus
-                  placeholder="e.g. Fix the bug, run the tests, then review the diff for regressions."
-                  value={autoText}
-                  onChange={(event) => setAutoText(event.target.value)}
-                  onKeyDown={(event) => {
-                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                      event.preventDefault()
-                      runAuto()
-                    }
-                  }}
-                  className="mt-2 min-h-20 text-[13px]"
-                />
-                <div className="mt-3 flex items-center gap-1.5">
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    data-slot="wb-auto-run"
-                    disabled={autoPlan.isPending || autoText.trim() === ''}
-                    onClick={runAuto}
-                  >
-                    <WandSparklesIcon aria-hidden="true" className="size-3" />
-                    {autoPlan.isPending ? 'Building…' : 'Build chain'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    data-slot="wb-auto-cancel"
-                    onClick={() => {
-                      setAutoOpen(false)
-                      setAutoText('')
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-
-            {importOpen ? (
-              <div data-slot="wb-import-panel" className="mt-4 rounded-lg border border-border bg-card p-3 shadow-xs">
-                <div className="text-[11px] font-medium tracking-wide text-soft-foreground uppercase">
-                  Import workflow YAML
-                </div>
-                <Textarea
-                  data-slot="wb-import-text"
-                  aria-label="Workflow YAML to import"
-                  rows={6}
-                  spellCheck={false}
-                  placeholder={'name: my-flow\nskills:\n  - test-conventions\n  - commit-style'}
-                  value={importText}
-                  onChange={(event) => setImportText(event.target.value)}
-                  className="mt-2 min-h-28 font-mono text-xs"
-                />
-                {importError !== '' ? (
-                  <p data-slot="wb-import-error" className="mt-2 text-xs text-danger">
-                    {importError}
-                  </p>
-                ) : null}
-                <div className="mt-3 flex items-center gap-1.5">
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    data-slot="wb-import-run"
-                    disabled={importMutation.isPending}
-                    onClick={runImport}
-                  >
-                    Import
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    data-slot="wb-import-cancel"
-                    onClick={() => {
-                      setImportOpen(false)
-                      setImportText('')
-                      setImportError('')
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-
-            <Canvas
-              steps={steps}
-              skills={skills}
-              dragging={dragging !== null}
-              overId={overId}
-              activeStepId={dragging?.type === 'step' ? dragging.step.id : null}
-              onRemove={(index) => setSteps(removeStep(steps, index))}
-            />
-          </section>
-
-          {/* ---- palette + YAML preview ------------------------------------------------- */}
-          <aside data-slot="wb-aside" className="w-full shrink-0 md:w-[320px]">
-            <div className="text-[11px] font-medium tracking-wide text-soft-foreground uppercase">Skills</div>
-            <p className="mt-1 text-xs leading-relaxed text-soft-foreground">
-              Drag into the flow. Order is execution order — the agent applies them top to bottom.
-            </p>
-            <Input
-              data-slot="wb-filter"
-              placeholder="Filter skills…"
-              aria-label="Filter skills"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className="mt-2.5 h-8 text-[13px]"
-            />
-            <Palette
-              skills={paletteSkills}
-              query={query}
-              error={skillsQuery.isError ? skillsQuery.error.message : null}
-              inFlow={new Set(steps.map((s) => s.skill).filter((s): s is string => Boolean(s)))}
-              onAdd={(skill) => addSkill(skill)}
-            />
-
-            <div className="mt-5 flex items-center gap-2">
-              <span className="text-[11px] font-medium tracking-wide text-soft-foreground uppercase">
-                workflow.yaml
-              </span>
-              <span className="flex-1" />
-              <CopyYamlButton yaml={yaml} />
-            </div>
-            <pre
-              data-slot="wb-yaml"
-              className="mt-2 overflow-x-auto rounded-lg border border-border bg-card p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre text-muted-foreground shadow-xs"
-            >
-              {yaml}
-            </pre>
-            <p className="mt-2 text-[11.5px] leading-relaxed text-soft-foreground">
-              Portable — export this file and import it in any repo running cezar.
-            </p>
-          </aside>
+                <pre
+                  data-slot="wb-yaml"
+                  className="mt-2 max-h-96 overflow-auto rounded-lg border border-border bg-background p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre text-muted-foreground"
+                >
+                  {yaml}
+                </pre>
+              </details>
+            </aside>
+          </div>
         </div>
 
         {/* What the pointer carries mid-drag: a copy of the pill/card, per dnd-kit. */}
@@ -632,7 +696,12 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
               {dragging.skill}
             </div>
           ) : dragging?.type === 'step' ? (
-            <StepCardBody step={dragging.step} index={steps.findIndex((s) => s.id === dragging.step.id)} skills={skills} overlay />
+            <StepCardBody
+              step={dragging.step}
+              index={steps.findIndex((s) => s.id === dragging.step.id)}
+              skills={skills}
+              overlay
+            />
           ) : null}
         </DragOverlay>
       </DndContext>
@@ -688,6 +757,7 @@ function Canvas({
   overId,
   activeStepId,
   onRemove,
+  onMove,
 }: {
   steps: WorkflowStepDef[]
   skills: readonly Skill[]
@@ -698,6 +768,7 @@ function Canvas({
   /** The id of the step BEING dragged — never draw an insert line against itself. */
   activeStepId: string | null
   onRemove: (index: number) => void
+  onMove: (from: number, to: number) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: CANVAS_ID })
   // Append target: the pointer is over the canvas padding (below the last card), not a card.
@@ -708,7 +779,7 @@ function Canvas({
       data-slot="wb-steps"
       data-dragging={dragging || undefined}
       className={cn(
-        'mt-4 rounded-lg border border-dashed p-2 transition-colors',
+        'mt-4 rounded-lg transition-colors',
         isOver ? 'border-accent-strong/60 bg-accent-strong/5' : 'border-muted-foreground/25',
       )}
     >
@@ -736,6 +807,8 @@ function Canvas({
                 // being dragged (dropping onto itself is a no-op, so no line).
                 insertBefore={dragging && overId === step.id && activeStepId !== step.id}
                 onRemove={() => onRemove(index)}
+                onMoveUp={index > 0 ? () => onMove(index, index - 1) : undefined}
+                onMoveDown={index < steps.length - 1 ? () => onMove(index, index + 1) : undefined}
               />
             ))}
           </ol>
@@ -765,6 +838,8 @@ function StepCard({
   dragging,
   insertBefore,
   onRemove,
+  onMoveUp,
+  onMoveDown,
 }: {
   step: WorkflowStepDef
   index: number
@@ -777,6 +852,8 @@ function StepCard({
   /** The drop indicator sits in the gap above this card. */
   insertBefore: boolean
   onRemove: () => void
+  onMoveUp?: () => void
+  onMoveDown?: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: step.id,
@@ -808,6 +885,8 @@ function StepCard({
         index={index}
         skills={skills}
         onRemove={onRemove}
+        onMoveUp={onMoveUp}
+        onMoveDown={onMoveDown}
         gripProps={{ ...attributes, ...listeners }}
       />
     </li>
@@ -825,23 +904,26 @@ function StepCardBody({
   skills,
   onRemove,
   gripProps,
+  onMoveUp,
+  onMoveDown,
   overlay = false,
 }: {
   step: WorkflowStepDef
   index: number
   skills: readonly Skill[]
   onRemove?: () => void
+  onMoveUp?: () => void
+  onMoveDown?: () => void
   gripProps?: Record<string, unknown>
   overlay?: boolean
 }) {
   const known = skills.find((skill) => skill.name === step.skill)
   const isCheck = Boolean(step.command)
-  const title = isCheck || !step.skill ? (step.name ?? step.id) : step.skill
+  const title = step.name ?? step.skill ?? step.id
   const description = isCheck
     ? `$ ${step.command}${step.onFail ? ` — on fail retry from "${step.onFail.retry}" (×${step.onFail.max ?? 2})` : ''}`
     : step.skill
-      ? (known?.description ??
-        'Not in this repo or the team skills — the step runs on its plain prompt.')
+      ? (known?.description ?? 'Not in this repo or the team skills — the step runs on its plain prompt.')
       : (step.prompt ?? '')
   const badge = isCheck ? 'check' : step.skill ? (known ? null : 'unknown') : 'prompt'
 
@@ -853,21 +935,21 @@ function StepCardBody({
       className={cn(
         // `bg-card-2` + a slightly stronger border: a white-on-white card with a `#ebebeb`
         // border all but vanished on the light page (the workflows low-contrast finding).
-        'rounded-md border border-muted-foreground/20 bg-card-2 px-2.5 py-2 shadow-xs',
+        'rounded-lg border border-border bg-background p-4',
         overlay && 'shadow-md',
       )}
     >
-      <div data-slot="wb-step-heading" className="flex min-w-0 items-center gap-2.5">
+      <div data-slot="wb-step-heading" className="flex min-w-0 items-center gap-1">
         <button
           type="button"
           data-slot="wb-step-grip"
           aria-label={`Reorder step ${index + 1}: ${title}`}
-          className="inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="inline-flex size-11 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
           {...gripProps}
         >
           <GripVerticalIcon aria-hidden="true" className="size-3.5" />
         </button>
-        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+        <span className="shrink-0 rounded bg-accent-strong/10 px-2 py-1 font-mono text-[10px] text-link-foreground">
           {String(index + 1).padStart(2, '0')}
         </span>
         {isCheck ? (
@@ -875,7 +957,7 @@ function StepCardBody({
         ) : (
           <SparklesIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
         )}
-        <div className="min-w-0 flex-1 truncate font-mono text-[13px] font-medium">{title}</div>
+        <div className="min-w-0 flex-1 break-words text-sm font-medium [overflow-wrap:anywhere]">{title}</div>
         {badge ? (
           <span
             data-slot="wb-step-badge"
@@ -896,7 +978,7 @@ function StepCardBody({
             aria-label={`Remove step ${index + 1}: ${title}`}
             title="Remove from flow"
             onClick={onRemove}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-soft-foreground transition-colors outline-none hover:text-danger focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-soft-foreground transition-colors outline-none hover:text-danger focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             <XIcon aria-hidden="true" className="size-3.5" />
           </button>
@@ -905,9 +987,40 @@ function StepCardBody({
       {description ? (
         <div
           data-slot="wb-step-summary"
-          className="mt-1.5 break-words text-xs leading-relaxed text-muted-foreground"
+          className="mt-3 break-words text-xs leading-relaxed text-muted-foreground"
         >
           {description}
+        </div>
+      ) : null}
+      <p className="mt-3 text-[10px] text-link-foreground">
+        {isCheck
+          ? `Command step${step.onFail ? ` · Retry ×${step.onFail.max ?? 2}` : ''}`
+          : step.skill
+            ? 'Skill step'
+            : 'Prompt step'}
+      </p>
+      {!overlay ? (
+        <div className="mt-3 flex flex-wrap gap-2 @min-[900px]:hidden">
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-11"
+            aria-label={`Move step ${index + 1} up`}
+            disabled={!onMoveUp}
+            onClick={onMoveUp}
+          >
+            Move up
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-11"
+            aria-label={`Move step ${index + 1} down`}
+            disabled={!onMoveDown}
+            onClick={onMoveDown}
+          >
+            Move down
+          </Button>
         </div>
       ) : null}
     </div>
@@ -980,7 +1093,7 @@ function PaletteSkill({
       data-skill={skill.name}
       title={skill.description ?? ''}
       className={cn(
-        'flex cursor-grab items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 shadow-xs transition-colors hover:bg-muted',
+        'flex min-h-11 cursor-grab items-center gap-2 rounded-md py-1 transition-colors hover:bg-muted',
         isDragging && 'opacity-40',
       )}
       {...attributes}
@@ -988,11 +1101,14 @@ function PaletteSkill({
     >
       <SparklesIcon
         aria-hidden="true"
-        className={cn('size-3.5 shrink-0', isProjectSkill(skill) ? 'text-accent-icon' : 'text-soft-foreground')}
+        className={cn(
+          'size-3.5 shrink-0',
+          isProjectSkill(skill) ? 'text-accent-icon' : 'text-soft-foreground',
+        )}
       />
       <span
         className={cn(
-          'min-w-0 flex-1 truncate font-mono text-[13px]',
+          'min-w-0 flex-1 break-words text-xs',
           isProjectSkill(skill) ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground',
         )}
       >
@@ -1005,7 +1121,7 @@ function PaletteSkill({
         aria-label={`Add ${skill.name} to the flow`}
         title="Add to the flow"
         onClick={() => onAdd(skill.name)}
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-soft-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-soft-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
         <PlusIcon aria-hidden="true" className="size-3.5" />
       </button>

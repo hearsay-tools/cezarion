@@ -128,10 +128,8 @@ describe('canvas seeding', () => {
 
     await waitFor(() => expect(stepIds()).toEqual(['om-fix', 'om-review']))
     expect(nameInput().value).toBe('ship-it')
-    // Its chip reads active; the compact YAML preview reflects the pure stack.
-    expect(
-      document.querySelector('[data-slot="wb-load-chip"][data-name="ship-it"]')?.getAttribute('aria-pressed'),
-    ).toBe('true')
+    // The selector reflects the loaded file; YAML retains the compact skill stack.
+    expect((screen.getByLabelText('Load an existing workflow') as HTMLSelectElement).value).toBe('ship-it')
     expect(yamlText()).toContain('skills:')
     expect(yamlText()).toContain('- om-fix')
     expect(screen.getByText('2 skills')).toBeTruthy()
@@ -460,5 +458,29 @@ describe('delete and “+ new”', () => {
     expect(stepCards()).toHaveLength(0)
     expect(nameInput().value).toBe('my-workflow')
     await screen.findByText('Drop a skill here — or Import a workflow.yaml')
+  })
+})
+
+
+describe('design workflow controls', () => {
+  it('loads a selected workflow and edits its description in the portable draft', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.change(screen.getByLabelText('Load an existing workflow'), { target: { value: 'quick-task' } })
+    expect(nameInput().value).toBe('quick-task')
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'My edited description' } })
+    expect(yamlText()).toContain('My edited description')
+  })
+
+  it('reorders without dragging and keeps boundary controls disabled', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    expect((screen.getByLabelText('Move step 1 up') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByLabelText('Move step 1 down'))
+    expect(stepIds()).toEqual(['om-review', 'om-fix'])
+    expect(yamlText().indexOf('- om-review')).toBeLessThan(yamlText().indexOf('- om-fix'))
+    expect((screen.getByLabelText('Move step 2 down') as HTMLButtonElement).disabled).toBe(true)
   })
 })
