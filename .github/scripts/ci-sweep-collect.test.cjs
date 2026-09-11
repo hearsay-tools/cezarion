@@ -33,6 +33,31 @@ test('reporting machinery is excluded but failures surface in operational summar
  const h=harness();h.state.runs[0]=run(1,{path:'.github/workflows/report-workflow-failure.yml'});
  const result=await collect(h);assert.equal(result.occurrences.length,0);assert.equal(result.manifest.reporterFailures,1);
 });
+test('the running sweep attempt is reporting machinery, never a coverage gap',async()=>{
+ const h=harness();
+ h.state.runs=[
+  run(3,{name:'Sweep Recurring CI Failures',path:'.github/workflows/sweep-ci-failures.yml',status:'in_progress',conclusion:null}),
+  h.state.runs[0],
+ ];
+ h.state.attempts.set('3:1',h.state.runs[0]);
+ const result=await collect(h);
+ assert.equal(result.occurrences.length,1);assert.equal(result.manifest.complete,true);
+ assert.ok(!result.manifest.problems.some(p=>p.code==='attempt-in-progress'));
+});
+test('a default 14-day volume of failed jobs completes inside the log budget',async()=>{
+ const h=harness();
+ h.state.runs=Array.from({length:150},(_,i)=>run(i+1));
+ for(const r of h.state.runs){h.state.attempts.set(`${r.id}:1`,r);h.state.jobs.set(`${r.id}:1`,[job(r.id*10)]);h.state.logs.set(r.id*10,h.state.logs.get(10));}
+ const result=await collect(h);
+ assert.equal(result.occurrences.length,150);assert.equal(result.manifest.complete,true);
+ assert.ok(!result.manifest.problems.some(p=>p.code==='log-count-limit'));
+});
+test('expired logs remain recorded evidence gaps without failing the classified sweep',async()=>{
+ const h=harness();h.state.logs.clear();
+ const result=await collect(h);
+ assert.equal(result.occurrences.length,1);assert.equal(result.manifest.complete,true);
+ assert.ok(result.manifest.problems.some(p=>p.code==='logs-unavailable' && p.jobId===10));
+});
 test('second-page runs are discovered and duplicate job rows are counted once',async()=>{
  const h=harness();h.state.runs=Array.from({length:101},(_,i)=>run(i+1));
  for(const r of h.state.runs){h.state.attempts.set(`${r.id}:1`,r);h.state.jobs.set(`${r.id}:1`,[]);}

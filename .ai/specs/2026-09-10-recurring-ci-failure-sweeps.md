@@ -44,6 +44,9 @@ repository workflow runs without filtering by latest conclusion, branch, or even
 Their workflow IDs/paths provide discovery, including workflows later disabled or
 deleted. Exclude only the immediate reporter and this sweep, by workflow path,
 from recursive issue creation; report their observed failures in the summary.
+Reporting machinery is skipped before the in-progress-attempt check: this sweep's
+own attempt is always running while it collects, and a queued sibling reporter is
+not a coverage gap either.
 
 Paginate run lists and each attempt's jobs at 100 per page. Split run-creation
 queries into smaller time intervals when a query reaches GitHub's 1,000-result
@@ -147,17 +150,29 @@ Apply labels directly; preserve labels on existing remediation reports.
 ## Bounds, partial scans, and retention
 
 Per invocation limits: 1,500 GitHub API requests, 20 attempts per run,
-100 downloaded job logs, 2 MiB per log (the existing limit), 50 MiB cumulative
+400 downloaded job logs, 2 MiB per log (the existing limit), 50 MiB cumulative
 download, 4,000 characters per diagnostic excerpt, 10 newly created issues,
 100 new occurrence comments, 12 minutes of application time, and a 15-minute
 Actions job timeout. Reads and writes share the request budget; reserve enough
 time to produce the final summary. Issue/comment enumeration is bounded by the
 same request budget and must complete before a deduplication-dependent write.
-Caps are safety bounds, not successful early-exit conditions.
+Caps are safety bounds, not successful early-exit conditions. The log-download
+budget is sized so the default 14-day window completes: a full window costs
+roughly one jobs request per attempt plus one request per failed-job log, so
+the request budget remains the binding global bound.
 
-Missing/expired/oversized logs, failed metadata requests, exhausted bounds,
-rate limits, pagination gaps, and ambiguous matches make the scan visibly
-incomplete. Continue independent safe reads where possible, but stop issuing
+Missing (404), expired (410) and oversized source logs are unrecoverable
+per-job evidence gaps: the coverage artifact lists their fixed code and job
+IDs and the summary prints their count, but they never fail the scheduled job
+on their own, because no replay can recover them and the next overlapping
+sweep rechecks them anyway. Transport failures — network errors, timeouts,
+non-OK signed-URL responses with any other status, invalid redirect URLs, and
+failed metadata requests outside 404/410 — are recorded as `logs-fetch-failed`
+and keep coverage visibly incomplete: a transient failure must never be
+summarized as a complete sweep with silently omitted evidence. Exhausted
+bounds, rate limits, pagination gaps, and
+ambiguous matches still make the scan visibly incomplete. Continue independent
+safe reads where possible, but stop issuing
 requests on a rate limit or exhausted global budget. Known qualifying evidence
 may still be reported when its issue lookup completed; incomplete evidence must
 never be treated as an absence of earlier reports or successful retries.
@@ -181,8 +196,19 @@ Normal partial scans are recovered by the next overlapping sweep. If a backlog
 continually reaches a cap, replay smaller explicit windows, splitting until every
 interval completes. Delays beyond the lookback and historical reruns require
 manual creation-window replay; the scan never promises coverage outside its
-printed bounds. Expired source logs are unrecoverable and remain visible as an
-evidence gap. Preserve previous manifests when auditing coverage across windows.
+printed bounds. Expired source logs are unrecoverable and remain visible as
+recorded evidence gaps that do not fail the job on their own. Preserve previous
+manifests when auditing coverage across windows.
+
+Revised on 2026-09-11 (#225): the first scheduled sweep (run 34581855648) wrote
+`complete: false` because its own in-progress attempt, the 100-log cap on a
+14-day window, and four expired logs all marked coverage incomplete. Reporting
+machinery is now skipped before the in-progress check, the log budget is 400,
+and missing/expired/oversized logs are recorded gaps that do not fail the job.
+Revised again on 2026-09-11 (review of #228): only missing/expired/oversized
+logs stay non-fatal gaps; transient transport failures are recorded as
+`logs-fetch-failed` and keep `complete: false` so a temporary outage can never
+publish a complete-sweep artifact with evidence silently omitted.
 
 ## Permissions and trust
 

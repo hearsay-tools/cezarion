@@ -1,6 +1,9 @@
 const {causesForStep} = require('./failure-diagnostics.cjs');
 const {createFailureWriter} = require('./failure-issue-writer.cjs');
 const LOG_LIMIT = 2 * 1024 * 1024;
+// Oversized single logs are unrecoverable per-job evidence gaps; the sweep
+// records this code without failing, everything else stays a coverage problem.
+const gapError = message => Object.assign(new Error(message), {code: 'log-size'});
 const PATHS = {Release:'.github/workflows/release.yml',Nightly:'.github/workflows/nightly.yml'};
 
 function eligible(run, owner, repo) {
@@ -21,20 +24,27 @@ async function downloadLog(github, args, fetchImpl) {
   const response = await github.request('GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs', {...args,request:{redirect:'manual'}});
   const location = response.headers?.location;
   if (!location) {
-    if (typeof response.data !== 'string' || Buffer.byteLength(response.data) > LOG_LIMIT) throw new Error('Unavailable log');
+    if (typeof response.data !== 'string') throw new Error('Unexpected log payload');
+    if (Buffer.byteLength(response.data) > LOG_LIMIT) throw gapError('Log exceeds download limit');
     return response.data;
   }
   const url = new URL(location);
   if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Invalid log URL');
   const logResponse = await fetchImpl(url, {redirect:'error',signal:AbortSignal.timeout(30_000)});
-  if (!logResponse.ok || !logResponse.body) throw new Error('Unavailable log');
+  if (!logResponse.ok || !logResponse.body) {
+    const error = new Error('Unavailable log');
+    // 404/410 mean the log is already gone or expired: unrecoverable, while
+    // any other status is a transient storage failure and stays a problem.
+    if (logResponse.status === 404 || logResponse.status === 410) error.code = 'logs-unavailable';
+    throw error;
+  }
   const reader=logResponse.body.getReader(), chunks=[];
   let bytes=0;
   try {
     while (true) {
       const {done,value}=await reader.read(); if(done)break;
       bytes+=value.byteLength;
-      if(bytes>LOG_LIMIT) throw new Error('Log exceeds download limit');
+      if(bytes>LOG_LIMIT) throw gapError('Log exceeds download limit');
       chunks.push(Buffer.from(value));
     }
   } finally { await reader.cancel(); }
