@@ -26,9 +26,12 @@ Shared shell, global typography, primitive button colors and sidebar are the par
 Actual server capabilities and save contracts take precedence over simplified fixture controls.
 The implementation does not render alternate permission/authentication/error states simultaneously.
 
+Late mobile exports `acXhB`, `MB5Yx` and `Zsg4w` also pin the mobile reader and action layout: catalog Filter/Refresh appear on the list, with Back to skills returning there; desktop retains both panes and catalog actions. Workflow Import and Export each occupy their own mobile row above Auto/Delete.
+
 ## Verification
 
 - Focused web suite: 349 tests across 21 files passed.
+- Late mobile-layout follow-up: 46 Skills/Workflows tests, web build/typecheck and 24 browser checks (four views × three widths × two themes) passed. Screenshots `followup-*.png` and `/tmp/fd-followup-browser.log` verify mobile action rows, catalog-control visibility and no horizontal overflow.
 - Web typecheck and server/web builds passed.
 - Red-before-green checks covered step prompt precedence, generic prompt fallback, menu removal,
   Add step selection/cancel/focus restoration, resource switch behavior, Open Skills and Open folder.

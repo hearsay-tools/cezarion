@@ -431,13 +431,14 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
           </section>
           <div
             data-slot="wb-actions"
-            className="flex flex-wrap items-center gap-2 [&_button]:min-h-11 [&_button]:border [&_button]:border-border [&_button]:bg-card"
+            className="grid grid-cols-[max-content_max-content] items-center justify-start gap-2 sm:flex sm:flex-wrap [&_button]:min-h-11 [&_button]:border [&_button]:border-border [&_button]:bg-card"
           >
             <Button
               type="button"
               variant="ghost"
               size="sm"
               data-slot="wb-import"
+              className="col-span-2 justify-self-start"
               onClick={() => {
                 setImportError('')
                 setAutoOpen(false)
@@ -452,6 +453,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
               variant="ghost"
               size="sm"
               data-slot="wb-export"
+              className="col-span-2 justify-self-start"
               title="Download workflow.yaml"
               onClick={exportYaml}
             >

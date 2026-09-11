@@ -139,7 +139,10 @@ function SkillsCatalog() {
           </Link>
         </div>
       </header>
-      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+      <div className={cn(
+        'flex-col items-start gap-2 sm:flex-row sm:items-center @min-[650px]:flex',
+        param === null ? 'flex' : 'hidden',
+      )}>
         <Input
           data-slot="skills-filter"
           placeholder="Filter skills…"
@@ -204,10 +207,10 @@ function SkillsCatalog() {
             <Link
               to="/skills"
               data-slot="skills-back"
-              className="mb-3 inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground @min-[650px]:hidden"
+              className="mb-4 inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted @min-[650px]:hidden"
             >
               <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
-              Back to the list
+              Back to skills
             </Link>
 
             {selection === IMPORT ? (
