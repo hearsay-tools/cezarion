@@ -272,7 +272,7 @@ export function SettingsSectionRoute({
     >
       {/* Desktop header — below `md` the shell's top bar already says "Settings". The
           breadcrumb is what tells the two areas apart at a glance (mockup: "Global settings"). */}
-      <header className="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-5 md:flex">
+      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center gap-3 border-b border-border bg-background px-11 md:flex">
         <h1 className="text-base font-semibold">{section.title}</h1>
         <p className="text-[13px] text-soft-foreground">{section.description}</p>
         {scope === 'global' ? (
@@ -302,7 +302,7 @@ export function SettingsIndexRoute({ scope, capabilities }: {
   const global = scope === 'global'
   return (
     <div data-route={global ? 'settings-global' : 'settings'} className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-5 md:flex">
+      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center gap-3 border-b border-border bg-background px-11 md:flex">
         <h1 className="text-base font-semibold">{global ? 'Global settings' : 'Settings'}</h1>
         <p className="text-[13px] text-soft-foreground">
           {global

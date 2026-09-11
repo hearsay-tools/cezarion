@@ -372,12 +372,11 @@ describe('the hero surface', () => {
     const summary = screen.getByText('Execution options')
     const disclosure = summary.closest('details')!
     expect(disclosure).not.toBeNull()
-    expect(disclosure.open).toBe(false)
+    expect(disclosure.open).toBe(true)
     expect(disclosure.contains(sourcePill())).toBe(false)
     expect(disclosure.contains(screen.getByRole('radio', { name: 'Plan first' }))).toBe(false)
     expect(disclosure.contains(screen.getByRole('button', { name: 'Start task' }))).toBe(false)
     expect(summary.parentElement?.textContent).toContain('claude')
-    fireEvent.click(summary)
     const model = screen.getByRole('button', { name: 'Model' })
     expect(disclosure.contains(model)).toBe(true)
     fireEvent.pointerDown(model)

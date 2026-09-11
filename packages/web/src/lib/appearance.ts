@@ -3,9 +3,9 @@
  * The authoritative store is the server's `ui-state.json` (`GET/PUT /api/ui-state`, additive
  * `appearance` key) so the choice follows the repo, not the browser. localStorage keeps a
  * per-browser MIRROR of the last-applied values purely so the pre-paint script in
- * `packages/web/index.html` can stamp `data-accent`/`data-density` before first paint — the same
- * no-flash trick the theme uses. When the server answers, its value wins and the mirror is
- * rewritten.
+ * `packages/web/index.html` can stamp density/width deviations before first paint — the same
+ * no-flash trick the theme uses. The sole accent needs no attribute. When the server answers,
+ * its value wins and the mirror is rewritten.
  *
  * IMPORTANT: `packages/web/index.html`'s inline script duplicates `applyAppearance`'s stamping in
  * vanilla JS on purpose — it must run before the bundle exists. Change one, change the other.
@@ -15,10 +15,10 @@ export const ACCENT_STORAGE_KEY = 'cez-accent'
 export const DENSITY_STORAGE_KEY = 'cez-density'
 export const WIDTH_STORAGE_KEY = 'cez-width'
 
-/** The two accents the token sheet can express today: `lime` is `--primary` as shipped;
- *  `violet` swaps the `--primary` family onto the existing `--violet` tokens (index.css
- *  `:root[data-accent="violet"]`). More accents = more token families there, nothing here. */
-export type Accent = 'lime' | 'violet'
+/** The brand accent applied through the appearance mechanism. Keeping this as a named option,
+ * rather than deleting the field, preserves the persisted shape and leaves one deliberate
+ * extension point for a future second accent. */
+export type Accent = 'violet'
 
 /** Density shrinks Tailwind v4's one spacing token (`--spacing`, default 4px/unit) so every
  *  padding/gap/control height tightens while type stays full-size: `compact` → 3.5px (~12%),
@@ -30,7 +30,7 @@ export type Density = 'comfortable' | 'compact' | 'ultra'
  *  to 1180px so long transcripts use more of the screen. Type size and spacing stay untouched. */
 export type Width = 'narrow' | 'wide'
 
-export const DEFAULT_ACCENT: Accent = 'lime'
+export const DEFAULT_ACCENT: Accent = 'violet'
 export const DEFAULT_DENSITY: Density = 'comfortable'
 export const DEFAULT_WIDTH: Width = 'narrow'
 
@@ -42,7 +42,10 @@ export interface Appearance {
 
 /** Coerce anything (missing key, a future value, garbage) into an Accent. */
 export function normalizeAccent(raw: unknown): Accent {
-  return raw === 'lime' || raw === 'violet' ? raw : DEFAULT_ACCENT
+  // `lime` is the legacy value; `violet` stays as the wire-compatible key for the sole Cezarion
+  // accent. Every stored value converges on it without requiring a server-side migration.
+  void raw
+  return DEFAULT_ACCENT
 }
 
 export function normalizeDensity(raw: unknown): Density {
@@ -87,8 +90,9 @@ export function writeStoredAppearance(appearance: Appearance): void {
   }
 }
 
-/** Stamp the root element. Defaults REMOVE the attribute rather than writing `data-accent="lime"`,
- *  so the stock token sheet applies untouched and the CSS only ever names the non-default cases. */
+/** Stamp the root element. The sole default accent is implicit; keeping the non-default branch
+ * live means adding another typed option and token family reconnects without replacing the
+ * appearance mechanism. */
 export function applyAppearance(root: HTMLElement, appearance: Appearance): void {
   if (appearance.accent === DEFAULT_ACCENT) delete root.dataset.accent
   else root.dataset.accent = appearance.accent

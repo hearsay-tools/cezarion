@@ -21,12 +21,14 @@ afterEach(() => {
 })
 
 describe('normalize', () => {
-  it('accepts the known values and defaults everything else', () => {
-    expect(normalizeAccent('violet')).toBe('violet')
-    expect(normalizeAccent('lime')).toBe('lime')
-    // Unknown/garbage inputs — localStorage and ui-state.json both outlive this code's vocabulary.
+  it('maps legacy and unknown accents onto the sole Cezarion accent', () => {
+    for (const raw of ['violet', 'lime', null, undefined, 'magenta', 42, {}]) {
+      expect(normalizeAccent(raw)).toBe('violet')
+    }
+  })
+
+  it('accepts the known density and width values and defaults everything else', () => {
     for (const raw of [null, undefined, 'magenta', 42, {}]) {
-      expect(normalizeAccent(raw)).toBe('lime')
       expect(normalizeDensity(raw)).toBe('comfortable')
       expect(normalizeWidth(raw)).toBe('narrow')
     }
@@ -38,12 +40,12 @@ describe('normalize', () => {
 
   it('normalizeAppearance survives any ui-state shape', () => {
     expect(normalizeAppearance(undefined)).toEqual({
-      accent: 'lime',
+      accent: 'violet',
       density: 'comfortable',
       width: 'narrow',
     })
     expect(normalizeAppearance('not-an-object')).toEqual({
-      accent: 'lime',
+      accent: 'violet',
       density: 'comfortable',
       width: 'narrow',
     })
@@ -53,7 +55,7 @@ describe('normalize', () => {
       width: 'narrow',
     })
     expect(normalizeAppearance({ accent: 'nope', density: 'compact', width: 'wide' })).toEqual({
-      accent: 'lime',
+      accent: 'violet',
       density: 'compact',
       width: 'wide',
     })
@@ -70,21 +72,20 @@ describe('the localStorage mirror', () => {
   })
 
   it('defaults when the mirror is empty', () => {
-    expect(readStoredAppearance()).toEqual({ accent: 'lime', density: 'comfortable', width: 'narrow' })
+    expect(readStoredAppearance()).toEqual({ accent: 'violet', density: 'comfortable', width: 'narrow' })
   })
 })
 
 describe('applyAppearance', () => {
-  it('stamps only the non-default choices, exactly like the pre-paint script', () => {
+  it('keeps the sole accent implicit and stamps only non-default density and width', () => {
     const root = document.documentElement
+    root.dataset.accent = 'violet'
     applyAppearance(root, { accent: 'violet', density: 'compact', width: 'wide' })
-    expect(root.dataset.accent).toBe('violet')
+    expect(root.hasAttribute('data-accent')).toBe(false)
     expect(root.dataset.density).toBe('compact')
     expect(root.dataset.width).toBe('wide')
 
-    // Back to defaults: the attributes must come OFF (the stock token sheet is the default),
-    // not be written as data-accent="lime".
-    applyAppearance(root, { accent: 'lime', density: 'comfortable', width: 'narrow' })
+    applyAppearance(root, { accent: 'violet', density: 'comfortable', width: 'narrow' })
     expect(root.hasAttribute('data-accent')).toBe(false)
     expect(root.hasAttribute('data-density')).toBe(false)
     expect(root.hasAttribute('data-width')).toBe(false)

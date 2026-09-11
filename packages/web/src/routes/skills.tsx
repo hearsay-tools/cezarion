@@ -45,7 +45,7 @@ export function SkillsRoute() {
   return (
     <div data-route="skills" className="flex min-h-full flex-col">
       {/* Desktop header — below `md` the shell's top bar already says "Skills". */}
-      <header className="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-5 md:flex">
+      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center gap-3 border-b border-border bg-background px-11 md:flex">
         <h1 className="text-base font-semibold">Skills</h1>
         <p className="text-[13px] text-muted-foreground">Markdown playbooks agents can follow.</p>
       </header>

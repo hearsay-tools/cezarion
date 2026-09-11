@@ -238,7 +238,7 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
         <div className="flex items-center gap-3">
           <Button
             type="button"
-            variant="contrast"
+            variant="primary"
             size="sm"
             data-action="prompt-templates-save"
             disabled={!dirty || invalid || save.isPending}

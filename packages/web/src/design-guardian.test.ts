@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -231,6 +231,40 @@ describe('design guardian', () => {
     expect(rels.has('src/styles/index.css')).toBe(true)
     expect(rels.has('e2e/smoke.e2e.ts')).toBe(true)
     expect(sources.length).toBeGreaterThan(40)
+  })
+
+  it('binds the approved self-hosted Poppins UI typeface', () => {
+    const css = readFileSync(path.join(APP_ROOT, 'src/styles/index.css'), 'utf8')
+    expect(css).toContain('@import "@fontsource/poppins/400.css"')
+    expect(css).toContain('@import "@fontsource/poppins/500.css"')
+    expect(css).toContain('@import "@fontsource/poppins/600.css"')
+    expect(css).toContain("--sans: 'Poppins'")
+    expect(existsSync(path.resolve(APP_ROOT, '../../node_modules/@fontsource/poppins/LICENSE'))).toBe(true)
+  })
+
+  it('defines the approved purple chrome and gold action token vocabulary', () => {
+    const css = readFileSync(path.join(APP_ROOT, 'src/styles/index.css'), 'utf8')
+    for (const token of [
+      '--brand-purple:',
+      '--brand-gold:',
+      '--task-brand-bg:',
+      '--task-brand-selected:',
+      '--accent-text:',
+      '--primary: var(--brand-gold)',
+    ]) {
+      expect(css).toContain(token)
+    }
+  })
+
+  it('builds shared controls on the 44px Cezarion rhythm and composer accent', () => {
+    const button = readFileSync(path.join(APP_ROOT, 'src/components/ui/button.tsx'), 'utf8')
+    const input = readFileSync(path.join(APP_ROOT, 'src/components/ui/input.tsx'), 'utf8')
+    const select = readFileSync(path.join(APP_ROOT, 'src/components/ui/select.tsx'), 'utf8')
+    const composer = readFileSync(path.join(APP_ROOT, 'src/components/composer/composer.tsx'), 'utf8')
+    expect(button).toContain('default: "h-11')
+    expect(input).toContain('h-11 w-full')
+    expect(select).toContain('data-[size=default]:h-11')
+    expect(composer).toContain('border-[var(--composer-border)]')
   })
 
   for (const rule of RULES) {

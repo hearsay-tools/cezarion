@@ -33,19 +33,17 @@
         } catch (e) {
           // Storage or matchMedia unavailable — the default dark tokens already apply.
         }
-        // Accent + density before first paint, from the localStorage MIRROR of ui-state.json
-        // (src/lib/appearance.ts owns the contract; keep the two in sync). Defaults are the
-        // absence of the attribute, so only the known deviations are stamped.
+        // Density + reading width before first paint, from the localStorage MIRROR of
+        // ui-state.json (src/lib/appearance.ts owns the contract; keep the two in sync).
+        // The one-option Cezarion accent is implicit, while its value remains persisted.
         try {
-          if (localStorage.getItem('cez-accent') === 'violet')
-            document.documentElement.dataset.accent = 'violet'
           var density = localStorage.getItem('cez-density')
           if (density === 'compact' || density === 'ultra')
             document.documentElement.dataset.density = density
           if (localStorage.getItem('cez-width') === 'wide')
             document.documentElement.dataset.width = 'wide'
         } catch (e) {
-          // Storage unavailable — lime/comfortable defaults already apply.
+          // Storage unavailable — comfortable/narrow defaults already apply.
         }
       })()
     </script>

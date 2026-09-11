@@ -200,7 +200,7 @@ function ReviewActions({ run }: { run: ApiRun }) {
         )}
         <Button
           data-slot="review-accept"
-          variant="contrast"
+          variant="primary"
           size="sm"
           className="ml-auto"
           title={finishTitle('review')}

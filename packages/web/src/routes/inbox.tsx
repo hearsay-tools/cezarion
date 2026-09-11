@@ -81,7 +81,7 @@ export function InboxRoute() {
   return (
     <div data-route="inbox" className="flex min-h-full flex-col">
       {/* Desktop header — below `md` the shell's top bar already says "Inbox". */}
-      <header className="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-5 md:flex">
+      <header className="sticky top-0 z-10 hidden h-[72px] shrink-0 items-center gap-3 border-b border-border bg-background px-11 md:flex">
         <h1 className="text-base font-semibold">Inbox</h1>
         <p className="text-[13px] text-soft-foreground">
           {inboxOff
@@ -280,7 +280,7 @@ function TodoCard({
             <>
               <Button
                 type="button"
-                variant="contrast"
+                variant="primary"
                 size="sm"
                 data-action="todo-run"
                 title="Start a task from this follow-up"
@@ -305,7 +305,7 @@ function TodoCard({
           ) : (
             <Button
               type="button"
-              variant="contrast"
+              variant="primary"
               size="sm"
               data-action="todo-acknowledge"
               title="Acknowledge and remove this note"

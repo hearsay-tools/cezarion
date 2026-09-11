@@ -322,7 +322,7 @@ export function HandToAgent({
 
       <div className="mt-4 flex flex-wrap items-center gap-2.5">
         <Button
-          variant="contrast"
+          variant="primary"
           data-action="gh-run"
           disabled={start.isPending || !resolved.canRun}
           onClick={() => start.mutate()}

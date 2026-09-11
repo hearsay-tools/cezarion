@@ -63,7 +63,7 @@ function RepoView({ repo, info, tab }: { repo: RepoResponse; info: RepoInfo; tab
     <div data-route="repo-git" className="flex min-h-full flex-col">
       <header
         data-slot="repo-header"
-        className="sticky top-0 z-20 border-b border-border bg-background/95 px-4 pt-3 backdrop-blur md:px-6"
+        className="sticky top-0 z-20 border-b border-border bg-background/95 px-4 pt-3 backdrop-blur md:px-11"
       >
         <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start">
           <div className="flex min-w-0 items-center gap-2.5 md:min-h-11">

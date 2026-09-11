@@ -336,7 +336,7 @@ describe('TaskQuickList', () => {
       expect(title.textContent).toBe('implementing comment threads across the whole thread view')
 
       const diff = rowEl.querySelector('[data-slot="diff-stat"]') as HTMLElement
-      // Hidden by default at the 264px column, back once the column is dragged past 23rem —
+      // Hidden by default at the 232px column, back once the column is dragged past 23rem —
       // the width at which the pair fits without costing the name any of its default budget.
       expect(diff.className).toContain('hidden')
       expect(diff.className).toContain('@min-[23rem]/sidebar:inline')
@@ -540,7 +540,7 @@ describe('TaskQuickList', () => {
       // The bug this pins: the control was revealed by `group-hover` and focus alone, so on a
       // phone (where this same list IS the drawer) there was no way to reach it at all. The
       // honest axis is the pointer, not the viewport — the drawer keeps the sidebar's fixed
-      // 264px, so a `md:` rule would have been wrong in both directions.
+      // 232px, so a `md:` rule would have been wrong in both directions.
       renderList({ runs: [run({ id: 'plain', status: 'done' })], onTogglePin: vi.fn() })
       const pin = document.querySelector('[data-slot="pin-toggle"]') as HTMLElement
       expect(pin.className).toContain('no-hover:opacity-100')

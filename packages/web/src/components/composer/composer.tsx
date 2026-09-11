@@ -49,7 +49,7 @@ import { formatElapsed, useDictation } from './dictation'
  * the Dictation mic (paseo pattern), and the Alt+A / Alt+C quick replies.
  *
  * Visual contract: docs/mockups/thread.html `.composer` — card, borderless textarea, footer
- * bar with paperclip · spacer · labeled Dictation · lime send.
+ * bar with paperclip · spacer · labeled Dictation · gold send.
  */
 // Session memory, matching run details: task tab navigation may remount the composer.
 const mobileOpenByTask = new Map<string, boolean>()
@@ -571,11 +571,14 @@ export function Composer({
           onDrop={onDrop}
           onDragOver={(event) => event.preventDefault()}
           className={cn(
-            'rounded-xl border border-border bg-card shadow-xs transition-[border-color,box-shadow]',
-            'focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15',
+            executionOptions && 'grid gap-4 md:grid-cols-[minmax(0,1fr)_330px] md:items-start md:gap-6',
             disabled && 'opacity-80',
           )}
         >
+          <div
+            data-slot="composer-editor"
+            className="rounded-xl border border-[var(--composer-border)] bg-card shadow-none transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15"
+          >
           {images.length > 0 ? (
             <div data-slot="composer-thumbs" className="flex flex-wrap items-center gap-2 px-4 pt-3">
               {images.map((attachment, index) => (
@@ -714,7 +717,6 @@ export function Composer({
               </div>
             </div>
           )}
-          {executionOptions ? <div inert={readOnly || undefined}>{executionOptions}</div> : null}
           {retainDraftUntilSuccess || onStop || stopping ? (
             <div className={cn("overflow-y-auto px-3 pb-2 text-xs leading-5 text-muted-foreground md:px-4", compactFeedback ? "min-h-6" : "h-24 md:h-20")}>
               <div
@@ -733,6 +735,8 @@ export function Composer({
               </div>
             </div>
           ) : null}
+          </div>
+          {executionOptions ? <div inert={readOnly || undefined}>{executionOptions}</div> : null}
         </div>
       </PopoverAnchor>
 

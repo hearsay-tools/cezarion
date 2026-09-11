@@ -299,7 +299,7 @@ function Row({
  * title rather than a chip wedged in front of the status it is not about.
  *
  * WIDTH-PRIORITY RULE (#788, option C) — read this before adding anything to this row.
- * The column is 264px by default and the title is the ONLY thing here a person scans for, so:
+ * The column is 232px by default and the title is the ONLY thing here a person scans for, so:
  *
  *  1. The title is the only element allowed to GROW (`flex-1`) and it has a floor
  *     (`min-w-[7rem]`, replacing the `min-w-0` that let it be squeezed to nothing) that no other
@@ -325,7 +325,7 @@ function Row({
  *  - `group-focus-within` — the keyboard, on the row's own link.
  *  - `no-hover` — a device that CANNOT hover, where the first two never fire and a
  *    hover-revealed control is simply unreachable. This is the phone and tablet case; the
- *    drawer keeps the sidebar's fixed 264px, so the width rule applies there too and the pin
+ *    drawer keeps the sidebar's fixed 232px, so the width rule applies there too and the pin
  *    still cannot be permanent — it is bigger instead (`size-11`), because a 20px target under a
  *    thumb is not a target. See the variant's definition in `styles/index.css`.
  *  - `data-[pinned=true]` — an already-pinned row, where the pin is a fact about the row rather
@@ -445,12 +445,12 @@ function RunRow({
             sidebar row has no column to hold an em dash open for.
 
             Droppable metadata, per the width-priority rule: `+59514 −12160` is ~82px, which a
-            264px column cannot spend and still name the task, and its exact numbers stay in the
+            232px column cannot spend and still name the task, and its exact numbers stay in the
             `title` tooltip and in the Tasks table's ± column either way.
 
             23rem is not the width at which the pair merely *fits* — it is the width at which it
-            fits AND the name is still at least as long as it was in the default 264px column
-            (measured: 146px of title at 23rem vs 132px at 264px). Anything narrower buys the
+            fits AND the name is still at least as long as it was in the default 232px column.
+            Anything narrower buys the
             numbers back by making the task names shorter than they were before the drag, which
             is precisely the bargain this issue exists to stop making. */}
         {run.diffStat ? (
