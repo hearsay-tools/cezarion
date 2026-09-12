@@ -31,3 +31,11 @@
 @media (max-width: 767px) {
   [data-slot='run-tabs'] { gap: calc(var(--spacing) * 5); }
 }
+
+[data-slot='run-tabs'] { margin-top: calc(var(--spacing) * 3); }
+[data-slot='run-tabs'] > a[aria-current='page'] { font-weight: 600; }
+[data-slot='run-meta'] { margin-top: calc(var(--spacing) * 2.5); }
+@media (min-width: 768px) {
+  [data-slot='run-header'] { padding-top: calc(var(--spacing) * 5.5); }
+  [data-slot='run-title-row'] h1 { font-size: 25px; letter-spacing: -0.7px; }
+}

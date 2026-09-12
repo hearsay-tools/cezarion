@@ -64,3 +64,8 @@
   [data-route='task-thread'] [data-slot='user-bubble'] > p:first-child { margin-bottom: 6px; }
   [data-route='task-thread'] [data-slot='assistant-message'] { padding-inline: 0; }
 }
+
+/* A closed event follows the report; the conversation flex space stays after it. */
+[data-route='task-thread'] [data-slot='thread-footer'][data-state='closed'] { margin-top: 0; border-top: 0; padding-top: 0; font-size: 10px; }
+[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> strong:only-child) { margin-bottom: calc(var(--spacing) * 1); }
+[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> strong:only-child) + p { margin-top: calc(var(--spacing) * 1); }
