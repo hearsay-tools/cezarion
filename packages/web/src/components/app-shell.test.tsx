@@ -901,3 +901,15 @@ it('opens project navigation from the mobile project control and restores its fo
   fireEvent.click(within(document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement).getByRole('link', { name: 'Second project' }))
   await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/p/second/skills'))
 })
+
+// Current 193-frame source has a taller Start/New task header; page/session frames
+// explicitly retain 64px, including Git panes whose viewport caps deduct it.
+it.each(['/new', '/p/iac/new'])('uses the source 72px Start header at %s', (route) => {
+  const { container } = renderShell(route)
+  expect(container.querySelector('[data-slot="desktop-breadcrumb"]')?.classList.contains('h-[72px]')).toBe(true)
+  expect(container.querySelector('[data-slot="desktop-breadcrumb"]')?.classList.contains('px-11')).toBe(true)
+})
+it.each(['/skills', '/workflows', '/p/iac/runs/123', '/p/iac/git', '/settings/global'])('retains the source 64px page header at %s', (route) => {
+  const { container } = renderShell(route)
+  expect(container.querySelector('[data-slot="desktop-breadcrumb"]')?.classList.contains('h-16')).toBe(true)
+})

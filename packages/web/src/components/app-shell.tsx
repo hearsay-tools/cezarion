@@ -242,7 +242,7 @@ export function AppShell({
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
           <MobileTopBar title={current?.label ?? 'cezar'} repo={repo} onTrigger={(button) => { mobileNavTrigger.current = button }} />
-          <header data-slot="desktop-breadcrumb" className="row-start-1 hidden h-16 min-w-0 items-center gap-3 border-b border-border px-9 text-[13px] text-muted-foreground md:flex">
+          <header data-slot="desktop-breadcrumb" className={cn("row-start-1 hidden min-w-0 items-center gap-3 border-b border-border text-[13px] text-muted-foreground md:flex", areaPathname === '/new' ? 'h-[72px] px-11' : 'h-16 px-9')}>
             <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
             {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
             <span className="min-w-0 truncate">{breadcrumb?.page ?? current?.label ?? 'Cezarion'}</span>
