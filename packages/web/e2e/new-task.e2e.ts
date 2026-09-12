@@ -120,7 +120,7 @@ describe('the full-screen /new against a live dry-run server', () => {
     browser.waitForFunction(`document.querySelector('[data-route="new"]') !== null`)
     expect(browser.url()).toBe(`${baseUrl}${scoped('/new')}`)
     expect(browser.text('h1')).toBe('What should the agent work on?')
-    expect(browser.isVisible('[data-slot="twinkle-backdrop"]')).toBe(true)
+    expect(browser.isVisible('[data-route="new"] [data-slot="composer"]')).toBe(true)
     expect(
       browser.evaluate(
         `document.activeElement === document.querySelector('[data-slot="composer"] textarea')`,
@@ -234,6 +234,9 @@ describe('the full-screen /new against a live dry-run server', () => {
   })
 
   it('type + submit → the thread; the run record carries the exact skill chain', async () => {
+    // The multi-select picker stays open while choosing skills; dismiss before typing.
+    browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
     browser.click('[data-slot="composer"] textarea')
     browser.fill('[data-slot="composer"] textarea', 'Draft a spec for the new-task hero e2e.')
     browser.click('[aria-label="Start task"]')

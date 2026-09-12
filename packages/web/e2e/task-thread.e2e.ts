@@ -429,7 +429,7 @@ describe('task thread', () => {
     const actions = browser.evaluate(
       `[...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map((b) => b.textContent.trim())`,
     ) as string[]
-    expect(actions).toEqual(['Open in…', 'Copy resume command', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
+    expect(actions).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive task', 'Delete task…'])
 
     browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent === 'Open in…').click()`)
     // The take-over command remains in the worktree chooser.
@@ -444,8 +444,8 @@ describe('task thread', () => {
 
   it('opens the Notes panel — an unseeded handoff reads as the honest empty state', () => {
     browser.click('[aria-label="Run actions"]')
-    browser.waitForFunction(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].some(el => el.textContent.trim() === 'Notes')`)
-    browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent.trim() === 'Notes').click()`)
+    browser.waitForFunction(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].some(el => el.textContent.trim() === 'Notes / handoff')`)
+    browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent.trim() === 'Notes / handoff').click()`)
     browser.waitForFunction(`document.querySelector('[data-slot="notes-panel"]') !== null`)
     browser.waitForFunction(
       `document.querySelector('[data-slot="notes-panel"]').textContent.includes('No notes yet')`,
@@ -456,8 +456,8 @@ describe('task thread', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') === null`)
     browser.screenshot(`${artifactsDir}/thread-header-desktop.png`, { viewport: true })
     browser.click('[aria-label="Run actions"]')
-    browser.waitForFunction(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].some(el => el.textContent.trim() === 'Notes')`)
-    browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent.trim() === 'Notes').click()`)
+    browser.waitForFunction(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].some(el => el.textContent.trim() === 'Notes / handoff')`)
+    browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent.trim() === 'Notes / handoff').click()`)
     browser.waitForFunction(`document.querySelector('[data-slot="notes-panel"]') === null`)
   })
 

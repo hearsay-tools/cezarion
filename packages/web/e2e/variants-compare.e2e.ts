@@ -150,7 +150,7 @@ describe('the variants compare view against two settled dry runs', () => {
     for (const letter of ['A', 'B']) {
       const col = `[data-slot="variant-column"][data-variant="${letter}"]`
       expect(browser.text(`${col} [data-slot="variant-letter"]`)).toBe(letter)
-      expect(browser.text(`${col} [data-slot="pill"]`)).toContain('needs review')
+      expect(browser.text(`${col} [data-slot="variant-status"]`)).toContain('Needs Review')
       // The mock's notes.md write shows up in git's own --stat words.
       expect(browser.text(`${col} [data-slot="variant-diffstat"]`)).toContain('notes.md')
       // The handoff Progress excerpt the mock appended (spec 007 behavior).

@@ -51,11 +51,11 @@ beforeAll(async () => {
  *  forge to poll AND the operator's opt-in to exist at all. */
 function expectedNavLabels(): string[] {
   return [
-    'Tasks',
     ...(followupsAvailable ? ['Inbox'] : []),
+    ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
+    'Tasks',
     'Git',
     ...(forgeAvailable ? ['GitHub'] : []),
-    ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
     'Skills',
     'Workflows',
     'Settings',
@@ -147,7 +147,7 @@ describe('cockpit app shell', () => {
 
     expect(browser.isVisible('[data-slot="sidebar"]')).toBe(true)
     expect(browser.isVisible('[data-slot="brand-wordmark"]')).toBe(true)
-    expect(browser.text('[data-slot="sidebar"] nav')).toContain('Tasks')
+    expect(browser.text('[data-slot="sidebar"] nav[aria-label="Main"]')).toContain('Tasks')
 
     // The GitHub item waits on the health answer — settle it before sampling the nav.
     if (forgeAvailable) {
@@ -167,13 +167,13 @@ describe('cockpit app shell', () => {
     // The "New task" CTA and its browser-usable accelerator hint. The desktop shell also
     // registers ⌘N, but browsers reserve that chord for opening a window.
     expect(browser.text(`[data-slot="sidebar"] a[href="${scoped('/new')}"]`)).toContain('New task')
-    expect(browser.text(`[data-slot="sidebar"] a[href="${scoped('/new')}"] kbd`)).toBe('C')
+    expect(browser.evaluate(`document.querySelector('[data-slot="sidebar"] a[href="${scoped('/new')}"] kbd').textContent`)).toBe('C')
 
     // The theme toggle lives in the footer.
     expect(browser.isVisible('[data-slot="sidebar-footer"] [data-slot="theme-toggle"]')).toBe(true)
 
     // Search now leads the creation flow above New task; the footer's tools, version, settings,
-    // and theme controls remain on one row inside the 232px column. Only a real layout engine can
+    // and theme controls remain on one row inside the 264px column. Only a real layout engine can
     // answer this: jsdom measures nothing.
     const footerRows = browser.evaluate(`(() => {
       const footer = document.querySelector('[data-slot="sidebar-footer"]')
@@ -185,7 +185,6 @@ describe('cockpit app shell', () => {
       }
       const controls = [
         '[data-slot="tools-menu-trigger"]',
-        '[data-slot="version-chip"]',
         '[data-slot="global-settings-link"]',
         '[data-slot="theme-toggle"]',
       ]
@@ -211,7 +210,7 @@ describe('cockpit app shell', () => {
     setTheme('light')
     const light = brandFacts('[data-slot="sidebar"]')
 
-    expect(light.text).toBe('cezarion')
+    expect(light.text).toBe('Cezarion')
     expect(light.fontFamily).toContain('Poppins')
     expect(light.fontSize).toBe('23px')
     expect(light.height).toBeGreaterThanOrEqual(23)
@@ -221,14 +220,14 @@ describe('cockpit app shell', () => {
     browser.click('[data-slot="sidebar"] [data-slot="theme-toggle"]')
     browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
     const dark = brandFacts('[data-slot="sidebar"]')
-    expect(dark.text).toBe('cezarion')
+    expect(dark.text).toBe('Cezarion')
     expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
     expect(dark.color).toBe(dark.foreground)
     expect(dark.color).not.toBe(light.color)
     expect(dark.headerOverflow).toBeLessThanOrEqual(0)
   })
 
-  it('keeps the footer controls inside the 232px column even on a nightly-length version', () => {
+  it('keeps the footer controls inside the 264px column even on a nightly-length version', () => {
     browser.goto(baseUrl + scoped('/'))
     browser.waitForFunction(`document.querySelector('[data-slot="version-chip"]') !== null`)
 
@@ -273,7 +272,8 @@ describe('cockpit app shell', () => {
     // the client → query → chip path really carries live API data, and stays true wherever the
     // suite runs (any checkout, any branch).
     const repoName = health.repoRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
-    expect(browser.text('[data-slot="repo-chip"]')).toBe(`${repoName} / ${health.repo?.branch}`)
+    expect(browser.text('[data-slot="repo-chip"]')).toBe(repoName)
+    expect(browser.evaluate(`document.querySelector('[data-slot="repo-chip"]').nextElementSibling.textContent`)).toBe(health.repo?.branch)
     expect(browser.text('[data-slot="version-chip"]')).toBe(`v${health.version}`)
 
     // Real values, not a placeholder that happens to match itself.
@@ -335,7 +335,7 @@ describe('cockpit app shell', () => {
     expect(layout.bodyOverflow).toBe('hidden')
     expect(layout.mainOverflow).toBe('auto')
     expect(layout.mainOverscroll).toBe('contain')
-    expect(layout.sidebarWidth).toBe(232)
+    expect(layout.sidebarWidth).toBe(264)
   })
 
   it('screenshots the shell in both themes', () => {
@@ -374,13 +374,20 @@ describe('mobile shell', () => {
     const bar = browser.evaluate(`(() => {
       const menu = document.querySelector('[data-slot="mobile-top-bar"] button')
       const rect = menu.getBoundingClientRect()
-      return { width: rect.width, height: rect.height, label: menu.getAttribute('aria-label') }
-    })()`) as { width: number; height: number; label: string }
+      // The approved 20px glyph reserves a 44px hit region through ::after.
+      const hit = getComputedStyle(menu, '::after')
+      const left = rect.left + Number.parseFloat(hit.left)
+      const right = rect.right - Number.parseFloat(hit.right)
+      const y = rect.top + rect.height / 2
+      return { width: right - left, height: rect.height, label: menu.getAttribute('aria-label'),
+        edgesHit: [left + 1, right - 1].every(x => menu.contains(document.elementFromPoint(x, y))) }
+    })()`) as { width: number; height: number; label: string; edgesHit: boolean }
 
     // Touch targets ≥44px (spec's mobile rules).
     expect(bar.label).toBe('Open menu')
     expect(bar.width).toBeGreaterThanOrEqual(44)
     expect(bar.height).toBeGreaterThanOrEqual(44)
+    expect(bar.edgesHit).toBe(true)
 
     browser.screenshot(`${artifactsDir}/shell-iphone.png`)
   })
@@ -388,7 +395,7 @@ describe('mobile shell', () => {
   it('never overflows the viewport horizontally', () => {
     browser.goto(baseUrl + scoped('/'))
 
-    // A 232px sidebar that failed to hide, or a nav row wider than the phone, shows up here
+    // A 264px sidebar that failed to hide, or a nav row wider than the phone, shows up here
     // first — as a page that scrolls sideways. `<=`, not `===`: the document may legitimately
     // be narrower than the viewport, it just must never be wider.
     const overflow = browser.evaluate(
@@ -455,7 +462,7 @@ describe('mobile shell', () => {
       // Anchored to the left edge, full height, and the sidebar's own width.
       expect(box.left).toBe(0)
       expect(box.top).toBe(0)
-      expect(box.width).toBe(232)
+      expect(box.width).toBe(322)
       expect(box.height).toBe(box.viewportHeight)
 
       // The backdrop really is a backdrop: it dims the whole viewport, not just the gap.
@@ -476,7 +483,7 @@ describe('mobile shell', () => {
         setTheme('light')
         openDrawer()
         const light = brandFacts(DRAWER)
-        expect(light.text).toBe('cezarion')
+        expect(light.text).toBe('Cezarion')
         expect(light.fontFamily).toContain('Poppins')
         expect(light.fontSize).toBe('23px')
         expect(light.height).toBeGreaterThanOrEqual(23)
@@ -486,7 +493,7 @@ describe('mobile shell', () => {
         browser.click(`${DRAWER} [data-slot="theme-toggle"]`)
         browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
         const dark = brandFacts(DRAWER)
-        expect(dark.text).toBe('cezarion')
+        expect(dark.text).toBe('Cezarion')
         expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
         expect(dark.color).toBe(dark.foreground)
         expect(dark.color).not.toBe(light.color)
@@ -513,7 +520,7 @@ describe('mobile shell', () => {
       browser.goto(baseUrl + scoped('/'))
       openDrawer()
 
-      // Beside the 232px drawer, in the dimmed strip on the right. By coordinate because the
+      // Beside the 264px drawer, in the dimmed strip on the right. By coordinate because the
       // overlay's own center point sits *under* the drawer, where a tap means something else.
       browser.tapAt(IPHONE.width - 40, Math.round(IPHONE.height / 2))
       browser.waitForFunction(GONE)
@@ -548,7 +555,7 @@ describe('mobile shell', () => {
       browser.goto(baseUrl + scoped('/'))
       openDrawer()
 
-      // The drawer is `fixed` and 232px of a 390px viewport, but a stray `w-3/4`/`sm:max-w-sm`
+      // The drawer is `fixed` and 264px of a 390px viewport, but a stray `w-3/4`/`sm:max-w-sm`
       // interaction or a too-wide nav row would push the document sideways.
       const overflow = browser.evaluate(
         `[document.documentElement.scrollWidth, window.innerWidth]`

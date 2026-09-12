@@ -62,22 +62,26 @@ function style(selector: string, pseudo?: string): Record<string, string> {
   return browser.evaluate(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)})
     const s = getComputedStyle(el, ${JSON.stringify(pseudo ?? null)})
-    return { content: s.content, width: s.width, height: s.height, background: s.backgroundColor,
+    return { content: s.content, width: s.width, height: s.height, background: s.backgroundColor, color: s.color,
       border: s.borderStyle, borderColor: s.borderColor, opacity: s.opacity, outline: s.outlineStyle }
   })()`) as Record<string, string>
 }
 
-function rail(selector: string): void {
-  const s = style(selector, '::before')
-  expect(s.content).not.toBe('none')
-  expect(parseFloat(s.width ?? '')).toBeGreaterThanOrEqual(3)
-  expect(parseFloat(s.height ?? '')).toBeGreaterThanOrEqual(12)
-  // Composite the pseudo-element's ink against the row's real background/ancestor surfaces.
-  const expression = contrastSampleExpression(selector, 'background-color')
-    .replace('getComputedStyle(element).getPropertyValue', "getComputedStyle(element, '::before').getPropertyValue")
-  const sample = browser.evaluate(expression) as ContrastSample
-  samples.push({ variant: variantId, target: selector, state: 'selection rail', ...sample })
-  expect(sample.ratio, JSON.stringify(sample)).toBeGreaterThanOrEqual(3)
+function selectedSurface(selector: string, filled = true): void {
+  const facts = browser.evaluate(`(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    const s = getComputedStyle(el), parent = getComputedStyle(el.parentElement);
+    return { background: s.backgroundColor, color: s.color, parent: parent.backgroundColor,
+      selected: el.getAttribute('data-active') === 'true' || el.getAttribute('aria-current') === 'page' };
+  })()`) as { background: string; parent: string; selected: boolean }
+  expect(facts.selected).toBe(true)
+  if (filled) {
+    expect(facts.background).not.toBe('rgba(0, 0, 0, 0)')
+    expect(facts.background).not.toBe(facts.parent)
+  }
+  const sample = browser.evaluate(contrastSampleExpression(selector)) as ContrastSample
+  samples.push({ variant: variantId, target: selector, state: 'selected surface text', ...sample })
+  expect(sample.ratio, JSON.stringify(sample)).toBeGreaterThanOrEqual(4.5)
 }
 
 function focus(selector: string): void {
@@ -91,7 +95,7 @@ function focus(selector: string): void {
 
 describe('selection and control states (#171)', () => {
   for (const variant of contrastQaVariants) {
-    it(`${variant.id}: task and skill selection have a persistent rail and accessible state`, () => {
+    it(`${variant.id}: task and skill selection have persistent selected states and accessible state`, () => {
       variantId = variant.id
       browser.setViewport(variant.viewport.width, variant.viewport.height)
       browser.goto(`${baseUrl}/p/${project}/tasks/one`)
@@ -103,13 +107,13 @@ describe('selection and control states (#171)', () => {
       const row = `${container}[data-slot="task-row"][data-active="true"]`
       const link = `${row} a[aria-current="page"]`
       browser.waitForFunction(`document.querySelector(${JSON.stringify(link)}).getBoundingClientRect().width > 0`)
-      rail(row)
+      selectedSurface(row)
       expect(style(`${container}[data-slot="task-row"]:not([data-active])`, '::before').content).toBe('none')
       hoverVisiblePoint(browser, row)
-      rail(row)
+      selectedSurface(row)
       focus(link)
       const nav = `${container}nav a[aria-current="page"]`
-      rail(nav)
+      selectedSurface(nav)
       focus(nav)
       browser.screenshot(`${artifacts}/states-tasks-${variant.id}.png`, { viewport: true })
 
@@ -117,19 +121,22 @@ describe('selection and control states (#171)', () => {
       browser.waitForFunction(`document.querySelector('[data-slot="skill-row"][aria-current="page"]') !== null`)
       applyContrastQaVariant(browser, variant)
       const skill = '[data-slot="skill-row"][aria-current="page"]'
-      rail(skill)
+      // Source10C/10D uses uniform mobile rows; desktop selection has a filled surface.
+      selectedSurface(skill, variant.viewport.width !== 360)
       hoverVisiblePoint(browser, skill)
-      rail(skill)
+      // Source10C/10D uses uniform mobile rows; desktop selection has a filled surface.
+      selectedSurface(skill, variant.viewport.width !== 360)
       focus(skill)
       expect((browser.evaluate(contrastSampleExpression(`${skill} span span`)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       browser.screenshot(`${artifacts}/states-skills-${variant.id}.png`, { viewport: true })
       browser.click('[data-slot="skill-row"][data-skill="ship"]')
       browser.waitForFunction(`document.querySelector('[data-slot="skill-row"][data-skill="ship"]')?.getAttribute('aria-current') === 'page'`)
       expect(browser.url()).toContain('skill=ship')
+      browser.waitForFunction(`document.querySelector('[data-slot="skills-detail"]')?.textContent.includes('ship')`)
       expect(style('[data-slot="skill-row"][data-skill="review"]', '::before').content).toBe('none')
     })
 
-    it(`${variant.id}: enabled boundaries contrast and disabled selectors remain unavailable`, () => {
+    it(`${variant.id}: enabled control icons contrast and disabled selectors remain unavailable`, () => {
       variantId = variant.id
       browser.goto(`${baseUrl}/p/${project}/new`)
       const model = 'button[data-slot="model-pill"]'
@@ -152,7 +159,7 @@ describe('selection and control states (#171)', () => {
       const enabledStyle = style(model)
       const disabledStyle = style(disabled)
       expect(enabledStyle.border).toBe('solid')
-      expect(disabledStyle.border).toBe('dashed')
+      expect(browser.evaluate(`document.querySelector('${disabled}').disabled`)).toBe(true)
       expect(disabledStyle.opacity).toBe('1')
       expect((browser.evaluate(contrastSampleExpression(disabled)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       for (const state of ['rest', 'hover', 'focus']) {
@@ -162,14 +169,15 @@ describe('selection and control states (#171)', () => {
             hover: matchMedia('(hover: hover)').matches,
             target: document.querySelector('${model}').matches(':hover'),
           })`)).toEqual({ hover: true, target: true })
-          expect(style(model).background).not.toBe(enabledStyle.background)
+          // New palette keeps the surface stable and brightens the label on hover.
+          browser.waitForFunction(`getComputedStyle(document.querySelector('${model}')).color !== ${JSON.stringify(enabledStyle.color)}`)
         }
         if (state === 'focus') focus(model)
-        const sample = browser.evaluate(contrastSampleExpression(model, 'border-top-color')) as ContrastSample
-        samples.push({ variant: variantId, target: model, state, ...sample })
+        // Source1A/1B has no model border; source23 uses a subtle1px border (1.26/1.39:1).
+        // The CPU glyph and label identify the control. Focus is independently checked above.
+        const sample = browser.evaluate(contrastSampleExpression(`${model} svg`, 'color')) as ContrastSample
+        samples.push({ variant: variantId, target: model, state: `${state} icon`, ...sample })
         expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(3)
-        const outside = browser.evaluate(contrastSampleExpression(model, 'border-top-color', 'parent')) as ContrastSample
-        expect(outside.ratio, `${state} outside: ${JSON.stringify(outside)}`).toBeGreaterThanOrEqual(3)
         expect(bounds()).toEqual(originalBounds)
         expect((browser.evaluate(contrastSampleExpression(model)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       }
@@ -210,7 +218,7 @@ describe('selection and control states (#171)', () => {
       const container = variant.viewport.width === 360 ? '[role="dialog"] ' : ''
       const nav = `${container}nav a[aria-current="page"]`
       browser.waitForFunction(`document.querySelector(${JSON.stringify(nav)})?.getBoundingClientRect().width > 0`)
-      rail(nav)
+      selectedSurface(nav)
       focus(nav)
       browser.screenshot(`${artifacts}/states-grouped-${variant.id}.png`, { viewport: true })
     }

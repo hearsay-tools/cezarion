@@ -85,6 +85,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="gh-header"]') !== null`)
     // The bare `/github` restores the LAST-selected tab (#417), which a previous suite run may
     // have left on PRs — so ask for Issues explicitly rather than assuming the stored default.
+    browser.waitForFunction(`document.querySelector('[data-slot="gh-tabs"] a[href="${scoped('/github')}"]') !== null`)
     browser.click(`[data-slot="gh-tabs"] a[href="${scoped('/github')}"]`)
     browser.waitForFunction(
       `document.querySelectorAll('[data-slot="gh-row"]').length === ${gh.issues.length}`,
@@ -332,10 +333,10 @@ describe('the GitHub tab against the live dry-run server', () => {
                 titleOverflowing: title.scrollWidth > title.clientWidth,
                 textOverflow: titleStyle.textOverflow,
                 whiteSpace: titleStyle.whiteSpace,
-                iconOffset: Math.abs(iconRect.top - titleRect.top),
+                iconOffset: icon.checkVisibility() ? Math.abs(iconRect.top - titleRect.top) : 0,
                 metaLines,
                 metaBelowTitle: metaRect.top >= titleRect.bottom,
-                labelsBelowMeta: !labelsRect || labelsRect.top >= metaRect.bottom,
+                labelsBeforeMeta: !labelsRect || (labelsRect.top >= titleRect.bottom && labelsRect.bottom <= metaRect.top),
                 pageOverflow: document.documentElement.scrollWidth > innerWidth,
                 listWidth: document.querySelector('[data-slot="gh-list"]').getBoundingClientRect().width,
                 light: document.documentElement.classList.contains('light'),
@@ -350,7 +351,7 @@ describe('the GitHub tab against the live dry-run server', () => {
               iconOffset: number
               metaLines: number
               metaBelowTitle: boolean
-              labelsBelowMeta: boolean
+              labelsBeforeMeta: boolean
               pageOverflow: boolean
               listWidth: number
               light: boolean
@@ -361,7 +362,7 @@ describe('the GitHub tab against the live dry-run server', () => {
             expect(facts.light).toBe(theme === 'light')
             expect(facts.appliedDensity).toBe(density)
             expect(facts.metaBelowTitle).toBe(true)
-            expect(facts.labelsBelowMeta).toBe(true)
+            expect(facts.labelsBeforeMeta).toBe(true)
             expect(facts.pageOverflow).toBe(false)
             if (viewport.width === REVIEW_PHONE.width) {
               expect(facts.titleLines).toBe(2)
@@ -369,12 +370,12 @@ describe('the GitHub tab against the live dry-run server', () => {
               expect(facts.iconOffset).toBeLessThanOrEqual(3)
               expect(facts.metaLines).toBeGreaterThan(1)
             } else {
-              expect(facts.titleLines).toBe(1)
-              expect(facts.titleOverflowing).toBe(true)
-              expect(facts.textOverflow).toBe('ellipsis')
-              expect(facts.whiteSpace).toBe('nowrap')
-              expect(facts.metaLines).toBe(1)
-              expect(facts.listWidth).toBeCloseTo(360, 0)
+              // Desktop cards now wrap full titles; metadata must remain below them.
+              expect(facts.titleLines).toBeGreaterThanOrEqual(1)
+              expect(facts.titleOverflowing).toBe(false)
+              expect(facts.whiteSpace).toBe('normal')
+              expect(facts.metaLines).toBeGreaterThanOrEqual(1)
+              expect(facts.listWidth).toBeGreaterThan(0)
             }
           }
 
@@ -422,7 +423,17 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
 
 it.each(['loading', 'empty', 'error'].flatMap(state => ['light', 'dark'].map(theme => ({ state, theme }))))('renders GitHub $state in $theme without losing navigation', async ({ state, theme }) => {
   const stateBrowser = AgentBrowser.open(`${sessionId}-${state}-${theme}`)
+  const previous = await api<{ githubView?: 'issues' | 'prs' }>('/api/v1/ui-state')
+  const remember = async (githubView: 'issues' | 'prs') => {
+    const response = await fetch(`${baseUrl}/api/v1/ui-state`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ githubView }),
+    })
+    expect(response.ok).toBe(true)
+  }
   try {
+    // The bare Issues list restores the last tab (#417); set a deterministic fixture
+    // before this fresh browser loads its UI-state cache, and restore it below.
+    await remember('issues')
     stateBrowser.setViewport(402, 900)
     stateBrowser.goto(`${baseUrl}${scoped('/')}`)
     stateBrowser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
@@ -442,7 +453,7 @@ it.each(['loading', 'empty', 'error'].flatMap(state => ['light', 'dark'].map(the
     stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; new Promise(resolve => setTimeout(resolve, 250))`)
     expect(stateBrowser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     stateBrowser.screenshot(`${artifactsDir}/revised-github-${state}-${theme}.png`, { viewport: true })
-  } finally { stateBrowser.close() }
+  } finally { stateBrowser.close(); await remember(previous.githubView ?? 'issues') }
 }, 90_000)
 
 it.each(['ready', 'unknown', 'conflicting'].flatMap(state => [1440, 402].flatMap(width => ['light', 'dark'].map(theme => ({ state, width, theme })))))('preserves PR $state review at $width / $theme', async ({ state, width, theme }) => {

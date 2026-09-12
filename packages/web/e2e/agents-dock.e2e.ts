@@ -135,13 +135,39 @@ afterAll(() => {
 const DOCK = '[data-slot="agents-dock"]'
 const ROW = '[data-slot="agent-item"]'
 
+function settledClick(selector: string): void {
+  // agent-browser samples coordinates before dispatch. Let pending scroll/layout
+  // settle so the pointer reaches the intended control instead of the composer.
+  browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
+  browser.click(selector)
+}
+
+function clickThreadControl(selector: string): void {
+  // Send actual upward pointer intent to detach follow-tail before bringing a
+  // document-flow control into view. Assert the real target, not scrollTop=0.
+  const point = browser.evaluate(`(() => {
+    const rect = document.querySelector('[data-slot="main"]').getBoundingClientRect()
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+  })()`) as { x: number; y: number }
+  browser.moveTo(point.x, point.y)
+  browser.wheel(-120)
+  browser.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center', behavior: 'instant' })`)
+  browser.waitForFunction(`(() => {
+    const target = document.querySelector(${JSON.stringify(selector)})
+    const rect = target.getBoundingClientRect()
+    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+    return rect.top >= 0 && rect.bottom <= innerHeight && target.contains(hit)
+  })()`)
+  settledClick(selector)
+}
+
 describe('the Agents dock against a replayed fan-out', () => {
   it('docks both sub-agents with odometer, type badge, activity and tool count', () => {
     browser.goto(`${baseUrl}/tasks/${RUN_ID}`)
     // The dock mounts only once the replay has produced the fan-out.
     browser.waitForFunction(`document.querySelector('${DOCK} > button') !== null`)
     expect(browser.evaluate(`document.querySelector('${DOCK} > button').getAttribute('aria-expanded')`)).toBe('false')
-    browser.click(`${DOCK} > button`)
+    clickThreadControl(`${DOCK} > button`)
     browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 2`)
     browser.waitForFunction(
       `document.querySelector('[data-slot="agents-count"]')?.textContent.includes('2/2')`,
@@ -172,11 +198,11 @@ describe('the Agents dock against a replayed fan-out', () => {
     browser.goto(`${baseUrl}/tasks/${RUN_ID}`)
     browser.waitForFunction(`document.querySelector('${DOCK} > button') !== null`)
     expect(browser.evaluate(`document.querySelector('${DOCK} > button').getAttribute('aria-expanded')`)).toBe('false')
-    browser.click(`${DOCK} > button`)
+    clickThreadControl(`${DOCK} > button`)
     browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 2`)
 
     // The second agent's row — a real dialog-opening button.
-    browser.click(`${ROW}:nth-of-type(2) button`)
+    clickThreadControl(`${ROW}:nth-of-type(2) button`)
     browser.waitForFunction(`document.querySelector('[data-slot="subagent-sheet"]') !== null`)
 
     const sheet = browser.evaluate(
@@ -206,15 +232,15 @@ describe('the Agents dock against a replayed fan-out', () => {
     browser.goto(`${baseUrl}/tasks/${RUN_ID}`)
     browser.waitForFunction(`document.querySelector('${DOCK} > button') !== null`)
     expect(browser.evaluate(`document.querySelector('${DOCK} > button').getAttribute('aria-expanded')`)).toBe('false')
-    browser.click(`${DOCK} > button`)
+    clickThreadControl(`${DOCK} > button`)
     browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 2`)
-    browser.click(`${ROW}:nth-of-type(1) button`)
+    clickThreadControl(`${ROW}:nth-of-type(1) button`)
     browser.waitForFunction(`document.querySelector('[data-slot="subagent-sheet"] [data-slot="transcript-viewport"]') !== null`)
 
     browser.waitForFunction(`Math.abs(document.querySelector('[data-slot="subagent-sheet"]').getBoundingClientRect().right - innerWidth) < 2`)
     // The shared transcript folds completed streaks; open the actual earlier-tools
     // disclosure before measuring a deliberately long child transcript.
-    browser.click('[data-slot="subagent-sheet"] [data-slot="tool-streak"] button')
+    settledClick('[data-slot="subagent-sheet"] [data-slot="tool-streak"] button')
     browser.waitForFunction(`document.querySelector('[data-slot="subagent-sheet"] [data-slot="tool-streak"] [aria-expanded="true"]') !== null`)
     const metrics = JSON.parse(
       browser.evaluate(`JSON.stringify((() => {
@@ -242,17 +268,17 @@ describe('the Agents dock against a replayed fan-out', () => {
     })()`)
     browser.waitForFunction(`document.querySelector('[data-slot="subagent-sheet"] [data-slot="jump-to-latest"]') !== null`)
     browser.screenshot(join(artifactsDir, 'agents-dock-long-transcript.png'))
-    browser.click('[data-slot="subagent-sheet"] [data-slot="jump-to-latest"]')
+    settledClick('[data-slot="subagent-sheet"] [data-slot="jump-to-latest"]')
   }, 120_000)
 
   it('collapses to a one-line odometer', () => {
     browser.goto(`${baseUrl}/tasks/${RUN_ID}`)
     browser.waitForFunction(`document.querySelector('${DOCK} > button') !== null`)
     expect(browser.evaluate(`document.querySelector('${DOCK} > button').getAttribute('aria-expanded')`)).toBe('false')
-    browser.click(`${DOCK} > button`)
+    clickThreadControl(`${DOCK} > button`)
     browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 2`)
 
-    browser.click(`${DOCK} > button`)
+    clickThreadControl(`${DOCK} > button`)
     browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 0`)
     expect(browser.evaluate(`document.querySelector('[data-slot="agents-count"]').textContent`)).toContain('2/2')
     expect(

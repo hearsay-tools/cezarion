@@ -165,8 +165,13 @@ describe('workflow builder against the live dry-run server', () => {
             const sr = summary.getBoundingClientRect(), hr = heading.getBoundingClientRect(), cr = step.getBoundingClientRect();
             const style = getComputedStyle(summary), saveStyle = getComputedStyle(save), deleteStyle = getComputedStyle(removeFile);
             const controls = ['[data-slot="wb-step-grip"]', '[data-slot="wb-step-actions"]', '${addButton(ALPHA)}']
-              .map(selector => document.querySelector(selector).getBoundingClientRect())
-              .map(rect => ({ width: rect.width, height: rect.height }));
+              .map(selector => {
+                const element = document.querySelector(selector), rect = element.getBoundingClientRect();
+                const hit = getComputedStyle(element, '::after');
+                // Compact step icons retain authored44px hit regions, exercised at real edges in touch-targets.
+                return { width: Math.max(rect.width, parseFloat(hit.width) || 0),
+                  height: Math.max(rect.height, parseFloat(hit.height) || 0) };
+              });
             return {
               saveVariant: save.dataset.variant,
               deleteVariant: removeFile.dataset.variant,

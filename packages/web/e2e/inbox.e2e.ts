@@ -68,7 +68,7 @@ describe('the inbox against the live dry-run server', () => {
       `document.querySelector('[data-route="inbox"] [data-slot="centered-state"]') !== null`,
     )
 
-    expect(browser.text('[data-slot="centered-state"]')).toContain('The follow-up inbox is off')
+    expect(browser.text('[data-slot="centered-state"]')).toContain('Inbox is off')
     expect(browser.text('[data-route="inbox"] header')).toContain(
       'Disabled for this server; per-task Notes still run.',
     )

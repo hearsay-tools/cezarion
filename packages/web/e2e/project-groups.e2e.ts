@@ -50,7 +50,6 @@ const scoped = (projectId: string, path: string) => `/p/${projectId}${path}`
 function expectedNavHrefs(projectId: string): string[] {
   return [
     scoped(projectId, '/'),
-    ...(followupsAvailable ? [scoped(projectId, '/inbox')] : []),
     scoped(projectId, '/git'),
     ...(projectId === bootProject && forgeAvailable ? [scoped(projectId, '/github')] : []),
     // #801: the automations opt-in is workspace-wide, the forge gate is per project — the item
@@ -180,7 +179,9 @@ function setGroupExpanded(projectId: string, expanded: boolean): void {
   browser.waitForFunction(`${state} !== null && ${state} !== undefined`)
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (browser.evaluate(state) === String(expanded)) break
-    browser.click(header)
+    // The project name is a separate link over the header center; activate its toggle by keyboard.
+    browser.evaluate(`document.querySelector('${header}').focus()`)
+    browser.press('Enter')
     try {
       browser.waitForFunction(`${state} === '${expanded}'`)
       break
@@ -246,7 +247,7 @@ describe('the grouped multi-project sidebar', () => {
 
     // The whole point of a group: it links into a project that is NOT the active one.
     expect(hrefs(bootProject)).toEqual(expectedNavHrefs(bootProject))
-    expect(hrefs(ALPHA.id)).toEqual(expectedNavHrefs(ALPHA.id))
+    expect(hrefs(ALPHA.id)).toEqual([])
 
     // `/git` is a flat, project-agnostic route, so exactly one Git row may claim the URL — the
     // one in the scoped group. Alpha's Git link points elsewhere and must stay unmarked.
@@ -255,12 +256,18 @@ describe('the grouped multi-project sidebar', () => {
         .map((a) => new URL(a.href).pathname)`)
     ).toEqual([scoped(bootProject, '/git')])
 
-    // Each group's door into its own tasks pane.
-    expect(
-      browser.evaluate(
-        `new URL(document.querySelector('${groupBody(ALPHA.id)} [data-slot="project-group-more"]').href).pathname`
-      )
-    ).toBe(scoped(ALPHA.id, '/'))
+    // The inactive project's name opens its scoped tasks; navigation is shown only for
+    // the current project in the source design, so inspect Alpha after actually entering it.
+    browser.click('[data-slot="project-group"][data-project="e2e-alpha"] a[aria-label="Open e2e alpha"]')
+    browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/')}'`)
+    browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav') !== null`)
+    expect(hrefs(ALPHA.id)).toEqual(expectedNavHrefs(ALPHA.id))
+    expect(hrefs(bootProject)).toEqual([])
+    browser.click(`${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/git')}"]`)
+    browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/git')}'`)
+    browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/git')}"]')?.getAttribute('aria-current') === 'page'`)
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="project-groups"] a[aria-current="page"]')].map(a => new URL(a.href).pathname)`)).toEqual([scoped(ALPHA.id, '/git')])
+
   })
 
   it('persists a collapse in THIS browser, so a reload keeps it and the workspace file does not', async ({
