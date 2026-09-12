@@ -542,6 +542,21 @@ describe('TaskQuickList', () => {
       expect(onTogglePin.mock.calls[1]?.[0]).toMatchObject({ id: 'kept' })
     })
 
+    it('does not keep the pin visible on the current unpinned task', () => {
+      renderList({
+        runs: [run({ id: 'open', status: 'running' })],
+        currentRunId: 'open',
+        onTogglePin: vi.fn(),
+      })
+      const pin = row('open')!.querySelector('[data-slot="pin-toggle"]') as HTMLElement
+      expect(pin.getAttribute('data-pinned')).toBeNull()
+      expect(pin.className).toContain('w-0')
+      expect(pin.className).toContain('opacity-0')
+      expect(pin.className).not.toContain('group-focus-within')
+      expect(pin.className).toContain('group-hover/task-row:opacity-100')
+      expect(pin.className).toContain('data-[pinned=true]:opacity-100')
+    })
+
     it('stays reachable on a device that cannot hover — the drawer has no pointer', () => {
       // The bug this pins: the control was revealed by `group-hover` and focus alone, so on a
       // phone (where this same list IS the drawer) there was no way to reach it at all. The

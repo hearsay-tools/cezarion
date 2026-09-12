@@ -336,7 +336,9 @@ function Row({
  *
  * Four things reveal it, and each answers a different way of reaching the row:
  *  - `group-hover` — the pointer.
- *  - `group-focus-within` — the keyboard, on the row's own link.
+ *  - `focus-visible` — the keyboard, on the pin itself. Revealing from the row's link
+ *    (`group-focus-within`) kept the pin up on the current task after a click, because that
+ *    link stays focused.
  *  - `no-hover` — a device that CANNOT hover, where the first two never fire and a
  *    hover-revealed control is simply unreachable. This is the phone and tablet case; the
  *    drawer keeps the sidebar's fixed 232px, so the width rule applies there too and the pin
@@ -348,7 +350,7 @@ function Row({
 const ROW_PIN_CLASS =
   'w-0 overflow-hidden opacity-0' +
   ' group-hover/task-row:mr-1 group-hover/task-row:w-5 group-hover/task-row:opacity-100' +
-  ' group-focus-within/task-row:mr-1 group-focus-within/task-row:w-5 group-focus-within/task-row:opacity-100' +
+  ' focus-visible:mr-1 focus-visible:w-5 focus-visible:opacity-100' +
   ' no-hover:mr-1 no-hover:size-11 no-hover:opacity-100' +
   ' data-[pinned=true]:mr-1 data-[pinned=true]:w-5 data-[pinned=true]:opacity-100'
 
