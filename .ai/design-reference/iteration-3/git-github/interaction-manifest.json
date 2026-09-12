@@ -1,0 +1,530 @@
+[
+  {
+    "state": "bypass-confirm-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "bypass-confirm-light-1440.png",
+    "design": "zSB9u-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5bf5e6e53d2844f0d09d9c2946dd0894767f8063621b4b60bc88d386934a7d8a",
+    "browserSha256": "7f81ef579aa73bcd11cb477c77a7cdd7d583a6f79801a64aec6e5148757ccbaa",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "conflict-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "conflict-light-1440.png",
+    "design": "zSB9u-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5bf5e6e53d2844f0d09d9c2946dd0894767f8063621b4b60bc88d386934a7d8a",
+    "browserSha256": "ae35da33042ebd2a16c44bd4b3efe3da85cb34c3e3432cf50884cfeb6e42acd4",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "conflict-handoff-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "conflict-handoff-light-1440.png",
+    "design": "zSB9u-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5bf5e6e53d2844f0d09d9c2946dd0894767f8063621b4b60bc88d386934a7d8a",
+    "browserSha256": "7dae2e22afb34f7f62fbe6a0926046759d8411fa233911e9f4fc364e9bbee3cc",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-text-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-text-light-1440.png",
+    "design": "MFtcY-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "0801516f5e8a9fc29fcce4add19cec08317fa9ba1c391d833a298d77d024366e",
+    "browserSha256": "b27f58a23e2829f9ddd94401ce23913d2de3224dc66bb8caeabf26c8a3f15c39",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-binary-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-binary-light-1440.png",
+    "design": "MFtcY-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "0801516f5e8a9fc29fcce4add19cec08317fa9ba1c391d833a298d77d024366e",
+    "browserSha256": "33f6fa91bf3f4d683aae44e8aa2efab158b979cc5107ebf535c59ef73b41ea51",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-too-large-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-too-large-light-1440.png",
+    "design": "MFtcY-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "0801516f5e8a9fc29fcce4add19cec08317fa9ba1c391d833a298d77d024366e",
+    "browserSha256": "f84e5f7a38eff0bb295de971c912d743abfe13f6e503bf4be70800201c9246f1",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "bypass-confirm-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 2001
+    },
+    "density": "comfortable",
+    "browser": "bypass-confirm-light-402.png",
+    "design": "RvbXf-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "210fba7a26707c7eeca57b5fcef8ccb4c5b7e8c16a78d8644cdf27b73f65cf22",
+    "browserSha256": "1d3ac77d8b0bd554297bdd210135ef42875a1576d8d761620ccfa186e2fb5379",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "conflict-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 2001
+    },
+    "density": "comfortable",
+    "browser": "conflict-light-402.png",
+    "design": "RvbXf-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "210fba7a26707c7eeca57b5fcef8ccb4c5b7e8c16a78d8644cdf27b73f65cf22",
+    "browserSha256": "72816573ba37238f0f0676b5a687f862ef553b1eb5001c7a364a75aa1536310b",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "conflict-handoff-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 2001
+    },
+    "density": "comfortable",
+    "browser": "conflict-handoff-light-402.png",
+    "design": "RvbXf-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "210fba7a26707c7eeca57b5fcef8ccb4c5b7e8c16a78d8644cdf27b73f65cf22",
+    "browserSha256": "f7a22faabf2b9e4290417521c461d4c44feafd45c765275f7a4228d330932f17",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-text-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-text-light-402.png",
+    "design": "LAKkC-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5a20e2cb7752220afc86fc4e293b876df2ab0d59e8c42aab17e46dd5c8fde6fe",
+    "browserSha256": "ef10ebb839c207bc51a9b8f72803a5613fbf9d9750b16f9acb7f4e3968e66b83",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-binary-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-binary-light-402.png",
+    "design": "LAKkC-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5a20e2cb7752220afc86fc4e293b876df2ab0d59e8c42aab17e46dd5c8fde6fe",
+    "browserSha256": "44bcc8a1dca1ccb589e04a96133fdfe6a87e548c2e400b6f4b69ec0c32e443fe",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-too-large-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-too-large-light-402.png",
+    "design": "LAKkC-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5a20e2cb7752220afc86fc4e293b876df2ab0d59e8c42aab17e46dd5c8fde6fe",
+    "browserSha256": "1636e434cdb083da93c1f1f6d4bbae1c637c46dd72016aebd69420a0c0e41bae",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "bypass-confirm-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "bypass-confirm-dark-1440.png",
+    "design": "Z3tJLp-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "1ec9de1d867ba312c65b82ba72733ead83ece7ec18fc9be31f05a46b39c36a58",
+    "browserSha256": "5be9cf5f3e9048c50f8e0fd2aa81fe3204a15dc2c83ef99d2a79cca1f985bd24",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "conflict-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "conflict-dark-1440.png",
+    "design": "Z3tJLp-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "1ec9de1d867ba312c65b82ba72733ead83ece7ec18fc9be31f05a46b39c36a58",
+    "browserSha256": "5e37e5cba1977095824b61f976fff50dc561bbb0ab4b79bd9e42446eb6367211",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "conflict-handoff-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "conflict-handoff-dark-1440.png",
+    "design": "Z3tJLp-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "1ec9de1d867ba312c65b82ba72733ead83ece7ec18fc9be31f05a46b39c36a58",
+    "browserSha256": "830693c4a4bba755f2bf9b1743d48f39273a8088b2a73a74152042f9e0bd4bcc",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-text-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-text-dark-1440.png",
+    "design": "l3f2r3-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "2b8a3c61061fcd5ffae86973dc27f595968030387e9f084f818078d4e36e2303",
+    "browserSha256": "95d9ddae205ddad934adad7437b56dea0af144fac9f144757fc80abe871f0905",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-binary-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-binary-dark-1440.png",
+    "design": "l3f2r3-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "2b8a3c61061fcd5ffae86973dc27f595968030387e9f084f818078d4e36e2303",
+    "browserSha256": "4a00696c6441f3cfe57a772fc4c395153cc4e3a75a25bb489819dec203987644",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-too-large-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-too-large-dark-1440.png",
+    "design": "l3f2r3-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "2b8a3c61061fcd5ffae86973dc27f595968030387e9f084f818078d4e36e2303",
+    "browserSha256": "494b82a876df1ba83ecba8339e82166a311cde2f6f88cbd2f214764a0b5004e1",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "bypass-confirm-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 2001
+    },
+    "density": "comfortable",
+    "browser": "bypass-confirm-dark-402.png",
+    "design": "MnEgv-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "d3508767d0c59f36e6ead2b624493139e3e018234c39ca93e4e782808fc136fd",
+    "browserSha256": "553f750caf3513a78f2a58c5902a8d68d04c0b6f1f40e7ce01cd4773c6a864a0",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "conflict-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 2001
+    },
+    "density": "comfortable",
+    "browser": "conflict-dark-402.png",
+    "design": "MnEgv-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "d3508767d0c59f36e6ead2b624493139e3e018234c39ca93e4e782808fc136fd",
+    "browserSha256": "6ca56c3156d36ef573b044df8b6c47323e7070d9b8616c5065b6e5c886f45e9e",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "conflict-handoff-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 2001
+    },
+    "density": "comfortable",
+    "browser": "conflict-handoff-dark-402.png",
+    "design": "MnEgv-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "d3508767d0c59f36e6ead2b624493139e3e018234c39ca93e4e782808fc136fd",
+    "browserSha256": "5d3281375ce880cb954f3f7763cc0bf987aae6289515726ae55ebc4996df2b87",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-text-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-text-dark-402.png",
+    "design": "S1Gdo-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "eeb4515f97278851999cdf67a5eab7b007b0b2f17596992eeef822caf38919f1",
+    "browserSha256": "0d4e5162636f9c2ffe45deb65c7119d3582894a8e578d63eba250793fd8dc45e",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-binary-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-binary-dark-402.png",
+    "design": "S1Gdo-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "eeb4515f97278851999cdf67a5eab7b007b0b2f17596992eeef822caf38919f1",
+    "browserSha256": "aa0243e43fe0ef348e7085d757f2b7016f545325669ab9454e6b57e2e9f49c2a",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  },
+  {
+    "state": "file-too-large-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-too-large-dark-402.png",
+    "design": "S1Gdo-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "46883eb3e51abed6b135e36a11bf61e1f61f781b",
+    "webDistSha256": "373065b83fc8271ffdfb3246c509267604290580ac2f93619fcc72258a15d6c2",
+    "fixture": "populated-mocks.json",
+    "designSha256": "eeb4515f97278851999cdf67a5eab7b007b0b2f17596992eeef822caf38919f1",
+    "browserSha256": "ec7458a7c6698a2f8f265e3bf28b52453a82d5028412ce3ac4b96f596533ea6a",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Shared sidebar, task header, global colors and shared Diff implementation remain the worker baseline; parent integration is required for whole-screen fidelity. Poppins is observed in the browser. Local 23 icon outlines are exact geometry matches to corrected source; unmatched shared/utility icons remain baseline."
+    ]
+  }
+]

@@ -1,0 +1,470 @@
+[
+  {
+    "path": "/automations",
+    "body": {
+      "available": true,
+      "scheduler": {
+        "state": "idle"
+      },
+      "automations": [
+        {
+          "id": "fixture-auto",
+          "revision": 1,
+          "name": "Cezar redesign \u2014 paused fixture",
+          "description": "Prepare a local review when a matching pull request opens.",
+          "enabled": false,
+          "events": [
+            "pull_request.opened"
+          ],
+          "intervalSeconds": 86400,
+          "filters": {
+            "lookbackDays": 7,
+            "maxRecords": 20
+          },
+          "task": {
+            "workflow": "quick-task",
+            "runner": "claude",
+            "prompt": "Validate the redesign fixture PR {{github.number}}."
+          },
+          "createdAt": "2026-09-12T09:29:17.582Z",
+          "updatedAt": "2026-09-12T09:29:17.582Z",
+          "counts": {
+            "matches": 4,
+            "launched": 3,
+            "duplicates": 1,
+            "errors": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "path": "/automation-log?*",
+    "body": {
+      "records": [
+        {
+          "seq": 1,
+          "ts": "2026-09-12T09:29:17.582Z",
+          "automationId": "fixture-auto",
+          "revision": 1,
+          "event": "pull_request.opened",
+          "result": "launched",
+          "runId": "10000000-0000-4000-8000-000000000000",
+          "githubNumber": 4,
+          "githubTitle": "[cezar fixture] Passing \u00b7 PR #4",
+          "githubUrl": "https://github.com/example/fixture/pull/4"
+        },
+        {
+          "ts": "2026-09-12T09:29:17.582Z",
+          "automationId": "fixture-auto",
+          "revision": 1,
+          "seq": 2,
+          "result": "no-match",
+          "reason": "Scheduled check completed."
+        },
+        {
+          "ts": "2026-09-12T09:29:17.582Z",
+          "automationId": "fixture-auto",
+          "revision": 1,
+          "seq": 3,
+          "result": "baseline",
+          "reason": "Fixture remains paused. Historical entries do not imply the automation is enabled."
+        }
+      ]
+    }
+  },
+  {
+    "path": "/runs",
+    "body": [
+      {
+        "id": "fixture-session",
+        "title": "213: fixing finalization failure",
+        "diffStat": {
+          "adds": 65,
+          "dels": 8,
+          "files": 3
+        },
+        "workflow": "dev-flow",
+        "task": "Summarize what this project does.",
+        "runner": "claude",
+        "status": "done",
+        "createdAt": "2026-09-12T05:59:00+00:00",
+        "startedAt": "2026-09-12T06:00:00Z",
+        "finishedAt": "2026-09-12T06:01:00+00:00",
+        "tokensUsed": 3620,
+        "inputTokens": 42000,
+        "outputTokens": 6000,
+        "costUsd": 0.42,
+        "pullRequestUrl": "https://github.com/open-mercato/demo/pull/217",
+        "worktreePath": "/home/agent/projects/cezar/.ai/cezar/worktrees/445dfcc8-7d69-4d12-96bd-e22acb47fbc5/.ai/qa/runtime-verified/fixture-repo",
+        "branch": "main",
+        "baseBranch": "main",
+        "peakRssBytes": 440401920,
+        "peakProcCount": 1,
+        "archived": false,
+        "steps": [
+          {
+            "id": "task",
+            "name": "Do the task",
+            "kind": "agent",
+            "status": "done",
+            "iterations": 1,
+            "tokensUsed": 3620,
+            "startedAt": "2026-07-14T20:28:14.062Z",
+            "finishedAt": "2026-07-14T20:28:17.155Z",
+            "sessionId": "40169e05-629f-4d7c-853c-8a2a197255e4",
+            "costUsd": 0.0352
+          },
+          {
+            "id": "verify",
+            "name": "Verify",
+            "kind": "check",
+            "status": "done",
+            "iterations": 1,
+            "tokensUsed": 0,
+            "startedAt": "2026-07-14T20:28:17.160Z",
+            "finishedAt": "2026-07-14T20:28:17.411Z"
+          }
+        ],
+        "workflowDef": {
+          "name": "quick-task",
+          "description": "One agent run on your task \u2014 no ceremony.",
+          "steps": [
+            {
+              "id": "task",
+              "name": "Do the task",
+              "prompt": "{{task}}"
+            },
+            {
+              "id": "verify",
+              "name": "Verify",
+              "command": "npm test"
+            }
+          ],
+          "source": "built-in"
+        },
+        "readAt": "2026-09-12T09:00:00Z",
+        "seenAt": "2026-09-13T00:00:00Z"
+      },
+      {
+        "id": "fixture-worker",
+        "title": "205: detecting recurring CI failures",
+        "diffStat": {
+          "adds": 1717,
+          "dels": 68,
+          "files": 3
+        },
+        "workflow": "dev-flow",
+        "task": "Summarize what this project does.",
+        "runner": "claude",
+        "status": "done",
+        "createdAt": "2026-09-12T01:59:00+00:00",
+        "startedAt": "2026-09-12T02:00:00Z",
+        "finishedAt": "2026-09-12T02:01:00+00:00",
+        "tokensUsed": 3620,
+        "inputTokens": 42000,
+        "outputTokens": 6000,
+        "costUsd": 0.42,
+        "pullRequestUrl": "https://github.com/open-mercato/demo/pull/215",
+        "worktreePath": "/home/agent/projects/cezar/.ai/cezar/worktrees/445dfcc8-7d69-4d12-96bd-e22acb47fbc5/.ai/qa/runtime-verified/fixture-repo",
+        "branch": "main",
+        "baseBranch": "main",
+        "peakRssBytes": 440401920,
+        "peakProcCount": 1,
+        "archived": false,
+        "steps": [
+          {
+            "id": "task",
+            "name": "Do the task",
+            "kind": "agent",
+            "status": "done",
+            "iterations": 1,
+            "tokensUsed": 3620,
+            "startedAt": "2026-07-14T20:28:14.062Z",
+            "finishedAt": "2026-07-14T20:28:17.155Z",
+            "sessionId": "40169e05-629f-4d7c-853c-8a2a197255e4",
+            "costUsd": 0.0352
+          },
+          {
+            "id": "verify",
+            "name": "Verify",
+            "kind": "check",
+            "status": "done",
+            "iterations": 1,
+            "tokensUsed": 0,
+            "startedAt": "2026-07-14T20:28:17.160Z",
+            "finishedAt": "2026-07-14T20:28:17.411Z"
+          }
+        ],
+        "workflowDef": {
+          "name": "quick-task",
+          "description": "One agent run on your task \u2014 no ceremony.",
+          "steps": [
+            {
+              "id": "task",
+              "name": "Do the task",
+              "prompt": "{{task}}"
+            },
+            {
+              "id": "verify",
+              "name": "Verify",
+              "command": "npm test"
+            }
+          ],
+          "source": "built-in"
+        },
+        "readAt": "2026-09-12T09:00:00Z",
+        "seenAt": "2026-09-13T00:00:00Z"
+      },
+      {
+        "id": "fixture-review",
+        "title": "Redesigning the project tasks tab",
+        "diffStat": {
+          "adds": 14996,
+          "dels": 294,
+          "files": 3
+        },
+        "workflow": "pen-design",
+        "task": "Summarize what this project does.",
+        "runner": "claude",
+        "status": "done",
+        "createdAt": "2026-09-11T09:59:00+00:00",
+        "startedAt": "2026-09-11T10:00:00Z",
+        "finishedAt": "2026-09-11T10:01:00+00:00",
+        "tokensUsed": 3620,
+        "inputTokens": 42000,
+        "outputTokens": 6000,
+        "costUsd": 0.42,
+        "pullRequestUrl": "https://github.com/open-mercato/demo/pull/196",
+        "worktreePath": "/home/agent/projects/cezar/.ai/cezar/worktrees/445dfcc8-7d69-4d12-96bd-e22acb47fbc5/.ai/qa/runtime-verified/fixture-repo",
+        "branch": "main",
+        "baseBranch": "main",
+        "peakRssBytes": 440401920,
+        "peakProcCount": 1,
+        "archived": false,
+        "steps": [
+          {
+            "id": "task",
+            "name": "Do the task",
+            "kind": "agent",
+            "status": "done",
+            "iterations": 1,
+            "tokensUsed": 3620,
+            "startedAt": "2026-07-14T20:28:14.062Z",
+            "finishedAt": "2026-07-14T20:28:17.155Z",
+            "sessionId": "40169e05-629f-4d7c-853c-8a2a197255e4",
+            "costUsd": 0.0352
+          },
+          {
+            "id": "verify",
+            "name": "Verify",
+            "kind": "check",
+            "status": "done",
+            "iterations": 1,
+            "tokensUsed": 0,
+            "startedAt": "2026-07-14T20:28:17.160Z",
+            "finishedAt": "2026-07-14T20:28:17.411Z"
+          }
+        ],
+        "workflowDef": {
+          "name": "quick-task",
+          "description": "One agent run on your task \u2014 no ceremony.",
+          "steps": [
+            {
+              "id": "task",
+              "name": "Do the task",
+              "prompt": "{{task}}"
+            },
+            {
+              "id": "verify",
+              "name": "Verify",
+              "command": "npm test"
+            }
+          ],
+          "source": "built-in"
+        },
+        "readAt": "2026-09-12T09:00:00Z",
+        "seenAt": "2026-09-13T00:00:00Z"
+      }
+    ]
+  },
+  {
+    "path": "/todos",
+    "body": [
+      {
+        "id": "follow-up",
+        "summary": "Validate the Cezar redesign fixture states and report any regressions.",
+        "suggestedPrompt": "Review the seeded Inbox, automation, comparison and GitHub states. Report regressions without running or merging the fixtures.",
+        "runnable": true,
+        "taskId": "fixture-session"
+      },
+      {
+        "id": "note",
+        "summary": "Manually validate the pending multi-step Plan review screen in the redesigned cockpit.",
+        "runnable": false,
+        "taskId": "fixture-session"
+      }
+    ]
+  },
+  {
+    "path": "/groups/fixture-group",
+    "body": {
+      "groupId": "fixture-group",
+      "runs": [
+        {
+          "id": "fixture-session",
+          "variant": "A",
+          "title": "Cezar redesign comparison fixture",
+          "status": "done",
+          "archived": false,
+          "diffStat": "comparison-fixture.md | 3 +++\n1 file changed, 3 insertions(+)",
+          "handoffExcerpt": "Step \u201cfixture\u201d complete \u2014 status: done. Distinct committed changes retained for comparison.",
+          "tokensUsed": 0
+        },
+        {
+          "id": "fixture-variant",
+          "variant": "B",
+          "title": "Cezar redesign comparison fixture",
+          "status": "done",
+          "archived": false,
+          "diffStat": "comparison-fixture.md | 3 +++\n1 file changed, 3 insertions(+)",
+          "handoffExcerpt": "Step \u201cfixture\u201d complete \u2014 status: done. Distinct committed changes retained for comparison.",
+          "tokensUsed": 0
+        }
+      ]
+    }
+  },
+  {
+    "path": "/plan",
+    "body": {
+      "steps": [
+        {
+          "id": "plan",
+          "name": "Plan the implementation",
+          "prompt": "For {{task}}, inspect affected code and define acceptance criteria, risks and verification checks."
+        },
+        {
+          "id": "implement",
+          "name": "Implement and verify",
+          "skill": "dev-flow",
+          "prompt": "Implement {{task}} using the plan. Add regression coverage, run tests and build, and prepare a draft PR."
+        },
+        {
+          "id": "review",
+          "name": "Review the changes",
+          "skill": "code-review",
+          "prompt": "Review the draft PR against acceptance criteria. Fix actionable findings and rerun affected checks."
+        },
+        {
+          "id": "ci",
+          "name": "Follow up CI",
+          "prompt": "Watch required checks and address actionable failures."
+        }
+      ],
+      "rationale": "Separate planning, implementation, review and CI follow-up provide a complete path from issue to verified draft PR.",
+      "fallback": false
+    }
+  },
+  {
+    "path": "/projects",
+    "body": {
+      "projects": [
+        {
+          "id": "fixture-repo",
+          "name": "cezar",
+          "root": "/fixture",
+          "addedAt": "2026-09-12T00:00:00Z",
+          "lastOpenedAt": "2026-09-12T00:00:00Z",
+          "source": "local",
+          "status": "ok",
+          "tags": [
+            "core"
+          ]
+        },
+        {
+          "id": "toolkit",
+          "name": "toolkit-dev",
+          "root": "/fixture/toolkit",
+          "addedAt": "2026-09-12T00:00:00Z",
+          "lastOpenedAt": "2026-09-12T00:00:00Z",
+          "source": "local",
+          "status": "ok",
+          "tags": []
+        }
+      ],
+      "bootProject": "fixture-repo",
+      "projectsDir": "/fixture"
+    }
+  },
+  {
+    "path": "/workspace/runs-index",
+    "body": {
+      "runs": [
+        {
+          "id": "fixture-session",
+          "title": "213: fixing finalization failure",
+          "status": "done",
+          "createdAt": "2026-09-12T05:59:00+00:00",
+          "startedAt": "2026-09-12T06:00:00Z",
+          "archived": false,
+          "workflow": "dev-flow",
+          "branch": "main",
+          "pullRequestUrl": "https://github.com/open-mercato/demo/pull/217",
+          "projectId": "fixture-repo",
+          "seenAt": "2026-09-13T00:00:00Z",
+          "tags": [],
+          "finishedAt": "2026-09-12T06:01:00+00:00"
+        },
+        {
+          "id": "fixture-worker",
+          "title": "205: detecting recurring CI failures",
+          "status": "done",
+          "createdAt": "2026-09-12T01:59:00+00:00",
+          "startedAt": "2026-09-12T02:00:00Z",
+          "archived": false,
+          "workflow": "dev-flow",
+          "branch": "main",
+          "pullRequestUrl": "https://github.com/open-mercato/demo/pull/215",
+          "projectId": "fixture-repo",
+          "seenAt": "2026-09-13T00:00:00Z",
+          "tags": [],
+          "finishedAt": "2026-09-12T02:01:00+00:00"
+        },
+        {
+          "id": "fixture-review",
+          "title": "Redesigning the project tasks tab",
+          "status": "done",
+          "createdAt": "2026-09-11T09:59:00+00:00",
+          "startedAt": "2026-09-11T10:00:00Z",
+          "archived": false,
+          "workflow": "pen-design",
+          "branch": "main",
+          "pullRequestUrl": "https://github.com/open-mercato/demo/pull/196",
+          "projectId": "fixture-repo",
+          "seenAt": "2026-09-13T00:00:00Z",
+          "tags": [],
+          "finishedAt": "2026-09-11T10:01:00+00:00"
+        }
+      ],
+      "perProjectLimit": 200,
+      "truncated": [],
+      "referenceStatuses": {}
+    }
+  },
+  {
+    "path": "/github/ref-status?*",
+    "body": {
+      "available": true,
+      "prs": {
+        "217": "merged",
+        "215": "merged",
+        "196": "ready"
+      },
+      "issues": {},
+      "conflicts": [
+        196
+      ],
+      "recheckAfterMs": null
+    }
+  }
+]

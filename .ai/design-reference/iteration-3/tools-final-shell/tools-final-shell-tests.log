@@ -1,0 +1,13 @@
+
+> @open-mercato/cezar-web@0.12.2 test
+> vitest run src/routes/workspace-tools.test.tsx src/components/add-project-dialog.test.tsx src/components/clone-project-dialog.test.tsx src/components/app-shell.test.tsx src/components/project-groups.test.tsx src/components/tools-menu.test.tsx
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/packages/web
+
+
+ Test Files  6 passed (6)
+      Tests  140 passed (140)
+   Start at  13:09:26
+   Duration  4.05s (transform 2.44s, setup 0ms, import 6.27s, tests 4.73s, environment 4.50s)
+

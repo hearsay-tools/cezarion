@@ -1,0 +1,530 @@
+[
+  {
+    "state": "bypass-confirm-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "bypass-confirm-light-1440.png",
+    "design": "zSB9u-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5bf5e6e53d2844f0d09d9c2946dd0894767f8063621b4b60bc88d386934a7d8a",
+    "browserSha256": "fc3868f97f6a6f2391fa8100ab02f1a227a181844cd36a8e0c5cb34159d81b30",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "conflict-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "conflict-light-1440.png",
+    "design": "zSB9u-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5bf5e6e53d2844f0d09d9c2946dd0894767f8063621b4b60bc88d386934a7d8a",
+    "browserSha256": "6528a137d6da5f9d8f6bd83202ef8f12a890cee8ed9e6655a7ff198bebc9db2c",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "conflict-handoff-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "conflict-handoff-light-1440.png",
+    "design": "zSB9u-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5bf5e6e53d2844f0d09d9c2946dd0894767f8063621b4b60bc88d386934a7d8a",
+    "browserSha256": "ee895a389ffbb6fed20e6f0382b28caff0e5ef215c7a2aa58975037c80123a55",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-text-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-text-light-1440.png",
+    "design": "MFtcY-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "0801516f5e8a9fc29fcce4add19cec08317fa9ba1c391d833a298d77d024366e",
+    "browserSha256": "c9a6fe8b70bc6758ad8d817a4143958ab3390a3e5acab822b9c1c8de119901c7",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-binary-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-binary-light-1440.png",
+    "design": "MFtcY-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "0801516f5e8a9fc29fcce4add19cec08317fa9ba1c391d833a298d77d024366e",
+    "browserSha256": "ec174cef8e882d0c9b28e75f6093f7df056cbbb0662061048b831c098a0adb0e",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-too-large-light-1440",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-too-large-light-1440.png",
+    "design": "MFtcY-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "0801516f5e8a9fc29fcce4add19cec08317fa9ba1c391d833a298d77d024366e",
+    "browserSha256": "88bec75cf66dc2f1c20a52b72a381f8090dfffb43a868f63651a97c41b3aa5a2",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "bypass-confirm-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 2052
+    },
+    "density": "comfortable",
+    "browser": "bypass-confirm-light-402.png",
+    "design": "RvbXf-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "210fba7a26707c7eeca57b5fcef8ccb4c5b7e8c16a78d8644cdf27b73f65cf22",
+    "browserSha256": "0643503eec4c919f6caad7643e6bbd92537a03602c328cc7242c58790ec940bd",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "conflict-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 2052
+    },
+    "density": "comfortable",
+    "browser": "conflict-light-402.png",
+    "design": "RvbXf-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "210fba7a26707c7eeca57b5fcef8ccb4c5b7e8c16a78d8644cdf27b73f65cf22",
+    "browserSha256": "6d5ea061dd61ab54fc1f5a08af153d18899a99be18070d1b517e3c5e537f35eb",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "conflict-handoff-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 2052
+    },
+    "density": "comfortable",
+    "browser": "conflict-handoff-light-402.png",
+    "design": "RvbXf-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "210fba7a26707c7eeca57b5fcef8ccb4c5b7e8c16a78d8644cdf27b73f65cf22",
+    "browserSha256": "ac80882a3d6603227cfb850e9694d86294d495d887482ba15343b85bade6e78c",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-text-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-text-light-402.png",
+    "design": "LAKkC-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5a20e2cb7752220afc86fc4e293b876df2ab0d59e8c42aab17e46dd5c8fde6fe",
+    "browserSha256": "c14075f0d05741b007ce8bc018f71efa42ad632960337c457d97f5116e21bac5",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-binary-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-binary-light-402.png",
+    "design": "LAKkC-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5a20e2cb7752220afc86fc4e293b876df2ab0d59e8c42aab17e46dd5c8fde6fe",
+    "browserSha256": "a5fca72170d48295f3b6fdde9c76e97621ecc6305d343f5cd7aa213118c1a6e4",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-too-large-light-402",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-too-large-light-402.png",
+    "design": "LAKkC-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "5a20e2cb7752220afc86fc4e293b876df2ab0d59e8c42aab17e46dd5c8fde6fe",
+    "browserSha256": "1d0b4529cdca57b1b9cd45e982e9411b0e0d459d3ca27b06af2982f978067bea",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "bypass-confirm-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "bypass-confirm-dark-1440.png",
+    "design": "Z3tJLp-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "1ec9de1d867ba312c65b82ba72733ead83ece7ec18fc9be31f05a46b39c36a58",
+    "browserSha256": "5d7a7bb03f1b1f8ea8f2de8f0ae8c2fbe6fd2df0e493af114774968c1c0ec9b2",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "conflict-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "conflict-dark-1440.png",
+    "design": "Z3tJLp-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "1ec9de1d867ba312c65b82ba72733ead83ece7ec18fc9be31f05a46b39c36a58",
+    "browserSha256": "88ae6fe9811eaf0ce56a8b97b12ca23002680ed15b9477be5d8eb4cd70474886",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "conflict-handoff-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1300
+    },
+    "density": "comfortable",
+    "browser": "conflict-handoff-dark-1440.png",
+    "design": "Z3tJLp-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "1ec9de1d867ba312c65b82ba72733ead83ece7ec18fc9be31f05a46b39c36a58",
+    "browserSha256": "4204dc7a9d0a79a4feb79df5ceed79e3a24036c1544fec2ccf7d3166dcfce518",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-text-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-text-dark-1440.png",
+    "design": "l3f2r3-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "2b8a3c61061fcd5ffae86973dc27f595968030387e9f084f818078d4e36e2303",
+    "browserSha256": "a5baf2755468933da50130fb289bcee9bd5bdeb5a20dce0c06c6ba90088f0d2c",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-binary-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-binary-dark-1440.png",
+    "design": "l3f2r3-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "2b8a3c61061fcd5ffae86973dc27f595968030387e9f084f818078d4e36e2303",
+    "browserSha256": "b95add6d8c28a51b9b7ac8ce4642570bcb188082be667699cf4d50b8669c7f78",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-too-large-dark-1440",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "density": "comfortable",
+    "browser": "file-too-large-dark-1440.png",
+    "design": "l3f2r3-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "2b8a3c61061fcd5ffae86973dc27f595968030387e9f084f818078d4e36e2303",
+    "browserSha256": "de275de778d7b86ad3dd68e2eb3663f72dcc6463367e5141af281baaff31000f",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "bypass-confirm-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 2052
+    },
+    "density": "comfortable",
+    "browser": "bypass-confirm-dark-402.png",
+    "design": "MnEgv-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "d3508767d0c59f36e6ead2b624493139e3e018234c39ca93e4e782808fc136fd",
+    "browserSha256": "c21cd6211d211ef36922d921e3e83ac5ee95ff591fb5419b0c1c42236cb96251",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "conflict-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 2052
+    },
+    "density": "comfortable",
+    "browser": "conflict-dark-402.png",
+    "design": "MnEgv-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "d3508767d0c59f36e6ead2b624493139e3e018234c39ca93e4e782808fc136fd",
+    "browserSha256": "b0066dffe0c076b7ddea3edd3334cd82da73e6aab098ce56cb63ada4f56f83b6",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "conflict-handoff-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 2052
+    },
+    "density": "comfortable",
+    "browser": "conflict-handoff-dark-402.png",
+    "design": "MnEgv-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "d3508767d0c59f36e6ead2b624493139e3e018234c39ca93e4e782808fc136fd",
+    "browserSha256": "e894eb1312c39460f8c95ec241dc2d8fe2c4bddd255a9205731d3b5edc7d4ea4",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-text-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-text-dark-402.png",
+    "design": "S1Gdo-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "eeb4515f97278851999cdf67a5eab7b007b0b2f17596992eeef822caf38919f1",
+    "browserSha256": "4a3797bd2e5a24502c4accbdf8a4c26b684613a93c98cd9c418dda4d8c505054",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-binary-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-binary-dark-402.png",
+    "design": "S1Gdo-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "eeb4515f97278851999cdf67a5eab7b007b0b2f17596992eeef822caf38919f1",
+    "browserSha256": "db57174e39f8403e701f1781d7279049bb98884c9f34236a4395c7c297fea760",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "file-too-large-dark-402",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 1471
+    },
+    "density": "comfortable",
+    "browser": "file-too-large-dark-402.png",
+    "design": "S1Gdo-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "eeb4515f97278851999cdf67a5eab7b007b0b2f17596992eeef822caf38919f1",
+    "browserSha256": "4ae1be087b610a3122ce53733d83cf973132be48b28030f58bbee1a27a773b34",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  }
+]

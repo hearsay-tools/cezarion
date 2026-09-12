@@ -619,5 +619,15 @@
       }
     ]
   },
-  "verification": "193 PNG signatures/dimensions/SHA checked; all extracted SVG XML parses; all ordered icons joined against full HTML. Font glyph coverage pending fresh font fetch."
+  "verification": "193 PNG signatures/dimensions/SHA checked; 76 extracted SVG XML files parse; 4719 ordered icons joined against full HTML; freshly captured font binary names and cmap coverage inspected.",
+  "sourceIconEnabledStates": {
+    "lucide": {
+      "enabled": 1861,
+      "disabled": 18
+    },
+    "Material Symbols Rounded": {
+      "enabled": 0,
+      "disabled": 45
+    }
+  }
 }

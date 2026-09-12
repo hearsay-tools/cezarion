@@ -1,0 +1,81 @@
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/445dfcc8-7d69-4d12-96bd-e22acb47fbc5
+
+ ❯ |web| src/routes/global-tasks.test.tsx (53 tests | 1 failed | 52 skipped) 312ms
+     ↓ lists every project’s tasks and links each into its OWN project
+     ↓ filters by tag across projects, and toggles back off
+     ↓ finds the repos nobody has tagged yet
+     ↓ ORs two tag chips rather than intersecting them
+     ↓ searches across title, project and branch
+     ↓ groups by tag, fanning a task out under every tag its project carries
+       × lets a restored grouped view collapse and reopen its filters 310ms
+       ↓ restores a filtered, grouped view from the query string alone
+       ↓ writes each facet into the URL as it is picked
+       ↓ carries the search box into the URL, debounced
+       ↓ counts the grouping in the Clear badge, not just the facets
+       ↓ clears the grouping too — Clear is the one way back to a plain list
+       ↓ empties the URL when the filters are cleared
+       ↓ adds and removes the archived flag, leaving active as the bare default
+       ↓ restores the archived view from the URL alone
+       ↓ keeps the view alongside the filters rather than dropping one for the other
+       ↓ shows archived rows from the URL without changing the sidebar filter
+       ↓ keeps the untagged bucket readable in a shared link
+     ↓ releases the grouping when its button is pressed again
+     ↓ clears every facet at once
+     ↓ shows the PR / issue chip each task actually references
+     ↓ shows every reference a task has, not just the strongest
+     ↓ collapses a pathological pile of references into a named +N
+     ↓ links a reference known only by number, from the project’s own repo
+     ↓ leaves a number-only reference inert when its project has no known repo
+     ↓ paints chips from the INDEX, without waiting on a ref-status answer
+     ↓ still asks about references the index had nothing warm for
+     ↓ paints each chip with the state of the thing it points at
+     ↓ asks each project once, for both kinds at a time
+     ↓ paints a conflict here exactly as the task’s own page does, and offers the same fix
+     ↓ leaves every chip neutral when the forge cannot be reached
+       ↓ opens on hover, and stays open while the pointer travels into it
+       ↓ closes once the pointer leaves both
+       ↓ ignores the hover a TAP fires, so touch gets one clean open from the click
+       ↓ opens on click for the keyboard too
+       ↓ shows a running task’s live sample and its cost
+       ↓ falls back to the persisted peak once the run is finished
+       ↓ never paints a finished run’s stale sample as live
+       ↓ drops the Cost column when the host hides cost metrics
+       ↓ marks a task read in its OWN project, clearing the unread marker
+       ↓ takes the receipt back again
+       ↓ is absent where there is no read state to change
+     ↓ archives a finished task in its OWN project and drops it from Active
+     ↓ restores an archived task from the Archived tab
+     ↓ puts a refused archive back and shows the server’s reason
+     ↓ picks up a read receipt made elsewhere, without a page refresh
+     ↓ offers a project filter and keeps project names linked to their own page
+     ↓ says which projects the index had to cap instead of showing a short list silently
+     ↓ points at Settings when the workspace has no tags at all
+     ↓ renders the server’s error rather than an empty table
+   ↓ identifies indexed workers and parked parents while preserving human waiting phases
+   ↓ shows a parked parent human question from the slim workspace index
+   ↓ starts a new task in the boot project from the workspace toolbar
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 52 skipped (53)
+   Start at  12:17:04
+   Duration  2.49s (transform 784ms, setup 0ms, import 1.37s, tests 312ms, environment 635ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/routes/global-tasks.test.tsx > global tasks page > filters live in the URL > lets a restored grouped view collapse and reopen its filters
+AssertionError: expected 'true' to be 'false' // Object.is equality
+
+Expected: "false"
+Received: "true"
+
+ ❯ src/routes/global-tasks.test.tsx:367:52
+    365|       expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    366|       fireEvent.click(toggle)
+    367|       expect(toggle.getAttribute('aria-expanded')).toBe('false')
+       |                                                    ^
+    368|       fireEvent.click(toggle)
+    369|       expect(toggle.getAttribute('aria-expanded')).toBe('true')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

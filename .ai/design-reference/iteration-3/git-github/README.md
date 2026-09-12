@@ -1,0 +1,41 @@
+Latest combined review: [combined/README.md](combined/README.md). It includes parent shared shell/task headers and supersedes the standalone integration-pending assessment below.
+
+# Git and GitHub — confirmed source review
+
+This evidence supersedes every fidelity verdict in iteration 2. The user confirmed the 193-frame `cezarion.pen`, SHA256 `56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8` (8,498,974 bytes). Earlier source `37378246…` was rejected. Its historical screenshots and commits are preserved, not treated as current evidence.
+
+`manifest.json` records 44 actual exported-design/built-browser pairs: families 6, 7, 8, 9, 14, 15, 16, 27A/B/C, and all six R2 list widths. Each carries the exact CSS viewport, observed browser theme/font, source/build/PNG hashes, fixture, review verdict and remaining differences. Design exports are 2x and browser captures 1x; contact sheets normalize images for inspection. No pair is labeled an exact whole-screen match.
+
+`interaction-manifest.json` adds 24 captures: bypass confirmation, conflicts, conflict-to-handoff focus, and text/binary/too-large file previews, each in desktop/mobile and light/dark. `menu-manifest.json` adds eight Git menu/commit-dialog captures. These use the nearest same-viewport source board as contextual evidence: the source combines multiple readiness states on one board and does not provide separate file-preview or Git-menu drawings. Runtime states remain separate real interactions; no merge, commit, branch switch, task launch or external GitHub write was submitted.
+
+`build-proof.json` pins the final app-source commit, complete built asset tree, served-index equality and server entry hash. `icon-verification.json` rechecks all 23 local adapter viewBoxes/path arrays against the corrected export; every outline matches exactly. Their ISC license remains beside the app adapter. Plain check marks replace circled checks for passing PR requirements, and readiness actions use the reference purple.
+
+## Implementation and validation
+
+The corrected-source changes refine issue list typography/dividers/plain labels, repository/sync heading hierarchy, handoff prompt inset and settings spacing, external handoff actions, task commit card heading/subject/file rows, and PR readiness glyph/action colors. Exact-head gating, bypass confirmation, conflict handling, real handoff/account selection, persistence, issue metadata filters, cross-state search, lazy file traversal and commit search remain operational.
+
+The full Git/GitHub scoped suite passed 255 tests. GitHub-only runs also passed 179 tests before the last readiness glyph/color adjustment. Subsequent full-suite runs exposed an existing prompt-template helper race: the helper considered a disappearing menu successful before scheduled textarea focus settled. The corrected helper now waits for a changed prompt and restored textarea focus; the final scoped rerun passed all 255 tests and is recorded in tests.log. The failed run and isolated passing reproduction are preserved for diagnosis. Web typecheck and production build passed. Logs are included. `validate-fixtures.mjs` validates the populated Git/GitHub payloads and all three readiness fixtures against the built contract. Parent GitHub mocks supply the contract shape; fixture issue text/list density is adapted to the confirmed reference.
+
+## Outstanding integration and design differences
+
+The shared shell/global palette and task header are owned by other workers and are still the baseline in this isolated build. Whole-screen fidelity requires parent integration followed by renewed paired QA. Parent messaging rejects updates with `capacity_limit: Conversation capacity limit reached`; no integration contract arrived through that channel. A final read-only inspection found parent commit `463821c6` now provides `components/design-icons.tsx`; the independently reverified local adapter remains so this scoped branch builds by itself. Parent may consolidate those exact same outlines during integration. This is a real integration blocker, not a claim that the sidebar/header match.
+
+Preserved capabilities visibly differ from simplified source drawings: full structured diffs and hierarchical changed-file tree; mobile automatic unified/wrapped diffs; author/time/SHA and searchable commit history; real task-header PR references; actual comments/activity and handoff composer on PR detail; refresh/automation/filter controls; exact reviewed SHA and individual readiness checks. The source shows a flat/abbreviated diff, a commit-to-PR association and older-log loading unavailable in the current API. No PR-assignee/board/state contract, issue Open state, or sync/handoff timestamp is fabricated. Empty branch name stays disabled and an unset base remains Follow checked-out branch. Real model/workflow/account defaults are displayed rather than hardcoded source examples. Per-pair notes name the practical visual consequences.
+
+Frame 10's name is “Run from GitHub,” but its confirmed contents are the **Skills bookmarklet** screen. It falls outside these owned route directories; its source was inspected and its ownership needs the Skills worker, not a replacement GitHub route.
+
+## Reproduction
+
+From the worker root, build the service and web app, then run `node .ai/design-reference/iteration-3/git-github/serve-fixture.mjs . 44659` in an isolated terminal. The fixture server receives only PATH and explicit dry-run flags. Verify the advertised port/root before continuing. `browser.sh` uses the installed agent-browser binary and its isolated `git5653` session; change that wrapper for another host.
+
+Open the fixture origin once, then run `fixture.py`, `capture.py`, `interactions.py`, and `menus.py` sequentially. `CEZ_DESIGN_REFERENCE` selects a portable directory containing the corrected export manifest and PNGs. Capture assertions verify actual viewport/theme; the browser uses comfortable density (16px root font, 4px spacing unit). Run the schema validator and `finalize-evidence.py` while the server is still live. Finalization requires the exact confirmed source hash and asserts served-index/build equality. `contact-sheets.py` requires Pillow and generates base-pair review sheets.
+
+## R2 resize follow-up
+
+`r2-resize-manifest.json` adds six fresh source/browser pairs reached through the actual resize handle: minimum `pg6Nc`/`ZhYVg` (280px), default `Gg8yJ`/`gW5PQ` (360px), maximum `CEQfL`/`vETJh` (520px). In both themes, real pointer drags beyond each boundary clamp correctly, double-click restores the default, and reload retains the selected width. DOM geometry, ARIA min/max/current values and localStorage agree. Home, End and ArrowLeft keyboard resizing also pass. All six screenshots use 1440×1900 CSS pixels and comfortable density; source/build hashes match the main evidence. The contact sheet was visually reviewed with the same documented shell/document differences. No application change was needed. The 14 existing width preference/bounds tests pass (`r2-width-tests.log`). Replay with `r2-resize.py` after starting the fixture server.
+
+## Shared fixture compatibility
+
+The six QA-only files from parent `d94958cc` are copied unchanged under `.ai/qa/runtime-verified/`. Its README's old source-confirmation hold sentence is superseded: the user confirmed SHA256 `56a71a27…` and implementation is authorized. `shared-fixture-proof.json` records a successful run on port 44661 with browser session `git5653-shared`: 88 served JS/CSS/font hashes match, four run records validate, the parent/worker link is present, generated state is untracked, app source is unchanged, and all nine contract-validated mocks install.
+
+For combined parent QA, use this shared fixture with a unique port/session. Its task IDs are `10000000-0000-4000-8000-000000000000` through `…003`; its project slug is `fixture-repo-v2`. The existing 44-frame evidence uses the earlier isolated fixture's `fixture-session` task IDs and must retain that provenance. Do not silently point those replay scripts at v2 without adapting their run IDs, API intercept paths and base URL. The recorded screenshots remain evidence for their pinned build, not for a future combined app build.

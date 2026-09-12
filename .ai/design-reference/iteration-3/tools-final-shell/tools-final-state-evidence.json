@@ -1,0 +1,170 @@
+[
+  {
+    "theme": "light",
+    "device": "desktop",
+    "state": "page",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-desktop-light-page.png",
+    "observed": {
+      "width": 1440,
+      "height": 1120,
+      "scrollWidth": 1440,
+      "theme": "light",
+      "dialog": null,
+      "icons": 23
+    }
+  },
+  {
+    "theme": "light",
+    "device": "desktop",
+    "state": "local",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-desktop-light-local.png",
+    "observed": {
+      "width": 1440,
+      "height": 1120,
+      "scrollWidth": 1440,
+      "theme": "light",
+      "dialog": "Open local folderPick the folder cezar should run in. Git repos are marked; any folder works./fixture/projectscezargitnotes/fixture/projectsCancelAdd projectClose",
+      "icons": 28
+    }
+  },
+  {
+    "theme": "light",
+    "device": "desktop",
+    "state": "clone",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-desktop-light-clone.png",
+    "observed": {
+      "width": 1440,
+      "height": 1120,
+      "scrollWidth": 1440,
+      "theme": "light",
+      "dialog": "Clone from GitHubcezar clones with gh into your checkout root and adds the result as a project.RepositoryFolder nameCancelCloneClose",
+      "icons": 25
+    }
+  },
+  {
+    "theme": "light",
+    "device": "mobile",
+    "state": "page",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-mobile-light-page.png",
+    "observed": {
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "theme": "light",
+      "dialog": null,
+      "icons": 23
+    }
+  },
+  {
+    "theme": "light",
+    "device": "mobile",
+    "state": "local",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-mobile-light-local.png",
+    "observed": {
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "theme": "light",
+      "dialog": "Open local folderPick the folder cezar should run in. Git repos are marked; any folder works./fixture/projectscezargitnotes/fixture/projectsCancelAdd projectClose",
+      "icons": 28
+    }
+  },
+  {
+    "theme": "light",
+    "device": "mobile",
+    "state": "clone",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-mobile-light-clone.png",
+    "observed": {
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "theme": "light",
+      "dialog": "Clone from GitHubcezar clones with gh into your checkout root and adds the result as a project.RepositoryFolder nameCancelCloneClose",
+      "icons": 25
+    }
+  },
+  {
+    "theme": "dark",
+    "device": "desktop",
+    "state": "page",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-desktop-dark-page.png",
+    "observed": {
+      "width": 1440,
+      "height": 1120,
+      "scrollWidth": 1440,
+      "theme": "",
+      "dialog": null,
+      "icons": 23
+    }
+  },
+  {
+    "theme": "dark",
+    "device": "desktop",
+    "state": "local",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-desktop-dark-local.png",
+    "observed": {
+      "width": 1440,
+      "height": 1120,
+      "scrollWidth": 1440,
+      "theme": "",
+      "dialog": "Open local folderPick the folder cezar should run in. Git repos are marked; any folder works./fixture/projectscezargitnotes/fixture/projectsCancelAdd projectClose",
+      "icons": 28
+    }
+  },
+  {
+    "theme": "dark",
+    "device": "desktop",
+    "state": "clone",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-desktop-dark-clone.png",
+    "observed": {
+      "width": 1440,
+      "height": 1120,
+      "scrollWidth": 1440,
+      "theme": "",
+      "dialog": "Clone from GitHubcezar clones with gh into your checkout root and adds the result as a project.RepositoryFolder nameCancelCloneClose",
+      "icons": 25
+    }
+  },
+  {
+    "theme": "dark",
+    "device": "mobile",
+    "state": "page",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-mobile-dark-page.png",
+    "observed": {
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "theme": "",
+      "dialog": null,
+      "icons": 23
+    }
+  },
+  {
+    "theme": "dark",
+    "device": "mobile",
+    "state": "local",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-mobile-dark-local.png",
+    "observed": {
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "theme": "",
+      "dialog": "Open local folderPick the folder cezar should run in. Git repos are marked; any folder works./fixture/projectscezargitnotes/fixture/projectsCancelAdd projectClose",
+      "icons": 28
+    }
+  },
+  {
+    "theme": "dark",
+    "device": "mobile",
+    "state": "clone",
+    "path": "/home/agent/projects/cezar/.ai/cezar/worktrees/e2fa39fa-a879-4b7a-8034-14c41d2cb83a/.ai/qa/iteration-3/tools-final-mobile-dark-clone.png",
+    "observed": {
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "theme": "",
+      "dialog": "Clone from GitHubcezar clones with gh into your checkout root and adds the result as a project.RepositoryFolder nameCancelCloneClose",
+      "icons": 25
+    }
+  }
+]

@@ -1,0 +1,13 @@
+
+> @open-mercato/cezar-web@0.12.2 test
+> vitest run src/routes/repo-git src/routes/task-git src/routes/github src/lib/github-list-width.test.ts src/components/design-icons.test.tsx
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/5653d0ea-767d-4deb-ad3f-368d1e912281/.ai/qa/git-combined-source/packages/web
+
+
+ Test Files  12 passed (12)
+      Tests  272 passed (272)
+   Start at  13:10:12
+   Duration  40.35s (transform 6.69s, setup 0ms, import 12.98s, tests 49.88s, environment 7.86s)
+

@@ -1,0 +1,12 @@
+{
+  "available": true,
+  "prs": {
+    "91": "review-required",
+    "217": "merged"
+  },
+  "issues": {
+    "214": "open",
+    "298": "open"
+  },
+  "recheckAfterMs": null
+}

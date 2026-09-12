@@ -47075,6 +47075,52 @@
     "Visible status marks are filled dots; old Material hollow-ring geometry must not be used.",
     "Current Inbox text map requires 500-weight action/engine labels, 11px instructions label and 17px note-only summary on both widths; scoped CSS corrected.",
     "Shared DiffStatLabel still emits ungrouped numbers; confirmed summary references use comma-grouped counts. Shared component ownership prevents local edit; parent coordination needed.",
-    "Shared foundation and exact glyph adapter not integrated; screenshots remain interim."
-  ]
+    "Exact adapter and shared shell integrated. Remaining shared EnginePills/PromptTemplateMenu treatment and DiffStatLabel grouping documented; global diff values absent from contract."
+  ],
+  "adapterVerification": {
+    "originCommit": "463821c6824af956fd0138af8805b7fb2b7bb857",
+    "localImportCommit": "6dd92678",
+    "ownedUsageCommit": "71337874",
+    "exactDefinitions": 76,
+    "pathsAndViewBoxesEqualCurrentAudit": true,
+    "unmappedExistingIcons": {
+      "tasks-overview": [
+        "CheckCheckIcon",
+        "ChevronsLeftIcon",
+        "ChevronsRightIcon",
+        "Clock3Icon",
+        "CoinsIcon",
+        "DollarSignIcon",
+        "ListChecksIcon",
+        "LinkIcon",
+        "MemoryStickIcon",
+        "MoreHorizontalIcon",
+        "PencilIcon",
+        "ScaleIcon",
+        "SearchXIcon"
+      ],
+      "global-tasks": [
+        "ArchiveRestoreIcon",
+        "EyeIcon",
+        "EyeOffIcon",
+        "ListChecksIcon",
+        "SearchXIcon"
+      ],
+      "compare-variants": [
+        "ScaleIcon",
+        "SearchXIcon"
+      ],
+      "plan-review": [
+        "PlayIcon"
+      ]
+    },
+    "note": "Exact-name matches now use the adapter. Existing actions absent from the current exported glyph inventory retain their original icons, with no guessed replacement. Shared shell/provider/template/reference components await their owner."
+  },
+  "sharedShellVerification": {
+    "originCommit": "4d7723df80b5e41b3c45f62b986b75decd488812",
+    "localImportCommit": "1805e542",
+    "copiedWithoutSourceEdits": true,
+    "sidebarCssPixels": 264,
+    "ibmPlexMonoIntegrated": true
+  }
 }

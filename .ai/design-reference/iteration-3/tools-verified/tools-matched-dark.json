@@ -1,0 +1,68 @@
+{
+  "text": "Workspace tools\nAdd project\n\nOpen an existing local folder or clone a GitHub repository.\n\nLocal folder\n~/code/cezar\nRepository\ngithub.com/apptension/cezar\nCheckout folder\n~/cezar/projects\nOpen local folder\nClone from GitHub\nTools diagnostics\n\nCheck the tools available to this local workspace.\n\ngit\nInstalled · Ready\ngh\nInstalled · Authenticated\ncodex\nInstalled · Provider connected\nclaude\nInstalled · Ready\nRecheck tools\nCopy diagnostics",
+  "styles": [
+    {
+      "text": "Workspace tools",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "size": "28px",
+      "weight": "400",
+      "lineHeight": "42px",
+      "width": 1104,
+      "height": 42
+    },
+    {
+      "text": "Add project",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "size": "18px",
+      "weight": "400",
+      "lineHeight": "27px",
+      "width": 1054,
+      "height": 27
+    },
+    {
+      "text": "Open local folder",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "size": "12px",
+      "weight": "400",
+      "lineHeight": "18px",
+      "width": 134.671875,
+      "height": 40
+    },
+    {
+      "text": "Clone from GitHub",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "size": "12px",
+      "weight": "400",
+      "lineHeight": "18px",
+      "width": 142.65625,
+      "height": 40
+    },
+    {
+      "text": "Tools diagnostics",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "size": "18px",
+      "weight": "400",
+      "lineHeight": "27px",
+      "width": 1054,
+      "height": 27
+    },
+    {
+      "text": "Recheck tools",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "size": "12px",
+      "weight": "400",
+      "lineHeight": "18px",
+      "width": 114.765625,
+      "height": 40
+    },
+    {
+      "text": "Copy diagnostics",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "size": "12px",
+      "weight": "400",
+      "lineHeight": "18px",
+      "width": 136.796875,
+      "height": 40
+    }
+  ]
+}

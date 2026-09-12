@@ -1,0 +1,63 @@
+Latest shared-control refresh 2026-09-12T11:32:34.273369+00:00: source `363deab3d96a38eea7e589713d8f222ffb2fa5b7`, build `32e3a33696117366a88481b88eb2e3f222f1fd6a6ab34cf26a695ebc54fa331f`,56 pairs /38 assigned frames;425 scoped tests pass. Exact EnginePills/Template glyphs and expanded comma counts implemented; compact/API behavior preserved. See current193-state-coverage.json and individual visual-review.json.
+
+Current refresh 2026-09-12T11:24:38.646214+00:00: source `d304fd48f26e8495a4af9498c6a88ac419b1d2e8` includes scheduler fix a4b941c9, exact adapter463821c6 and shell15ef08fc. See `current193-state-coverage.json` for all193 frame IDs and56 captures across38 assigned frames. Current build aggregate `b7823c257dbb0615c78861b33121da81ff197e996f3735707697ac12bfd76baa`;105 served assets verified. Individual remaining discrepancies are recorded in visual-review.json; no full-frame exact-match claim.
+
+# Task views — committed implementation and visual evidence
+
+This folder retains the assignment’s iteration-2 path, but all paired design PNGs use the user-confirmed **193-frame** source SHA-256 `56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8`. The earlier 158-frame source was copied before reading, then superseded on the parent’s explicit instruction. Old audit 048 was not used.
+
+**Whole-frame exact fidelity is not certified.** The exact glyph adapter and shared shell are integrated. Remaining route/component discrepancies are listed individually; EnginePills/PromptTemplateMenu still need their owner’s follow-through. The parent explicitly required final integrated captures after that dependency lands. Parent progress delivery now fails with Cezar `capacity_limit: Conversation capacity limit reached`.
+
+Implementation commits: `f399ba7c`, `f18ce8eb`, `5010e3d1`, `bd8a63f5`, `739e3ccd`, `12bf4b92`, `f98c6f05`, `71337874`, `1c6e2b63`, `808b1edb`, `f5b22030`, `a7a2392e` (all scoped; cherry-pick in order). Dependency: parent adapter `463821c6`, imported unchanged locally as `6dd92678`; parent already has this dependency. Owned changes affect only assigned routes, their two CSS files, scoped tests and evidence. The shared adapter import reproduces the parent commit without modification. No API/engine changes, external writes, push, PR, merge or delegation.
+
+## Behavior retained
+
+Project task lists default to the five-column summary. **Columns → Resource columns** exposes the complete table and preserves every saved folded-column preference. A task’s status badge discloses resources; mobile details retain branch, directional tokens, cost, CPU and memory. Existing rename, pin, archive/read controls, links, global tag/group filters, comparison confirmation and plan reorder/remove/save/start behavior remain. Automation scheduler availability remains visible even with no definitions; multiple automation logs retain their names.
+
+## Verification
+
+`verification/` records the successful web typecheck, production build and all six scoped route suites (**190 tests**); the final optional-state revision also passed its four affected suites (**62 tests**), typecheck and build. The restored grouped-filter disclosure regression was also run with the faulty derived expansion expression reinstated; it failed as expected, and the exact fixed source was restored. Fixture JSON validates against the actual contract schemas (`fixture-validation.json`). Fixture writes stay in isolated CEZ_HOME or browser mocks, and plan/overwrite responses are intercepted. The additional column-details captures make reversible column-preference writes only in that isolated home.
+
+`source-proof.json` hashes every owned source/test file. `capture-proof.json` and `state-capture-proof.json` identify build HTML and source hashes. `capture-inventory.json` records 34 primary route frames by current manifest names; `state-capture-inventory.json` records 18 explicit optional states/dialogs. `list-detail-inventory.json` adds four full-column/inline-rename captures, for **56 pairs** total. Each has its own design PNG and original full browser screenshot in `pairs/`, at the design’s CSS viewport and matching theme, comfortable density. The reference exports are 2×; browser images are 1× CSS pixels. Inventories retain observed content and timestamps. Empty/disabled captures are explicit states, never substitutes for populated route captures.
+
+## Remaining differences and integration dependencies
+
+- Shared shell: the parent shell4d7723df is integrated with264px sidebar, exact glyph adapter and IBM Plex Mono. Fixture navigation/content differs, and provider/template controls remain outside this worker’s source ownership. Matching owned glyphs, including Filters, now use the verified exact adapter. Unmapped existing action glyphs remain listed in the rescan; shared components still need their owner’s integration.
+- Project lists: the full table and pin/rename/menu controls remain real controls. Summary Columns access, mobile pin/action affordances and the retained FAB add controls absent from frame 4. Frame 25B separately illustrates the FAB. Counts/ages/PR statuses reflect isolated fixture data, not fabricated release data. Full-table folded preferences are respected; an unchecked Branch remains folded until the user chooses it.
+- Global tasks: `RunIndexEntry` has no diff totals or directional token fields. Changes therefore remains an honest dash; no API shape was widened. Grouped view keeps the existing search/view controls so archived/search behavior is not dropped. The illustration of all grouped actions includes states not simultaneously shown by the current active/archived filter.
+- Inbox: provider/model/effort controls remain capability driven. The fixture has Claude/Auto and an Effort selector; reference has Codex/Default. The design’s provider-configuration note is an implementation annotation, not persistent product copy. The source has no cross-project Inbox query; no fake all-project selector was added.
+- Automations: activity is contract-valid with launched, no-match and baseline records. Actual scheduler/availability, timestamps and historical result labels remain honest. Native checkbox geometry is still distinct from the reference glyph.
+- Plan: step hints use the IBM Plex Mono font supplied by the integrated parent shell. The existing accessible dialog/scroll/focus behavior remains; the supplied frame depicts an inset stage headed “New task / Plan first,” which requires the other owner’s composer/shell coordination. The global modal scrim and close focus ring differ. Design notes about empty/fallback behavior were not rendered as unconditional copy.
+- Frames 25, 26, 29 and 33 contain composite demonstrations. Captures isolate the actual menu, dialog or route state rather than pretending several mutually exclusive application states appear simultaneously. Frame 23 belongs to the new-task owner; parent was notified at task start.
+
+See `visual-review.json` for individual frame/state verdicts. A build or overflow pass is not a visual-match verdict.
+
+## Reproduction
+
+Use a built service in this worktree with the parent’s isolated `runtime-verified/serve-fixture.mjs` (recorded local URL `http://127.0.0.1:44635`). The seed server uses `.ai/qa/runtime-verified/cez-home`; it is not a real user home.
+
+1. `npm ci --ignore-scripts`; `npm run build:server`; `npm run build:web`.
+2. Start the isolated fixture server. `browser.sh` wraps the installed agent-browser binary and a dedicated session.
+3. `node .ai/design-reference/iteration-2/task-views/validate-mocks.mjs` then `python3 .ai/design-reference/iteration-2/task-views/apply-mocks.py`.
+4. Run `capture.py <current-design-export-directory> [base-url]`, then `capture-states.py` and `capture-list-details.py` (base/design constants are at the top).
+5. `make-review.py` optionally creates side-by-side route crops with Pillow. Crops are review aids only; original screenshots remain in `pairs/`. They remove the integrated264px sidebar from both images to inspect route content.
+
+The harness removes existing routes before adding new mocks, aborts fixture SSE replay so it cannot overwrite analogous populated rows, waits for populated route selectors, and checks intended optional-state text. Disabled-capability mocks set localHandoff false so a live health WebSocket cannot overwrite them. It validates source hashes before and after capture. Credentials remain in the environment and are never copied into fixtures/evidence.
+
+## Confirmed-source resumption
+
+User confirmation of fresh 19A restored SHA `56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8` (8,498,974 bytes) as authority. All 56 stored design PNGs were rechecked against the complete 193-frame manifest and match. `confirmed-source-rescan.json` records current per-frame text/icon instances and audit hashes; the rejected 373782 audit is not used. Inbox text corrections are in `f98c6f05`. Parent adapter `463821c6` was imported unchanged as dependency `6dd92678`; owned exact-name glyph usage is `71337874`. Parent already has the adapter and must not integrate that dependency twice. All 76 geometries match the current audit paths/viewBoxes; visible status dots do not use the old Material ring.
+
+Fresh verification: seven suites / 193 tests, web typecheck and build passed. `build-artifact-proof.json` hashes every emitted web asset and records an aggregate SHA. Remaining whole-frame differences include fixture data and provider/template details. The unmapped existing action glyphs are enumerated in the rescan; they are preserved, not replaced by guessed shapes.
+
+The final text/card revisions are `1c6e2b63` and `808b1edb`; 54 affected tests and the latest production build pass after those label/layout changes. Inbox gaps and line heights were checked directly against current JSON, not inherited from the rejected file. Frame 29 task finish/archive/delete confirmations belong to the task-session owner per runtime ownership-slices; this evidence covers its comparison and plan confirmations.
+
+Parent shell `4d7723df` was imported unchanged as local dependency `1805e542`; parent must skip this duplicate dependency on integration. Seven suites/193 tests, typecheck and build passed with the shell. The final fixture now supplies contract-valid merged217/215 and conflicting196 reference statuses; no external requests/actions are required. `f5b22030` gives these known states plain summary labels while retaining all shared link/panel behavior. Nine mock response shapes validate.
+
+Capture correction: fourteen mobile PNGs have larger rendered canvas heights than their declared frame heights (for example, editor402×899 versus declaration402×874). Their horizontal export scale is exactly2×. Capture uses PNG-height/2 for these actual comparison canvases, retaining `declaredWidth`/`declaredHeight` and `viewportBasis` in inventory. This avoids cropping the footer while claiming a matching pair; original PNGs are unchanged.
+
+The pre-19B-recheck captured owned source was `a7a2392e` with parent dependencies imported. The complete emitted-web aggregate SHA256 is `649757c61c32ce8737f4d51f3c80ff29bf577dc2b3e2efb66cf0ca8c0964af2f`. All56 original browser images have exactly half the corresponding2× reference image width/height. Source hashes and HTTP/disk index identity were rechecked after capture. Remaining shared work: EnginePills/PromptTemplateMenu icon and label treatment, plus optional comma grouping in shared DiffStatLabel; global diff values are unavailable in the current contract. The optional Pillow crop helper was unavailable in the final shell; original PNGs were inspected directly.
+
+19B/table recheck: `fc401a58` corrects the caught-up heading to current-source Poppins500 in pwW2r/DZts9. Both1440×1120 pairs are included. Re-read current HcGEf five-summary headers and M5SWe full-resource/column-menu declarations; seven summary/folding tests passed. All56 pairs recaptured against `fc401a585169ae939fc8820a425257b8fcdae918`, final build aggregate SHA256 `473ed68abc71668f2e1c7e4494a62b45ddeba2ed22ed98073577b809bed010e8`. S/R-series files remain outside ownership.
+
+Reusable fixture follow-through: `verify-served-assets.mjs` adapts parent `d94958cc` verification to the existing worker-specific server/session without reseeding. It checks process/repo identity, served HTML, and all105 JS/CSS/font assets against disk, including IBM Plex TTF. Latest result is in `served-asset-proof.json`; run with `node .ai/design-reference/iteration-2/task-views/verify-served-assets.mjs`. No app source/design changes or additional server were needed.

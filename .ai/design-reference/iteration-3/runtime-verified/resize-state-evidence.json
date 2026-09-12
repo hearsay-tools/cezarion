@@ -1,0 +1,224 @@
+[
+  {
+    "id": "t5OS8c",
+    "name": "R1. Sidebar minimum / default · 264px · Desktop light",
+    "desired": 264,
+    "actual": 264,
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/t5OS8c-resize-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nNew task\ntask-fixture\n\nNEW TASK\n\nWhat should the agent work on?\n\nRuns in an isolated worktree — review everything before it lands.\n\nStart with a suggestion\n\nFix a failing or flaky test\nSummarize recent commits on this branch\nUpdate the README for recent changes\nTask description\n\n⌁   Type / for a skill or workflow\n\nTemplate\nSkill\nclaude\nMODEL\nauto\nEffortauto\nExecution settings\n\nControl where and how this task runs.\n\nParallel variants\n×1\nWorktree\nRun in an isolated working copy\nAutonomous\nLet the agent proceed without prompts\nBase branch\ntask-fixture\n\nChanges stay in their own worktree, separate from your working directory.\n\nFollow-ups\n\nGenerate suggestions in Inbox after this task. Enabled by default; your choice is remembered.\n\nStart\nPlan first\nStart task\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "separators": [
+        {
+          "label": "Resize the sidebar",
+          "value": "264",
+          "min": "232",
+          "max": "420"
+        }
+      ]
+    }
+  },
+  {
+    "id": "wDyFh",
+    "name": "R1. Sidebar minimum / default · 264px · Desktop dark",
+    "desired": 264,
+    "actual": 264,
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/wDyFh-resize-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nNew task\ntask-fixture\n\nNEW TASK\n\nWhat should the agent work on?\n\nRuns in an isolated worktree — review everything before it lands.\n\nStart with a suggestion\n\nFix a failing or flaky test\nSummarize recent commits on this branch\nUpdate the README for recent changes\nTask description\n\n⌁   Type / for a skill or workflow\n\nTemplate\nSkill\nclaude\nMODEL\nauto\nEffortauto\nExecution settings\n\nControl where and how this task runs.\n\nParallel variants\n×1\nWorktree\nRun in an isolated working copy\nAutonomous\nLet the agent proceed without prompts\nBase branch\ntask-fixture\n\nChanges stay in their own worktree, separate from your working directory.\n\nFollow-ups\n\nGenerate suggestions in Inbox after this task. Enabled by default; your choice is remembered.\n\nStart\nPlan first\nStart task\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "separators": [
+        {
+          "label": "Resize the sidebar",
+          "value": "264",
+          "min": "232",
+          "max": "420"
+        }
+      ]
+    }
+  },
+  {
+    "id": "IbsZT",
+    "name": "R1. Sidebar maximum · 420px · Desktop light",
+    "desired": 420,
+    "actual": 420,
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/IbsZT-resize-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\n+12 −3\nParent · done\n#123\nReview keyboard controls\n+12 −3\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nNew task\ntask-fixture\n\nNEW TASK\n\nWhat should the agent work on?\n\nRuns in an isolated worktree — review everything before it lands.\n\nStart with a suggestion\n\nFix a failing or flaky test\nSummarize recent commits on this branch\nUpdate the README for recent changes\nTask description\n\n⌁   Type / for a skill or workflow\n\nTemplate\nSkill\nclaude\nMODEL\nauto\nEffortauto\nExecution settings\n\nControl where and how this task runs.\n\nParallel variants\n×1\nWorktree\nRun in an isolated working copy\nAutonomous\nLet the agent proceed without prompts\nBase branch\ntask-fixture\n\nChanges stay in their own worktree, separate from your working directory.\n\nFollow-ups\n\nGenerate suggestions in Inbox after this task. Enabled by default; your choice is remembered.\n\nStart\nPlan first\nStart task\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "separators": [
+        {
+          "label": "Resize the sidebar",
+          "value": "420",
+          "min": "232",
+          "max": "420"
+        }
+      ]
+    }
+  },
+  {
+    "id": "IFqhi",
+    "name": "R1. Sidebar maximum · 420px · Desktop dark",
+    "desired": 420,
+    "actual": 420,
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/IFqhi-resize-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\n+12 −3\nParent · done\n#123\nReview keyboard controls\n+12 −3\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nNew task\ntask-fixture\n\nNEW TASK\n\nWhat should the agent work on?\n\nRuns in an isolated worktree — review everything before it lands.\n\nStart with a suggestion\n\nFix a failing or flaky test\nSummarize recent commits on this branch\nUpdate the README for recent changes\nTask description\n\n⌁   Type / for a skill or workflow\n\nTemplate\nSkill\nclaude\nMODEL\nauto\nEffortauto\nExecution settings\n\nControl where and how this task runs.\n\nParallel variants\n×1\nWorktree\nRun in an isolated working copy\nAutonomous\nLet the agent proceed without prompts\nBase branch\ntask-fixture\n\nChanges stay in their own worktree, separate from your working directory.\n\nFollow-ups\n\nGenerate suggestions in Inbox after this task. Enabled by default; your choice is remembered.\n\nStart\nPlan first\nStart task\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "separators": [
+        {
+          "label": "Resize the sidebar",
+          "value": "420",
+          "min": "232",
+          "max": "420"
+        }
+      ]
+    }
+  },
+  {
+    "id": "pg6Nc",
+    "name": "R2. GitHub list minimum · 280px · Desktop light",
+    "desired": 280,
+    "actual": 280,
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/pg6Nc-resize-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nGitHub\ntask-fixture\nGitHub\nexample/fixture\nIssues · 1\nPull requests · 2\nSet up automations\nRefresh\nLabels\nClear filters\n\nNot synced yet\n\nBack to the list\n\n#218\n·\npull request\n·\nopened by fixture-user\n·\n28s ago\n·\n2\n·\n+42 −9\n·\nopen on GitHub\n\nImprove task session controls\nConversation\nChanges\nenhancement\n✓ checks passing\n\nRefine session navigation and preserve keyboard controls.\n\nValidation\nDesktop and mobile checked\nLight and dark themes verified\nACTIVITY · 1 COMMENT\nR\nreviewer\n28s\napproved\n\nThe session navigation looks good. Please retain all keyboard shortcuts.\n\nMerge blocked · Requirements unknown\nRefresh\n\nfeature/session-controls (aaaaaaa) → main\n\nReviews: approved\nConflicts: none\nBuild and tests · passing · requiredness unknown\nRepository requirements are not available.\n\nGitHub could not confirm review and branch-protection requirements. Passing checks do not establish merge readiness.\n\nSquash and merge\nSquash and merge\nHand this to the agent\nInstructions for the agent\ntemplates\nWorkflow\nworkflow\nSkills · select one or more\nskills\nclaude\nauto\nauto\nAccount\nDefault\nRun agent on this PR\nCtrl+↵\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "separators": [
+        {
+          "label": "Resize the sidebar",
+          "value": "264",
+          "min": "232",
+          "max": "420"
+        },
+        {
+          "label": "Resize the GitHub list",
+          "value": "280",
+          "min": "280",
+          "max": "520"
+        }
+      ],
+      "listWidth": 0
+    }
+  },
+  {
+    "id": "ZhYVg",
+    "name": "R2. GitHub list minimum · 280px · Desktop dark",
+    "desired": 280,
+    "actual": 280,
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/ZhYVg-resize-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nGitHub\ntask-fixture\nGitHub\nexample/fixture\nIssues · 1\nPull requests · 2\nSet up automations\nRefresh\nLabels\nClear filters\n\nNot synced yet\n\nBack to the list\n\n#218\n·\npull request\n·\nopened by fixture-user\n·\n29s ago\n·\n2\n·\n+42 −9\n·\nopen on GitHub\n\nImprove task session controls\nConversation\nChanges\nenhancement\n✓ checks passing\n\nRefine session navigation and preserve keyboard controls.\n\nValidation\nDesktop and mobile checked\nLight and dark themes verified\nACTIVITY · 1 COMMENT\nR\nreviewer\n29s\napproved\n\nThe session navigation looks good. Please retain all keyboard shortcuts.\n\nMerge blocked · Requirements unknown\nRefresh\n\nfeature/session-controls (aaaaaaa) → main\n\nReviews: approved\nConflicts: none\nBuild and tests · passing · requiredness unknown\nRepository requirements are not available.\n\nGitHub could not confirm review and branch-protection requirements. Passing checks do not establish merge readiness.\n\nSquash and merge\nSquash and merge\nHand this to the agent\nInstructions for the agent\ntemplates\nWorkflow\nworkflow\nSkills · select one or more\nskills\nclaude\nauto\nauto\nAccount\nDefault\nRun agent on this PR\nCtrl+↵\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "separators": [
+        {
+          "label": "Resize the sidebar",
+          "value": "264",
+          "min": "232",
+          "max": "420"
+        },
+        {
+          "label": "Resize the GitHub list",
+          "value": "280",
+          "min": "280",
+          "max": "520"
+        }
+      ],
+      "listWidth": 0
+    }
+  },
+  {
+    "id": "Gg8yJ",
+    "name": "R2. GitHub list default · 360px · Desktop light",
+    "desired": 360,
+    "actual": 360,
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/Gg8yJ-resize-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nGitHub\ntask-fixture\nGitHub\nexample/fixture\nIssues · 1\nPull requests · 2\nSet up automations\nRefresh\nLabels\nClear filters\n\nNot synced yet\n\nBack to the list\n\n#218\n·\npull request\n·\nopened by fixture-user\n·\n30s ago\n·\n2\n·\n+42 −9\n·\nopen on GitHub\n\nImprove task session controls\nConversation\nChanges\nenhancement\n✓ checks passing\n\nRefine session navigation and preserve keyboard controls.\n\nValidation\nDesktop and mobile checked\nLight and dark themes verified\nACTIVITY · 1 COMMENT\nR\nreviewer\n30s\napproved\n\nThe session navigation looks good. Please retain all keyboard shortcuts.\n\nMerge blocked · Requirements unknown\nRefresh\n\nfeature/session-controls (aaaaaaa) → main\n\nReviews: approved\nConflicts: none\nBuild and tests · passing · requiredness unknown\nRepository requirements are not available.\n\nGitHub could not confirm review and branch-protection requirements. Passing checks do not establish merge readiness.\n\nSquash and merge\nSquash and merge\nHand this to the agent\nInstructions for the agent\ntemplates\nWorkflow\nworkflow\nSkills · select one or more\nskills\nclaude\nauto\nauto\nAccount\nDefault\nRun agent on this PR\nCtrl+↵\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "separators": [
+        {
+          "label": "Resize the sidebar",
+          "value": "264",
+          "min": "232",
+          "max": "420"
+        },
+        {
+          "label": "Resize the GitHub list",
+          "value": "360",
+          "min": "280",
+          "max": "520"
+        }
+      ],
+      "listWidth": 0
+    }
+  },
+  {
+    "id": "gW5PQ",
+    "name": "R2. GitHub list default · 360px · Desktop dark",
+    "desired": 360,
+    "actual": 360,
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/gW5PQ-resize-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nGitHub\ntask-fixture\nGitHub\nexample/fixture\nIssues · 1\nPull requests · 2\nSet up automations\nRefresh\nLabels\nClear filters\n\nNot synced yet\n\nBack to the list\n\n#218\n·\npull request\n·\nopened by fixture-user\n·\n31s ago\n·\n2\n·\n+42 −9\n·\nopen on GitHub\n\nImprove task session controls\nConversation\nChanges\nenhancement\n✓ checks passing\n\nRefine session navigation and preserve keyboard controls.\n\nValidation\nDesktop and mobile checked\nLight and dark themes verified\nACTIVITY · 1 COMMENT\nR\nreviewer\n31s\napproved\n\nThe session navigation looks good. Please retain all keyboard shortcuts.\n\nMerge blocked · Requirements unknown\nRefresh\n\nfeature/session-controls (aaaaaaa) → main\n\nReviews: approved\nConflicts: none\nBuild and tests · passing · requiredness unknown\nRepository requirements are not available.\n\nGitHub could not confirm review and branch-protection requirements. Passing checks do not establish merge readiness.\n\nSquash and merge\nSquash and merge\nHand this to the agent\nInstructions for the agent\ntemplates\nWorkflow\nworkflow\nSkills · select one or more\nskills\nclaude\nauto\nauto\nAccount\nDefault\nRun agent on this PR\nCtrl+↵\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "separators": [
+        {
+          "label": "Resize the sidebar",
+          "value": "264",
+          "min": "232",
+          "max": "420"
+        },
+        {
+          "label": "Resize the GitHub list",
+          "value": "360",
+          "min": "280",
+          "max": "520"
+        }
+      ],
+      "listWidth": 0
+    }
+  },
+  {
+    "id": "CEQfL",
+    "name": "R2. GitHub list maximum · 520px · Desktop light",
+    "desired": 520,
+    "actual": 520,
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/CEQfL-resize-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nGitHub\ntask-fixture\nGitHub\nexample/fixture\nIssues · 1\nPull requests · 2\nSet up automations\nRefresh\nLabels\nClear filters\n\nNot synced yet\n\nBack to the list\n\n#218\n·\npull request\n·\nopened by fixture-user\n·\n32s ago\n·\n2\n·\n+42 −9\n·\nopen on GitHub\n\nImprove task session controls\nConversation\nChanges\nenhancement\n✓ checks passing\n\nRefine session navigation and preserve keyboard controls.\n\nValidation\nDesktop and mobile checked\nLight and dark themes verified\nACTIVITY · 1 COMMENT\nR\nreviewer\n32s\napproved\n\nThe session navigation looks good. Please retain all keyboard shortcuts.\n\nMerge blocked · Requirements unknown\nRefresh\n\nfeature/session-controls (aaaaaaa) → main\n\nReviews: approved\nConflicts: none\nBuild and tests · passing · requiredness unknown\nRepository requirements are not available.\n\nGitHub could not confirm review and branch-protection requirements. Passing checks do not establish merge readiness.\n\nSquash and merge\nSquash and merge\nHand this to the agent\nInstructions for the agent\ntemplates\nWorkflow\nworkflow\nSkills · select one or more\nskills\nclaude\nauto\nauto\nAccount\nDefault\nRun agent on this PR\nCtrl+↵\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "separators": [
+        {
+          "label": "Resize the sidebar",
+          "value": "264",
+          "min": "232",
+          "max": "420"
+        },
+        {
+          "label": "Resize the GitHub list",
+          "value": "520",
+          "min": "280",
+          "max": "520"
+        }
+      ],
+      "listWidth": 0
+    }
+  },
+  {
+    "id": "vETJh",
+    "name": "R2. GitHub list maximum · 520px · Desktop dark",
+    "desired": 520,
+    "actual": 520,
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/vETJh-resize-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nGitHub\ntask-fixture\nGitHub\nexample/fixture\nIssues · 1\nPull requests · 2\nSet up automations\nRefresh\nLabels\nClear filters\n\nNot synced yet\n\nBack to the list\n\n#218\n·\npull request\n·\nopened by fixture-user\n·\n33s ago\n·\n2\n·\n+42 −9\n·\nopen on GitHub\n\nImprove task session controls\nConversation\nChanges\nenhancement\n✓ checks passing\n\nRefine session navigation and preserve keyboard controls.\n\nValidation\nDesktop and mobile checked\nLight and dark themes verified\nACTIVITY · 1 COMMENT\nR\nreviewer\n33s\napproved\n\nThe session navigation looks good. Please retain all keyboard shortcuts.\n\nMerge blocked · Requirements unknown\nRefresh\n\nfeature/session-controls (aaaaaaa) → main\n\nReviews: approved\nConflicts: none\nBuild and tests · passing · requiredness unknown\nRepository requirements are not available.\n\nGitHub could not confirm review and branch-protection requirements. Passing checks do not establish merge readiness.\n\nSquash and merge\nSquash and merge\nHand this to the agent\nInstructions for the agent\ntemplates\nWorkflow\nworkflow\nSkills · select one or more\nskills\nclaude\nauto\nauto\nAccount\nDefault\nRun agent on this PR\nCtrl+↵\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "separators": [
+        {
+          "label": "Resize the sidebar",
+          "value": "264",
+          "min": "232",
+          "max": "420"
+        },
+        {
+          "label": "Resize the GitHub list",
+          "value": "520",
+          "min": "280",
+          "max": "520"
+        }
+      ],
+      "listWidth": 0
+    }
+  }
+]

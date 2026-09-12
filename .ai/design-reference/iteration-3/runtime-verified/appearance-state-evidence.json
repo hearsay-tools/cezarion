@@ -1,0 +1,182 @@
+[
+  {
+    "theme": "light",
+    "density": "comfortable",
+    "width": "narrow",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-light-comfortable-narrow.png",
+    "observed": {
+      "density": "comfortable",
+      "width": "narrow",
+      "spacing": ".25rem",
+      "measure": "820px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "light",
+    "density": "comfortable",
+    "width": "wide",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-light-comfortable-wide.png",
+    "observed": {
+      "density": "comfortable",
+      "width": "wide",
+      "spacing": ".25rem",
+      "measure": "1180px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "light",
+    "density": "compact",
+    "width": "narrow",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-light-compact-narrow.png",
+    "observed": {
+      "density": "compact",
+      "width": "narrow",
+      "spacing": ".21875rem",
+      "measure": "820px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "light",
+    "density": "compact",
+    "width": "wide",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-light-compact-wide.png",
+    "observed": {
+      "density": "compact",
+      "width": "wide",
+      "spacing": ".21875rem",
+      "measure": "1180px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "light",
+    "density": "ultra",
+    "width": "narrow",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-light-ultra-narrow.png",
+    "observed": {
+      "density": "ultra",
+      "width": "narrow",
+      "spacing": ".1875rem",
+      "measure": "820px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "light",
+    "density": "ultra",
+    "width": "wide",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-light-ultra-wide.png",
+    "observed": {
+      "density": "ultra",
+      "width": "wide",
+      "spacing": ".1875rem",
+      "measure": "1180px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "dark",
+    "density": "comfortable",
+    "width": "narrow",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-dark-comfortable-narrow.png",
+    "observed": {
+      "density": "comfortable",
+      "width": "narrow",
+      "spacing": ".25rem",
+      "measure": "820px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "dark",
+    "density": "comfortable",
+    "width": "wide",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-dark-comfortable-wide.png",
+    "observed": {
+      "density": "comfortable",
+      "width": "wide",
+      "spacing": ".25rem",
+      "measure": "1180px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "dark",
+    "density": "compact",
+    "width": "narrow",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-dark-compact-narrow.png",
+    "observed": {
+      "density": "compact",
+      "width": "narrow",
+      "spacing": ".21875rem",
+      "measure": "820px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "dark",
+    "density": "compact",
+    "width": "wide",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-dark-compact-wide.png",
+    "observed": {
+      "density": "compact",
+      "width": "wide",
+      "spacing": ".21875rem",
+      "measure": "1180px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "dark",
+    "density": "ultra",
+    "width": "narrow",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-dark-ultra-narrow.png",
+    "observed": {
+      "density": "ultra",
+      "width": "narrow",
+      "spacing": ".1875rem",
+      "measure": "820px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  },
+  {
+    "theme": "dark",
+    "density": "ultra",
+    "width": "wide",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/appearance-dark-ultra-wide.png",
+    "observed": {
+      "density": "ultra",
+      "width": "wide",
+      "spacing": ".1875rem",
+      "measure": "1180px",
+      "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "bodySize": "16px",
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills"
+    }
+  }
+]

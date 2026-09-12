@@ -1,0 +1,4 @@
+*.pen
+*.txt
+review/
+mock-api.json

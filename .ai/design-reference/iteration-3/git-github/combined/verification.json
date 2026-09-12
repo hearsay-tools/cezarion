@@ -1,0 +1,11 @@
+{
+  "verifiedAt": "2026-09-12T11:11:55.828493+00:00",
+  "pairsAndContextCaptures": 82,
+  "sourceOverlayFiles": 37,
+  "servedAssets": 90,
+  "hashesAndDimensions": "passed",
+  "scopedTests": 272,
+  "typecheck": "passed",
+  "serverBuild": "passed",
+  "webBuild": "passed"
+}

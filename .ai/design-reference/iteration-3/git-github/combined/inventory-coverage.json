@@ -1,0 +1,1706 @@
+{
+  "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+  "inventorySha256": "be1f9320b4300eec3640ac0c773431a5820ae7facce2d4d4ed815b4b7c78e913",
+  "reviewedAt": "2026-09-12T11:14:31.097138+00:00",
+  "totalFrames": 193,
+  "ownedFrameVariants": 44,
+  "coverage": [
+    {
+      "frameId": "x4dva",
+      "name": "1A. Brand light \u00b7 Start",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "yhesD",
+      "name": "1B. Brand dark \u00b7 Start",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "mZMB8",
+      "name": "1C. Desktop light \u00b7 Start",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Pusy6",
+      "name": "1D. Desktop dark \u00b7 Start",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "C9o2u",
+      "name": "Cezarion \u00b7 Shared components",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "cgGWE",
+      "name": "2A. Task session \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "igwKt",
+      "name": "2B. Task session \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "gVXYn",
+      "name": "2C. Task session \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "nu4S5",
+      "name": "2D. Task session \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "h690uO",
+      "name": "2E. Session navigation open \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "L0VfI",
+      "name": "2F. Session navigation open \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "HYltX",
+      "name": "3A. Expanded activity \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "r7humJ",
+      "name": "3B. Expanded activity \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "zwIL4",
+      "name": "3C. Expanded activity \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "es88m",
+      "name": "3D. Expanded activity \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "HcGEf",
+      "name": "4A. Project tasks \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "rstLr",
+      "name": "4C. Project tasks \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "FsD5O",
+      "name": "4B. Project tasks \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "x3GLa",
+      "name": "4D. Project tasks \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "c1EQa",
+      "name": "5A. All tasks \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "dVuKR",
+      "name": "5C. All tasks \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "T5Xpa",
+      "name": "5B. All tasks \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "tQmNd",
+      "name": "5D. All tasks \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "rUusA",
+      "name": "6A. Git \u00b7 Changes \u00b7 Desktop light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "rUusA-design.png",
+      "browser": "rUusA-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Preserves the real hierarchical changed-file tree, line-numbered structured diff, full file patches and wrap control. Reference flattens the tree and abbreviates patches. Mobile retains the existing unified/wrapped mode, so source split controls differ. Fixture has 3 changed files rather than the source summary of 9.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "p8bEI",
+      "name": "6C. Git \u00b7 Changes \u00b7 Mobile light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "p8bEI-design.png",
+      "browser": "p8bEI-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1178
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Preserves the real hierarchical changed-file tree, line-numbered structured diff, full file patches and wrap control. Reference flattens the tree and abbreviates patches. Mobile retains the existing unified/wrapped mode, so source split controls differ. Fixture has 3 changed files rather than the source summary of 9.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "qxKBh",
+      "name": "6B. Git \u00b7 Changes \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "qxKBh-design.png",
+      "browser": "qxKBh-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Preserves the real hierarchical changed-file tree, line-numbered structured diff, full file patches and wrap control. Reference flattens the tree and abbreviates patches. Mobile retains the existing unified/wrapped mode, so source split controls differ. Fixture has 3 changed files rather than the source summary of 9.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "CvQao",
+      "name": "6D. Git \u00b7 Changes \u00b7 Mobile dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "CvQao-design.png",
+      "browser": "CvQao-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1178
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Preserves the real hierarchical changed-file tree, line-numbered structured diff, full file patches and wrap control. Reference flattens the tree and abbreviates patches. Mobile retains the existing unified/wrapped mode, so source split controls differ. Fixture has 3 changed files rather than the source summary of 9.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "FZ2Hk",
+      "name": "7A. Git \u00b7 Commits \u00b7 Desktop light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "FZ2Hk-design.png",
+      "browser": "FZ2Hk-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Search, exact commit links, author/time metadata and SHA labels remain. Source displays PR numbers and an older-commits action; the current repo log API has neither PR association nor pagination. Extra metadata makes rows taller, especially on mobile.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "LqDjB",
+      "name": "7C. Git \u00b7 Commits \u00b7 Mobile light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "LqDjB-design.png",
+      "browser": "LqDjB-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1246
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Search, exact commit links, author/time metadata and SHA labels remain. Source displays PR numbers and an older-commits action; the current repo log API has neither PR association nor pagination. Extra metadata makes rows taller, especially on mobile.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "g2Jzw",
+      "name": "7B. Git \u00b7 Commits \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "g2Jzw-design.png",
+      "browser": "g2Jzw-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Search, exact commit links, author/time metadata and SHA labels remain. Source displays PR numbers and an older-commits action; the current repo log API has neither PR association nor pagination. Extra metadata makes rows taller, especially on mobile.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "D53pMS",
+      "name": "7D. Git \u00b7 Commits \u00b7 Mobile dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "D53pMS-design.png",
+      "browser": "D53pMS-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1246
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Search, exact commit links, author/time metadata and SHA labels remain. Source displays PR numbers and an older-commits action; the current repo log API has neither PR association nor pagination. Extra metadata makes rows taller, especially on mobile.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "bI71R",
+      "name": "8A. Git \u00b7 Branches \u00b7 Desktop light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "bI71R-design.png",
+      "browser": "bI71R-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Two-panel desktop and stacked mobile layout, 44px controls and purple current chip compared. Empty branch name correctly disables Create; source shows it enabled. Actual unset base remains Follow checked-out branch; source selects main. Mobile retains extra vertical row spacing.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "o67XB",
+      "name": "8C. Git \u00b7 Branches \u00b7 Mobile light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "o67XB-design.png",
+      "browser": "o67XB-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1495
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Two-panel desktop and stacked mobile layout, 44px controls and purple current chip compared. Empty branch name correctly disables Create; source shows it enabled. Actual unset base remains Follow checked-out branch; source selects main. Mobile retains extra vertical row spacing.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "JYHsj",
+      "name": "8B. Git \u00b7 Branches \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "JYHsj-design.png",
+      "browser": "JYHsj-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Two-panel desktop and stacked mobile layout, 44px controls and purple current chip compared. Empty branch name correctly disables Create; source shows it enabled. Actual unset base remains Follow checked-out branch; source selects main. Mobile retains extra vertical row spacing.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "ZmozS",
+      "name": "8D. Git \u00b7 Branches \u00b7 Mobile dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "ZmozS-design.png",
+      "browser": "ZmozS-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1495
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Two-panel desktop and stacked mobile layout, 44px controls and purple current chip compared. Empty branch name correctly disables Create; source shows it enabled. Actual unset base remains Follow checked-out branch; source selects main. Mobile retains extra vertical row spacing.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "tVifC",
+      "name": "9A. GitHub \u00b7 Desktop light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "tVifC-design.png",
+      "browser": "tVifC-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1900
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "List/divider/selection, 22px detail title, prompt inset and external handoff actions compared. Preserves real author/time/comment metadata, activity, filters and utility actions. No fabricated Open state, PR-assignee/board filter, or sync timestamp. Handoff uses actual available model/workflow/account choices and existing Run agent wording; source uses preset Fable/dev-flow/code-review and Start task. These additions make the document taller.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "zu66o",
+      "name": "9C. GitHub \u00b7 Mobile light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "zu66o-design.png",
+      "browser": "zu66o-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 2244
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "List/divider/selection, 22px detail title, prompt inset and external handoff actions compared. Preserves real author/time/comment metadata, activity, filters and utility actions. No fabricated Open state, PR-assignee/board filter, or sync timestamp. Handoff uses actual available model/workflow/account choices and existing Run agent wording; source uses preset Fable/dev-flow/code-review and Start task. These additions make the document taller.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "AKO2L",
+      "name": "9B. GitHub \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "AKO2L-design.png",
+      "browser": "AKO2L-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1900
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "List/divider/selection, 22px detail title, prompt inset and external handoff actions compared. Preserves real author/time/comment metadata, activity, filters and utility actions. No fabricated Open state, PR-assignee/board filter, or sync timestamp. Handoff uses actual available model/workflow/account choices and existing Run agent wording; source uses preset Fable/dev-flow/code-review and Start task. These additions make the document taller.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "eOnqx",
+      "name": "9D. GitHub \u00b7 Mobile dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "eOnqx-design.png",
+      "browser": "eOnqx-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 2244
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "List/divider/selection, 22px detail title, prompt inset and external handoff actions compared. Preserves real author/time/comment metadata, activity, filters and utility actions. No fabricated Open state, PR-assignee/board filter, or sync timestamp. Handoff uses actual available model/workflow/account choices and existing Run agent wording; source uses preset Fable/dev-flow/code-review and Start task. These additions make the document taller.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "EKi57",
+      "name": "10A. Skills \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "kmHeY",
+      "name": "10C. Skills \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "cvBro",
+      "name": "10B. Skills \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "XdHUd",
+      "name": "10D. Skills \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "C2sfEo",
+      "name": "11A. Workflows \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "aa0TQ",
+      "name": "11C. Workflows \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "s0JzCL",
+      "name": "11B. Workflows \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Ae0n6",
+      "name": "11D. Workflows \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "PPxMw",
+      "name": "S01. Project settings / General \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "x7yBQu",
+      "name": "S01. Project settings / General \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "T4h3KX",
+      "name": "S01. Project settings / General \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Y9V5h2",
+      "name": "S01. Project settings / General \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "aFFvV",
+      "name": "S07. Global settings / General \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "yqIfL",
+      "name": "S07. Global settings / General \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "oHH3V",
+      "name": "S07. Global settings / General \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "TrsF6",
+      "name": "S07. Global settings / General \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "QifUP",
+      "name": "14A. Task changes \u00b7 Desktop light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "QifUP-design.png",
+      "browser": "QifUP-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Task header and toolbar include parent shared implementation 4d7723df. Preserves full task-attributed diff, hierarchical tree and all Git actions. Source abbreviates diff, relocates toolbar below it, and shows four files while this fixture carries three. Mobile retains automatic unified/wrapped behavior.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "M8dqPj",
+      "name": "14C. Task changes \u00b7 Mobile light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "M8dqPj-design.png",
+      "browser": "M8dqPj-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1191
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Task header and toolbar include parent shared implementation 4d7723df. Preserves full task-attributed diff, hierarchical tree and all Git actions. Source abbreviates diff, relocates toolbar below it, and shows four files while this fixture carries three. Mobile retains automatic unified/wrapped behavior.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "X79RX",
+      "name": "14B. Task changes \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "X79RX-design.png",
+      "browser": "X79RX-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Task header and toolbar include parent shared implementation 4d7723df. Preserves full task-attributed diff, hierarchical tree and all Git actions. Source abbreviates diff, relocates toolbar below it, and shows four files while this fixture carries three. Mobile retains automatic unified/wrapped behavior.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "rxmtI",
+      "name": "14D. Task changes \u00b7 Mobile dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "rxmtI-design.png",
+      "browser": "rxmtI-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1191
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Task header and toolbar include parent shared implementation 4d7723df. Preserves full task-attributed diff, hierarchical tree and all Git actions. Source abbreviates diff, relocates toolbar below it, and shows four files while this fixture carries three. Mobile retains automatic unified/wrapped behavior.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "PjeE9",
+      "name": "15A. Task commits \u00b7 Desktop light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "PjeE9-design.png",
+      "browser": "PjeE9-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Card heading, 22px commit subject, filled commit icon, gold View changes and 44px changed-file rows compared. Preserves commit search and author/time/SHA. PR references remain in the shared task header; no commit-to-PR association is invented. Source shows four changed files and its reference badge/action; fixture has three task-changed files.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "feU0A",
+      "name": "15C. Task commits \u00b7 Mobile light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "feU0A-design.png",
+      "browser": "feU0A-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 973
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Card heading, 22px commit subject, filled commit icon, gold View changes and 44px changed-file rows compared. Preserves commit search and author/time/SHA. PR references remain in the shared task header; no commit-to-PR association is invented. Source shows four changed files and its reference badge/action; fixture has three task-changed files.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "HClxj",
+      "name": "15B. Task commits \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "HClxj-design.png",
+      "browser": "HClxj-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Card heading, 22px commit subject, filled commit icon, gold View changes and 44px changed-file rows compared. Preserves commit search and author/time/SHA. PR references remain in the shared task header; no commit-to-PR association is invented. Source shows four changed files and its reference badge/action; fixture has three task-changed files.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "ODSy3",
+      "name": "15D. Task commits \u00b7 Mobile dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "ODSy3-design.png",
+      "browser": "ODSy3-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 973
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Card heading, 22px commit subject, filled commit icon, gold View changes and 44px changed-file rows compared. Preserves commit search and author/time/SHA. PR references remain in the shared task header; no commit-to-PR association is invented. Source shows four changed files and its reference badge/action; fixture has three task-changed files.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "MFtcY",
+      "name": "16A. Task files \u00b7 Desktop light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "MFtcY-design.png",
+      "browser": "MFtcY-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Lazy tree, folder chevrons, exact file-search glyph and centered selection state compared. Real direct-path Open file control remains; source shows Find and Open worktree. Shared task header and available worktree actions differ. Preview/error states are in the interaction manifest.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "LAKkC",
+      "name": "16C. Task files \u00b7 Mobile light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "LAKkC-design.png",
+      "browser": "LAKkC-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1471
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Lazy tree, folder chevrons, exact file-search glyph and centered selection state compared. Real direct-path Open file control remains; source shows Find and Open worktree. Shared task header and available worktree actions differ. Preview/error states are in the interaction manifest.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "l3f2r3",
+      "name": "16B. Task files \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "l3f2r3-design.png",
+      "browser": "l3f2r3-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1120
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Lazy tree, folder chevrons, exact file-search glyph and centered selection state compared. Real direct-path Open file control remains; source shows Find and Open worktree. Shared task header and available worktree actions differ. Preview/error states are in the interaction manifest.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "S1Gdo",
+      "name": "16D. Task files \u00b7 Mobile dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "S1Gdo-design.png",
+      "browser": "S1Gdo-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1471
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Lazy tree, folder chevrons, exact file-search glyph and centered selection state compared. Real direct-path Open file control remains; source shows Find and Open worktree. Shared task header and available worktree actions differ. Preview/error states are in the interaction manifest.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "T2fE7",
+      "name": "17. Sidebar indicators \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "L61J13",
+      "name": "17. Sidebar indicators \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "cfIXv",
+      "name": "17. Sidebar indicators \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "zSP4H",
+      "name": "17. Sidebar indicators \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "OeHGM",
+      "name": "18. Appearance \u00b7 Density and reading-width behavior",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "gqaUM",
+      "name": "10. Run from GitHub \u00b7 Desktop light",
+      "ownership": "Skills worker",
+      "coverage": "outside owned routes",
+      "reason": "Reverified source descendants: Skills heading/list and BOOKMARKLETS panel. Frame10 title mentions GitHub but content belongs to Skills bookmarklet flow."
+    },
+    {
+      "frameId": "EsGpp",
+      "name": "10. Run from GitHub \u00b7 Desktop dark",
+      "ownership": "Skills worker",
+      "coverage": "outside owned routes",
+      "reason": "Reverified source descendants: Skills heading/list and BOOKMARKLETS panel. Frame10 title mentions GitHub but content belongs to Skills bookmarklet flow."
+    },
+    {
+      "frameId": "YS15Y",
+      "name": "10. Run from GitHub \u00b7 Mobile light",
+      "ownership": "Skills worker",
+      "coverage": "outside owned routes",
+      "reason": "Reverified source descendants: Skills heading/list and BOOKMARKLETS panel. Frame10 title mentions GitHub but content belongs to Skills bookmarklet flow."
+    },
+    {
+      "frameId": "wLVhd",
+      "name": "10. Run from GitHub \u00b7 Mobile dark",
+      "ownership": "Skills worker",
+      "coverage": "outside owned routes",
+      "reason": "Reverified source descendants: Skills heading/list and BOOKMARKLETS panel. Frame10 title mentions GitHub but content belongs to Skills bookmarklet flow."
+    },
+    {
+      "frameId": "acXhB",
+      "name": "10. Skill detail \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "utoCL",
+      "name": "10. Skill detail \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "f2LGv",
+      "name": "10. Manage skills \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "suUEJ",
+      "name": "10. Manage skills \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "MB5Yx",
+      "name": "10. Manage skills \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "IbcKi",
+      "name": "10. Manage skills \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "VDDSI",
+      "name": "11. Workflow Auto open \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "MmQCH",
+      "name": "11. Workflow Auto open \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Zsg4w",
+      "name": "11. Workflow Auto open \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "e7UWy",
+      "name": "11. Workflow Auto open \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "e8wQer",
+      "name": "19A. Inbox \u00b7 Follow-up review",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "f2220g",
+      "name": "20A. Automations \u00b7 List and activity",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "UFERI",
+      "name": "20B. Automations \u00b7 Editor",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "yH9DZ",
+      "name": "21A. Variant comparison \u00b7 Results",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "empfw",
+      "name": "22A. Plan review \u00b7 Reorder and start",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "O2W1k",
+      "name": "23A. New task \u00b7 Starters and follow-ups",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "qTzd6",
+      "name": "24A. Shared navigation \u00b7 Optional tools and project entry",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "M5SWe",
+      "name": "25A. Project tasks \u00b7 Full resource table and column menu",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "AHKNo",
+      "name": "26A. All tasks \u00b7 Grouping, tags and run actions",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "I44Ul8",
+      "name": "27A. GitHub \u00b7 PR conversation, filters and readiness",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "I44Ul8-design.png",
+      "browser": "I44Ul8-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1280
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Ready state verified from a schema-valid parent fixture. Retains exact reviewed SHA, per-check results, refresh and real handoff below readiness. Source abbreviates those details and omits the composer. PR-specific assignee/board/state filters absent from API are not invented.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "ZhHkR",
+      "name": "28A. Task actions \u00b7 Menu and handoff reader",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "rEzlh",
+      "name": "29A. Confirmation dialogs \u00b7 Tasks, variants and plans",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "zSB9u",
+      "name": "27B. GitHub PR \u00b7 Changes, blocked merge and confirmation",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "zSB9u-design.png",
+      "browser": "zSB9u-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1300
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Blocked/review-required state compared. Source board combines mutually exclusive blocked, confirmation and conflicting states; runtime captures them separately in interaction-manifest.json. Exact-head confirmation is a modal; it never coexists as an inline decorative card. All bypass/conflict gates remain.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "ur8ZK",
+      "name": "S02. Project settings / Agents \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "w1inBF",
+      "name": "S03. Project settings / Agent config \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "LmL0v",
+      "name": "S04. Project settings / Worktrees \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "cv6mn",
+      "name": "S06. Project settings / Prompt templates \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "x1Iye",
+      "name": "S09. Global settings / Notifications \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "sBaI8",
+      "name": "S10. Global settings / Resources \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "RysDF",
+      "name": "S11. Global settings / Skills \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "XLiCf",
+      "name": "S12. Global settings / Agent accounts \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Id0Gw",
+      "name": "S13. Global settings / Projects \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "lRC5W",
+      "name": "32A. Workflow editing \u00b7 Import, Add step and Delete",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "mpyjl",
+      "name": "33A. Optional features \u00b7 Disabled, empty and waiting states",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "N6NED",
+      "name": "19A. Inbox \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Jn0Bt",
+      "name": "20B. Automation editor \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "hG4Cl",
+      "name": "21A. Compare variants \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "i9Si8J",
+      "name": "22A. Plan review \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "ogTQi",
+      "name": "28A. Task actions \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "RvbXf",
+      "name": "27B. PR changes and merge \u00b7 Mobile light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "RvbXf-design.png",
+      "browser": "RvbXf-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 2052
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Blocked/review-required state compared. Source board combines mutually exclusive blocked, confirmation and conflicting states; runtime captures them separately in interaction-manifest.json. Exact-head confirmation is a modal; it never coexists as an inline decorative card. All bypass/conflict gates remain.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "OGJJ1",
+      "name": "S10. Global settings / Resources \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "djknR",
+      "name": "32A. Import workflow \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "lpRVc",
+      "name": "25B. Project tasks \u00b7 Mobile floating New task",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "moM53",
+      "name": "19A. Inbox \u00b7 Follow-up review \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "s6Ih0I",
+      "name": "20A. Automations \u00b7 List and activity \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "YVkaw",
+      "name": "20B. Automations \u00b7 Editor \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "owGYp",
+      "name": "21A. Variant comparison \u00b7 Results \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Oo1J1",
+      "name": "22A. Plan review \u00b7 Reorder and start \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "pf8QM",
+      "name": "23A. New task \u00b7 Starters and follow-ups \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "OREDs",
+      "name": "24A. Shared navigation \u00b7 Optional tools and project entry \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "ofMmL",
+      "name": "25A. Project tasks \u00b7 Full resource table and column menu \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "UzdJ2",
+      "name": "26A. All tasks \u00b7 Grouping, tags and run actions \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "HBMSk",
+      "name": "27A. GitHub \u00b7 PR conversation, filters and readiness \u00b7 Dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "HBMSk-design.png",
+      "browser": "HBMSk-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1280
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Ready state verified from a schema-valid parent fixture. Retains exact reviewed SHA, per-check results, refresh and real handoff below readiness. Source abbreviates those details and omits the composer. PR-specific assignee/board/state filters absent from API are not invented.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "ef75D",
+      "name": "28A. Task actions \u00b7 Menu and handoff reader \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "c6ANji",
+      "name": "29A. Confirmation dialogs \u00b7 Tasks, variants and plans \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Z3tJLp",
+      "name": "27B. GitHub PR \u00b7 Changes, blocked merge and confirmation \u00b7 Dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "Z3tJLp-design.png",
+      "browser": "Z3tJLp-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1300
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Blocked/review-required state compared. Source board combines mutually exclusive blocked, confirmation and conflicting states; runtime captures them separately in interaction-manifest.json. Exact-head confirmation is a modal; it never coexists as an inline decorative card. All bypass/conflict gates remain.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "cQJod",
+      "name": "S02. Project settings / Agents \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "v9iCdT",
+      "name": "S03. Project settings / Agent config \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "u8PPZ3",
+      "name": "S04. Project settings / Worktrees \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "v5h5dm",
+      "name": "S06. Project settings / Prompt templates \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "c96HBw",
+      "name": "S09. Global settings / Notifications \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "iBtG5",
+      "name": "S10. Global settings / Resources \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "tWnpG",
+      "name": "S11. Global settings / Skills \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "XvWFg",
+      "name": "S12. Global settings / Agent accounts \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "pHBjV",
+      "name": "S13. Global settings / Projects \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "KwkJs",
+      "name": "32A. Workflow editing \u00b7 Import, Add step and Delete \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "NQePM",
+      "name": "33A. Optional features \u00b7 Disabled, empty and waiting states \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "ITZ94",
+      "name": "19A. Inbox \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Itxee",
+      "name": "20B. Automation editor \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "iQvMt",
+      "name": "21A. Compare variants \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "PFLKh",
+      "name": "22A. Plan review \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "myX8Q",
+      "name": "28A. Task actions \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "MnEgv",
+      "name": "27B. PR changes and merge \u00b7 Mobile dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "MnEgv-design.png",
+      "browser": "MnEgv-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 2052
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Blocked/review-required state compared. Source board combines mutually exclusive blocked, confirmation and conflicting states; runtime captures them separately in interaction-manifest.json. Exact-head confirmation is a modal; it never coexists as an inline decorative card. All bypass/conflict gates remain.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "jCdnx",
+      "name": "S10. Global settings / Resources \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "MF4eF",
+      "name": "32A. Import workflow \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "R2OII2",
+      "name": "25B. Project tasks \u00b7 Mobile floating New task \u00b7 Dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "mxZSz",
+      "name": "00. Design reference \u00b7 Current UI and behavior",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "kDsvU",
+      "name": "27C. GitHub PR \u00b7 Checks passing, requirements unknown",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "kDsvU-design.png",
+      "browser": "kDsvU-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1280
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Passing check with unknown requirements stays blocked; actual canOverride=false hides bypass. Source shows a bypass control for its different capability fixture. Exact SHA, review/check details and refresh remain; no merge permission inferred from passing CI.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "zze3r",
+      "name": "27C. GitHub PR \u00b7 Requirements unknown \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "zze3r-design.png",
+      "browser": "zze3r-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1280
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Passing check with unknown requirements stays blocked; actual canOverride=false hides bypass. Source shows a bypass control for its different capability fixture. Exact SHA, review/check details and refresh remain; no merge permission inferred from passing CI.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "Pf2JI",
+      "name": "27C. GitHub PR \u00b7 Requirements unknown \u00b7 Mobile light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "Pf2JI-design.png",
+      "browser": "Pf2JI-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1680
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Passing check with unknown requirements stays blocked; actual canOverride=false hides bypass. Source shows a bypass control for its different capability fixture. Exact SHA, review/check details and refresh remain; no merge permission inferred from passing CI.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "mC4Fw",
+      "name": "27C. GitHub PR \u00b7 Requirements unknown \u00b7 Mobile dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "mC4Fw-design.png",
+      "browser": "mC4Fw-browser.png",
+      "viewport": {
+        "width": 402,
+        "height": 1680
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Passing check with unknown requirements stays blocked; actual canOverride=false hides bypass. Source shows a bypass control for its different capability fixture. Exact SHA, review/check details and refresh remain; no merge permission inferred from passing CI.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "h8VpfA",
+      "name": "S05. Project settings / Bookmarklets \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "f03Qc",
+      "name": "S08. Global settings / Appearance \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "JWelK",
+      "name": "S02. Project settings / Agents \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "f7OdkB",
+      "name": "S03. Project settings / Agent config \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "M6nNaF",
+      "name": "S04. Project settings / Worktrees \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "mQkaN",
+      "name": "S06. Project settings / Prompt templates \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "h7wNTk",
+      "name": "S09. Global settings / Notifications \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "aYBO5",
+      "name": "S11. Global settings / Skills \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "giEbe",
+      "name": "S12. Global settings / Agent accounts \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "UylPc",
+      "name": "S13. Global settings / Projects \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Z58Tuz",
+      "name": "S05. Project settings / Bookmarklets \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "P416t",
+      "name": "S08. Global settings / Appearance \u00b7 Mobile light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "U6TLR",
+      "name": "S02. Project settings / Agents \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "Sizxn",
+      "name": "S03. Project settings / Agent config \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "nMfbp",
+      "name": "S04. Project settings / Worktrees \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "U8r6vF",
+      "name": "S06. Project settings / Prompt templates \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "ZavY5",
+      "name": "S09. Global settings / Notifications \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "kyWF8",
+      "name": "S11. Global settings / Skills \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "XalAH",
+      "name": "S12. Global settings / Agent accounts \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "iWYPL",
+      "name": "S13. Global settings / Projects \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "wC1Sd",
+      "name": "S05. Project settings / Bookmarklets \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "eWOxf",
+      "name": "S05. Project settings / Bookmarklets \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "n27mE",
+      "name": "S08. Global settings / Appearance \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "iI7Fo",
+      "name": "S08. Global settings / Appearance \u00b7 Mobile dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "t5OS8c",
+      "name": "R1. Sidebar minimum / default \u00b7 264px \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "wDyFh",
+      "name": "R1. Sidebar minimum / default \u00b7 264px \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "IbsZT",
+      "name": "R1. Sidebar maximum \u00b7 420px \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "IFqhi",
+      "name": "R1. Sidebar maximum \u00b7 420px \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "pg6Nc",
+      "name": "R2. GitHub list minimum \u00b7 280px \u00b7 Desktop light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "pg6Nc-design.png",
+      "browser": "pg6Nc-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1900
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Actual persisted list widths 280/360/520px captured in both themes. Same GitHub document/control differences as family 9; source and runtime share CSS viewport with the parent shared shell included.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "ZhYVg",
+      "name": "R2. GitHub list minimum \u00b7 280px \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "ZhYVg-design.png",
+      "browser": "ZhYVg-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1900
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Actual persisted list widths 280/360/520px captured in both themes. Same GitHub document/control differences as family 9; source and runtime share CSS viewport with the parent shared shell included.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "Gg8yJ",
+      "name": "R2. GitHub list default \u00b7 360px \u00b7 Desktop light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "Gg8yJ-design.png",
+      "browser": "Gg8yJ-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1900
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Actual persisted list widths 280/360/520px captured in both themes. Same GitHub document/control differences as family 9; source and runtime share CSS viewport with the parent shared shell included.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "gW5PQ",
+      "name": "R2. GitHub list default \u00b7 360px \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "gW5PQ-design.png",
+      "browser": "gW5PQ-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1900
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Actual persisted list widths 280/360/520px captured in both themes. Same GitHub document/control differences as family 9; source and runtime share CSS viewport with the parent shared shell included.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "CEQfL",
+      "name": "R2. GitHub list maximum \u00b7 520px \u00b7 Desktop light",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "CEQfL-design.png",
+      "browser": "CEQfL-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1900
+      },
+      "theme": "light",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Actual persisted list widths 280/360/520px captured in both themes. Same GitHub document/control differences as family 9; source and runtime share CSS viewport with the parent shared shell included.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "vETJh",
+      "name": "R2. GitHub list maximum \u00b7 520px \u00b7 Desktop dark",
+      "ownership": "Git/GitHub worker",
+      "coverage": "actual paired PNG reviewed",
+      "design": "vETJh-design.png",
+      "browser": "vETJh-browser.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1900
+      },
+      "theme": "dark",
+      "verdict": "visually reviewed; differences remain",
+      "differences": [
+        "Actual persisted list widths 280/360/520px captured in both themes. Same GitHub document/control differences as family 9; source and runtime share CSS viewport with the parent shared shell included.",
+        "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+      ]
+    },
+    {
+      "frameId": "pwW2r",
+      "name": "19B. Inbox \u00b7 Empty \u00b7 Desktop light",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    },
+    {
+      "frameId": "DZts9",
+      "name": "19B. Inbox \u00b7 Empty \u00b7 Desktop dark",
+      "ownership": "other assigned worker",
+      "coverage": "outside owned route scope"
+    }
+  ],
+  "additionalStateManifests": [
+    "interaction-manifest.json",
+    "menu-manifest.json",
+    "r2-resize-manifest.json"
+  ],
+  "additionalCaptures": 38,
+  "scopeNotes": "27B composite states captured separately: bypass modal, conflicts and handoff; file text/binary/too-large and Git menus/commit dialogs use contextual source comparisons. R2 six variants additionally reached through actual pointer/reset/persistence actions."
+}

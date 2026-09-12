@@ -1,0 +1,367 @@
+[
+  {
+    "name": "mobile-base-branch-after",
+    "clientWidth": 400,
+    "rect": {
+      "bottom": 1219.1875,
+      "height": 204.6875,
+      "left": 0,
+      "right": 402,
+      "top": 1014.5,
+      "width": 402,
+      "x": 0,
+      "y": 1014.5
+    },
+    "scrollWidth": 400,
+    "text": "follow checked-out branch (main)\nNew task worktrees fork from whatever branch is checked out\nfeature/runtime-audit\nmain\ntask-fixture",
+    "theme": "",
+    "viewport": {
+      "height": 1260,
+      "width": 402
+    }
+  },
+  {
+    "name": "tools-light-open",
+    "clientWidth": 238,
+    "rect": {
+      "bottom": 1108.8125,
+      "height": 398.3125,
+      "left": 167,
+      "right": 407,
+      "top": 710.5,
+      "width": 240,
+      "x": 167,
+      "y": 710.5
+    },
+    "scrollWidth": 238,
+    "text": "Active\n4\nArchived\nINSTALLED TOOLS\nclaude\nmock (CEZ_DRY_RUN=1)\ncodex\ncodex-cli 0.153.4\nopencode\n1.18.29\npi\nmock (CEZ_DRY_RUN=1)\ngh\nnot found\ninstall the GitHub CLI and run `gh auth login` (only needed for PR creation)\nSet up →\ngit\ngit version 2.43.0\nTools diagnostics\nTool settings",
+    "theme": "light",
+    "viewport": {
+      "height": 1161,
+      "width": 1440
+    }
+  },
+  {
+    "name": "palette-light-open",
+    "clientWidth": 894,
+    "rect": {
+      "bottom": 955.5625,
+      "height": 839.46875,
+      "left": 272,
+      "right": 1168,
+      "top": 116.09375,
+      "width": 896,
+      "x": 272,
+      "y": 116.09375
+    },
+    "scrollWidth": 894,
+    "text": "New task\nC\nViews\nAll tasks\nTasks\nGit\nGitHub\nSkills\nWorkflows\nSettings\nProjects\nwebsite\nmain\nearwitness\nmain\niac\nmain\nTasks\nFixing finalization failure\niac\n3m\nWorker\nImplementation worker\niac\n1h\nPlanning CI follow-up\niac\n2h\nWorker\nCI regression checks\niac\n3h\nWatch preview deployment\nwebsite\n2h\nReplace legacy carousel\nwebsite\n3h\nActions\nToggle theme\nlight → dark\nSkills\nfixture-audit\nReview task navigation and report actionable findings.\nom-apply-upgrade-notes\nApply the skills collection's UPGRADE_NOTES.md after an upgrade. Re-syncs installed tracker and browser-provider descriptors while preserving local edits, reports custom-provider gaps, checks pipeline config and installed artifacts, and summarizes exactly what changed.\nom-approve-merge-pr\nApprove (submit an approving review) and squash-merge a PR given only its number, refusing when the QA gate or a blocking label forbids it. Routes fixable blockers to om-auto-fix-pr (red CI via its --ci-only mode, or conflicts and review problems via the full loop). Optionally file a follow-up issue at the same time. Use when the user says \"approve and merge PR 123\", \"ship PR 123\", or gives a PR number with intent to merge.\nom-auto-continue-pr\nResume any open PR — started by `om-auto-create-pr` or opened outside the pipeline. Claims it, resumes in an isolated worktree from the first unchecked step of its execution plan; a PR with no plan is adopted — the goal is reconstructed from its description, comments, review feedback, linked issues and diff, then executed. Usage - /om-auto-continue-pr <PR-number>\nom-auto-continue-pr-loop\nAdvanced om-auto-continue-pr for PRs started by om-auto-create-pr-loop — claims the PR, resumes from the first non-done PLAN.md Tasks row in an isolated worktree, keeps the per-step commit and checkpoint discipline (integration tests + screenshots for UI), runs the full gate at completion, keeps spec-only design PRs design-only (implementation ships on its own PR via om-auto-implement-spec), and preserves the run-folder and label contract. Use plain om-auto-continue-pr for simple runs.\nom-auto-create-pr\nRun an arbitrary autonomous task end-to-end and ship it as a PR against the configured base branch. Drafts a Progress-tracked execution plan, commits on a fresh worktree branch, implements phase-by-phase, runs the configured validation gate, applies pipeline labels. Long plans hand off to om-auto-create-pr-loop automatically. Resumable via om-auto-continue-pr.\nom-auto-create-pr-loop\nAdvanced om-auto-create-pr for long, multi-step spec implementations needing resumability and strict step tracking — run folder (PLAN/HANDOFF/NOTIFY), one lean commit per Step, checkpoint verification every ~5 Steps with integration tests and UI screenshots, full gate at completion, ready labeled PR. Resumable via om-auto-continue-pr-loop. Use plain om-auto-create-pr for small fixes.\nom-auto-fix-issue\nFix or implement a tracker issue end to end from a single command — takes an issue id or a plain problem description (filed first via om-prepare-issue), classifies, then drives the bug autofix chain (om-verify-in-repo, om-root-cause, om-fix, om-open-pr, om-auto-review-pr, om-auto-qa-pr for UI fixes) or the feature route (spec via om-auto-write-spec, built via om-auto-implement-spec). Isolated worktree, claim protocol, clean stops. Use for \"fix issue 123\" or a pasted problem description.\nom-auto-fix-pr\nDrive an open PR to merge-ready from its number — merges the latest base, then loops review-autofix (om-auto-review-pr), built-in CI stabilization, and UI verification (om-auto-qa-pr) until approvable, green, and QA-evidenced. A --ci-only mode drives just CI green on a PR or a plain branch. Files follow-up issues for nits, normalizes labels, hands off to om-approve-merge-pr — never merges itself. Use for \"get PR 123 merge-ready\".\nom-auto-implement-spec\nImplement an existing spec and ship a verified, reviewed, ready PR. Resolves the spec by path, name, issue, or spec-PR number (clean stop with candidates when not found). A spec PR stays design-only — implementation ships on its own PR referencing it. Delegates to om-auto-create-pr (om-auto-continue-pr for an existing implementation PR), then runs the review loop and UI verification with screenshots. Use for \"implement the spec X\", \"build spec from issue 123\".\nom-auto-manage-issues\nBring existing tracker issues up to standard without implementing anything — applies missing SDLC labels, clarifies laconic issues (analyzing attached screenshots), posts a read-only implementation-prep analysis, checks each issue against SDLC.md's Definition of Ready (READY_STATUS, not-ready comment), and flags feature issues lacking a covering spec (optionally authoring one with --write-missing-specs). Single issue or a batch (last ~25 open, worst-described first). Idempotent, claim-aware.\nom-auto-qa-pr\nQA a PR's UI change in a real browser through the configured browser-provider descriptor — first ensuring the PR has been reviewed (invoking om-auto-review-pr when it has not), then capturing screenshots and a pass/fail report, and optionally posting tracker evidence or self-QA labels without modifying source. Also runs in a local, tracker-less mode against the current worktree.\nom-auto-review-pr\nReview or re-review a PR by number in an isolated worktree. Runs the `om-code-review` skill — or, for spec-only design PRs, a specification review — submits approve/request-changes, manages pipeline labels. On changes-requested, the autofix loop (fix/test/validate/re-review until merge-ready) runs on the automation's own PRs or with --autofix; other authors' PRs get review + handoff only. Usage - /om-auto-review-pr <PR-number> [--autofix]\nom-auto-update-changelog\nDraft a CHANGELOG.md release entry in an emoji-driven format for every PR merged since the last release, then delegate to om-auto-create-pr so it lands as a docs PR against the configured base branch. Honors the Supersede Credit Rule and verifies every credit against commit authorship, so carry-forwards and umbrella merges credit the contributor rather than the merger. Use at release time.\nom-auto-write-spec\nAutonomously turn a brief or FR issue into a spec landed on a ready PR — runs om-spec-writing --autonomous (defaults posted for override), attaches UI mockups and current-app screenshots as PR evidence when a browser provider exists, applies full SDLC labels, and emits PR/spec markers for chaining into om-auto-implement-spec. Use for \"write a spec for X and open a PR\", \"spec this issue\".\nom-brainstorm\nDivergent conversation before any artifact exists — open questions one at a time, alternatives including building nothing, converging on a routing decision and a handoff brief for the next skill. Runs before om-spec-writing and om-prepare-issue. Use when the user says \"should we build this\", \"let's think this through\", \"I have an idea\", \"is this worth doing\".\nom-check-and-commit\nVerify that the current branch is ready to publish by running every configured validation command in order, fix straightforward failures (including locale-file drift when the repo checks it), and once everything passes commit and push the current branch. Use when the user asks to check the branch, make CI-style verification pass, then commit and push.\nom-close-fixed-issues\nClose the tracker issues that recently merged PRs authoritatively fixed — via `fixes`/`closes`/`resolves` keywords or `closingIssuesReferences` — and post informational comments on issues whose PRs were closed without merging or merged into a non-base branch. Use for post-merge housekeeping and release prep. Respects claim locks and never acts on bare `#N` mentions.\nom-code-review\nReview a diff, branch, or PR against correctness, security, breaking-change, and quality standards — runs the validation gate, applies the built-in checklist plus any repo-local one, and produces severity-ranked findings with an approve/request-changes verdict. The review engine behind om-auto-review-pr and om-review-prs.\nom-create-skill\nAuthor a new OM skill from a brief, or split an oversized SKILL.md into layered references/ files — conservatively, behind the lint + completeness gate. Knows the layering philosophy, lint invariants, tracker abstraction, and the cross-skill contract, so output matches house conventions. Use for \"create a skill for…\", \"new om-skill\", \"split this skill into references\".\nom-discover\nProduct-level discovery and define session that leaves a product-brief.md every later skill reads — problem and who has it, stakeholders, rules, flows, benchmark, success criteria, scope, assumptions, decisions. Three modes (existing product, client idea, own idea). Gathers real material before writing; never invents evidence. Use for \"discovery\", \"define the product\", \"product brief\".\nom-fix\nImplements the minimal code change identified by the om-root-cause step, adds regression tests, and runs the configured validation gate. Claims the tracker issue at start (assignee + in-progress label + claim comment) so concurrent automation backs off. Does not commit, push, or open a PR — that is the om-open-pr step's job.\nom-followup-issue-from-pr\nTurn a PR into tracked follow-up work — paste a PR or PR-comment link to extract the actionable ask and open a follow-up issue assigned to the @-mention or PR author; for a PR adding a design doc, it opens the missing `Implement:` tracking issue instead. Use for \"make a follow-up issue\", \"create an issue for this\", or a pasted PR/comment link with that intent.\nom-integration-tests\nRun and create integration/E2E tests by exploring the live app with the configured browser provider, preserving repository-native runners, reusing the shared test environment, and diagnosing failures from concrete artifacts.\nom-merge-buddy\nScan open pull requests via the configured tracker, classify merge readiness from labels, reviews, CI, and mergeability, then report which PRs can merge now and which ones are close but blocked.\nom-open-pr\nShared PR opener for the auto pipeline — commits the worktree, pushes, reuses an existing PR or opens a ready (non-draft) PR against the configured base branch with the unified body template, applies the full SDLC label set with rationale comments, and for issue-driven runs hands the issue back and releases the lock. Emits the `PR:`/`Issue:` chaining reference lines.\nom-pipeline-retro\nClassify finished pipeline runs from the configured tracker — clean single pass, hard recovery, loop checkpoints, or cause not recorded — and rank what the second passes cost in wall-clock hours. Read-only; hands the top cause to om-prepare-issue. Use for \"pipeline retro\", \"why is our pipeline slow\", \"what is costing us rework\".\nom-pr-autopilot\nDiagnose what state one open PR is actually in — unfinished plan steps, missing review, unresolved conversations, red CI, base conflicts, missing QA evidence, merge-ready — then run the matching chain of om-* skills in order and publish a status report. Use for \"finish PR 123\", \"what is left on PR 123\", \"drive PR 123 to the end\".\nom-prepare-issue\nCreate one well-formed tracker issue from a brief without implementing it — dedupes against existing issues and PRs, links a covering spec (authoring one via om-auto-write-spec on a design-only PR when a feature needs it), attaches user-provided images as tracker evidence, otherwise embeds step-by-step guidance, and applies SDLC labels on creation. For existing issues use om-auto-manage-issues. Use for \"file an issue for X\", \"park this idea\".\nom-prepare-test-env\nPrepare a reusable, technology-agnostic environment for local tests and QA. Compiles discovery into cross-platform launch scripts, provisions the configured browser provider autonomously, and writes the shared test-env descriptor consumed by UI and integration-test skills.\nom-review-prs\nReview all currently unreviewed open pull requests, newest first, using the om-auto-review-pr skill and respecting in-progress claim locks.\nom-root-cause\nRead-only root-cause analysis for a tracker issue. Identifies the bug's location and the minimal change surface so the next agent can implement the fix without re-exploring the repo. Outputs a short summary, the files that need to change, and the proposed approach.\nom-setup-agent-pipeline\nOne-time pipeline configurator. Inspects the repo (default branch, validation scripts, labels), asks a few questions, writes .ai/agentic.config.json — the file every other skill reads — installs the tracker descriptor, and generates missing project docs (SDLC.md, CODE_REVIEW.md, BACKWARD_COMPATIBILITY.md, AGENTS.md starter). Re-run when the toolchain or label taxonomy changes. Verifies cross-skill coverage and prints the install command for missing skills.\nom-spec-writing\nWrite and review feature specifications to staff-engineer standards. Skeleton-first drafting with a hard Open Questions gate, research against market leaders, an implementation breakdown into phases and steps that feeds om-auto-create-pr, and a severity-ranked architectural review format. Use when starting a new spec or reviewing one.\nom-ux-review-pr\nEvidence-first design review of a PR's UI. Walks the changed screens in a real browser, performs the user's tasks, and posts findings ranked by user impact, each with evidence, a pattern, a trade-off and an acceptance criterion.\nom-ux-setup\nExtract the repository's design contract (tokens, component registry, screen archetypes, conventions) into .uxproof/ so every UX skill judges against THIS repo's design system, whatever it is. Run once per repository; re-run to refresh after design-system changes.\nom-ux-shape\nTurn a vague product, UI/UX, or AI feature idea into a decided direction. Use when shaping a feature, simplifying an overcomplicated flow, deciding whether and how to use AI, defining screen states, planning validation, or preparing a design handoff for engineering.\nom-verify-in-repo\nRead-only triage gate for an autofix chain. Decides whether a tracker issue is a real, still-unfixed defect on the current branch. Stops the chain cleanly with NO_ACTION_NEEDED when the issue is already fixed, already in progress by someone else, already covered by an open PR, or not actually a bug.\npen-design\n>",
+    "theme": "light",
+    "viewport": {
+      "height": 1161,
+      "width": 1440
+    }
+  },
+  {
+    "name": "resize-420-light",
+    "clientWidth": 419,
+    "rect": {
+      "bottom": 1161,
+      "height": 1161,
+      "left": 0,
+      "right": 420,
+      "top": 0,
+      "width": 420,
+      "x": 0,
+      "y": 0
+    },
+    "scrollWidth": 421,
+    "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\niac\nmain\n2\nTasks\nGit\nGitHub\nSkills\nWorkflows\nSettings\nPINNED\n#217\n#214\nFixing finalization failure\n+12 −3\n#217\nImplementation worker\n+12 −3\nWorker · done\nRECENT\nPlanning CI follow-up\n+12 −3\n2h\n#214\nCI regression checks\n+12 −3\nWorker · cancelled\nMore…\nwebsite\nearwitness\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2",
+    "theme": "light",
+    "viewport": {
+      "height": 1161,
+      "width": 1440
+    },
+    "trigger": "Focused separator then End",
+    "persisted": "420"
+  },
+  {
+    "name": "resize-264-light",
+    "clientWidth": 263,
+    "rect": {
+      "bottom": 1161,
+      "height": 1161,
+      "left": 0,
+      "right": 264,
+      "top": 0,
+      "width": 264,
+      "x": 0,
+      "y": 0
+    },
+    "scrollWidth": 265,
+    "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\niac\nmain\n2\nTasks\nGit\nGitHub\nSkills\nWorkflows\nSettings\nPINNED\n#217\n#214\nFixing finalization failure\n#217\nImplementation worker\nWorker · done\nRECENT\nPlanning CI follow-up\n2h\n#214\nCI regression checks\nWorker · cancelled\nMore…\nwebsite\nearwitness\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2",
+    "theme": "light",
+    "viewport": {
+      "height": 1161,
+      "width": 1440
+    },
+    "trigger": "Focused separator then Home",
+    "persisted": "264"
+  },
+  {
+    "name": "add-project-light-desktop",
+    "clientWidth": 222,
+    "rect": {
+      "bottom": 1109,
+      "height": 102,
+      "left": 66.5,
+      "right": 290.5,
+      "top": 1007,
+      "width": 224,
+      "x": 66.5,
+      "y": 1007
+    },
+    "scrollWidth": 222,
+    "text": "Add project\nOpen local folder…\nClone from GitHub…",
+    "theme": "light",
+    "viewport": {
+      "height": 1161,
+      "width": 1440
+    }
+  },
+  {
+    "name": "add-project-light-mobile",
+    "clientWidth": 222,
+    "rect": {
+      "bottom": 1200,
+      "height": 126,
+      "left": 76.5,
+      "right": 300.5,
+      "top": 1074,
+      "width": 224,
+      "x": 76.5,
+      "y": 1074
+    },
+    "scrollWidth": 222,
+    "text": "Add project\nOpen local folder…\nClone from GitHub…",
+    "theme": "light",
+    "viewport": {
+      "height": 1260,
+      "width": 402
+    }
+  },
+  {
+    "name": "tools-light-mobile",
+    "clientWidth": 238,
+    "rect": {
+      "bottom": 1199.96875,
+      "height": 438.46875,
+      "left": 162,
+      "right": 402,
+      "top": 761.5,
+      "width": 240,
+      "x": 162,
+      "y": 761.5
+    },
+    "scrollWidth": 238,
+    "text": "Active\n4\nArchived\nINSTALLED TOOLS\nclaude\nmock (CEZ_DRY_RUN=1)\ncodex\ncodex-cli 0.153.4\nopencode\n1.18.29\npi\nmock (CEZ_DRY_RUN=1)\ngh\nnot found\ninstall the GitHub CLI and run `gh auth login` (only needed for PR creation)\nSet up →\ngit\ngit version 2.43.0\nTools diagnostics\nTool settings",
+    "theme": "light",
+    "viewport": {
+      "height": 1260,
+      "width": 402
+    }
+  },
+  {
+    "name": "palette-light-mobile",
+    "clientWidth": 368,
+    "rect": {
+      "bottom": 869,
+      "height": 743,
+      "left": 16,
+      "right": 386,
+      "top": 126,
+      "width": 370,
+      "x": 16,
+      "y": 126
+    },
+    "scrollWidth": 368,
+    "text": "New task\nC\nViews\nAll tasks\nTasks\nGit\nGitHub\nSkills\nWorkflows\nSettings\nProjects\nwebsite\nmain\nearwitness\nmain\niac\nmain\nTasks\nFixing finalization failure\niac\n3m\nWorker\nImplementation worker\niac\n1h\nPlanning CI follow-up\niac\n2h\nWorker\nCI regression checks\niac\n3h\nWatch preview deployment\nwebsite\n2h\nReplace legacy carousel\nwebsite\n3h\nActions\nToggle theme\nlight → dark\nSkills\nfixture-audit\nReview task navigation and report actionable findings.\nom-apply-upgrade-notes\nApply the skills collection's UPGRADE_NOTES.md after an upgrade. Re-syncs installed tracker and browser-provider descriptors while preserving local edits, reports custom-provider gaps, checks pipeline config and installed artifacts, and summarizes exactly what changed.\nom-approve-merge-pr\nApprove (submit an approving review) and squash-merge a PR given only its number, refusing when the QA gate or a blocking label forbids it. Routes fixable blockers to om-auto-fix-pr (red CI via its --ci-only mode, or conflicts and review problems via the full loop). Optionally file a follow-up issue at the same time. Use when the user says \"approve and merge PR 123\", \"ship PR 123\", or gives a PR number with intent to merge.\nom-auto-continue-pr\nResume any open PR — started by `om-auto-create-pr` or opened outside the pipeline. Claims it, resumes in an isolated worktree from the first unchecked step of its execution plan; a PR with no plan is adopted — the goal is reconstructed from its description, comments, review feedback, linked issues and diff, then executed. Usage - /om-auto-continue-pr <PR-number>\nom-auto-continue-pr-loop\nAdvanced om-auto-continue-pr for PRs started by om-auto-create-pr-loop — claims the PR, resumes from the first non-done PLAN.md Tasks row in an isolated worktree, keeps the per-step commit and checkpoint discipline (integration tests + screenshots for UI), runs the full gate at completion, keeps spec-only design PRs design-only (implementation ships on its own PR via om-auto-implement-spec), and preserves the run-folder and label contract. Use plain om-auto-continue-pr for simple runs.\nom-auto-create-pr\nRun an arbitrary autonomous task end-to-end and ship it as a PR against the configured base branch. Drafts a Progress-tracked execution plan, commits on a fresh worktree branch, implements phase-by-phase, runs the configured validation gate, applies pipeline labels. Long plans hand off to om-auto-create-pr-loop automatically. Resumable via om-auto-continue-pr.\nom-auto-create-pr-loop\nAdvanced om-auto-create-pr for long, multi-step spec implementations needing resumability and strict step tracking — run folder (PLAN/HANDOFF/NOTIFY), one lean commit per Step, checkpoint verification every ~5 Steps with integration tests and UI screenshots, full gate at completion, ready labeled PR. Resumable via om-auto-continue-pr-loop. Use plain om-auto-create-pr for small fixes.\nom-auto-fix-issue\nFix or implement a tracker issue end to end from a single command — takes an issue id or a plain problem description (filed first via om-prepare-issue), classifies, then drives the bug autofix chain (om-verify-in-repo, om-root-cause, om-fix, om-open-pr, om-auto-review-pr, om-auto-qa-pr for UI fixes) or the feature route (spec via om-auto-write-spec, built via om-auto-implement-spec). Isolated worktree, claim protocol, clean stops. Use for \"fix issue 123\" or a pasted problem description.\nom-auto-fix-pr\nDrive an open PR to merge-ready from its number — merges the latest base, then loops review-autofix (om-auto-review-pr), built-in CI stabilization, and UI verification (om-auto-qa-pr) until approvable, green, and QA-evidenced. A --ci-only mode drives just CI green on a PR or a plain branch. Files follow-up issues for nits, normalizes labels, hands off to om-approve-merge-pr — never merges itself. Use for \"get PR 123 merge-ready\".\nom-auto-implement-spec\nImplement an existing spec and ship a verified, reviewed, ready PR. Resolves the spec by path, name, issue, or spec-PR number (clean stop with candidates when not found). A spec PR stays design-only — implementation ships on its own PR referencing it. Delegates to om-auto-create-pr (om-auto-continue-pr for an existing implementation PR), then runs the review loop and UI verification with screenshots. Use for \"implement the spec X\", \"build spec from issue 123\".\nom-auto-manage-issues\nBring existing tracker issues up to standard without implementing anything — applies missing SDLC labels, clarifies laconic issues (analyzing attached screenshots), posts a read-only implementation-prep analysis, checks each issue against SDLC.md's Definition of Ready (READY_STATUS, not-ready comment), and flags feature issues lacking a covering spec (optionally authoring one with --write-missing-specs). Single issue or a batch (last ~25 open, worst-described first). Idempotent, claim-aware.\nom-auto-qa-pr\nQA a PR's UI change in a real browser through the configured browser-provider descriptor — first ensuring the PR has been reviewed (invoking om-auto-review-pr when it has not), then capturing screenshots and a pass/fail report, and optionally posting tracker evidence or self-QA labels without modifying source. Also runs in a local, tracker-less mode against the current worktree.\nom-auto-review-pr\nReview or re-review a PR by number in an isolated worktree. Runs the `om-code-review` skill — or, for spec-only design PRs, a specification review — submits approve/request-changes, manages pipeline labels. On changes-requested, the autofix loop (fix/test/validate/re-review until merge-ready) runs on the automation's own PRs or with --autofix; other authors' PRs get review + handoff only. Usage - /om-auto-review-pr <PR-number> [--autofix]\nom-auto-update-changelog\nDraft a CHANGELOG.md release entry in an emoji-driven format for every PR merged since the last release, then delegate to om-auto-create-pr so it lands as a docs PR against the configured base branch. Honors the Supersede Credit Rule and verifies every credit against commit authorship, so carry-forwards and umbrella merges credit the contributor rather than the merger. Use at release time.\nom-auto-write-spec\nAutonomously turn a brief or FR issue into a spec landed on a ready PR — runs om-spec-writing --autonomous (defaults posted for override), attaches UI mockups and current-app screenshots as PR evidence when a browser provider exists, applies full SDLC labels, and emits PR/spec markers for chaining into om-auto-implement-spec. Use for \"write a spec for X and open a PR\", \"spec this issue\".\nom-brainstorm\nDivergent conversation before any artifact exists — open questions one at a time, alternatives including building nothing, converging on a routing decision and a handoff brief for the next skill. Runs before om-spec-writing and om-prepare-issue. Use when the user says \"should we build this\", \"let's think this through\", \"I have an idea\", \"is this worth doing\".\nom-check-and-commit\nVerify that the current branch is ready to publish by running every configured validation command in order, fix straightforward failures (including locale-file drift when the repo checks it), and once everything passes commit and push the current branch. Use when the user asks to check the branch, make CI-style verification pass, then commit and push.\nom-close-fixed-issues\nClose the tracker issues that recently merged PRs authoritatively fixed — via `fixes`/`closes`/`resolves` keywords or `closingIssuesReferences` — and post informational comments on issues whose PRs were closed without merging or merged into a non-base branch. Use for post-merge housekeeping and release prep. Respects claim locks and never acts on bare `#N` mentions.\nom-code-review\nReview a diff, branch, or PR against correctness, security, breaking-change, and quality standards — runs the validation gate, applies the built-in checklist plus any repo-local one, and produces severity-ranked findings with an approve/request-changes verdict. The review engine behind om-auto-review-pr and om-review-prs.\nom-create-skill\nAuthor a new OM skill from a brief, or split an oversized SKILL.md into layered references/ files — conservatively, behind the lint + completeness gate. Knows the layering philosophy, lint invariants, tracker abstraction, and the cross-skill contract, so output matches house conventions. Use for \"create a skill for…\", \"new om-skill\", \"split this skill into references\".\nom-discover\nProduct-level discovery and define session that leaves a product-brief.md every later skill reads — problem and who has it, stakeholders, rules, flows, benchmark, success criteria, scope, assumptions, decisions. Three modes (existing product, client idea, own idea). Gathers real material before writing; never invents evidence. Use for \"discovery\", \"define the product\", \"product brief\".\nom-fix\nImplements the minimal code change identified by the om-root-cause step, adds regression tests, and runs the configured validation gate. Claims the tracker issue at start (assignee + in-progress label + claim comment) so concurrent automation backs off. Does not commit, push, or open a PR — that is the om-open-pr step's job.\nom-followup-issue-from-pr\nTurn a PR into tracked follow-up work — paste a PR or PR-comment link to extract the actionable ask and open a follow-up issue assigned to the @-mention or PR author; for a PR adding a design doc, it opens the missing `Implement:` tracking issue instead. Use for \"make a follow-up issue\", \"create an issue for this\", or a pasted PR/comment link with that intent.\nom-integration-tests\nRun and create integration/E2E tests by exploring the live app with the configured browser provider, preserving repository-native runners, reusing the shared test environment, and diagnosing failures from concrete artifacts.\nom-merge-buddy\nScan open pull requests via the configured tracker, classify merge readiness from labels, reviews, CI, and mergeability, then report which PRs can merge now and which ones are close but blocked.\nom-open-pr\nShared PR opener for the auto pipeline — commits the worktree, pushes, reuses an existing PR or opens a ready (non-draft) PR against the configured base branch with the unified body template, applies the full SDLC label set with rationale comments, and for issue-driven runs hands the issue back and releases the lock. Emits the `PR:`/`Issue:` chaining reference lines.\nom-pipeline-retro\nClassify finished pipeline runs from the configured tracker — clean single pass, hard recovery, loop checkpoints, or cause not recorded — and rank what the second passes cost in wall-clock hours. Read-only; hands the top cause to om-prepare-issue. Use for \"pipeline retro\", \"why is our pipeline slow\", \"what is costing us rework\".\nom-pr-autopilot\nDiagnose what state one open PR is actually in — unfinished plan steps, missing review, unresolved conversations, red CI, base conflicts, missing QA evidence, merge-ready — then run the matching chain of om-* skills in order and publish a status report. Use for \"finish PR 123\", \"what is left on PR 123\", \"drive PR 123 to the end\".\nom-prepare-issue\nCreate one well-formed tracker issue from a brief without implementing it — dedupes against existing issues and PRs, links a covering spec (authoring one via om-auto-write-spec on a design-only PR when a feature needs it), attaches user-provided images as tracker evidence, otherwise embeds step-by-step guidance, and applies SDLC labels on creation. For existing issues use om-auto-manage-issues. Use for \"file an issue for X\", \"park this idea\".\nom-prepare-test-env\nPrepare a reusable, technology-agnostic environment for local tests and QA. Compiles discovery into cross-platform launch scripts, provisions the configured browser provider autonomously, and writes the shared test-env descriptor consumed by UI and integration-test skills.\nom-review-prs\nReview all currently unreviewed open pull requests, newest first, using the om-auto-review-pr skill and respecting in-progress claim locks.\nom-root-cause\nRead-only root-cause analysis for a tracker issue. Identifies the bug's location and the minimal change surface so the next agent can implement the fix without re-exploring the repo. Outputs a short summary, the files that need to change, and the proposed approach.\nom-setup-agent-pipeline\nOne-time pipeline configurator. Inspects the repo (default branch, validation scripts, labels), asks a few questions, writes .ai/agentic.config.json — the file every other skill reads — installs the tracker descriptor, and generates missing project docs (SDLC.md, CODE_REVIEW.md, BACKWARD_COMPATIBILITY.md, AGENTS.md starter). Re-run when the toolchain or label taxonomy changes. Verifies cross-skill coverage and prints the install command for missing skills.\nom-spec-writing\nWrite and review feature specifications to staff-engineer standards. Skeleton-first drafting with a hard Open Questions gate, research against market leaders, an implementation breakdown into phases and steps that feeds om-auto-create-pr, and a severity-ranked architectural review format. Use when starting a new spec or reviewing one.\nom-ux-review-pr\nEvidence-first design review of a PR's UI. Walks the changed screens in a real browser, performs the user's tasks, and posts findings ranked by user impact, each with evidence, a pattern, a trade-off and an acceptance criterion.\nom-ux-setup\nExtract the repository's design contract (tokens, component registry, screen archetypes, conventions) into .uxproof/ so every UX skill judges against THIS repo's design system, whatever it is. Run once per repository; re-run to refresh after design-system changes.\nom-ux-shape\nTurn a vague product, UI/UX, or AI feature idea into a decided direction. Use when shaping a feature, simplifying an overcomplicated flow, deciding whether and how to use AI, defining screen states, planning validation, or preparing a design handoff for engineering.\nom-verify-in-repo\nRead-only triage gate for an autofix chain. Decides whether a tracker issue is a real, still-unfixed defect on the current branch. Stops the chain cleanly with NO_ACTION_NEEDED when the issue is already fixed, already in progress by someone else, already covered by an open PR, or not actually a bug.\npen-design\n>",
+    "theme": "light",
+    "viewport": {
+      "height": 1260,
+      "width": 402
+    }
+  },
+  {
+    "name": "tools-dark-open",
+    "clientWidth": 238,
+    "rect": {
+      "bottom": 1108.8125,
+      "height": 398.3125,
+      "left": 167,
+      "right": 407,
+      "top": 710.5,
+      "width": 240,
+      "x": 167,
+      "y": 710.5
+    },
+    "scrollWidth": 238,
+    "text": "Active\n4\nArchived\nINSTALLED TOOLS\nclaude\nmock (CEZ_DRY_RUN=1)\ncodex\ncodex-cli 0.153.4\nopencode\n1.18.29\npi\nmock (CEZ_DRY_RUN=1)\ngh\nnot found\ninstall the GitHub CLI and run `gh auth login` (only needed for PR creation)\nSet up →\ngit\ngit version 2.43.0\nTools diagnostics\nTool settings",
+    "theme": "",
+    "viewport": {
+      "height": 1161,
+      "width": 1440
+    }
+  },
+  {
+    "name": "palette-dark-open",
+    "clientWidth": 894,
+    "rect": {
+      "bottom": 955.5625,
+      "height": 839.46875,
+      "left": 272,
+      "right": 1168,
+      "top": 116.09375,
+      "width": 896,
+      "x": 272,
+      "y": 116.09375
+    },
+    "scrollWidth": 894,
+    "text": "New task\nC\nViews\nAll tasks\nTasks\nGit\nGitHub\nSkills\nWorkflows\nSettings\nProjects\nwebsite\nmain\nearwitness\nmain\niac\nmain\nTasks\nFixing finalization failure\niac\n3m\nWorker\nImplementation worker\niac\n1h\nPlanning CI follow-up\niac\n2h\nWorker\nCI regression checks\niac\n3h\nWatch preview deployment\nwebsite\n2h\nReplace legacy carousel\nwebsite\n3h\nActions\nToggle theme\ndark → system\nSkills\nfixture-audit\nReview task navigation and report actionable findings.\nom-apply-upgrade-notes\nApply the skills collection's UPGRADE_NOTES.md after an upgrade. Re-syncs installed tracker and browser-provider descriptors while preserving local edits, reports custom-provider gaps, checks pipeline config and installed artifacts, and summarizes exactly what changed.\nom-approve-merge-pr\nApprove (submit an approving review) and squash-merge a PR given only its number, refusing when the QA gate or a blocking label forbids it. Routes fixable blockers to om-auto-fix-pr (red CI via its --ci-only mode, or conflicts and review problems via the full loop). Optionally file a follow-up issue at the same time. Use when the user says \"approve and merge PR 123\", \"ship PR 123\", or gives a PR number with intent to merge.\nom-auto-continue-pr\nResume any open PR — started by `om-auto-create-pr` or opened outside the pipeline. Claims it, resumes in an isolated worktree from the first unchecked step of its execution plan; a PR with no plan is adopted — the goal is reconstructed from its description, comments, review feedback, linked issues and diff, then executed. Usage - /om-auto-continue-pr <PR-number>\nom-auto-continue-pr-loop\nAdvanced om-auto-continue-pr for PRs started by om-auto-create-pr-loop — claims the PR, resumes from the first non-done PLAN.md Tasks row in an isolated worktree, keeps the per-step commit and checkpoint discipline (integration tests + screenshots for UI), runs the full gate at completion, keeps spec-only design PRs design-only (implementation ships on its own PR via om-auto-implement-spec), and preserves the run-folder and label contract. Use plain om-auto-continue-pr for simple runs.\nom-auto-create-pr\nRun an arbitrary autonomous task end-to-end and ship it as a PR against the configured base branch. Drafts a Progress-tracked execution plan, commits on a fresh worktree branch, implements phase-by-phase, runs the configured validation gate, applies pipeline labels. Long plans hand off to om-auto-create-pr-loop automatically. Resumable via om-auto-continue-pr.\nom-auto-create-pr-loop\nAdvanced om-auto-create-pr for long, multi-step spec implementations needing resumability and strict step tracking — run folder (PLAN/HANDOFF/NOTIFY), one lean commit per Step, checkpoint verification every ~5 Steps with integration tests and UI screenshots, full gate at completion, ready labeled PR. Resumable via om-auto-continue-pr-loop. Use plain om-auto-create-pr for small fixes.\nom-auto-fix-issue\nFix or implement a tracker issue end to end from a single command — takes an issue id or a plain problem description (filed first via om-prepare-issue), classifies, then drives the bug autofix chain (om-verify-in-repo, om-root-cause, om-fix, om-open-pr, om-auto-review-pr, om-auto-qa-pr for UI fixes) or the feature route (spec via om-auto-write-spec, built via om-auto-implement-spec). Isolated worktree, claim protocol, clean stops. Use for \"fix issue 123\" or a pasted problem description.\nom-auto-fix-pr\nDrive an open PR to merge-ready from its number — merges the latest base, then loops review-autofix (om-auto-review-pr), built-in CI stabilization, and UI verification (om-auto-qa-pr) until approvable, green, and QA-evidenced. A --ci-only mode drives just CI green on a PR or a plain branch. Files follow-up issues for nits, normalizes labels, hands off to om-approve-merge-pr — never merges itself. Use for \"get PR 123 merge-ready\".\nom-auto-implement-spec\nImplement an existing spec and ship a verified, reviewed, ready PR. Resolves the spec by path, name, issue, or spec-PR number (clean stop with candidates when not found). A spec PR stays design-only — implementation ships on its own PR referencing it. Delegates to om-auto-create-pr (om-auto-continue-pr for an existing implementation PR), then runs the review loop and UI verification with screenshots. Use for \"implement the spec X\", \"build spec from issue 123\".\nom-auto-manage-issues\nBring existing tracker issues up to standard without implementing anything — applies missing SDLC labels, clarifies laconic issues (analyzing attached screenshots), posts a read-only implementation-prep analysis, checks each issue against SDLC.md's Definition of Ready (READY_STATUS, not-ready comment), and flags feature issues lacking a covering spec (optionally authoring one with --write-missing-specs). Single issue or a batch (last ~25 open, worst-described first). Idempotent, claim-aware.\nom-auto-qa-pr\nQA a PR's UI change in a real browser through the configured browser-provider descriptor — first ensuring the PR has been reviewed (invoking om-auto-review-pr when it has not), then capturing screenshots and a pass/fail report, and optionally posting tracker evidence or self-QA labels without modifying source. Also runs in a local, tracker-less mode against the current worktree.\nom-auto-review-pr\nReview or re-review a PR by number in an isolated worktree. Runs the `om-code-review` skill — or, for spec-only design PRs, a specification review — submits approve/request-changes, manages pipeline labels. On changes-requested, the autofix loop (fix/test/validate/re-review until merge-ready) runs on the automation's own PRs or with --autofix; other authors' PRs get review + handoff only. Usage - /om-auto-review-pr <PR-number> [--autofix]\nom-auto-update-changelog\nDraft a CHANGELOG.md release entry in an emoji-driven format for every PR merged since the last release, then delegate to om-auto-create-pr so it lands as a docs PR against the configured base branch. Honors the Supersede Credit Rule and verifies every credit against commit authorship, so carry-forwards and umbrella merges credit the contributor rather than the merger. Use at release time.\nom-auto-write-spec\nAutonomously turn a brief or FR issue into a spec landed on a ready PR — runs om-spec-writing --autonomous (defaults posted for override), attaches UI mockups and current-app screenshots as PR evidence when a browser provider exists, applies full SDLC labels, and emits PR/spec markers for chaining into om-auto-implement-spec. Use for \"write a spec for X and open a PR\", \"spec this issue\".\nom-brainstorm\nDivergent conversation before any artifact exists — open questions one at a time, alternatives including building nothing, converging on a routing decision and a handoff brief for the next skill. Runs before om-spec-writing and om-prepare-issue. Use when the user says \"should we build this\", \"let's think this through\", \"I have an idea\", \"is this worth doing\".\nom-check-and-commit\nVerify that the current branch is ready to publish by running every configured validation command in order, fix straightforward failures (including locale-file drift when the repo checks it), and once everything passes commit and push the current branch. Use when the user asks to check the branch, make CI-style verification pass, then commit and push.\nom-close-fixed-issues\nClose the tracker issues that recently merged PRs authoritatively fixed — via `fixes`/`closes`/`resolves` keywords or `closingIssuesReferences` — and post informational comments on issues whose PRs were closed without merging or merged into a non-base branch. Use for post-merge housekeeping and release prep. Respects claim locks and never acts on bare `#N` mentions.\nom-code-review\nReview a diff, branch, or PR against correctness, security, breaking-change, and quality standards — runs the validation gate, applies the built-in checklist plus any repo-local one, and produces severity-ranked findings with an approve/request-changes verdict. The review engine behind om-auto-review-pr and om-review-prs.\nom-create-skill\nAuthor a new OM skill from a brief, or split an oversized SKILL.md into layered references/ files — conservatively, behind the lint + completeness gate. Knows the layering philosophy, lint invariants, tracker abstraction, and the cross-skill contract, so output matches house conventions. Use for \"create a skill for…\", \"new om-skill\", \"split this skill into references\".\nom-discover\nProduct-level discovery and define session that leaves a product-brief.md every later skill reads — problem and who has it, stakeholders, rules, flows, benchmark, success criteria, scope, assumptions, decisions. Three modes (existing product, client idea, own idea). Gathers real material before writing; never invents evidence. Use for \"discovery\", \"define the product\", \"product brief\".\nom-fix\nImplements the minimal code change identified by the om-root-cause step, adds regression tests, and runs the configured validation gate. Claims the tracker issue at start (assignee + in-progress label + claim comment) so concurrent automation backs off. Does not commit, push, or open a PR — that is the om-open-pr step's job.\nom-followup-issue-from-pr\nTurn a PR into tracked follow-up work — paste a PR or PR-comment link to extract the actionable ask and open a follow-up issue assigned to the @-mention or PR author; for a PR adding a design doc, it opens the missing `Implement:` tracking issue instead. Use for \"make a follow-up issue\", \"create an issue for this\", or a pasted PR/comment link with that intent.\nom-integration-tests\nRun and create integration/E2E tests by exploring the live app with the configured browser provider, preserving repository-native runners, reusing the shared test environment, and diagnosing failures from concrete artifacts.\nom-merge-buddy\nScan open pull requests via the configured tracker, classify merge readiness from labels, reviews, CI, and mergeability, then report which PRs can merge now and which ones are close but blocked.\nom-open-pr\nShared PR opener for the auto pipeline — commits the worktree, pushes, reuses an existing PR or opens a ready (non-draft) PR against the configured base branch with the unified body template, applies the full SDLC label set with rationale comments, and for issue-driven runs hands the issue back and releases the lock. Emits the `PR:`/`Issue:` chaining reference lines.\nom-pipeline-retro\nClassify finished pipeline runs from the configured tracker — clean single pass, hard recovery, loop checkpoints, or cause not recorded — and rank what the second passes cost in wall-clock hours. Read-only; hands the top cause to om-prepare-issue. Use for \"pipeline retro\", \"why is our pipeline slow\", \"what is costing us rework\".\nom-pr-autopilot\nDiagnose what state one open PR is actually in — unfinished plan steps, missing review, unresolved conversations, red CI, base conflicts, missing QA evidence, merge-ready — then run the matching chain of om-* skills in order and publish a status report. Use for \"finish PR 123\", \"what is left on PR 123\", \"drive PR 123 to the end\".\nom-prepare-issue\nCreate one well-formed tracker issue from a brief without implementing it — dedupes against existing issues and PRs, links a covering spec (authoring one via om-auto-write-spec on a design-only PR when a feature needs it), attaches user-provided images as tracker evidence, otherwise embeds step-by-step guidance, and applies SDLC labels on creation. For existing issues use om-auto-manage-issues. Use for \"file an issue for X\", \"park this idea\".\nom-prepare-test-env\nPrepare a reusable, technology-agnostic environment for local tests and QA. Compiles discovery into cross-platform launch scripts, provisions the configured browser provider autonomously, and writes the shared test-env descriptor consumed by UI and integration-test skills.\nom-review-prs\nReview all currently unreviewed open pull requests, newest first, using the om-auto-review-pr skill and respecting in-progress claim locks.\nom-root-cause\nRead-only root-cause analysis for a tracker issue. Identifies the bug's location and the minimal change surface so the next agent can implement the fix without re-exploring the repo. Outputs a short summary, the files that need to change, and the proposed approach.\nom-setup-agent-pipeline\nOne-time pipeline configurator. Inspects the repo (default branch, validation scripts, labels), asks a few questions, writes .ai/agentic.config.json — the file every other skill reads — installs the tracker descriptor, and generates missing project docs (SDLC.md, CODE_REVIEW.md, BACKWARD_COMPATIBILITY.md, AGENTS.md starter). Re-run when the toolchain or label taxonomy changes. Verifies cross-skill coverage and prints the install command for missing skills.\nom-spec-writing\nWrite and review feature specifications to staff-engineer standards. Skeleton-first drafting with a hard Open Questions gate, research against market leaders, an implementation breakdown into phases and steps that feeds om-auto-create-pr, and a severity-ranked architectural review format. Use when starting a new spec or reviewing one.\nom-ux-review-pr\nEvidence-first design review of a PR's UI. Walks the changed screens in a real browser, performs the user's tasks, and posts findings ranked by user impact, each with evidence, a pattern, a trade-off and an acceptance criterion.\nom-ux-setup\nExtract the repository's design contract (tokens, component registry, screen archetypes, conventions) into .uxproof/ so every UX skill judges against THIS repo's design system, whatever it is. Run once per repository; re-run to refresh after design-system changes.\nom-ux-shape\nTurn a vague product, UI/UX, or AI feature idea into a decided direction. Use when shaping a feature, simplifying an overcomplicated flow, deciding whether and how to use AI, defining screen states, planning validation, or preparing a design handoff for engineering.\nom-verify-in-repo\nRead-only triage gate for an autofix chain. Decides whether a tracker issue is a real, still-unfixed defect on the current branch. Stops the chain cleanly with NO_ACTION_NEEDED when the issue is already fixed, already in progress by someone else, already covered by an open PR, or not actually a bug.\npen-design\n>",
+    "theme": "",
+    "viewport": {
+      "height": 1161,
+      "width": 1440
+    }
+  },
+  {
+    "name": "resize-420-dark",
+    "clientWidth": 419,
+    "rect": {
+      "bottom": 1161,
+      "height": 1161,
+      "left": 0,
+      "right": 420,
+      "top": 0,
+      "width": 420,
+      "x": 0,
+      "y": 0
+    },
+    "scrollWidth": 421,
+    "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\niac\nmain\n2\nTasks\nGit\nGitHub\nSkills\nWorkflows\nSettings\nPINNED\n#217\n#214\nFixing finalization failure\n+12 −3\n#217\nImplementation worker\n+12 −3\nWorker · done\nRECENT\nPlanning CI follow-up\n+12 −3\n2h\n#214\nCI regression checks\n+12 −3\nWorker · cancelled\nMore…\nwebsite\nearwitness\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2",
+    "theme": "",
+    "viewport": {
+      "height": 1161,
+      "width": 1440
+    },
+    "trigger": "Focused separator then End",
+    "persisted": "420"
+  },
+  {
+    "name": "resize-264-dark",
+    "clientWidth": 263,
+    "rect": {
+      "bottom": 1161,
+      "height": 1161,
+      "left": 0,
+      "right": 264,
+      "top": 0,
+      "width": 264,
+      "x": 0,
+      "y": 0
+    },
+    "scrollWidth": 265,
+    "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\niac\nmain\n2\nTasks\nGit\nGitHub\nSkills\nWorkflows\nSettings\nPINNED\n#217\n#214\nFixing finalization failure\n#217\nImplementation worker\nWorker · done\nRECENT\nPlanning CI follow-up\n2h\n#214\nCI regression checks\nWorker · cancelled\nMore…\nwebsite\nearwitness\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2",
+    "theme": "",
+    "viewport": {
+      "height": 1161,
+      "width": 1440
+    },
+    "trigger": "Focused separator then Home",
+    "persisted": "264"
+  },
+  {
+    "name": "add-project-dark-desktop",
+    "clientWidth": 222,
+    "rect": {
+      "bottom": 1109,
+      "height": 102,
+      "left": 66.5,
+      "right": 290.5,
+      "top": 1007,
+      "width": 224,
+      "x": 66.5,
+      "y": 1007
+    },
+    "scrollWidth": 222,
+    "text": "Add project\nOpen local folder…\nClone from GitHub…",
+    "theme": "",
+    "viewport": {
+      "height": 1161,
+      "width": 1440
+    }
+  },
+  {
+    "name": "add-project-dark-mobile",
+    "clientWidth": 222,
+    "rect": {
+      "bottom": 1200,
+      "height": 126,
+      "left": 76.5,
+      "right": 300.5,
+      "top": 1074,
+      "width": 224,
+      "x": 76.5,
+      "y": 1074
+    },
+    "scrollWidth": 222,
+    "text": "Add project\nOpen local folder…\nClone from GitHub…",
+    "theme": "",
+    "viewport": {
+      "height": 1260,
+      "width": 402
+    }
+  },
+  {
+    "name": "tools-dark-mobile",
+    "clientWidth": 238,
+    "rect": {
+      "bottom": 1199.96875,
+      "height": 438.46875,
+      "left": 162,
+      "right": 402,
+      "top": 761.5,
+      "width": 240,
+      "x": 162,
+      "y": 761.5
+    },
+    "scrollWidth": 238,
+    "text": "Active\n4\nArchived\nINSTALLED TOOLS\nclaude\nmock (CEZ_DRY_RUN=1)\ncodex\ncodex-cli 0.153.4\nopencode\n1.18.29\npi\nmock (CEZ_DRY_RUN=1)\ngh\nnot found\ninstall the GitHub CLI and run `gh auth login` (only needed for PR creation)\nSet up →\ngit\ngit version 2.43.0\nTools diagnostics\nTool settings",
+    "theme": "",
+    "viewport": {
+      "height": 1260,
+      "width": 402
+    }
+  },
+  {
+    "name": "palette-dark-mobile",
+    "clientWidth": 368,
+    "rect": {
+      "bottom": 869,
+      "height": 743,
+      "left": 16,
+      "right": 386,
+      "top": 126,
+      "width": 370,
+      "x": 16,
+      "y": 126
+    },
+    "scrollWidth": 368,
+    "text": "New task\nC\nViews\nAll tasks\nTasks\nGit\nGitHub\nSkills\nWorkflows\nSettings\nProjects\nwebsite\nmain\nearwitness\nmain\niac\nmain\nTasks\nFixing finalization failure\niac\n3m\nWorker\nImplementation worker\niac\n1h\nPlanning CI follow-up\niac\n2h\nWorker\nCI regression checks\niac\n3h\nWatch preview deployment\nwebsite\n2h\nReplace legacy carousel\nwebsite\n3h\nActions\nToggle theme\ndark → system\nSkills\nfixture-audit\nReview task navigation and report actionable findings.\nom-apply-upgrade-notes\nApply the skills collection's UPGRADE_NOTES.md after an upgrade. Re-syncs installed tracker and browser-provider descriptors while preserving local edits, reports custom-provider gaps, checks pipeline config and installed artifacts, and summarizes exactly what changed.\nom-approve-merge-pr\nApprove (submit an approving review) and squash-merge a PR given only its number, refusing when the QA gate or a blocking label forbids it. Routes fixable blockers to om-auto-fix-pr (red CI via its --ci-only mode, or conflicts and review problems via the full loop). Optionally file a follow-up issue at the same time. Use when the user says \"approve and merge PR 123\", \"ship PR 123\", or gives a PR number with intent to merge.\nom-auto-continue-pr\nResume any open PR — started by `om-auto-create-pr` or opened outside the pipeline. Claims it, resumes in an isolated worktree from the first unchecked step of its execution plan; a PR with no plan is adopted — the goal is reconstructed from its description, comments, review feedback, linked issues and diff, then executed. Usage - /om-auto-continue-pr <PR-number>\nom-auto-continue-pr-loop\nAdvanced om-auto-continue-pr for PRs started by om-auto-create-pr-loop — claims the PR, resumes from the first non-done PLAN.md Tasks row in an isolated worktree, keeps the per-step commit and checkpoint discipline (integration tests + screenshots for UI), runs the full gate at completion, keeps spec-only design PRs design-only (implementation ships on its own PR via om-auto-implement-spec), and preserves the run-folder and label contract. Use plain om-auto-continue-pr for simple runs.\nom-auto-create-pr\nRun an arbitrary autonomous task end-to-end and ship it as a PR against the configured base branch. Drafts a Progress-tracked execution plan, commits on a fresh worktree branch, implements phase-by-phase, runs the configured validation gate, applies pipeline labels. Long plans hand off to om-auto-create-pr-loop automatically. Resumable via om-auto-continue-pr.\nom-auto-create-pr-loop\nAdvanced om-auto-create-pr for long, multi-step spec implementations needing resumability and strict step tracking — run folder (PLAN/HANDOFF/NOTIFY), one lean commit per Step, checkpoint verification every ~5 Steps with integration tests and UI screenshots, full gate at completion, ready labeled PR. Resumable via om-auto-continue-pr-loop. Use plain om-auto-create-pr for small fixes.\nom-auto-fix-issue\nFix or implement a tracker issue end to end from a single command — takes an issue id or a plain problem description (filed first via om-prepare-issue), classifies, then drives the bug autofix chain (om-verify-in-repo, om-root-cause, om-fix, om-open-pr, om-auto-review-pr, om-auto-qa-pr for UI fixes) or the feature route (spec via om-auto-write-spec, built via om-auto-implement-spec). Isolated worktree, claim protocol, clean stops. Use for \"fix issue 123\" or a pasted problem description.\nom-auto-fix-pr\nDrive an open PR to merge-ready from its number — merges the latest base, then loops review-autofix (om-auto-review-pr), built-in CI stabilization, and UI verification (om-auto-qa-pr) until approvable, green, and QA-evidenced. A --ci-only mode drives just CI green on a PR or a plain branch. Files follow-up issues for nits, normalizes labels, hands off to om-approve-merge-pr — never merges itself. Use for \"get PR 123 merge-ready\".\nom-auto-implement-spec\nImplement an existing spec and ship a verified, reviewed, ready PR. Resolves the spec by path, name, issue, or spec-PR number (clean stop with candidates when not found). A spec PR stays design-only — implementation ships on its own PR referencing it. Delegates to om-auto-create-pr (om-auto-continue-pr for an existing implementation PR), then runs the review loop and UI verification with screenshots. Use for \"implement the spec X\", \"build spec from issue 123\".\nom-auto-manage-issues\nBring existing tracker issues up to standard without implementing anything — applies missing SDLC labels, clarifies laconic issues (analyzing attached screenshots), posts a read-only implementation-prep analysis, checks each issue against SDLC.md's Definition of Ready (READY_STATUS, not-ready comment), and flags feature issues lacking a covering spec (optionally authoring one with --write-missing-specs). Single issue or a batch (last ~25 open, worst-described first). Idempotent, claim-aware.\nom-auto-qa-pr\nQA a PR's UI change in a real browser through the configured browser-provider descriptor — first ensuring the PR has been reviewed (invoking om-auto-review-pr when it has not), then capturing screenshots and a pass/fail report, and optionally posting tracker evidence or self-QA labels without modifying source. Also runs in a local, tracker-less mode against the current worktree.\nom-auto-review-pr\nReview or re-review a PR by number in an isolated worktree. Runs the `om-code-review` skill — or, for spec-only design PRs, a specification review — submits approve/request-changes, manages pipeline labels. On changes-requested, the autofix loop (fix/test/validate/re-review until merge-ready) runs on the automation's own PRs or with --autofix; other authors' PRs get review + handoff only. Usage - /om-auto-review-pr <PR-number> [--autofix]\nom-auto-update-changelog\nDraft a CHANGELOG.md release entry in an emoji-driven format for every PR merged since the last release, then delegate to om-auto-create-pr so it lands as a docs PR against the configured base branch. Honors the Supersede Credit Rule and verifies every credit against commit authorship, so carry-forwards and umbrella merges credit the contributor rather than the merger. Use at release time.\nom-auto-write-spec\nAutonomously turn a brief or FR issue into a spec landed on a ready PR — runs om-spec-writing --autonomous (defaults posted for override), attaches UI mockups and current-app screenshots as PR evidence when a browser provider exists, applies full SDLC labels, and emits PR/spec markers for chaining into om-auto-implement-spec. Use for \"write a spec for X and open a PR\", \"spec this issue\".\nom-brainstorm\nDivergent conversation before any artifact exists — open questions one at a time, alternatives including building nothing, converging on a routing decision and a handoff brief for the next skill. Runs before om-spec-writing and om-prepare-issue. Use when the user says \"should we build this\", \"let's think this through\", \"I have an idea\", \"is this worth doing\".\nom-check-and-commit\nVerify that the current branch is ready to publish by running every configured validation command in order, fix straightforward failures (including locale-file drift when the repo checks it), and once everything passes commit and push the current branch. Use when the user asks to check the branch, make CI-style verification pass, then commit and push.\nom-close-fixed-issues\nClose the tracker issues that recently merged PRs authoritatively fixed — via `fixes`/`closes`/`resolves` keywords or `closingIssuesReferences` — and post informational comments on issues whose PRs were closed without merging or merged into a non-base branch. Use for post-merge housekeeping and release prep. Respects claim locks and never acts on bare `#N` mentions.\nom-code-review\nReview a diff, branch, or PR against correctness, security, breaking-change, and quality standards — runs the validation gate, applies the built-in checklist plus any repo-local one, and produces severity-ranked findings with an approve/request-changes verdict. The review engine behind om-auto-review-pr and om-review-prs.\nom-create-skill\nAuthor a new OM skill from a brief, or split an oversized SKILL.md into layered references/ files — conservatively, behind the lint + completeness gate. Knows the layering philosophy, lint invariants, tracker abstraction, and the cross-skill contract, so output matches house conventions. Use for \"create a skill for…\", \"new om-skill\", \"split this skill into references\".\nom-discover\nProduct-level discovery and define session that leaves a product-brief.md every later skill reads — problem and who has it, stakeholders, rules, flows, benchmark, success criteria, scope, assumptions, decisions. Three modes (existing product, client idea, own idea). Gathers real material before writing; never invents evidence. Use for \"discovery\", \"define the product\", \"product brief\".\nom-fix\nImplements the minimal code change identified by the om-root-cause step, adds regression tests, and runs the configured validation gate. Claims the tracker issue at start (assignee + in-progress label + claim comment) so concurrent automation backs off. Does not commit, push, or open a PR — that is the om-open-pr step's job.\nom-followup-issue-from-pr\nTurn a PR into tracked follow-up work — paste a PR or PR-comment link to extract the actionable ask and open a follow-up issue assigned to the @-mention or PR author; for a PR adding a design doc, it opens the missing `Implement:` tracking issue instead. Use for \"make a follow-up issue\", \"create an issue for this\", or a pasted PR/comment link with that intent.\nom-integration-tests\nRun and create integration/E2E tests by exploring the live app with the configured browser provider, preserving repository-native runners, reusing the shared test environment, and diagnosing failures from concrete artifacts.\nom-merge-buddy\nScan open pull requests via the configured tracker, classify merge readiness from labels, reviews, CI, and mergeability, then report which PRs can merge now and which ones are close but blocked.\nom-open-pr\nShared PR opener for the auto pipeline — commits the worktree, pushes, reuses an existing PR or opens a ready (non-draft) PR against the configured base branch with the unified body template, applies the full SDLC label set with rationale comments, and for issue-driven runs hands the issue back and releases the lock. Emits the `PR:`/`Issue:` chaining reference lines.\nom-pipeline-retro\nClassify finished pipeline runs from the configured tracker — clean single pass, hard recovery, loop checkpoints, or cause not recorded — and rank what the second passes cost in wall-clock hours. Read-only; hands the top cause to om-prepare-issue. Use for \"pipeline retro\", \"why is our pipeline slow\", \"what is costing us rework\".\nom-pr-autopilot\nDiagnose what state one open PR is actually in — unfinished plan steps, missing review, unresolved conversations, red CI, base conflicts, missing QA evidence, merge-ready — then run the matching chain of om-* skills in order and publish a status report. Use for \"finish PR 123\", \"what is left on PR 123\", \"drive PR 123 to the end\".\nom-prepare-issue\nCreate one well-formed tracker issue from a brief without implementing it — dedupes against existing issues and PRs, links a covering spec (authoring one via om-auto-write-spec on a design-only PR when a feature needs it), attaches user-provided images as tracker evidence, otherwise embeds step-by-step guidance, and applies SDLC labels on creation. For existing issues use om-auto-manage-issues. Use for \"file an issue for X\", \"park this idea\".\nom-prepare-test-env\nPrepare a reusable, technology-agnostic environment for local tests and QA. Compiles discovery into cross-platform launch scripts, provisions the configured browser provider autonomously, and writes the shared test-env descriptor consumed by UI and integration-test skills.\nom-review-prs\nReview all currently unreviewed open pull requests, newest first, using the om-auto-review-pr skill and respecting in-progress claim locks.\nom-root-cause\nRead-only root-cause analysis for a tracker issue. Identifies the bug's location and the minimal change surface so the next agent can implement the fix without re-exploring the repo. Outputs a short summary, the files that need to change, and the proposed approach.\nom-setup-agent-pipeline\nOne-time pipeline configurator. Inspects the repo (default branch, validation scripts, labels), asks a few questions, writes .ai/agentic.config.json — the file every other skill reads — installs the tracker descriptor, and generates missing project docs (SDLC.md, CODE_REVIEW.md, BACKWARD_COMPATIBILITY.md, AGENTS.md starter). Re-run when the toolchain or label taxonomy changes. Verifies cross-skill coverage and prints the install command for missing skills.\nom-spec-writing\nWrite and review feature specifications to staff-engineer standards. Skeleton-first drafting with a hard Open Questions gate, research against market leaders, an implementation breakdown into phases and steps that feeds om-auto-create-pr, and a severity-ranked architectural review format. Use when starting a new spec or reviewing one.\nom-ux-review-pr\nEvidence-first design review of a PR's UI. Walks the changed screens in a real browser, performs the user's tasks, and posts findings ranked by user impact, each with evidence, a pattern, a trade-off and an acceptance criterion.\nom-ux-setup\nExtract the repository's design contract (tokens, component registry, screen archetypes, conventions) into .uxproof/ so every UX skill judges against THIS repo's design system, whatever it is. Run once per repository; re-run to refresh after design-system changes.\nom-ux-shape\nTurn a vague product, UI/UX, or AI feature idea into a decided direction. Use when shaping a feature, simplifying an overcomplicated flow, deciding whether and how to use AI, defining screen states, planning validation, or preparing a design handoff for engineering.\nom-verify-in-repo\nRead-only triage gate for an autofix chain. Decides whether a tracker issue is a real, still-unfixed defect on the current branch. Stops the chain cleanly with NO_ACTION_NEEDED when the issue is already fixed, already in progress by someone else, already covered by an open PR, or not actually a bug.\npen-design\n>",
+    "theme": "",
+    "viewport": {
+      "height": 1260,
+      "width": 402
+    }
+  }
+]

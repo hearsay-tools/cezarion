@@ -1,0 +1,16 @@
+
+> test
+> vitest run packages/web/src/components/picker-pill.test.tsx packages/web/src/components/app-shell.test.tsx packages/web/src/lib/sidebar-width.test.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/a4395cbb-69c4-4655-9939-90c5eb8ccc1e
+
+ ✓ |web| src/lib/sidebar-width.test.ts (18 tests) 9ms
+ ✓ |web| src/components/picker-pill.test.tsx (1 test) 277ms
+ ✓ |web| src/components/app-shell.test.tsx (81 tests) 2005ms
+
+ Test Files  3 passed (3)
+      Tests  100 passed (100)
+   Start at  12:53:20
+   Duration  3.71s (transform 813ms, setup 0ms, import 1.77s, tests 2.29s, environment 1.60s)
+

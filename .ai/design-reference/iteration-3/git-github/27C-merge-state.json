@@ -1,0 +1,35 @@
+{
+  "available": true,
+  "mergeState": {
+    "number": 218,
+    "title": "Improve task session controls",
+    "url": "https://github.com/example/fixture/pull/218",
+    "state": "open",
+    "isDraft": false,
+    "headRef": "feature/session-controls",
+    "baseRef": "main",
+    "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "mergeable": "mergeable",
+    "reviewDecision": "approved",
+    "checks": [
+      {
+        "name": "Build and tests",
+        "state": "passing",
+        "required": null
+      }
+    ],
+    "methods": [
+      "squash"
+    ],
+    "defaultMethod": "squash",
+    "eligibility": "unknown",
+    "blockers": [
+      {
+        "code": "unknown-requirements",
+        "message": "Repository requirements are not available."
+      }
+    ],
+    "canMerge": false,
+    "canOverride": false
+  }
+}

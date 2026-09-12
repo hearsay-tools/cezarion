@@ -1,0 +1,170 @@
+[
+  {
+    "state": "git-menu",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "browser": "git-menu-light-1440.png",
+    "design": "QifUP-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "42c8948db80764ec426375e63383635e736c886ed1f936f448a02ed680019f9c",
+    "browserSha256": "15c6d0bd04bfdb41bf071d91ddfe0de2f20e74db7e1ceed42b549104db47e20b",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "commit-dialog",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "browser": "commit-dialog-light-1440.png",
+    "design": "QifUP-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "42c8948db80764ec426375e63383635e736c886ed1f936f448a02ed680019f9c",
+    "browserSha256": "64c35012e1384c0f2637ec2ba7b3fdc4692a58a38747107f9b8afdc88248a9ff",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "git-menu",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 1191
+    },
+    "browser": "git-menu-light-402.png",
+    "design": "M8dqPj-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "a1d9858407cac17132a1b4165fbeab4873a529214e61b4c7f1d72c62270d5b28",
+    "browserSha256": "da683b16c774ffe22309bbab452f28a67b3a43fdad1441d21a500eb6591f7473",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "commit-dialog",
+    "theme": "light",
+    "viewport": {
+      "width": 402,
+      "height": 1191
+    },
+    "browser": "commit-dialog-light-402.png",
+    "design": "M8dqPj-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "a1d9858407cac17132a1b4165fbeab4873a529214e61b4c7f1d72c62270d5b28",
+    "browserSha256": "2f180bb3aa94cba088eab6fff6b01d91be93baed06795bfbba16e5211867efb2",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "git-menu",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "browser": "git-menu-dark-1440.png",
+    "design": "X79RX-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "091f0f689c80fe0f698da10c17795d26ad10202cd51238bef37abc053637b8aa",
+    "browserSha256": "f245ffc1c3f98f2c80ef5ba4aee50f8ffe4813ae236841c43a0d40a8e8edc943",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "commit-dialog",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 1120
+    },
+    "browser": "commit-dialog-dark-1440.png",
+    "design": "X79RX-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "091f0f689c80fe0f698da10c17795d26ad10202cd51238bef37abc053637b8aa",
+    "browserSha256": "cda724c0a95cd9a5ecaf505b544645e4c458e6132b9729d9e2c06c06ffe8ab00",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "git-menu",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 1191
+    },
+    "browser": "git-menu-dark-402.png",
+    "design": "rxmtI-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "556f1a370b8880ee9cb18937914880f4d5af7f425d718f95aa22880549048135",
+    "browserSha256": "89e4724eba5f4da4320b08e38e8e5a29a417162b30b69b8d6187e4fc48bc671d",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  },
+  {
+    "state": "commit-dialog",
+    "theme": "dark",
+    "viewport": {
+      "width": 402,
+      "height": 1191
+    },
+    "browser": "commit-dialog-dark-402.png",
+    "design": "rxmtI-design.png",
+    "verdict": "visually reviewed; contextual source comparison",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "sourceCommit": "e4b19a4b20732a174da28e33cc604ae1648f0a6b",
+    "webDistSha256": "cf2aff6a176f1a038bcc89256e44de9adffd04fb078204cd9e2ad1c8fafb0f45",
+    "fixture": "populated-mocks.json",
+    "designSha256": "556f1a370b8880ee9cb18937914880f4d5af7f425d718f95aa22880549048135",
+    "browserSha256": "585891c63d2fcc0391fda9197e3570c1a17579d8a75b760d3d9b8c49b7030b43",
+    "notes": [
+      "Reference frame supplies the surrounding layout. Dialog/menu/file-preview state is a separate live state, not a claim of whole-board pixel equality.",
+      "Combined QA snapshot includes parent 4d7723df shell/task headers plus worker 901f75af owned routes. Poppins and exact source glyphs are present. Populated fixture has four tasks and one project; reference has more projects/pinned tasks. Actual worker/status controls and preserved metadata add height. Remaining differences are explicit, not a whole-screen match claim."
+    ]
+  }
+]

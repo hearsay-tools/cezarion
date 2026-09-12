@@ -1,0 +1,136 @@
+[
+  {
+    "state": "inbox-empty",
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/inbox-empty-light.png",
+    "expected": "Inbox empty",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nAll tasks\\nInbox\\nAdd project\\nActive\\n4\\nArchived\\nfixture-repo-v2\\ntask-fixture\\nTasks\\n2\\nGit\\nSkills\\nWorkflows\\nSettings\\nSESSIONS\\nNeeds you\\nPolish task overview\\n×2\\nRecent\\n#123\\nImprove session navigation\\nParent · done\\n#123\\nReview keyboard controls\\nWorker · done\\nGlobal settings\\nTools\\nv0.12.2\\nfixture-repo-v2\\n/\\nInbox\\ntask-fixture\\nInbox\\n\\nFollow-ups from your agents. Review the suggestion, then start a new task.\\n\\nInbox empty\\n\\nAgents drop follow-up suggestions here when they finish a task.\\n\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": "schema-validated browser HTTP fixtures; live SSE/WebSocket suppressed; no mutations",
+    "source": "current baseline plus Tools-only style diff"
+  },
+  {
+    "state": "inbox-disabled",
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/inbox-disabled-light.png",
+    "expected": "The follow-up inbox is off",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nAll tasks\\nAdd project\\nActive\\n4\\nArchived\\nfixture-repo-v2\\ntask-fixture\\nTasks\\n2\\nGit\\nSkills\\nWorkflows\\nSettings\\nSESSIONS\\nNeeds you\\nPolish task overview\\n×2\\nRecent\\n#123\\nImprove session navigation\\nParent · done\\n#123\\nReview keyboard controls\\nWorker · done\\nGlobal settings\\nTools\\nv0.12.2\\nfixture-repo-v2\\n/\\nInbox\\ntask-fixture\\nInbox\\n\\nDisabled for this server; per-task Notes still run.\\n\\nThe follow-up inbox is off\\n\\nAgents are not asked to leave follow-ups. Set CEZ_FOLLOWUPS=1 and restart cezar to turn the inbox on.\\n\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": "schema-validated browser HTTP fixtures; live SSE/WebSocket suppressed; no mutations",
+    "source": "current baseline plus Tools-only style diff"
+  },
+  {
+    "state": "automations-empty",
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/automations-empty-light.png",
+    "expected": "No automations yet",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nAll tasks\\nInbox\\n1\\nAdd project\\nActive\\n4\\nArchived\\nfixture-repo-v2\\ntask-fixture\\nTasks\\n2\\nGit\\nSkills\\nWorkflows\\nSettings\\nSESSIONS\\nNeeds you\\nPolish task overview\\n×2\\nRecent\\n#123\\nImprove session navigation\\nParent · done\\n#123\\nReview keyboard controls\\nWorker · done\\nGlobal settings\\nTools\\nv0.12.2\\nfixture-repo-v2\\n/\\nAutomations\\ntask-fixture\\nAutomations\\n\\nChecks run while cezar is open. No webhook or public URL required.\\n\\nNew automation\\nGitHub\\nGitHub available · Scheduler idle\\nNo automations yet. Create one paused, test its bounded filter, then enable it from a current-time baseline.\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": "schema-validated browser HTTP fixtures; live SSE/WebSocket suppressed; no mutations",
+    "source": "current baseline plus Tools-only style diff"
+  },
+  {
+    "state": "automations-disabled",
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/automations-disabled-light.png",
+    "expected": "GitHub automations are off",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nAll tasks\\nAdd project\\nActive\\n4\\nArchived\\nfixture-repo-v2\\ntask-fixture\\nTasks\\n2\\nGit\\nSkills\\nWorkflows\\nSettings\\nSESSIONS\\nNeeds you\\nPolish task overview\\n×2\\nRecent\\n#123\\nImprove session navigation\\nParent · done\\n#123\\nReview keyboard controls\\nWorker · done\\nGlobal settings\\nTools\\nv0.12.2\\nfixture-repo-v2\\n/\\nAutomations\\ntask-fixture\\nGitHub automations are off\\n\\nThis server does not poll GitHub or launch tasks from it. Set CEZ_AUTOMATIONS=1 and restart cezar to turn automations on.\\n\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": "schema-validated browser HTTP fixtures; live SSE/WebSocket suppressed; no mutations",
+    "source": "current baseline plus Tools-only style diff"
+  },
+  {
+    "state": "inbox-empty",
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/inbox-empty-dark.png",
+    "expected": "Inbox empty",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nAll tasks\\nInbox\\nAdd project\\nActive\\n4\\nArchived\\nfixture-repo-v2\\ntask-fixture\\nTasks\\n2\\nGit\\nSkills\\nWorkflows\\nSettings\\nSESSIONS\\nNeeds you\\nPolish task overview\\n×2\\nRecent\\n#123\\nImprove session navigation\\nParent · done\\n#123\\nReview keyboard controls\\nWorker · done\\nGlobal settings\\nTools\\nv0.12.2\\nfixture-repo-v2\\n/\\nInbox\\ntask-fixture\\nInbox\\n\\nFollow-ups from your agents. Review the suggestion, then start a new task.\\n\\nInbox empty\\n\\nAgents drop follow-up suggestions here when they finish a task.\\n\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": "schema-validated browser HTTP fixtures; live SSE/WebSocket suppressed; no mutations",
+    "source": "current baseline plus Tools-only style diff"
+  },
+  {
+    "state": "inbox-disabled",
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/inbox-disabled-dark.png",
+    "expected": "The follow-up inbox is off",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nAll tasks\\nAdd project\\nActive\\n4\\nArchived\\nfixture-repo-v2\\ntask-fixture\\nTasks\\n2\\nGit\\nSkills\\nWorkflows\\nSettings\\nSESSIONS\\nNeeds you\\nPolish task overview\\n×2\\nRecent\\n#123\\nImprove session navigation\\nParent · done\\n#123\\nReview keyboard controls\\nWorker · done\\nGlobal settings\\nTools\\nv0.12.2\\nfixture-repo-v2\\n/\\nInbox\\ntask-fixture\\nInbox\\n\\nDisabled for this server; per-task Notes still run.\\n\\nThe follow-up inbox is off\\n\\nAgents are not asked to leave follow-ups. Set CEZ_FOLLOWUPS=1 and restart cezar to turn the inbox on.\\n\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": "schema-validated browser HTTP fixtures; live SSE/WebSocket suppressed; no mutations",
+    "source": "current baseline plus Tools-only style diff"
+  },
+  {
+    "state": "automations-empty",
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/automations-empty-dark.png",
+    "expected": "No automations yet",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nAll tasks\\nInbox\\n1\\nAdd project\\nActive\\n4\\nArchived\\nfixture-repo-v2\\ntask-fixture\\nTasks\\n2\\nGit\\nSkills\\nWorkflows\\nSettings\\nSESSIONS\\nNeeds you\\nPolish task overview\\n×2\\nRecent\\n#123\\nImprove session navigation\\nParent · done\\n#123\\nReview keyboard controls\\nWorker · done\\nGlobal settings\\nTools\\nv0.12.2\\nfixture-repo-v2\\n/\\nAutomations\\ntask-fixture\\nAutomations\\n\\nChecks run while cezar is open. No webhook or public URL required.\\n\\nNew automation\\nGitHub\\nGitHub available · Scheduler idle\\nNo automations yet. Create one paused, test its bounded filter, then enable it from a current-time baseline.\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": "schema-validated browser HTTP fixtures; live SSE/WebSocket suppressed; no mutations",
+    "source": "current baseline plus Tools-only style diff"
+  },
+  {
+    "state": "automations-disabled",
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/automations-disabled-dark.png",
+    "expected": "GitHub automations are off",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nAll tasks\\nAdd project\\nActive\\n4\\nArchived\\nfixture-repo-v2\\ntask-fixture\\nTasks\\n2\\nGit\\nSkills\\nWorkflows\\nSettings\\nSESSIONS\\nNeeds you\\nPolish task overview\\n×2\\nRecent\\n#123\\nImprove session navigation\\nParent · done\\n#123\\nReview keyboard controls\\nWorker · done\\nGlobal settings\\nTools\\nv0.12.2\\nfixture-repo-v2\\n/\\nAutomations\\ntask-fixture\\nGitHub automations are off\\n\\nThis server does not poll GitHub or launch tasks from it. Set CEZ_AUTOMATIONS=1 and restart cezar to turn automations on.\\n\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": "schema-validated browser HTTP fixtures; live SSE/WebSocket suppressed; no mutations",
+    "source": "current baseline plus Tools-only style diff"
+  },
+  {
+    "state": "variants-waiting",
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/variants-waiting-light.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nCompare\ntask-fixture\nCompare variants\n\nPolish task overview · 2 variants of the same task, each in its own worktree — pick the diff you want to keep. The others are cancelled and archived, their worktrees and branches removed.\n\nVariants are still running. Picking a result is available when every variant finishes.\n\nA\nrunning\nIN 42.0k · OUT 6.0k\n·\n$0.42\nGIT DIFF --STAT\nREADME.md      | 2 ++\n src/session.ts | 3 ++-\n 2 files changed, 4 insertions(+), 1 deletion(-)\nPROGRESS\n\n(no progress notes)\n\nOpen task\nPick variant A\nB\ndone\nIN 42.0k · OUT 6.0k\n·\n$0.42\nGIT DIFF --STAT\nREADME.md      | 2 ++\n src/session.ts | 3 ++-\n 2 files changed, 4 insertions(+), 1 deletion(-)\nPROGRESS\n\n(no progress notes)\n\nOpen task\nPick variant B\nVariant A — full diff\nVariant B — full diff\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "url": "http://127.0.0.1:44629/p/fixture-repo-v2/compare/fixture-group",
+      "picks": [
+        {
+          "label": "Pick variant A",
+          "disabled": true
+        },
+        {
+          "label": "Pick variant B",
+          "disabled": true
+        }
+      ]
+    },
+    "fixture": "browser response only; no variant pick or task mutation"
+  },
+  {
+    "state": "variants-error",
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/variants-error-light.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nCompare\ntask-fixture\nCould not load the variants\n\ncannot reach the cezar server (/api/v1/groups/fixture-group)\n\nBack to tasks\nRetry\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "url": "http://127.0.0.1:44629/p/fixture-repo-v2/compare/fixture-group",
+      "picks": []
+    },
+    "fixture": "browser response only; no variant pick or task mutation"
+  },
+  {
+    "state": "variants-waiting",
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/variants-waiting-dark.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nCompare\ntask-fixture\nCompare variants\n\nPolish task overview · 2 variants of the same task, each in its own worktree — pick the diff you want to keep. The others are cancelled and archived, their worktrees and branches removed.\n\nVariants are still running. Picking a result is available when every variant finishes.\n\nA\nrunning\nIN 42.0k · OUT 6.0k\n·\n$0.42\nGIT DIFF --STAT\nREADME.md      | 2 ++\n src/session.ts | 3 ++-\n 2 files changed, 4 insertions(+), 1 deletion(-)\nPROGRESS\n\n(no progress notes)\n\nOpen task\nPick variant A\nB\ndone\nIN 42.0k · OUT 6.0k\n·\n$0.42\nGIT DIFF --STAT\nREADME.md      | 2 ++\n src/session.ts | 3 ++-\n 2 files changed, 4 insertions(+), 1 deletion(-)\nPROGRESS\n\n(no progress notes)\n\nOpen task\nPick variant B\nVariant A — full diff\nVariant B — full diff\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "url": "http://127.0.0.1:44629/p/fixture-repo-v2/compare/fixture-group",
+      "picks": [
+        {
+          "label": "Pick variant A",
+          "disabled": true
+        },
+        {
+          "label": "Pick variant B",
+          "disabled": true
+        }
+      ]
+    },
+    "fixture": "browser response only; no variant pick or task mutation"
+  },
+  {
+    "state": "variants-error",
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/runtime-verified/pairs/variants-error-dark.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nAll tasks\nInbox\n1\nAdd project\nActive\n4\nArchived\nfixture-repo-v2\ntask-fixture\nTasks\n2\nGit\nSkills\nWorkflows\nSettings\nSESSIONS\nNeeds you\nPolish task overview\n×2\nRecent\n#123\nImprove session navigation\nParent · done\n#123\nReview keyboard controls\nWorker · done\nGlobal settings\nTools\nv0.12.2\nfixture-repo-v2\n/\nCompare\ntask-fixture\nCould not load the variants\n\ncannot reach the cezar server (/api/v1/groups/fixture-group)\n\nBack to tasks\nRetry\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "url": "http://127.0.0.1:44629/p/fixture-repo-v2/compare/fixture-group",
+      "picks": []
+    },
+    "fixture": "browser response only; no variant pick or task mutation"
+  }
+]

@@ -1,0 +1,143 @@
+{
+  "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+  "components": [
+    {
+      "component": "ArrowLeftIcon",
+      "icon": "arrow-left",
+      "geometrySha256": "ab2be7a63f250420ea7020489f5832b94c6be44f058251d1a88398b8905036cf",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "CheckIcon",
+      "icon": "check",
+      "geometrySha256": "eec82dfb4f142534e3d1350af205b0e79b08e8d2d471ebddee62e538947a90f6",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "ChevronDownIcon",
+      "icon": "chevron-down",
+      "geometrySha256": "96bc4c16a8d0adba941b3aca3530a4ee93ddb902e08726949ad4547a750dfd41",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "ChevronRightIcon",
+      "icon": "chevron-right",
+      "geometrySha256": "cee1458c0dd09cd41c1e18b942d336d9ac66465fa81b6ec3a69379282df75f20",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "CircleCheckIcon",
+      "icon": "circle-check",
+      "geometrySha256": "3b96698f8c648f83548b6c6a047c3db531bd873719ded4f612fd208fcf5d65af",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "CircleDotIcon",
+      "icon": "circle-dot",
+      "geometrySha256": "ea10782b4ad5f9777a0fac108b7974b957ef64348e5dd053d9137588670840cd",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "CircleIcon",
+      "icon": "circle",
+      "geometrySha256": "8d8a191c532c3e8498be85ddeee48a5c2402643269e072098138c56c4896e8d1",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "CircleXIcon",
+      "icon": "circle-x",
+      "geometrySha256": "95f41733865b029044a95162a7f1387d710119331c7710ff980622008f65661d",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "FileDiffIcon",
+      "icon": "file-diff",
+      "geometrySha256": "2884ffc868184d16eea49c7bd98c3ae63416c69c7154e72f939c58d8cc8a24dd",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "FileSearchIcon",
+      "icon": "file-search",
+      "geometrySha256": "2e774c084a43c1cebd73759f143a13bcb6ab6970c31ca5e0cb575c31a0f79da8",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "FolderIcon",
+      "icon": "folder",
+      "geometrySha256": "2492d9f6fc6853794781babfbac47531e73abb57fb30015389960936b188edd1",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "GitBranchIcon",
+      "icon": "git-branch",
+      "geometrySha256": "cb2e993ccf96533a9eefff78a807edb44bb38d68648b6156440b67618b4b20f4",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "GitCommitHorizontalIcon",
+      "icon": "git-commit-horizontal",
+      "geometrySha256": "b8471009907c8fbe7f8a98bce2ef541a2821a7659fe2b6a0d760a5915f802a98",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "GitPullRequestIcon",
+      "icon": "git-pull-request",
+      "geometrySha256": "9ff25470d22f3787c882d057e948bae73bc42d9cae8fac915c5f78bf0a281dbe",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "PlusIcon",
+      "icon": "plus",
+      "geometrySha256": "5d291bcb8254c2c4257c48e6c908146166dfca39fc195e469db368adeecd8cd0",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "RefreshCwIcon",
+      "icon": "refresh-cw",
+      "geometrySha256": "567f8b6b33c2932619c1cd2d1763c5969d2ea6f881739437705977a65095dfd7",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "SearchIcon",
+      "icon": "search",
+      "geometrySha256": "97566fb629e3e7748be137d3c77d0f85cd0bb9c91ac5a84d28014262ae1dbe67",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "SparklesIcon",
+      "icon": "sparkles",
+      "geometrySha256": "34b3b72da68a940d392e7809048e383975c60925482c45fa403015a43ce9642b",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "TriangleAlertIcon",
+      "icon": "triangle-alert",
+      "geometrySha256": "d28bf3dfaf64173399f6a39e1d8a3ad13244f27f4b0ba34ea251f089836faf54",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "UploadIcon",
+      "icon": "upload",
+      "geometrySha256": "bcb294a8c8420823940dff8e87de3226805563a602cf2c0424a883d35b8fc9f7",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "WorkflowIcon",
+      "icon": "workflow",
+      "geometrySha256": "8a89b4882c4448f29716ec89881444b463f97b5bc9c6b3fec58534888c80c9db",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "XIcon",
+      "icon": "x",
+      "geometrySha256": "92f041eccbb3b416df03585287f4754f0d0d03b8612271305846b03ca11de4a4",
+      "verdict": "exact viewBox and path match"
+    },
+    {
+      "component": "FileCodeIcon",
+      "icon": "file-code",
+      "geometrySha256": "7d20e5cf9bd4701ae2b7b9efd0bd7635e05e3084b6025c7915641b0f45234727",
+      "verdict": "exact viewBox and path match"
+    }
+  ]
+}

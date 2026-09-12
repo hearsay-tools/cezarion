@@ -1,0 +1,66 @@
+
+> test
+> vitest run packages/web/src/components packages/web/src/lib/sidebar-width.test.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/a4395cbb-69c4-4655-9939-90c5eb8ccc1e
+
+ ✓ |web| src/components/reference-chip.test.tsx (31 tests) 693ms
+ ✓ |web| src/components/reference-status.test.tsx (20 tests) 1026ms
+ ✓ |web| src/components/diff/diff.test.tsx (19 tests) 1313ms
+     ✓ renders every file with its path, per-file ± and status badge  304ms
+     ✓ shows the aggregate ± stat across files  381ms
+ ✓ |web| src/components/add-project-dialog.test.tsx (10 tests) 1133ms
+ ✓ |web| src/components/tools-menu.test.tsx (24 tests) 1221ms
+ ✓ |web| src/components/task-quick-list.test.tsx (50 tests) 1360ms
+ ✓ |web| src/components/project-groups.test.tsx (16 tests) 1615ms
+     ✓ caps an expanded group at 10 rows and links More… at that project’s tasks pane  448ms
+ ✓ |web| src/components/diff/diff-virtualize.test.tsx (9 tests) 914ms
+     ✓ renders every file, each hinted for content-visibility skipping  462ms
+ ✓ |web| src/components/provider-banner.test.tsx (14 tests) 340ms
+ ✓ |web| src/components/centered-state.test.tsx (11 tests) 311ms
+ ✓ |web| src/components/composer/composer.test.tsx (78 tests) 3444ms
+ ✓ |web| src/components/command-palette.test.tsx (57 tests) 3737ms
+ ✓ |web| src/components/provider-banner-container.test.tsx (4 tests) 368ms
+ ✓ |web| src/components/clone-project-dialog.test.tsx (6 tests) 652ms
+ ✓ |web| src/components/engine-pills.test.ts (28 tests) 689ms
+ ✓ |web| src/components/composer/dictation.test.tsx (10 tests) 559ms
+ ✓ |web| src/components/app-shell.test.tsx (81 tests) 3885ms
+ ✓ |web| src/components/app-shell-container.test.tsx (34 tests) 2370ms
+     ✓ renders the inbox badge from /api/v1/todos  366ms
+     ✓ keeps the shared archive filter reachable in Tools for a multi-project session tree  348ms
+ ✓ |web| src/components/theme-toggle.test.tsx (8 tests) 245ms
+ ✓ |web| src/components/ui/button.test.tsx (14 tests) 271ms
+ ✓ |web| src/components/design-icons.test.tsx (3 tests) 314ms
+ ✓ |web| src/components/picker-pill.test.tsx (1 test) 340ms
+     ✓ keeps radio options selectable and renders a disabled status row  338ms
+ ✓ |web| src/components/zoomable-image.test.tsx (2 tests) 157ms
+ ✓ |web| src/components/ui/toaster.test.tsx (5 tests) 277ms
+ ✓ |web| src/components/list-view.test.tsx (3 tests) 238ms
+ ✓ |web| src/components/ghost-code-backdrop.test.tsx (7 tests) 217ms
+ ✓ |web| src/components/last-location-controller.test.tsx (9 tests) 342ms
+ ✓ |web| src/components/reference-conflict-action.test.tsx (4 tests) 420ms
+     ✓ sends the numbered prompt into the live session  304ms
+ ✓ |web| src/components/diff/diff-scroll.test.ts (13 tests) 15ms
+ ✓ |web| src/components/theme-provider.test.tsx (18 tests) 106ms
+ ✓ |web| src/components/diff/parse-patch.test.ts (13 tests) 25ms
+ ✓ |web| src/components/diff/word-diff.test.ts (9 tests) 8ms
+ ✓ |web| src/components/nav-items.test.ts (32 tests) 23ms
+ ✓ |web| src/components/code-editor.test.tsx (7 tests) 74ms
+ ✓ |web| src/components/composer/composer-text.test.ts (15 tests) 24ms
+ ✓ |web| src/components/diff-stat.test.tsx (8 tests) 109ms
+ ✓ |web| src/components/pill.test.tsx (10 tests) 66ms
+ ✓ |web| src/components/status-dot.test.tsx (9 tests) 49ms
+ ✓ |web| src/components/directional-usage.test.tsx (3 tests) 61ms
+ ✓ |web| src/components/diff/diff-fallback.test.tsx (2 tests) 71ms
+ ✓ |web| src/components/composer/composer-attachments.test.ts (28 tests) 15ms
+stderr | src/components/run-notifications.test.tsx > RunNotifications > a constructor that throws (Android Chrome) is swallowed — the courtesy never crashes the app
+[vitest] The vi.fn() mock did not use 'function' or 'class' in its implementation, see https://vitest.dev/api/vi#vi-spyon for examples.
+
+ ✓ |web| src/components/run-notifications.test.tsx (11 tests) 45ms
+ ✓ |web| src/lib/sidebar-width.test.ts (18 tests) 10ms
+
+ Test Files  43 passed (43)
+      Tests  754 passed (754)
+   Start at  12:44:40
+   Duration  8.88s (transform 7.90s, setup 0ms, import 25.41s, tests 29.15s, environment 29.66s)

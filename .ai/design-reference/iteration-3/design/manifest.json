@@ -27,7 +27,11 @@
       "pngSha256": "c92b738be7be32b9e521c4d18c3eda42fc6156ba3c49ed479442fc3a3e9486f8",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "session 06"
     },
     {
       "id": "yhesD",
@@ -43,7 +47,11 @@
       "pngSha256": "f6cad2d4d0071c5f748603fd85fc8ae0e880abe77eec26d65b37c5e9cffefe28",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "session 06"
     },
     {
       "id": "mZMB8",
@@ -59,7 +67,11 @@
       "pngSha256": "9a3dc62502c5ef6f7fe594536d89c9a04e185806316b36c77841afd1fe33738c",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "session 06"
     },
     {
       "id": "Pusy6",
@@ -75,7 +87,11 @@
       "pngSha256": "bd844a1b821815a775c328373ac9008ad639997fd54633b8a494f827f17c31e0",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "session 06"
     },
     {
       "id": "C9o2u",
@@ -91,7 +107,11 @@
       "pngSha256": "072b799ac6e153069f433d6c21679b1ff1789cfde58b044f6afd466b89e2fccf",
       "scaleX": 1.510843373493976,
       "scaleY": 1.523526129812163,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "shared a4395cbb — full shell and exact shared icon adapter"
     },
     {
       "id": "cgGWE",
@@ -107,7 +127,9 @@
       "pngSha256": "014d78df0faec4d97deaaf358367bdebd7cb35ef3df66e9a5e8601ed440e61bf",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "igwKt",
@@ -123,7 +145,9 @@
       "pngSha256": "255705d86f3b82d5467605a7fec676c836346aada2e490c2b81bbf088819afff",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "gVXYn",
@@ -139,7 +163,11 @@
       "pngSha256": "6a727eddcc91a5fb8132903b06805feb848029de85ffb2df65c857deac9ac576",
       "scaleX": 2.0,
       "scaleY": 2.0329557157569518,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "session 06"
     },
     {
       "id": "nu4S5",
@@ -155,7 +183,11 @@
       "pngSha256": "708be2d2a34d926ae2a046db9546edf9a345f22e9de0e21f9b81787bf93ab7ba",
       "scaleX": 2.0,
       "scaleY": 2.0332294911734166,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "session 06"
     },
     {
       "id": "h690uO",
@@ -171,7 +203,9 @@
       "pngSha256": "a0b59c3306a211e5ed0cb77c22bf07768a802fd549cb944fb84aa3c2ab24e8d5",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "L0VfI",
@@ -187,7 +221,9 @@
       "pngSha256": "16e3d3a5e427b2144aa0c949b545b07775eb85dc508d4b70ebd7148fbb658c01",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "HYltX",
@@ -203,7 +239,9 @@
       "pngSha256": "0253e5a04598bba19aadc821d32ba64f56fc7321207f0b5fce02d8cb1ba602ea",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "r7humJ",
@@ -219,7 +257,9 @@
       "pngSha256": "8505a4be53a02c8e206904437323100e04680f15a7b8715007362c9e3d46e149",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "zwIL4",
@@ -235,7 +275,11 @@
       "pngSha256": "2a6e59252511278aa5428e84bdedcf301659866d7331eeb76db8a121e9dffa93",
       "scaleX": 2.0,
       "scaleY": 2.026766595289079,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "session 06"
     },
     {
       "id": "es88m",
@@ -251,7 +295,11 @@
       "pngSha256": "6af2fabad965872beb2dda2c1c98159f3b127593e2118a5dd6c6c50bd6247ee3",
       "scaleX": 2.0,
       "scaleY": 2.026766595289079,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "session 06"
     },
     {
       "id": "HcGEf",
@@ -267,7 +315,9 @@
       "pngSha256": "bbff0fee82391ed1b4daa1b43667cc316c01c14297dfa38b7dfe60a55c8cb8be",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "rstLr",
@@ -283,7 +333,9 @@
       "pngSha256": "449039161a5bf18ef43145814b8228a4b85ceab897a84c730deafc5eaba23ee0",
       "scaleX": 2.0,
       "scaleY": 2.018595041322314,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "FsD5O",
@@ -299,7 +351,9 @@
       "pngSha256": "ec4374b51c713367da4057f8de11fdda6fca3192f6516de928fc8497458a81e8",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "x3GLa",
@@ -315,7 +369,9 @@
       "pngSha256": "43619b3f4a745332d52e53924fc3ae6740041662edfceaea03c3e18f4cbc861e",
       "scaleX": 2.0,
       "scaleY": 2.018595041322314,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "c1EQa",
@@ -331,7 +387,9 @@
       "pngSha256": "0cd4f4fe8621d2dff0ef1458eae533e1eebb63d4e4ef0f1bcecd4354acff84d7",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "dVuKR",
@@ -347,7 +405,9 @@
       "pngSha256": "60a1230b34409fd7639184eb9359925f2e4f2bf1b5658a67e4d36f4d834a2272",
       "scaleX": 2.0,
       "scaleY": 2.018250950570342,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "T5Xpa",
@@ -363,7 +423,9 @@
       "pngSha256": "13fda0ffbeef257789744bf10d556a0cc3edd5629b227c5008431ae5d390837e",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "tQmNd",
@@ -379,7 +441,9 @@
       "pngSha256": "8e77179071cc5dc8edfe489d0c9c53fed534c7310d12efa2a18666cc30e71201",
       "scaleX": 2.0,
       "scaleY": 2.018250950570342,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "rUusA",
@@ -395,7 +459,9 @@
       "pngSha256": "968491ab393da445c27e9500818838b1bd70fda456f68b1c2f27183c0840e653",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "p8bEI",
@@ -411,7 +477,9 @@
       "pngSha256": "42755b1d56384bcd52beba2327da39d8e16448d460dc4b01a08b84f7ef95ea24",
       "scaleX": 2.0,
       "scaleY": 2.048695652173913,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "qxKBh",
@@ -427,7 +495,9 @@
       "pngSha256": "dd02b2365958c78ee3fa702447c7bb6106cb83618229b3df358c9cadcf380a5b",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "CvQao",
@@ -443,7 +513,9 @@
       "pngSha256": "dab59abb478dd5a4f424e1d170c036bd21c84505a352ad0565e4a55a6f8ebabd",
       "scaleX": 2.0,
       "scaleY": 2.048695652173913,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "FZ2Hk",
@@ -459,7 +531,9 @@
       "pngSha256": "748631758cdd4ddb735f19b2fd63791978a351a43c7ef6fd81b38fa33d1d7b29",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "LqDjB",
@@ -475,7 +549,9 @@
       "pngSha256": "c73b1dd76e011ea32382a93d8b54c9826b7557171d25feae55771e4c64a8641d",
       "scaleX": 2.0,
       "scaleY": 2.0194489465153973,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "g2Jzw",
@@ -491,7 +567,9 @@
       "pngSha256": "9f0943bfde247299fa82aeb88304a91adfb40611e8c4653c58bd73d6fa038db3",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "D53pMS",
@@ -507,7 +585,9 @@
       "pngSha256": "ecfb2a5e38eaec55beecb7cfb4da48d82701eb956c43c787b63f521831534f06",
       "scaleX": 2.0,
       "scaleY": 2.0194489465153973,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "bI71R",
@@ -523,7 +603,11 @@
       "pngSha256": "96cca934a4fc5587f696ec04e4d8c995f382893164d1174be90f4bb7a60f06b9",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "o67XB",
@@ -539,7 +623,11 @@
       "pngSha256": "2ee8475fe15540e2e4348a7319f66c32ad046a0b35f8813ffba990d108f823b3",
       "scaleX": 2.0,
       "scaleY": 2.005365526492287,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "JYHsj",
@@ -555,7 +643,11 @@
       "pngSha256": "a029bcab1f8132df3bb3241b1957b0db8fb4c4d76894860bb165f0ff3372e9d6",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "ZmozS",
@@ -571,7 +663,11 @@
       "pngSha256": "ebd7a68f1736739db719b950006530f851c744a331f79f94ae78a583eec8baf3",
       "scaleX": 2.0,
       "scaleY": 2.005365526492287,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "tVifC",
@@ -587,7 +683,9 @@
       "pngSha256": "c60771dc784e2c7380f8bc786e5df6fa55214b958f7a67c2d2c2b23a750efc1c",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "zu66o",
@@ -603,7 +701,9 @@
       "pngSha256": "0c22f59b22f66f87ef9061d09ca8816943c48d1adc2d1df1a5c13a3ce378c990",
       "scaleX": 2.0,
       "scaleY": 2.044646924829157,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "AKO2L",
@@ -619,7 +719,9 @@
       "pngSha256": "d20f2b62f9b14280599f53444f10239c68ffe81333cc3f4360f7d8a7f83c8b1e",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "eOnqx",
@@ -635,7 +737,9 @@
       "pngSha256": "04f9b208d59db8c4c635054fa03abab5455f5b5d1e062dacc830e5aa54761b56",
       "scaleX": 2.0,
       "scaleY": 2.044646924829157,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "git 565"
     },
     {
       "id": "EKi57",
@@ -651,7 +755,9 @@
       "pngSha256": "585bbc832549a5001560753cdfbd538583915cd40a239d7ff9b32655961cf5c1",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "kmHeY",
@@ -667,7 +773,9 @@
       "pngSha256": "2fc3a58a781b2144e5b97562583257da1d5f5bace6663c6a39c3f46a9022cb6e",
       "scaleX": 2.0,
       "scaleY": 2.014678899082569,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "cvBro",
@@ -683,7 +791,9 @@
       "pngSha256": "0703a285a2b1d05fa846185afb3f30c05b2349e33c4c470ee9319f173ad80716",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "XdHUd",
@@ -699,7 +809,9 @@
       "pngSha256": "9d47d69e0041224c2496e2bfbe35ed1189ef2a11292bbddb672ce28ccbc89143",
       "scaleX": 2.0,
       "scaleY": 2.014678899082569,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "C2sfEo",
@@ -715,7 +827,9 @@
       "pngSha256": "8e6bcbbd9168b78926fcce3d2bc42a858799c83cc28cf39f799ab93bf1416a58",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "aa0TQ",
@@ -731,7 +845,9 @@
       "pngSha256": "48b0e320e39bc4102a60efb03b4580b07107818dfa603b5090601386007605ec",
       "scaleX": 2.0,
       "scaleY": 2.054054054054054,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "s0JzCL",
@@ -747,7 +863,9 @@
       "pngSha256": "ee607d6c3f132d4379961db448253d81882e378f742e7d7d52c0d518ffa388fb",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "Ae0n6",
@@ -763,7 +881,9 @@
       "pngSha256": "f574157c203098d43dfe9d83fd87990f70e52acd5d295bca9e02320d5782da94",
       "scaleX": 2.0,
       "scaleY": 2.054054054054054,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "PPxMw",
@@ -779,7 +899,11 @@
       "pngSha256": "24650a22b4439be6262c7b49bcbb4775fbcd158d22ddfe0bacdc6cdfeb021edf",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "x7yBQu",
@@ -795,7 +919,11 @@
       "pngSha256": "b0ed4f9df7fd8ad83cb3c82fc344f3d14dd468d6e0c051b540ef754203a7c684",
       "scaleX": 2.0,
       "scaleY": 2.041891891891892,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "T4h3KX",
@@ -811,7 +939,11 @@
       "pngSha256": "ea12b0eeb3095c93fd70bf9aeeb7382b33da13572dd643cd034bebc033a7de8d",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "Y9V5h2",
@@ -827,7 +959,11 @@
       "pngSha256": "fe0cc94c0ded7d7330b50b0bc0ec47fdc48484379ec14cd94fd27ef7ae69edf1",
       "scaleX": 2.0,
       "scaleY": 2.041891891891892,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "aFFvV",
@@ -843,7 +979,9 @@
       "pngSha256": "cd995d789252135cecc1d2950277f670e492cf0180703725cf7f14afd5537224",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "yqIfL",
@@ -859,7 +997,9 @@
       "pngSha256": "6e6c4051b8d4dc5705e208f88f081b38648034c37d1ba0669e28291cee7242eb",
       "scaleX": 2.0,
       "scaleY": 2.1045627376425857,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "oHH3V",
@@ -875,7 +1015,9 @@
       "pngSha256": "cecbbb1570a8e3a5529ef0304926ec9185037bb6cdeb847f6d4699d7e89e8268",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "TrsF6",
@@ -891,7 +1033,9 @@
       "pngSha256": "10f989d3a0333d89ae977ddbb4c7c4f91b29333aac486fc8f97709eb493b9b09",
       "scaleX": 2.0,
       "scaleY": 2.106382978723404,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "QifUP",
@@ -907,7 +1051,9 @@
       "pngSha256": "42c8948db80764ec426375e63383635e736c886ed1f936f448a02ed680019f9c",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "M8dqPj",
@@ -923,7 +1069,9 @@
       "pngSha256": "a1d9858407cac17132a1b4165fbeab4873a529214e61b4c7f1d72c62270d5b28",
       "scaleX": 2.0,
       "scaleY": 2.0785340314136125,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "X79RX",
@@ -939,7 +1087,9 @@
       "pngSha256": "091f0f689c80fe0f698da10c17795d26ad10202cd51238bef37abc053637b8aa",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "rxmtI",
@@ -955,7 +1105,9 @@
       "pngSha256": "556f1a370b8880ee9cb18937914880f4d5af7f425d718f95aa22880549048135",
       "scaleX": 2.0,
       "scaleY": 2.0785340314136125,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "PjeE9",
@@ -971,7 +1123,9 @@
       "pngSha256": "02bf5550dbb8b5ab35eac27ff0ffcdee7afbf06d2c7cc3db21b3a688ea801290",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "feU0A",
@@ -987,7 +1141,9 @@
       "pngSha256": "6d9fbd060028508743f9dd314679e1b8660b3f42b791b0e143eabe3f2a4ba4ee",
       "scaleX": 2.0,
       "scaleY": 2.0061855670103093,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "HClxj",
@@ -1003,7 +1159,9 @@
       "pngSha256": "68061ea63c378a58a42a3649ffdac9d24f84f24740115b9f0c91156c88fd87c0",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "ODSy3",
@@ -1019,7 +1177,9 @@
       "pngSha256": "bcbccc6655c87da31aff765f97be6697ffe2053cad225cd8c4794b4354970ee5",
       "scaleX": 2.0,
       "scaleY": 2.0061855670103093,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "MFtcY",
@@ -1035,7 +1195,9 @@
       "pngSha256": "0801516f5e8a9fc29fcce4add19cec08317fa9ba1c391d833a298d77d024366e",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "LAKkC",
@@ -1051,7 +1213,9 @@
       "pngSha256": "5a20e2cb7752220afc86fc4e293b876df2ab0d59e8c42aab17e46dd5c8fde6fe",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "l3f2r3",
@@ -1067,7 +1231,9 @@
       "pngSha256": "2b8a3c61061fcd5ffae86973dc27f595968030387e9f084f818078d4e36e2303",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "S1Gdo",
@@ -1083,7 +1249,9 @@
       "pngSha256": "eeb4515f97278851999cdf67a5eab7b007b0b2f17596992eeef822caf38919f1",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "T2fE7",
@@ -1099,7 +1267,9 @@
       "pngSha256": "e57d9776ea1a4df53c327be746ee28ff6e48d8ff65da7df39402da4559564410",
       "scaleX": 2.0,
       "scaleY": 1.9858044164037856,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "shared a4395cbb — full shell and exact shared icon adapter"
     },
     {
       "id": "L61J13",
@@ -1115,7 +1285,9 @@
       "pngSha256": "b8594edceb3932e80cd77618d2cc4b39122075e8b61e2c4bd34af63646cc329b",
       "scaleX": 2.0,
       "scaleY": 1.9858044164037856,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "shared a4395cbb — full shell and exact shared icon adapter"
     },
     {
       "id": "cfIXv",
@@ -1131,7 +1303,9 @@
       "pngSha256": "9b35b9cd42f27c3ba746843f2f5de50e80ae808f1840088120b153669ef5783a",
       "scaleX": 2.0,
       "scaleY": 2.038364462392731,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "shared a4395cbb — full shell and exact shared icon adapter"
     },
     {
       "id": "zSP4H",
@@ -1147,7 +1321,9 @@
       "pngSha256": "2243427853279b7df98c6015613760bf8957b4de2730d34494c3ca9c4940a92b",
       "scaleX": 2.0,
       "scaleY": 2.038364462392731,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "shared a4395cbb — full shell and exact shared icon adapter"
     },
     {
       "id": "OeHGM",
@@ -1163,7 +1339,9 @@
       "pngSha256": "d845ae1b6be2b96a993f812e4cfbbab2e59a536f856acc935b665b4baa79dd6a",
       "scaleX": 2.0,
       "scaleY": 2.090437361008154,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "shared a4395cbb — full shell and exact shared icon adapter"
     },
     {
       "id": "gqaUM",
@@ -1179,7 +1357,9 @@
       "pngSha256": "30acfc80b2f62352d587bff3a6440bbe22cdb2007d3650d8756df39e5efd1c43",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "EsGpp",
@@ -1195,7 +1375,9 @@
       "pngSha256": "3b411eb14eefa0c0c2cf26332ec2f328c995513c06e0c973c25f79cb6f15d524",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "YS15Y",
@@ -1211,7 +1393,9 @@
       "pngSha256": "0dd0f0fc55f789cbc99875eecd31e6a65050bf798b8e3cb056f39f93ce39662b",
       "scaleX": 2.0,
       "scaleY": 2.0289193302891935,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "wLVhd",
@@ -1227,7 +1411,9 @@
       "pngSha256": "55966f6c06a7df6b7a29320bbcf57fb99e7d8fc0640c46ffdab54bc0aae498eb",
       "scaleX": 2.0,
       "scaleY": 2.0289193302891935,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "acXhB",
@@ -1243,7 +1429,9 @@
       "pngSha256": "56328817144968027a45539c9caa3d991084c2cdeb43f0ef9fcd218370b5406a",
       "scaleX": 2.0,
       "scaleY": 2.0140515222482436,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "utoCL",
@@ -1259,7 +1447,9 @@
       "pngSha256": "6b1e7e212ca5f6649675aca7459eaade179943de599e448f027806f8224bd0aa",
       "scaleX": 2.0,
       "scaleY": 2.0140515222482436,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "f2LGv",
@@ -1275,7 +1465,9 @@
       "pngSha256": "bdb844cd5e761045458f2a199650ef6837442bbe77f8f5dbf21e7b6d3ee12c11",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "suUEJ",
@@ -1291,7 +1483,9 @@
       "pngSha256": "f3215592702b9c90fcb6ce308708f801d4689ee1bfb4aa524892dc5353fe2ce9",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "MB5Yx",
@@ -1307,7 +1501,9 @@
       "pngSha256": "8ff9b8c8cbce3f7c5137ffa291d834474d43fc5b8e15e6c3fbcf5893ba2f952a",
       "scaleX": 2.0,
       "scaleY": 2.0689655172413794,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "IbcKi",
@@ -1323,7 +1519,9 @@
       "pngSha256": "d1f13adf6966eb18b802279ab4fdfbd1c7d96034b696671552a5e920e41d67d4",
       "scaleX": 2.0,
       "scaleY": 2.0689655172413794,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "VDDSI",
@@ -1339,7 +1537,9 @@
       "pngSha256": "c988d234666247ba840b142bdb59cbeb43fcf5aa2bcc9ddb7c45a271a3d575b0",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "MmQCH",
@@ -1355,7 +1555,9 @@
       "pngSha256": "8af285e6188a8139d21e14e2aabda91ab1b2b083587a0dbc4125c7ec6049a77f",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "Zsg4w",
@@ -1371,7 +1573,9 @@
       "pngSha256": "4f7d68e57cfd00b259f1081c923972642eb94426e04aa8d0e6db7b6086062476",
       "scaleX": 2.0,
       "scaleY": 2.0441640378548898,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "e7UWy",
@@ -1387,7 +1591,9 @@
       "pngSha256": "af650039c03dd04306e21e8c95b181555b413e308f5a0452c54494cc41ddb07e",
       "scaleX": 2.0,
       "scaleY": 2.0441640378548898,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "e8wQer",
@@ -1403,7 +1609,9 @@
       "pngSha256": "1df203842a0b3a184bc383d5ec2176140b4d0d8cfda02ac22ddb1507c448f310",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "f2220g",
@@ -1419,7 +1627,9 @@
       "pngSha256": "2a42a5a757d588c3b6a6eb3e364e5f22d49a96d3313593a93c0585f21eec6764",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "UFERI",
@@ -1435,7 +1645,9 @@
       "pngSha256": "ffd9845b30ddb1c92b05e486db8f6228230f7e3565d69f8e4d2ef7fef5eb95ea",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "yH9DZ",
@@ -1451,7 +1663,9 @@
       "pngSha256": "4617ed94ae688c4d78a0ce0c3ce920788d9f7bac4fc5744387dd845506b71672",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "empfw",
@@ -1467,7 +1681,9 @@
       "pngSha256": "72d1abb94ebd8dede9ad2e479c1b70e579217d17b4f0c9037bcc87d4fe2a5188",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "O2W1k",
@@ -1483,7 +1699,11 @@
       "pngSha256": "993b3541050cacc2694b71e64a648ff3d74d76c3fa57f932c48609443f47f38c",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "session 06"
     },
     {
       "id": "qTzd6",
@@ -1499,7 +1719,9 @@
       "pngSha256": "bc79068d430f72fba3e4dc4662d65db8ac0484661c47adae8fc1c04f0a39d61a",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tools e2fa"
     },
     {
       "id": "M5SWe",
@@ -1515,7 +1737,11 @@
       "pngSha256": "409e393ae8c61577e0dcb931c238eff225bb45366f8b0c3de2fd71b0a85ec5a1",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "AHKNo",
@@ -1531,7 +1757,11 @@
       "pngSha256": "3f2a3da60051bc3b1a04828d4c87710d2b657623adc09cf2db149d54e3f86799",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "I44Ul8",
@@ -1547,7 +1777,12 @@
       "pngSha256": "45e940a2b6610657ea065b72ec1ef296fef49b4cc83b13f65ed4e86ee184ce66",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304",
+        "0x21bb"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "ZhHkR",
@@ -1563,7 +1798,11 @@
       "pngSha256": "6fe65657c5bfb0bd06f4b52fc9f33c4b9d165cc4ad3e73e5419a0332ea3c9c54",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "rEzlh",
@@ -1579,7 +1818,9 @@
       "pngSha256": "0af583724b8adf0df8ff4ad6d6aaa997ab55ea65d9d314496b9f8778d2f7325e",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "zSB9u",
@@ -1595,7 +1836,12 @@
       "pngSha256": "5bf5e6e53d2844f0d09d9c2946dd0894767f8063621b4b60bc88d386934a7d8a",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304",
+        "0x21bb"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "ur8ZK",
@@ -1611,7 +1857,9 @@
       "pngSha256": "774e0615bc609106c428025e00e9a65d9dc9f1f9baf73ee320a614cf24a9bb79",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "w1inBF",
@@ -1627,7 +1875,9 @@
       "pngSha256": "9437e35a91687e763e344fd426e56b1663bd3b71ab04f0fca74d1b97ecdfceef",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "LmL0v",
@@ -1643,7 +1893,9 @@
       "pngSha256": "e7c2ae884810f2fe379e74b8c9bb830fb94e5d6e007147b4d75807ee10c351fb",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "cv6mn",
@@ -1659,7 +1911,11 @@
       "pngSha256": "8b9ba72ea5781e43c3074a5c3833b953f8ef44172f3af5c630b3be53dc056afa",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "x1Iye",
@@ -1675,7 +1931,9 @@
       "pngSha256": "78118e860901b5fff54fb8afb0eeb02bb24417af3d482e42b24161ec917e1d96",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "sBaI8",
@@ -1691,7 +1949,9 @@
       "pngSha256": "66322f65f8eb9598dd1a90cf6ad605e40491ba91af25302a1b8c6e5dddc4fb63",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "RysDF",
@@ -1707,7 +1967,9 @@
       "pngSha256": "5cadebd2ec5237a904934330cb228fdfc73e96af79a14a6fa7d43f16605737a6",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "XLiCf",
@@ -1723,7 +1985,9 @@
       "pngSha256": "0455bc6cea47d9a44f5e0cabe4d06757375874e07ea57924ecd24780558893ba",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "Id0Gw",
@@ -1739,7 +2003,11 @@
       "pngSha256": "7d6f88a122569beff1ba489ac9cd16c0b4dc07b0f765ce17c14d98d8c8bc70df",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "lRC5W",
@@ -1755,7 +2023,9 @@
       "pngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "mpyjl",
@@ -1771,7 +2041,9 @@
       "pngSha256": "e2d5d828e8f4711050bc06fba43f06c79d68c60e534b8883f62ce445c9de5535",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "N6NED",
@@ -1787,7 +2059,9 @@
       "pngSha256": "8a785edc6c23107eda0c0511a0db08a0f326541daa775f5ccc6286b5a8d4342d",
       "scaleX": 2.0,
       "scaleY": 2.0178412132024977,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "Jn0Bt",
@@ -1803,7 +2077,9 @@
       "pngSha256": "bd83a11177084bf4a173a79f24ffd27032e323431378efaf1e711c754185c05c",
       "scaleX": 2.0,
       "scaleY": 2.05720823798627,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "hG4Cl",
@@ -1819,7 +2095,9 @@
       "pngSha256": "a7372bddffea966939eee9c26c6aea6a0efa98b571c1e356a1f111c3f05d1553",
       "scaleX": 2.0,
       "scaleY": 2.0182982616651417,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "i9Si8J",
@@ -1835,7 +2113,9 @@
       "pngSha256": "6175f172e24bdb9c47edd71f289acacc5528d9338bde953a2b7f05a8c0923466",
       "scaleX": 2.0,
       "scaleY": 2.18144750254842,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "ogTQi",
@@ -1851,7 +2131,11 @@
       "pngSha256": "b022d1ce5f8cf5e7041816f199effb4027f484f8c500916f7b283501d194a853",
       "scaleX": 2.0,
       "scaleY": 2.0511749347258488,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "RvbXf",
@@ -1867,7 +2151,12 @@
       "pngSha256": "210fba7a26707c7eeca57b5fcef8ccb4c5b7e8c16a78d8644cdf27b73f65cf22",
       "scaleX": 2.0,
       "scaleY": 2.050974512743628,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304",
+        "0x21bb"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "OGJJ1",
@@ -1883,7 +2172,9 @@
       "pngSha256": "dfebfbafcf608b19a1b4ae72cf696060bcc0d38afec044761d217d8c10dbcfd0",
       "scaleX": 2.0,
       "scaleY": 2.0252454417952315,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "djknR",
@@ -1899,7 +2190,9 @@
       "pngSha256": "dea844e5f7d1cb0492384352757b2d38f67e7410609c7386c6cba1278f54ef92",
       "scaleX": 2.0,
       "scaleY": 2.0095238095238095,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "lpRVc",
@@ -1915,7 +2208,9 @@
       "pngSha256": "9818306b188bdc7fb5bbce03ba0ce7498ed96f7a0fcc698e5d9080d72e698258",
       "scaleX": 2.0,
       "scaleY": 2.0216216216216214,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "moM53",
@@ -1931,7 +2226,9 @@
       "pngSha256": "b3660950b15ab70b9c388edd7beaef715c4e46ec1a14044260cef29991c2d1ee",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "s6Ih0I",
@@ -1947,7 +2244,9 @@
       "pngSha256": "c18844018b05e0b8c723e9925929466ba3d9ccbe788a0c8af5e031b10a0c0e18",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "YVkaw",
@@ -1963,7 +2262,9 @@
       "pngSha256": "f8d5c367ef06c7abcbba11d80db47388a74db34de63421503f8fa084327a0911",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "owGYp",
@@ -1979,7 +2280,9 @@
       "pngSha256": "cecd13e9c43ab1fd25e31fae1ff32d787a91523cd63a639c48b623d7f90eec07",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "Oo1J1",
@@ -1995,7 +2298,9 @@
       "pngSha256": "25c0248277d59b96ea69da607e1f0423c2aa620fee4535e12569d96db6323afc",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "pf8QM",
@@ -2011,7 +2316,11 @@
       "pngSha256": "7b07ddceeb786dc9940277bae36dca511cfc91d001bb28ff4c76bd1263aecd16",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "session 06"
     },
     {
       "id": "OREDs",
@@ -2027,7 +2336,9 @@
       "pngSha256": "691cd74e2f6cc8392b4fc663cdb4e19ad31bd7419cd4dc9a8848b0a4197e7579",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tools e2fa"
     },
     {
       "id": "ofMmL",
@@ -2043,7 +2354,11 @@
       "pngSha256": "eab83cd98891c9e88a217dcfb10b15758035523a0f85a2206a8eee90a4822c4e",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "UzdJ2",
@@ -2059,7 +2374,11 @@
       "pngSha256": "653116827ef01d078547c34f46f48b02ee56d7615f3a701ea857b340b0974be3",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "HBMSk",
@@ -2075,7 +2394,12 @@
       "pngSha256": "8adaf583f5b8a34a58da1bc6db1399eb1aea759be9b7ecebd0c6e381dec003c9",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304",
+        "0x21bb"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "ef75D",
@@ -2091,7 +2415,11 @@
       "pngSha256": "abe16fecac646e1b1645df9683214d22c17e9a5985d901d086a256879d950010",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "c6ANji",
@@ -2107,7 +2435,9 @@
       "pngSha256": "66e06f503058e6e6d6572a4ff54f1eea7e7947943c6e11923ffd093273fa3c7a",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "Z3tJLp",
@@ -2123,7 +2453,12 @@
       "pngSha256": "1ec9de1d867ba312c65b82ba72733ead83ece7ec18fc9be31f05a46b39c36a58",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304",
+        "0x21bb"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "cQJod",
@@ -2139,7 +2474,9 @@
       "pngSha256": "9c5773a2e38684492bd1da1d1e9ee9dad4fb48bda9c11f25ec565d1a964ada17",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "v9iCdT",
@@ -2155,7 +2492,9 @@
       "pngSha256": "780ae78dcf5d2facf8b8714bf85324c9fd429932bfc62a58c26d044e51d749ce",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "u8PPZ3",
@@ -2171,7 +2510,9 @@
       "pngSha256": "bf7bd533c0a8076cb8b1fc69afbaa07f432e604e43352da3a42733a67b710f35",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "v5h5dm",
@@ -2187,7 +2528,11 @@
       "pngSha256": "945670166231de265addbe9fd27026a75d0fce72904e595f67b0a93678c611a3",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "c96HBw",
@@ -2203,7 +2548,9 @@
       "pngSha256": "286f8c7cb75a882227e5ad98fce550ac01044f58f68671c97abb1acfe7ddd761",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "iBtG5",
@@ -2219,7 +2566,9 @@
       "pngSha256": "59dad816424657179a8b6684d62759a376d6182b63609d4243f6067bd0351ac2",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "tWnpG",
@@ -2235,7 +2584,9 @@
       "pngSha256": "e2fe1327874f8aeb62ba6563490c928b264775e3d544a455a5b1427ba9748c32",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "XvWFg",
@@ -2251,7 +2602,9 @@
       "pngSha256": "d132e07069cfe8eeefc9b9bcca6365dc619a9e550b83cc858108070cdb0ddd1a",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "pHBjV",
@@ -2267,7 +2620,11 @@
       "pngSha256": "81c53fb5ea2ccb7da58acd8cc30f6fcac29ca845fa3954a9399c18db28bbfb1e",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "KwkJs",
@@ -2283,7 +2640,9 @@
       "pngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "NQePM",
@@ -2299,7 +2658,9 @@
       "pngSha256": "4aff8be8c93ad3504714c276adda0e902160b7168bfcde716e5ec9259ae35ae4",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "ITZ94",
@@ -2315,7 +2676,9 @@
       "pngSha256": "8bdb5342783a40e905db2da7eaa4f4e13a7d094d7e3f7699d6e9b0a94d12cc25",
       "scaleX": 2.0,
       "scaleY": 2.0178412132024977,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "Itxee",
@@ -2331,7 +2694,9 @@
       "pngSha256": "f1564246e11e1ef9ea33df11ee12ee366f253a717ffa84fe0dfd6621a63e7999",
       "scaleX": 2.0,
       "scaleY": 2.05720823798627,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "iQvMt",
@@ -2347,7 +2712,9 @@
       "pngSha256": "38d607aecfb9641c468af676128de3c719ff069bb7df59201fb28d68e2c8866b",
       "scaleX": 2.0,
       "scaleY": 2.0182982616651417,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "PFLKh",
@@ -2363,7 +2730,9 @@
       "pngSha256": "98cb7585817ed1332672ab8c5aaca7033a0419abb2f5df27cc264f68472bbc63",
       "scaleX": 2.0,
       "scaleY": 2.18144750254842,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "myX8Q",
@@ -2379,7 +2748,11 @@
       "pngSha256": "68ddf5abeb4452a2d5cb717c7c2d16b4ad31c38486738cbc9c0d34d9b22c9696",
       "scaleX": 2.0,
       "scaleY": 2.0511749347258488,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "MnEgv",
@@ -2395,7 +2768,12 @@
       "pngSha256": "d3508767d0c59f36e6ead2b624493139e3e018234c39ca93e4e782808fc136fd",
       "scaleX": 2.0,
       "scaleY": 2.050974512743628,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304",
+        "0x21bb"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "jCdnx",
@@ -2411,7 +2789,9 @@
       "pngSha256": "78058d40a66f6c288baffc7eba692bc311db5478d09eae404384c49708e0ab3a",
       "scaleX": 2.0,
       "scaleY": 2.027972027972028,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "MF4eF",
@@ -2427,7 +2807,9 @@
       "pngSha256": "5e55c5c080dc57b7cebf7b7a6c6bc4e2095f0b85e917a4a117440e6965be140a",
       "scaleX": 2.0,
       "scaleY": 2.0095238095238095,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Skills/Workflows \u2014 new worker queued"
     },
     {
       "id": "R2OII2",
@@ -2443,7 +2825,9 @@
       "pngSha256": "04e678e6b7849a5e9305020569b3493adf6d68fd8263f5f54e193cb430f8d3a0",
       "scaleX": 2.0,
       "scaleY": 2.0216216216216214,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445"
     },
     {
       "id": "mxZSz",
@@ -2459,7 +2843,9 @@
       "pngSha256": "e232095545e522ba7a664cbf05a3b347ed28a1f2fa54a1d2658ce454d21e56e6",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "session 06"
     },
     {
       "id": "kDsvU",
@@ -2475,7 +2861,12 @@
       "pngSha256": "8b93f424b75f9342095e4c9634cc5d17b229af1cbdf5bf88159d3a7f7456fc9f",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304",
+        "0x21bb"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "zze3r",
@@ -2491,7 +2882,12 @@
       "pngSha256": "365dbfc52b4a212c90c3efc6e0078349cc8dfc38bcd79bb4a3a7e862fd1236db",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304",
+        "0x21bb"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "Pf2JI",
@@ -2507,7 +2903,12 @@
       "pngSha256": "1bd21f84c451895ce1b5c74107b7a2f51f5e1362d6113672213a41fc026f37ad",
       "scaleX": 2.0,
       "scaleY": 2.0651505838967426,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304",
+        "0x21bb"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "mC4Fw",
@@ -2523,7 +2924,12 @@
       "pngSha256": "dadf08af0908a3393ab2224d006e34ded0940acda2f48e0b783bc410c0216757",
       "scaleX": 2.0,
       "scaleY": 2.0651505838967426,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304",
+        "0x21bb"
+      ],
+      "implementationOwner": "git 565"
     },
     {
       "id": "h8VpfA",
@@ -2539,7 +2945,9 @@
       "pngSha256": "79a329d5d97fca1e1fba53e4ff0391727cd14ac11e62b88d8e59c97e4db97432",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "f03Qc",
@@ -2555,7 +2963,9 @@
       "pngSha256": "862c6270450be17fdde6e4734b476d1407619bf4b5c7154adfb63e5b3edef244",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "JWelK",
@@ -2571,7 +2981,9 @@
       "pngSha256": "84d235035c80f3dd571af1f7fbfc2ab16a0e8039e43c15c30e8f8cb41dec9a67",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "f7OdkB",
@@ -2587,7 +2999,9 @@
       "pngSha256": "c0c884b888be93c4f66ae37087db4791ca7bd46473c8aa8ee61bf2f6203e5f74",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "M6nNaF",
@@ -2603,7 +3017,9 @@
       "pngSha256": "dfc4de9ad58d7d5f8648d35becd73dfb7e2fdeb7db97affea61111408c8a13bc",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "mQkaN",
@@ -2619,7 +3035,11 @@
       "pngSha256": "de496f800f8566a292235c625f0e35199840e8a10e99d9e399b41eae98793b73",
       "scaleX": 2.0,
       "scaleY": 2.0351493848857647,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "h7wNTk",
@@ -2635,7 +3055,9 @@
       "pngSha256": "dc3a48a17919c8eb71d1a2b83ecbe85d6a49419428ee9e0c85a67a6aa88fa944",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "aYBO5",
@@ -2651,7 +3073,9 @@
       "pngSha256": "f087ea68782dbe9a36b393e8b90bce6d5500a8810a98fe29d5375ce288c1341a",
       "scaleX": 2.0,
       "scaleY": 2.056872037914692,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "giEbe",
@@ -2667,7 +3091,9 @@
       "pngSha256": "0b2eaef417bc002bbf98cd13fd8c03064b67aa0e6bead174096a2f21ab9edaf4",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "UylPc",
@@ -2683,7 +3109,11 @@
       "pngSha256": "89db2522634fc11eae9ca9c003d4888cb942a198a6f2bc00d5530c9e6e6e5f29",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "Z58Tuz",
@@ -2699,7 +3129,9 @@
       "pngSha256": "a8389ae9b700236b9324bf3a714ad4c0816b00cf9e7e0a29cdad5d47b2fecad2",
       "scaleX": 2.0,
       "scaleY": 2.003401360544218,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "P416t",
@@ -2715,7 +3147,9 @@
       "pngSha256": "da0e6d2610d75d10c9f77383a31daab99c83dadf9bea6c140bde01a63be462af",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "U6TLR",
@@ -2731,7 +3165,9 @@
       "pngSha256": "6277c0637867c2f10e494edae036a661d8e219a9ab649435e371522f707c99ff",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "Sizxn",
@@ -2747,7 +3183,9 @@
       "pngSha256": "fad1433793d996042fe290a525fee42bb04ec22b7d0bc87c58cdb95a18576335",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "nMfbp",
@@ -2763,7 +3201,9 @@
       "pngSha256": "b6c6bcedaf63b6d0489fe7b64fd5ceff2597408f9b8ea13f73c3128a739a363c",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "U8r6vF",
@@ -2779,7 +3219,11 @@
       "pngSha256": "f24c953ec4854a14926fccc68b57ee97c29355be8187057d7acd535cee6f71f2",
       "scaleX": 2.0,
       "scaleY": 2.0351493848857647,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "ZavY5",
@@ -2795,7 +3239,9 @@
       "pngSha256": "5f57fa298dca3e5b412a88362549398cad9477a312125107d056ea268844ae3e",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "kyWF8",
@@ -2811,7 +3257,9 @@
       "pngSha256": "b2f54b8de076318aa50e86e7c67ad47404ca8fc438816c246d4c3cdf600f61da",
       "scaleX": 2.0,
       "scaleY": 2.056872037914692,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "XalAH",
@@ -2827,7 +3275,9 @@
       "pngSha256": "b4c6e3c64e899b2f9657787e0120c2fa685f877811daa904916640548c1a736c",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "iWYPL",
@@ -2843,7 +3293,11 @@
       "pngSha256": "6e9e792f9f70336541c7c64cd278887aa3f5f9a1db1491f51a922dd9d084d8d1",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [
+        "0x2304"
+      ],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "wC1Sd",
@@ -2859,7 +3313,9 @@
       "pngSha256": "153bd8de145ee8fb41a19dbd3c07de8cf17dd1f67d32cf0b9a9c738f81531ab1",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "eWOxf",
@@ -2875,7 +3331,9 @@
       "pngSha256": "c5988f1de760d3b69371593f7abbc526d272759655da972ff2b2048331083f8b",
       "scaleX": 2.0,
       "scaleY": 2.003401360544218,
-      "sizeCapped": true
+      "sizeCapped": true,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "n27mE",
@@ -2891,7 +3349,9 @@
       "pngSha256": "81fd7fe57e911bcfb586324719bc1f2edb7866c8f6b625377a01e0eb8118eb99",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "iI7Fo",
@@ -2907,7 +3367,9 @@
       "pngSha256": "12fdd4ad75dc19cd9af6780beef4fe7c694eeab0549356151327b372da7163ea",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "settings ba089 \u2014 Settings only"
     },
     {
       "id": "t5OS8c",
@@ -2923,7 +3385,9 @@
       "pngSha256": "7f0297816b510fe8d928db726393b28f4f6aad713874a73a20c6b03b31977b94",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "shared a4395cbb — full shell and exact shared icon adapter \u2014 sidebar width and status primitives"
     },
     {
       "id": "wDyFh",
@@ -2939,7 +3403,9 @@
       "pngSha256": "64d69e93883e20b5ae2ce91dcb1f4bf5cf344d09f860642a5b97ba97a2969879",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "shared a4395cbb — full shell and exact shared icon adapter \u2014 sidebar width and status primitives"
     },
     {
       "id": "IbsZT",
@@ -2955,7 +3421,9 @@
       "pngSha256": "0ed5ada0527c66fe3405f3b40bbe75aa21f19e68ad757338e85b8cdb1c8ad8c9",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "shared a4395cbb — full shell and exact shared icon adapter \u2014 sidebar width and status primitives"
     },
     {
       "id": "IFqhi",
@@ -2971,7 +3439,9 @@
       "pngSha256": "e1450d232be4950211b43bd94f90204914fdefe0b9318f1f7f7f953f03148b73",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "shared a4395cbb — full shell and exact shared icon adapter \u2014 sidebar width and status primitives"
     },
     {
       "id": "pg6Nc",
@@ -2987,7 +3457,9 @@
       "pngSha256": "5917d50ea9a77af52eadd1f2b3ab69a72407814924b9132e36f2064c1ed6a184",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Git 565 \u2014 GitHub list width"
     },
     {
       "id": "ZhYVg",
@@ -3003,7 +3475,9 @@
       "pngSha256": "2be5411397a2a0e93e9bd9f3527f2aa93673826962bca5695640e6b1ba37a3e1",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Git 565 \u2014 GitHub list width"
     },
     {
       "id": "Gg8yJ",
@@ -3019,7 +3493,9 @@
       "pngSha256": "380dc9a8e1ac13999ab15a30b2e3a0513f4ba9a45bcd245dff02b4a3abbfdfd4",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Git 565 \u2014 GitHub list width"
     },
     {
       "id": "gW5PQ",
@@ -3035,7 +3511,9 @@
       "pngSha256": "c9107b65bf1c146d147a932a75a044bb8e9103a400db9d72c16a768bf78b049d",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Git 565 \u2014 GitHub list width"
     },
     {
       "id": "CEQfL",
@@ -3051,7 +3529,9 @@
       "pngSha256": "595af3ec1b8d7dc584f4c5cd4aa7eda7fd2a79f0f7085c2e3feb55725835dcd9",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Git 565 \u2014 GitHub list width"
     },
     {
       "id": "vETJh",
@@ -3067,7 +3547,9 @@
       "pngSha256": "b3d1dc99c3d4d58ec9645b0a4d63005d72c93c2f440a44cbb45082ae39461a0e",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "Git 565 \u2014 GitHub list width"
     },
     {
       "id": "pwW2r",
@@ -3083,7 +3565,9 @@
       "pngSha256": "449ef86946cf802343bc900c1512ce836ca67bbfb164f6e6ebac04a70f185606",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445 \u2014 empty Inbox"
     },
     {
       "id": "DZts9",
@@ -3099,7 +3583,13 @@
       "pngSha256": "eaced117de81bcee56d05055dc9a541ca804180d093dbee024d7587bd67a4b8e",
       "scaleX": 2.0,
       "scaleY": 2.0,
-      "sizeCapped": false
+      "sizeCapped": false,
+      "textGlyphFallbacks": [],
+      "implementationOwner": "tasks 445 \u2014 empty Inbox"
     }
-  ]
+  ],
+  "htmlExport": "../font-audit/all-frames.html",
+  "htmlSha256": "da069d4a5a96f394e68098a4a262a10d517e2a03d29d59102ee7fcd02dacc757",
+  "iconMap": "../font-audit/icon-map.json",
+  "textStyles": "../font-audit/text-instances.json"
 }

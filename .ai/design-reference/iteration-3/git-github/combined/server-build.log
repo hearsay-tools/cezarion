@@ -1,0 +1,17 @@
+
+> build:server
+> npm run build -w @wjarka/cezarion
+
+
+> @wjarka/cezarion@0.12.2 prebuild
+> node scripts/sync-readme.mjs
+
+
+> @wjarka/cezarion@0.12.2 build
+> tsc
+
+
+> @wjarka/cezarion@0.12.2 postbuild
+> node scripts/inline-contract.mjs
+
+inline-contract ok — contract bundled with declarations, 56 file(s) repointed
