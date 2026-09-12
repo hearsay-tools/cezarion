@@ -1141,7 +1141,9 @@ export function TasksOverviewRoute() {
   // provider wraps it instead, so the chips deep in the table and the cards read their status
   // from context and nothing in between has to relay it.
   const projectId = useReferenceProjectId()
-  const projects = useProjects()
+  // The scope gate already owns registry loading. Retrying its failed query when this
+  // child mounts would make the gate unmount us, then mount/retry forever offline.
+  const projects = useProjects({ retryOnMount: false })
   const projectName = projects.data?.projects?.find((project) => project.id === projectId)?.name
   const referenceRequests = React.useMemo(
     () =>
