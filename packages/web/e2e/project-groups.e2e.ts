@@ -258,7 +258,7 @@ describe('the grouped multi-project sidebar', () => {
 
     // The inactive project's name opens its scoped tasks. Entering Alpha lights its Git
     // row and collapses the boot group (no stored pin), so only Alpha claims the URL.
-    browser.click('[data-slot="project-group"][data-project="e2e-alpha"] a[aria-label="Open e2e alpha"]')
+    browser.click(`${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/')}"]`)
     browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/')}'`)
     browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav') !== null`)
     expect(hrefs(ALPHA.id)).toEqual(expectedNavHrefs(ALPHA.id))

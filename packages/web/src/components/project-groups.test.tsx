@@ -177,6 +177,14 @@ describe('ProjectGroups', () => {
     expect(within(nav).getByRole('link', { current: 'page' }).textContent).toBe('Tasks')
   })
 
+  it('folds an expanded group when its project name is clicked again', async () => {
+    serve({ '/api/v1/p/cezar/runs': [] })
+    renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
+    await waitFor(() => expect(header('cezar').getAttribute('aria-expanded')).toBe('true'))
+    fireEvent.click(screen.getByRole('link', { name: 'Open cezar' }))
+    await waitFor(() => expect(header('cezar').getAttribute('aria-expanded')).toBe('false'))
+  })
+
   it('unfolds a collapsed group when its project name is clicked', async () => {
     storeCollapsed({ shop: true })
     serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
@@ -192,9 +200,9 @@ describe('ProjectGroups', () => {
     serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/plain/runs': [] })
     renderGroups([project(), project({ id: 'plain', name: 'plain', forge: undefined })])
     expect(screen.getByRole('link', { name: 'GitHub' }).getAttribute('href')).toBe('/p/cezar/github')
-    fireEvent.click(screen.getByRole('link', { name: 'Open plain' }))
+    fireEvent.click(within(group('plain')).getByRole('link', { name: 'Tasks' }))
     await screen.findByRole('navigation', { name: 'plain navigation' })
-    expect(screen.queryByRole('link', { name: 'GitHub' })).toBeNull()
+    expect(within(group('plain')).queryByRole('link', { name: 'GitHub' })).toBeNull()
   })
 
   it.each([true, false])('preserves the automations capability gate (%s) when switching projects', async (automations) => {
@@ -202,7 +210,7 @@ describe('ProjectGroups', () => {
     serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
     renderGroups([project(), project({ id: 'shop', name: 'shop' })], '/p/cezar/', { automations })
     for (const id of ['cezar', 'shop']) {
-      fireEvent.click(screen.getByRole('link', { name: `Open ${id}` }))
+      fireEvent.click(within(group(id)).getByRole('link', { name: 'Tasks' }))
       const nav = await screen.findByRole('navigation', { name: `${id} navigation` })
       const link = within(nav).queryByRole('link', { name: 'Automations' })
       if (automations) expect(link?.getAttribute('href')).toBe(`/p/${id}/automations`)

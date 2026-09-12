@@ -251,7 +251,7 @@ function ProjectGroup({
         <button type="button" onClick={() => onToggle(project.id)} aria-expanded={!collapsed} aria-controls={bodyId}
           aria-label={`Toggle ${project.name}`} data-slot="project-group-header" className="absolute inset-0 rounded-md hover:bg-muted/80" />
         {collapsed ? <FolderIcon className="pointer-events-none relative size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" /> : <FolderOpenIcon className="pointer-events-none relative size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />}
-        <Link to={scopeTo(project.id, '/')} onClick={() => { onNavigate?.(); if (collapsed) onToggle(project.id) }} className="pointer-events-auto relative min-w-0 flex-1 truncate" aria-label={`Open ${project.name}`}>{project.name}</Link>
+        <Link to={scopeTo(project.id, '/')} onClick={() => { onNavigate?.(); onToggle(project.id) }} className="pointer-events-auto relative min-w-0 flex-1 truncate" aria-label={`Open ${project.name}`}>{project.name}</Link>
         {project.branch ? <span data-slot="project-branch" className="pointer-events-none relative max-w-[40%] shrink-0 truncate font-['IBM_Plex_Mono'] text-[10px] leading-[14px] font-normal text-soft-foreground">{project.branch}</span> : null}
         {waiting ? (
           <span
