@@ -334,6 +334,24 @@ describe('sidebar wiring', () => {
     expect(repoChip()).toBeNull()
   })
 
+  it('keeps Inbox and Automations inside the only project card', async () => {
+    serve({
+      '/api/v1/health': {
+        ...HEALTH,
+        capabilities: { ...HEALTH.capabilities, followups: true, automations: true },
+      },
+      '/api/v1/todos': TODOS,
+      '/api/v1/projects': { projects: [{ ...PROJECT, forge: 'github' }], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
+      '/api/v1/runs': [],
+    })
+    renderShell()
+    await waitFor(() => expect(document.querySelector('[data-slot="project-group"][data-project="cezar"]')).not.toBeNull())
+    expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull()
+    const cezar = within(document.querySelector('[data-slot="project-group"][data-project="cezar"]') as HTMLElement)
+    expect(cezar.getByRole('link', { name: 'Inbox' }).getAttribute('href')).toBe('/p/cezar/inbox')
+    expect(cezar.getByRole('link', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
+  })
+
   it('keeps Inbox and Automations inside project groups, not as workspace links', async () => {
     serve({
       '/api/v1/health': {
