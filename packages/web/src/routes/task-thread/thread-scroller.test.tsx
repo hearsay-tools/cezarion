@@ -96,6 +96,32 @@ describe('useThreadScroll — outside a shell scroller (jsdom, tests, storybook-
     ])
   })
 
+  it('keeps jump-to-latest intent when refreshing history remounts the transcript', async () => {
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, {
+      clientHeight: { value: 400 },
+      scrollHeight: { value: 1_000 },
+    })
+    scroller.scrollTo = vi.fn()
+    const content = document.createElement('div')
+    scroller.append(content)
+    saveThreadScroll('refreshing-run', { top: 120, atBottom: false })
+    let refreshed!: () => void
+    const refresh = new Promise<void>((resolve) => { refreshed = resolve })
+    const before = renderHook(() => useThreadScroll('refreshing-run', { onJumpToLatest: () => refresh }))
+    act(() => before.result.current.attachContent(content))
+    expect(scroller.scrollTop).toBe(120)
+    act(() => before.result.current.jumpToLatest())
+    before.unmount()
+    const after = renderHook(() => useThreadScroll('refreshing-run'))
+    act(() => after.result.current.attachContent(content))
+    expect(scroller.scrollTop).toBe(600)
+    await act(async () => { refreshed(); await refresh })
+    after.unmount()
+    scroller.remove()
+  })
+
   it('attaches without a [data-slot=main] ancestor and stays inert', () => {
     const { result } = renderHook(() => useThreadScroll('r1'))
     const el = document.createElement('div')
