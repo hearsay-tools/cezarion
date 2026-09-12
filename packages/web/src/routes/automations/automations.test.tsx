@@ -54,6 +54,17 @@ it('shows recent execution activity on the automation list without enabling it',
   expect(requests.some((path) => path.endsWith('/enable'))).toBe(false)
 })
 
+it('opens a started task from the inline log on the existing task route', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => json(String(input).includes('/automation-log')
+    ? { records: [{ seq: 1, ts: '2026-09-11T12:00:00Z', automationId: 'a1', result: 'started', runId: 'run-42' }] }
+    : { automations: [automation], available: true, scheduler: { state: 'idle' } })))
+  const client = createQueryClient()
+  client.setQueryData(queryKeys.health, { capabilities: { automations: true } })
+  render(<QueryClientProvider client={client}><MemoryRouter><AutomationsRoute /></MemoryRouter></QueryClientProvider>)
+  const link = await screen.findByRole('link', { name: 'Open task' })
+  expect(link.getAttribute('href')).toBe('/tasks/run-42')
+})
+
 it.each(['list', 'new', 'edit', 'log'] as const)('keeps %s gated when automations are off', async (mode) => {
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
   const client = createQueryClient()

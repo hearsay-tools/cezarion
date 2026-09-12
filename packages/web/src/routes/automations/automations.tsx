@@ -160,7 +160,7 @@ function AutomationLog({ automationId, automationName, inline = false, showName 
           {record.reason && <p className="mt-2 text-sm text-muted-foreground">{record.reason}</p>}
           {(record.githubUrl || record.runId) && <div className="mt-3 flex flex-wrap gap-3 text-sm">
             {record.githubUrl && <a className="underline underline-offset-4" href={record.githubUrl} target="_blank" rel="noreferrer">{record.githubTitle ?? `GitHub #${record.githubNumber ?? ''}`}</a>}
-            {record.runId && <Link className="underline underline-offset-4" to={`/runs/${record.runId}`}>Open task</Link>}
+            {record.runId && <Link className="underline underline-offset-4" to={`/tasks/${record.runId}`}>Open task</Link>}
           </div>}
         </li>)}
       </ol>
