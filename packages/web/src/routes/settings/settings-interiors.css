@@ -93,7 +93,7 @@
 .settings-panel .settings-toggle-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
 .settings-panel .settings-toggle-field h2 { font-size: 13px; font-weight: 400; }
 .settings-panel .settings-toggle-field + .settings-toggle-field { margin-top: -8px; }
-.settings-panel .settings-toggle-field label span { display: none; }
+.settings-panel .settings-toggle-field label > span { display: none; }
 .settings-panel .settings-toggle-field label { flex-shrink: 0; }
 .settings-panel .settings-form-actions { display: flex; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--border); padding-top: 20px; }
 .settings-panel [data-slot=accounts-tabs] { gap: 8px; }
