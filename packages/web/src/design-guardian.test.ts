@@ -81,11 +81,13 @@ const RULES: Rule[] = [
     pattern: /\b(?:border-action(?!-foreground)|(?:selection:)?bg-action(?!-foreground))(?:\/(?:\[[^\]]+\]|[\w.-]+))?/g,
     applies: styleSources,
     // These are the deliberate gold surfaces: shared action buttons, the mobile create action,
-    // the inline Save action, and decorative gold points in the sparse twinkle backdrop.
+    // the inline Save action, the confirmed task-commit View changes link action,
+    // and decorative gold points in the sparse twinkle backdrop.
     allowed: (rel) =>
       rel === 'src/components/ui/button.tsx' ||
       rel === 'src/routes/tasks-overview.tsx' ||
       rel === 'src/routes/task-thread/thread-items.tsx' ||
+      rel === 'src/routes/task-git/commit-list.tsx' ||
       rel === 'src/components/centered-state.tsx' ||
       rel === 'src/styles/index.css',
   },

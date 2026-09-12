@@ -350,7 +350,7 @@ describe('TaskQuickList', () => {
 
       // Everything the row paints, in reading order: reference, name, diff, unread marker. No
       // age — the reference took that slot.
-      expect(rowsIn('Recent')).toEqual(['#775implementing comment threads across the whole thread view+59514 −12160'])
+      expect(rowsIn('Recent')).toEqual(['#775implementing comment threads across the whole thread view+59,514 −12,160'])
     })
 
     it('gives the collapsed variant tile the same floor', () => {
