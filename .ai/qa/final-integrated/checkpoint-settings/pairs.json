@@ -1,0 +1,261 @@
+{
+  "designSourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+  "sourceCommit": "9f6c1cd0998d5336a5a336277d56319a955fcbcf",
+  "sourceSha256": "36daa7bdd5e5cad2018b31dca510e770646427437d96e017cc7163aa3c3c434a",
+  "indexSha256": "4536c04fb85599c5d5dff2ab40789f590c38581d050a3359afd160202d07d934",
+  "servedIndexSha256": "4536c04fb85599c5d5dff2ab40789f590c38581d050a3359afd160202d07d934",
+  "pairs": [
+    {
+      "id": "w1inBF",
+      "name": "S03. Project settings / Agent config · Desktop light",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/w1inBF.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/checkpoint-settings/browser/w1inBF.png",
+      "designPngSha256": "9437e35a91687e763e344fd426e56b1663bd3b71ab04f0fca74d1b97ecdfceef",
+      "browserPngSha256": "3162cf766fe0b53303a1d876b864f27fc2e1dd73dbd8e6e1ca816d57e90f33ff",
+      "sourceCommit": "9f6c1cd0998d5336a5a336277d56319a955fcbcf",
+      "sourceSha256": "36daa7bdd5e5cad2018b31dca510e770646427437d96e017cc7163aa3c3c434a",
+      "indexSha256": "4536c04fb85599c5d5dff2ab40789f590c38581d050a3359afd160202d07d934",
+      "viewport": {
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2
+      },
+      "theme": "light",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44786/p/fixture-repo-v2/settings/agent-config",
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2,
+        "theme": "light",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Actual Claude project .mcp.json editor selected. Agent selector, scope/precedence/effect and file browser retained; These remain a visible departure from the reference’s three-file row.",
+      "acceptance": "Captured for comparison; not a pixel-parity pass."
+    },
+    {
+      "id": "XLiCf",
+      "name": "S12. Global settings / Agent accounts · Desktop light",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/XLiCf.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/checkpoint-settings/browser/XLiCf.png",
+      "designPngSha256": "0455bc6cea47d9a44f5e0cabe4d06757375874e07ea57924ecd24780558893ba",
+      "browserPngSha256": "8d688c4223b053f07246761586f377cb3115570d4f9fa38f86b882c60f653dfb",
+      "sourceCommit": "9f6c1cd0998d5336a5a336277d56319a955fcbcf",
+      "sourceSha256": "36daa7bdd5e5cad2018b31dca510e770646427437d96e017cc7163aa3c3c434a",
+      "indexSha256": "4536c04fb85599c5d5dff2ab40789f590c38581d050a3359afd160202d07d934",
+      "viewport": {
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2
+      },
+      "theme": "light",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44786/settings/global/accounts",
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2,
+        "theme": "light",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "accountProvider": "codex",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Synthetic installation/login status only, documented in mock-proof.json. Actual account tabs/defaults/details/auth flows retained; no invented authentication-progress state or credential fields.",
+      "acceptance": "Captured for comparison; not a pixel-parity pass."
+    },
+    {
+      "id": "v9iCdT",
+      "name": "S03. Project settings / Agent config · Desktop dark",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/v9iCdT.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/checkpoint-settings/browser/v9iCdT.png",
+      "designPngSha256": "780ae78dcf5d2facf8b8714bf85324c9fd429932bfc62a58c26d044e51d749ce",
+      "browserPngSha256": "de336250a40c2d26f11cf556e095979a30250712f35d063b7bf680284c72f9e2",
+      "sourceCommit": "9f6c1cd0998d5336a5a336277d56319a955fcbcf",
+      "sourceSha256": "36daa7bdd5e5cad2018b31dca510e770646427437d96e017cc7163aa3c3c434a",
+      "indexSha256": "4536c04fb85599c5d5dff2ab40789f590c38581d050a3359afd160202d07d934",
+      "viewport": {
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2
+      },
+      "theme": "dark",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44786/p/fixture-repo-v2/settings/agent-config",
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2,
+        "theme": "dark",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Actual Claude project .mcp.json editor selected. Agent selector, scope/precedence/effect and file browser retained; These remain a visible departure from the reference’s three-file row.",
+      "acceptance": "Captured for comparison; not a pixel-parity pass."
+    },
+    {
+      "id": "XvWFg",
+      "name": "S12. Global settings / Agent accounts · Desktop dark",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/XvWFg.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/checkpoint-settings/browser/XvWFg.png",
+      "designPngSha256": "d132e07069cfe8eeefc9b9bcca6365dc619a9e550b83cc858108070cdb0ddd1a",
+      "browserPngSha256": "0bc28f5a384978e4692d45d1c60aff6113d417443a7ee72015aaf5171b40145b",
+      "sourceCommit": "9f6c1cd0998d5336a5a336277d56319a955fcbcf",
+      "sourceSha256": "36daa7bdd5e5cad2018b31dca510e770646427437d96e017cc7163aa3c3c434a",
+      "indexSha256": "4536c04fb85599c5d5dff2ab40789f590c38581d050a3359afd160202d07d934",
+      "viewport": {
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2
+      },
+      "theme": "dark",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44786/settings/global/accounts",
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2,
+        "theme": "dark",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "accountProvider": "codex",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Synthetic installation/login status only, documented in mock-proof.json. Actual account tabs/defaults/details/auth flows retained; no invented authentication-progress state or credential fields.",
+      "acceptance": "Captured for comparison; not a pixel-parity pass."
+    },
+    {
+      "id": "f7OdkB",
+      "name": "S03. Project settings / Agent config · Mobile light",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/f7OdkB.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/checkpoint-settings/browser/f7OdkB.png",
+      "designPngSha256": "c0c884b888be93c4f66ae37087db4791ca7bd46473c8aa8ee61bf2f6203e5f74",
+      "browserPngSha256": "cf22f386422718282fb0805bf62126f407681d687a991e0ca71f0178a70916b2",
+      "sourceCommit": "9f6c1cd0998d5336a5a336277d56319a955fcbcf",
+      "sourceSha256": "36daa7bdd5e5cad2018b31dca510e770646427437d96e017cc7163aa3c3c434a",
+      "indexSha256": "4536c04fb85599c5d5dff2ab40789f590c38581d050a3359afd160202d07d934",
+      "viewport": {
+        "width": 402,
+        "height": 1002,
+        "dpr": 2
+      },
+      "theme": "light",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44786/p/fixture-repo-v2/settings/agent-config",
+        "width": 402,
+        "height": 1002,
+        "dpr": 2,
+        "theme": "light",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Actual Claude project .mcp.json editor selected. Agent selector, scope/precedence/effect and file browser retained; These remain a visible departure from the reference’s three-file row.",
+      "acceptance": "Captured for comparison; not a pixel-parity pass."
+    },
+    {
+      "id": "giEbe",
+      "name": "S12. Global settings / Agent accounts · Mobile light",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/giEbe.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/checkpoint-settings/browser/giEbe.png",
+      "designPngSha256": "0b2eaef417bc002bbf98cd13fd8c03064b67aa0e6bead174096a2f21ab9edaf4",
+      "browserPngSha256": "5eeb04cd646c0a85d6ac4b21cae4858368159aacd47af7b3c5b394feacacc307",
+      "sourceCommit": "9f6c1cd0998d5336a5a336277d56319a955fcbcf",
+      "sourceSha256": "36daa7bdd5e5cad2018b31dca510e770646427437d96e017cc7163aa3c3c434a",
+      "indexSha256": "4536c04fb85599c5d5dff2ab40789f590c38581d050a3359afd160202d07d934",
+      "viewport": {
+        "width": 402,
+        "height": 1404,
+        "dpr": 2
+      },
+      "theme": "light",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44786/settings/global/accounts",
+        "width": 402,
+        "height": 1404,
+        "dpr": 2,
+        "theme": "light",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "accountProvider": "codex",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Synthetic installation/login status only, documented in mock-proof.json. Actual account tabs/defaults/details/auth flows retained; no invented authentication-progress state or credential fields.",
+      "acceptance": "Captured for comparison; not a pixel-parity pass."
+    },
+    {
+      "id": "Sizxn",
+      "name": "S03. Project settings / Agent config · Mobile dark",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/Sizxn.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/checkpoint-settings/browser/Sizxn.png",
+      "designPngSha256": "fad1433793d996042fe290a525fee42bb04ec22b7d0bc87c58cdb95a18576335",
+      "browserPngSha256": "ff80f6c5c7b3d2feba287b87c78272b6565e368a5a85d7c03b24b42ca0fa6c06",
+      "sourceCommit": "9f6c1cd0998d5336a5a336277d56319a955fcbcf",
+      "sourceSha256": "36daa7bdd5e5cad2018b31dca510e770646427437d96e017cc7163aa3c3c434a",
+      "indexSha256": "4536c04fb85599c5d5dff2ab40789f590c38581d050a3359afd160202d07d934",
+      "viewport": {
+        "width": 402,
+        "height": 1002,
+        "dpr": 2
+      },
+      "theme": "dark",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44786/p/fixture-repo-v2/settings/agent-config",
+        "width": 402,
+        "height": 1002,
+        "dpr": 2,
+        "theme": "dark",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Actual Claude project .mcp.json editor selected. Agent selector, scope/precedence/effect and file browser retained; These remain a visible departure from the reference’s three-file row.",
+      "acceptance": "Captured for comparison; not a pixel-parity pass."
+    },
+    {
+      "id": "XalAH",
+      "name": "S12. Global settings / Agent accounts · Mobile dark",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/XalAH.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/checkpoint-settings/browser/XalAH.png",
+      "designPngSha256": "b4c6e3c64e899b2f9657787e0120c2fa685f877811daa904916640548c1a736c",
+      "browserPngSha256": "3c0bb3bd7423dceb7903b446ada496f650f4ef920d193f1afdfed9d29da5562b",
+      "sourceCommit": "9f6c1cd0998d5336a5a336277d56319a955fcbcf",
+      "sourceSha256": "36daa7bdd5e5cad2018b31dca510e770646427437d96e017cc7163aa3c3c434a",
+      "indexSha256": "4536c04fb85599c5d5dff2ab40789f590c38581d050a3359afd160202d07d934",
+      "viewport": {
+        "width": 402,
+        "height": 1404,
+        "dpr": 2
+      },
+      "theme": "dark",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44786/settings/global/accounts",
+        "width": 402,
+        "height": 1404,
+        "dpr": 2,
+        "theme": "dark",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "accountProvider": "codex",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Synthetic installation/login status only, documented in mock-proof.json. Actual account tabs/defaults/details/auth flows retained; no invented authentication-progress state or credential fields.",
+      "acceptance": "Captured for comparison; not a pixel-parity pass."
+    }
+  ]
+}

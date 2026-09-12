@@ -1,0 +1,51 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts touch-targets.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+ ❯ |e2e| touch-targets.e2e.ts (24 tests | 4 failed) 86571ms
+     × compact/light/360: edge taps, keyboard, drafts, pins and pending controls 4895ms
+     × compact/dark/360: edge taps, keyboard, drafts, pins and pending controls 4289ms
+     × ultra/light/360: edge taps, keyboard, drafts, pins and pending controls 4754ms
+     × ultra/dark/360: edge taps, keyboard, drafts, pins and pending controls 4220ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/light/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark/360: edge taps, keyboard, drafts, pins and pending controls
+AssertionError: [data-slot="wb-yaml-toggle"]: expected 38.5 to be greater than or equal to 44
+ ❯ region touch-targets.e2e.ts:138:37
+    136|   if (mobile) {
+    137|     expect(result.width, selector).toBeGreaterThanOrEqual(44)
+    138|     expect(result.height, selector).toBeGreaterThanOrEqual(44)
+       |                                     ^
+    139|   }
+    140|   expect(result.hits, selector).toEqual([true, true, true, true, true])
+ ❯ tapEdge touch-targets.e2e.ts:145:20
+ ❯ touch-targets.e2e.ts:317:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark/360: edge taps, keyboard, drafts, pins and pending controls
+AssertionError: [data-slot="wb-yaml-toggle"]: expected 33 to be greater than or equal to 44
+ ❯ region touch-targets.e2e.ts:138:37
+    136|   if (mobile) {
+    137|     expect(result.width, selector).toBeGreaterThanOrEqual(44)
+    138|     expect(result.height, selector).toBeGreaterThanOrEqual(44)
+       |                                     ^
+    139|   }
+    140|   expect(result.hits, selector).toEqual([true, true, true, true, true])
+ ❯ tapEdge touch-targets.e2e.ts:145:20
+ ❯ touch-targets.e2e.ts:317:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 20 passed (24)
+   Start at  14:47:48
+   Duration  86.79s (transform 31ms, setup 0ms, import 46ms, tests 86.57s, environment 0ms)
+

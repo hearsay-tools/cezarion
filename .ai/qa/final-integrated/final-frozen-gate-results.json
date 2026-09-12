@@ -1,0 +1,27 @@
+[
+  {
+    "command": "npm run typecheck",
+    "exitCode": 0,
+    "seconds": 9.5
+  },
+  {
+    "command": "npm test -- --maxWorkers=4",
+    "exitCode": 0,
+    "seconds": 299.7
+  },
+  {
+    "command": "npm run test:unit",
+    "exitCode": 0,
+    "seconds": 28.5
+  },
+  {
+    "command": "npm run build",
+    "exitCode": 0,
+    "seconds": 5.0
+  },
+  {
+    "command": "npm run test:package",
+    "exitCode": 0,
+    "seconds": 12.0
+  }
+]

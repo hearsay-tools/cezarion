@@ -1,0 +1,43 @@
+
+> test:package
+> npm run test:package -w @wjarka/cezarion
+
+
+> @wjarka/cezarion@0.12.2 test:package
+> node --import tsx --test test/e2e/*.test.ts
+
+✔ the cezarion alias imports a specifier the exports map exposes (80.314996ms)
+✔ built worker CLI runs without cez on PATH; headless provision stays local and exits cleanly (3428.14322ms)
+✔ installed CLI completes owned-worker lifecycle with lost spawn reply and one slot (6791.905706ms)
+✔ the build repointed something — otherwise every assertion below is vacuous (94.889025ms)
+✔ the bundled contract ships declarations, not just JavaScript (67.350874ms)
+✔ a repointed declaration type-checks with skipLibCheck OFF (1037.644108ms)
+✔ the published contract and workflow share the document vocabulary at runtime (218.698227ms)
+✔ the release tarball installs and runs the dry-run CLI workflow (11467.234663ms)
+✔ dry-run publish stamps every manifest, pins each sibling exact, and emits the result JSON (2419.481167ms)
+✔ OIDC without a token still forces a snapshot dry run (1158.084257ms)
+✔ a missing NPM token forces a dry run instead of failing the job (1173.20275ms)
+✔ the nightly channel stamps a dated version and publishes under the nightly tag (1154.500877ms)
+✔ a nightly re-run stamps the attempt onto the version so it cannot collide (1269.336094ms)
+✔ the same schedule event without the channel request publishes nothing (63.167607ms)
+✔ a non-publishable event exits 0 without touching the manifests (66.97163ms)
+✔ a patch bump stamps every manifest, keeps the caret ranges, and emits the version (2418.914011ms)
+✔ a private package is stamped but never published (812.657334ms)
+✔ the existing bump publishes the committed version verbatim (1174.279684ms)
+✔ a missing NPM token forces a dry run instead of publishing (1116.275648ms)
+✔ OIDC without a token does not force a dry run and does not pass --provenance (250.642353ms)
+✔ a token publish from Actions still passes --provenance (257.157907ms)
+✔ a mid-set collision skips the already-published name and publishes the rest (326.52383ms)
+✔ a publish failure that is not already on the registry still aborts (331.960757ms)
+✔ an unknown bump exits non-zero without touching the manifests (77.29207ms)
+✔ an existing publication with different source is verified before finalization (203.133195ms)
+✔ an existing publication with missing source is verified before finalization (210.525638ms)
+✔ an existing publication with matching source is verified before finalization (417.865995ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11608.941496

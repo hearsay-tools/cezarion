@@ -1,0 +1,13 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts agents-dock.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  16:09:27
+   Duration  7.46s (transform 24ms, setup 0ms, import 38ms, tests 7.24s, environment 0ms)
+

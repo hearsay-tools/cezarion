@@ -1,0 +1,13 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts progressive-history.e2e.ts agents-dock.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+   Start at  16:32:36
+   Duration  17.43s (transform 52ms, setup 0ms, import 88ms, tests 17.04s, environment 0ms)
+

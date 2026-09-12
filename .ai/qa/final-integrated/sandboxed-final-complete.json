@@ -1,0 +1,31 @@
+{
+  "gates": [
+    {
+      "command": "npm run typecheck",
+      "exitCode": 0,
+      "seconds": 8.5
+    },
+    {
+      "command": "npm test -- --maxWorkers=4",
+      "exitCode": 0,
+      "seconds": 303.3
+    },
+    {
+      "command": "npm run test:unit",
+      "exitCode": 0,
+      "seconds": 30.2
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "seconds": 4.9
+    },
+    {
+      "command": "npm run test:package",
+      "exitCode": 0,
+      "seconds": 11.9
+    }
+  ],
+  "browserExitCode": 1,
+  "completedAt": 1789223434.2666237
+}

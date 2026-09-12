@@ -1,0 +1,479 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts quick-list.e2e.ts mobile-task-controls.e2e.ts worker-relationships.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+ ❯ |e2e| mobile-task-controls.e2e.ts (16 tests | 1 failed) 39894ms
+     × retains the query while page and drawer selection stay independent across resize 26045ms
+ ❯ |e2e| worker-relationships.e2e.ts (8 tests | 1 failed) 13092ms
+   × shows unavailable parent with retry, successful empty state, worker wait and preserved human ask attribution 1831ms
+ ❯ |e2e| quick-list.e2e.ts (27 tests | 6 failed) 63684ms
+     × keeps selected and hovered sidebar task metadata AA-readable 25976ms
+     × switches to the archived view, and back 25175ms
+     × allocates two contained title lines without crowding desktop metadata or actions 262ms
+     × opens the task from a row click 6ms
+     × keeps task metadata AA-readable on normal and hovered rows with visible title focus 265ms
+     × renames a task inline from its row — the hover pencil, committed by Enter, stored for real 13ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > retains the query while page and drawer selection stay independent across resize
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="mobile-nav-drawer"]') === null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ mobile-task-controls.e2e.ts:107:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session controls-3012154 wait --fn document.querySelector('[data-slot="mobile-nav-drawer"]') === null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ mobile-task-controls.e2e.ts:107:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3012600, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > task quick-list > keeps selected and hovered sidebar task metadata AA-readable
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="quick-list"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ quick-list.e2e.ts:267:15
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-3015338 wait --fn document.querySelector('[data-slot="quick-list"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ quick-list.e2e.ts:267:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3015900, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > task quick-list > switches to the archived view, and back
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="quick-list"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ quick-list.e2e.ts:362:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-3015338 wait --fn document.querySelector('[data-slot="quick-list"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ quick-list.e2e.ts:362:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3019905, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > allocates two contained title lines without crowding desktop metadata or actions
+Error: cezar e2e: agent-browser eval (() => {
+            const rows = [...document.querySelectorAll('[data-slot="task-table-row"]')]
+            const firstCell = rows[0].querySelector('td[data-column-id="task"]')
+            const firstLink = firstCell.querySelector('a[href*="/tasks/"]')
+            const secondCell = rows[1].querySelector('td[data-column-id="task"]')
+            const secondLink = secondCell.querySelector('a[href*="/tasks/"]')
+            const suffix = 'documentation outcome'
+            const textNode = firstLink.firstChild
+            const range = document.createRange()
+            range.setStart(textNode, textNode.textContent.indexOf(suffix))
+            range.setEnd(textNode, textNode.textContent.length)
+            const suffixRect = range.getBoundingClientRect()
+            const firstRect = firstLink.getBoundingClientRect()
+            const secondRect = secondLink.getBoundingClientRect()
+            const secondCellRect = secondCell.getBoundingClientRect()
+            const lineHeight = Number.parseFloat(getComputedStyle(firstLink).lineHeight)
+            const workflow = rows[0].querySelector('td[data-column-id="workflow"]')
+            workflow.textContent = 'workflow-name-that-is-deliberately-too-long-for-its-column'
+            const status = rows[0].querySelector('td[data-column-id="status"]')
+            const statusPill = status.querySelector('[data-slot="pill"]')
+            statusPill.textContent = 'waiting on workers'
+            const reference = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"] td[data-column-id="reference"]')
+            const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
+            const referenceLabel = [...referenceChip.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
+            referenceLabel.textContent = '#1234'
+            const referenceGlyph = referenceChip.querySelector('svg')
+            referenceChip.insertBefore(referenceGlyph.cloneNode(true), referenceChip.firstChild)
+            const diff = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"] td[data-column-id="diff"]')
+            const [adds, dels] = diff.querySelectorAll('[data-slot="diff-stat"] > span')
+            adds.textContent = '+12k'
+            dels.textContent = '−1k'
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('title', '+12345 −1234 across 37 files')
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('aria-label', '+12345 −1234 across 37 files')
+            const workflowHeader = document.querySelector('th[data-column-id="workflow"]')
+            const workflowHeaderButton = workflowHeader.querySelector('button')
+            const metricsRow = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"]')
+            const cpuCell = metricsRow.querySelector('td[data-column-id="cpu"]')
+            const cpuMetric = cpuCell.firstElementChild
+            cpuMetric.textContent = '100%'
+            cpuMetric.setAttribute('title', '100%')
+            cpuMetric.setAttribute('aria-label', '100%')
+            const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
+            const secondary = secondaryIds.map((id) => {
+              const cell = metricsRow.querySelector('td[data-column-id="' + id + '"]')
+              const style = getComputedStyle(cell)
+              const rect = cell.getBoundingClientRect()
+              const target = cell.firstElementChild || cell
+              const targetRect = target.getBoundingClientRect()
+              const targetStyle = getComputedStyle(target)
+              const range = document.createRange()
+              range.selectNodeContents(target)
+              const content = range.getBoundingClientRect()
+              const textFits = content.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && content.right <= rect.right - Number.parseFloat(style.paddingRight) + 1
+              const clipsOverflow = targetStyle.overflowX === 'hidden' && target.scrollWidth > target.clientWidth
+              return {
+                id,
+                width: rect.width,
+                contained: targetRect.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && targetRect.right <= rect.right - Number.parseFloat(style.paddingRight) + 1 && (textFits || clipsOverflow),
+                right: targetRect.right,
+                clipsOverflow,
+                label: cell.textContent,
+                accessible: cell.firstElementChild?.getAttribute('aria-label') || cell.getAttribute('aria-label'),
+                title: cell.firstElementChild?.getAttribute('title') || cell.getAttribute('title'),
+              }
+            })
+            const memoryCell = metricsRow.querySelector('td[data-column-id="memory"]')
+            const workflowStyle = getComputedStyle(workflow)
+            const diffStyle = getComputedStyle(diff)
+            const diffRect = diff.getBoundingClientRect()
+            const diffRange = document.createRange()
+            diffRange.selectNodeContents(diff.querySelector('[data-slot="diff-stat"]'))
+            const diffTextRect = diffRange.getBoundingClientRect()
+            const referenceContentRect = referenceChip.getBoundingClientRect()
+            const workflowHeaderStyle = getComputedStyle(workflowHeader)
+            const workflowHeaderRect = workflowHeader.getBoundingClientRect()
+            const workflowHeaderContentRight = workflowHeaderRect.right - Number.parseFloat(workflowHeaderStyle.paddingRight)
+            const workflowHeaderChildren = [...workflowHeaderButton.children].map((child) => child.getBoundingClientRect())
+            return {
+              taskWidth: firstCell.getBoundingClientRect().width,
+              titleWidth: firstRect.width,
+              workflowWidth: workflow.getBoundingClientRect().width,
+              lineCount: Math.round(firstRect.height / lineHeight),
+              suffixRect: { left: suffixRect.left, right: suffixRect.right, bottom: suffixRect.bottom },
+              titleRect: { left: firstRect.left, right: firstRect.right, bottom: firstRect.bottom },
+              suffixVisible: suffixRect.left >= firstRect.left - 1 && suffixRect.right <= firstRect.right + 1 && suffixRect.bottom <= firstRect.bottom + 1,
+              unbrokenContained: getComputedStyle(secondLink).overflow === 'hidden' && secondLink.scrollWidth > secondLink.clientWidth && secondRect.right <= secondCellRect.right + 1,
+              workflowContained: workflowStyle.overflow === 'hidden' && workflow.scrollWidth > workflow.clientWidth,
+              statusContained: status.scrollWidth <= status.clientWidth + 1 && statusPill.getBoundingClientRect().right <= status.getBoundingClientRect().right + 1,
+              referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1 && [...referenceChip.querySelectorAll('svg')].every((glyph) => glyph.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1),
+              referenceLabel: referenceChip.textContent,
+              diffContained: diffTextRect.left >= diffRect.left + Number.parseFloat(diffStyle.paddingLeft) - 1 && diffTextRect.right <= diffRect.right - Number.parseFloat(diffStyle.paddingRight) + 1 && diffTextRect.right < referenceContentRect.left,
+              workflowHeaderContained: workflowHeaderChildren.every((rect) => rect.left >= workflowHeaderRect.left + Number.parseFloat(workflowHeaderStyle.paddingLeft) - 1 && rect.right <= workflowHeaderContentRight + 1),
+              memoryLabel: memoryCell.textContent,
+              metricsBeforeNeighbors: secondary.slice(0, -1).every((metric, index) => {
+                const nextCell = metricsRow.querySelector('td[data-column-id="' + secondaryIds[index + 1] + '"]')
+                const nextStyle = getComputedStyle(nextCell)
+                return metric.right < nextCell.getBoundingClientRect().left + Number.parseFloat(nextStyle.paddingLeft)
+              }),
+              secondary,
+              pageContained: document.documentElement.scrollWidth <= window.innerWidth,
+            }
+          })() failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ quick-list.e2e.ts:452:33
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-3015338 eval (() => {
+            const rows = [...document.querySelectorAll('[data-slot="task-table-row"]')]
+            const firstCell = rows[0].querySelector('td[data-column-id="task"]')
+            const firstLink = firstCell.querySelector('a[href*="/tasks/"]')
+            const secondCell = rows[1].querySelector('td[data-column-id="task"]')
+            const secondLink = secondCell.querySelector('a[href*="/tasks/"]')
+            const suffix = 'documentation outcome'
+            const textNode = firstLink.firstChild
+            const range = document.createRange()
+            range.setStart(textNode, textNode.textContent.indexOf(suffix))
+            range.setEnd(textNode, textNode.textContent.length)
+            const suffixRect = range.getBoundingClientRect()
+            const firstRect = firstLink.getBoundingClientRect()
+            const secondRect = secondLink.getBoundingClientRect()
+            const secondCellRect = secondCell.getBoundingClientRect()
+            const lineHeight = Number.parseFloat(getComputedStyle(firstLink).lineHeight)
+            const workflow = rows[0].querySelector('td[data-column-id="workflow"]')
+            workflow.textContent = 'workflow-name-that-is-deliberately-too-long-for-its-column'
+            const status = rows[0].querySelector('td[data-column-id="status"]')
+            const statusPill = status.querySelector('[data-slot="pill"]')
+            statusPill.textContent = 'waiting on workers'
+            const reference = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"] td[data-column-id="reference"]')
+            const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
+            const referenceLabel = [...referenceChip.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
+            referenceLabel.textContent = '#1234'
+            const referenceGlyph = referenceChip.querySelector('svg')
+            referenceChip.insertBefore(referenceGlyph.cloneNode(true), referenceChip.firstChild)
+            const diff = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"] td[data-column-id="diff"]')
+            const [adds, dels] = diff.querySelectorAll('[data-slot="diff-stat"] > span')
+            adds.textContent = '+12k'
+            dels.textContent = '−1k'
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('title', '+12345 −1234 across 37 files')
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('aria-label', '+12345 −1234 across 37 files')
+            const workflowHeader = document.querySelector('th[data-column-id="workflow"]')
+            const workflowHeaderButton = workflowHeader.querySelector('button')
+            const metricsRow = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"]')
+            const cpuCell = metricsRow.querySelector('td[data-column-id="cpu"]')
+            const cpuMetric = cpuCell.firstElementChild
+            cpuMetric.textContent = '100%'
+            cpuMetric.setAttribute('title', '100%')
+            cpuMetric.setAttribute('aria-label', '100%')
+            const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
+            const secondary = secondaryIds.map((id) => {
+              const cell = metricsRow.querySelector('td[data-column-id="' + id + '"]')
+              const style = getComputedStyle(cell)
+              const rect = cell.getBoundingClientRect()
+              const target = cell.firstElementChild || cell
+              const targetRect = target.getBoundingClientRect()
+              const targetStyle = getComputedStyle(target)
+              const range = document.createRange()
+              range.selectNodeContents(target)
+              const content = range.getBoundingClientRect()
+              const textFits = content.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && content.right <= rect.right - Number.parseFloat(style.paddingRight) + 1
+              const clipsOverflow = targetStyle.overflowX === 'hidden' && target.scrollWidth > target.clientWidth
+              return {
+                id,
+                width: rect.width,
+                contained: targetRect.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && targetRect.right <= rect.right - Number.parseFloat(style.paddingRight) + 1 && (textFits || clipsOverflow),
+                right: targetRect.right,
+                clipsOverflow,
+                label: cell.textContent,
+                accessible: cell.firstElementChild?.getAttribute('aria-label') || cell.getAttribute('aria-label'),
+                title: cell.firstElementChild?.getAttribute('title') || cell.getAttribute('title'),
+              }
+            })
+            const memoryCell = metricsRow.querySelector('td[data-column-id="memory"]')
+            const workflowStyle = getComputedStyle(workflow)
+            const diffStyle = getComputedStyle(diff)
+            const diffRect = diff.getBoundingClientRect()
+            const diffRange = document.createRange()
+            diffRange.selectNodeContents(diff.querySelector('[data-slot="diff-stat"]'))
+            const diffTextRect = diffRange.getBoundingClientRect()
+            const referenceContentRect = referenceChip.getBoundingClientRect()
+            const workflowHeaderStyle = getComputedStyle(workflowHeader)
+            const workflowHeaderRect = workflowHeader.getBoundingClientRect()
+            const workflowHeaderContentRight = workflowHeaderRect.right - Number.parseFloat(workflowHeaderStyle.paddingRight)
+            const workflowHeaderChildren = [...workflowHeaderButton.children].map((child) => child.getBoundingClientRect())
+            return {
+              taskWidth: firstCell.getBoundingClientRect().width,
+              titleWidth: firstRect.width,
+              workflowWidth: workflow.getBoundingClientRect().width,
+              lineCount: Math.round(firstRect.height / lineHeight),
+              suffixRect: { left: suffixRect.left, right: suffixRect.right, bottom: suffixRect.bottom },
+              titleRect: { left: firstRect.left, right: firstRect.right, bottom: firstRect.bottom },
+              suffixVisible: suffixRect.left >= firstRect.left - 1 && suffixRect.right <= firstRect.right + 1 && suffixRect.bottom <= firstRect.bottom + 1,
+              unbrokenContained: getComputedStyle(secondLink).overflow === 'hidden' && secondLink.scrollWidth > secondLink.clientWidth && secondRect.right <= secondCellRect.right + 1,
+              workflowContained: workflowStyle.overflow === 'hidden' && workflow.scrollWidth > workflow.clientWidth,
+              statusContained: status.scrollWidth <= status.clientWidth + 1 && statusPill.getBoundingClientRect().right <= status.getBoundingClientRect().right + 1,
+              referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1 && [...referenceChip.querySelectorAll('svg')].every((glyph) => glyph.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1),
+              referenceLabel: referenceChip.textContent,
+              diffContained: diffTextRect.left >= diffRect.left + Number.parseFloat(diffStyle.paddingLeft) - 1 && diffTextRect.right <= diffRect.right - Number.parseFloat(diffStyle.paddingRight) + 1 && diffTextRect.right < referenceContentRect.left,
+              workflowHeaderContained: workflowHeaderChildren.every((rect) => rect.left >= workflowHeaderRect.left + Number.parseFloat(workflowHeaderStyle.paddingLeft) - 1 && rect.right <= workflowHeaderContentRight + 1),
+              memoryLabel: memoryCell.textContent,
+              metricsBeforeNeighbors: secondary.slice(0, -1).every((metric, index) => {
+                const nextCell = metricsRow.querySelector('td[data-column-id="' + secondaryIds[index + 1] + '"]')
+                const nextStyle = getComputedStyle(nextCell)
+                return metric.right < nextCell.getBoundingClientRect().left + Number.parseFloat(nextStyle.paddingLeft)
+              }),
+              secondary,
+              pageContained: document.documentElement.scrollWidth <= window.innerWidth,
+            }
+          })() --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ quick-list.e2e.ts:452:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'cloneNode\')\n    at <anonymous>:27:55\n    at <anonymous>:102:13"}\n', '' ], pid: 3022318, stdout: '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'cloneNode\')\n    at <anonymous>:27:55\n    at <anonymous>:102:13"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > opens the task from a row click
+Error: cezar e2e: agent-browser click [data-slot="task-table-row"][data-run-id="fix-done"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ quick-list.e2e.ts:713:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-3015338 click [data-slot="task-table-row"][data-run-id="fix-done"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ quick-list.e2e.ts:713:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-done\"]\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 3022343, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-done\"]\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > keeps task metadata AA-readable on normal and hovered rows with visible title focus
+Error: cezar e2e: agent-browser eval (() => {
+    const element = document.querySelector("[data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums")
+    if (!element) throw new Error('contrast target not found: ' + "[data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums")
+    const parse = (value) => {
+      const channels = value.match(/[\d.]+/g)?.map(Number) ?? []
+      if (channels.length < 3) throw new Error('unsupported computed color: ' + value)
+      return { r: channels[0], g: channels[1], b: channels[2], a: channels[3] ?? 1 }
+    }
+    const over = (front, back) => {
+      const alpha = front.a + back.a * (1 - front.a)
+      return {
+        r: (front.r * front.a + back.r * back.a * (1 - front.a)) / alpha,
+        g: (front.g * front.a + back.g * back.a * (1 - front.a)) / alpha,
+        b: (front.b * front.a + back.b * back.a * (1 - front.a)) / alpha,
+        a: alpha,
+      }
+    }
+    const layers = []
+    // An offset outline sits outside the control's fill, on the parent surface.
+    for (let node = element; node; node = node.parentElement) {
+      const layer = parse(getComputedStyle(node).backgroundColor)
+      if (layer.a > 0) layers.push(layer)
+      if (layer.a === 1) break
+    }
+    let background = { r: 255, g: 255, b: 255, a: 1 }
+    for (const layer of layers.reverse()) background = over(layer, background)
+    const foregroundValue = getComputedStyle(element).getPropertyValue("color")
+    const foreground = over(parse(foregroundValue), background)
+    const luminance = (color) => {
+      const channel = (value) => {
+        const srgb = value / 255
+        return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+    }
+    const light = Math.max(luminance(foreground), luminance(background))
+    const dark = Math.min(luminance(foreground), luminance(background))
+    return {
+      foreground: foregroundValue,
+      background: 'rgb(' + [background.r, background.g, background.b].map(Math.round).join(', ') + ')',
+      ratio: (light + 0.05) / (dark + 0.05),
+    }
+  })() failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ quick-list.e2e.ts:733:32
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-3015338 eval (() => {
+    const element = document.querySelector("[data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums")
+    if (!element) throw new Error('contrast target not found: ' + "[data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums")
+    const parse = (value) => {
+      const channels = value.match(/[\d.]+/g)?.map(Number) ?? []
+      if (channels.length < 3) throw new Error('unsupported computed color: ' + value)
+      return { r: channels[0], g: channels[1], b: channels[2], a: channels[3] ?? 1 }
+    }
+    const over = (front, back) => {
+      const alpha = front.a + back.a * (1 - front.a)
+      return {
+        r: (front.r * front.a + back.r * back.a * (1 - front.a)) / alpha,
+        g: (front.g * front.a + back.g * back.a * (1 - front.a)) / alpha,
+        b: (front.b * front.a + back.b * back.a * (1 - front.a)) / alpha,
+        a: alpha,
+      }
+    }
+    const layers = []
+    // An offset outline sits outside the control's fill, on the parent surface.
+    for (let node = element; node; node = node.parentElement) {
+      const layer = parse(getComputedStyle(node).backgroundColor)
+      if (layer.a > 0) layers.push(layer)
+      if (layer.a === 1) break
+    }
+    let background = { r: 255, g: 255, b: 255, a: 1 }
+    for (const layer of layers.reverse()) background = over(layer, background)
+    const foregroundValue = getComputedStyle(element).getPropertyValue("color")
+    const foreground = over(parse(foregroundValue), background)
+    const luminance = (color) => {
+      const channel = (value) => {
+        const srgb = value / 255
+        return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+    }
+    const light = Math.max(luminance(foreground), luminance(background))
+    const dark = Math.min(luminance(foreground), luminance(background))
+    return {
+      foreground: foregroundValue,
+      background: 'rgb(' + [background.r, background.g, background.b].map(Math.round).join(', ') + ')',
+      ratio: (light + 0.05) / (dark + 0.05),
+    }
+  })() --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ quick-list.e2e.ts:733:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Evaluation error: Error: contrast target not found: [data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums\n    at <anonymous>:3:25\n    at <anonymous>:43:5"}\n', '' ], pid: 3022348, stdout: '{"success":false,"data":null,"error":"Evaluation error: Error: contrast target not found: [data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums\n    at <anonymous>:3:25\n    at <anonymous>:43:5"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > renames a task inline from its row — the hover pencil, committed by Enter, stored for real
+Error: cezar e2e: agent-browser hover [data-slot="task-table-row"][data-run-id="fix-failed"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.hover agent-browser.ts:287:10
+ ❯ quick-list.e2e.ts:765:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-3015338 hover [data-slot="task-table-row"][data-run-id="fix-failed"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.hover agent-browser.ts:287:10
+ ❯ quick-list.e2e.ts:765:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-failed\"]\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 3022351, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-failed\"]\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+ FAIL  |e2e| worker-relationships.e2e.ts > shows unavailable parent with retry, successful empty state, worker wait and preserved human ask attribution
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ worker-relationships.e2e.ts:142:68
+    140|   const projectAsk = `[data-slot="task-row"][data-run-id="${askId}"]`
+    141|   browser.waitForFunction(`document.querySelector('${projectAsk} [aria…
+    142|   expect(browser.count(`[data-bucket="Needs you"] ${projectAsk}`)).toB…
+       |                                                                    ^
+    143|   expect(browser.count(`${projectAsk} [aria-label="waiting on workers"…
+    144|   browser.goto(`${base}/tasks`)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/8]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  8 failed | 43 passed (51)
+   Start at  14:51:19
+   Duration  117.21s (transform 83ms, setup 0ms, import 128ms, tests 116.67s, environment 0ms)
+

@@ -1,0 +1,76 @@
+{
+  "id": "eOnqx",
+  "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/browser/eOnqx.png",
+  "facts": {
+    "url": "http://127.0.0.1:44786/p/fixture-repo-v2/github/issues/219",
+    "text": "Cezarion\ncezar\nGitHub\nGitHub\nexample/fixture \u00b7 Not synced yet\nIssues \u00b7 1\nPull requests \u00b7 2\nSet up automations\nRefresh\nLabels\nAssignees\nAssigned to me\n\nProject boards unavailable.\n\nClear filters\nKeep resource columns readable\n#219\nfixture-user\n2h\n2\n\u2713\nenhancement\nBack to the list\n\n#219\n\u00b7\nissue\n\u00b7\nopened by fixture-user\n\u00b7\n2h ago\n\u00b7\n2\n\u00b7\nopen on GitHub\n\nKeep resource columns readable\nenhancement\n\u2713 checks passing\n\nRefine session navigation and preserve keyboard controls.\n\nValidation\nDesktop and mobile checked\nLight and dark themes verified\nACTIVITY \u00b7 1 COMMENT\nR\nreviewer\n2h\napproved\n\nThe session navigation looks good. Please retain all keyboard shortcuts.\n\nHand this to the agent\nInstructions for the agent\nTemplate\nWorkflow\nworkflow\nSkills \u00b7 select one or more\nskills\ncodex \u00b7 Default\nDefault\nauto\nAccount\nDefault\nPersonal account\n\nIssue number and link remain attached to the task. Edit the prompt before starting. Cmd/Ctrl+Enter submits; Enter adds a new line.\n\nOpen in GitHub\nRun agent on this issue\nCtrl+\u21b5\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+    "overflow": false,
+    "handToAgent": true,
+    "prompt": "Fix GitHub issue #219: Keep resource columns readable\n\nhttps://github.com/example/fixture/issues/219"
+  },
+  "fixture": {
+    "available": true,
+    "repo": "example/fixture",
+    "issues": [
+      {
+        "kind": "issue",
+        "number": 219,
+        "title": "Keep resource columns readable",
+        "author": "fixture-user",
+        "createdAt": "2026-09-12T12:10:32.246Z",
+        "labels": [
+          "enhancement"
+        ],
+        "body": "Refine session navigation and preserve keyboard controls.\n\n## Validation\n- Desktop and mobile checked\n- Light and dark themes verified",
+        "url": "https://github.com/example/fixture/issues/219",
+        "comments": 2,
+        "isDraft": false,
+        "additions": 42,
+        "deletions": 9,
+        "checks": "passing"
+      }
+    ],
+    "prs": [
+      {
+        "kind": "pr",
+        "number": 218,
+        "title": "Improve task session controls",
+        "author": "fixture-user",
+        "createdAt": "2026-09-12T12:10:32.246Z",
+        "labels": [
+          "enhancement"
+        ],
+        "body": "Refine session navigation and preserve keyboard controls.\n\n## Validation\n- Desktop and mobile checked\n- Light and dark themes verified",
+        "url": "https://github.com/example/fixture/pull/218",
+        "comments": 2,
+        "isDraft": false,
+        "additions": 42,
+        "deletions": 9,
+        "checks": "passing"
+      },
+      {
+        "kind": "pr",
+        "number": 220,
+        "title": "Review compact task layout",
+        "author": "fixture-user",
+        "createdAt": "2026-09-12T12:10:32.246Z",
+        "labels": [
+          "enhancement"
+        ],
+        "body": "Refine session navigation and preserve keyboard controls.\n\n## Validation\n- Desktop and mobile checked\n- Light and dark themes verified",
+        "url": "https://github.com/example/fixture/pull/218",
+        "comments": 2,
+        "isDraft": true,
+        "additions": 42,
+        "deletions": 9,
+        "checks": "passing"
+      }
+    ],
+    "viewerLogin": "fixture-user",
+    "labelColors": {
+      "enhancement": "7c3aed"
+    }
+  },
+  "disclosure": "Final corrected mobile filter stack and corrected fixture issue URL. Source pinned by release-frozen-manifest.json; no run launched.",
+  "independentlyInspected": true
+}

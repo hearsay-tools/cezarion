@@ -1,0 +1,1 @@
+window.WebSocket=class extends EventTarget{close(){} send(){}};

@@ -1,0 +1,192 @@
+
+> test
+> vitest run --maxWorkers=1 packages/web/src/routes.test.tsx -t with the registry errored and no health either
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f
+
+ ❯ |web| src/routes.test.tsx (129 tests | 1 failed | 128 skipped) 4106ms
+     ↓ labels /p/cezar/ as Tasks
+     ↓ labels /new as New task
+     ↓ labels /p/cezar/compare/group-1 as Compare
+     ↓ labels /p/cezar/git as Git
+     ↓ labels /p/cezar/git/commits/abc123 as Git
+     ↓ labels /p/cezar/github/issues/543 as GitHub
+     ↓ labels /p/cezar/skills as Skills
+     ↓ labels /p/cezar/inbox as Inbox
+     ↓ labels /p/cezar/workflows/quick-task as Workflows
+     ↓ labels /p/cezar/settings/agents as Settings
+     ↓ labels /settings/global/projects as Settings
+     ↓ returns the task lookup key for /p/cezar/tasks/run-1
+     ↓ returns the task lookup key for /p/cezar/tasks/run-1/changes
+     ↓ returns the task lookup key for /p/cezar/tasks/run-1/files
+     ↓ returns the task lookup key for /p/cezar/tasks/run-1/commits/abc123
+     ↓ does not invent a label for an unknown route
+     ↓ opens shared workspace diagnostics without forcing a project redirect
+     ↓ /p/boot/ → tasks
+     ↓ /p/boot/new → new
+     ↓ /p/boot/tasks/abc123 → task-thread
+     ↓ /p/boot/tasks/abc123/changes → task-changes
+     ↓ /p/boot/tasks/abc123/files → task-files
+     ↓ /p/boot/compare/grp-1 → compare
+     ↓ /p/boot/git → repo-git
+     ↓ /p/boot/git/commits → repo-git
+     ↓ /p/boot/git/commits/abc1234 → repo-git
+     ↓ /p/boot/git/branches → repo-git
+     ↓ /p/boot/github → github
+     ↓ /p/boot/github/prs → github
+     ↓ /p/boot/github/issues/42 → github
+     ↓ /p/boot/github/prs/7 → github
+     ↓ /p/boot/inbox → inbox
+     ↓ /p/boot/workflows → workflows
+     ↓ /p/boot/workflows/ship-it → workflows
+     ↓ /p/boot/skills → skills
+     ↓ /p/boot/settings → settings
+     ↓ /p/boot/settings/agents → settings-agents
+     ↓ /p/boot/settings/agent-config → settings-agent-config
+     ↓ /p/boot/settings/worktrees → settings-worktrees
+     ↓ /p/boot/settings/bookmarklets → settings-bookmarklets
+     ↓ /p/boot/settings/prompt-templates → settings-prompt-templates
+     ↓ a task tab deep link renders the tab, not the thread
+     ↓ /p/boot/nope-404 → the 404 route
+     ↓ /p/boot/tasks → the 404 route
+     ↓ /p/boot/settings/nope → the 404 route
+     ↓ /p/boot/settings/mcp → the 404 route
+     ↓ /p/boot/settings/keyboard → the 404 route
+     ↓ /p/boot/tasks/abc123/nope → the 404 route
+     ↓ /p/boot/compare → the 404 route
+     ↓ the 404 renders a CenteredState with a back-to-tasks action scoped to the project
+     ↓ navigation links generated inside a project carry its prefix
+     ↓ remounts the same page and loads its new scope when the project param changes
+     ↓ /settings/global → settings-global, unscoped
+     ↓ /settings/global/appearance → settings-global-appearance, unscoped
+     ↓ /settings/global/notifications → settings-global-notifications, unscoped
+     ↓ /settings/global/resources → settings-global-resources, unscoped
+     ↓ /settings/global/skills → settings-global-skills, unscoped
+     ↓ /settings/global/projects → settings-global-projects, unscoped
+     ↓ /automations renders the disabled state while the capability is off
+     ↓ /automations/new renders the disabled state while the capability is off
+     ↓ /automations/a-1 renders the disabled state while the capability is off
+     ↓ /automations/a-1/log renders the disabled state while the capability is off
+     ↓ holds every /automations mode on a loading state until health answers
+     ↓ omits the Projects route when single-project mode is active
+     ↓ /p/boot/settings/appearance redirects to the global twin
+     ↓ the legacy flat /settings/appearance lands on the global twin too
+     ↓ /settings/appearance carries query AND hash through BOTH redirect hops
+     ↓ /p/boot/settings/appearance carries query AND hash on the single hop
+     ↓ /p/boot/settings/notifications redirects to the global twin
+     ↓ the legacy flat /settings/notifications lands on the global twin too
+     ↓ /settings/notifications carries query AND hash through BOTH redirect hops
+     ↓ /p/boot/settings/notifications carries query AND hash on the single hop
+     ↓ /p/boot/settings/resources redirects to the global twin
+     ↓ the legacy flat /settings/resources lands on the global twin too
+     ↓ /settings/resources carries query AND hash through BOTH redirect hops
+     ↓ /p/boot/settings/resources carries query AND hash on the single hop
+     ↓ restores the last settled project page from the exact bare root
+     ↓ keeps an explicit legacy deep link even when another location was saved
+     ↓ treats query or hash on / as an explicit boot-project URL
+     ↓ falls back to the boot project for a malformed saved location
+     ↓ falls back to the boot project for a unknown saved location
+     ↓ falls back to the boot project for a missing saved location
+     ↓ restores a registered not-git project
+     ↓ with the registry unavailable, handles a saved location for the boot project
+     ↓ with the registry unavailable, handles a saved location for another project
+     ↓ keeps the quiet resolving surface while bare-root inputs are pending
+     ↓ uses the registry boot project when health fails instead of resolving forever
+     ↓ falls through the default alias when health and registry both fail
+     ↓ / → /p/boot/
+     ↓ /new → /p/boot/new
+     ↓ /tasks/abc123 → /p/boot/tasks/abc123
+     ↓ /tasks/abc123/changes → /p/boot/tasks/abc123/changes
+     ↓ /tasks/abc123/files → /p/boot/tasks/abc123/files
+     ↓ /compare/grp-1 → /p/boot/compare/grp-1
+     ↓ /git → /p/boot/git
+     ↓ /git/commits → /p/boot/git/commits
+     ↓ /git/commits/abc1234 → /p/boot/git/commits/abc1234
+     ↓ /git/branches → /p/boot/git/branches
+     ↓ /github → /p/boot/github
+     ↓ /github/prs → /p/boot/github/prs
+     ↓ /github/issues/42 → /p/boot/github/issues/42
+     ↓ /github/prs/7 → /p/boot/github/prs/7
+     ↓ /inbox → /p/boot/inbox
+     ↓ /workflows → /p/boot/workflows
+     ↓ /workflows/ship-it → /p/boot/workflows/ship-it
+     ↓ /skills → /p/boot/skills
+     ↓ /settings → /p/boot/settings
+     ↓ /settings/agents → /p/boot/settings/agents
+     ↓ /settings/agent-config → /p/boot/settings/agent-config
+     ↓ /settings/worktrees → /p/boot/settings/worktrees
+     ↓ /settings/bookmarklets → /p/boot/settings/bookmarklets
+     ↓ /settings/prompt-templates → /p/boot/settings/prompt-templates
+     ↓ preserves a query byte-for-byte across the redirect
+     ↓ preserves the hash too — /settings/skills through both hops
+     ↓ delivers the full bookmarklet grammar into the composer (spec 011 contract)
+     ↓ renders the quiet resolving state while the boot id is unknown — never a wrong screen
+     ↓ an unknown legacy path still ends at the scoped 404
+     ↓ a bare /p names no project and lands on the boot project home
+     ↓ normalizes /p/default/tasks/x to /p/<boot>/tasks/x
+     ↓ keeps the query while normalizing
+     ↓ normalizes the bare /p/default to the boot project home
+     ↓ a registry error still resolves the alias via health instead of loading forever
+     × with the registry errored and no health either, the alias mounts the scope rather than spin 4103ms
+     ↓ renders the not-registered screen with the registry list
+     ↓ stays honestly resolving while the registry is still loading
+     ↓ prefills the composer from a non-auto deep link
+     ↓ an armed auto=1 link shows the starting surface, never the composer mid-flight
+     ↓ renders an empty composer without params
+     ↓ never prints the launch key anywhere on the page
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/routes.test.tsx > the /p/default alias > with the registry errored and no health either, the alias mounts the scope rather than spin
+AssertionError: expected 'scope-resolving' to be 'tasks' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html[39m
+  [33mstyle[39m=[32m"color-scheme: dark;"[39m
+[36m>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex min-h-full flex-col"[39m
+        [33mdata-route[39m=[32m"scope-resolving"[39m
+      [36m>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"px-4 py-6 text-center text-xs text-soft-foreground"[39m
+        [36m>[39m
+          [0mLoading…[0m
+        [36m</p>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mdata-hash[39m=[32m""[39m
+        [33mdata-pathname[39m=[32m"/p/default"[39m
+        [33mdata-search[39m=[32m""[39m
+        [33mdata-testid[39m=[32m"location"[39m
+      [36m/>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+Expected: "tasks"
+Received: "scope-resolving"
+
+ ❯ timeout src/routes.test.tsx:720:45
+    718|     renderAt('/p/default', { seed: false })
+    719|     // The client retries a 5xx once with ~1 s of backoff before error…
+    720|     await waitFor(() => expect(routeName()).toBe('tasks'), { timeout: …
+       |                                             ^
+    721|     expect(currentPathname()).toBe('/p/default')
+    722|   })
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 128 skipped (129)
+   Start at  13:37:53
+   Duration  8.41s (transform 2.29s, setup 0ms, import 3.34s, tests 4.11s, environment 729ms)
+

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "MFtcY",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/MFtcY-selected-file.png",
+    "facts": {
+      "text": "Improve session navigation\ndone\nquick-task\n\u00b7\ntask-fixture\n\u00b7\n#123\n\u00b7\n+12 \u22123\nIN 42.0k \u00b7 OUT 6.0k\n\u00b7\n$0.42\nclaude \u00b7 auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nVerify\nstep 2 of 2\nOpen file\nWorktree files\n.ai\nsrc\nsession.ts\n62 B\n.gitignore\n13 B\n.mcp.json\n133 B\nAGENTS.md\n58 B\nCLAUDE.md\n58 B\nREADME.md\n70 B\nsrc/session.ts\n62 B\n1\nexport const title = \"Session\";\n2\nexport const keyboard = true;\n3\n\nBrowsing files is read-only. Worktree contents may differ from your main checkout.",
+      "url": "http://127.0.0.1:44786/p/fixture-repo-v2/tasks/10000000-0000-4000-8000-000000000000/files",
+      "overflow": false
+    },
+    "disclosure": "Actual isolated task worktree file, selected through directory/file buttons. Source16 depicts empty selection; this is supplemental selected-state behavior evidence.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "id": "LAKkC",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/LAKkC-selected-file.png",
+    "facts": {
+      "text": "PARENT SESSION\n\nImprove session navigation\ndone\nSession\nChanges\nCommits\nFiles\nParent\nWorkers 1\nVerify\nstep 2 of 2\nOpen file\nWorktree files\n.ai\nsrc\nsession.ts\n62 B\n.gitignore\n13 B\n.mcp.json\n133 B\nAGENTS.md\n58 B\nCLAUDE.md\n58 B\nREADME.md\n70 B\nsrc/session.ts\n62 B\n1\nexport const title = \"Session\";\n2\nexport const keyboard = true;\n3\n\nBrowsing files is read-only. Worktree contents may differ from your main checkout.",
+      "url": "http://127.0.0.1:44786/p/fixture-repo-v2/tasks/10000000-0000-4000-8000-000000000000/files",
+      "overflow": false
+    },
+    "disclosure": "Actual isolated task worktree file, selected through directory/file buttons. Source16 depicts empty selection; this is supplemental selected-state behavior evidence.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "id": "l3f2r3",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/l3f2r3-selected-file.png",
+    "facts": {
+      "text": "Improve session navigation\ndone\nquick-task\n\u00b7\ntask-fixture\n\u00b7\n#123\n\u00b7\n+12 \u22123\nIN 42.0k \u00b7 OUT 6.0k\n\u00b7\n$0.42\nclaude \u00b7 auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nVerify\nstep 2 of 2\nOpen file\nWorktree files\n.ai\nsrc\nsession.ts\n62 B\n.gitignore\n13 B\n.mcp.json\n133 B\nAGENTS.md\n58 B\nCLAUDE.md\n58 B\nREADME.md\n70 B\nsrc/session.ts\n62 B\n1\nexport const title = \"Session\";\n2\nexport const keyboard = true;\n3\n\nBrowsing files is read-only. Worktree contents may differ from your main checkout.",
+      "url": "http://127.0.0.1:44786/p/fixture-repo-v2/tasks/10000000-0000-4000-8000-000000000000/files",
+      "overflow": false
+    },
+    "disclosure": "Actual isolated task worktree file, selected through directory/file buttons. Source16 depicts empty selection; this is supplemental selected-state behavior evidence.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "id": "S1Gdo",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/S1Gdo-selected-file.png",
+    "facts": {
+      "text": "PARENT SESSION\n\nImprove session navigation\ndone\nSession\nChanges\nCommits\nFiles\nParent\nWorkers 1\nVerify\nstep 2 of 2\nOpen file\nWorktree files\n.ai\nsrc\nsession.ts\n62 B\n.gitignore\n13 B\n.mcp.json\n133 B\nAGENTS.md\n58 B\nCLAUDE.md\n58 B\nREADME.md\n70 B\nsrc/session.ts\n62 B\n1\nexport const title = \"Session\";\n2\nexport const keyboard = true;\n3\n\nBrowsing files is read-only. Worktree contents may differ from your main checkout.",
+      "url": "http://127.0.0.1:44786/p/fixture-repo-v2/tasks/10000000-0000-4000-8000-000000000000/files",
+      "overflow": false
+    },
+    "disclosure": "Actual isolated task worktree file, selected through directory/file buttons. Source16 depicts empty selection; this is supplemental selected-state behavior evidence.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  }
+]

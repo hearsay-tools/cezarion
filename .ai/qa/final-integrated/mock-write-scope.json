@@ -1,0 +1,22 @@
+{
+  "recordedAt": "2026-09-12T15:01:50.711649+00:00",
+  "outsideFixtureMutation": true,
+  "affected": [
+    {
+      "path": "/home/agent/projects/cezar/.ai/cezar/runs/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f.handoff.md",
+      "provenFixtureLines": 9,
+      "action": "Removed only exact mock-writer heartbeat lines; legitimate task notes retained.",
+      "beforeSha256": "468560c0212f04ba6f2d74431af985bed5c91077119efba339ef23ff59449e5c",
+      "afterSha256": "0eec0bcf298404a5adec0fe514c0eeca91de1860ee538c3fc02b0a9cad8179d9"
+    },
+    {
+      "path": "/home/agent/projects/cezar/.ai/cezar/runs/9ae05dcc-cc09-405c-9934-ab364076aa21.handoff.md",
+      "provenFixtureLines": 2,
+      "action": "Detected and reported; parent-owned live journal not modified.",
+      "allPredateEarliestOwnObservedMockLine": true
+    }
+  ],
+  "runRecords": "No real runs.json or run NDJSON mutation is established by available evidence. The inspected mock writer directly targets only its handoff and optional todos path; optional todos/args targets are absent from this governed controller environment. No historical filesystem write trace exists, so this is not an exhaustive negative claim.",
+  "isolation": "Final child environments exclude inherited CEZ metadata and receive explicit isolated CEZ_HOME/TMPDIR. Governed controller environment is unchanged.",
+  "removedOnly": "Exact mock heartbeat lines, never legitimate notes or whole task state."
+}

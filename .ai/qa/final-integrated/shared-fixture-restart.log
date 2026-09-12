@@ -1,0 +1,18 @@
+
+  cezar v0.12.2 — /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f
+  branch cez/86a5f50c
+  ✓ claude mock (CEZ_DRY_RUN=1)
+  ✓ codex  codex-cli 0.153.4
+  ✓ opencode 1.18.29
+  ✓ pi     mock (CEZ_DRY_RUN=1)
+  ✓ gh     authenticated
+  ✓ git    git version 2.43.0
+
+  cockpit → http://localhost:53287
+
+  🤖 Make the most of parallel coding with our AI skills
+  open-mercato/skills: reusable, technology-agnostic agent skills for PR
+  creation, code review, CI stabilisation, spec writing & more.
+  cezar already loads them for you — Skills → Refresh in the cockpit gets the latest.
+  To use them outside cezar:  npx skills add open-mercato/skills --skill '*'
+

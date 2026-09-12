@@ -1,0 +1,44 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts github.e2e.ts agents-dock.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+stderr | agents-dock.e2e.ts > the Agents dock against a replayed fan-out > docks both sub-agents with odometer, type badge, activity and tool count
+DOCK_DIAGNOSTIC {"top":135,"height":971,"client":836,"active":"<button type=\"button\" aria-expanded=\"false\" class=\"flex w-full items-center gap-2 px-3.5 text-left text-[13px] py-2\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 13.99993896484375 14\" aria-hidden=\"true\" focusable=\"false\" class=\"size-3.5 shrink-0 text-soft-foreground\" fill=\"currentColor\" stroke=\"none\" data-design-icon=\"bot\"><path d=\"M4.52197 1.76367q-0.14014 0.04102-0.2666 0.16748-0.16748 0.15381-0.17432 0.37256-0.00684 0.21533 0.12647 0.38623 0.1333 0.16748 0.35547 0.22217 0.09912 0.01367 0.98096 0.01367l0.88183 0 0 1.14844-1.42871 0q-1.104 0-1.44922 0.01367-0.3418 0.01367-0.4956 0.05469-0.43408 0.12646-0.74854 0.42041-0.31445 0.29395-0.45459 0.71435-0.07178 0.19824-0.08545 0.39991-0.01367 0.20166-0.01367 0.96045l0 0.93652-0.34863 0q-0.2666 0.01367-0.33155 0.02051-0.06152 0.00684-0.1333 0.04785-0.23584 0.09912-0.32129 0.33838-0.08203 0.23584 0.02735 0.46142 0.04443 0.06836 0.11963 0.14014 0.07861 0.06836 0.15381 0.10596 0.07861 0.03418 0.14013 0.04101 0.06494 0.00684 0.33155 0.02051l0.3623 0 0 1.79102q0.01367 0.16748 0.02734 0.29394 0.09912 0.44775 0.3794 0.78613 0.28027 0.33496 0.70068 0.50245 0.15381 0.05811 0.30762 0.09912 0.12646 0.01367 0.64258 0.02734l3.19238 0 3.19238 0q0.51611-0.01367 0.64258-0.04102 0.5332-0.09912 0.90234-0.46826 0.37256-0.37256 0.48536-0.90576 0.01367-0.12646 0.02734-0.29394l0-1.79102 0.3623 0q0.2666-0.01367 0.32813-0.02051 0.06494-0.00684 0.14014-0.04101 0.07861-0.0376 0.15381-0.10596 0.07861-0.07178 0.11279-0.14014 0.0376-0.07178 0.05127-0.18115 0.04101-0.19824-0.05127-0.36572-0.08887-0.16748-0.28369-0.2666-0.07178-0.02734-0.13672-0.03418-0.06152-0.00684-0.32813-0.02051l-0.34863 0 0-0.93652q0-0.75879-0.01367-0.96045-0.01367-0.20166-0.08545-0.39991-0.14014-0.42041-0.45459-0.71435-0.31445-0.29395-0.74854-0.42041-0.15381-0.04102-0.49902-0.05469-0.3418-0.01367-1.4458-0.01367l-1.42871 0 0-0.92285q0-0.67334 0-0.81348 0-0.14014-0.02734-0.2085-0.08545-0.21191-0.29395-0.3247l-0.09912-0.04102-1.28858-0.01367q-1.2749 0-1.34326 0.01367z m6.23096 3.54102q0.2085 0.11279 0.29395 0.3247 0.02734 0.06836 0.02734 0.38965l0 4.64844-0.05469 0.08545q-0.09912 0.18115-0.2666 0.28027l-0.08545 0.04102-7.33496 0-0.08545-0.04102q-0.16748-0.09912-0.2666-0.28027l-0.05469-0.08545 0-4.63477q0-0.33496 0.02735-0.40332 0.05811-0.12646 0.16748-0.23242 0.11279-0.10596 0.23925-0.1333 0.08545-0.01367 3.68116-0.01367l3.61279 0.01367 0.09912 0.04102z m-5.64307 1.70898q-0.12646 0.02734-0.23925 0.1333-0.10938 0.10596-0.16748 0.23242-0.02734 0.06836-0.02735 0.18116 0 0.11279 0 0.6289l0 0.72803 0.04102 0.08545q0.04443 0.06836 0.12646 0.15381 0.08545 0.08203 0.16065 0.12646 0.07861 0.04102 0.24609 0.04102 0.16748 0 0.24268-0.04102 0.07861-0.04443 0.16064-0.12646 0.08545-0.08545 0.12988-0.15381l0.04102-0.08545 0-0.72803q0-0.51611 0-0.6289 0-0.11279-0.02734-0.18116-0.08545-0.19824-0.27344-0.30078-0.18799-0.10596-0.41358-0.06494z m3.5 0q-0.12646 0.02734-0.23925 0.1333-0.10938 0.10596-0.16748 0.23242-0.02734 0.06836-0.02735 0.18116 0 0.11279 0 0.6289l0 0.72803 0.04102 0.08545q0.04443 0.06836 0.12646 0.15381 0.08545 0.08203 0.16065 0.12646 0.07861 0.04102 0.24609 0.04102 0.16748 0 0.24268-0.04102 0.07861-0.04443 0.16064-0.12646 0.08545-0.08545 0.12988-0.15381l0.04102-0.08545 0-0.72803q0-0.51611 0-0.6289 0-0.11279-0.02734-0.18116-0.08545-0.19824-0.27344-0.30078-0.18799-0.10596-0.41358-0.06494z\"></path></svg><span class=\"shrink-0 font-semibold\">Agents</span><span data-slot=\"agents-count\" class=\"shrink-0 text-muted-foreground tabular-nums\">· 2/2</span><span data-slot=\"agents-current\" class=\"min-w-0 truncate text-muted-foreground\">— Ran long check 34</span><svg width=\"24\" height=\"24\" viewBox=\"0 0 13.99993896484375 14\" aria-hidden=\"true\" focusable=\"false\" class=\"ml-auto size-3.5 shrink-0 text-soft-foreground transition-transform rotate-180\" fill=\"currentColor\" stroke=\"none\" data-design-icon=\"chevron-down\"><path d=\"M3.34619 4.68945q-0.25293 0.08545-0.37939 0.30762-0.04102 0.08545-0.04102 0.25293 0 0.16748 0.04785 0.25977 0.05127 0.08887 1.8628 1.9038 1.81494 1.81152 1.9038 1.8628 0.09229 0.04785 0.25977 0.04785 0.16748 0 0.25635-0.04785 0.09229-0.05127 1.90381-1.8628 1.81494-1.81494 1.86279-1.9038 0.05127-0.09229 0.05127-0.25977 0-0.16748-0.04102-0.25293-0.09912-0.16748-0.28027-0.2666-0.05811-0.02734-0.09912-0.04102-0.04102-0.01367-0.15381-0.01367-0.11279 0-0.15381 0.01367-0.04101 0.01367-0.11279 0.04102-0.09912 0.05811-1.66455 1.62695l-1.56885 1.56543-2.82666-2.81299q-0.31104-0.29395-0.42041-0.37939-0.08545-0.05469-0.19824-0.05469l-0.02735 0q-0.14014 0-0.18115 0.01367z\"></path></svg></button>","rect":{"x":507,"y":643.65625,"width":690,"height":35.5,"top":643.65625,"right":1197,"bottom":679.15625,"left":507}}
+
+ ❯ |e2e| agents-dock.e2e.ts (4 tests | 1 failed) 31934ms
+     × docks both sub-agents with odometer, type badge, activity and tool count 25761ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| agents-dock.e2e.ts > the Agents dock against a replayed fan-out > docks both sub-agents with odometer, type badge, activity and tool count
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="main"]').scrollTop === 0 failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ clickThreadControl agents-dock.e2e.ts:144:13
+ ❯ agents-dock.e2e.ts:161:5
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-agents-dock-3949000 wait --fn document.querySelector('[data-slot="main"]').scrollTop === 0 --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ clickThreadControl agents-dock.e2e.ts:144:13
+ ❯ agents-dock.e2e.ts:161:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3949437, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 35 passed (36)
+   Start at  16:45:08
+   Duration  125.59s (transform 55ms, setup 0ms, import 82ms, tests 125.22s, environment 0ms)
+

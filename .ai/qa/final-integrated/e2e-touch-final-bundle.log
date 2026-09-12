@@ -1,0 +1,181 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts packages/web/e2e/touch-targets.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+ ❯ |e2e| touch-targets.e2e.ts (24 tests | 18 failed) 215363ms
+     × comfortable/light: mobile shell, composer, appearance and workflow targets 955ms
+     × comfortable/light/360: edge taps, keyboard, drafts, pins and pending controls 3741ms
+     × comfortable/light/1440: edge taps, keyboard, drafts, pins and pending controls 27978ms
+     × comfortable/dark: mobile shell, composer, appearance and workflow targets 1009ms
+     × comfortable/dark/360: edge taps, keyboard, drafts, pins and pending controls 3217ms
+     × comfortable/dark/1440: edge taps, keyboard, drafts, pins and pending controls 27550ms
+     × compact/light: mobile shell, composer, appearance and workflow targets 928ms
+     × compact/light/360: edge taps, keyboard, drafts, pins and pending controls 3516ms
+     × compact/light/1440: edge taps, keyboard, drafts, pins and pending controls 28225ms
+     × compact/dark: mobile shell, composer, appearance and workflow targets 907ms
+     × compact/dark/360: edge taps, keyboard, drafts, pins and pending controls 3034ms
+     × compact/dark/1440: edge taps, keyboard, drafts, pins and pending controls 27693ms
+     × ultra/light: mobile shell, composer, appearance and workflow targets 256ms
+     × ultra/light/360: edge taps, keyboard, drafts, pins and pending controls 3865ms
+     × ultra/light/1440: edge taps, keyboard, drafts, pins and pending controls 28241ms
+     × ultra/dark: mobile shell, composer, appearance and workflow targets 294ms
+     × ultra/dark/360: edge taps, keyboard, drafts, pins and pending controls 3713ms
+     × ultra/dark/1440: edge taps, keyboard, drafts, pins and pending controls 27821ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 18 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/light: mobile shell, composer, appearance and workflow targets
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/dark: mobile shell, composer, appearance and workflow targets
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/light: mobile shell, composer, appearance and workflow targets
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark: mobile shell, composer, appearance and workflow targets
+AssertionError: /p/cez-touch-qtrhea/workflows: expected [ { height: 26, …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "height": 26,
++     "name": "Reorder step 1: touch-check",
++     "width": 26,
++   },
++   {
++     "height": 26,
++     "name": "Step 1 actions: touch-check",
++     "width": 26,
++   },
++ ]
+
+ ❯ touch-targets.e2e.ts:206:40
+    204|           appearance(density, theme)
+    205|           if (path.endsWith('/new')) browser.click('[data-slot="execut…
+    206|           expect(smallTargets(), path).toEqual([])
+       |                                        ^
+    207|           expect(overlappingTargets(), path).toEqual([])
+    208|           expect(browser.evaluate('document.documentElement.scrollWidt…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/18]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/light/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/dark/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/light/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark/360: edge taps, keyboard, drafts, pins and pending controls
+Error: cezar e2e: agent-browser eval (() => {
+    const el = document.querySelector("[aria-label=\"Expand composer\"]");
+    el.scrollIntoView({block: 'center', inline: 'center'});
+    const r = ((el) => {
+  const box = el.getBoundingClientRect();
+  if (!el.matches('[aria-label="Open menu"]')) return box;
+  const pseudo = getComputedStyle(el, '::after');
+  if (pseudo.content === 'none' || pseudo.position !== 'absolute') return box;
+  const left = box.left + parseFloat(pseudo.left), top = box.top + parseFloat(pseudo.top);
+  const width = parseFloat(pseudo.width), height = parseFloat(pseudo.height);
+  return { left, top, right: left + width, bottom: top + height, width, height };
+})(el);
+    const cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const points = [[r.left+1,cy], [r.right-1,cy], [cx,r.top+1], [cx,r.bottom-1], [cx,cy]];
+    return {width:r.width, height:r.height, x:r.left+2, y:cy,
+      hits: points.map(([x,y]) => el.contains(document.elementFromPoint(x,y)))};
+  })() failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ region touch-targets.e2e.ts:127:26
+ ❯ tapEdge touch-targets.e2e.ts:145:20
+ ❯ touch-targets.e2e.ts:289:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session touch-2896738 eval (() => {
+    const el = document.querySelector("[aria-label=\"Expand composer\"]");
+    el.scrollIntoView({block: 'center', inline: 'center'});
+    const r = ((el) => {
+  const box = el.getBoundingClientRect();
+  if (!el.matches('[aria-label="Open menu"]')) return box;
+  const pseudo = getComputedStyle(el, '::after');
+  if (pseudo.content === 'none' || pseudo.position !== 'absolute') return box;
+  const left = box.left + parseFloat(pseudo.left), top = box.top + parseFloat(pseudo.top);
+  const width = parseFloat(pseudo.width), height = parseFloat(pseudo.height);
+  return { left, top, right: left + width, bottom: top + height, width, height };
+})(el);
+    const cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const points = [[r.left+1,cy], [r.right-1,cy], [cx,r.top+1], [cx,r.bottom-1], [cx,cy]];
+    return {width:r.width, height:r.height, x:r.left+2, y:cy,
+      hits: points.map(([x,y]) => el.contains(document.elementFromPoint(x,y)))};
+  })() --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ region touch-targets.e2e.ts:127:26
+ ❯ tapEdge touch-targets.e2e.ts:145:20
+ ❯ touch-targets.e2e.ts:289:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'scrollIntoView\')\n    at <anonymous>:3:8\n    at <anonymous>:17:5"}\n', '' ], pid: 2899499, stdout: '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'scrollIntoView\')\n    at <anonymous>:3:8\n    at <anonymous>:17:5"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/18]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/light/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/dark/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/light/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark/1440: edge taps, keyboard, drafts, pins and pending controls
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="wb-step-remove"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ touch-targets.e2e.ts:305:19
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session touch-2896738 wait --fn document.querySelector('[data-slot="wb-step-remove"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ touch-targets.e2e.ts:305:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 2900207, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/18]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light: mobile shell, composer, appearance and workflow targets
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark: mobile shell, composer, appearance and workflow targets
+AssertionError: /p/cez-touch-qtrhea/new: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   [
++     "Open menu",
++     "Add missing tests",
++   ],
++ ]
+
+ ❯ touch-targets.e2e.ts:207:46
+    205|           if (path.endsWith('/new')) browser.click('[data-slot="execut…
+    206|           expect(smallTargets(), path).toEqual([])
+    207|           expect(overlappingTargets(), path).toEqual([])
+       |                                              ^
+    208|           expect(browser.evaluate('document.documentElement.scrollWidt…
+    209|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/18]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  18 failed | 6 passed (24)
+   Start at  14:38:22
+   Duration  215.62s (transform 35ms, setup 0ms, import 53ms, tests 215.36s, environment 0ms)
+

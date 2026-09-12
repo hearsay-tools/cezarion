@@ -1,0 +1,66 @@
+
+> pretypecheck
+> npm run build:server
+
+
+> build:server
+> npm run build -w @wjarka/cezarion
+
+
+> @wjarka/cezarion@0.12.2 prebuild
+> node scripts/sync-readme.mjs
+
+
+> @wjarka/cezarion@0.12.2 build
+> tsc
+
+
+> @wjarka/cezarion@0.12.2 postbuild
+> node scripts/inline-contract.mjs
+
+inline-contract ok — contract bundled with declarations, 56 file(s) repointed
+
+> typecheck
+> npm run typecheck:contract && npm run typecheck:client && npm run typecheck:server && npm run typecheck:web
+
+
+> typecheck:contract
+> npm run typecheck -w @open-mercato/cezar-contract
+
+
+> @open-mercato/cezar-contract@0.12.2 typecheck
+> tsc --noEmit
+
+
+> typecheck:client
+> npm run typecheck -w @open-mercato/cezar-api-client
+
+
+> @open-mercato/cezar-api-client@0.12.2 typecheck
+> tsc --noEmit -p tsconfig.test.json
+
+
+> typecheck:server
+> npm run typecheck -w @wjarka/cezarion
+
+
+> @wjarka/cezarion@0.12.2 typecheck
+> tsc --noEmit -p tsconfig.test.json
+
+
+> typecheck:web
+> npm run typecheck -w @open-mercato/cezar-web
+
+
+> @open-mercato/cezar-web@0.12.2 typecheck
+> tsc --noEmit
+
+e2e/quick-list.e2e.ts(7,31): error TS2300: Duplicate identifier 'beforeEach'.
+e2e/quick-list.e2e.ts(7,43): error TS2300: Duplicate identifier 'beforeEach'.
+npm error Lifecycle script `typecheck` failed with error:
+npm error code 1
+npm error path /home/agent/projects/cezar/.ai/cezar/worktrees/***/packages/web
+npm error workspace @open-mercato/cezar-web@0.12.2
+npm error location /home/agent/projects/cezar/.ai/cezar/worktrees/***/packages/web
+npm error command failed
+npm error command sh -c tsc --noEmit

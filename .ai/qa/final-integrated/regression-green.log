@@ -1,0 +1,22 @@
+
+> test
+> vitest run --maxWorkers=2 packages/web/src/routes.test.tsx packages/web/src/routes/automations packages/web/src/routes/tasks-overview.test.tsx
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f
+
+ ✓ |web| src/routes/tasks-overview.test.tsx (75 tests) 8981ms
+     ✓ opens the keyboard actions menu and uses the existing archive handler  536ms
+ ✓ |web| src/routes.test.tsx (129 tests) 7988ms
+     ✓ with the registry unavailable, handles a saved location for the boot project  1012ms
+     ✓ with the registry unavailable, handles a saved location for another project  1014ms
+     ✓ falls through the default alias when health and registry both fail  2029ms
+     ✓ a registry error still resolves the alias via health instead of loading forever  1016ms
+     ✓ with the registry errored and no health either, the alias mounts the scope rather than spin  1018ms
+ ✓ |web| src/routes/automations/automations.test.tsx (11 tests) 401ms
+
+ Test Files  3 passed (3)
+      Tests  215 passed (215)
+   Start at  13:50:24
+   Duration  12.85s (transform 3.95s, setup 0ms, import 4.62s, tests 17.37s, environment 1.75s)
+

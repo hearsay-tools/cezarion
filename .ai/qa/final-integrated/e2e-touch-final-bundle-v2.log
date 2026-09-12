@@ -1,0 +1,136 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts touch-targets.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+ ❯ |e2e| touch-targets.e2e.ts (24 tests | 18 failed) 72235ms
+     × comfortable/light: mobile shell, composer, appearance and workflow targets 895ms
+     × comfortable/light/360: edge taps, keyboard, drafts, pins and pending controls 4409ms
+     × comfortable/light/1440: edge taps, keyboard, drafts, pins and pending controls 3897ms
+     × comfortable/dark: mobile shell, composer, appearance and workflow targets 900ms
+     × comfortable/dark/360: edge taps, keyboard, drafts, pins and pending controls 3630ms
+     × comfortable/dark/1440: edge taps, keyboard, drafts, pins and pending controls 3268ms
+     × compact/light: mobile shell, composer, appearance and workflow targets 966ms
+     × compact/light/360: edge taps, keyboard, drafts, pins and pending controls 4414ms
+     × compact/light/1440: edge taps, keyboard, drafts, pins and pending controls 3960ms
+     × compact/dark: mobile shell, composer, appearance and workflow targets 957ms
+     × compact/dark/360: edge taps, keyboard, drafts, pins and pending controls 3794ms
+     × compact/dark/1440: edge taps, keyboard, drafts, pins and pending controls 3499ms
+     × ultra/light: mobile shell, composer, appearance and workflow targets 276ms
+     × ultra/light/360: edge taps, keyboard, drafts, pins and pending controls 4445ms
+     × ultra/light/1440: edge taps, keyboard, drafts, pins and pending controls 4032ms
+     × ultra/dark: mobile shell, composer, appearance and workflow targets 270ms
+     × ultra/dark/360: edge taps, keyboard, drafts, pins and pending controls 3866ms
+     × ultra/dark/1440: edge taps, keyboard, drafts, pins and pending controls 3498ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 18 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/light: mobile shell, composer, appearance and workflow targets
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/dark: mobile shell, composer, appearance and workflow targets
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/light: mobile shell, composer, appearance and workflow targets
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark: mobile shell, composer, appearance and workflow targets
+AssertionError: /p/cez-touch-ovctav/workflows: expected [ { height: 26, …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "height": 26,
++     "name": "Reorder step 1: touch-check",
++     "width": 26,
++   },
++   {
++     "height": 26,
++     "name": "Step 1 actions: touch-check",
++     "width": 26,
++   },
++ ]
+
+ ❯ touch-targets.e2e.ts:206:40
+    204|           appearance(density, theme)
+    205|           if (path.endsWith('/new')) browser.click('[data-slot="execut…
+    206|           expect(smallTargets(), path).toEqual([])
+       |                                        ^
+    207|           expect(overlappingTargets(), path).toEqual([])
+    208|           expect(browser.evaluate('document.documentElement.scrollWidt…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/18]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/light/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/dark/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/light/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark/360: edge taps, keyboard, drafts, pins and pending controls
+AssertionError: [data-slot="wb-step-grip"]: expected 26 to be greater than or equal to 44
+ ❯ region touch-targets.e2e.ts:137:36
+    135|   })()`) as { width: number; height: number; x: number; y: number; hit…
+    136|   if (mobile) {
+    137|     expect(result.width, selector).toBeGreaterThanOrEqual(44)
+       |                                    ^
+    138|     expect(result.height, selector).toBeGreaterThanOrEqual(44)
+    139|   }
+ ❯ touch-targets.e2e.ts:306:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/18]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/light/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/dark/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/light/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark/1440: edge taps, keyboard, drafts, pins and pending controls
+AssertionError: [data-slot="wb-copy"]: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ focus touch-targets.e2e.ts:157:21
+    155|     return document.activeElement === el && el.matches(':focus-visible…
+    156|       ((s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0) |…
+    157|   })()`), selector).toBe(true)
+       |                     ^
+    158| }
+    159|
+ ❯ touch-targets.e2e.ts:316:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/18]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light: mobile shell, composer, appearance and workflow targets
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark: mobile shell, composer, appearance and workflow targets
+AssertionError: /p/cez-touch-ovctav/new: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   [
++     "Open menu",
++     "Add missing tests",
++   ],
++ ]
+
+ ❯ touch-targets.e2e.ts:207:46
+    205|           if (path.endsWith('/new')) browser.click('[data-slot="execut…
+    206|           expect(smallTargets(), path).toEqual([])
+    207|           expect(overlappingTargets(), path).toEqual([])
+       |                                              ^
+    208|           expect(browser.evaluate('document.documentElement.scrollWidt…
+    209|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/18]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  18 failed | 6 passed (24)
+   Start at  14:45:14
+   Duration  72.48s (transform 33ms, setup 0ms, import 54ms, tests 72.24s, environment 0ms)
+

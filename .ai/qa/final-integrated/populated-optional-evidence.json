@@ -1,0 +1,158 @@
+[
+  {
+    "id": "e8wQer",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/e8wQer-populated-browser.png",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nInbox\\n2\\ncezar\\ntask-fixture\\n1\\nTasks\\nGit\\nSkills\\nWorkflows\\nSettings\\nRECENT\\nPolish task overview\\n×2\\n#123\\nImprove session navigation\\n#123\\nReview keyboard controls\\nWorker · done\\nMore…\\nwebsite\\nAll tasks\\nAdd project\\nGlobal settings\\nTools\\nv0.12.2\\ncezar\\n/\\nInbox\\ntask-fixture\\nInbox\\n\\nFollow-ups from your agents. Review the suggestion, then start a new task.\\n\\nValidate populated task views on desktop and mobile.\\n\\ncezar\\nRunnable follow-up\\n54s ago\\nSource task ↗\\n\\nReview current screenshots and report actionable regressions.\\n\\nRunner · Codex\\nModel · Default\\nEffort · Auto\\nAdditional instructions\\nTemplate\\nHide instructions\\nRun follow-up\\nDismiss\\n\\nManually validate the pending multi-step Plan review screen.\\n\\ncezar\\nNote only\\n53s ago\\nSource task ↗\\nAcknowledge\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": [
+      {
+        "id": "audit-run",
+        "ts": "2026-09-12T12:05:33.749Z",
+        "taskId": "10000000-0000-4000-8000-000000000000",
+        "summary": "Validate populated task views on desktop and mobile.",
+        "suggestedPrompt": "Review current screenshots and report actionable regressions.",
+        "runnable": true
+      },
+      {
+        "id": "audit-note",
+        "ts": "2026-09-12T12:05:33.749Z",
+        "taskId": "10000000-0000-4000-8000-000000000000",
+        "summary": "Manually validate the pending multi-step Plan review screen.",
+        "runnable": false
+      }
+    ],
+    "sourceCommit": "8ec8fdbc",
+    "disclosure": "Contract validated browser responses only; no task or automation launched."
+  },
+  {
+    "id": "f2220g",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/f2220g-populated-browser.png",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nInbox\\n2\\ncezar\\ntask-fixture\\n1\\nTasks\\nGit\\nSkills\\nWorkflows\\nSettings\\nRECENT\\nPolish task overview\\n×2\\n#123\\nImprove session navigation\\n#123\\nReview keyboard controls\\nWorker · done\\nMore…\\nwebsite\\nAll tasks\\nAdd project\\nGlobal settings\\nTools\\nv0.12.2\\ncezar\\n/\\nAutomations\\ntask-fixture\\nAutomations\\n\\nChecks run while Cezarion is open. No webhook or public URL required.\\n\\nNew automation\\nGitHub\\nReview new pull requests\\n\\npull_request.opened · every 5 min\\n\\nPaused\\n\\nScheduler idle · GitHub available\\n\\nEdit\\nExecution log\\nEnable\\nTest filter\\nRecent activity\\nLaunched\\n9/12/2026, 2:04:40 PM\\nOpen task\\nNo Match\\n9/12/2026, 2:04:40 PM\\n\\nScheduled check completed.\\n\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": {
+      "records": [
+        {
+          "seq": 1,
+          "ts": "2026-09-12T12:05:33.749Z",
+          "automationId": "fixture-auto",
+          "revision": 1,
+          "event": "pull_request.opened",
+          "result": "launched",
+          "runId": "10000000-0000-4000-8000-000000000000",
+          "githubNumber": 218,
+          "githubTitle": "Improve task session controls"
+        },
+        {
+          "seq": 2,
+          "ts": "2026-09-12T12:05:33.749Z",
+          "automationId": "fixture-auto",
+          "revision": 1,
+          "result": "no-match",
+          "reason": "Scheduled check completed."
+        }
+      ]
+    },
+    "sourceCommit": "8ec8fdbc",
+    "disclosure": "Contract validated browser responses only; no task or automation launched."
+  },
+  {
+    "id": "N6NED",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/N6NED-populated-browser.png",
+    "observed": "\"Cezarion\\ncezar\\nInbox\\nInbox\\n\\nFollow-ups from your agents. Review the suggestion, then start a new task.\\n\\nValidate populated task views on desktop and mobile.\\n\\ncezar\\nRunnable follow-up\\n57s ago\\nSource task ↗\\n\\nReview current screenshots and report actionable regressions.\\n\\nCodex\\nDefault\\nAuto\\nAdditional instructions\\nTemplate\\nHide instructions\\nRun follow-up\\nDismiss\\n\\nManually validate the pending multi-step Plan review screen.\\n\\ncezar\\nNote only\\n56s ago\\nSource task ↗\\nAcknowledge\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": [
+      {
+        "id": "audit-run",
+        "ts": "2026-09-12T12:05:33.749Z",
+        "taskId": "10000000-0000-4000-8000-000000000000",
+        "summary": "Validate populated task views on desktop and mobile.",
+        "suggestedPrompt": "Review current screenshots and report actionable regressions.",
+        "runnable": true
+      },
+      {
+        "id": "audit-note",
+        "ts": "2026-09-12T12:05:33.749Z",
+        "taskId": "10000000-0000-4000-8000-000000000000",
+        "summary": "Manually validate the pending multi-step Plan review screen.",
+        "runnable": false
+      }
+    ],
+    "sourceCommit": "8ec8fdbc",
+    "disclosure": "Contract validated browser responses only; no task or automation launched."
+  },
+  {
+    "id": "moM53",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/moM53-populated-browser.png",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nInbox\\n2\\ncezar\\ntask-fixture\\n1\\nTasks\\nGit\\nSkills\\nWorkflows\\nSettings\\nRECENT\\nPolish task overview\\n×2\\n#123\\nImprove session navigation\\n#123\\nReview keyboard controls\\nWorker · done\\nMore…\\nwebsite\\nAll tasks\\nAdd project\\nGlobal settings\\nTools\\nv0.12.2\\ncezar\\n/\\nInbox\\ntask-fixture\\nInbox\\n\\nFollow-ups from your agents. Review the suggestion, then start a new task.\\n\\nValidate populated task views on desktop and mobile.\\n\\ncezar\\nRunnable follow-up\\n58s ago\\nSource task ↗\\n\\nReview current screenshots and report actionable regressions.\\n\\nRunner · Codex\\nModel · Default\\nEffort · Auto\\nAdditional instructions\\nTemplate\\nHide instructions\\nRun follow-up\\nDismiss\\n\\nManually validate the pending multi-step Plan review screen.\\n\\ncezar\\nNote only\\n57s ago\\nSource task ↗\\nAcknowledge\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": [
+      {
+        "id": "audit-run",
+        "ts": "2026-09-12T12:05:33.749Z",
+        "taskId": "10000000-0000-4000-8000-000000000000",
+        "summary": "Validate populated task views on desktop and mobile.",
+        "suggestedPrompt": "Review current screenshots and report actionable regressions.",
+        "runnable": true
+      },
+      {
+        "id": "audit-note",
+        "ts": "2026-09-12T12:05:33.749Z",
+        "taskId": "10000000-0000-4000-8000-000000000000",
+        "summary": "Manually validate the pending multi-step Plan review screen.",
+        "runnable": false
+      }
+    ],
+    "sourceCommit": "8ec8fdbc",
+    "disclosure": "Contract validated browser responses only; no task or automation launched."
+  },
+  {
+    "id": "s6Ih0I",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/s6Ih0I-populated-browser.png",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nInbox\\n2\\ncezar\\ntask-fixture\\n1\\nTasks\\nGit\\nSkills\\nWorkflows\\nSettings\\nRECENT\\nPolish task overview\\n×2\\n#123\\nImprove session navigation\\n#123\\nReview keyboard controls\\nWorker · done\\nMore…\\nwebsite\\nAll tasks\\nAdd project\\nGlobal settings\\nTools\\nv0.12.2\\ncezar\\n/\\nAutomations\\ntask-fixture\\nAutomations\\n\\nChecks run while Cezarion is open. No webhook or public URL required.\\n\\nNew automation\\nGitHub\\nReview new pull requests\\n\\npull_request.opened · every 5 min\\n\\nPaused\\n\\nScheduler idle · GitHub available\\n\\nEdit\\nExecution log\\nEnable\\nTest filter\\nRecent activity\\nLaunched\\n9/12/2026, 2:04:40 PM\\nOpen task\\nNo Match\\n9/12/2026, 2:04:40 PM\\n\\nScheduled check completed.\\n\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": {
+      "records": [
+        {
+          "seq": 1,
+          "ts": "2026-09-12T12:05:33.749Z",
+          "automationId": "fixture-auto",
+          "revision": 1,
+          "event": "pull_request.opened",
+          "result": "launched",
+          "runId": "10000000-0000-4000-8000-000000000000",
+          "githubNumber": 218,
+          "githubTitle": "Improve task session controls"
+        },
+        {
+          "seq": 2,
+          "ts": "2026-09-12T12:05:33.749Z",
+          "automationId": "fixture-auto",
+          "revision": 1,
+          "result": "no-match",
+          "reason": "Scheduled check completed."
+        }
+      ]
+    },
+    "sourceCommit": "8ec8fdbc",
+    "disclosure": "Contract validated browser responses only; no task or automation launched."
+  },
+  {
+    "id": "ITZ94",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/ITZ94-populated-browser.png",
+    "observed": "\"Cezarion\\ncezar\\nInbox\\nInbox\\n\\nFollow-ups from your agents. Review the suggestion, then start a new task.\\n\\nValidate populated task views on desktop and mobile.\\n\\ncezar\\nRunnable follow-up\\n1m ago\\nSource task ↗\\n\\nReview current screenshots and report actionable regressions.\\n\\nCodex\\nDefault\\nAuto\\nAdditional instructions\\nTemplate\\nHide instructions\\nRun follow-up\\nDismiss\\n\\nManually validate the pending multi-step Plan review screen.\\n\\ncezar\\nNote only\\n1m ago\\nSource task ↗\\nAcknowledge\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": [
+      {
+        "id": "audit-run",
+        "ts": "2026-09-12T12:05:33.749Z",
+        "taskId": "10000000-0000-4000-8000-000000000000",
+        "summary": "Validate populated task views on desktop and mobile.",
+        "suggestedPrompt": "Review current screenshots and report actionable regressions.",
+        "runnable": true
+      },
+      {
+        "id": "audit-note",
+        "ts": "2026-09-12T12:05:33.749Z",
+        "taskId": "10000000-0000-4000-8000-000000000000",
+        "summary": "Manually validate the pending multi-step Plan review screen.",
+        "runnable": false
+      }
+    ],
+    "sourceCommit": "8ec8fdbc",
+    "disclosure": "Contract validated browser responses only; no task or automation launched."
+  }
+]

@@ -1,0 +1,240 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+ ❯ |e2e| selection-states.e2e.ts (17 tests | 12 failed) 15971ms
+     × mobile-dark-comfortable: task and skill selection have a persistent selected surfaces and accessible state 1628ms
+     × mobile-dark-comfortable: enabled boundaries contrast and disabled selectors remain unavailable 326ms
+     × mobile-light-comfortable: task and skill selection have a persistent selected surfaces and accessible state 1011ms
+     × mobile-light-comfortable: enabled boundaries contrast and disabled selectors remain unavailable 303ms
+     × mobile-dark-ultra: task and skill selection have a persistent selected surfaces and accessible state 1004ms
+     × mobile-dark-ultra: enabled boundaries contrast and disabled selectors remain unavailable 296ms
+     × mobile-light-ultra: task and skill selection have a persistent selected surfaces and accessible state 1022ms
+     × mobile-light-ultra: enabled boundaries contrast and disabled selectors remain unavailable 305ms
+     × desktop-dark-comfortable: enabled boundaries contrast and disabled selectors remain unavailable 318ms
+     × desktop-light-comfortable: enabled boundaries contrast and disabled selectors remain unavailable 299ms
+     × desktop-dark-ultra: enabled boundaries contrast and disabled selectors remain unavailable 317ms
+     × desktop-light-ultra: enabled boundaries contrast and disabled selectors remain unavailable 307ms
+ ❯ |e2e| workflows.e2e.ts (7 tests | 1 failed) 12350ms
+     × keeps action hierarchy and readable summaries across viewport, theme, and density 260ms
+ ❯ |e2e| project-groups.e2e.ts (4 tests | 2 failed | 1 skipped) 1414ms
+     × scopes every group nav to its own project, and lights only the active one 157ms
+     × persists a collapse in THIS browser, so a reload keeps it and the workspace file does not 147ms
+Preparing worktree (new branch 'cez/fixture-A')
+Preparing worktree (new branch 'cez/fixture-B')
+ ❯ |e2e| task-changes.e2e.ts (7 tests | 2 failed) 59024ms
+     × the Session header tab navigates to /changes: tree, toolbar and the real diff 26469ms
+     × the toolbar comes from the policy: Push, Create PR, Commit, and kebab 25031ms
+ ❯ |e2e| skills-update.e2e.ts (4 tests | 1 failed) 1973ms
+     × shows the inherited global preference and persists an explicit override 390ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 18 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| project-groups.e2e.ts > the grouped multi-project sidebar > scopes every group nav to its own project, and lights only the active one
+Error: cezar e2e: agent-browser click [data-slot="project-group"][data-project="e2e-alpha"] [data-slot="project-group-header"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ setGroupExpanded project-groups.e2e.ts:183:13
+ ❯ project-groups.e2e.ts:233:5
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-project-groups-3338809 click [data-slot="project-group"][data-project="e2e-alpha"] [data-slot="project-group-header"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ setGroupExpanded project-groups.e2e.ts:183:13
+ ❯ project-groups.e2e.ts:233:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"project-group\"][data-project=\"e2e-alpha\"] [data-slot=\"project-group-header\"]\' is covered by <a.pointer-events-auto.block inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 3339170, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"project-group\"][data-project=\"e2e-alpha\"] [data-slot=\"project-group-header\"]\' is covered by <a.pointer-events-auto.block inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/18]⎯
+
+ FAIL  |e2e| project-groups.e2e.ts > the grouped multi-project sidebar > persists a collapse in THIS browser, so a reload keeps it and the workspace file does not
+Error: cezar e2e: agent-browser click [data-slot="project-group"][data-project="86a5f50c-6f3c-4c93-ba2f-489eeaf1613f"] [data-slot="project-group-header"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ setGroupExpanded project-groups.e2e.ts:183:13
+ ❯ project-groups.e2e.ts:277:5
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-project-groups-3338809 click [data-slot="project-group"][data-project="86a5f50c-6f3c-4c93-ba2f-489eeaf1613f"] [data-slot="project-group-header"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ setGroupExpanded project-groups.e2e.ts:183:13
+ ❯ project-groups.e2e.ts:277:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"project-group\"][data-project=\"86a5f50c-6f3c-4c93-ba2f-489eeaf1613f\"] [data-slot=\"project-group-header\"]\' is covered by <a.pointer-events-auto.block inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 3339176, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"project-group\"][data-project=\"86a5f50c-6f3c-4c93-ba2f-489eeaf1613f\"] [data-slot=\"project-group-header\"]\' is covered by <a.pointer-events-auto.block inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/18]⎯
+
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-dark-comfortable: task and skill selection have a persistent selected surfaces and accessible state
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-light-comfortable: task and skill selection have a persistent selected surfaces and accessible state
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-dark-ultra: task and skill selection have a persistent selected surfaces and accessible state
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-light-ultra: task and skill selection have a persistent selected surfaces and accessible state
+AssertionError: expected 'rgba(0, 0, 0, 0)' not to be 'rgba(0, 0, 0, 0)' // Object.is equality
+ ❯ selectedSurface selection-states.e2e.ts:78:32
+     76|   })()`) as { background: string; parent: string; selected: boolean }
+     77|   expect(facts.selected).toBe(true)
+     78|   expect(facts.background).not.toBe('rgba(0, 0, 0, 0)')
+       |                                ^
+     79|   expect(facts.background).not.toBe(facts.parent)
+     80|   const sample = browser.evaluate(contrastSampleExpression(selector)) …
+ ❯ selection-states.e2e.ts:122:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/18]⎯
+
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-dark-comfortable: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-dark-ultra: enabled boundaries contrast and disabled selectors remain unavailable
+AssertionError: rest: {"background":"rgb(11, 15, 23)","foreground":"rgba(0, 0, 0, 0)","ratio":1}: expected 1 to be greater than or equal to 3
+ ❯ selection-states.e2e.ts:172:69
+    170|         const sample = browser.evaluate(contrastSampleExpression(model…
+    171|         samples.push({ variant: variantId, target: model, state, ...sa…
+    172|         expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).to…
+       |                                                                     ^
+    173|         const outside = browser.evaluate(contrastSampleExpression(mode…
+    174|         expect(outside.ratio, `${state} outside: ${JSON.stringify(outs…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/18]⎯
+
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-light-comfortable: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-light-ultra: enabled boundaries contrast and disabled selectors remain unavailable
+AssertionError: rest: {"background":"rgb(248, 250, 252)","foreground":"rgba(0, 0, 0, 0)","ratio":1}: expected 1 to be greater than or equal to 3
+ ❯ selection-states.e2e.ts:172:69
+    170|         const sample = browser.evaluate(contrastSampleExpression(model…
+    171|         samples.push({ variant: variantId, target: model, state, ...sa…
+    172|         expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).to…
+       |                                                                     ^
+    173|         const outside = browser.evaluate(contrastSampleExpression(mode…
+    174|         expect(outside.ratio, `${state} outside: ${JSON.stringify(outs…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/18]⎯
+
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-dark-comfortable: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-dark-ultra: enabled boundaries contrast and disabled selectors remain unavailable
+AssertionError: rest: {"background":"rgb(18, 23, 34)","foreground":"rgb(44, 49, 66)","ratio":1.387332588997054}: expected 1.387332588997054 to be greater than or equal to 3
+ ❯ selection-states.e2e.ts:172:69
+    170|         const sample = browser.evaluate(contrastSampleExpression(model…
+    171|         samples.push({ variant: variantId, target: model, state, ...sa…
+    172|         expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).to…
+       |                                                                     ^
+    173|         const outside = browser.evaluate(contrastSampleExpression(mode…
+    174|         expect(outside.ratio, `${state} outside: ${JSON.stringify(outs…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/18]⎯
+
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-light-comfortable: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-light-ultra: enabled boundaries contrast and disabled selectors remain unavailable
+AssertionError: rest: {"background":"rgb(255, 255, 255)","foreground":"rgb(226, 229, 238)","ratio":1.2592884448568542}: expected 1.2592884448568542 to be greater than or equal to 3
+ ❯ selection-states.e2e.ts:172:69
+    170|         const sample = browser.evaluate(contrastSampleExpression(model…
+    171|         samples.push({ variant: variantId, target: model, state, ...sa…
+    172|         expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).to…
+       |                                                                     ^
+    173|         const outside = browser.evaluate(contrastSampleExpression(mode…
+    174|         expect(outside.ratio, `${state} outside: ${JSON.stringify(outs…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/18]⎯
+
+ FAIL  |e2e| skills-update.e2e.ts > automatic Open Mercato skills updates > shows the inherited global preference and persists an explicit override
+AssertionError: expected 'Update Open Mercato skills automatica…' to contain 'On (default)'
+
+- Expected
++ Received
+
+- On (default)
++ Update Open Mercato skills automatically
++
++ Checks installed Open Mercato skills in the background and applies available updates. Other skills and untracked folders are never changed.
++
++ Off (default)
++ Installation status
++
++ No tracked Open Mercato installation found.
++
++ Manage installed skills and sources from the Skills catalog.
++
++ Open Skills
++ Update preference inheritance
+
+ ❯ skills-update.e2e.ts:57:67
+     55|
+     56|     expect(browser.isVisible('[data-slot="skills-auto-update"]')).toBe…
+     57|     expect(browser.text('[data-slot="skills-settings-section"]')).toCo…
+       |                                                                   ^
+     58|     expect(browser.text('[data-slot="skills-installation-status"]')).t…
+     59|       'No tracked Open Mercato installation found.',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/18]⎯
+
+ FAIL  |e2e| task-changes.e2e.ts > the Changes tab against a live dry run > the Session header tab navigates to /changes: tree, toolbar and the real diff
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="git-toolbar"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ task-changes.e2e.ts:146:15
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-changes-3363160 wait --fn document.querySelector('[data-slot="git-toolbar"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ task-changes.e2e.ts:146:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3363752, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/18]⎯
+
+ FAIL  |e2e| task-changes.e2e.ts > the Changes tab against a live dry run > the toolbar comes from the policy: Push, Create PR, Commit, and kebab
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="git-toolbar"] [data-action="push"]')?.disabled === false failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ task-changes.e2e.ts:178:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-changes-3363160 wait --fn document.querySelector('[data-slot="git-toolbar"] [data-action="push"]')?.disabled === false --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ task-changes.e2e.ts:178:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3364104, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/18]⎯
+
+ FAIL  |e2e| workflows.e2e.ts > workflow builder against the live dry-run server > keeps action hierarchy and readable summaries across viewport, theme, and density
+AssertionError: expected 26 to be greater than or equal to 44
+ ❯ workflows.e2e.ts:223:37
+    221|             )
+    222|             for (const control of presentation.controls) {
+    223|               expect(control.width).toBeGreaterThanOrEqual(44)
+       |                                     ^
+    224|               expect(control.height).toBeGreaterThanOrEqual(44)
+    225|             }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/18]⎯
+
+
+ Test Files  5 failed | 38 passed (43)
+      Tests  18 failed | 355 passed | 6 skipped (379)
+   Start at  15:14:23
+   Duration  656.34s (transform 431ms, setup 0ms, import 989ms, tests 650.00s, environment 4ms)
+

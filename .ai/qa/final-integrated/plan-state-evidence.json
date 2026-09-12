@@ -1,0 +1,122 @@
+[
+  {
+    "id": "empfw",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/empfw-plan-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nInbox\n1\ncezar\ntask-fixture\nTasks\nGit\nSkills\nWorkflows\nSettings\nMore…\nwebsite\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2\ncezar\n/\nNew task\ntask-fixture\nNew task / Plan first\n\nReview the proposed chain before launching.\n\nPROPOSED CHAIN\n\nReview and improve task navigation\n\nReview the constraints, implement the scoped changes, then verify.\n\n01\nReview changes\n\nReview the proposed change and its constraints.\n\nMove up\nMove down\nRemove\n02\nImplement\n\nApply the reviewed changes.\n\nMove up\nMove down\nRemove\n03\nVerify\ncheck\n\nnpm test\n\nMove up\nMove down\nRemove\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.\n\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "dialog": false
+    },
+    "fixture": {
+      "name": "review-implementation",
+      "steps": [
+        {
+          "id": "review",
+          "name": "Review changes",
+          "prompt": "Review the proposed change and its constraints."
+        },
+        {
+          "id": "implement",
+          "name": "Implement",
+          "prompt": "Apply the reviewed changes."
+        },
+        {
+          "id": "verify",
+          "name": "Verify",
+          "command": "npm test"
+        }
+      ],
+      "rationale": "Review the constraints, implement the scoped changes, then verify.",
+      "fallback": false
+    }
+  },
+  {
+    "id": "i9Si8J",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/i9Si8J-plan-browser.png",
+    "observed": {
+      "text": "Cezarion\ncezar\nPROPOSED CHAIN\n\nReview and improve task navigation\n\nReview the constraints, implement the scoped changes, then verify.\n\n01\nReview changes\n\nReview the proposed change and its constraints.\n\nMove up\nMove down\nRemove\n02\nImplement\n\nApply the reviewed changes.\n\nMove up\nMove down\nRemove\n03\nVerify\ncheck\n\nnpm test\n\nMove up\nMove down\nRemove\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.\n\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "dialog": false
+    },
+    "fixture": {
+      "name": "review-implementation",
+      "steps": [
+        {
+          "id": "review",
+          "name": "Review changes",
+          "prompt": "Review the proposed change and its constraints."
+        },
+        {
+          "id": "implement",
+          "name": "Implement",
+          "prompt": "Apply the reviewed changes."
+        },
+        {
+          "id": "verify",
+          "name": "Verify",
+          "command": "npm test"
+        }
+      ],
+      "rationale": "Review the constraints, implement the scoped changes, then verify.",
+      "fallback": false
+    }
+  },
+  {
+    "id": "Oo1J1",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/Oo1J1-plan-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nInbox\n1\ncezar\ntask-fixture\nTasks\nGit\nSkills\nWorkflows\nSettings\nMore…\nwebsite\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2\ncezar\n/\nNew task\ntask-fixture\nNew task / Plan first\n\nReview the proposed chain before launching.\n\nPROPOSED CHAIN\n\nReview and improve task navigation\n\nReview the constraints, implement the scoped changes, then verify.\n\n01\nReview changes\n\nReview the proposed change and its constraints.\n\nMove up\nMove down\nRemove\n02\nImplement\n\nApply the reviewed changes.\n\nMove up\nMove down\nRemove\n03\nVerify\ncheck\n\nnpm test\n\nMove up\nMove down\nRemove\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.\n\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "dialog": false
+    },
+    "fixture": {
+      "name": "review-implementation",
+      "steps": [
+        {
+          "id": "review",
+          "name": "Review changes",
+          "prompt": "Review the proposed change and its constraints."
+        },
+        {
+          "id": "implement",
+          "name": "Implement",
+          "prompt": "Apply the reviewed changes."
+        },
+        {
+          "id": "verify",
+          "name": "Verify",
+          "command": "npm test"
+        }
+      ],
+      "rationale": "Review the constraints, implement the scoped changes, then verify.",
+      "fallback": false
+    }
+  },
+  {
+    "id": "PFLKh",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/PFLKh-plan-browser.png",
+    "observed": {
+      "text": "Cezarion\ncezar\nPROPOSED CHAIN\n\nReview and improve task navigation\n\nReview the constraints, implement the scoped changes, then verify.\n\n01\nReview changes\n\nReview the proposed change and its constraints.\n\nMove up\nMove down\nRemove\n02\nImplement\n\nApply the reviewed changes.\n\nMove up\nMove down\nRemove\n03\nVerify\ncheck\n\nnpm test\n\nMove up\nMove down\nRemove\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.\n\nCommand palette\n\nSearch projects, tasks, views, actions, and skills",
+      "dialog": false
+    },
+    "fixture": {
+      "name": "review-implementation",
+      "steps": [
+        {
+          "id": "review",
+          "name": "Review changes",
+          "prompt": "Review the proposed change and its constraints."
+        },
+        {
+          "id": "implement",
+          "name": "Implement",
+          "prompt": "Apply the reviewed changes."
+        },
+        {
+          "id": "verify",
+          "name": "Verify",
+          "command": "npm test"
+        }
+      ],
+      "rationale": "Review the constraints, implement the scoped changes, then verify.",
+      "fallback": false
+    }
+  }
+]

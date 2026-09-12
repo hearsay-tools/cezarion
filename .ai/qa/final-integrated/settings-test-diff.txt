@@ -1,0 +1,184 @@
+diff --git a/packages/web/src/routes/settings/settings.test.tsx b/packages/web/src/routes/settings/settings.test.tsx
+index 60840e8a..3de09284 100644
+--- a/packages/web/src/routes/settings/settings.test.tsx
++++ b/packages/web/src/routes/settings/settings.test.tsx
+@@ -1,5 +1,5 @@
+ import { QueryClientProvider } from '@tanstack/react-query'
+-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
++import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+ import { MemoryRouter } from 'react-router'
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+ 
+@@ -107,31 +107,6 @@ function renderAt(entry: string, { singleProject = false }: { singleProject?: bo
+   )
+ }
+ 
+-function elementRect(left: number, width: number): DOMRect {
+-  return {
+-    x: left,
+-    y: 0,
+-    width,
+-    height: 40,
+-    top: 0,
+-    left,
+-    right: left + width,
+-    bottom: 40,
+-    toJSON: () => ({}),
+-  }
+-}
+-
+-function setHorizontalGeometry(
+-  element: HTMLElement,
+-  { clientWidth, scrollWidth, scrollLeft }: { clientWidth: number; scrollWidth: number; scrollLeft: number },
+-) {
+-  Object.defineProperties(element, {
+-    clientWidth: { configurable: true, value: clientWidth },
+-    scrollWidth: { configurable: true, value: scrollWidth },
+-    scrollLeft: { configurable: true, writable: true, value: scrollLeft },
+-  })
+-}
+-
+ beforeEach(() => serve())
+ 
+ afterEach(() => {
+@@ -203,129 +178,21 @@ describe('the settings shell', () => {
+     expect([...pills.querySelectorAll('[data-section]')].length).toBe(PROJECT_SECTIONS.length)
+   })
+ 
+-  it('shows overflow cues only at edges with hidden mobile settings pills', () => {
+-    renderAt('/settings/global/appearance')
+-    const nav = document.querySelector<HTMLElement>('[data-slot="settings-nav-mobile"]')!
+-    setHorizontalGeometry(nav, { clientWidth: 320, scrollWidth: 600, scrollLeft: 0 })
+-
+-    fireEvent.scroll(nav)
+-    expect(document.querySelector('[data-slot="settings-overflow-start"]')?.getAttribute('data-visible')).toBe(
+-      'false',
+-    )
+-    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
+-      'true',
+-    )
+-
+-    nav.scrollLeft = 140
+-    fireEvent.scroll(nav)
+-    expect(document.querySelector('[data-slot="settings-overflow-start"]')?.getAttribute('data-visible')).toBe(
+-      'true',
+-    )
+-    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
+-      'true',
+-    )
+-
+-    nav.scrollLeft = 280
+-    fireEvent.scroll(nav)
+-    expect(document.querySelector('[data-slot="settings-overflow-start"]')?.getAttribute('data-visible')).toBe(
+-      'true',
+-    )
+-    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
+-      'false',
+-    )
+-  })
+-
+-  it('recalculates overflow cues when tab or viewport layout changes', () => {
+-    let resize: ResizeObserverCallback | undefined
+-    class TestResizeObserver {
+-      constructor(callback: ResizeObserverCallback) {
+-        resize = callback
+-      }
+-      observe() {}
+-      unobserve() {}
+-      disconnect() {}
+-    }
+-    vi.stubGlobal('ResizeObserver', TestResizeObserver)
+-
+-    renderAt('/settings/global/appearance')
+-    const nav = document.querySelector<HTMLElement>('[data-slot="settings-nav-mobile"]')!
+-    setHorizontalGeometry(nav, { clientWidth: 320, scrollWidth: 320, scrollLeft: 0 })
+-    fireEvent.scroll(nav)
+-    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
+-      'false',
+-    )
+-
+-    setHorizontalGeometry(nav, { clientWidth: 280, scrollWidth: 520, scrollLeft: 0 })
+-    expect(resize).toBeTypeOf('function')
+-    act(() => resize?.([], {} as ResizeObserver))
+-    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
+-      'true',
+-    )
+-  })
+-
+-  it('reveals a directly opened active pill horizontally without moving the page', async () => {
+-    const scrollTo = vi.fn()
+-    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+-      configurable: true,
+-      value: scrollTo,
+-    })
+-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+-      const element = this as HTMLElement
+-      if (element.dataset.slot === 'settings-nav-mobile') return elementRect(0, 320)
+-      if (element.dataset.section === 'projects') return elementRect(500, 80)
+-      return elementRect(16, 80)
+-    })
+-    const pageScroll = vi.spyOn(window, 'scrollTo')
+-
++  it('names the directly linked section in the mobile disclosure', () => {
+     renderAt('/settings/global/projects')
+-
+-    await waitFor(() => {
+-      expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', left: 272 })
+-    })
+-    expect(pageScroll).not.toHaveBeenCalled()
++    const disclosure = document.querySelector<HTMLDetailsElement>('.settings-section-picker')!
++    expect(disclosure.open).toBe(false)
++    expect(disclosure.querySelector('summary')?.textContent).toBe('Projects')
++    expect(disclosure.querySelector('[aria-current="page"]')?.getAttribute('data-section')).toBe('projects')
+   })
+ 
+-  it('reveals a directly linked late pill after the mobile row becomes visible', () => {
+-    const scrollTo = vi.fn()
+-    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+-      configurable: true,
+-      value: scrollTo,
+-    })
+-    let mobile = false
+-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+-      const element = this as HTMLElement
+-      if (!mobile) return elementRect(0, 0)
+-      if (element.dataset.slot === 'settings-nav-mobile') return elementRect(0, 320)
+-      if (element.dataset.section === 'projects') return elementRect(500, 80)
+-      return elementRect(16, 80)
+-    })
+-
+-    renderAt('/settings/global/projects')
+-    expect(scrollTo).not.toHaveBeenCalled()
+-
+-    mobile = true
+-    fireEvent(window, new Event('resize'))
+-    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', left: 272 })
+-  })
+-
+-  it('reveals a pill immediately when keyboard focus reaches it', () => {
+-    const scrollTo = vi.fn()
+-    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+-      configurable: true,
+-      value: scrollTo,
+-    })
+-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+-      const element = this as HTMLElement
+-      if (element.dataset.slot === 'settings-nav-mobile') return elementRect(0, 320)
+-      if (element.dataset.section === 'projects') return elementRect(500.25, 80)
+-      return elementRect(16, 80)
+-    })
+-
++  it('navigates from the mobile disclosure and closes it on the new section', async () => {
+     renderAt('/settings/global/appearance')
+-    scrollTo.mockClear()
+-    fireEvent.focus(document.querySelector<HTMLElement>('[data-slot="settings-nav-mobile"] [data-section="projects"]')!)
+-
+-    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', left: 273 })
++    const disclosure = document.querySelector<HTMLDetailsElement>('.settings-section-picker')!
++    disclosure.open = true
++    fireEvent.click(disclosure.querySelector('[data-section="resources"]')!)
++    await waitFor(() => expect(document.querySelector('.settings-section-picker summary')?.textContent).toBe('Resources'))
++    expect(document.querySelector<HTMLDetailsElement>('.settings-section-picker')?.open).toBe(false)
+   })
+ 
+   it('every section keeps a way BACK to the index: the "General" nav entry', () => {

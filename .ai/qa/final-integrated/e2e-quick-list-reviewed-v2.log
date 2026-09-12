@@ -1,0 +1,39 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts quick-list.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+ ❯ |e2e| quick-list.e2e.ts (27 tests | 1 failed) 17461ms
+     × allocates two contained title lines without crowding desktop metadata or actions 246ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > allocates two contained title lines without crowding desktop metadata or actions
+AssertionError: expected [ 'tokens' ] to deeply equal [ 'tokens', 'memory' ]
+
+- Expected
++ Received
+
+  [
+    "tokens",
+-   "memory",
+  ]
+
+ ❯ quick-list.e2e.ts:600:100
+    598|           expect.soft(facts.metricsBeforeNeighbors, `${theme}/${densit…
+    599|           expect(facts.secondary.slice(0, -1).every(({ width, containe…
+    600|           expect(facts.secondary.filter(({ clipsOverflow }) => clipsOv…
+       |                                                                                                    ^
+    601|           expect(facts.secondary.slice(0, -1).map(({ id, label, access…
+    602|             { id: 'tokens', label: '999.9k / 888.8k', accessible: 'Inp…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 26 passed (27)
+   Start at  15:03:00
+   Duration  17.76s (transform 67ms, setup 0ms, import 86ms, tests 17.46s, environment 0ms)
+

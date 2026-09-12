@@ -1,0 +1,134 @@
+[
+  {
+    "id": "h690uO",
+    "name": "2E. Session navigation open · Mobile light",
+    "state": "mobile navigation panel",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/h690uO-state-browser.png",
+    "observed": {
+      "text": "Cezarion\ncezar\nTasks\n\nPARENT SESSION\n\nImprove session navigation\ndone\nSession\nChanges\nCommits\nFiles\nParent\nWorkers 1\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nclaude\nauto\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills\n\nNavigation\nCezarion\nSearch…\nCtrl+K\nNew task\nC\nInbox\n1\ncezar\ntask-fixture\n1\nTasks\nGit\nSkills\nWorkflows\nSettings\nRECENT\nPolish task overview\n×2\n#123\nImprove session navigation\n#123\nReview keyboard controls\nWorker · done\nMore…\nwebsite\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2",
+      "menus": 1,
+      "importInput": false,
+      "expanded": [
+        "Toggle cezar",
+        "Open menu",
+        "Toggle cezar"
+      ]
+    },
+    "status": "interaction triggered and open state confirmed; composite-frame content still needs visual review"
+  },
+  {
+    "id": "L0VfI",
+    "name": "2F. Session navigation open · Mobile dark",
+    "state": "mobile navigation panel",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/L0VfI-state-browser.png",
+    "observed": {
+      "text": "Cezarion\ncezar\nTasks\n\nPARENT SESSION\n\nImprove session navigation\ndone\nSession\nChanges\nCommits\nFiles\nParent\nWorkers 1\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nclaude\nauto\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills\n\nNavigation\nCezarion\nSearch…\nCtrl+K\nNew task\nC\nInbox\n1\ncezar\ntask-fixture\n1\nTasks\nGit\nSkills\nWorkflows\nSettings\nRECENT\nPolish task overview\n×2\n#123\nImprove session navigation\n#123\nReview keyboard controls\nWorker · done\nMore…\nwebsite\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2",
+      "menus": 1,
+      "importInput": false,
+      "expanded": [
+        "Toggle cezar",
+        "Open menu",
+        "Toggle cezar"
+      ]
+    },
+    "status": "interaction triggered and open state confirmed; composite-frame content still needs visual review"
+  },
+  {
+    "id": "M5SWe",
+    "name": "25A. Project tasks · Full resource table and column menu",
+    "state": "task column menu",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/M5SWe-state-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nInbox\n1\ncezar\ntask-fixture\n1\nTasks\nGit\nSkills\nWorkflows\nSettings\nRECENT\nPolish task overview\n×2\n#123\nImprove session navigation\n#123\nReview keyboard controls\nWorker · done\nMore…\nwebsite\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2\ncezar\n/\nTasks\ntask-fixture\nProject tasks\n\ncezar · Review runs, pull requests and resource usage.\n\nActive\n4\nArchived\nMark all read\nArchive finished\nColumns\nNew task\nTASK\tWORKFLOW\tCHANGES\tPULL REQUEST\tSTARTED\n\nPolish task overview\nneeds review\ncezar\n\tquick-task\t+12 −3\t#123\t2h\n\nImprove session navigation\nDone\ncezar\n\tquick-task\t+12 −3\t#123\t26m\n\nWorker\nReview keyboard controls\nDone\ncezar\n\tquick-task\t+12 −3\t#123\t1h\n\nCompare compact layout\nDone\ncezar\n\tquick-task\t+12 −3\t#123\t3h\n\nResource details—including tokens, cost, CPU and peak memory—are available when a task row is expanded.\n\nPolish task overview — 2 variants finished\nCompare\nCommand palette\n\nSearch projects, tasks, views, actions, and skills\n\nVisible columns\n\nStatus and Task · Always visible\n\nWorkflow\nBranch\nDiff\nReference\nIN / OUT\nCost\nCPU\nMemory\nStarted\n\nSaved automatically. Tokens and cost appear only when supported.\n\nResource columns",
+      "menus": 1,
+      "importInput": false,
+      "expanded": [
+        "Toggle cezar",
+        "Columns"
+      ]
+    },
+    "status": "interaction triggered and open state confirmed; composite-frame content still needs visual review"
+  },
+  {
+    "id": "ZhHkR",
+    "name": "28A. Task actions · Menu and handoff reader",
+    "state": "task action menu",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/ZhHkR-state-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nInbox\n1\ncezar\ntask-fixture\n1\nTasks\nGit\nSkills\nWorkflows\nSettings\nRECENT\nPolish task overview\n×2\n#123\nImprove session navigation\n#123\nReview keyboard controls\nWorker · done\nMore…\nwebsite\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2\ncezar\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills\n\nTASK ACTIONS\nNotes / handoff\nOpen in…\nCopy resume command\nMark unread\nPin task\nArchive task\nDelete task…",
+      "menus": 1,
+      "importInput": false,
+      "expanded": [
+        "Toggle cezar",
+        "Run actions",
+        "ParentWorkers 1"
+      ]
+    },
+    "status": "interaction triggered and open state confirmed; composite-frame content still needs visual review"
+  },
+  {
+    "id": "ogTQi",
+    "name": "28A. Task actions · Mobile light",
+    "state": "task action menu",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/ogTQi-state-browser.png",
+    "observed": {
+      "text": "Cezarion\ncezar\nTasks\n\nPARENT SESSION\n\nImprove session navigation\ndone\nSession\nChanges\nCommits\nFiles\nParent\nWorkers 1\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nclaude\nauto\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills\n\nTASK ACTIONS\nNotes / handoff\nOpen in…\nCopy resume command\nMark unread\nPin task\nArchive task\nDelete task…",
+      "menus": 1,
+      "importInput": false,
+      "expanded": [
+        "Toggle cezar",
+        "Run actions"
+      ]
+    },
+    "status": "interaction triggered and open state confirmed; composite-frame content still needs visual review"
+  },
+  {
+    "id": "ofMmL",
+    "name": "25A. Project tasks · Full resource table and column menu · Dark",
+    "state": "task column menu",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/ofMmL-state-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nInbox\n1\ncezar\ntask-fixture\n1\nTasks\nGit\nSkills\nWorkflows\nSettings\nRECENT\nPolish task overview\n×2\n#123\nImprove session navigation\n#123\nReview keyboard controls\nWorker · done\nMore…\nwebsite\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2\ncezar\n/\nTasks\ntask-fixture\nProject tasks\n\ncezar · Review runs, pull requests and resource usage.\n\nActive\n4\nArchived\nMark all read\nArchive finished\nColumns\nNew task\nTASK\tWORKFLOW\tCHANGES\tPULL REQUEST\tSTARTED\n\nPolish task overview\nneeds review\ncezar\n\tquick-task\t+12 −3\t#123\t2h\n\nImprove session navigation\nDone\ncezar\n\tquick-task\t+12 −3\t#123\t26m\n\nWorker\nReview keyboard controls\nDone\ncezar\n\tquick-task\t+12 −3\t#123\t1h\n\nCompare compact layout\nDone\ncezar\n\tquick-task\t+12 −3\t#123\t3h\n\nResource details—including tokens, cost, CPU and peak memory—are available when a task row is expanded.\n\nPolish task overview — 2 variants finished\nCompare\nCommand palette\n\nSearch projects, tasks, views, actions, and skills\n\nVisible columns\n\nStatus and Task · Always visible\n\nWorkflow\nBranch\nDiff\nReference\nIN / OUT\nCost\nCPU\nMemory\nStarted\n\nSaved automatically. Tokens and cost appear only when supported.\n\nResource columns",
+      "menus": 1,
+      "importInput": false,
+      "expanded": [
+        "Toggle cezar",
+        "Columns"
+      ]
+    },
+    "status": "interaction triggered and open state confirmed; composite-frame content still needs visual review"
+  },
+  {
+    "id": "ef75D",
+    "name": "28A. Task actions · Menu and handoff reader · Dark",
+    "state": "task action menu",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/ef75D-state-browser.png",
+    "observed": {
+      "text": "Cezarion\nSearch…\nCtrl+K\nNew task\nC\nInbox\n1\ncezar\ntask-fixture\n1\nTasks\nGit\nSkills\nWorkflows\nSettings\nRECENT\nPolish task overview\n×2\n#123\nImprove session navigation\n#123\nReview keyboard controls\nWorker · done\nMore…\nwebsite\nAll tasks\nAdd project\nGlobal settings\nTools\nv0.12.2\ncezar\n/\nTasks / Improve session navigation\nIsolated worktree\nImprove session navigation\ndone\nquick-task\n·\ntask-fixture\n·\n#123\n·\n+12 −3\nIN 42.0k · OUT 6.0k\n·\n$0.42\nclaude · auto\nSession\nChanges\nCommits\nFiles\nReview keyboard controls\ndone\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nRunner\nclaude\nEffort\nauto\nMODEL\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills\n\nTASK ACTIONS\nNotes / handoff\nOpen in…\nCopy resume command\nMark unread\nPin task\nArchive task\nDelete task…",
+      "menus": 1,
+      "importInput": false,
+      "expanded": [
+        "Toggle cezar",
+        "Run actions",
+        "ParentWorkers 1"
+      ]
+    },
+    "status": "interaction triggered and open state confirmed; composite-frame content still needs visual review"
+  },
+  {
+    "id": "myX8Q",
+    "name": "28A. Task actions · Mobile dark",
+    "state": "task action menu",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/myX8Q-state-browser.png",
+    "observed": {
+      "text": "Cezarion\ncezar\nTasks\n\nPARENT SESSION\n\nImprove session navigation\ndone\nSession\nChanges\nCommits\nFiles\nParent\nWorkers 1\nStart of session\n\nYOU\n\nSummarize what this project does.\n\nRan\ngit status --short\nAudit done. No code changes.\nBroken / stale role references\n\nOne stale role reference needs a corrected directory name.\n\nUnused role directories\n\nThree directories have no live playbook references.\n\nRequirements consistency\n\nThe requirements file repeats a declared dependency. Review the full report before changing references.\n\n· review accepted — finished without a PR\nSession closed\nPR ↗\nVerify\nstep 2 of 2\nReply to the agent\nclaude\nauto\nauto\nContinue\nCommand palette\n\nSearch projects, tasks, views, actions, and skills\n\nTASK ACTIONS\nNotes / handoff\nOpen in…\nCopy resume command\nMark unread\nPin task\nArchive task\nDelete task…",
+      "menus": 1,
+      "importInput": false,
+      "expanded": [
+        "Toggle cezar",
+        "Run actions"
+      ]
+    },
+    "status": "interaction triggered and open state confirmed; composite-frame content still needs visual review"
+  }
+]

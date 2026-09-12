@@ -1,0 +1,140 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+Preparing worktree (new branch 'cez/fixture-A')
+Preparing worktree (new branch 'cez/fixture-B')
+ ❯ |e2e| progressive-history.e2e.ts (7 tests | 1 failed) 34027ms
+     × preserves a virtual history anchor behind the task prefix at 1440px 26432ms
+ ❯ |e2e| agents-dock.e2e.ts (4 tests | 1 failed) 31905ms
+     × docks both sub-agents with odometer, type badge, activity and tool count 25746ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| agents-dock.e2e.ts > the Agents dock against a replayed fan-out > docks both sub-agents with odometer, type badge, activity and tool count
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="main"]').scrollTop === 0 failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ clickThreadControl agents-dock.e2e.ts:143:11
+ ❯ agents-dock.e2e.ts:153:5
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-agents-dock-3854744 wait --fn document.querySelector('[data-slot="main"]').scrollTop === 0 --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ clickThreadControl agents-dock.e2e.ts:143:11
+ ❯ agents-dock.e2e.ts:153:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3855130, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |e2e| progressive-history.e2e.ts > progressive long-session history > preserves a virtual history anchor behind the task prefix at 1440px
+Error: cezar e2e: agent-browser wait --fn (() => {
+    const main = document.querySelector('[data-slot="main"]')
+    if (!main) return false
+    
+    const sample = (() => {
+    const main = document.querySelector('[data-slot="main"]')
+    const rows = document.querySelector('[data-slot="thread-rows"]')
+    const row = main.querySelector("[data-slot=\"thread-row\"][data-row-key=\"turn-seq-2777:user\"]")
+    if (!main || !row) return null
+    return {
+      key: row.dataset.rowKey,
+      top: row.getBoundingClientRect().top,
+      scrollTop: main.scrollTop,
+      maxTop: main.scrollHeight - main.clientHeight,
+      virtualized: rows?.dataset.virtualized ?? null,
+      mountedRows: main.querySelectorAll('[data-slot="thread-row"]').length,
+    }
+  })()
+    if (!sample) return false
+    const prev = window.__cezHistoryAnchor
+    if (
+      prev &&
+      prev.key === sample.key &&
+      Math.abs(prev.top - sample.top) < 0.5 &&
+      Math.abs(prev.scrollTop - sample.scrollTop) < 0.5
+    ) {
+      prev.hits += 1
+      if (prev.hits >= 3) {
+        window.__cezSettledHistoryAnchor = sample
+        return true
+      }
+      return false
+    }
+    window.__cezHistoryAnchor = { ...sample, hits: 1 }
+    return false
+  })() failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ settleHistoryAnchor progressive-history.e2e.ts:148:11
+ ❯ settleNamedHistoryAnchor progressive-history.e2e.ts:184:10
+ ❯ progressive-history.e2e.ts:400:19
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-progressive-history-3850134 wait --fn (() => {
+    const main = document.querySelector('[data-slot="main"]')
+    if (!main) return false
+    
+    const sample = (() => {
+    const main = document.querySelector('[data-slot="main"]')
+    const rows = document.querySelector('[data-slot="thread-rows"]')
+    const row = main.querySelector("[data-slot=\"thread-row\"][data-row-key=\"turn-seq-2777:user\"]")
+    if (!main || !row) return null
+    return {
+      key: row.dataset.rowKey,
+      top: row.getBoundingClientRect().top,
+      scrollTop: main.scrollTop,
+      maxTop: main.scrollHeight - main.clientHeight,
+      virtualized: rows?.dataset.virtualized ?? null,
+      mountedRows: main.querySelectorAll('[data-slot="thread-row"]').length,
+    }
+  })()
+    if (!sample) return false
+    const prev = window.__cezHistoryAnchor
+    if (
+      prev &&
+      prev.key === sample.key &&
+      Math.abs(prev.top - sample.top) < 0.5 &&
+      Math.abs(prev.scrollTop - sample.scrollTop) < 0.5
+    ) {
+      prev.hits += 1
+      if (prev.hits >= 3) {
+        window.__cezSettledHistoryAnchor = sample
+        return true
+      }
+      return false
+    }
+    window.__cezHistoryAnchor = { ...sample, hits: 1 }
+    return false
+  })() --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ settleHistoryAnchor progressive-history.e2e.ts:148:11
+ ❯ settleNamedHistoryAnchor progressive-history.e2e.ts:184:10
+ ❯ progressive-history.e2e.ts:400:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3850889, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 41 passed (43)
+      Tests  2 failed | 371 passed | 6 skipped (379)
+   Start at  16:18:41
+   Duration  696.08s (transform 466ms, setup 0ms, import 1.03s, tests 689.66s, environment 4ms)
+

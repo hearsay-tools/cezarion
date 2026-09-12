@@ -1,0 +1,62 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+ ❯ |e2e| github.e2e.ts (32 tests | 1 failed) 135119ms
+   × renders GitHub 'empty' in 'dark' without losing navigation 25892ms
+Preparing worktree (new branch 'cez/fixture-A')
+Preparing worktree (new branch 'cez/fixture-B')
+ ❯ |e2e| page-headings.e2e.ts (8 tests | 1 failed) 5451ms
+     × Git at 360x640 in light keeps one visible title, context, and first-row access 1089ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| github.e2e.ts > renders GitHub 'empty' in 'dark' without losing navigation
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-route="github"]')?.textContent.includes("No open issues") === true failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ github.e2e.ts:441:18
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-github-3424862-empty-dark wait --fn document.querySelector('[data-route="github"]')?.textContent.includes("No open issues") === true --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ github.e2e.ts:441:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3439268, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |e2e| page-headings.e2e.ts > Git page headings at the review viewports > Git at 360x640 in light keeps one visible title, context, and first-row access
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ page-headings.e2e.ts:111:43
+    109|           // Page headings remain in the route at both widths; the mob…
+    110|           expect(facts.routeTitlePainted).toBe(true)
+    111|           expect(facts.shellTitlePainted).toBe(false)
+       |                                           ^
+    112|
+    113|           browser.screenshot(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 41 passed (43)
+      Tests  2 failed | 371 passed | 6 skipped (379)
+   Start at  15:33:32
+   Duration  653.77s (transform 479ms, setup 0ms, import 1.04s, tests 647.33s, environment 4ms)
+

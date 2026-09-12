@@ -1,0 +1,76 @@
+[
+  {
+    "id": "I44Ul8",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/I44Ul8-ready-browser.png",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nInbox\\n1\\ncezar\\ntask-fixture\\n1\\nTasks\\nGit\\nSkills\\nWorkflows\\nSettings\\nRECENT\\nPolish task overview\\n×2\\n#123\\nImprove session navigation\\n#123\\nReview keyboard controls\\nWorker · done\\nMore…\\nwebsite\\nAll tasks\\nAdd project\\nGlobal settings\\nTools\\nv0.12.2\\ncezar\\n/\\nGitHub\\ntask-fixture\\nGitHub\\nexample/fixture · Not synced yet\\nIssues · 1\\nPull requests · 2\\nSet up automations\\nRefresh\\nLabels\\nClear filters\\nBack to the list\\n#218 Improve task session controls\\n\\n#218\\n·\\npull request\\n·\\nopened by fixture-user\\n·\\n1s ago\\n·\\n2\\n·\\n+42 −9\\n·\\nopen on GitHub\\n\\nConversation\\nChanges\\nenhancement\\n✓ checks passing\\n\\nRefine session navigation and preserve keyboard controls.\\n\\nValidation\\nDesktop and mobile checked\\nLight and dark themes verified\\nACTIVITY · 1 COMMENT\\nR\\nreviewer\\n1s\\napproved\\n\\nThe session navigation looks good. Please retain all keyboard shortcuts.\\n\\nReady to merge\\nRefresh\\n\\nfeature/session-controls (aaaaaaa) → main\\n\\nReviews: approved\\nConflicts: none\\nBuild and tests · passing · required\\nSquash and merge\\nSquash and merge\\nHand this to the agent\\nInstructions for the agent\\nTemplate\\nWorkflow\\nworkflow\\nSkills · select one or more\\nskills\\nRunner · codex · Default\\nModel · Default\\nEffort · auto\\nAccount\\nDefault\\nPersonal account\\n\\nPR number and link remain attached to the task. Edit the prompt before starting. Cmd/Ctrl+Enter submits; Enter adds a new line.\\n\\nOpen in GitHub\\nRun agent on this PR\\nCtrl+↵\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": {
+      "available": true,
+      "mergeState": {
+        "number": 218,
+        "title": "Improve task session controls",
+        "url": "https://github.com/example/fixture/pull/218",
+        "state": "open",
+        "isDraft": false,
+        "headRef": "feature/session-controls",
+        "baseRef": "main",
+        "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mergeable": "mergeable",
+        "reviewDecision": "approved",
+        "checks": [
+          {
+            "name": "Build and tests",
+            "state": "passing",
+            "required": true
+          }
+        ],
+        "methods": [
+          "squash"
+        ],
+        "defaultMethod": "squash",
+        "eligibility": "ready",
+        "blockers": [],
+        "canMerge": true,
+        "canOverride": false
+      }
+    },
+    "sourceCommit": "8ec8fdbc",
+    "disclosure": "Contract fixture; merge HTTP blocked and no merge clicked."
+  },
+  {
+    "id": "HBMSk",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/HBMSk-ready-browser.png",
+    "observed": "\"Cezarion\\nSearch…\\nCtrl+K\\nNew task\\nC\\nInbox\\n1\\ncezar\\ntask-fixture\\n1\\nTasks\\nGit\\nSkills\\nWorkflows\\nSettings\\nRECENT\\nPolish task overview\\n×2\\n#123\\nImprove session navigation\\n#123\\nReview keyboard controls\\nWorker · done\\nMore…\\nwebsite\\nAll tasks\\nAdd project\\nGlobal settings\\nTools\\nv0.12.2\\ncezar\\n/\\nGitHub\\ntask-fixture\\nGitHub\\nexample/fixture · Not synced yet\\nIssues · 1\\nPull requests · 2\\nSet up automations\\nRefresh\\nLabels\\nClear filters\\nBack to the list\\n#218 Improve task session controls\\n\\n#218\\n·\\npull request\\n·\\nopened by fixture-user\\n·\\n2s ago\\n·\\n2\\n·\\n+42 −9\\n·\\nopen on GitHub\\n\\nConversation\\nChanges\\nenhancement\\n✓ checks passing\\n\\nRefine session navigation and preserve keyboard controls.\\n\\nValidation\\nDesktop and mobile checked\\nLight and dark themes verified\\nACTIVITY · 1 COMMENT\\nR\\nreviewer\\n2s\\napproved\\n\\nThe session navigation looks good. Please retain all keyboard shortcuts.\\n\\nReady to merge\\nRefresh\\n\\nfeature/session-controls (aaaaaaa) → main\\n\\nReviews: approved\\nConflicts: none\\nBuild and tests · passing · required\\nSquash and merge\\nSquash and merge\\nHand this to the agent\\nInstructions for the agent\\nTemplate\\nWorkflow\\nworkflow\\nSkills · select one or more\\nskills\\nRunner · codex · Default\\nModel · Default\\nEffort · auto\\nAccount\\nDefault\\nPersonal account\\n\\nPR number and link remain attached to the task. Edit the prompt before starting. Cmd/Ctrl+Enter submits; Enter adds a new line.\\n\\nOpen in GitHub\\nRun agent on this PR\\nCtrl+↵\\nCommand palette\\n\\nSearch projects, tasks, views, actions, and skills\"",
+    "fixture": {
+      "available": true,
+      "mergeState": {
+        "number": 218,
+        "title": "Improve task session controls",
+        "url": "https://github.com/example/fixture/pull/218",
+        "state": "open",
+        "isDraft": false,
+        "headRef": "feature/session-controls",
+        "baseRef": "main",
+        "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mergeable": "mergeable",
+        "reviewDecision": "approved",
+        "checks": [
+          {
+            "name": "Build and tests",
+            "state": "passing",
+            "required": true
+          }
+        ],
+        "methods": [
+          "squash"
+        ],
+        "defaultMethod": "squash",
+        "eligibility": "ready",
+        "blockers": [],
+        "canMerge": true,
+        "canOverride": false
+      }
+    },
+    "sourceCommit": "8ec8fdbc",
+    "disclosure": "Contract fixture; merge HTTP blocked and no merge clicked."
+  }
+]

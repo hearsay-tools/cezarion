@@ -1,0 +1,1125 @@
+
+> test
+> vitest run --maxWorkers=4
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f
+
+ ✓ |api-client| src/protocol/tool-display.test.ts (15 tests) 6ms
+ ✓ |api-client| src/utils/project-scope.test.ts (30 tests) 8ms
+stderr | src/core/harness-parity.test.ts > harness parity — owned input run tier > claude R11 post-send checkpoint failure interrupts and reports failure without dropping input
+[cez] failed to save runs.json: EISDIR: illegal operation on a directory, open '/tmp/cez-vitest-tmp-mreC0Y/cez-owned-input-claude-wLlBJM/.ai/cezar/runs.json.tmp'
+
+ ✓ |server| src/workflows/worker-wait-capacity.test.ts (35 tests) 68089ms
+     ✓ holds a nonfinal agent session and the following 'agent' behind 'early' admitted worker wake at cap one  2320ms
+     ✓ holds a nonfinal agent session and the following 'agent' behind 'late' admitted worker wake at cap one  2234ms
+     ✓ holds a nonfinal agent session and the following 'check' behind 'early' admitted worker wake at cap one  2234ms
+     ✓ holds a nonfinal agent session and the following 'check' behind 'late' admitted worker wake at cap one  2221ms
+     ✓ 'codex' keeps a completed wake and following 'agent' held until its real transport ACK at cap one  1546ms
+     ✓ 'codex' keeps a completed wake and following 'check' held until its real transport ACK at cap one  1519ms
+     ✓ 'opencode' keeps a completed wake and following 'agent' held until its real transport ACK at cap one  1756ms
+     ✓ 'opencode' keeps a completed wake and following 'check' held until its real transport ACK at cap one  1754ms
+     ✓ 'pi' keeps a completed wake and following 'agent' held until its real transport ACK at cap one  1805ms
+     ✓ 'pi' keeps a completed wake and following 'check' held until its real transport ACK at cap one  1875ms
+     ✓ interactive markerless wake persists run and step waiting immediately after its held HTTP ACK  856ms
+     ✓ an actual session close during a nonfinal wait cannot advance a check or retain a capacity exemption  1008ms
+     ✓ a portable human ask still takes precedence over an accepted nonfinal worker wait  2681ms
+     ✓ ordinary nonfinal auto-end still advances to the next check without a worker wait  1314ms
+     ✓ fresh: an admitted undelivered wake cannot suppress a portable ask  1443ms
+     ✓ continuation: an admitted undelivered wake cannot suppress a portable ask  2286ms
+     ✓ root: restart re-admits a persisted human answer before its first boundary  546ms
+     ✓ worker: restart re-admits a persisted human answer before its first boundary  1012ms
+     ✓ restart preserves a queued human answer when wait withdrawal left a blank lifecycle opening  2176ms
+     ✓ restart with an empty human-origin checkpoint preserves the ask without a synthetic answer  1876ms
+     ✓ restart preserves an ordinary parked root without a wait or ask, including after children finish  3050ms
+     ✓ inactive ready root Finish persists intent before async settlement and restart keeps review=false  1008ms
+     ✓ inactive ready root Finish persists intent before async settlement and restart keeps review=true  1093ms
+     ✓ inactive Finish write failure leaves the root recoverable and children untouched  3005ms
+     ✓ legacy pending inactive Finish holds queued children while unrelated work progresses  2989ms
+     ✓ legacy pending inactive Finish holds continued children while unrelated work progresses  2937ms
+     ✓ legacy pending inactive Finish rechecks a fresh child at the pre-spawn boundary  1086ms
+     ✓ legacy pending inactive Finish rechecks a continuation child at the pre-spawn boundary  2012ms
+     ✓ inactive Finish retains retryable intent after diff failure and checkpoints successful publication  2061ms
+     ✓ inactive Finish retains retryable intent after checkpoint failure and checkpoints successful publication  2123ms
+     ✓ monitoring synthetic delivery respects legacy pending Finish=false before wake bookkeeping  2925ms
+     ✓ monitoring synthetic delivery respects legacy pending Finish=true before wake bookkeeping  2936ms
+     ✓ cancellation retires pending Finish after delayed diff and preserves human Continue across restart  1807ms
+     ✓ cancellation retires pending Finish after failed diff and preserves human Continue across restart  1804ms
+     ✓ restart durably reconciles cancelled roots with superseded Finish intent  2788ms
+ ✓ |server| src/workflows/worker-wait-conversations.test.ts (8 tests) 75182ms
+     ✓ conversation: worker request wait releases capacity and explicit parent reply wakes exactly once  3604ms
+     ✓ conversation: reply before registration satisfies request wait and is retained after retirement  3533ms
+     ✓ conversation: incoming question interrupts a parked wait without settling its obligation  2788ms
+     ✓ conversation: request deadlines settle without registering a wait or polling  2928ms
+     ✓ conversation: restart restores a worker request wait, deadline, and one wake receipt  3805ms
+     ✓ conversation: parent waits for replies from two workers without treating the first as an interruption  6069ms
+     ✓ conversation: a full queue of 32 replies can admit an all-request wake without losing a message  49893ms
+     ✓ conversation: a monitoring recipient queues its message until scheduler capacity is available  2560ms
+stderr | src/core/harness-parity.test.ts > harness parity — owned input run tier > opencode R11 post-send checkpoint failure interrupts and reports failure without dropping input
+[cez] failed to save runs.json: EISDIR: illegal operation on a directory, open '/tmp/cez-vitest-tmp-mreC0Y/cez-owned-input-opencode-hn95Ll/.ai/cezar/runs.json.tmp'
+
+ ✓ |server| src/workflows/run.test.ts (125 tests) 77871ms
+     ✓ runs both skill steps to completion, and the second step's prompt carries the chain guard  3912ms
+     ✓ leaves the lone agent step's prompt untouched  2209ms
+     ✓ 'dry-run runner' publishes and persists a complete waiting record before yielding  1817ms
+     ✓ a continuation turn persists a complete waiting record before yielding  2587ms
+     ✓ a CEZ:MONITORING turn-end parks the run as running/monitoring  1833ms
+     ✓ a Claude ScheduleWakeup turn-end parks as monitoring without a text marker  2485ms
+     ✓ recognizes Claude ScheduleWakeup on a reopened continuation too  3894ms
+     ✓ keeps CEZ:DONE ahead of Claude ScheduleWakeup  2085ms
+     ✓ keeps CEZ:ASK ahead of Claude ScheduleWakeup  2070ms
+     ✓ a parked monitor schedules its own re-check under the zero-config default (#810)  1823ms
+     ✓ park mode remains reachable as an explicit operator choice (#810)  1824ms
+     ✓ optionally wakes a parked monitor without fabricating a user message  1875ms
+     ✓ backend 'tool' activity resumes a parked monitor before its wake deadline (#59)  1431ms
+     ✓ backend 'message' activity resumes a parked monitor before its wake deadline (#59)  1407ms
+     ✓ a passive backend diagnostic keeps a parked monitor wakeable  2428ms
+     ✓ nested Codex subagent items after park do not unpark monitoring (#121)  2430ms
+     ✓ parent turn.started after park still unparks monitoring (#61, #121)  1822ms
+     ✓ a markerless turn-end still parks as waiting with no activity  1839ms
+     ✓ strips the CEZ:MONITORING marker from server-emitted v1 text events  1881ms
+     ✓ resuming a monitoring run clears the activity  2282ms
+     ✓ a CEZ:ASK turn-end parks the run as waiting (attention) and emits ask.requested  1886ms
+     ✓ parks a continuation when only Claude's completed v2 message contains a valid CEZ:ASK marker  1990ms
+     ✓ strips the CEZ:ASK marker from server-emitted v1 text events  1822ms
+     ✓ normalizes a near-valid presentation-only marker into exactly one ask card  1825ms
+     ✓ a markerless turn-end raises no ask.requested  1833ms
+     ✓ a mid-turn follow-up does not resume past a CEZ:ASK park  498ms
+     ✓ a malformed CEZ:ASK degrades gracefully: parks waiting, no ask card  1949ms
+     ✓ a schema-invalid CEZ:ASK stays visible in v1 text — no card will ever render it  1879ms
+     ✓ a CEZ:ASK missing its final brace still renders one card, notes the recovery, and retains the raw recovery audit  1889ms
+     ✓ recovers a truncated CEZ:ASK on a continuation turn identically  3691ms
+     ✓ delivers the task plus every stacked message, with the edit applied  3716ms
+     ✓ expands the continuation's OPENING prompt before it becomes the session userPrompt  2345ms
+     ✓ expands a FOLLOW-UP delivered into the reopened continuation session  3952ms
+     ✓ leaves an unknown slash command untouched so backend-native commands still work  2237ms
+     ✓ expands the opening prompt before it reaches the backend  424ms
+     ✓ passes through '/compact please' with registry=true  429ms
+     ✓ passes through '/demo-review look at the diff' with registry=false  374ms
+stderr | src/core/harness-parity.test.ts > harness parity — owned input run tier > pi R11 post-send checkpoint failure interrupts and reports failure without dropping input
+[cez] failed to save runs.json: EISDIR: illegal operation on a directory, open '/tmp/cez-vitest-tmp-mreC0Y/cez-owned-input-pi-sipBkz/.ai/cezar/runs.json.tmp'
+
+ ✓ |server| src/core/harness-parity.test.ts (125 tests) 97913ms
+     ✓ claude S1 terminates with exactly one v1 done, and it is the last event  1769ms
+     ✓ claude S2 ends the turn on its own terminal signal, after the last content event  811ms
+     ✓ claude S8 assembles split assistant text so a trailing marker still anchors  403ms
+     ✓ claude S7 surfaces a provider failure as an error on both streams  313ms
+     ✓ claude S9 keeps the parent turn open past a child session terminal signal  3272ms
+     ✓ claude S3 yields a resumable session id at the seam  1768ms
+     ✓ claude S4 reports token usage on both streams  1770ms
+     ✓ claude S10 exposes the spawned process pid  1769ms
+     ✓ codex S2 ends the turn on its own terminal signal, after the last content event  323ms
+     ✓ opencode S2 ends the turn on its own terminal signal, after the last content event  377ms
+     ✓ pi S2 ends the turn on its own terminal signal, after the last content event  567ms
+     ✓ claude S13 auto-end checks a late hold at execution and resumes after the next admitted turn  1722ms
+     ✓ claude S11 non-human input cannot answer a native or marker ask  2584ms
+     ✓ claude S12 non-human input refuses an unsafe turn and can retry at its boundary  1087ms
+     ✓ claude S5 accepts a follow-up message and completes a second turn  2179ms
+     ✓ claude S6 settles result on interrupt without reporting an agent error  311ms
+     ✓ codex S13 auto-end checks a late hold at execution and resumes after the next admitted turn  965ms
+     ✓ codex S12 non-human input refuses an unsafe turn and can retry at its boundary  322ms
+     ✓ opencode S13 auto-end checks a late hold at execution and resumes after the next admitted turn  1028ms
+     ✓ opencode S12 non-human input refuses an unsafe turn and can retry at its boundary  363ms
+     ✓ pi S13 auto-end checks a late hold at execution and resumes after the next admitted turn  1218ms
+     ✓ pi S12 non-human input refuses an unsafe turn and can retry at its boundary  576ms
+     ✓ claude R1 takes a declared-complete run to its review gate  1888ms
+     ✓ claude R2 fails the run on a provider failure instead of parking it as Needs You  423ms
+     ✓ claude R3 parks as waiting and emits exactly one ask card  1829ms
+     ✓ claude R4 renders no card for a malformed ask and still ends the turn  1877ms
+     ✓ claude R5 parks a declared monitoring turn as running/monitoring, not waiting  537ms
+     ✓ claude R12 keeps monitoring parked when child text follows the parent marker  3341ms
+     ✓ claude R6 queues before/during asks and drains only after a human answer  3208ms
+     ✓ claude R7 restart retains pending asks and input; only explicit-answer Continue drains it  4161ms
+     ✓ claude refused human delivery retains the ask live and after restart  3852ms
+     ✓ claude R10 accepted input precedes DONE but explicit termination is never prolonged  7554ms
+     ✓ claude R11 post-send checkpoint failure interrupts and reports failure without dropping input  2006ms
+     ✓ claude R9 continuation asks keep input queued through delayed native reply acknowledgement  4618ms
+     ✓ claude R8 queued restart/starting inputs persist; disk failure emits and delivers nothing  1605ms
+     ✓ codex R6 queues before/during asks and drains only after a human answer  528ms
+     ✓ codex R7 restart retains pending asks and input; only explicit-answer Continue drains it  524ms
+     ✓ codex refused human delivery retains the ask live and after restart  475ms
+     ✓ codex R10 accepted input precedes DONE but explicit termination is never prolonged  920ms
+     ✓ codex R11 post-send checkpoint failure interrupts and reports failure without dropping input  336ms
+     ✓ codex R9 continuation asks keep input queued through delayed native reply acknowledgement  723ms
+     ✓ codex R8 queued restart/starting inputs persist; disk failure emits and delivers nothing  587ms
+     ✓ opencode R6 queues before/during asks and drains only after a human answer  568ms
+     ✓ opencode R7 restart retains pending asks and input; only explicit-answer Continue drains it  661ms
+     ✓ opencode refused human delivery retains the ask live and after restart  657ms
+     ✓ opencode R10 accepted input precedes DONE but explicit termination is never prolonged  1178ms
+     ✓ opencode R11 post-send checkpoint failure interrupts and reports failure without dropping input  434ms
+     ✓ opencode R9 continuation asks keep input queued through delayed native reply acknowledgement  871ms
+     ✓ opencode R8 queued restart/starting inputs persist; disk failure emits and delivers nothing  663ms
+     ✓ pi R6 queues before/during asks and drains only after a human answer  556ms
+     ✓ pi R7 restart retains pending asks and input; only explicit-answer Continue drains it  598ms
+     ✓ pi refused human delivery retains the ask live and after restart  633ms
+     ✓ pi R10 accepted input precedes DONE but explicit termination is never prolonged  2079ms
+     ✓ pi R11 post-send checkpoint failure interrupts and reports failure without dropping input  314ms
+     ✓ pi R9 continuation asks keep input queued through delayed native reply acknowledgement  613ms
+     ✓ pi R8 queued restart/starting inputs persist; disk failure emits and delivers nothing  893ms
+     ✓ rejected opening answer never checkpoints an unanswered ask  740ms
+     ✓ finished opening answer never checkpoints an unanswered ask  621ms
+     ✓ cancelled opening answer never checkpoints an unanswered ask  577ms
+     ✓ fresh late reply acknowledgement plus DONE retries accepted input  592ms
+     ✓ continuation late reply acknowledgement plus DONE retries accepted input  873ms
+     ✓ rejected mid-session human POST remains nonfatal  418ms
+     ✓ fresh rejected agent POST fails without draining more accepted input  401ms
+     ✓ continuation rejected agent POST fails without draining more accepted input  800ms
+     ✓ claude restricts verified native delegation on start without widening ordinary settings  3560ms
+     ✓ claude restricts verified native delegation on Continue without widening ordinary settings  3547ms
+     ✓ opencode restricts verified native delegation on start without widening ordinary settings  360ms
+     ✓ opencode restricts verified native delegation on Continue without widening ordinary settings  380ms
+ ✓ |server| src/delegation/provision-workflows.test.ts (110 tests) 34944ms
+     ✓ provisions governed intent for 'codex' on 'continue'  433ms
+     ✓ provisions governed intent for 'codex' on 'recovery'  399ms
+     ✓ refuses a failed continuation checkpoint without advancing revision or opening another session  565ms
+     ✓ persists result-only assistant evidence on initial execution and authorized Continue  635ms
+     ✓ pins explicitly selected mixed-backend identity and defaults on queued  329ms
+     ✓ pins explicitly selected mixed-backend identity and defaults on restart  302ms
+     ✓ pins explicitly selected mixed-backend identity and defaults on continue  426ms
+     ✓ rejects lost accepted input recipes on continue  428ms
+     ✓ verifies or rebuilds explicit context with 'original-deleted' on 'queued'  362ms
+     ✓ verifies or rebuilds explicit context with 'copy-missing' on 'queued'  339ms
+     ✓ verifies or rebuilds explicit context with 'both-changed' on 'queued'  340ms
+     ✓ verifies or rebuilds explicit context with 'original-deleted' on 'restart'  333ms
+     ✓ verifies or rebuilds explicit context with 'copy-missing' on 'restart'  325ms
+     ✓ verifies or rebuilds explicit context with 'both-changed' on 'restart'  374ms
+     ✓ verifies or rebuilds explicit context with 'original-deleted' on 'continue'  459ms
+     ✓ verifies or rebuilds explicit context with 'copy-missing' on 'continue'  405ms
+     ✓ verifies or rebuilds explicit context with 'both-changed' on 'continue'  399ms
+     ✓ pins accepted [] grants across 'missing' workflow on 'restart'  329ms
+     ✓ pins accepted [ 'Read' ] grants across 'missing' workflow on 'restart'  388ms
+     ✓ pins accepted [] grants across 'malformed' workflow on 'restart'  357ms
+     ✓ pins accepted [ 'Read' ] grants across 'malformed' workflow on 'restart'  350ms
+     ✓ pins accepted [] grants across 'missing-step' workflow on 'restart'  433ms
+     ✓ pins accepted [ 'Read' ] grants across 'missing-step' workflow on 'restart'  385ms
+     ✓ pins accepted [] grants across 'missing' workflow on 'continue'  471ms
+     ✓ pins accepted [ 'Read' ] grants across 'missing' workflow on 'continue'  462ms
+     ✓ pins accepted [] grants across 'malformed' workflow on 'continue'  438ms
+     ✓ pins accepted [ 'Read' ] grants across 'malformed' workflow on 'continue'  472ms
+     ✓ pins accepted [] grants across 'missing-step' workflow on 'continue'  472ms
+     ✓ pins accepted [ 'Read' ] grants across 'missing-step' workflow on 'continue'  424ms
+     ✓ refuses 'missing' private accepted grants on 'continue'  480ms
+     ✓ refuses 'malformed' private accepted grants on 'continue'  423ms
+     ✓ preserves Claude 'override' state-file layout on 'restart'  340ms
+     ✓ preserves Claude 'named' state-file layout on 'restart'  347ms
+     ✓ preserves Claude 'native' state-file layout on 'continue'  445ms
+     ✓ preserves Claude 'override' state-file layout on 'continue'  396ms
+     ✓ preserves Claude 'named' state-file layout on 'continue'  413ms
+     ✓ refuses incompatible native Claude 'same-dir-override' environment on 'continue'  411ms
+     ✓ refuses incompatible native Claude 'home' environment on 'continue'  301ms
+     ✓ checks native Claude layout against merged session env, not only the host env  322ms
+     ✓ pins account home after registry 'delete' on 'queued'  338ms
+     ✓ pins account home after registry 'repoint' on 'queued'  433ms
+     ✓ pins account home after registry 'delete' on 'restart'  387ms
+     ✓ pins account home after registry 'repoint' on 'restart'  390ms
+     ✓ pins account home after registry 'delete' on 'continue'  457ms
+     ✓ pins account home after registry 'repoint' on 'continue'  499ms
+     ✓ explicitly refuses accepted { effort: 'high' } after model lock on 'queued'  351ms
+     ✓ explicitly refuses accepted { model: 'haiku' } after model lock on 'continue'  583ms
+     ✓ explicitly refuses accepted { effort: 'high' } after model lock on 'continue'  425ms
+     ✓ refuses 'malformed' private identity on 'queued'  303ms
+     ✓ refuses 'missing' private identity on 'restart'  318ms
+     ✓ refuses 'missing' private identity on 'continue'  563ms
+     ✓ refuses 'malformed' private identity on 'continue'  442ms
+     ✓ leaves an accepted native/default model and effort unspecified under model lock  493ms
+     ✓ pins supported homes while preserving codex profile limits  516ms
+     ✓ pins supported homes while preserving opencode profile limits  515ms
+     ✓ pins supported homes while preserving pi profile limits  367ms
+     ✓ supports only deliberately marked internal primitive workers, never missing identity evidence  304ms
+     ✓ fresh and Continue rotate/revoke inside execution, retain restrictions through accepted worker and restart  374ms
+     ✓ keeps an empty tool grant and absent prompt pinned after acceptance and on worker Continue  789ms
+     ✓ root session wait returns immediately, then controller shutdown revokes without terminalizing persisted work  345ms
+     ✓ attaches lazy project provisioning before recovery can launch a session  408ms
+ ✓ |server| src/workflows/worker-wait.test.ts (28 tests) 41454ms
+     ✓ readiness fresh: DONE waits for live workers without accepting human Finish  1398ms
+     ✓ readiness continuation: DONE waits for live workers without accepting human Finish  2254ms
+     ✓ readiness closed session defers successful done with outstanding workers  938ms
+     ✓ readiness public cancellation does not wake until private completion is durable  955ms
+     ✓ readiness real stopped process wakes its parent only after actual exit and finalization  1176ms
+     ✓ readiness requires settled collection of review and accepts partial failures  1051ms
+     ✓ readiness requires settled collection of failed and accepts partial failures  1032ms
+     ✓ readiness requires settled collection of cancelled and accepts partial failures  1055ms
+     ✓ readiness timeout and repeated DONE retain attention without another automatic wait  1800ms
+     ✓ readiness settled uncollected completion sends one collection response then remains attention  2630ms
+     ✓ readiness accepted worker revision invalidates a previously collected settled result  995ms
+     ✓ readiness closed-session wait resumes on a later proof after restart and preserves its cycle  2763ms
+     ✓ readiness ready human Finish retires an accepted wait before closing its session  8205ms
+     ✓ completion timeout fresh monitoring stays attention with delayed ACK=false  2296ms
+     ✓ completion timeout fresh monitoring stays attention with delayed ACK=true  792ms
+     ✓ completion timeout continuation monitoring stays attention with delayed ACK=false  3178ms
+     ✓ completion timeout continuation monitoring stays attention with delayed ACK=true  1089ms
+     ✓ readiness Finish preserves pending parent human questions  2038ms
+     ✓ all-mode replaces old observations when a selected worker accepts another execution  1086ms
+     ✓ all-mode stays parked after one outcome and wakes exactly once after both  1009ms
+     ✓ cancels before park durably without releasing an executing parent slot  338ms
+     ✓ cancelled parked wait queues one wake behind a running worker and stale IDs cannot cancel a later wait  1042ms
+     ✓ restarts cancelled settlement and retains its receipt after delivery and another restart  629ms
+     ✓ parent cancellation retires its wait with a receipt while cancelling workers  995ms
+ ✓ |server| src/core/owned-input-delivery.test.ts (37 tests) 28552ms
+   ✓ codex fresh rejected transport remains queued and replays the same input after reopening  583ms
+   ✓ codex continuation rejected transport remains queued and replays the same input after reopening  710ms
+   ✓ opencode fresh rejected transport remains queued and replays the same input after reopening  784ms
+   ✓ opencode continuation rejected transport remains queued and replays the same input after reopening  960ms
+   ✓ pi fresh rejected transport remains queued and replays the same input after reopening  584ms
+   ✓ pi continuation rejected transport remains queued and replays the same input after reopening  811ms
+   ✓ codex delayed ACK keeps the in-flight input in the 32 cap and merges concurrent queue writes exactly once  998ms
+   ✓ codex owned DONE before ACK closes only after acceptance without needing a phantom turn  391ms
+   ✓ codex scheduler DONE before ACK closes only after acceptance without needing a phantom turn  473ms
+   ✓ opencode delayed ACK keeps the in-flight input in the 32 cap and merges concurrent queue writes exactly once  1131ms
+   ✓ opencode owned DONE before ACK closes only after acceptance without needing a phantom turn  485ms
+   ✓ opencode scheduler DONE before ACK closes only after acceptance without needing a phantom turn  454ms
+   ✓ pi delayed ACK keeps the in-flight input in the 32 cap and merges concurrent queue writes exactly once  929ms
+   ✓ pi owned DONE before ACK closes only after acceptance without needing a phantom turn  409ms
+   ✓ pi scheduler DONE before ACK closes only after acceptance without needing a phantom turn  402ms
+   ✓ codex a completed turn with a delayed ACK holds auto-end and resumes it after acceptance  1024ms
+   ✓ codex pending ACK settles without a delivery receipt or reopened lifecycle after finish  517ms
+   ✓ codex pending ACK settles without a delivery receipt or reopened lifecycle after cancel  374ms
+   ✓ codex pending ACK settles without a delivery receipt or reopened lifecycle after dispose  370ms
+   ✓ opencode a completed turn with a delayed ACK holds auto-end and resumes it after acceptance  1071ms
+   ✓ opencode pending ACK settles without a delivery receipt or reopened lifecycle after finish  567ms
+   ✓ opencode pending ACK settles without a delivery receipt or reopened lifecycle after cancel  573ms
+   ✓ opencode pending ACK settles without a delivery receipt or reopened lifecycle after dispose  504ms
+   ✓ pi a completed turn with a delayed ACK holds auto-end and resumes it after acceptance  1240ms
+   ✓ pi pending ACK settles without a delivery receipt or reopened lifecycle after finish  456ms
+   ✓ pi pending ACK settles without a delivery receipt or reopened lifecycle after cancel  393ms
+   ✓ pi pending ACK settles without a delivery receipt or reopened lifecycle after dispose  402ms
+   ✓ claude transport acceptance remains delivered when the accepted turn subsequently reports a provider failure  2329ms
+   ✓ codex transport acceptance remains delivered when the accepted turn subsequently reports a provider failure  356ms
+   ✓ opencode transport acceptance remains delivered when the accepted turn subsequently reports a provider failure  575ms
+   ✓ pi transport acceptance remains delivered when the accepted turn subsequently reports a provider failure  374ms
+   ✓ opencode fresh provider failure before HTTP ACK retains the accepted input receipt  629ms
+   ✓ opencode continuation provider failure before HTTP ACK retains the accepted input receipt  845ms
+   ✓ opencode fixture reaches waiting when the requested runner port is occupied  444ms
+   ✓ opencode provider failure with unresponsive ACK terminates without inventing delivery  4501ms
+   ✓ opencode provider failure with cancel ACK terminates without inventing delivery  477ms
+   ✓ opencode provider failure with finish ACK terminates without inventing delivery  425ms
+ ✓ |server| src/workflows/worker-wait-durability.test.ts (42 tests) 66558ms
+     ✓ queued human withdrawal preserves admission, FIFO and attachments without answering an ask on acceptance  1974ms
+     ✓ a failed queued human withdrawal publishes no wait, wake, message or admission changes  1075ms
+     ✓ startup human withdrawal before-delivery: survives restart without double folding or lost input  2061ms
+     ✓ startup human withdrawal after-delivery: survives restart without double folding or lost input  1992ms
+     ✓ startup human withdrawal checkpoint-failure: stops delivery and preserves the replay ID  1143ms
+     ✓ releases only on yield and admits a live wake behind already queued work  1986ms
+     ✓ observes review before registration, includes all selected statuses and wakes once  951ms
+     ✓ observes done before registration, includes all selected statuses and wakes once  986ms
+     ✓ observes failed before registration, includes all selected statuses and wakes once  949ms
+     ✓ observes cancelled before registration, includes all selected statuses and wakes once  936ms
+     ✓ delivers all 32 terminal outcomes within the input bound without dropping durable summaries  1882ms
+     ✓ observes completion between registration and park and reports every selected status  530ms
+     ✓ fresh: worker wait precedes mock:done except that a human ask wins  1911ms
+     ✓ fresh: worker wait precedes mock:monitoring except that a human ask wins  1909ms
+     ✓ fresh: worker wait precedes mock:ask except that a human ask wins  1898ms
+     ✓ continuation: worker wait precedes mock:done except that a human ask wins  2755ms
+     ✓ continuation: worker wait precedes mock:monitoring except that a human ask wins  2785ms
+     ✓ continuation: worker wait precedes mock:ask except that a human ask wins  2796ms
+     ✓ a parent timeout leaves a waiting child human question unanswered  2918ms
+     ✓ rejects duplicate sets, excessive deadlines, foreign workers, outstanding waits and pending asks  1372ms
+     ✓ rebuilds a parked deadline on restart, expires without cancelling the queued child  2870ms
+     ✓ restart reconciles registered before generic waiting settlement and deduplicates recovery  3306ms
+     ✓ restart reconciles parked before generic waiting settlement and deduplicates recovery  3231ms
+     ✓ restart reconciles wake-pending before generic waiting settlement and deduplicates recovery  3229ms
+     ✓ retiring a delivered wait durably records the resumed status in the same snapshot  934ms
+     ✓ restart after the delivery checkpoint resumes the parent instead of settling the parked snapshot  913ms
+     ✓ preserves a delegated parent ask across restart and never uses a lifecycle prompt as its answer  3830ms
+     ✓ persists lifecycle continuation origin through a queued restart  1889ms
+     ✓ backend activity restores an executing parent slot without withdrawing its durable wait  988ms
+     ✓ recovery admits an older queued child before an expired parent wake  1106ms
+     ✓ fresh: disposal ignores late result and restart retains the wait and children  968ms
+     ✓ fresh: disposal ignores late error and restart retains the wait and children  1214ms
+     ✓ continuation: disposal ignores late result and restart retains the wait and children  1842ms
+     ✓ continuation: disposal ignores late error and restart retains the wait and children  2269ms
+     ✓ explicit cancel before disposal is not resurrected on restart  924ms
+     ✓ controller disposal does not cascade or clear durable waits  930ms
+stderr | src/workflows/auto-resume.test.ts > a run stopped by a usage limit resumes itself > watchdog: an idle queue with no appointment behind the hold starts work anyway
+[cez] queue watchdog: re-adopting queued run 84113711-6f3e-402b-9d4a-222c61874c8f the engine had lost
+
+stderr | src/workflows/auto-resume.test.ts > a run stopped by a usage limit resumes itself > watchdog: an idle queue with no appointment behind the hold starts work anyway
+[cez] queue watchdog: work is queued, nothing is running, and the usage-limit hold has no deadline behind it — starting the next task anyway
+
+stderr | src/workflows/auto-resume.test.ts > a run stopped by a usage limit resumes itself > watchdog: an in-place run it forces through is not handed back at the repo-root gate
+[cez] queue watchdog: re-adopting queued run 0b8f0d7d-afb1-4f1e-99be-2b4f372a3309 the engine had lost
+
+stderr | src/workflows/auto-resume.test.ts > a run stopped by a usage limit resumes itself > watchdog: an in-place run it forces through is not handed back at the repo-root gate
+[cez] queue watchdog: work is queued, nothing is running, and the usage-limit hold has no deadline behind it — starting the next task anyway
+
+stderr | src/workflows/auto-resume.test.ts > a run stopped by a usage limit resumes itself > watchdog: re-adopts a queued record the engine has no work item for
+[cez] queue watchdog: re-adopting queued run 8826d957-545e-41a6-88b8-8b3b76b6afbe the engine had lost
+
+ ✓ |server| src/workflows/pasted-attachments.test.ts (26 tests) 34530ms
+     ✓ a task-start pasted image is saved as pasted-1.png and its path lands in the opening prompt  2621ms
+     ✓ task-start PDF and markdown attachments land on disk and reach the agent as paths, not bytes  2525ms
+     ✓ a file stacked onto a queued run reaches the opening prompt as a path  2510ms
+     ✓ notes a queued document deleted before same-process execution and still delivers text  2511ms
+     ✓ a follow-up pasted image is saved and its path is appended to the delivered message  2510ms
+     ✓ a Continue pasted image is saved, rendered on the bubble, and reaches the reopened session  3914ms
+     ✓ delivers mixed PDF/image attachments through live without a file runner block  2316ms
+     ✓ delivers mixed PDF/image attachments through deferred without a file runner block  2218ms
+     ✓ delivers mixed PDF/image attachments through continuation without a file runner block  3815ms
+     ✓ keeps a fresh Continue image viewable when its disk write fails  1907ms
+     ✓ recovers fresh mixed Continue attachments after a immediate pre-spawn restart  1919ms
+     ✓ recovers fresh mixed Continue attachments after a capacity pre-spawn restart  1909ms
+     ✓ recovers fresh mixed Continue attachments after a running pre-spawn restart  1912ms
+     ✓ recovers fresh mixed Continue attachments after a missing pre-spawn restart  1914ms
+ ✓ |server| src/workflows/auto-resume.test.ts (21 tests) 21545ms
+     ✓ schedules the resume for the provider's reset instant plus the grace  428ms
+     ✓ leaves the run plainly failed when the setting is off  368ms
+     ✓ schedules the next window when the resumed turn hits the limit again, and counts up  731ms
+     ✓ never leaves a deadline behind: a record with no armed timer heals on the next sweep  2185ms
+     ✓ retires the deadline when the resume is refused, instead of promising a past time  421ms
+     ✓ holds the queue while the account is limited — the rest never start  1476ms
+     ✓ holds in-place runs too, which dequeue long before they spawn  1423ms
+     ✓ keeps the account held while a resume is in flight, until a turn proves the window  420ms
+     ✓ lets two resumes on one account both run — they must not hold each other  2292ms
+     ✓ watchdog: an idle queue with no appointment behind the hold starts work anyway  987ms
+     ✓ watchdog: an in-place run it forces through is not handed back at the repo-root gate  920ms
+     ✓ retires a deadline no timer is holding when the setting is off  371ms
+     ✓ watchdog: re-adopts a queued record the engine has no work item for  1928ms
+     ✓ a re-limited resume holds the other resumes back  2681ms
+     ✓ holds only the limited account — other accounts keep running  419ms
+     ✓ never resumes a task the user resigned from — archived is archived  373ms
+     ✓ lets a long-missed deadline expire instead of reviving a task from another era  426ms
+     ✓ cancels one task without touching another that is waiting out the same window  720ms
+     ✓ cancels an armed resume when the setting is switched off mid-wait  424ms
+     ✓ stops scheduling once the consecutive-resume cap is spent, and says why  366ms
+     ✓ re-arms across a restart and resumes the task from its last session  2182ms
+ ✓ |server| src/workflows/system-prompt.test.ts (30 tests) 32271ms
+     ✓ no override: the config default reaches the CLI and is echoed on the record  2417ms
+     ✓ live refresh: the namer applies turn context through the mock (direct drive)  640ms
+     ✓ marker declarations outrank the namer (spec 2026-07-18-task-ref-markers)  651ms
+     ✓ mock:refs end to end: markers set the record, silence the wrong chip, and stay out of the transcript  8521ms
+     ✓ a user rename made before the namer answers is never overwritten  3008ms
+     ✓ override: replaces the config default in argv and in the record echo  2308ms
+     ✓ sends skill identity, description, instructions, and numeric task context to the runner  2312ms
+     ✓ on an inbox-enabled server the agent gets the run own inbox, never an inherited one  2309ms
+     ✓ explicit opt-out keeps handoff behavior but removes inbox prompt and environment  2414ms
+     ✓ without CEZ_FOLLOWUPS the agent is never told about the inbox  1909ms
+     ✓ keeps the per-task handoff journal — #471 turns off the inbox, not the notes  1907ms
+     ✓ a client asking for follow-ups cannot override the gate  1908ms
+     ✓ turning the flag on restores the inbox for a new run  1907ms
+ ✓ |server| src/workflows/worker-destroy.test.ts (38 tests) 20220ms
+     ✓ parked stop waits for process result AND pending turn bookkeeping before allowing destruction  1079ms
+     ✓ fresh post-spawn human flush failure retains resources until the session process closes  422ms
+     ✓ Continue post-spawn human flush failure retains resources until the session process closes  1206ms
+     ✓ refuses queued recovery and Continue over a surviving prior process, then refuses real destroy  308ms
+     ✓ completion rotates on Continue; stale completion cannot authorize a newer execution  1892ms
+     ✓ terminal completion and failed session startup both prove finalization, while disposal settles waiters false  3101ms
+     ✓ waits for an already-running periodic autosave before proving termination  1111ms
+     ✓ admits the same manager deferred Continue without rotating its exact owned generation  1909ms
+     ✓ capacity-deferred Continue invalidates prior completion before queueing and cancels without launching  1030ms
+     ✓ keeps workflow checks inside the termination barrier until the check process closes  522ms
+     ✓ failed session startup cannot leave periodic autosave running after termination proof  1090ms
+     ✓ destruction intent prevents synthetic monitoring wake bookkeeping before stop is sent  1944ms
+     ✓ explicit termination retry can persist finalized same-process evidence after a checkpoint write failure  1987ms
+ ✓ |server| src/delegation/workspace.test.ts (64 tests) 15462ms
+     ✓ executes only the bundled quick-task from durable intent, pins before queuing and never autosaves parent edits  2068ms
+     ✓ recovers an owned queued record with its bundled workflow, inherited settings and original start time  2074ms
+     ✓ retries branch-only cleanup after a locked ref; rejects repurposing after partial cleanup  434ms
+     ✓ refuses changed branch tip and checkout elsewhere after partial removal  422ms
+     ✓ replays a durable prepared checkpoint after directory removal  416ms
+     ✓ replays a durable worktree-removed checkpoint after directory removal  440ms
+     ✓ does not let a short branch collision adopt a partially removed worker branch  362ms
+ ✓ |server| src/workflows/delegation-integration.test.ts (3 tests) 20119ms
+     ✓ coordinates two isolated backends, explicitly integrates a reviewed commit, and retries cleanup after restart  10922ms
+     ✓ reports a real provider failure and a stopped worker without allowing peer authority or premature success  6294ms
+     ✓ parent cancellation proves live child termination while preserving another child review worktree  2899ms
+ ✓ |server| src/workflows/model-identity-wiring.test.ts (10 tests) 21630ms
+     ✓ a bare preset reaches the CLI bare and persists provider-qualified  2317ms
+     ✓ pins --effort on create and reuses it on Continue when the body omits it (#45)  2415ms
+     ✓ omits --effort when unset so the harness keeps its default (#45)  2307ms
+     ✓ an auto (empty) model persists no identity and pins nothing on the wire  2307ms
+     ✓ a provider-qualified model is normalised to the bare wire form for claude  2306ms
+     ✓ a continuation normalises the same way as the first spawn (#405 review M1)  2410ms
+     ✓ a follow-up model override re-writes the persisted identity (#401 + #405)  2408ms
+     ✓ Claude gateway models run with their provider-qualified wire id  2311ms
+     ✓ fails a run when the runner reports a model error instead of parking it as active  504ms
+     ✓ a continuation with an unsupported Codex provider still fails loudly  2323ms
+ ✓ |server| src/core/pi-runner.test.ts (29 tests) 14342ms
+     ✓ reports pi as unavailable with a hint, and never rejects (no boot failure)  587ms
+     ✓ streams text, a tool call/result and a terminal done over the mock  316ms
+     ✓ coalesces token-split text_delta into one v1 text so a CEZ:ASK marker still parses (#2)  314ms
+     ✓ emits a second assistant text block after a tool when both use contentIndex 0  311ms
+     ✓ emits follow-up text after an interrupted contentIndex 0 block (flush without text_end)  307ms
+     ✓ keeps one text block when a mid-stream prompt ack arrives between text_delta events  312ms
+     ✓ steers an active turn, starts one fresh turn after settlement, and auto-ends  308ms
+     ✓ steers a follow-up into an autonomously resumed turn without opening another normalized turn  327ms
+     ✓ steers a follow-up during a late update from a tool started before settlement  326ms
+     ✓ emits a v1 error before turn-end for a transport diagnostic  321ms
+     ✓ falls back to errorMessage when diagnostics are absent  310ms
+     ✓ does not fail a successful empty assistant turn  306ms
+     ✓ end settles exit 143 with a note and no startup stderr  10064ms
+ ✓ |server| src/workflows/workspace-semaphore.test.ts (11 tests) 10617ms
+     ✓ caps concurrent runs across two projects: with cap 2, the third run queues  735ms
+     ✓ a slot freed in one project starts the run queued in ANOTHER project  738ms
+     ✓ a freed slot goes to the longest-waiting run across projects  613ms
+     ✓ #347 across projects: a waiting run resumes immediately even when other projects saturate the cap  2324ms
+     ✓ per-project cap: project A limited to 1 runs one at a time while B fills the workspace cap  847ms
+     ✓ applies the owning project cap when the manager runs from a cezar task worktree  415ms
+     ✓ restart continuation releases its starting slot after becoming active  1856ms
+     ✓ #347 with a per-project cap: a waiting run on the capped project still resumes immediately  2313ms
+     ✓ refresh() applies a raised cap without a restart: the queued run starts  683ms
+ ✓ |server| src/core/claude-cli-runner.test.ts (32 tests) 9035ms
+     ✓ counts the aggregate result usage without re-adding assistant-frame snapshots  2025ms
+   ✓ keeps non-human input out of a Claude turn already queued by a human  1340ms
+     ✓ acknowledged settles only the reserved write and never a mere turn-end  757ms
+     ✓ write error settles only the reserved write and never a mere turn-end  508ms
+     ✓ closed settles only the reserved write and never a mere turn-end  505ms
+     ✓ keeps stdin open through a follow-up queued before the opening result, then closes after the final result  1085ms
+     ✓ closes after a single final result exactly as before  329ms
+     ✓ leaves an interactive session open after every result  504ms
+     ✓ real mock binary: a follow-up written before the opening result finishes before stdin closes  1848ms
+ ✓ |server| src/server/health-topic.test.ts (10 tests) 9765ms
+     ✓ pre-warms the cache at boot so the first GET is already warm  683ms
+     ✓ does not serve a payload older than the staleness ceiling  1161ms
+     ✓ still answers instantly from cache inside the TTL  571ms
+     ✓ serves the cached value while revalidating in the stale-but-not-expired window  1202ms
+     ✓ publishes to subscribers only when the payload actually changed  1830ms
+     ✓ stops publishing once the last subscriber leaves  1252ms
+     ✓ the topic snapshot and GET /api/v1/health serve the same payload  642ms
+     ✓ shares one compute between concurrent reads (in-flight dedupe)  1201ms
+     ✓ a hub-less app is unchanged: no cache, every request computes fresh  1187ms
+ ✓ |server| src/server/health-forge.test.ts (20 tests) 10548ms
+     ✓ local mode: keeps every pre-forge field and adds localHandoff:true + forge:null outside a repo  695ms
+     ✓ reports the GitHub forge for a repo with a github.com remote  687ms
+     ✓ reports the GitHub forge for an SSH (scp-like) origin remote  619ms
+     ✓ reports the GitHub forge when the only remote is not named origin  572ms
+     ✓ reports forge:null for a non-GitHub remote  602ms
+     ✓ hosted mode via CEZ_REMOTE=1: localHandoff:false  600ms
+     ✓ hosted mode trims repoRoot to a basename — no absolute path/username leak (#431)  584ms
+     ✓ hosted mode via a non-loopback bind host also trims repoRoot (#431)  581ms
+     ✓ hosted mode via a non-loopback bind host: localHandoff:false  618ms
+     ✓ a loopback bind host stays local  677ms
+     ✓ reports followups:false by default — the global inbox is opt-in  641ms
+     ✓ reports followups:true with CEZ_FOLLOWUPS=1  602ms
+     ✓ reports automations:false by default — GitHub automations are opt-in  629ms
+     ✓ reports automations:true with CEZ_AUTOMATIONS=1  614ms
+     ✓ reports tokenMetrics:false with CEZ_HIDE_TOKEN_METRICS=1  601ms
+     ✓ reports independent token-only and cost-only presentation policies  1176ms
+ ✓ |server| src/core/conversation-delivery.test.ts (4 tests) 6826ms
+   ✓ claude conversation correlation survives ask recovery without projection-driven delivery  4814ms
+   ✓ codex conversation correlation survives ask recovery without projection-driven delivery  809ms
+   ✓ opencode conversation correlation survives ask recovery without projection-driven delivery  669ms
+   ✓ pi conversation correlation survives ask recovery without projection-driven delivery  531ms
+ ✓ |server| src/delegation/destruction-results.test.ts (23 tests) 5630ms
+     ✓ preserves a settled summary and diff after destruction, child deletion and restart  348ms
+     ✓ checkpoints deletion before bytes and retries failed removal after reopening  600ms
+     ✓ retains the pre-removal snapshot when cleanup result publication fails and retries without losing its diff  324ms
+     ✓ collection and destroy cannot erase evidence during an interrupted child deletion  322ms
+     ✓ does not let a missing parent authorize deletion of cleaned child history  338ms
+     ✓ does not let a malformed parent authorize deletion of cleaned child history  356ms
+     ✓ keeps worker history and parent snapshots through ordinary run retention eviction  310ms
+     ✓ reports branch-only cleanup failure while keeping the removed workspace and retained diff explicit on recollection  638ms
+     ✓ keeps an all-wait outcome and its revision after safe child deletion until the other worker settles  347ms
+     ✓ denies replacement evidence whose retained workspace names a different owner  303ms
+ ✓ |server| src/core/opencode-server-runner.test.ts (45 tests) 6579ms
+     ✓ keeps queued text through a failed reply until a later explicit answer succeeds  356ms
+     ✓ hints readiness after an idle human prompt receives its late HTTP acknowledgement  329ms
+     ✓ keeps post-idle messages queued until a delayed reply succeeds and drains them FIFO  317ms
+     ✓ restores an ask after an early-idle reply failure and retains queued text through retry  399ms
+     ✓ defers auto-end while an early-idle reply still owns queued prompt delivery  538ms
+     ✓ terminates the turn and session when an invalid native request ID cannot be found  1082ms
+     ✓ does not post a prompt when all pending-question ID lookups fail  1109ms
+ ✓ |server| src/server/repo-pull.test.ts (33 tests) 5425ms
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'review/pr-42'
+Switched to a new branch 'review/pr-42'
+Switched to a new branch 'cez/task1234'
+Switched to a new branch 'review/pr-42'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+ ✓ |server| src/core/claude-ui-mapper.test.ts (39 tests) 6124ms
+     ✓ preserves an is_error result message as an authoritative v1 error signal  560ms
+     ✓ emits v2 events through opts.onUiEvent while v1 events keep flowing  2017ms
+     ✓ mock:subagents fans out two parented Task agents  3521ms
+Switched to a new branch 'side'
+Switched to a new branch 'existing'
+Switched to branch 'main'
+Switched to a new branch 'other'
+Switched to branch 'main'
+Switched to a new branch 'feature'
+Switched to branch 'main'
+HEAD is now at aae1bef base
+ ✓ |server| src/server/git-changes.test.ts (70 tests) 4801ms
+ ✓ |server| src/headless-repo-handle.test.ts (2 tests) 5395ms
+   ✓ headless completion cancels slow repository discovery promptly  2970ms
+   ✓ headless completion cancels retry-delay repository discovery promptly  2422ms
+ ✓ |server| src/server/host-guard.test.ts (14 tests) 5447ms
+     ✓ allows the loopback spelling localhost  643ms
+     ✓ allows the loopback spelling localhost:4321  663ms
+     ✓ allows the loopback spelling 127.0.0.1  684ms
+     ✓ allows the loopback spelling 127.0.0.1:4321  652ms
+     ✓ allows the loopback spelling [::1]  713ms
+     ✓ allows the loopback spelling [::1]:4321  619ms
+     ✓ is exempt in hosted mode (CEZ_REMOTE=1) — the operator fronts it with their own hostname  627ms
+     ✓ is exempt for a non-loopback bind host — deliberately exposed  640ms
+stderr | src/core/owned-input-failure.test.ts > fresh acknowledged input checkpoint remains primary over a later session error
+[cez] failed to save runs.json: EISDIR: illegal operation on a directory, open '/tmp/cez-vitest-tmp-cOTiKq/cez-owned-input-opencode-6tJYAA/.ai/cezar/runs.json.tmp'
+
+stderr | src/core/owned-input-failure.test.ts > continuation acknowledged input checkpoint remains primary over a later session error
+[cez] failed to save runs.json: EISDIR: illegal operation on a directory, open '/tmp/cez-vitest-tmp-cOTiKq/cez-owned-input-opencode-QGJtml/.ai/cezar/runs.json.tmp'
+
+ ✓ |server| src/workflows/run-isolation.test.ts (3 tests) 2858ms
+     ✓ serializes parallel runs that explicitly opt out of worktrees  865ms
+     ✓ allows explicitly unsafe root runs to overlap when the repository lock is disabled  1903ms
+ ✓ |server| src/workflows/delegation-wire-gate.test.ts (1 test) 3562ms
+     ✓ a process polling existsSync then JSON.parse never observes truncated reply JSON  3560ms
+ ✓ |server| src/core/owned-input-failure.test.ts (4 tests) 2696ms
+   ✓ fresh acknowledged input checkpoint remains primary over a later session error  548ms
+   ✓ continuation acknowledged input checkpoint remains primary over a later session error  855ms
+   ✓ fresh earlier provider failure remains primary over a later checkpoint error  489ms
+   ✓ continuation earlier provider failure remains primary over a later checkpoint error  802ms
+ ✓ |server| src/server/projects-api.test.ts (39 tests) 4876ms
+       ✓ pins flagged health listings to the explicit boot identity  608ms
+       ✓ keeps the pre-workspace shape byte-identical and adds only projects + bootProject  677ms
+       ✓ health project entries carry id + name ONLY — never root (#431)  696ms
+       ✓ regression: the health payload never contains another project's absolute root  631ms
+       ✓ hosted mode (CEZ_REMOTE=1): no absolute root at all — boot repo included (#431)  617ms
+       ✓ degrades to projects:[] with a slug bootProject when nothing is registered  648ms
+ ✓ |server| src/delegation/service.test.ts (23 tests) 2067ms
+     ✓ caps accepted creations at 32 including destroyed workers; replay does not consume a creation  759ms
+ ✓ |server| src/core/codex-ui-mapper.test.ts (78 tests) 2315ms
+     ✓ emits v2 events through opts.onUiEvent while v1 events keep flowing  323ms
+     ✓ normalizes collaboration telemetry while preserving the legacy stream  317ms
+     ✓ does not end the parent turn when a sub-agent child thread completes its turn (#600)  308ms
+     ✓ keeps autonomous full-access permissions when resuming a thread  316ms
+     ✓ retains CEZ_CODEX_NETWORK=0 as an explicit restricted-sandbox opt-out  317ms
+     ✓ bridges native requestUserInput to ask.requested and answers the server request  320ms
+     ✓ routes an unstructured multi-question free-text reply to the first native question  315ms
+ ✓ |server| src/server/automations-gate.test.ts (21 tests) 2292ms
+       ✓ gates only its own family — health and its neighbours are untouched  630ms
+       ✓ reports the capability as off on health, which is what the nav gate reads  595ms
+       ✓ reports the capability as on  604ms
+ ✓ |server| src/server/provider-action-gating.test.ts (21 tests) 2552ms
+     ✓ dequeues a task created before disable and reaches its later provider step  2183ms
+ ✓ |server| src/delegation/results.test.ts (14 tests) 1886ms
+     ✓ collects assistant evidence, bounded Git snapshots and durable parent pointers with redaction  424ms
+ ✓ |server| src/delegation/routes.test.ts (35 tests) 1491ms
+ ✓ |server| src/workflows/retention-wiring.test.ts (1 test) 2052ms
+     ✓ reclaims the oldest finished worktree and spares the review run  2021ms
+ ✓ |server| src/server/agent-profiles-api.test.ts (55 tests) 1645ms
+ ✓ |server| src/server/open-in-app.test.ts (23 tests) 1551ms
+       ✓ opens the resolved JetBrains stub with the worktree dir as its argument  505ms
+     ✓ passes the path as a lone argv entry on macOS and Linux too  502ms
+ ✓ |server| src/workflows/run-lease.test.ts (2 tests) 1927ms
+     ✓ does not let a lease-blocked run consume a parallel slot  1144ms
+     ✓ cancels a run blocked on the lease without waiting for the holder  780ms
+ ✓ |server| src/server/origin-guard.test.ts (41 tests) 1366ms
+     ✓ leaves /api/v1/health open cross-origin on a loopback Host (the bookmarklet discovery probe) → 200  643ms
+ ✓ |server| src/git-worktree.test.ts (34 tests) 1931ms
+ ✓ |server| src/todos.test.ts (4 tests) 1441ms
+     ✓ scopes events to the written dataDir — A fires, B stays silent  1127ms
+     ✓ unsubscribe stops delivery to that callback while others keep receiving  309ms
+ ✓ |server| src/workspace/home-safety.test.ts (6 tests) 1065ms
+     ✓ survives a real, timing-out suite run: the home registry is never created  1044ms
+ ✓ |server| src/server/run-relationships.test.ts (2 tests) 1247ms
+   ✓ reads all owned workers including archived records through each human project alias with delegation off  1111ms
+ ✓ |server| src/server/providers-api.test.ts (35 tests) 1242ms
+     ✓ does not add provider fields or calls to /api/v1/health  658ms
+ ✓ |server| src/server/delegation-cleanup.test.ts (5 tests) 992ms
+     ✓ rejects malformed human cleanup without state or intent changes and accepts absent or empty bodies  319ms
+ ✓ |server| src/server/attachments-api.test.ts (29 tests) 1046ms
+ ✓ |server| src/delegation/conversation-service.test.ts (12 tests) 717ms
+ ✓ |server| src/core/opencode-ui-mapper.test.ts (41 tests) 922ms
+     ✓ uses the mock’s announced port when the runner’s requested port is occupied  460ms
+     ✓ emits v2 events through opts.onUiEvent while v1 events keep flowing; turn.completed comes from session.idle, not the HTTP response  433ms
+ ✓ |server| src/delegation/context.test.ts (11 tests) 732ms
+ ✓ |server| src/delegation/cli.test.ts (23 tests) 955ms
+     ✓ uses only provisioned transport, emits JSON, and reports incomplete operations as nonzero  329ms
+ ✓ |server| src/server/typed-client.test.ts (7 tests) 815ms
+     ✓ reaches a workspace-level route and infers its response  719ms
+ ✓ |server| src/server/worktrees-api.test.ts (9 tests) 716ms
+ ✓ |server| src/server/versioned-surface.test.ts (4 tests) 691ms
+     ✓ serves health cross-origin — the discovery endpoint  629ms
+ ✓ |server| src/core/codex-app-server-runner.test.ts (8 tests) 726ms
+     ✓ surfaces a legacy failed turn as an AgentEvent error: mock:turn-failed  315ms
+     ✓ surfaces a legacy failed turn as an AgentEvent error: mock:turn-failed mock:legacy-interrupt  327ms
+ ✓ |server| src/server-install/platforms/macosx-ngrok.test.ts (13 tests) 692ms
+     ✓ dry-run install walks every step and server-uninstall reverses it  675ms
+ ✓ |server| src/server-install/strategies.test.ts (3 tests) 649ms
+     ✓ walks every Phase-1 step and writes a complete server.json  644ms
+ ✓ |server| src/runs/auto-name.test.ts (21 tests) 649ms
+     ✓ answers a short, pr-classified title through the mock runner and never throws  635ms
+ ✓ |server| src/server/workspace-api.test.ts (45 tests) 611ms
+ ✓ |server| src/core/codex-provider-failure.test.ts (4 tests) 618ms
+ ✓ |server| src/workflows/pi-teardown.test.ts (2 tests) 563ms
+ ✓ |server| src/workflows/stopped-composer.test.ts (7 tests) 490ms
+ ✓ |server| src/autosave-conflict-guard.test.ts (8 tests) 384ms
+ ✓ |server| src/server/route-parity.test.ts (10 tests) 473ms
+ ✓ |server| src/server/request-validation.test.ts (24 tests) 400ms
+ ✓ |server| src/workflows/continuation-tools.test.ts (6 tests) 527ms
+ ✓ |server| src/server/todos-start.test.ts (22 tests) 420ms
+ ✓ |server| src/server/ui-state-api.test.ts (12 tests) 420ms
+ ✓ |server| src/server/open-in-cli-resume.test.ts (23 tests) 423ms
+ ✓ |server| src/runs/delegation-state.test.ts (23 tests) 483ms
+ ✓ |server| src/server/queued-messages.test.ts (24 tests) 430ms
+ ✓ |server| src/server/runs-index-api.test.ts (19 tests) 491ms
+ ✓ |server| src/server/checkout.test.ts (23 tests) 409ms
+ ✓ |server| src/server/config-api.test.ts (15 tests) 323ms
+ ✓ |server| src/server/workspace-events.test.ts (9 tests) 297ms
+ ✓ |server| src/server/query-repeat-parity.test.ts (2 tests) 353ms
+     ✓ /api/v1/models?runner=codex&runner=codex is not a 400  319ms
+ ✓ |server| src/workspace/projects-cli.test.ts (23 tests) 453ms
+ ✓ |server| src/runs/event-history.test.ts (20 tests) 268ms
+ ✓ |server| src/server/ws.test.ts (26 tests) 312ms
+ ✓ |server| src/server/models-api.test.ts (18 tests) 312ms
+ ✓ |server| src/server/start-run.test.ts (14 tests) 276ms
+ ✓ |server| src/workspace/projects.test.ts (34 tests) 298ms
+ ✓ |server| src/server/fs-browse.test.ts (14 tests) 321ms
+ ✓ |server| src/server/continue-run.test.ts (15 tests) 325ms
+ ✓ |server| src/server/open-in-file.test.ts (14 tests) 247ms
+ ✓ |server| src/workflows/continue-unarchive.test.ts (4 tests) 183ms
+ ✓ |server| src/agent-config/seed.test.ts (5 tests) 220ms
+stderr | src/server/start-run-todo.test.ts > POST /api/v1/runs todoId > an unknown todo id still starts the run (bookkeeping never costs the user a task)
+[cezar] inbox entry gone-long-ago not marked started (unknown or already started)
+
+stderr | src/server/start-run-todo.test.ts > POST /api/v1/runs todoId > a missing todos.json still starts the run
+[cezar] inbox entry t1 not marked started (unknown or already started)
+
+stderr | src/server/start-run-todo.test.ts > POST /api/v1/runs todoId > an already-started entry keeps its first run — a duplicate launch never overwrites it
+[cezar] inbox entry t1 not marked started (unknown or already started)
+
+ ✓ |server| src/server/start-run-todo.test.ts (8 tests) 231ms
+ ✓ |server| src/server/ref-status-invalidation.test.ts (3 tests) 240ms
+ ✓ |server| src/server/automations-api.test.ts (6 tests) 224ms
+ ✓ |server| src/server/forge/github.test.ts (199 tests) 209ms
+ ✓ |server| src/workflows/recover-session-failure.test.ts (1 test) 188ms
+Switched to a new branch 'task'
+Switched to a new branch 'task'
+ ✓ |server| src/server/skills-update-api.test.ts (9 tests) 185ms
+Switched to a new branch 'task'
+ ✓ |server| src/server/group-pick.test.ts (3 tests) 189ms
+ ✓ |server| src/runs/retention-enforce.test.ts (3 tests) 164ms
+ ✓ |server| src/server/github-merge-api.test.ts (3 tests) 168ms
+ ✓ |server| src/server/agent-config-api.test.ts (9 tests) 165ms
+ ✓ |server| src/skills-update.test.ts (18 tests) 157ms
+ ✓ |server| src/workflows/autosave-gate.test.ts (6 tests) 159ms
+ ✓ |server| src/core/claude-model-catalog.test.ts (18 tests) 159ms
+ ✓ |server| src/runs/store.test.ts (158 tests) 161ms
+ ✓ |server| src/server/git.test.ts (7 tests) 141ms
+ ✓ |server| src/server/inbox-gate.test.ts (7 tests) 161ms
+ ✓ |server| src/server/ui-state.test.ts (6 tests) 133ms
+ ✓ |server| src/delegation/provision.test.ts (7 tests) 1871ms
+     ✓ provisions no ordinary-run metadata while off and never promotes invalid/worker records to roots  1761ms
+ ✓ |server| src/server/patch-run.test.ts (7 tests) 132ms
+ ✓ |server| src/server/forge/draft-pr-autosave.test.ts (4 tests) 151ms
+ ✓ |server| src/server/github-search-api.test.ts (8 tests) 149ms
+ ✓ |server| src/server/open-in-project.test.ts (6 tests) 122ms
+ ✓ |server| src/runs/retention-rematerialize.test.ts (3 tests) 150ms
+ ✓ |server| src/server/github-comments-api.test.ts (7 tests) 155ms
+ ✓ |server| src/server/github-checks-api.test.ts (7 tests) 133ms
+ ✓ |server| src/server/auto-resume-api.test.ts (6 tests) 119ms
+ ✓ |server| src/server/read-run.test.ts (7 tests) 139ms
+ ✓ |server| src/server/github-ref-status-api.test.ts (6 tests) 131ms
+ ✓ |server| src/server/project-context.test.ts (10 tests) 121ms
+ ✓ |server| src/server/usage-scope.test.ts (2 tests) 107ms
+ ✓ |server| src/delegation/policy.test.ts (79 tests) 91ms
+ ✓ |server| src/workflows/agent-tmpdir.test.ts (11 tests) 91ms
+ ✓ |server| src/server/github-pr-changes-api.test.ts (2 tests) 61ms
+ ✓ |server| src/workflows/recover-followups.test.ts (3 tests) 65ms
+stderr | src/workflows/agent-profile-wiring.test.ts > RunManager agent-profile resolution > degrades to the default when the accounts file is unreadable
+[cez] agent accounts /tmp/cez-vitest-tmp-WfcGve/cez-profile-wiring-home-hye5as/agent-accounts.json is corrupt — ignoring it (every project falls back to its default account)
+
+ ✓ |server| src/workflows/agent-profile-wiring.test.ts (7 tests) 57ms
+ ✓ |server| src/server-install/engine.test.ts (25 tests) 62ms
+ ✓ |server| src/workspace/config.test.ts (30 tests) 53ms
+ ✓ |server| src/workflows/recover-autonomous.test.ts (2 tests) 53ms
+ ✓ |server| src/server/sse-headers.test.ts (2 tests) 63ms
+ ✓ |server| src/server/project-context-repo-handle.test.ts (2 tests) 56ms
+stderr | src/config.test.ts > resolveWorktreeRetention > falls back to 10 when the workspace config is corrupt (unreadable)
+[cez] workspace config /tmp/cez-vitest-tmp-d5YGPU/cez-home-qUU1QZ/config.json is corrupt — using defaults (registry rebuilds)
+
+stderr | src/config.test.ts > loadConfig machine-wide agent defaults > degrades to the built-in default when the machine file is corrupt
+[cez] workspace config /tmp/cez-vitest-tmp-d5YGPU/cez-machine-home-pSVQlY/config.json is corrupt — using defaults (registry rebuilds)
+
+ ✓ |server| src/config.test.ts (40 tests) 59ms
+ ✓ |server| src/skills.test.ts (14 tests) 51ms
+ ✓ |server| src/workspace/agent-accounts.test.ts (25 tests) 55ms
+ ✓ |server| src/workspace/migrations.test.ts (10 tests) 45ms
+ ✓ |server| src/core/provider-auth.test.ts (99 tests) 48ms
+ ✓ |server| src/automations/scheduler.test.ts (7 tests) 48ms
+ ✓ |server| src/server/open-in-terminal.test.ts (11 tests) 42ms
+ ✓ |server| src/runs/repo-handle-recovery.test.ts (16 tests) 45ms
+ ✓ |server| src/server/provider-auth-runtime.test.ts (12 tests) 34ms
+ ✓ |server| src/delegation/input.test.ts (19 tests) 40ms
+ ✓ |server| src/runs/human-ask-summary.test.ts (11 tests) 43ms
+ ✓ |server| src/core/codex-model-catalog.test.ts (8 tests) 33ms
+ ✓ |server| src/core/pi-model-catalog.test.ts (18 tests) 33ms
+stderr | src/automations/store.test.ts > AutomationStore > writes definitions atomically at private permissions and preserves unknown fields
+Promise returned by `expect(actual).resolves.toBe(expected)` was not awaited. Vitest currently auto-awaits hanging assertions at the end of the test, but this will cause the test to fail in the next Vitest major. Please remember to await the assertion.
+    at /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/cezar/src/automations/store.test.ts:44:92
+
+ ✓ |server| src/automations/store.test.ts (5 tests) 32ms
+ ✓ |server| src/server-install/platforms/ubuntu-vps.test.ts (44 tests) 30ms
+ ✓ |server| src/core/tool-display.test.ts (68 tests) 29ms
+ ✓ |server| src/core/opencode-model-catalog.test.ts (17 tests) 32ms
+stderr | src/workspace/agent-profiles.test.ts > agent profile resolution > resolveProfileEnvForRoot > degrades to the default when the accounts file is unreadable
+[cez] agent accounts /tmp/cez-vitest-tmp-VjlANw/cez-profiles-nMXhbq/agent-accounts.json is corrupt — ignoring it (every project falls back to its default account)
+
+ ✓ |server| src/workspace/agent-profiles.test.ts (24 tests) 44ms
+ ✓ |server| src/core/usage-limit.test.ts (11 tests) 25ms
+ ✓ |server| src/agent-config/files.test.ts (11 tests) 24ms
+ ✓ |server| src/automations/github-poller.test.ts (6 tests) 25ms
+ ✓ |server| src/core/ask.test.ts (41 tests) 21ms
+ ✓ |server| src/server-install/state.test.ts (11 tests) 21ms
+ ✓ |server| src/server/capabilities.test.ts (111 tests) 25ms
+ ✓ |server| src/server/forge/github-filters.test.ts (21 tests) 24ms
+ ✓ |server| src/automations/task-template.test.ts (4 tests) 20ms
+ ✓ |server| src/core/agent-env.test.ts (50 tests) 18ms
+ ✓ |server| src/agent-config/models.test.ts (5 tests) 20ms
+ ✓ |server| src/runs/ui-event-sink.test.ts (16 tests) 19ms
+ ✓ |server| src/automations/coordinator.test.ts (3 tests) 19ms
+ ✓ |server| src/runs/agent-tmpdir.test.ts (18 tests) 16ms
+ ✓ |server| src/agent-config/account-identity.test.ts (9 tests) 17ms
+ ✓ |server| src/server/cold-repo-handles.test.ts (7 tests) 14ms
+ ✓ |server| src/runs/run-index.test.ts (9 tests) 20ms
+ ✓ |server| src/server-install/steps.test.ts (20 tests) 14ms
+ ✓ |server| src/core/codex-app-server-transport.test.ts (8 tests) 18ms
+ ✓ |server| src/core/pi-ui-mapper.test.ts (20 tests) 17ms
+ ✓ |server| src/skills-banner.test.ts (11 tests) 19ms
+ ✓ |server| src/server/tool-display-mirror.test.ts (35 tests) 22ms
+ ✓ |server| src/runs/arm-repo-handle.test.ts (4 tests) 13ms
+ ✓ |server| src/core/model-identity.test.ts (35 tests) 17ms
+ ✓ |server| src/delegation/wait.test.ts (19 tests) 13ms
+ ✓ |server| src/server/static-ui.test.ts (47 tests) 10ms
+ ✓ |server| src/automations/types.test.ts (4 tests) 12ms
+ ✓ |server| src/core/runner-model-catalog.test.ts (11 tests) 12ms
+ ✓ |server| src/core/ui-parity.test.ts (42 tests) 10ms
+ ✓ |server| src/release/snapshot.test.ts (21 tests) 10ms
+ ✓ |server| src/server/bc-route-inventory.test.ts (12 tests) 11ms
+ ✓ |server| src/server-install/ui.test.ts (8 tests) 9ms
+ ✓ |server| src/server/forge/index.test.ts (32 tests) 10ms
+ ✓ |server| src/delegation/credentials.test.ts (5 tests) 8ms
+ ✓ |server| src/workspace/semaphore.test.ts (16 tests) 12ms
+ ✓ |server| src/paths.test.ts (18 tests) 8ms
+ ✓ |server| src/server-install/types.test.ts (3 tests) 10ms
+ ✓ |server| src/server/forge/github-pr-diff.test.ts (3 tests) 9ms
+ ✓ |server| src/git-diff-base.test.ts (16 tests) 10ms
+ ✓ |server| src/runs/task-markers.test.ts (16 tests) 10ms
+ ✓ |server| src/agent-config/catalog.test.ts (9 tests) 8ms
+ ✓ |server| src/core/agent-model-policy.test.ts (3 tests) 7ms
+ ✓ |server| src/release/stable.test.ts (11 tests) 7ms
+ ✓ |server| src/core/secret-redaction.test.ts (9 tests) 7ms
+ ✓ |server| src/runs/task-refs.test.ts (10 tests) 9ms
+ ✓ |server| src/install-as-command.test.ts (9 tests) 8ms
+ ✓ |server| src/agent-config/validate.test.ts (9 tests) 8ms
+ ✓ |server| src/server/provider-action-gate.test.ts (10 tests) 7ms
+ ✓ |server| src/release/manifests.test.ts (3 tests) 6ms
+ ✓ |server| src/workflows/skill-system-prompt.test.ts (15 tests) 10ms
+ ✓ |server| src/server/wsl.test.ts (14 tests) 7ms
+ ✓ |server| src/git-refs.test.ts (3 tests) 5ms
+ ✓ |server| src/pack-check.test.ts (6 tests) 6ms
+ ✓ |server| src/server/model-contract.test.ts (2 tests) 6ms
+ ✓ |server| src/delegation/conversations.test.ts (6 tests) 6ms
+ ✓ |server| src/core/v1-text-coalescer.test.ts (10 tests) 6ms
+ ✓ |server| src/core/agent-profiles.test.ts (10 tests) 7ms
+ ✓ |server| src/runs/retention.test.ts (7 tests) 9ms
+ ✓ |server| src/core/usage.test.ts (14 tests) 6ms
+ ✓ |server| src/handoff.test.ts (2 tests) 6ms
+ ✓ |server| src/core/ui-events.test.ts (7 tests) 7ms
+ ✓ |server| src/skills-remote.test.ts (6 tests) 7ms
+ ✓ |server| src/core/shell-env.test.ts (10 tests) 9ms
+ ✓ |server| src/core/model-presets.test.ts (7 tests) 6ms
+ ✓ |server| src/core/provider-availability.test.ts (3 tests) 5ms
+ ✓ |server| src/workflows/allowed-tools.test.ts (5 tests) 6ms
+ ✓ |server| src/core/effort.test.ts (2 tests) 5ms
+ ✓ |server| src/core/process-usage.test.ts (6 tests) 6ms
+ ✓ |server| src/server/contract-parity.delegation.test.ts (1 test) 4ms
+ ✓ |server| src/server/resume-command.test.ts (10 tests) 6ms
+ ✓ |server| src/server/contract-parity.github.test.ts (1 test) 4ms
+ ✓ |server| src/server/contract-parity.runs.test.ts (1 test) 4ms
+ ✓ |server| src/server/typed-bodies.test.ts (1 test) 3ms
+ ✓ |server| src/server/api-types.test.ts (2 tests) 5ms
+ ✓ |server| src/runs/review-gate.test.ts (3 tests) 5ms
+ ✓ |server| src/server/contract-parity.workflows.test.ts (1 test) 4ms
+ ✓ |server| src/server/contract-parity.automations.test.ts (1 test) 4ms
+ ✓ |server| src/server/contract-parity.test.ts (1 test) 4ms
+ ✓ |server| src/server/contract-parity.workspace.test.ts (1 test) 4ms
+ ✓ |web| src/routes/tasks-overview.test.tsx (75 tests) 8052ms
+     ✓ opens the keyboard actions menu and uses the existing archive handler  508ms
+ ✓ |web| src/routes.test.tsx (129 tests) 7617ms
+     ✓ with the registry unavailable, handles a saved location for the boot project  1014ms
+     ✓ with the registry unavailable, handles a saved location for another project  1010ms
+     ✓ falls through the default alias when health and registry both fail  2024ms
+     ✓ a registry error still resolves the alias via health instead of loading forever  1013ms
+     ✓ with the registry errored and no health either, the alias mounts the scope rather than spin  1015ms
+ ✓ |web| src/routes/new-task.test.tsx (116 tests) 11511ms
+     ✓ keeps run options in a disclosure separate from prompt, agent selection, and submission  599ms
+     ✓ filters effort by model and resets an unsupported pick before submission  344ms
+ ✓ |web| src/api/queries.test.tsx (60 tests) 4332ms
+     ✓ surfaces an ApiError instead of synthesizing disconnected providers  1057ms
+     ✓ surfaces an ApiError rather than pretending it has data  1055ms
+ ✓ |web| src/routes/global-tasks.test.tsx (53 tests) 5726ms
+     ✓ lists every project’s tasks and links each into its OWN project  308ms
+     ✓ searches across title, project and branch  584ms
+       ✓ carries the search box into the URL, debounced  310ms
+       ✓ opens on hover, and stays open while the pointer travels into it  414ms
+       ✓ closes once the pointer leaves both  303ms
+     ✓ renders the server’s error rather than an empty table  1016ms
+ ✓ |web| src/routes/task-thread/run-header.test.tsx (88 tests) 4239ms
+ ✓ |web| src/api/run-history.test.tsx (7 tests) 3683ms
+     ✓ falls back to the protected full replay when either optimized request cannot load  1056ms
+     ✓ fallback jump preserves full replay and its live SSE when history is unavailable  1060ms
+     ✓ fallback jump preserves full replay and its live SSE when context is unavailable  1059ms
+ ✓ |web| src/routes/task-thread/task-thread.test.tsx (70 tests) 2906ms
+ ✓ |web| src/components/app-shell.test.tsx (89 tests) 2420ms
+ ✓ |web| src/routes/task-thread/follow-up-engine.test.tsx (32 tests) 2567ms
+ ✓ |web| src/routes/settings/accounts-section.test.tsx (36 tests) 1975ms
+ ✓ |web| src/components/command-palette.test.tsx (57 tests) 1835ms
+ ✓ |web| src/routes/workflows/workflows.test.tsx (24 tests) 1817ms
+     ✓ adds a selected skill from the Add step picker without changing the draft on cancel  327ms
+ ✓ |web| src/routes/inbox.test.tsx (41 tests) 1774ms
+     ✓ shared engine pills filter effort and drop a pick unsupported by the next model  341ms
+ ✓ |web| src/routes/repo-git/repo-git.test.tsx (29 tests) 1666ms
+     ✓ renders the header, the segment tabs and the working-tree diff from /api/v1/repo/changes  303ms
+ ✓ |web| src/routes/github/github.test.tsx (153 tests) 28028ms
+   ✓ /github/prs/:n/changes renders PR-only file review navigation and completeness  349ms
+     ✓ searches exact numeric 4507 despite an open substring match  414ms
+     ✓ searches exact numeric #4507 despite an open substring match  414ms
+     ✓ reports exact lookup unavailable alongside local substring rows  438ms
+     ✓ reports exact lookup empty alongside local substring rows  433ms
+     ✓ shows refresh failure beside cached hits and recovers with local matches false  524ms
+     ✓ shows refresh failure beside cached hits and recovers with local matches true  550ms
+     ✓ hides old hits immediately on change to Stream and retains URL-selected detail  1295ms
+     ✓ hides old hits immediately on change to another query and retains URL-selected detail  1329ms
+     ✓ hides old hits immediately on change to 4508 and retains URL-selected detail  1314ms
+     ✓ hides old hits immediately on change to  and retains URL-selected detail  1333ms
+     ✓ hydrates searched PR checks within 100 numbers with selected detail null  681ms
+     ✓ hydrates searched PR checks within 100 numbers with selected detail 9999  643ms
+     ✓ finds a merged PR the open list never contained — the bug in #730  425ms
+     ✓ keeps a clicked cross-state hit open across the /github → /github/issues/:n hop  444ms
+     ✓ keeps a clicked cross-state hit open across the /github/prs → /github/prs/:n hop  443ms
+     ✓ opens a searched item in the detail pane, like any listed row  408ms
+     ✓ does not shell out while the local filter still matches something  764ms
+     ✓ reports an unavailable search with the server’s own reason  394ms
+     ✓ drops the empty-state wrapper entirely once hits arrive, so its padding leaves no gap (#838)  404ms
+     ✓ states plainly that nothing matched in ANY state when the search comes back empty  391ms
+     ✓ stops rendering hits once the local filter matches the query again (#856)  687ms
+     ✓ never repeats a listed item under "Found on GitHub" mid-debounce either (#856)  491ms
+     ✓ says the search failed when the REQUEST failed, not just when the driver degraded  391ms
+     ✓ uses the full local narrow to trigger search, then ANDs labels and board with OR assignees  627ms
+     ✓ keeps the selected remote detail when filters hide its row  467ms
+     ✓ refresh retries an incomplete search without losing the active filter  457ms
+     ✓ does not claim exhaustive absence when filters discard a truncated search window  420ms
+     ✓ reports incomplete search board metadata without clearing query or selected board  422ms
+   ✓ debounces to the settled query and never searches after clearing to a label-only narrow  963ms
+ ✓ |web| src/routes/compare-variants.test.tsx (13 tests) 1805ms
+     ✓ retries a failed group without losing the comparison URL  1054ms
+ ✓ |web| src/routes/settings/projects-section.test.tsx (25 tests) 1792ms
+ ✓ |web| src/components/composer/composer.test.tsx (78 tests) 1724ms
+ ✓ |web| src/routes/github/github-route-wiring.test.tsx (2 tests) 1507ms
+     ✓ /github → /github/issues/:n keeps the clicked hit  1025ms
+     ✓ /github/prs → /github/prs/:n keeps the clicked hit  480ms
+ ✓ |web| src/routes/settings/agents-section.test.tsx (26 tests) 1789ms
+ ✓ |web| src/routes/skills.test.tsx (22 tests) 1466ms
+     ✓ renders project-first with bold project rows and source tags (#377)  422ms
+ ✓ |web| src/components/app-shell-container.test.tsx (34 tests) 1396ms
+ ✓ |web| src/routes/new-task-project.test.tsx (5 tests) 1418ms
+     ✓ is preselected from the URL scope and lists the registry with branches  374ms
+     ✓ re-resolves the skills, workflows and config pickers against the new project  301ms
+     ✓ keeps drafts isolated per project — one composer never leaks into the other  394ms
+ ✓ |web| src/routes/task-git/task-changes.test.tsx (18 tests) 1390ms
+ ✓ |web| src/routes/task-git/task-files.test.tsx (11 tests) 1232ms
+     ✓ a text file previews with line numbers and Shiki tokens by extension  306ms
+ ✓ |web| src/api/global-events.test.tsx (49 tests) 1072ms
+     ✓ refreshes the cross-project index from ANOTHER project’s run event  406ms
+     ✓ coalesces a burst of run events into ONE index refresh  407ms
+ ✓ |web| src/routes/task-thread/markdown.test.tsx (22 tests) 967ms
+     ✓ renders a ts fence as a code block with language chip and copy button, tokens on --syn-*  570ms
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > updates enablement immediately and restores the confirmed state when a write fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > updates enablement immediately and restores the confirmed state when a write fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a successful retry when a pending enablement write fails
+The current testing environment is not configured to support act(...)
+
+ ✓ |web| src/routes/settings/prompt-templates-section.test.tsx (16 tests) 1081ms
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a newer runtime incident from the provider-status cache when a toggle fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a newer runtime incident from the provider-status cache when a toggle fails
+The current testing environment is not configured to support act(...)
+
+ ✓ |web| src/routes/settings/provider-settings.test.tsx (20 tests) 906ms
+ ✓ |web| src/components/engine-pills.test.ts (30 tests) 868ms
+ ✓ |web| src/components/diff/diff.test.tsx (19 tests) 800ms
+ ✓ |web| src/routes/task-thread/review-panel.test.tsx (17 tests) 1024ms
+     ✓ renders the violet banner + panel ONLY while the run rests at review  310ms
+ ✓ |web| src/routes/settings/settings.test.tsx (22 tests) 848ms
+ ✓ |web| src/routes/task-thread/run-relationships.test.tsx (14 tests) 788ms
+ ✓ |web| src/components/reference-status.test.tsx (20 tests) 763ms
+ ✓ |web| src/components/project-groups.test.tsx (16 tests) 849ms
+     ✓ caps an expanded group at 10 rows and links More… at that project’s tasks pane  300ms
+ ✓ |web| src/routes/settings/resources-section.test.tsx (10 tests) 633ms
+ ✓ |web| src/routes/settings/accounts-defaults.test.tsx (10 tests) 724ms
+ ✓ |web| src/routes/cross-project-task-navigation.test.tsx (2 tests) 679ms
+     ✓ reads the run from its own project when the row is clicked on the global Tasks page  618ms
+ ✓ |web| src/components/task-quick-list.test.tsx (50 tests) 734ms
+ ✓ |web| src/components/tools-menu.test.tsx (24 tests) 676ms
+ ✓ |web| src/routes/task-thread/thread-items.test.tsx (36 tests) 583ms
+ ✓ |web| src/components/diff/diff-virtualize.test.tsx (9 tests) 558ms
+ ✓ |web| src/components/add-project-dialog.test.tsx (10 tests) 634ms
+ ✓ |web| src/routes/settings/project-location.test.tsx (7 tests) 728ms
+     ✓ "Open with" lists the machine's apps, minus the agent CLIs  312ms
+ ✓ |web| src/routes/settings/project-general.test.tsx (8 tests) 618ms
+ ✓ |web| src/components/reference-chip.test.tsx (31 tests) 586ms
+ ✓ |web| src/routes/task-thread/ask-card.test.tsx (17 tests) 523ms
+ ✓ |web| src/routes/settings/agent-config-section.test.tsx (9 tests) 531ms
+ ✓ |web| src/routes/task-thread/subagent-sheet.test.tsx (15 tests) 443ms
+ ✓ |web| src/components/clone-project-dialog.test.tsx (6 tests) 416ms
+ ✓ |web| src/routes/automations/automations.test.tsx (11 tests) 434ms
+ ✓ |web| src/routes/settings/worktrees-panel.test.tsx (6 tests) 414ms
+ ✓ |web| src/components/composer/dictation.test.tsx (10 tests) 345ms
+ ✓ |web| src/routes/settings/skills-section.test.tsx (5 tests) 367ms
+ ✓ |web| src/routes/task-git/commit-list.test.tsx (6 tests) 342ms
+ ✓ |web| src/routes/task-thread/session-transcript.test.tsx (14 tests) 389ms
+ ✓ |web| src/lib/highlighter.test.ts (7 tests) 297ms
+ ✓ |web| src/lib/use-task-table-columns.test.tsx (5 tests) 342ms
+ ✓ |web| src/routes/settings/notifications-section.test.tsx (8 tests) 333ms
+ ✓ |web| src/components/picker-pill.test.tsx (1 test) 227ms
+ ✓ |web| src/components/provider-banner-container.test.tsx (4 tests) 248ms
+ ✓ |web| src/routes/settings/bookmarklets-section.test.tsx (9 tests) 291ms
+ ✓ |web| src/routes/task-thread/step-rail.test.tsx (27 tests) 268ms
+ ✓ |web| src/routes/workspace-tools.test.tsx (3 tests) 191ms
+ ✓ |web| src/components/provider-banner.test.tsx (14 tests) 226ms
+ ✓ |web| src/routes/task-thread/thread-open-cards.test.tsx (4 tests) 218ms
+ ✓ |web| src/components/reference-conflict-action.test.tsx (4 tests) 216ms
+ ✓ |web| src/components/design-icons.test.tsx (3 tests) 193ms
+ ✓ |web| src/routes/plan-review.test.tsx (1 test) 281ms
+ ✓ |web| src/components/centered-state.test.tsx (11 tests) 189ms
+ ✓ |web| src/components/ui/button.test.tsx (14 tests) 194ms
+ ✓ |web| src/design-guardian.test.ts (15 tests) 180ms
+ ✓ |web| src/routes/task-thread/subagent-replay.test.tsx (4 tests) 210ms
+ ✓ |web| src/components/ui/toaster.test.tsx (5 tests) 188ms
+ ✓ |web| src/components/theme-toggle.test.tsx (8 tests) 206ms
+ ✓ |web| src/components/last-location-controller.test.tsx (9 tests) 160ms
+ ✓ |web| src/components/list-view.test.tsx (3 tests) 167ms
+ ✓ |web| src/routes/task-thread/thread-scroller-virtualizer.test.tsx (1 test) 158ms
+ ✓ |web| src/routes/settings/worktrees-section.test.tsx (4 tests) 159ms
+ ✓ |web| src/routes/task-thread/agents-dock.test.tsx (17 tests) 139ms
+ ✓ |web| src/lib/project-router.test.tsx (12 tests) 146ms
+ ✓ |web| src/lib/use-now.test.tsx (2 tests) 132ms
+ ✓ |web| src/components/ghost-code-backdrop.test.tsx (7 tests) 124ms
+ ✓ |web| src/components/zoomable-image.test.tsx (2 tests) 128ms
+ ✓ |web| src/routes/task-thread/thread-scroller.test.tsx (11 tests) 97ms
+ ✓ |web| src/routes/task-thread/plan-dock.test.tsx (14 tests) 84ms
+ ✓ |web| src/components/theme-provider.test.tsx (18 tests) 92ms
+ ✓ |web| src/components/diff/diff-fallback.test.tsx (2 tests) 68ms
+ ✓ |web| src/components/diff-stat.test.tsx (9 tests) 64ms
+ ✓ |web| src/components/code-editor.test.tsx (7 tests) 68ms
+ ✓ |web| src/components/directional-usage.test.tsx (3 tests) 50ms
+ ✓ |web| src/components/pill.test.tsx (10 tests) 54ms
+stderr | src/components/run-notifications.test.tsx > RunNotifications > a constructor that throws (Android Chrome) is swallowed — the courtesy never crashes the app
+[vitest] The vi.fn() mock did not use 'function' or 'class' in its implementation, see https://vitest.dev/api/vi#vi-spyon for examples.
+
+ ✓ |web| src/components/run-notifications.test.tsx (11 tests) 50ms
+ ✓ |web| src/lib/use-command-shortcut.test.tsx (38 tests) 53ms
+ ✓ |web| src/api/client.test.ts (83 tests) 49ms
+ ✓ |web| src/components/status-dot.test.tsx (9 tests) 46ms
+ ✓ |web| src/lib/tasks-table.test.ts (80 tests) 32ms
+ ✓ |web| src/api/run-events.test.ts (24 tests) 43ms
+ ✓ |web| src/test/fixture-serve-env.test.ts (5 tests) 34ms
+ ✓ |web| src/routes/task-thread/run-reconcile.test.ts (23 tests) 42ms
+ ✓ |web| src/lib/task-groups.test.ts (85 tests) 23ms
+ ✓ |web| src/api/project-scope-context.test.tsx (7 tests) 35ms
+ ✓ |web| src/routes/task-thread/run-actions.test.ts (74 tests) 21ms
+ ✓ |web| src/lib/theme.test.ts (39 tests) 26ms
+ ✓ |web| src/lib/workflow-builder.test.ts (28 tests) 20ms
+ ✓ |web| src/lib/global-tasks.test.ts (36 tests) 20ms
+ ✓ |web| src/routes/task-thread/thread-state.test.ts (81 tests) 20ms
+ ✓ |web| src/api/events.test.ts (45 tests) 19ms
+ ✓ |web| src/lib/keyboard-inset.test.ts (23 tests) 25ms
+ ✓ |web| src/routes/github/github-filter.test.ts (16 tests) 15ms
+ ✓ |web| src/routes/task-thread/thread-groups.test.ts (38 tests) 13ms
+ ✓ |web| src/routes/new-task-form.test.ts (44 tests) 15ms
+ ✓ |web| src/routes/task-git/file-tree.test.ts (7 tests) 15ms
+ ✓ |web| src/routes/task-thread/subagent-dock.test.ts (46 tests) 13ms
+ ✓ |web| src/lib/project-tags.test.ts (9 tests) 14ms
+ ✓ |web| src/lib/skills.test.ts (50 tests) 13ms
+ ✓ |web| src/lib/use-document-title.test.ts (7 tests) 18ms
+ ✓ |web| src/lib/attention.test.ts (55 tests) 10ms
+ ✓ |web| src/components/composer/composer-attachments.test.ts (28 tests) 17ms
+ ✓ |web| src/lib/prompt-templates.test.ts (47 tests) 11ms
+ ✓ |web| src/lib/github-task.test.ts (36 tests) 11ms
+ ✓ |web| src/lib/utils.test.ts (26 tests) 12ms
+ ✓ |web| src/api/ws.test.ts (12 tests) 17ms
+ ✓ |web| src/lib/provider-status.test.ts (35 tests) 11ms
+ ✓ |web| src/components/diff/parse-patch.test.ts (13 tests) 10ms
+ ✓ |web| src/routes/new-task-plan.test.ts (35 tests) 9ms
+ ✓ |web| src/lib/notifications.test.ts (20 tests) 10ms
+ ✓ |web| src/lib/git-actions.test.ts (37 tests) 8ms
+ ✓ |web| src/lib/sidebar-width.test.ts (18 tests) 9ms
+ ✓ |web| src/components/nav-items.test.ts (32 tests) 10ms
+ ✓ |web| src/routes/task-thread/ask-answer.test.ts (18 tests) 9ms
+ ✓ |web| src/lib/format.test.ts (28 tests) 6ms
+ ✓ |web| src/lib/bookmarklet.test.ts (11 tests) 5ms
+ ✓ |web| src/lib/appearance.test.ts (6 tests) 9ms
+ ✓ |web| src/routes/new-task-draft.test.ts (13 tests) 8ms
+ ✓ |web| src/components/composer/composer-text.test.ts (15 tests) 6ms
+ ✓ |web| src/lib/read-state.test.ts (20 tests) 7ms
+ ✓ |web| src/components/diff/diff-scroll.test.ts (13 tests) 6ms
+ ✓ |web| src/lib/unified-diff.test.ts (8 tests) 6ms
+ ✓ |web| src/routes/task-thread/thread-scroll.test.ts (21 tests) 7ms
+ ✓ |web| src/lib/github-list-width.test.ts (14 tests) 8ms
+ ✓ |web| src/lib/use-submit-shortcut.test.ts (21 tests) 6ms
+ ✓ |web| src/routes/github/hand-to-agent-draft.test.ts (8 tests) 6ms
+ ✓ |web| src/routes/new-task-params.test.ts (17 tests) 7ms
+ ✓ |web| src/components/diff/word-diff.test.ts (9 tests) 6ms
+ ✓ |web| src/lib/sidebar-collapse.test.ts (10 tests) 6ms
+ ✓ |web| src/lib/task-columns.test.ts (6 tests) 5ms
+ ✓ |web| src/routes/new-task-autostart.test.ts (9 tests) 5ms
+ ✓ |web| src/routes/settings/agent-descriptors.test.ts (5 tests) 5ms
+ ✓ |web| src/api/contract-pipeline.test.ts (2 tests) 6ms
+ ✓ |web| src/lib/last-location.test.ts (23 tests) 8ms
+ ✓ |web| src/lib/provider-auth-alert.test.ts (5 tests) 5ms
+ ✓ |web| src/routes/task-thread/active-provider.test.ts (4 tests) 4ms
+ ✓ |web| src/lib/token-metrics.test.ts (6 tests) 4ms
+ ✓ |web| src/routes/task-git/worktree-files.test.ts (5 tests) 4ms
+ ✓ |web| src/vite-config.test.ts (2 tests) 4ms
+
+ Test Files  386 passed (386)
+      Tests  8010 passed (8010)
+   Start at  15:33:32
+   Duration  297.12s (transform 11.54s, setup 2.50s, import 101.36s, tests 963.70s, environment 64.50s)
+

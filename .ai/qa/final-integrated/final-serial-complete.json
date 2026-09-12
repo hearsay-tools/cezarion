@@ -1,0 +1,42 @@
+{
+  "results": [
+    {
+      "name": "typecheck",
+      "command": "npm run typecheck",
+      "exitCode": 0,
+      "seconds": 8.5
+    },
+    {
+      "name": "test",
+      "command": "npm test -- --maxWorkers=4",
+      "exitCode": 0,
+      "seconds": 293.3
+    },
+    {
+      "name": "test-unit",
+      "command": "npm run test:unit",
+      "exitCode": 0,
+      "seconds": 28.4
+    },
+    {
+      "name": "build",
+      "command": "npm run build",
+      "exitCode": 0,
+      "seconds": 4.8
+    },
+    {
+      "name": "test-package",
+      "command": "npm run test:package",
+      "exitCode": 0,
+      "seconds": 13.1
+    },
+    {
+      "name": "browser",
+      "command": "npm test -- --config packages/web/e2e/vitest.config.ts",
+      "exitCode": 0,
+      "seconds": 574.2
+    }
+  ],
+  "completedAt": 1789226045.0932703,
+  "exitCode": 0
+}

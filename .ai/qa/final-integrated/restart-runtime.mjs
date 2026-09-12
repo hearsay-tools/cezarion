@@ -1,0 +1,5 @@
+import {readFileSync,writeFileSync} from 'node:fs';import {spawn,execFileSync} from 'node:child_process';import {resolve} from 'node:path';
+const qa=resolve('.ai/qa/runtime-verified'),path=qa+'/server-proof.json',proof=JSON.parse(readFileSync(path));
+const env={PATH:process.env.PATH,TMPDIR:'/tmp',CLAUDE_CONFIG_DIR:qa+'/vendor/claude',CODEX_HOME:qa+'/vendor/codex',OPENCODE_CONFIG_DIR:qa+'/vendor/opencode',XDG_CONFIG_HOME:qa+'/vendor/config',XDG_DATA_HOME:qa+'/vendor/data',XDG_STATE_HOME:qa+'/vendor/state',CEZ_HOME:qa+'/cez-home',CEZ_DRY_RUN:'1',CEZ_FOLLOWUPS:'1',CEZ_AUTOMATIONS:'1',CEZ_SKILLS_AUTO_UPDATE:'0',CEZ_SINGLE_PROJECT:'0',CEZ_AUTONAME:'0',CEZ_DELEGATION:'0'};
+const child=spawn(process.execPath,[proof.entry,'serve','--repo',proof.repo,'--port','44786','--no-open'],{env,stdio:'inherit'});
+proof.pid=child.pid;proof.startedAt=new Date().toISOString();proof.sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();proof.restart='Same existing fixture repo/home; no seed replay or state reset';writeFileSync(path,JSON.stringify(proof,null,2));child.on('exit',c=>process.exit(c??0));

@@ -1,0 +1,240 @@
+
+> test
+> vitest run --maxWorkers=2 packages/web/src/design-guardian.test.ts packages/web/src/components/task-quick-list.test.tsx packages/web/src/routes.test.tsx
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f
+
+ ✓ |web| src/components/task-quick-list.test.tsx (50 tests) 2081ms
+ ✓ |web| src/design-guardian.test.ts (15 tests) 378ms
+ ❯ |web| src/routes.test.tsx (129 tests | 2 failed) 15674ms
+     ✓ labels /p/cezar/ as Tasks 9ms
+     ✓ labels /new as New task 1ms
+     ✓ labels /p/cezar/compare/group-1 as Compare 5ms
+     ✓ labels /p/cezar/git as Git 1ms
+     ✓ labels /p/cezar/git/commits/abc123 as Git 0ms
+     ✓ labels /p/cezar/github/issues/543 as GitHub 1ms
+     ✓ labels /p/cezar/skills as Skills 0ms
+     ✓ labels /p/cezar/inbox as Inbox 0ms
+     ✓ labels /p/cezar/workflows/quick-task as Workflows 0ms
+     ✓ labels /p/cezar/settings/agents as Settings 0ms
+     ✓ labels /settings/global/projects as Settings 0ms
+     ✓ returns the task lookup key for /p/cezar/tasks/run-1 6ms
+     ✓ returns the task lookup key for /p/cezar/tasks/run-1/changes 1ms
+     ✓ returns the task lookup key for /p/cezar/tasks/run-1/files 0ms
+     ✓ returns the task lookup key for /p/cezar/tasks/run-1/commits/abc123 4ms
+     ✓ does not invent a label for an unknown route 1ms
+     ✓ opens shared workspace diagnostics without forcing a project redirect  348ms
+     ✓ /p/boot/ → tasks 104ms
+     ✓ /p/boot/new → new 124ms
+     ✓ /p/boot/tasks/abc123 → task-thread 88ms
+     ✓ /p/boot/tasks/abc123/changes → task-changes 36ms
+     ✓ /p/boot/tasks/abc123/files → task-files 33ms
+     ✓ /p/boot/compare/grp-1 → compare 54ms
+     ✓ /p/boot/git → repo-git 45ms
+     ✓ /p/boot/git/commits → repo-git 66ms
+     ✓ /p/boot/git/commits/abc1234 → repo-git 50ms
+     ✓ /p/boot/git/branches → repo-git 32ms
+     ✓ /p/boot/github → github 40ms
+     ✓ /p/boot/github/prs → github 38ms
+     ✓ /p/boot/github/issues/42 → github 31ms
+     ✓ /p/boot/github/prs/7 → github 39ms
+     ✓ /p/boot/inbox → inbox 37ms
+     ✓ /p/boot/workflows → workflows 41ms
+     ✓ /p/boot/workflows/ship-it → workflows 33ms
+     ✓ /p/boot/skills → skills 44ms
+     ✓ /p/boot/settings → settings 99ms
+     ✓ /p/boot/settings/agents → settings-agents 92ms
+     ✓ /p/boot/settings/agent-config → settings-agent-config 65ms
+     ✓ /p/boot/settings/worktrees → settings-worktrees 61ms
+     ✓ /p/boot/settings/bookmarklets → settings-bookmarklets 53ms
+     ✓ /p/boot/settings/prompt-templates → settings-prompt-templates 64ms
+     ✓ a task tab deep link renders the tab, not the thread 36ms
+     ✓ /p/boot/nope-404 → the 404 route 12ms
+     ✓ /p/boot/tasks → the 404 route 13ms
+     ✓ /p/boot/settings/nope → the 404 route 14ms
+     ✓ /p/boot/settings/mcp → the 404 route 34ms
+     ✓ /p/boot/settings/keyboard → the 404 route 26ms
+     ✓ /p/boot/tasks/abc123/nope → the 404 route 23ms
+     ✓ /p/boot/compare → the 404 route 9ms
+     ✓ the 404 renders a CenteredState with a back-to-tasks action scoped to the project 34ms
+     ✓ navigation links generated inside a project carry its prefix 49ms
+     ✓ remounts the same page and loads its new scope when the project param changes 203ms
+     ✓ /settings/global → settings-global, unscoped 51ms
+     ✓ /settings/global/appearance → settings-global-appearance, unscoped 112ms
+     ✓ /settings/global/notifications → settings-global-notifications, unscoped 51ms
+     ✓ /settings/global/resources → settings-global-resources, unscoped 44ms
+     ✓ /settings/global/skills → settings-global-skills, unscoped 53ms
+     ✓ /settings/global/projects → settings-global-projects, unscoped 49ms
+     ✓ /automations renders the disabled state while the capability is off 130ms
+     ✓ /automations/new renders the disabled state while the capability is off 67ms
+     ✓ /automations/a-1 renders the disabled state while the capability is off 68ms
+     ✓ /automations/a-1/log renders the disabled state while the capability is off 61ms
+     ✓ holds every /automations mode on a loading state until health answers 44ms
+     ✓ omits the Projects route when single-project mode is active 22ms
+     ✓ /p/boot/settings/appearance redirects to the global twin 41ms
+     ✓ the legacy flat /settings/appearance lands on the global twin too 23ms
+     ✓ /settings/appearance carries query AND hash through BOTH redirect hops 23ms
+     ✓ /p/boot/settings/appearance carries query AND hash on the single hop 17ms
+     ✓ /p/boot/settings/notifications redirects to the global twin 39ms
+     ✓ the legacy flat /settings/notifications lands on the global twin too 28ms
+     ✓ /settings/notifications carries query AND hash through BOTH redirect hops 74ms
+     ✓ /p/boot/settings/notifications carries query AND hash on the single hop 63ms
+     ✓ /p/boot/settings/resources redirects to the global twin 37ms
+     ✓ the legacy flat /settings/resources lands on the global twin too 35ms
+     ✓ /settings/resources carries query AND hash through BOTH redirect hops 32ms
+     ✓ /p/boot/settings/resources carries query AND hash on the single hop 23ms
+     ✓ restores the last settled project page from the exact bare root 24ms
+     ✓ keeps an explicit legacy deep link even when another location was saved 16ms
+     ✓ treats query or hash on / as an explicit boot-project URL 36ms
+     ✓ falls back to the boot project for a malformed saved location 40ms
+     ✓ falls back to the boot project for a unknown saved location 36ms
+     ✓ falls back to the boot project for a missing saved location 13ms
+     ✓ restores a registered not-git project 43ms
+     ✓ with the registry unavailable, handles a saved location for the boot project  1042ms
+     ✓ with the registry unavailable, handles a saved location for another project  1056ms
+     ✓ keeps the quiet resolving surface while bare-root inputs are pending 23ms
+     ✓ uses the registry boot project when health fails instead of resolving forever 63ms
+     × falls through the default alias when health and registry both fail 4052ms
+     ✓ / → /p/boot/ 28ms
+     ✓ /new → /p/boot/new 49ms
+     ✓ /tasks/abc123 → /p/boot/tasks/abc123 17ms
+     ✓ /tasks/abc123/changes → /p/boot/tasks/abc123/changes 13ms
+     ✓ /tasks/abc123/files → /p/boot/tasks/abc123/files 15ms
+     ✓ /compare/grp-1 → /p/boot/compare/grp-1 31ms
+     ✓ /git → /p/boot/git 25ms
+     ✓ /git/commits → /p/boot/git/commits 29ms
+     ✓ /git/commits/abc1234 → /p/boot/git/commits/abc1234 11ms
+     ✓ /git/branches → /p/boot/git/branches 11ms
+     ✓ /github → /p/boot/github 13ms
+     ✓ /github/prs → /p/boot/github/prs 12ms
+     ✓ /github/issues/42 → /p/boot/github/issues/42 9ms
+     ✓ /github/prs/7 → /p/boot/github/prs/7 19ms
+     ✓ /inbox → /p/boot/inbox 19ms
+     ✓ /workflows → /p/boot/workflows 24ms
+     ✓ /workflows/ship-it → /p/boot/workflows/ship-it 26ms
+     ✓ /skills → /p/boot/skills 26ms
+     ✓ /settings → /p/boot/settings 29ms
+     ✓ /settings/agents → /p/boot/settings/agents 54ms
+     ✓ /settings/agent-config → /p/boot/settings/agent-config 15ms
+     ✓ /settings/worktrees → /p/boot/settings/worktrees 21ms
+     ✓ /settings/bookmarklets → /p/boot/settings/bookmarklets 27ms
+     ✓ /settings/prompt-templates → /p/boot/settings/prompt-templates 22ms
+     ✓ preserves a query byte-for-byte across the redirect 22ms
+     ✓ preserves the hash too — /settings/skills through both hops 16ms
+     ✓ delivers the full bookmarklet grammar into the composer (spec 011 contract) 22ms
+     ✓ renders the quiet resolving state while the boot id is unknown — never a wrong screen 6ms
+     ✓ an unknown legacy path still ends at the scoped 404 8ms
+     ✓ a bare /p names no project and lands on the boot project home 14ms
+     ✓ normalizes /p/default/tasks/x to /p/<boot>/tasks/x 11ms
+     ✓ keeps the query while normalizing 24ms
+     ✓ normalizes the bare /p/default to the boot project home 14ms
+     ✓ a registry error still resolves the alias via health instead of loading forever  1014ms
+     × with the registry errored and no health either, the alias mounts the scope rather than spin 4007ms
+     ✓ renders the not-registered screen with the registry list 11ms
+     ✓ stays honestly resolving while the registry is still loading 6ms
+     ✓ prefills the composer from a non-auto deep link 35ms
+     ✓ an armed auto=1 link shows the starting surface, never the composer mid-flight 12ms
+     ✓ renders an empty composer without params 31ms
+     ✓ never prints the launch key anywhere on the page 38ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/routes.test.tsx > legacy flat URLs redirect to the boot project > falls through the default alias when health and registry both fail
+AssertionError: expected 'scope-resolving' to be 'tasks' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html[39m
+  [33mstyle[39m=[32m"color-scheme: dark;"[39m
+[36m>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex min-h-full flex-col"[39m
+        [33mdata-route[39m=[32m"scope-resolving"[39m
+      [36m>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"px-4 py-6 text-center text-xs text-soft-foreground"[39m
+        [36m>[39m
+          [0mLoading…[0m
+        [36m</p>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mdata-hash[39m=[32m""[39m
+        [33mdata-pathname[39m=[32m"/p/default/"[39m
+        [33mdata-search[39m=[32m""[39m
+        [33mdata-testid[39m=[32m"location"[39m
+      [36m/>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+Expected: "tasks"
+Received: "scope-resolving"
+
+ ❯ timeout src/routes.test.tsx:583:29
+    581|       () => {
+    582|         expect(currentPathname()).toBe('/p/default/')
+    583|         expect(routeName()).toBe('tasks')
+       |                             ^
+    584|       },
+    585|       { timeout: 4_000 },
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |web| src/routes.test.tsx > the /p/default alias > with the registry errored and no health either, the alias mounts the scope rather than spin
+AssertionError: expected 'scope-resolving' to be 'tasks' // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html[39m
+  [33mstyle[39m=[32m"color-scheme: dark;"[39m
+[36m>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex min-h-full flex-col"[39m
+        [33mdata-route[39m=[32m"scope-resolving"[39m
+      [36m>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"px-4 py-6 text-center text-xs text-soft-foreground"[39m
+        [36m>[39m
+          [0mLoading…[0m
+        [36m</p>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mdata-hash[39m=[32m""[39m
+        [33mdata-pathname[39m=[32m"/p/default"[39m
+        [33mdata-search[39m=[32m""[39m
+        [33mdata-testid[39m=[32m"location"[39m
+      [36m/>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+Expected: "tasks"
+Received: "scope-resolving"
+
+ ❯ timeout src/routes.test.tsx:720:45
+    718|     renderAt('/p/default', { seed: false })
+    719|     // The client retries a 5xx once with ~1 s of backoff before error…
+    720|     await waitFor(() => expect(routeName()).toBe('tasks'), { timeout: …
+       |                                             ^
+    721|     expect(currentPathname()).toBe('/p/default')
+    722|   })
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  2 failed | 192 passed (194)
+   Start at  13:36:42
+   Duration  23.82s (transform 8.55s, setup 0ms, import 9.27s, tests 18.13s, environment 3.46s)
+

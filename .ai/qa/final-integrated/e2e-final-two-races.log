@@ -1,0 +1,89 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts github.e2e.ts page-headings.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+ ❯ |e2e| github.e2e.ts (32 tests | 6 failed) 247030ms
+   × renders GitHub 'loading' in 'light' without losing navigation 25873ms
+   × renders GitHub 'loading' in 'dark' without losing navigation 25969ms
+   × renders GitHub 'empty' in 'light' without losing navigation 25893ms
+   × renders GitHub 'empty' in 'dark' without losing navigation 25926ms
+   × renders GitHub 'error' in 'light' without losing navigation 25857ms
+   × renders GitHub 'error' in 'dark' without losing navigation 25922ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| github.e2e.ts > renders GitHub 'loading' in 'light' without losing navigation
+ FAIL  |e2e| github.e2e.ts > renders GitHub 'loading' in 'dark' without losing navigation
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-route="github"]')?.textContent.includes("Loading GitHub") === true failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ github.e2e.ts:443:18
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-github-3521453-loading-light wait --fn document.querySelector('[data-route="github"]')?.textContent.includes("Loading GitHub") === true --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ github.e2e.ts:443:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3523041, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  |e2e| github.e2e.ts > renders GitHub 'empty' in 'light' without losing navigation
+ FAIL  |e2e| github.e2e.ts > renders GitHub 'empty' in 'dark' without losing navigation
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-route="github"]')?.textContent.includes("No open issues") === true failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ github.e2e.ts:443:18
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-github-3521453-empty-light wait --fn document.querySelector('[data-route="github"]')?.textContent.includes("No open issues") === true --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ github.e2e.ts:443:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3524511, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  |e2e| github.e2e.ts > renders GitHub 'error' in 'light' without losing navigation
+ FAIL  |e2e| github.e2e.ts > renders GitHub 'error' in 'dark' without losing navigation
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-route="github"]')?.textContent.includes("Could not load GitHub") === true failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ github.e2e.ts:443:18
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-github-3521453-error-light wait --fn document.querySelector('[data-route="github"]')?.textContent.includes("Could not load GitHub") === true --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ github.e2e.ts:443:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3526904, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  6 failed | 34 passed (40)
+   Start at  15:46:47
+   Duration  253.46s (transform 41ms, setup 0ms, import 65ms, tests 253.10s, environment 0ms)
+

@@ -1,0 +1,12 @@
+{
+  "sourceCommit": "b87b5082076d2c34290909b42f4dee0d9fc58804",
+  "baseUrl": "http://127.0.0.1:44786",
+  "checkedAt": "2026-09-12T11:42:57.269Z",
+  "checks": [
+    "Mobile disclosure navigates to scoped Agents and closes.",
+    "MCP editor Reset restores loaded project file without writing.",
+    "MCP Save writes the real project file through the versioned API; original fixture content restored through Save.",
+    "Settings Add project opens the existing real project-registration dialog."
+  ],
+  "disclosure": "No account authentication, notifications, MCP execution, skill updates, task launches or project removal. File writes stayed in the isolated fixture."
+}

@@ -1,0 +1,26 @@
+
+> test:e2e
+> sh .ai/scripts/e2e.sh
+
+[test-env] not reusing: no descriptor at /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/test-env.json
+[test-env] building (npm ci && npm run build)
+[test-env] starting cezar on http://127.0.0.1:48941 (CEZ_DRY_RUN=1)
+[test-env] healthy after 1s
+TEST_ENV_STATUS=running
+TEST_ENV_BASE_URL=http://127.0.0.1:48941
+TEST_ENV_DESCRIPTOR=.ai/qa/test-env.json
+TEST_ENV_REUSED=0
+BROWSER_PROVIDER=agent-browser
+BROWSER_INSTALLED=0
+
+################################################################################
+# E2E SKIPPED — the UI was NOT verified.
+#
+# Reason: live browser launch failed after autonomous install
+#
+# The agent-browser provider (.ai/browsers/agent-browser.md) could not be
+# provisioned here, so no spec ran. This is NOT a pass. Re-run on a machine with
+# network access to the GitHub Releases and Chrome-for-Testing hosts.
+################################################################################
+
+TEST_E2E_STATUS=skipped

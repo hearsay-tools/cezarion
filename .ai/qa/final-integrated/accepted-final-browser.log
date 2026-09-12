@@ -1,0 +1,63 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+Preparing worktree (new branch 'cez/fixture-A')
+Preparing worktree (new branch 'cez/fixture-B')
+ ❯ |e2e| agents-dock.e2e.ts (4 tests | 2 failed) 55903ms
+     × the long agent panel scrolls, detaches from follow-tail, and exposes the jump pill 25593ms
+     × collapses to a one-line odometer 25621ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| agents-dock.e2e.ts > the Agents dock against a replayed fan-out > the long agent panel scrolls, detaches from follow-tail, and exposes the jump pill
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="subagent-sheet"] [data-slot="transcript-viewport"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:212:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-agents-dock-3654630 wait --fn document.querySelector('[data-slot="subagent-sheet"] [data-slot="transcript-viewport"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:212:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3655049, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |e2e| agents-dock.e2e.ts > the Agents dock against a replayed fan-out > collapses to a one-line odometer
+Error: cezar e2e: agent-browser wait --fn document.querySelectorAll('[data-slot="agent-item"]').length === 0 failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:256:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-agents-dock-3654630 wait --fn document.querySelectorAll('[data-slot="agent-item"]').length === 0 --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:256:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3655301, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 42 passed (43)
+      Tests  2 failed | 371 passed | 6 skipped (379)
+   Start at  15:53:38
+   Duration  708.51s (transform 450ms, setup 0ms, import 1.00s, tests 702.17s, environment 4ms)
+

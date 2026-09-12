@@ -1,0 +1,82 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts task-changes.e2e.ts github.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+ ❯ |e2e| github.e2e.ts (32 tests | 1 failed) 81188ms
+     × lays out long issue and pull-request titles at the review viewports in both themes and densities 3692ms
+ ❯ |e2e| task-changes.e2e.ts (7 tests | 2 failed) 60983ms
+     × the Session header tab navigates to /changes: tree, toolbar and the real diff 28348ms
+     × the toolbar comes from the policy: Push, Create PR, Commit, and kebab 25039ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| github.e2e.ts > the GitHub tab against the live dry-run server > lays out long issue and pull-request titles at the review viewports in both themes and densities
+AssertionError: expected 3 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 3
+
+ ❯ github.e2e.ts:372:40
+    370|               expect(facts.metaLines).toBeGreaterThan(1)
+    371|             } else {
+    372|               expect(facts.titleLines).toBe(1)
+       |                                        ^
+    373|               expect(facts.titleOverflowing).toBe(true)
+    374|               expect(facts.textOverflow).toBe('ellipsis')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  |e2e| task-changes.e2e.ts > the Changes tab against a live dry run > the Session header tab navigates to /changes: tree, toolbar and the real diff
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="git-toolbar"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ task-changes.e2e.ts:145:15
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-changes-3023496 wait --fn document.querySelector('[data-slot="git-toolbar"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ task-changes.e2e.ts:145:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3024300, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  |e2e| task-changes.e2e.ts > the Changes tab against a live dry run > the toolbar comes from the policy: Push, Create PR, Commit, and kebab
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="git-toolbar"] [data-action="push"]')?.disabled === false failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ task-changes.e2e.ts:177:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-changes-3023496 wait --fn document.querySelector('[data-slot="git-toolbar"] [data-action="push"]')?.disabled === false --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ task-changes.e2e.ts:177:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3025562, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 36 passed (39)
+   Start at  14:51:54
+   Duration  142.61s (transform 71ms, setup 0ms, import 105ms, tests 142.17s, environment 0ms)
+

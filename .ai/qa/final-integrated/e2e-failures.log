@@ -1,0 +1,1565 @@
+⎯⎯⎯⎯⎯⎯ Failed Tests 107 ⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| agents-dock.e2e.ts > the Agents dock against a replayed fan-out > a row opens the drill-down sheet with that agent’s output and nobody else’s
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="subagent-sheet"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:180:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-agents-dock-2597061 wait --fn document.querySelector('[data-slot="subagent-sheet"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:180:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 2597654, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/107]⎯
+
+ FAIL  |e2e| composer.e2e.ts > the thread composer against a live waiting session > send delivers the reply — the transcript grows with the new user bubble over SSE
+AssertionError: expected 'YOUPlease run /lint-fix' to be 'Please run /lint-fix' // Object.is equality
+
+Expected: "Please run /lint-fix"
+Received: "YOUPlease run /lint-fix"
+
+ ❯ composer.e2e.ts:175:7
+    173|     expect(
+    174|       browser.evaluate(`[...document.querySelectorAll('[data-slot="use…
+    175|     ).toBe('Please run /lint-fix')
+       |       ^
+    176|   })
+    177|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/107]⎯
+
+ FAIL  |e2e| github.e2e.ts > the GitHub tab against the live dry-run server > lays out long issue and pull-request titles at the review viewports in both themes and densities
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ github.e2e.ts:364:43
+    362|             expect(facts.appliedDensity).toBe(density)
+    363|             expect(facts.metaBelowTitle).toBe(true)
+    364|             expect(facts.labelsBelowMeta).toBe(true)
+       |                                           ^
+    365|             expect(facts.pageOverflow).toBe(false)
+    366|             if (viewport.width === REVIEW_PHONE.width) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/107]⎯
+
+ FAIL  |e2e| inbox.e2e.ts > the inbox against the live dry-run server > the default-off inbox stays reachable and hides entries already on disk
+AssertionError: expected 'Inbox is off\n\nAgents are not asked …' to contain 'The follow-up inbox is off'
+
+- Expected
++ Received
+
+- The follow-up inbox is off
++ Inbox is off
++
++ Agents are not asked to leave follow-ups. Set CEZ_FOLLOWUPS=1 and restart Cezarion to enable Inbox.
+
+ ❯ inbox.e2e.ts:71:58
+     69|     )
+     70|
+     71|     expect(browser.text('[data-slot="centered-state"]')).toContain('Th…
+       |                                                          ^
+     72|     expect(browser.text('[data-route="inbox"] header')).toContain(
+     73|       'Disabled for this server; per-task Notes still run.',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/107]⎯
+
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > retains the query while page and drawer selection stay independent across resize
+Error: cezar e2e: agent-browser eval document.querySelector('[data-slot="mobile-nav-drawer"] [data-slot="view-tab"][data-view="active"]').getAttribute('aria-pressed') failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ mobile-task-controls.e2e.ts:99:20
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session controls-2607226 eval document.querySelector('[data-slot="mobile-nav-drawer"] [data-slot="view-tab"][data-view="active"]').getAttribute('aria-pressed') --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ mobile-task-controls.e2e.ts:99:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'getAttribute\')\n    at <anonymous>:1:101"}\n', '' ], pid: 2607917, stdout: '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'getAttribute\')\n    at <anonymous>:1:101"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/107]⎯
+
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: light/comfortable/normal
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: dark/comfortable/normal
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: light/comfortable/reduced
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: dark/comfortable/reduced
+AssertionError: expected 437 to be less than 300
+ ❯ mobile-task-controls.e2e.ts:149:53
+    147|           }
+    148|         }
+    149|         if (width === 360) expect(bounds.firstCard).toBeLessThan(300)
+       |                                                     ^
+    150|         focusWithKeyboard(browser, search)
+    151|         expect(browser.evaluate(`document.querySelector('${search}').m…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/107]⎯
+
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: light/compact/normal
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: dark/compact/normal
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: light/compact/reduced
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: dark/compact/reduced
+AssertionError: expected 422.5 to be less than 300
+ ❯ mobile-task-controls.e2e.ts:149:53
+    147|           }
+    148|         }
+    149|         if (width === 360) expect(bounds.firstCard).toBeLessThan(300)
+       |                                                     ^
+    150|         focusWithKeyboard(browser, search)
+    151|         expect(browser.evaluate(`document.querySelector('${search}').m…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/107]⎯
+
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: light/ultra/normal
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: dark/ultra/normal
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: light/ultra/reduced
+ FAIL  |e2e| mobile-task-controls.e2e.ts > mobile Tasks controls > fits both viewports with keyboard focus and 44px mobile targets: dark/ultra/reduced
+AssertionError: expected 408 to be less than 300
+ ❯ mobile-task-controls.e2e.ts:149:53
+    147|           }
+    148|         }
+    149|         if (width === 360) expect(bounds.firstCard).toBeLessThan(300)
+       |                                                     ^
+    150|         focusWithKeyboard(browser, search)
+    151|         expect(browser.evaluate(`document.querySelector('${search}').m…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/107]⎯
+
+ FAIL  |e2e| new-task.e2e.ts > the full-screen /new against a live dry-run server > the sidebar CTA client-navigates to the React hero, focus already in the textarea
+Error: cezar e2e: agent-browser is visible [data-slot="twinkle-backdrop"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.isVisible agent-browser.ts:191:17
+ ❯ new-task.e2e.ts:123:20
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-new-task-2583035 is visible [data-slot="twinkle-backdrop"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.isVisible agent-browser.ts:191:17
+ ❯ new-task.e2e.ts:123:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element not found: [data-slot=\"twinkle-backdrop\"]. Verify the selector, role, or name is correct and the element exists in the DOM."}\n', '' ], pid: 2583546, stdout: '{"success":false,"data":null,"error":"Element not found: [data-slot=\"twinkle-backdrop\"]. Verify the selector, role, or name is correct and the element exists in the DOM."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/107]⎯
+
+ FAIL  |e2e| new-task.e2e.ts > the full-screen /new against a live dry-run server > type + submit → the thread; the run record carries the exact skill chain
+Error: cezar e2e: agent-browser click [data-slot="composer"] textarea failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ new-task.e2e.ts:237:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-new-task-2583035 click [data-slot="composer"] textarea --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ new-task.e2e.ts:237:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"composer\"] textarea\' is covered by <div#radix-_r_2t_> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 2583692, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"composer\"] textarea\' is covered by <div#radix-_r_2t_> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/107]⎯
+
+ FAIL  |e2e| new-task.e2e.ts > the full-screen /new against a live dry-run server > back on /new the skill is gone with the task it ran; iPhone hero screenshot
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="source-pill"]')?.textContent.includes('Skill') failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ new-task.e2e.ts:271:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-new-task-2583035 wait --fn document.querySelector('[data-slot="source-pill"]')?.textContent.includes('Skill') --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ new-task.e2e.ts:271:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 2583700, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/107]⎯
+
+ FAIL  |e2e| page-headings.e2e.ts > Git page headings at the review viewports > Git at 360x640 in light keeps one visible title, context, and first-row access
+ FAIL  |e2e| page-headings.e2e.ts > Git page headings at the review viewports > Git at 360x640 in dark keeps one visible title, context, and first-row access
+ FAIL  |e2e| page-headings.e2e.ts > Git page headings at the review viewports > Git at 1440x900 in light keeps one visible title, context, and first-row access
+ FAIL  |e2e| page-headings.e2e.ts > Git page headings at the review viewports > Git at 1440x900 in dark keeps one visible title, context, and first-row access
+AssertionError: expected 'Git · Changes' to be 'Git' // Object.is equality
+
+Expected: "Git"
+Received: "Git · Changes"
+
+ ❯ page-headings.e2e.ts:96:40
+     94|
+     95|           expect(facts.light).toBe(theme === 'light')
+     96|           expect(facts.routeTitleText).toBe(page.name)
+       |                                        ^
+     97|           expect(facts.routeTitleTag).toBe('H1')
+     98|           expect(facts.routeTitleAriaHidden).toBeNull()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/107]⎯
+
+ FAIL  |e2e| page-headings.e2e.ts > Git page headings at the review viewports > GitHub at 360x640 in light keeps one visible title, context, and first-row access
+ FAIL  |e2e| page-headings.e2e.ts > Git page headings at the review viewports > GitHub at 360x640 in dark keeps one visible title, context, and first-row access
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ page-headings.e2e.ts:108:45
+    106|           if (viewport.width === PHONE.width) {
+    107|             expect(Number(facts.routeTitlePainted) + Number(facts.shel…
+    108|             expect(facts.routeTitlePainted).toBe(false)
+       |                                             ^
+    109|             expect(facts.shellTitlePainted).toBe(true)
+    110|           } else {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/107]⎯
+
+ FAIL  |e2e| project-groups.e2e.ts > the grouped multi-project sidebar > scopes every group nav to its own project, and lights only the active one
+Error: cezar e2e: agent-browser click [data-slot="project-group"][data-project="e2e-alpha"] [data-slot="project-group-header"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ setGroupExpanded project-groups.e2e.ts:183:13
+ ❯ project-groups.e2e.ts:233:5
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-project-groups-2588820 click [data-slot="project-group"][data-project="e2e-alpha"] [data-slot="project-group-header"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ setGroupExpanded project-groups.e2e.ts:183:13
+ ❯ project-groups.e2e.ts:233:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"project-group\"][data-project=\"e2e-alpha\"] [data-slot=\"project-group-header\"]\' is covered by <a.pointer-events-auto.block inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 2589237, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"project-group\"][data-project=\"e2e-alpha\"] [data-slot=\"project-group-header\"]\' is covered by <a.pointer-events-auto.block inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/107]⎯
+
+ FAIL  |e2e| project-groups.e2e.ts > the grouped multi-project sidebar > persists a collapse in THIS browser, so a reload keeps it and the workspace file does not
+Error: cezar e2e: agent-browser click [data-slot="project-group"][data-project="86a5f50c-6f3c-4c93-ba2f-489eeaf1613f"] [data-slot="project-group-header"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ setGroupExpanded project-groups.e2e.ts:183:13
+ ❯ project-groups.e2e.ts:277:5
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-project-groups-2588820 click [data-slot="project-group"][data-project="86a5f50c-6f3c-4c93-ba2f-489eeaf1613f"] [data-slot="project-group-header"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ setGroupExpanded project-groups.e2e.ts:183:13
+ ❯ project-groups.e2e.ts:277:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"project-group\"][data-project=\"86a5f50c-6f3c-4c93-ba2f-489eeaf1613f\"] [data-slot=\"project-group-header\"]\' is covered by <a.pointer-events-auto.block inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 2589243, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"project-group\"][data-project=\"86a5f50c-6f3c-4c93-ba2f-489eeaf1613f\"] [data-slot=\"project-group-header\"]\' is covered by <a.pointer-events-auto.block inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > task quick-list > groups the runs under Needs you / Recent, in that order
+AssertionError: expected [ 'Recent' ] to deeply equal [ 'Needs you', 'Recent' ]
+
+- Expected
++ Received
+
+  [
+-   "Needs you",
+    "Recent",
+  ]
+
+ ❯ quick-list.e2e.ts:236:7
+    234|     expect(
+    235|       browser.evaluate(`[...document.querySelectorAll('[data-slot="qui…
+    236|     ).toEqual(['Needs you', 'Recent'])
+       |       ^
+    237|
+    238|     // The review runs are what wants you; the terminal ones are histo…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > task quick-list > paints one dot per row, in the tone deriveAttention picked
+AssertionError: expected '10px' to be '7px' // Object.is equality
+
+Expected: "7px"
+Received: "10px"
+
+ ❯ quick-list.e2e.ts:318:7
+    316|         `getComputedStyle(document.querySelector('[data-run-id="fix-do…
+    317|       )
+    318|     ).toBe('7px')
+       |       ^
+    319|   })
+    320|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > task quick-list > switches to the archived view, and back
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="quick-list"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ quick-list.e2e.ts:373:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-2514772 wait --fn document.querySelector('[data-slot="quick-list"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ quick-list.e2e.ts:373:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 2516346, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > allocates two contained title lines without crowding desktop metadata or actions
+Error: cezar e2e: agent-browser eval (() => {
+            const rows = [...document.querySelectorAll('[data-slot="task-table-row"]')]
+            const firstCell = rows[0].querySelector('td[data-column-id="task"]')
+            const firstLink = firstCell.querySelector('a[href*="/tasks/"]')
+            const secondCell = rows[1].querySelector('td[data-column-id="task"]')
+            const secondLink = secondCell.querySelector('a[href*="/tasks/"]')
+            const suffix = 'documentation outcome'
+            const textNode = firstLink.firstChild
+            const range = document.createRange()
+            range.setStart(textNode, textNode.textContent.indexOf(suffix))
+            range.setEnd(textNode, textNode.textContent.length)
+            const suffixRect = range.getBoundingClientRect()
+            const firstRect = firstLink.getBoundingClientRect()
+            const secondRect = secondLink.getBoundingClientRect()
+            const secondCellRect = secondCell.getBoundingClientRect()
+            const lineHeight = Number.parseFloat(getComputedStyle(firstLink).lineHeight)
+            const workflow = rows[0].querySelector('td[data-column-id="workflow"]')
+            workflow.textContent = 'workflow-name-that-is-deliberately-too-long-for-its-column'
+            const status = rows[0].querySelector('td[data-column-id="status"]')
+            const statusPill = status.querySelector('[data-slot="pill"]')
+            statusPill.textContent = 'waiting on workers'
+            const reference = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"] td[data-column-id="reference"]')
+            const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
+            const referenceLabel = [...referenceChip.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
+            referenceLabel.textContent = '#1234'
+            const referenceGlyph = referenceChip.querySelector('svg')
+            referenceChip.insertBefore(referenceGlyph.cloneNode(true), referenceChip.firstChild)
+            const diff = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"] td[data-column-id="diff"]')
+            const [adds, dels] = diff.querySelectorAll('[data-slot="diff-stat"] > span')
+            adds.textContent = '+12k'
+            dels.textContent = '−1k'
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('title', '+12345 −1234 across 37 files')
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('aria-label', '+12345 −1234 across 37 files')
+            const workflowHeader = document.querySelector('th[data-column-id="workflow"]')
+            const workflowHeaderButton = workflowHeader.querySelector('button')
+            const metricsRow = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"]')
+            const cpuCell = metricsRow.querySelector('td[data-column-id="cpu"]')
+            const cpuMetric = cpuCell.firstElementChild
+            cpuMetric.textContent = '100%'
+            cpuMetric.setAttribute('title', '100%')
+            cpuMetric.setAttribute('aria-label', '100%')
+            const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
+            const secondary = secondaryIds.map((id) => {
+              const cell = metricsRow.querySelector('td[data-column-id="' + id + '"]')
+              const style = getComputedStyle(cell)
+              const rect = cell.getBoundingClientRect()
+              const target = cell.firstElementChild || cell
+              const targetRect = target.getBoundingClientRect()
+              const targetStyle = getComputedStyle(target)
+              const range = document.createRange()
+              range.selectNodeContents(target)
+              const content = range.getBoundingClientRect()
+              const textFits = content.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && content.right <= rect.right - Number.parseFloat(style.paddingRight) + 1
+              const clipsOverflow = targetStyle.overflowX === 'hidden' && target.scrollWidth > target.clientWidth
+              return {
+                id,
+                width: rect.width,
+                contained: targetRect.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && targetRect.right <= rect.right - Number.parseFloat(style.paddingRight) + 1 && (textFits || clipsOverflow),
+                right: targetRect.right,
+                clipsOverflow,
+                label: cell.textContent,
+                accessible: cell.firstElementChild?.getAttribute('aria-label') || cell.getAttribute('aria-label'),
+                title: cell.firstElementChild?.getAttribute('title') || cell.getAttribute('title'),
+              }
+            })
+            const memoryCell = metricsRow.querySelector('td[data-column-id="memory"]')
+            const workflowStyle = getComputedStyle(workflow)
+            const diffStyle = getComputedStyle(diff)
+            const diffRect = diff.getBoundingClientRect()
+            const diffRange = document.createRange()
+            diffRange.selectNodeContents(diff.querySelector('[data-slot="diff-stat"]'))
+            const diffTextRect = diffRange.getBoundingClientRect()
+            const referenceContentRect = referenceChip.getBoundingClientRect()
+            const workflowHeaderStyle = getComputedStyle(workflowHeader)
+            const workflowHeaderRect = workflowHeader.getBoundingClientRect()
+            const workflowHeaderContentRight = workflowHeaderRect.right - Number.parseFloat(workflowHeaderStyle.paddingRight)
+            const workflowHeaderChildren = [...workflowHeaderButton.children].map((child) => child.getBoundingClientRect())
+            return {
+              taskWidth: firstCell.getBoundingClientRect().width,
+              titleWidth: firstRect.width,
+              workflowWidth: workflow.getBoundingClientRect().width,
+              lineCount: Math.round(firstRect.height / lineHeight),
+              suffixRect: { left: suffixRect.left, right: suffixRect.right, bottom: suffixRect.bottom },
+              titleRect: { left: firstRect.left, right: firstRect.right, bottom: firstRect.bottom },
+              suffixVisible: suffixRect.left >= firstRect.left - 1 && suffixRect.right <= firstRect.right + 1 && suffixRect.bottom <= firstRect.bottom + 1,
+              unbrokenContained: getComputedStyle(secondLink).overflow === 'hidden' && secondLink.scrollWidth > secondLink.clientWidth && secondRect.right <= secondCellRect.right + 1,
+              workflowContained: workflowStyle.overflow === 'hidden' && workflow.scrollWidth > workflow.clientWidth,
+              statusContained: status.scrollWidth <= status.clientWidth + 1 && statusPill.getBoundingClientRect().right <= status.getBoundingClientRect().right + 1,
+              referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1 && [...referenceChip.querySelectorAll('svg')].every((glyph) => glyph.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1),
+              referenceLabel: referenceChip.textContent,
+              diffContained: diffTextRect.left >= diffRect.left + Number.parseFloat(diffStyle.paddingLeft) - 1 && diffTextRect.right <= diffRect.right - Number.parseFloat(diffStyle.paddingRight) + 1 && diffTextRect.right < referenceContentRect.left,
+              workflowHeaderContained: workflowHeaderChildren.every((rect) => rect.left >= workflowHeaderRect.left + Number.parseFloat(workflowHeaderStyle.paddingLeft) - 1 && rect.right <= workflowHeaderContentRight + 1),
+              memoryLabel: memoryCell.textContent,
+              metricsBeforeNeighbors: secondary.slice(0, -1).every((metric, index) => {
+                const nextCell = metricsRow.querySelector('td[data-column-id="' + secondaryIds[index + 1] + '"]')
+                const nextStyle = getComputedStyle(nextCell)
+                return metric.right < nextCell.getBoundingClientRect().left + Number.parseFloat(nextStyle.paddingLeft)
+              }),
+              secondary,
+              pageContained: document.documentElement.scrollWidth <= window.innerWidth,
+            }
+          })() failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ quick-list.e2e.ts:460:33
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-2514772 eval (() => {
+            const rows = [...document.querySelectorAll('[data-slot="task-table-row"]')]
+            const firstCell = rows[0].querySelector('td[data-column-id="task"]')
+            const firstLink = firstCell.querySelector('a[href*="/tasks/"]')
+            const secondCell = rows[1].querySelector('td[data-column-id="task"]')
+            const secondLink = secondCell.querySelector('a[href*="/tasks/"]')
+            const suffix = 'documentation outcome'
+            const textNode = firstLink.firstChild
+            const range = document.createRange()
+            range.setStart(textNode, textNode.textContent.indexOf(suffix))
+            range.setEnd(textNode, textNode.textContent.length)
+            const suffixRect = range.getBoundingClientRect()
+            const firstRect = firstLink.getBoundingClientRect()
+            const secondRect = secondLink.getBoundingClientRect()
+            const secondCellRect = secondCell.getBoundingClientRect()
+            const lineHeight = Number.parseFloat(getComputedStyle(firstLink).lineHeight)
+            const workflow = rows[0].querySelector('td[data-column-id="workflow"]')
+            workflow.textContent = 'workflow-name-that-is-deliberately-too-long-for-its-column'
+            const status = rows[0].querySelector('td[data-column-id="status"]')
+            const statusPill = status.querySelector('[data-slot="pill"]')
+            statusPill.textContent = 'waiting on workers'
+            const reference = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"] td[data-column-id="reference"]')
+            const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
+            const referenceLabel = [...referenceChip.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
+            referenceLabel.textContent = '#1234'
+            const referenceGlyph = referenceChip.querySelector('svg')
+            referenceChip.insertBefore(referenceGlyph.cloneNode(true), referenceChip.firstChild)
+            const diff = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"] td[data-column-id="diff"]')
+            const [adds, dels] = diff.querySelectorAll('[data-slot="diff-stat"] > span')
+            adds.textContent = '+12k'
+            dels.textContent = '−1k'
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('title', '+12345 −1234 across 37 files')
+            diff.querySelector('[data-slot="diff-stat"]').setAttribute('aria-label', '+12345 −1234 across 37 files')
+            const workflowHeader = document.querySelector('th[data-column-id="workflow"]')
+            const workflowHeaderButton = workflowHeader.querySelector('button')
+            const metricsRow = document.querySelector('[data-slot="task-table-row"][data-run-id="fix-review-pr"]')
+            const cpuCell = metricsRow.querySelector('td[data-column-id="cpu"]')
+            const cpuMetric = cpuCell.firstElementChild
+            cpuMetric.textContent = '100%'
+            cpuMetric.setAttribute('title', '100%')
+            cpuMetric.setAttribute('aria-label', '100%')
+            const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
+            const secondary = secondaryIds.map((id) => {
+              const cell = metricsRow.querySelector('td[data-column-id="' + id + '"]')
+              const style = getComputedStyle(cell)
+              const rect = cell.getBoundingClientRect()
+              const target = cell.firstElementChild || cell
+              const targetRect = target.getBoundingClientRect()
+              const targetStyle = getComputedStyle(target)
+              const range = document.createRange()
+              range.selectNodeContents(target)
+              const content = range.getBoundingClientRect()
+              const textFits = content.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && content.right <= rect.right - Number.parseFloat(style.paddingRight) + 1
+              const clipsOverflow = targetStyle.overflowX === 'hidden' && target.scrollWidth > target.clientWidth
+              return {
+                id,
+                width: rect.width,
+                contained: targetRect.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && targetRect.right <= rect.right - Number.parseFloat(style.paddingRight) + 1 && (textFits || clipsOverflow),
+                right: targetRect.right,
+                clipsOverflow,
+                label: cell.textContent,
+                accessible: cell.firstElementChild?.getAttribute('aria-label') || cell.getAttribute('aria-label'),
+                title: cell.firstElementChild?.getAttribute('title') || cell.getAttribute('title'),
+              }
+            })
+            const memoryCell = metricsRow.querySelector('td[data-column-id="memory"]')
+            const workflowStyle = getComputedStyle(workflow)
+            const diffStyle = getComputedStyle(diff)
+            const diffRect = diff.getBoundingClientRect()
+            const diffRange = document.createRange()
+            diffRange.selectNodeContents(diff.querySelector('[data-slot="diff-stat"]'))
+            const diffTextRect = diffRange.getBoundingClientRect()
+            const referenceContentRect = referenceChip.getBoundingClientRect()
+            const workflowHeaderStyle = getComputedStyle(workflowHeader)
+            const workflowHeaderRect = workflowHeader.getBoundingClientRect()
+            const workflowHeaderContentRight = workflowHeaderRect.right - Number.parseFloat(workflowHeaderStyle.paddingRight)
+            const workflowHeaderChildren = [...workflowHeaderButton.children].map((child) => child.getBoundingClientRect())
+            return {
+              taskWidth: firstCell.getBoundingClientRect().width,
+              titleWidth: firstRect.width,
+              workflowWidth: workflow.getBoundingClientRect().width,
+              lineCount: Math.round(firstRect.height / lineHeight),
+              suffixRect: { left: suffixRect.left, right: suffixRect.right, bottom: suffixRect.bottom },
+              titleRect: { left: firstRect.left, right: firstRect.right, bottom: firstRect.bottom },
+              suffixVisible: suffixRect.left >= firstRect.left - 1 && suffixRect.right <= firstRect.right + 1 && suffixRect.bottom <= firstRect.bottom + 1,
+              unbrokenContained: getComputedStyle(secondLink).overflow === 'hidden' && secondLink.scrollWidth > secondLink.clientWidth && secondRect.right <= secondCellRect.right + 1,
+              workflowContained: workflowStyle.overflow === 'hidden' && workflow.scrollWidth > workflow.clientWidth,
+              statusContained: status.scrollWidth <= status.clientWidth + 1 && statusPill.getBoundingClientRect().right <= status.getBoundingClientRect().right + 1,
+              referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1 && [...referenceChip.querySelectorAll('svg')].every((glyph) => glyph.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1),
+              referenceLabel: referenceChip.textContent,
+              diffContained: diffTextRect.left >= diffRect.left + Number.parseFloat(diffStyle.paddingLeft) - 1 && diffTextRect.right <= diffRect.right - Number.parseFloat(diffStyle.paddingRight) + 1 && diffTextRect.right < referenceContentRect.left,
+              workflowHeaderContained: workflowHeaderChildren.every((rect) => rect.left >= workflowHeaderRect.left + Number.parseFloat(workflowHeaderStyle.paddingLeft) - 1 && rect.right <= workflowHeaderContentRight + 1),
+              memoryLabel: memoryCell.textContent,
+              metricsBeforeNeighbors: secondary.slice(0, -1).every((metric, index) => {
+                const nextCell = metricsRow.querySelector('td[data-column-id="' + secondaryIds[index + 1] + '"]')
+                const nextStyle = getComputedStyle(nextCell)
+                return metric.right < nextCell.getBoundingClientRect().left + Number.parseFloat(nextStyle.paddingLeft)
+              }),
+              secondary,
+              pageContained: document.documentElement.scrollWidth <= window.innerWidth,
+            }
+          })() --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ quick-list.e2e.ts:460:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'cloneNode\')\n    at <anonymous>:27:55\n    at <anonymous>:102:13"}\n', '' ], pid: 2522200, stdout: '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'cloneNode\')\n    at <anonymous>:27:55\n    at <anonymous>:102:13"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > keeps the table and sidebar archive filters independent
+Error: cezar e2e: agent-browser eval document.querySelector('[data-slot="view-tab"][data-view="active"]').getAttribute('aria-pressed') failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ quick-list.e2e.ts:697:15
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-2514772 eval document.querySelector('[data-slot="view-tab"][data-view="active"]').getAttribute('aria-pressed') --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ quick-list.e2e.ts:697:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'getAttribute\')\n    at <anonymous>:1:69"}\n', '' ], pid: 2522239, stdout: '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'getAttribute\')\n    at <anonymous>:1:69"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > opens the task from a row click
+Error: cezar e2e: agent-browser click [data-slot="task-table-row"][data-run-id="fix-done"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ quick-list.e2e.ts:718:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-2514772 click [data-slot="task-table-row"][data-run-id="fix-done"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ quick-list.e2e.ts:718:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element not found: [data-slot=\"task-table-row\"][data-run-id=\"fix-done\"]. Verify the selector, role, or name is correct and the element exists in the DOM."}\n', '' ], pid: 2522241, stdout: '{"success":false,"data":null,"error":"Element not found: [data-slot=\"task-table-row\"][data-run-id=\"fix-done\"]. Verify the selector, role, or name is correct and the element exists in the DOM."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > keeps task metadata AA-readable on normal and hovered rows with visible title focus
+Error: cezar e2e: agent-browser eval (() => {
+    const element = document.querySelector("[data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums")
+    if (!element) throw new Error('contrast target not found: ' + "[data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums")
+    const parse = (value) => {
+      const channels = value.match(/[\d.]+/g)?.map(Number) ?? []
+      if (channels.length < 3) throw new Error('unsupported computed color: ' + value)
+      return { r: channels[0], g: channels[1], b: channels[2], a: channels[3] ?? 1 }
+    }
+    const over = (front, back) => {
+      const alpha = front.a + back.a * (1 - front.a)
+      return {
+        r: (front.r * front.a + back.r * back.a * (1 - front.a)) / alpha,
+        g: (front.g * front.a + back.g * back.a * (1 - front.a)) / alpha,
+        b: (front.b * front.a + back.b * back.a * (1 - front.a)) / alpha,
+        a: alpha,
+      }
+    }
+    const layers = []
+    // An offset outline sits outside the control's fill, on the parent surface.
+    for (let node = element; node; node = node.parentElement) {
+      const layer = parse(getComputedStyle(node).backgroundColor)
+      if (layer.a > 0) layers.push(layer)
+      if (layer.a === 1) break
+    }
+    let background = { r: 255, g: 255, b: 255, a: 1 }
+    for (const layer of layers.reverse()) background = over(layer, background)
+    const foregroundValue = getComputedStyle(element).getPropertyValue("color")
+    const foreground = over(parse(foregroundValue), background)
+    const luminance = (color) => {
+      const channel = (value) => {
+        const srgb = value / 255
+        return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+    }
+    const light = Math.max(luminance(foreground), luminance(background))
+    const dark = Math.min(luminance(foreground), luminance(background))
+    return {
+      foreground: foregroundValue,
+      background: 'rgb(' + [background.r, background.g, background.b].map(Math.round).join(', ') + ')',
+      ratio: (light + 0.05) / (dark + 0.05),
+    }
+  })() failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ quick-list.e2e.ts:738:32
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-2514772 eval (() => {
+    const element = document.querySelector("[data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums")
+    if (!element) throw new Error('contrast target not found: ' + "[data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums")
+    const parse = (value) => {
+      const channels = value.match(/[\d.]+/g)?.map(Number) ?? []
+      if (channels.length < 3) throw new Error('unsupported computed color: ' + value)
+      return { r: channels[0], g: channels[1], b: channels[2], a: channels[3] ?? 1 }
+    }
+    const over = (front, back) => {
+      const alpha = front.a + back.a * (1 - front.a)
+      return {
+        r: (front.r * front.a + back.r * back.a * (1 - front.a)) / alpha,
+        g: (front.g * front.a + back.g * back.a * (1 - front.a)) / alpha,
+        b: (front.b * front.a + back.b * back.a * (1 - front.a)) / alpha,
+        a: alpha,
+      }
+    }
+    const layers = []
+    // An offset outline sits outside the control's fill, on the parent surface.
+    for (let node = element; node; node = node.parentElement) {
+      const layer = parse(getComputedStyle(node).backgroundColor)
+      if (layer.a > 0) layers.push(layer)
+      if (layer.a === 1) break
+    }
+    let background = { r: 255, g: 255, b: 255, a: 1 }
+    for (const layer of layers.reverse()) background = over(layer, background)
+    const foregroundValue = getComputedStyle(element).getPropertyValue("color")
+    const foreground = over(parse(foregroundValue), background)
+    const luminance = (color) => {
+      const channel = (value) => {
+        const srgb = value / 255
+        return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+    }
+    const light = Math.max(luminance(foreground), luminance(background))
+    const dark = Math.min(luminance(foreground), luminance(background))
+    return {
+      foreground: foregroundValue,
+      background: 'rgb(' + [background.r, background.g, background.b].map(Math.round).join(', ') + ')',
+      ratio: (light + 0.05) / (dark + 0.05),
+    }
+  })() --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ quick-list.e2e.ts:738:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Evaluation error: Error: contrast target not found: [data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums\n    at <anonymous>:3:25\n    at <anonymous>:43:5"}\n', '' ], pid: 2522255, stdout: '{"success":false,"data":null,"error":"Evaluation error: Error: contrast target not found: [data-slot=\"task-card\"][data-run-id=\"fix-review-pr\"] > div:first-child > span.tabular-nums\n    at <anonymous>:3:25\n    at <anonymous>:43:5"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > renames a task inline from its row — the hover pencil, committed by Enter, stored for real
+Error: cezar e2e: agent-browser hover [data-slot="task-table-row"][data-run-id="fix-failed"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.hover agent-browser.ts:287:10
+ ❯ quick-list.e2e.ts:770:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-2514772 hover [data-slot="task-table-row"][data-run-id="fix-failed"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.hover agent-browser.ts:287:10
+ ❯ quick-list.e2e.ts:770:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-failed\"]\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 2522258, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-failed\"]\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > a row under width contention, in a column the user can widen > gives the name real width at the default 232px, and drops the diff pair to do it
+AssertionError: expected 264 to be 232 // Object.is equality
+
+- Expected
++ Received
+
+- 232
++ 264
+
+ ❯ quick-list.e2e.ts:960:28
+    958|
+    959|   it('gives the name real width at the default 264px, and drops the di…
+    960|     expect(sidebarWidth()).toBe(264)
+       |                            ^
+    961|
+    962|     const measured = browser.evaluate(`(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > a row under width contention, in a column the user can widen > drags wider, brings the diff pair back, and remembers the width across a reload
+AssertionError: expected 364 to be 332 // Object.is equality
+
+- Expected
++ Received
+
+- 332
++ 364
+
+ ❯ quick-list.e2e.ts:1008:28
+    1006|   it('drags wider, brings the diff pair back, and remembers the width …
+    1007|     dragHandle(100)
+    1008|     expect(sidebarWidth()).toBe(364)
+       |                            ^
+    1009|     expect(browser.evaluate(`document.querySelector('${HANDLE}').getAt…
+    1010|     // Still below 23rem: the column is wider, and all of it went to t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > a row under width contention, in a column the user can widen > clamps at both ends — the column can never collapse or swallow the view
+AssertionError: expected 264 to be 232 // Object.is equality
+
+- Expected
++ Received
+
+- 232
++ 264
+
+ ❯ quick-list.e2e.ts:1032:28
+    1030|     expect(sidebarWidth()).toBe(420)
+    1031|     dragHandle(-4000)
+    1032|     expect(sidebarWidth()).toBe(264)
+       |                            ^
+    1033|   })
+    1034|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > a row under width contention, in a column the user can widen > resizes from the keyboard and resets on double-click
+AssertionError: expected 264 to be 232 // Object.is equality
+
+- Expected
++ Received
+
+- 232
++ 264
+
+ ❯ quick-list.e2e.ts:1042:28
+    1040|     expect(sidebarWidth()).toBe(404)
+    1041|     browser.press('Home')
+    1042|     expect(sidebarWidth()).toBe(264)
+       |                            ^
+    1043|
+    1044|     browser.press('ArrowRight')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > a row under width contention, in a column the user can widen > is a desktop affordance only: below md there is no handle to reach
+AssertionError: expected 322 to be 232 // Object.is equality
+
+- Expected
++ Received
+
+- 232
++ 322
+
+ ❯ quick-list.e2e.ts:1070:7
+    1068|         `Math.round(document.querySelector('[data-slot="mobile-nav-dra…
+    1069|       )
+    1070|     ).toBe(264)
+       |       ^
+    1071|   })
+    1072| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/107]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > empty quick-list > shows the honest empty state — a fresh cezar has nothing to list
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="quick-list"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ quick-list.e2e.ts:1101:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-2514772 wait --fn document.querySelector('[data-slot="quick-list"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ quick-list.e2e.ts:1101:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 2524083, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/107]⎯
+
+ FAIL  |e2e| repo-git.e2e.ts > the repo view against the live dry-run server > below md the repo view forces unified+wrap, hides the toggles, and never overflows
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ repo-git.e2e.ts:177:11
+    175|             `(() => { const el = document.querySelector('[data-slot="c…
+    176|           ),
+    177|         ).toBe(true)
+       |           ^
+    178|       } else {
+    179|         browser.waitForFunction(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/107]⎯
+
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-dark-comfortable: task and skill selection have a persistent rail and accessible state
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-light-comfortable: task and skill selection have a persistent rail and accessible state
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-dark-ultra: task and skill selection have a persistent rail and accessible state
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-light-ultra: task and skill selection have a persistent rail and accessible state
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-dark-comfortable: task and skill selection have a persistent rail and accessible state
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-light-comfortable: task and skill selection have a persistent rail and accessible state
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-dark-ultra: task and skill selection have a persistent rail and accessible state
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-light-ultra: task and skill selection have a persistent rail and accessible state
+AssertionError: expected 'none' not to be 'none' // Object.is equality
+ ❯ rail selection-states.e2e.ts:72:25
+     70| function rail(selector: string): void {
+     71|   const s = style(selector, '::before')
+     72|   expect(s.content).not.toBe('none')
+       |                         ^
+     73|   expect(parseFloat(s.width ?? '')).toBeGreaterThanOrEqual(3)
+     74|   expect(parseFloat(s.height ?? '')).toBeGreaterThanOrEqual(12)
+ ❯ selection-states.e2e.ts:106:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/107]⎯
+
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-dark-comfortable: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-light-comfortable: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-dark-ultra: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > mobile-light-ultra: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-dark-comfortable: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-light-comfortable: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-dark-ultra: enabled boundaries contrast and disabled selectors remain unavailable
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > desktop-light-ultra: enabled boundaries contrast and disabled selectors remain unavailable
+AssertionError: expected 'none' to be 'dashed' // Object.is equality
+
+Expected: "dashed"
+Received: "none"
+
+ ❯ selection-states.e2e.ts:155:36
+    153|       const disabledStyle = style(disabled)
+    154|       expect(enabledStyle.border).toBe('solid')
+    155|       expect(disabledStyle.border).toBe('dashed')
+       |                                    ^
+    156|       expect(disabledStyle.opacity).toBe('1')
+    157|       expect((browser.evaluate(contrastSampleExpression(disabled)) as …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/107]⎯
+
+ FAIL  |e2e| selection-states.e2e.ts > selection and control states (#171) > keeps the same selection cue in the grouped project navigation
+AssertionError: expected 'none' not to be 'none' // Object.is equality
+ ❯ rail selection-states.e2e.ts:72:25
+     70| function rail(selector: string): void {
+     71|   const s = style(selector, '::before')
+     72|   expect(s.content).not.toBe('none')
+       |                         ^
+     73|   expect(parseFloat(s.width ?? '')).toBeGreaterThanOrEqual(3)
+     74|   expect(parseFloat(s.height ?? '')).toBeGreaterThanOrEqual(12)
+ ❯ selection-states.e2e.ts:213:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/107]⎯
+
+ FAIL  |e2e| settings-agents.e2e.ts > settings → agents against the live dry-run server > default runner: click writes config.json and GET /api/v1/config reads it back
+Error: cezar e2e: agent-browser click [data-slot="agents-runner"] [data-value="codex"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ settings-agents.e2e.ts:92:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-settings-agents-2622561 click [data-slot="agents-runner"] [data-value="codex"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ settings-agents.e2e.ts:92:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"agents-runner\"] [data-value=\"codex\"]\' is covered by <section.settings-field.flex inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 2623564, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"agents-runner\"] [data-value=\"codex\"]\' is covered by <section.settings-field.flex inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/107]⎯
+
+ FAIL  |e2e| settings-agents.e2e.ts > settings → agents against the live dry-run server > per-runner model preset: select writes the runner key, others untouched
+Error: cezar e2e: agent-browser eval (() => {
+    const el = document.querySelector("[data-slot=\"agents-model\"][data-runner=\"claude\"]")
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, "opus")
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })() failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ setSelect settings-agents.e2e.ts:67:11
+ ❯ settings-agents.e2e.ts:100:5
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-settings-agents-2622561 eval (() => {
+    const el = document.querySelector("[data-slot=\"agents-model\"][data-runner=\"claude\"]")
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, "opus")
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })() --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ setSelect settings-agents.e2e.ts:67:11
+ ❯ settings-agents.e2e.ts:100:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Evaluation error: TypeError: Illegal invocation\n    at <anonymous>:3:79\n    at <anonymous>:5:5"}\n', '' ], pid: 2623597, stdout: '{"success":false,"data":null,"error":"Evaluation error: TypeError: Illegal invocation\n    at <anonymous>:3:79\n    at <anonymous>:5:5"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/107]⎯
+
+ FAIL  |e2e| settings-agents.e2e.ts > settings → agents against the live dry-run server > a cold load renders the persisted knobs — the form is a view of config.json
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ settings-agents.e2e.ts:126:100
+    124|   it('a cold load renders the persisted knobs — the form is a view of …
+    125|     gotoAgents()
+    126|     expect(browser.count('[data-slot="agents-runner"] [data-value="cod…
+       |                                                                                                    ^
+    127|     expect(
+    128|       String(browser.evaluate(`document.querySelector('[data-slot="age…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/107]⎯
+
+ FAIL  |e2e| settings-appearance.e2e.ts > settings → appearance against the live dry-run server > compact density measurably tightens the spacing scale
+AssertionError: expected 70 to be 72 // Object.is equality
+
+- Expected
++ Received
+
+- 72
++ 70
+
+ ❯ settings-appearance.e2e.ts:124:64
+    122|     const header = `document.querySelector('[data-route="settings-glob…
+    123|     const section = `document.querySelector('[data-slot="appearance-se…
+    124|     expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(72)
+       |                                                                ^
+    125|     expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${sect…
+    126|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/107]⎯
+
+ FAIL  |e2e| skills-update.e2e.ts > automatic Open Mercato skills updates > shows the inherited global preference and persists an explicit override
+AssertionError: expected 'Update Open Mercato skills automatica…' to contain 'explicit workspace override'
+
+- Expected
++ Received
+
+- explicit workspace override
++ Update Open Mercato skills automatically
++
++ Checks installed Open Mercato skills in the background and applies available updates. Other skills and untracked folders are never changed.
++
++ Off
++ Installation status
++
++ No tracked Open Mercato installation found.
++
++ Manage installed skills and sources from the Skills catalog.
++
++ Open Skills
++ Update preference inheritance
+
+ ❯ skills-update.e2e.ts:71:67
+     69|     expect(config.skillsAutoUpdate).toBe(false)
+     70|     browser.waitForFunction(`document.querySelector('[data-slot="skill…
+     71|     expect(browser.text('[data-slot="skills-settings-section"]')).toCo…
+       |                                                                   ^
+     72|
+     73|     browser.click('[data-action="skills-use-default"]')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/107]⎯
+
+ FAIL  |e2e| skills-update.e2e.ts > automatic Open Mercato skills updates > keeps the navigation marker absent for the dry-run current state
+AssertionError: expected '' to contain 'Skills'
+
+- Expected
++ Received
+
+- Skills
+
+ ❯ skills-update.e2e.ts:85:55
+     83|     browser.waitForFunction(`document.querySelector('[data-slot="sideb…
+     84|     expect(browser.count('[data-slot="nav-update-marker"]')).toBe(0)
+     85|     expect(browser.text('[data-slot="sidebar"] nav')).toContain('Skill…
+       |                                                       ^
+     86|     browser.screenshot(`${artifactsDir}/skills-navigation-current.png`)
+     87|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/107]⎯
+
+ FAIL  |e2e| skills-update.e2e.ts > automatic Open Mercato skills updates > keeps Skills reachable in mobile navigation without a false marker
+AssertionError: expected '' to contain 'Skills'
+
+- Expected
++ Received
+
+- Skills
+
+ ❯ skills-update.e2e.ts:116:49
+    114|     browser.waitForFunction(`document.querySelector('[role="dialog"] n…
+    115|
+    116|     expect(browser.text('[role="dialog"] nav')).toContain('Skills')
+       |                                                 ^
+    117|     expect(browser.count('[role="dialog"] [data-slot="nav-update-marke…
+    118|     browser.screenshot(`${artifactsDir}/skills-mobile-navigation.png`,…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/107]⎯
+
+ FAIL  |e2e| smoke.e2e.ts > cockpit app shell > renders the sidebar brand and the whole nav
+AssertionError: expected '' to contain 'Tasks'
+
+- Expected
++ Received
+
+- Tasks
+
+ ❯ smoke.e2e.ts:150:55
+    148|     expect(browser.isVisible('[data-slot="sidebar"]')).toBe(true)
+    149|     expect(browser.isVisible('[data-slot="brand-wordmark"]')).toBe(tru…
+    150|     expect(browser.text('[data-slot="sidebar"] nav')).toContain('Tasks…
+       |                                                       ^
+    151|
+    152|     // The GitHub item waits on the health answer — settle it before s…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/107]⎯
+
+ FAIL  |e2e| smoke.e2e.ts > cockpit app shell > keeps the themed wordmark readable and geometry-stable at the minimum sidebar width
+AssertionError: expected 'Cezarion' to be 'cezarion' // Object.is equality
+
+Expected: "cezarion"
+Received: "Cezarion"
+
+ ❯ smoke.e2e.ts:214:24
+    212|     const light = brandFacts('[data-slot="sidebar"]')
+    213|
+    214|     expect(light.text).toBe('Cezarion')
+       |                        ^
+    215|     expect(light.fontFamily).toContain('Poppins')
+    216|     expect(light.fontSize).toBe('23px')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/107]⎯
+
+ FAIL  |e2e| smoke.e2e.ts > cockpit app shell > fills the repo and version chips from the live /api/v1/health
+AssertionError: expected '86a5f50c-6f3c-4c93-ba2f-489eeaf1613f' to be '86a5f50c-6f3c-4c93-ba2f-489eeaf1613f …' // Object.is equality
+
+Expected: "86a5f50c-6f3c-4c93-ba2f-489eeaf1613f / cez/86a5f50c"
+Received: "86a5f50c-6f3c-4c93-ba2f-489eeaf1613f"
+
+ ❯ smoke.e2e.ts:276:53
+    274|     // suite runs (any checkout, any branch).
+    275|     const repoName = health.repoRoot.replace(/[\\/]+$/, '').split(/[\\…
+    276|     expect(browser.text('[data-slot="repo-chip"]')).toBe(`${repoName} …
+       |                                                     ^
+    277|     expect(browser.text('[data-slot="version-chip"]')).toBe(`v${health…
+    278|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/107]⎯
+
+ FAIL  |e2e| smoke.e2e.ts > cockpit app shell > makes main the only scroller — the document never scrolls
+AssertionError: expected 264 to be 232 // Object.is equality
+
+- Expected
++ Received
+
+- 232
++ 264
+
+ ❯ smoke.e2e.ts:338:33
+    336|     expect(layout.mainOverflow).toBe('auto')
+    337|     expect(layout.mainOverscroll).toBe('contain')
+    338|     expect(layout.sidebarWidth).toBe(264)
+       |                                 ^
+    339|   })
+    340|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/107]⎯
+
+ FAIL  |e2e| smoke.e2e.ts > mobile shell > nav drawer > opens over a backdrop, and covers the viewport top to bottom
+AssertionError: expected 322 to be 232 // Object.is equality
+
+- Expected
++ Received
+
+- 232
++ 322
+
+ ❯ smoke.e2e.ts:458:25
+    456|       expect(box.left).toBe(0)
+    457|       expect(box.top).toBe(0)
+    458|       expect(box.width).toBe(264)
+       |                         ^
+    459|       expect(box.height).toBe(box.viewportHeight)
+    460|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[45/107]⎯
+
+ FAIL  |e2e| smoke.e2e.ts > mobile shell > nav drawer > keeps the themed wordmark readable and unclipped at 360×640
+AssertionError: expected 'Cezarion' to be 'cezarion' // Object.is equality
+
+Expected: "cezarion"
+Received: "Cezarion"
+
+ ❯ smoke.e2e.ts:479:28
+    477|         openDrawer()
+    478|         const light = brandFacts(DRAWER)
+    479|         expect(light.text).toBe('Cezarion')
+       |                            ^
+    480|         expect(light.fontFamily).toContain('Poppins')
+    481|         expect(light.fontSize).toBe('23px')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[46/107]⎯
+
+ FAIL  |e2e| task-changes.e2e.ts > the Changes tab against a live dry run > task Changes and commit diffs reserve sticky header space only on desktop
+AssertionError: expected '16px' to be '160px' // Object.is equality
+
+Expected: "160px"
+Received: "16px"
+
+ ❯ task-changes.e2e.ts:250:43
+    248|       expect(browser.evaluate(`getComputedStyle(document.querySelector…
+    249|       browser.setViewport(1440, 900)
+    250|       expect(browser.evaluate(stickyTop)).toBe('160px')
+       |                                           ^
+    251|       expect(browser.evaluate(`getComputedStyle(document.querySelector…
+    252|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[47/107]⎯
+
+ FAIL  |e2e| task-changes.e2e.ts > the Changes tab against a live dry run > below md the segments stay tappable and the diff forces unified+wrap (toggles gone)
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ task-changes.e2e.ts:273:7
+    271|         `(() => { const el = document.querySelector('[data-slot="chang…
+    272|       ),
+    273|     ).toBe(true)
+       |       ^
+    274|     // The tabs remain a tappable segment row and the page does not ov…
+    275|     // Session / Changes / Commits / Files — the whole row survives th…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[48/107]⎯
+
+ FAIL  |e2e| task-thread.e2e.ts > task thread > tabs point at the routed Session/Changes/Files surfaces; the done run offers the closed-run actions
+AssertionError: expected [ 'Notes / handoff', 'Open in…', …(5) ] to deeply equal [ 'Open in…', …(6) ]
+
+- Expected
++ Received
+
+  [
++   "Notes / handoff",
+    "Open in…",
+    "Copy resume command",
+-   "Notes",
+    "Mark unread",
+-   "Pin",
+-   "Archive",
+-   "Delete",
++   "Pin task",
++   "Archive task",
++   "Delete task…",
+  ]
+
+ ❯ task-thread.e2e.ts:432:21
+    430|       `[...document.querySelectorAll('[data-slot="run-actions-menu"] […
+    431|     ) as string[]
+    432|     expect(actions).toEqual(['Open in…', 'Copy resume command', 'Notes…
+       |                     ^
+    433|
+    434|     browser.evaluate(`[...document.querySelectorAll('[data-slot="run-a…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[49/107]⎯
+
+ FAIL  |e2e| task-thread.e2e.ts > task thread > opens the Notes panel — an unseeded handoff reads as the honest empty state
+Error: cezar e2e: agent-browser wait --fn [...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].some(el => el.textContent.trim() === 'Notes') failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ task-thread.e2e.ts:447:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-thread-2528365 wait --fn [...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].some(el => el.textContent.trim() === 'Notes') --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ task-thread.e2e.ts:447:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 2532078, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[50/107]⎯
+
+ FAIL  |e2e| tools-menu.e2e.ts > tools menu > summarizes the health answer on the closed trigger
+Error: cezar e2e: agent-browser eval document.querySelector('[data-slot="tools-menu-trigger"] [data-slot="status-dot"]').dataset.tone failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ tools-menu.e2e.ts:84:15
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-tools-2627192 eval document.querySelector('[data-slot="tools-menu-trigger"] [data-slot="status-dot"]').dataset.tone --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ tools-menu.e2e.ts:84:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'dataset\')\n    at <anonymous>:1:84"}\n', '' ], pid: 2627659, stdout: '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'dataset\')\n    at <anonymous>:1:84"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[51/107]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/light: mobile keyboard outline contrast for both accents
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/dark: mobile keyboard outline contrast for both accents
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/light: mobile keyboard outline contrast for both accents
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark: mobile keyboard outline contrast for both accents
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light: mobile keyboard outline contrast for both accents
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark: mobile keyboard outline contrast for both accents
+AssertionError: [data-slot="settings-nav-mobile"] a:last-child: expected [ false, false, false, false, false ] to deeply equal [ true, true, true, true, true ]
+
+- Expected
++ Received
+
+  [
+-   true,
+-   true,
+-   true,
+-   true,
+-   true,
++   false,
++   false,
++   false,
++   false,
++   false,
+  ]
+
+ ❯ region touch-targets.e2e.ts:128:33
+    126|     expect(result.height, selector).toBeGreaterThanOrEqual(44)
+    127|   }
+    128|   expect(result.hits, selector).toEqual([true, true, true, true, true])
+       |                                 ^
+    129|   return result
+    130| }
+ ❯ touch-targets.e2e.ts:164:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[52/107]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/light/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/dark/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/light/360: edge taps, keyboard, drafts, pins and pending controls
+Error: cezar e2e: agent-browser eval (() => {
+    const el = document.querySelector("[aria-label=\"Expand composer\"]");
+    el.scrollIntoView({block: 'center', inline: 'center'});
+    const r = el.getBoundingClientRect();
+    const cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const points = [[r.left+1,cy], [r.right-1,cy], [cx,r.top+1], [cx,r.bottom-1], [cx,cy]];
+    return {width:r.width, height:r.height, x:r.left+2, y:cy,
+      hits: points.map(([x,y]) => el.contains(document.elementFromPoint(x,y)))};
+  })() failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ region touch-targets.e2e.ts:115:26
+ ❯ tapEdge touch-targets.e2e.ts:133:20
+ ❯ touch-targets.e2e.ts:276:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session touch-2578361 eval (() => {
+    const el = document.querySelector("[aria-label=\"Expand composer\"]");
+    el.scrollIntoView({block: 'center', inline: 'center'});
+    const r = el.getBoundingClientRect();
+    const cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const points = [[r.left+1,cy], [r.right-1,cy], [cx,r.top+1], [cx,r.bottom-1], [cx,cy]];
+    return {width:r.width, height:r.height, x:r.left+2, y:cy,
+      hits: points.map(([x,y]) => el.contains(document.elementFromPoint(x,y)))};
+  })() --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.evaluate agent-browser.ts:259:17
+ ❯ region touch-targets.e2e.ts:115:26
+ ❯ tapEdge touch-targets.e2e.ts:133:20
+ ❯ touch-targets.e2e.ts:276:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'scrollIntoView\')\n    at <anonymous>:3:8\n    at <anonymous>:9:5"}\n', '' ], pid: 2579442, stdout: '{"success":false,"data":null,"error":"Evaluation error: TypeError: Cannot read properties of null (reading \'scrollIntoView\')\n    at <anonymous>:3:8\n    at <anonymous>:9:5"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[53/107]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/light/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > comfortable/dark/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/light/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light/1440: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark/1440: edge taps, keyboard, drafts, pins and pending controls
+AssertionError: expected 44 to be 26 // Object.is equality
+
+- Expected
++ Received
+
+- 26
++ 44
+
+ ❯ touch-targets.e2e.ts:246:81
+    244|           browser.waitForFunction(`document.querySelector('[role="menu…
+    245|           const model = browser.text('[data-slot="model-pill"]')
+    246|           if (!mobile) expect(region('[data-slot="model-pill"]', false…
+       |                                                                                 ^
+    247|           appearance('ultra', theme)
+    248|           appearance(density, theme)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[54/107]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark: mobile shell, composer, appearance and workflow targets
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light: mobile shell, composer, appearance and workflow targets
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark: mobile shell, composer, appearance and workflow targets
+AssertionError: /p/cez-touch-5bxijb/new: expected [ { height: 44, …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "height": 44,
++     "name": "Open menu",
++     "width": 20,
++   },
++ ]
+
+ ❯ touch-targets.e2e.ts:193:40
+    191|           appearance(density, theme)
+    192|           if (path.endsWith('/new')) browser.click('[data-slot="execut…
+    193|           expect(smallTargets(), path).toEqual([])
+       |                                        ^
+    194|           expect(overlappingTargets(), path).toEqual([])
+    195|           expect(browser.evaluate('document.documentElement.scrollWidt…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[55/107]⎯
+
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > compact/dark/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/light/360: edge taps, keyboard, drafts, pins and pending controls
+ FAIL  |e2e| touch-targets.e2e.ts > density-independent mobile action targets (#166) > ultra/dark/360: edge taps, keyboard, drafts, pins and pending controls
+AssertionError: [aria-label="Open menu"]: expected 20 to be greater than or equal to 44
+ ❯ region touch-targets.e2e.ts:125:36
+    123|   })()`) as { width: number; height: number; x: number; y: number; hit…
+    124|   if (mobile) {
+    125|     expect(result.width, selector).toBeGreaterThanOrEqual(44)
+       |                                    ^
+    126|     expect(result.height, selector).toBeGreaterThanOrEqual(44)
+    127|   }
+ ❯ tapEdge touch-targets.e2e.ts:133:20
+ ❯ touch-targets.e2e.ts:252:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[56/107]⎯
+
+ FAIL  |e2e| variants-compare.e2e.ts > the variants compare view against two settled dry runs > renders a column per variant with letter, status, spend, --stat and Progress
+Error: cezar e2e: agent-browser get text [data-slot="variant-column"][data-variant="A"] [data-slot="pill"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.text agent-browser.ts:178:24
+ ❯ variants-compare.e2e.ts:153:22
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-variants-2606344 get text [data-slot="variant-column"][data-variant="A"] [data-slot="pill"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.text agent-browser.ts:178:24
+ ❯ variants-compare.e2e.ts:153:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element not found: [data-slot=\"variant-column\"][data-variant=\"A\"] [data-slot=\"pill\"]. Verify the selector, role, or name is correct and the element exists in the DOM."}\n', '' ], pid: 2607118, stdout: '{"success":false,"data":null,"error":"Element not found: [data-slot=\"variant-column\"][data-variant=\"A\"] [data-slot=\"pill\"]. Verify the selector, role, or name is correct and the element exists in the DOM."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[57/107]⎯
+
+ FAIL  |e2e| worker-relationships.e2e.ts > 1440x900 light: keyboard reaches last worker under sticky header with 44px targets
+ FAIL  |e2e| worker-relationships.e2e.ts > 1440x900 dark: keyboard reaches last worker under sticky header with 44px targets
+AssertionError: expected 'Parent · Relationship parent with 32 …' to contain 'c1d32bad-339e-4382-b443-7bceef3b207d'
+
+Expected: "c1d32bad-339e-4382-b443-7bceef3b207d"
+Received: "Parent · Relationship parent with 32 workers"
+
+ ❯ worker-relationships.e2e.ts:120:34
+    118|     browser.press('Enter')
+    119|     browser.waitForFunction(`location.pathname === '${route(ids[31]!)}…
+    120|     expect(browser.text(region)).toContain(parentId)
+       |                                  ^
+    121|   }, 120_000)
+    122| }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[58/107]⎯
+
+ FAIL  |e2e| worker-relationships.e2e.ts > 360x640 light: keyboard reaches last worker under sticky header with 44px targets
+ FAIL  |e2e| worker-relationships.e2e.ts > 360x640 dark: keyboard reaches last worker under sticky header with 44px targets
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ worker-relationships.e2e.ts:114:27
+    112|     })()`) as { focused: boolean; visible: boolean; scroll: number; mi…
+    113|     observations.push({ width, height, selectedTheme: theme, ...facts …
+    114|     expect(facts.focused).toBe(true); expect(facts.visible).toBe(true)…
+       |                           ^
+    115|     expect(facts.minimumTarget).toBeGreaterThanOrEqual(44); expect(fac…
+    116|     expect(facts.theme).toBe(true); expect(facts.reducedMotion).toBe(t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[59/107]⎯
+
+ FAIL  |e2e| worker-relationships.e2e.ts > shows unavailable parent with retry, successful empty state, worker wait and preserved human ask attribution
+Error: cezar e2e: agent-browser click [aria-label="Task relationships"] button failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ worker-relationships.e2e.ts:130:11
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-workers-2589246 click [aria-label="Task relationships"] button --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ worker-relationships.e2e.ts:130:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[aria-label=\"Task relationships\"] button\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 2590852, stdout: '{"success":false,"data":null,"error":"Element \'[aria-label=\"Task relationships\"] button\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[60/107]⎯
+
+ FAIL  |e2e| worker-relationships.e2e.ts > retains known IDs during loading, request error and offline pause, then retries real relationships
+AssertionError: expected 'Worker 717e6b09\nStatus unavailable\n…' to contain '717e6b09-f0dd-4452-9638-1fc3cbd1e95c'
+
+- Expected
++ Received
+
+- 717e6b09-f0dd-4452-9638-1fc3cbd1e95c
++ Worker 717e6b09
++ Status unavailable
++
++ Loading relationships…
+
+ ❯ worker-relationships.e2e.ts:173:32
+    171|   navigate(loadingId)
+    172|   browser.waitForFunction(`document.querySelector('${region}')?.textCo…
+    173|   expect(browser.text(region)).toContain(absentId)
+       |                                ^
+    174|   expect(browser.text(region)).not.toContain('No workers')
+    175|   browser.evaluate(`window.__relationshipMode = 'error'`)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[61/107]⎯
+
+ FAIL  |e2e| workflows.e2e.ts > workflow builder against the live dry-run server > keeps action hierarchy and readable summaries across viewport, theme, and density
+AssertionError: expected 26 to be greater than or equal to 44
+ ❯ workflows.e2e.ts:223:37
+    221|             )
+    222|             for (const control of presentation.controls) {
+    223|               expect(control.width).toBeGreaterThanOrEqual(44)
+       |                                     ^
+    224|               expect(control.height).toBeGreaterThanOrEqual(44)
+    225|             }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[62/107]⎯
+
+
+ Test Files  22 failed | 21 passed (43)
+      Tests  107 failed | 266 passed | 6 skipped (379)
+   Start at  13:45:15
+   Duration  739.48s (transform 495ms, setup 0ms, import 1.13s, tests 732.45s, environment 4ms)
+

@@ -1,0 +1,14 @@
+{
+  "url": "http://127.0.0.1:44786/p/fixture-repo-v2/",
+  "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+  "fonts": [
+    "Poppins",
+    "Poppins",
+    "Poppins",
+    "JetBrains Mono Variable"
+  ],
+  "theme": "",
+  "density": "comfortable",
+  "width": 390,
+  "height": 844
+}

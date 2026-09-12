@@ -1,0 +1,20 @@
+# Browser failure clustering
+
+Counts below refer ONLY to the historical102-failure checkpoint (`e2e-stable-full.log`), not the latest run. They are disjoint file clusters; mixed clusters are not falsely counted as entirely stale. Later targeted runs repaired these files before further whole sweeps.
+
+| Historical failures | Root cause / classification | Source ownership / disposition |
+|---:|---|---|
+|25|Touch targets + workflows: mixed stale selectors/icon-box measurements and real YAML target/mobile menu geometry. Actual five-point hit tests preserved.|Integration tests86; shared geometry fc; YAML44px source463f7caa. Targeted24 touch pass.|
+|19|Selection + grouped projects: stale rails/borders/group toggles; source glyph/fill inspection confirmed actual intended cues.|Integration tests86; shared sourcefc. All17 selection and3 project tests pass, existing1skip.|
+|13|Mobile Tasks: stale drawer portal/filter/header selectors and control geometry.|Integration tests86; shared sourcefc. All16 pass.|
+|11|Quick list: summary now defaults to five columns; full resources remain behind Columns. Stale table setup/minimum width expectations.|Integration tests86; Tasks445 source completed. All27 pass with resource/persistence/focus checks.|
+|6|Page headings: revised titles and async mobile repository picker replacing temporary route heading.|Integration tests86. All8 targeted pass; actual picker readiness awaited.|
+|6|Worker relationships: mobile disclosure, friendly IDs and ask/action controls replaced old literal selectors.|Integration tests86. All8 pass; relationships and reply guards retained.|
+|7|Settings Agents/appearance + Skills update: preference disclosures, scoped navigation and actual density geometry; separate hidden switch-thumb defect reported and fixed by579.|Integration tests86; Settings579/sharedfc. Final Settings52 pairs inspected, auth/MCP/scope/persistence guards retained.|
+|7|Task Changes/repo Git/AgentsDock: mobile tree layout and follow-tail interaction setup. Dock remains intermittent/unresolved in later whole runs; no blanket stale classification.|Integration tests86; Session source authorization now86 for proven bounded regression. Changes7 pass, dock isolated4 pass but full-run failure retained.|
+|4|New Task/composer: removed decorative twinkle, YOU label excluded from transcript assertion, multi-select popup must close before typing.|Integration tests86; NewTask06 source completed. Distinct from execution-control scroll reachability; focus/draft/submission remain asserted.|
+|4|GitHub/Inbox/Tools/Variants: saved tab/readiness and revised honest status/copy/icon triggers. GitHub current full-run failure still under diagnosis.|Integration tests86; respective source owners completed. Focused suites passed; whole result not promoted from focused runs.|
+
+Latest completed sandboxed whole run:371pass/2fail/6skip (AgentsDock ControlHome setup and desktop progressive history anchor). First isolated history reproduced; next isolated11cases passed. The serial whole run completed371pass/2fail/6skip: GitHub clicked before its tab link mounted (header readiness was insufficient); a targeted32-case GitHub rerun passes after waiting for the actual link. Dock geometry shows scrollTop135 at max135 while the target is visible at y643–679; the helper’s mandatory scrollTop0 is not the action contract. The final helper sends real upward wheel intent, checks viewport containment and hit targeting, then waits two animation frames before a real click. Three fresh4-case runs pass; the reviewed combined35 touch/workflow/dock cases also pass with eight-perimeter and effective-overlap guards. Final complete frozen run now passes373tests with6existing skips across43files; all five repository gates also pass. See final-serial-complete.json. No timeout inflation, removed behavioral guard, or full acceptance claim.
+
+Separate real integration regressions already fixed and red/green proven: offline Tasks registry retry loop and Automation sr-only legend containment, source8ec8fdbc. They are unit/browser acceptance findings, not invented additions to the102 browser count.

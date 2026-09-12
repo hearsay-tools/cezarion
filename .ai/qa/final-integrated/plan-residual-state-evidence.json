@@ -1,0 +1,334 @@
+[
+  {
+    "state": "empty",
+    "width": 1440,
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-empty-1440-light.png",
+    "facts": {
+      "text": "New task / Plan first\n\nReview the proposed chain before launching.\n\nPROPOSED CHAIN\n\nPreserve this reviewed draft\n\nReview the proposed step before launch.\n\n(no steps left \u2014 discard and plan again)\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.",
+      "overflow": false,
+      "active": null,
+      "steps": 0,
+      "startDisabled": true
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": false
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "fallback",
+    "width": 1440,
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-fallback-1440-light.png",
+    "facts": {
+      "text": "New task / Plan first\n\nReview the proposed chain before launching.\n\nPROPOSED CHAIN\n\nPreserve this reviewed draft\n\nplanner unavailable \u2014 single-step plan\n\n01\nImplement the task\n\nImplement {{task}} and verify the result.\n\nMove up\nMove down\nRemove\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.",
+      "overflow": false,
+      "active": "plan-review",
+      "steps": 1,
+      "startDisabled": false
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": true
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "discard",
+    "width": 1440,
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-discard-1440-light.png",
+    "facts": {
+      "text": "NEW TASK\n\nWhat should the agent work on?\n\nRuns in an isolated worktree \u2014 review everything before it lands.\n\nStart with a suggestion\n\nReview recent changes\nFind a bug\nAdd missing tests\nTask description\n\nType / for a skill or workflow\n\ncezar\nTemplate\nSkill\ncodex \u00b7 Default\nMODEL\nauto\nEffort\nauto\nExecution settings\n\nControl where and how this task runs.\n\nParallel variants\n\u00d71\nWorktree\nRun in an isolated working copy\nAutonomous\nLet the agent proceed without prompts\nBase branch\nmain\n\nChanges stay in their own worktree, separate from your working directory.\n\nFollow-ups\nGenerate suggestions in Inbox after this task. Enabled by default; your choice is remembered.\nStart\nPlan first\nPlan task\nReview the plan before starting the task.\nCtrl+\u21b5",
+      "overflow": false,
+      "active": null,
+      "steps": 0
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": false
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "empty",
+    "width": 402,
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-empty-402-light.png",
+    "facts": {
+      "text": "PROPOSED CHAIN\n\nPreserve this reviewed draft\n\nReview the proposed step before launch.\n\n(no steps left \u2014 discard and plan again)\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.",
+      "overflow": false,
+      "active": null,
+      "steps": 0,
+      "startDisabled": true
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": false
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "fallback",
+    "width": 402,
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-fallback-402-light.png",
+    "facts": {
+      "text": "PROPOSED CHAIN\n\nPreserve this reviewed draft\n\nplanner unavailable \u2014 single-step plan\n\n01\nImplement the task\n\nImplement {{task}} and verify the result.\n\nMove up\nMove down\nRemove\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.",
+      "overflow": false,
+      "active": "plan-review",
+      "steps": 1,
+      "startDisabled": false
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": true
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "discard",
+    "width": 402,
+    "theme": "light",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-discard-402-light.png",
+    "facts": {
+      "text": "What should the agent work on?\n\nStart with a suggestion\n\nReview recent changes\nFind a bug\nAdd missing tests\n\nType / for a skill or workflow\n\ncezar\nTemplate\nSkill\ncodex \u00b7 Default\nauto\nauto\nExecution settings\nParallel variants\n\u00d71\nWorktree\nRun in an isolated working copy\nAutonomous\nLet the agent proceed without prompts\nBase branch\nmain\nFollow-ups\nGenerate suggestions in Inbox after this task. Enabled by default; your choice is remembered.\nStart\nPlan first\nPlan task\nReview the plan before starting the task.",
+      "overflow": false,
+      "active": null,
+      "steps": 0
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": false
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "empty",
+    "width": 1440,
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-empty-1440-dark.png",
+    "facts": {
+      "text": "New task / Plan first\n\nReview the proposed chain before launching.\n\nPROPOSED CHAIN\n\nPreserve this reviewed draft\n\nReview the proposed step before launch.\n\n(no steps left \u2014 discard and plan again)\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.",
+      "overflow": false,
+      "active": null,
+      "steps": 0,
+      "startDisabled": true
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": false
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "fallback",
+    "width": 1440,
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-fallback-1440-dark.png",
+    "facts": {
+      "text": "New task / Plan first\n\nReview the proposed chain before launching.\n\nPROPOSED CHAIN\n\nPreserve this reviewed draft\n\nplanner unavailable \u2014 single-step plan\n\n01\nImplement the task\n\nImplement {{task}} and verify the result.\n\nMove up\nMove down\nRemove\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.",
+      "overflow": false,
+      "active": "plan-review",
+      "steps": 1,
+      "startDisabled": false
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": true
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "discard",
+    "width": 1440,
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-discard-1440-dark.png",
+    "facts": {
+      "text": "NEW TASK\n\nWhat should the agent work on?\n\nRuns in an isolated worktree \u2014 review everything before it lands.\n\nStart with a suggestion\n\nReview recent changes\nFind a bug\nAdd missing tests\nTask description\n\nType / for a skill or workflow\n\ncezar\nTemplate\nSkill\ncodex \u00b7 Default\nMODEL\nauto\nEffort\nauto\nExecution settings\n\nControl where and how this task runs.\n\nParallel variants\n\u00d71\nWorktree\nRun in an isolated working copy\nAutonomous\nLet the agent proceed without prompts\nBase branch\nmain\n\nChanges stay in their own worktree, separate from your working directory.\n\nFollow-ups\nGenerate suggestions in Inbox after this task. Enabled by default; your choice is remembered.\nStart\nPlan first\nPlan task\nReview the plan before starting the task.\nCtrl+\u21b5",
+      "overflow": false,
+      "active": null,
+      "steps": 0
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": false
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "empty",
+    "width": 402,
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-empty-402-dark.png",
+    "facts": {
+      "text": "PROPOSED CHAIN\n\nPreserve this reviewed draft\n\nReview the proposed step before launch.\n\n(no steps left \u2014 discard and plan again)\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.",
+      "overflow": false,
+      "active": null,
+      "steps": 0,
+      "startDisabled": true
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": false
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "fallback",
+    "width": 402,
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-fallback-402-dark.png",
+    "facts": {
+      "text": "PROPOSED CHAIN\n\nPreserve this reviewed draft\n\nplanner unavailable \u2014 single-step plan\n\n01\nImplement the task\n\nImplement {{task}} and verify the result.\n\nMove up\nMove down\nRemove\nStart\nSave as chain\nDiscard\n\nNo steps left? Start is disabled. A planner failure shows a single-step fallback.",
+      "overflow": false,
+      "active": "plan-review",
+      "steps": 1,
+      "startDisabled": false
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": true
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  },
+  {
+    "state": "discard",
+    "width": 402,
+    "theme": "dark",
+    "image": "/home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/.ai/qa/final-integrated/pairs/plan-discard-402-dark.png",
+    "facts": {
+      "text": "What should the agent work on?\n\nStart with a suggestion\n\nReview recent changes\nFind a bug\nAdd missing tests\n\nType / for a skill or workflow\n\ncezar\nTemplate\nSkill\ncodex \u00b7 Default\nauto\nauto\nExecution settings\nParallel variants\n\u00d71\nWorktree\nRun in an isolated working copy\nAutonomous\nLet the agent proceed without prompts\nBase branch\nmain\nFollow-ups\nGenerate suggestions in Inbox after this task. Enabled by default; your choice is remembered.\nStart\nPlan first\nPlan task\nReview the plan before starting the task.",
+      "overflow": false,
+      "active": null,
+      "steps": 0
+    },
+    "fixture": {
+      "name": "review-fixture",
+      "steps": [
+        {
+          "id": "implement",
+          "name": "Implement the task",
+          "prompt": "Implement {{task}} and verify the result."
+        }
+      ],
+      "rationale": "Review the proposed step before launch.",
+      "fallback": false
+    },
+    "disclosure": "Schema-valid planner response; real review controls and Escape. Run creation blocked; no launch. Supplemental states described by22, not an invented reference screenshot.",
+    "independentlyInspected": true,
+    "sourceManifest": "release-frozen-manifest.json"
+  }
+]

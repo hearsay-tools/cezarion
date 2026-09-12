@@ -1,0 +1,4 @@
+Mobile disclosure navigates to scoped Agents and closes.
+MCP editor Reset restores loaded project file without writing.
+MCP Save writes the real project file through the versioned API; original fixture content restored through Save.
+Settings Add project opens the existing real project-registration dialog.

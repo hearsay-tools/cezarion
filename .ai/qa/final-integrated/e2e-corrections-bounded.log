@@ -1,0 +1,119 @@
+
+> test
+> vitest run --config packages/web/e2e/vitest.config.ts quick-list.e2e.ts mobile-task-controls.e2e.ts worker-relationships.e2e.ts touch-targets.e2e.ts task-changes.e2e.ts github.e2e.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f/packages/web/e2e
+
+ ❯ |e2e| github.e2e.ts (32 tests | 1 failed) 85023ms
+   × renders GitHub 'empty' in 'light' without losing navigation 26396ms
+ ❯ |e2e| quick-list.e2e.ts (27 tests | 4 failed) 20224ms
+     × allocates two contained title lines without crowding desktop metadata or actions 223ms
+     × opens the task from a row click 14ms
+     × keeps task metadata AA-readable on normal and hovered rows with visible title focus 848ms
+     × renames a task inline from its row — the hover pencil, committed by Enter, stored for real 15ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| github.e2e.ts > renders GitHub 'empty' in 'light' without losing navigation
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-route="github"]')?.textContent.includes("No open issues") === true failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ github.e2e.ts:441:18
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-github-3032343-empty-light wait --fn document.querySelector('[data-route="github"]')?.textContent.includes("No open issues") === true --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ github.e2e.ts:441:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 3039544, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > allocates two contained title lines without crowding desktop metadata or actions
+AssertionError: light/comfortable: task width: expected 0 to be greater than or equal to 315
+ ❯ quick-list.e2e.ts:572:70
+    570|           }
+    571|
+    572|           expect(facts.taskWidth, `${theme}/${density}: task width`).t…
+       |                                                                      ^
+    573|           expect(facts.taskWidth, `${theme}/${density}: task vs workfl…
+    574|           expect(facts.lineCount, `${theme}/${density}: title lines`).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > opens the task from a row click
+Error: cezar e2e: agent-browser click [data-slot="task-table-row"][data-run-id="fix-done"] a[href*='/tasks/'] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ quick-list.e2e.ts:711:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-3121274 click [data-slot="task-table-row"][data-run-id="fix-done"] a[href*='/tasks/'] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.click agent-browser.ts:281:10
+ ❯ quick-list.e2e.ts:711:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-done\"] a[href*=\'/tasks/\']\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 3122162, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-done\"] a[href*=\'/tasks/\']\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > keeps task metadata AA-readable on normal and hovered rows with visible title focus
+Error: cezar e2e: agent-browser hover [data-slot="task-table-row"][data-run-id="fix-review-pr"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.hover agent-browser.ts:287:10
+ ❯ quick-list.e2e.ts:733:17
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-3121274 hover [data-slot="task-table-row"][data-run-id="fix-review-pr"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.hover agent-browser.ts:287:10
+ ❯ quick-list.e2e.ts:733:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-review-pr\"]\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 3122265, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-review-pr\"]\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  |e2e| quick-list.e2e.ts > tasks table overview > renames a task inline from its row — the hover pencil, committed by Enter, stored for real
+Error: cezar e2e: agent-browser hover [data-slot="task-table-row"][data-run-id="fix-failed"] failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.hover agent-browser.ts:287:10
+ ❯ quick-list.e2e.ts:763:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-quick-list-3121274 hover [data-slot="task-table-row"][data-run-id="fix-failed"] --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.hover agent-browser.ts:287:10
+ ❯ quick-list.e2e.ts:763:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-failed\"]\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', '' ], pid: 3122268, stdout: '{"success":false,"data":null,"error":"Element \'[data-slot=\"task-table-row\"][data-run-id=\"fix-failed\"]\' is covered by <div.flex.items-center inside div#root> at its click point, so the input would land on that element instead. Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header)."}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  2 failed | 4 passed (6)
+      Tests  5 failed | 109 passed (114)
+   Start at  14:55:27
+   Duration  257.42s (transform 150ms, setup 0ms, import 253ms, tests 256.29s, environment 1ms)
+

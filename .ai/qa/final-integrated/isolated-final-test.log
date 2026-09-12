@@ -1,0 +1,9 @@
+
+> test
+> vitest run --maxWorkers=4
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/86a5f50c-6f3c-4c93-ba2f-489eeaf1613f
+
+ ✓ |api-client| src/utils/project-scope.test.ts (30 tests) 8ms
+ ✓ |api-client| src/protocol/tool-display.test.ts (15 tests) 6ms
