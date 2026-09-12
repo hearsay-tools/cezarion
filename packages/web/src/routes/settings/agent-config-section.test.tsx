@@ -88,7 +88,7 @@ afterEach(() => {
 })
 
 describe('AgentConfigSection', () => {
-  it('offers only real selected-agent files in the primary row and preserves every scope below', async () => {
+  it('keeps agent tabs beside a file list and editor, not a shortcut row', async () => {
     serve({ editable: true, userMcp: null, files: [
       fileOf({ id: 'claude.memory', label: 'CLAUDE.md', kind: 'memory', format: 'markdown' }),
       fileOf({ id: 'claude.settings', label: '.claude/settings.json' }),
@@ -97,17 +97,17 @@ describe('AgentConfigSection', () => {
       fileOf({ id: 'codex.memory', label: 'AGENTS.md', runners: ['codex'], kind: 'memory' }),
     ] })
     renderSection()
-    await waitFor(() => expect(document.querySelectorAll('[data-slot="agent-config-shortcut"]')).toHaveLength(3))
-    expect([...document.querySelectorAll('[data-slot="agent-config-shortcut"]')].map((node) => node.textContent)).toEqual(['CLAUDE.md', 'settings.json', 'MCP config'])
-    expect(document.querySelector('[data-slot="agent-config-primary-files"]')?.textContent).not.toContain('AGENTS.md')
+    await waitFor(() => expect(agentTab('claude').getAttribute('role')).toBe('tab'))
+    expect(screen.queryByLabelText('Configuration agent')).toBeNull()
+    expect(document.querySelector('[data-slot="agent-config-shortcut"]')).toBeNull()
+    expect(document.querySelector('[data-slot="agent-config-nav"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="agent-config-editor-pane"]')).not.toBeNull()
     expect(screen.getByText('~/.claude/settings.json')).toBeTruthy()
-    fireEvent.click(document.querySelector('[data-slot="agent-config-shortcut"][data-file="claude.mcp"]')!)
+    fireEvent.click(screen.getByText('.mcp.json'))
     await waitFor(() => expect(screen.getByLabelText('.mcp.json contents')).toBeTruthy())
-    expect(document.querySelector('[data-slot="agent-config-scope"]')?.textContent).toContain('Project scope')
-    expect(document.querySelector('[data-slot="agent-config-precedence"]')?.textContent).toContain('Overrides user')
-    fireEvent.change(screen.getByLabelText('Configuration agent'), { target: { value: 'codex' } })
-    expect(document.querySelectorAll('[data-slot="agent-config-shortcut"]')).toHaveLength(1)
-    expect(document.querySelector('[data-slot="agent-config-shortcut"]')?.textContent).toBe('AGENTS.md')
+    fireEvent.click(agentTab('codex'))
+    await waitFor(() => expect(screen.getByText('AGENTS.md')).toBeTruthy())
+    expect(screen.queryByText('.claude/settings.json')).toBeNull()
   })
 
   it('renders the agent selector with a not-installed badge from health', async () => {
@@ -138,7 +138,7 @@ describe('AgentConfigSection', () => {
     await waitFor(() => expect(screen.getByText('.claude/settings.json')).toBeTruthy())
     expect(screen.queryByText('.codex/config.toml')).toBeNull()
 
-    fireEvent.change(screen.getByLabelText('Configuration agent'), { target: { value: 'codex' } })
+    fireEvent.click(agentTab('codex'))
     await waitFor(() => expect(screen.getAllByText('.codex/config.toml').length).toBeGreaterThan(0))
     expect(screen.queryByText('.claude/settings.json')).toBeNull()
     // the config.toml holds Codex's MCP servers — it must appear under Settings AND MCP
@@ -158,9 +158,9 @@ describe('AgentConfigSection', () => {
     })
     renderSection()
     await waitFor(() => expect(agentTab('codex')).toBeTruthy())
-    fireEvent.change(screen.getByLabelText('Configuration agent'), { target: { value: 'codex' } })
+    fireEvent.click(agentTab('codex'))
     await waitFor(() => expect(screen.getAllByText('AGENTS.md')[0]).toBeTruthy())
-    fireEvent.change(screen.getByLabelText('Configuration agent'), { target: { value: 'opencode' } })
+    fireEvent.click(agentTab('opencode'))
     await waitFor(() => expect(screen.getAllByText('AGENTS.md')[0]).toBeTruthy())
   })
 
@@ -178,7 +178,7 @@ describe('AgentConfigSection', () => {
     expect(block.textContent).toContain('sentry')
     expect(block.textContent).toContain('cezar does not edit')
     // the block belongs to Claude's pane only
-    fireEvent.change(screen.getByLabelText('Configuration agent'), { target: { value: 'codex' } })
+    fireEvent.click(agentTab('codex'))
     await waitFor(() => expect(document.querySelector('[data-slot="agent-config-user-mcp"]')).toBeNull())
   })
 
@@ -195,7 +195,7 @@ describe('AgentConfigSection', () => {
     await waitFor(() => expect(screen.getByText('.claude/settings.json')).toBeTruthy())
     fireEvent.click(screen.getByText('.claude/settings.json'))
     await waitFor(() => expect(screen.getByLabelText('.claude/settings.json contents')).toBeTruthy())
-    fireEvent.change(screen.getByLabelText('Configuration agent'), { target: { value: 'opencode' } })
+    fireEvent.click(agentTab('opencode'))
     await waitFor(() => expect(screen.queryByLabelText('.claude/settings.json contents')).toBeNull())
     expect(screen.getByText('Select a config file to view or edit it.')).toBeTruthy()
   })
