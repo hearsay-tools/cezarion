@@ -2268,6 +2268,11 @@ describe('the follow-up prompt template menu (#413)', () => {
       if (!option(id)) throw new Error(`template option "${id}" not mounted yet`)
     })
     await selectOption(id)
+    // Insertion restores the textarea caret on the next animation frame. Opening the
+    // next popover before that focus lands lets the old restoration dismiss it; an
+    // unmounted option alone does not prove that the second insertion happened.
+    await waitFor(() => expect(textarea().value).not.toBe(before))
+    await waitFor(() => expect(document.activeElement).toBe(textarea()))
   }
 
   it('an untouched ui-state shows the built-in templates, and inserting one fills the custom prompt', async () => {

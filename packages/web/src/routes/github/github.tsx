@@ -1,7 +1,7 @@
 import './github-layout.css'
 import { hashKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeftIcon, ExternalLinkIcon, MessageSquareIcon, LoaderCircleIcon, TagIcon,  } from 'lucide-react'
-import { ArrowLeftIcon, CircleCheckIcon, CheckIcon, CircleIcon, CircleDotIcon, CircleXIcon, ChevronRightIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon } from '../task-git/design-icons'
+import { ArrowLeftIcon, CheckIcon, CircleIcon, CircleDotIcon, CircleXIcon, ChevronRightIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon } from '../task-git/design-icons'
 import {
   useEffect,
   useMemo,
@@ -1069,7 +1069,7 @@ type MergeRequirementState = 'passing' | 'failing' | 'pending' | 'unknown'
 
 function MergeRequirementIcon({ state }: { state: MergeRequirementState }) {
   const iconClass = 'size-4 shrink-0'
-  if (state === 'passing') return <CircleCheckIcon aria-hidden="true" data-slot="gh-merge-status-passing" className={cn(iconClass, 'text-success')} />
+  if (state === 'passing') return <CheckIcon aria-hidden="true" data-slot="gh-merge-status-passing" className={cn(iconClass, 'text-success')} />
   if (state === 'failing') return <CircleXIcon aria-hidden="true" data-slot="gh-merge-status-failing" className={cn(iconClass, 'text-danger')} />
   if (state === 'pending') return <LoaderCircleIcon aria-hidden="true" data-slot="gh-merge-status-pending" className={cn(iconClass, 'animate-spin text-warning')} />
   return <CircleIcon aria-hidden="true" data-slot="gh-merge-status-unknown" className={cn(iconClass, 'text-soft-foreground')} />

@@ -109,3 +109,6 @@
 [data-slot='gh-row-labels'] { order: 1; }
 [data-slot='gh-row-labels'] > span + span::before { content: '·'; margin-right: 4px; }
 [data-slot='gh-row'] > span:nth-child(2) { order: 2; }
+
+[data-slot='gh-merge-box'] [data-variant='primary'] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
+[data-pr-detail='true'] [data-slot='gh-header'] h1 { font-size: 28px; }
