@@ -1,8 +1,8 @@
 # Skills and Workflows — implementation checkpoint
 
-This is **not a visual-parity sign-off**. The scoped implementation, behavioral checks, and populated browser evidence are ready for parent review. Shared shell/token/glyph integration is still outstanding, and the residual differences below remain visible.
+This is **not a visual-parity sign-off**. The scoped implementation, behavioral checks, and populated browser evidence are ready for parent review. Shared shell/token integration is still outstanding, and the residual differences below remain visible.
 
-Additional real-API verification is recorded in `real-runtime/README.md`: ten supplementary browser captures and a persisted workflow import/reorder/save/conflict/overwrite/reload/delete round trip, using the parent's reusable isolated fixture. The service's 93 assets match the same build. These content-different captures supplement the original 74 matched-fixture entries and do not establish additional exact visual matches.
+Additional real-API verification is recorded in `real-runtime/README.md`: ten supplementary browser captures and a persisted workflow import/reorder/save/conflict/overwrite/reload/delete round trip, using the parent's reusable isolated fixture. That supplement verifies the earlier `c6d56857` build's 93 assets; its recorded hashes are intentionally historical after the subsequent glyph/layout pass. These content-different captures supplement the original 74 matched-fixture entries and do not establish additional exact visual matches.
 
 ## Source and ownership
 
@@ -10,8 +10,10 @@ Additional real-API verification is recorded in `real-runtime/README.md`: ten su
 - SHA256: `56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8`; 8,498,974 bytes; 193 frames. Verified before implementation and again after it; never edited.
 - `reference/` contains original PNG exports for the 26 related frames and their original export metadata. These are from iteration 3, not the rejected iteration-2 design.
 - Owned code: Skills route, skill detail/import components, Workflows route, scoped CSS, and two stale copy assertions in the Skills tests. No API, engine, Settings/bookmarklet-inner, shell, shared primitive, global-style, or asset modifications.
-- Current source icons are `type: icon`, `library: lucide`, with names such as `search`, `square-check`, `file-code`, and `wand-sparkles`. Rescanned the current JSON instead of using the rejected font-path map. Existing Lucide imports are used; no duplicate adapter was created.
-- Parent coordination attempts for the shared adapter were rejected with `Conversation capacity limit reached` (request `27428325-966e-4607-8490-5a1fb7e5ee3e`, progress `4678566f-29af-4531-a86a-50514a320852`). No contract or integration commit was received.
+- Current source icons are `type: icon`, `library: lucide`, with names such as `search`, `square-check`, `file-code`, and `wand-sparkles`. Rescanned the current JSON instead of using the rejected font-path map. Owned surfaces now import the parent's exact filled-glyph adapter, integrated from `463821c6` as `9d2040fd`; no duplicate adapter was created. The `circle-check` design export supplies the existing success-state icon alias.
+- Parent coordination attempts for the shared adapter were rejected with `Conversation capacity limit reached` (request `27428325-966e-4607-8490-5a1fb7e5ee3e`, progress `4678566f-29af-4531-a86a-50514a320852`). The adapter was subsequently discovered in the parent checkout and integrated directly; the shared shell/token changes are not yet present.
+
+`current-export-proof.json` verifies all 26 stored PNGs against the completed 193-frame export. The hashes are unchanged. It also records the shared-adapter integration and Poppins metric comparison.
 
 ## What changed
 
@@ -56,10 +58,10 @@ The pairing helper needs Pillow. These `CEZ_QA_*` values are fixture-script inpu
 
 | Surface and references | Evidence | Actual remaining differences / limits |
 | --- | --- | --- |
-| Skills desktop `EKi57`, `cvBro` | Same-name PNGs and comparisons | Shell is still 232px rather than 264px, putting the catalog at x=268 instead of x=300 and widening the reader. This changes paragraph wrapping. Shared font rendering, glyph strokes, and theme tokens still differ. Some catalog row vertical positions differ by several pixels. |
+| Skills desktop `EKi57`, `cvBro` | Same-name PNGs and comparisons | Shell is still 232px rather than 264px, putting the catalog at x=268 instead of x=300 and widening the reader. This changes paragraph wrapping. Shared theme tokens and shell glyphs still differ; owned glyphs now use the exact exported paths. Some catalog row vertical positions differ by several pixels. |
 | Skills mobile `kmHeY`, `XdHUd` | Same-name pairs | Correct catalog-only structure, tools, search/refresh, and seven populated rows. Header brand/project controls belong to shared shell. Small cumulative row-height/type-rendering differences remain; this is not pixel parity. |
 | Detail mobile `acXhB`, `utoCL` | Same-name pairs | Back routing, badge, title, source, usage and Markdown are present. Typography/list indentation and several vertical positions still differ slightly. Desktop reading width depends on the shared shell integration. |
-| Manage `f2LGv`, `suUEJ`, `MB5Yx`, `IbcKi` | Same-name pairs | Tools, current status, search, remove-all and all three outlined enabled controls are visible. On mobile, the first skill description wraps to two lines in the browser and one in the export, changing the list's height. Global surface/ink colors and font rendering remain different. Runtime tracked-scope and last-check details remain conditional and were not removed to imitate an empty static card. |
+| Manage `f2LGv`, `suUEJ`, `MB5Yx`, `IbcKi` | Same-name pairs | Tools, current status, search, remove-all and all three outlined enabled controls are visible. The source overlays its frame strokes, whereas CSS borders consume space. The reader inset now accounts for that pixel, descriptions use the source's 6px gap, and status/explanatory text uses 1.6 line height. The first description now stays on one line in the actual mobile capture. Font audit confirms both Poppins binaries measure the first description at 260.7px at 12px; the old 260px text column forced an extra line. Global surface/ink colors remain different. Runtime tracked-scope and last-check details remain conditional and were not removed to imitate an empty static card. |
 | Workflows `C2sfEo`, `s0JzCL`, `aa0TQ`, `Ae0n6` | Same-name pairs | Metadata, toolbar, two populated steps, palette, YAML disclosure and Save are present. Command summaries deliberately show the actual command/retry target rather than replacing them with the design's prose. Shared mobile 44px target floors make step headings taller than the 26px glyph row in the mockup; disabled boundary reorder actions remain visibly disabled. |
 | Auto `VDDSI`, `MmQCH`, `Zsg4w`, `e7UWy` | Same-name pairs | Prompt and Build/Cancel controls are populated. Textarea outline/ink and vertical spacing still differ. Shared shell/font/token differences also apply. |
 | Import/error `lRC5W`, `KwkJs`, `djknR`, `MF4eF` | `import-*`, `import-error-*`, content crops | Actual dialog opens and controls work on both viewport classes/themes. Real parser-error copy replaces the design's instructional placeholder. The desktop design is a component sheet, not an overlay specification. Mobile header remains the older shell. |
@@ -69,16 +71,16 @@ The pairing helper needs Pillow. These `CEZ_QA_*` values are fixture-script inpu
 | Managed states / errors | `manage-{current,available,updating,error,disabled,filter-empty}-*`, `skills-error-*`, `manage-error-*` | Populated mock states exercise conditional update/error/selection layout. Their reference is the enclosing Manage design; the source has no distinct frame for every server status. Supplementary screenshots are not a visual-match claim for those absent frames. |
 | Bookmarklet wrapper `gqaUM`, `EsGpp`, `YS15Y`, `wLVhd` | Same-name pairs | Skills tools/list/back wrapper checked. Inner panel is owned by the Settings worker and unchanged. Fixture catalog creates seven launchers versus three examples in the design; its typography, filtering glyph, action glyphs, and mobile length still differ. |
 
-The source badge and browser commands use existing semantic tokens so the shared worker's token/glyph integration can propagate. The final fine-spacing pass must run on that integrated shell and font/asset implementation; otherwise it would compensate for the wrong shared geometry. No remaining assigned subview is declared matching or silently deferred.
+The source badge and browser commands use existing semantic tokens so the shared worker's token integration can propagate. The final fine-spacing pass must run on that integrated shell and font/asset implementation; otherwise it would compensate for the wrong shared geometry. No remaining assigned subview is declared matching or silently deferred.
 
 ## Behavioral verification
 
 - `npm run typecheck:web` — pass.
-- `npm run test -w @open-mercato/cezar-web -- src/routes/skills.test.tsx src/routes/workflows/workflows.test.tsx src/lib/workflow-builder.test.ts` — 74 tests pass.
+- `npm run test -w @open-mercato/cezar-web -- src/routes/skills.test.tsx src/routes/workflows/workflows.test.tsx src/lib/workflow-builder.test.ts src/components/design-icons.test.tsx` — 77 tests pass.
 - Production web build — pass.
 - Browser matrix — complete; all 74 ledger entries have zero horizontal overflow. That check is supplementary to the visual inspections, not their substitute.
 - Existing custom-prompt precedence, parser error preservation, import/save/overwrite, YAML export, reorder, managed-skill write ordering, refresh selection, and bookmarklet routing tests remain active. Only two static copy assertions changed to the confirmed wording.
 
 ## Next step
 
-Parent should provide the shared adapter contract/integration commit and combine the owned shell/token work before this worker performs the final spacing/glyph pass and fresh built-browser review. The family message channel currently blocks that coordination. This checkpoint is intentionally left awaiting that dependency rather than marked complete.
+Parent can integrate the scoped commits independently. The adapter dependency is already integrated in this worker checkout; parent already owns its original commit and need not cherry-pick `9d2040fd` again. The final whole-page review must combine the separately owned shell/token work. No human approval gate is requested. The family message channel continues to reject progress delivery due to capacity.

@@ -111,3 +111,10 @@
 :is([data-slot="wb-import-panel"], [data-slot="wb-add-dialog"], .sw-workflow-confirm) { box-shadow: none; }
 [data-slot="wb-import-panel"] [data-slot="dialog-title"] { line-height: 1.6; }
 [data-slot="wb-add-dialog"] [data-slot="dialog-header"] { text-align: left; }
+
+/* Pen strokes overlay the frame; CSS borders consume one pixel of its padding. */
+[data-slot="skills-detail"] > div { padding: 19px; }
+[data-slot="skills-update-card"] { padding: 15px; }
+[data-slot="import-row"] > span:last-child > span:last-child:not(:first-child) { margin-top: 6px; line-height: 1.6; }
+[data-slot="skills-import-panel"] > p:not(:first-child), [data-slot="skills-update-card"] p { line-height: 1.6; }
+[data-slot="skills-update-card"] > div > div > p:nth-child(2) { font-size: 11px; }

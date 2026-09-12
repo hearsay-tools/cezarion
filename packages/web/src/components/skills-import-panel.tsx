@@ -1,6 +1,6 @@
 import '@/routes/skills-workflows.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2Icon, RefreshCwIcon, SearchIcon, MinusIcon, PlusIcon, SquareCheckIcon, SquareIcon, TriangleAlertIcon } from 'lucide-react'
+import { CircleCheckIcon as CheckCircle2Icon, RefreshCwIcon, SearchIcon, MinusIcon, PlusIcon, SquareCheckIcon, SquareIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useCallback, useMemo, useRef, useState } from 'react'
 
 import { applySkillsUpdate, checkSkillsUpdate, createRun, putWorkspaceUiState } from '@/api/client'

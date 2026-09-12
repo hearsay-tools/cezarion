@@ -36,7 +36,7 @@ import {
   TriangleAlertIcon,
   UploadIcon,
   WandSparklesIcon,
-} from 'lucide-react'
+} from '@/components/design-icons'
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 

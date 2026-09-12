@@ -26,3 +26,15 @@ for start in range(0,len(main),4):
     for i,(name,im) in enumerate(tiles):
         x=(i%2)*680;y=(i//2)*980;draw.text((x+8,y+4),name,fill='black');sheet.paste(im,(x,y+24))
     sheet.save(out/'comparisons'/f'overview-{start//4+1}.png')
+
+# Supplementary states have no distinct full-frame design; keep their inspection
+# sheets reproducible and refreshed with the same capture ledger.
+states=[p for p in pairs if p['name']!=p['reference']]
+for start in range(0,len(states),13):
+    sheet=Image.new('RGB',(1360,1840),'white');draw=ImageDraw.Draw(sheet)
+    for i,p in enumerate(states[start:start+13]):
+        im=Image.open(out/(p.get('content') or p['actual'])).convert('RGB')
+        im.thumbnail((330,425),Image.Resampling.LANCZOS)
+        x=(i%4)*340;y=(i//4)*460
+        draw.text((x+4,y+4),p['name'],fill='black');sheet.paste(im,(x,y+28))
+    sheet.save(out/'comparisons'/f'states-{start//13+1}.png')

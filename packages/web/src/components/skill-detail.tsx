@@ -1,5 +1,5 @@
 import '@/routes/skills-workflows.css'
-import { ArrowRightIcon } from 'lucide-react'
+import { ArrowRightIcon } from '@/components/design-icons'
 import { Link } from '@/lib/project-router'
 
 import type { Skill } from '@open-mercato/cezar-api-client'

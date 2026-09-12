@@ -8,7 +8,7 @@ import {
   SparklesIcon,
   TriangleAlertIcon,
   ZapIcon,
-} from 'lucide-react'
+} from '@/components/design-icons'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 
