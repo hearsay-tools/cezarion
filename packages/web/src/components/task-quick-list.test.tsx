@@ -380,6 +380,7 @@ describe('TaskQuickList', () => {
         ],
       })
       expect(metadataText(row('old'))).toBe('Old2h')
+      expect(Array.from(row('old')!.querySelectorAll('span')).find(el => el.textContent === '2h')?.classList.contains('sr-only')).toBe(false)
       expect(metadataText(row('new'))).toBe('New4m')
     })
 

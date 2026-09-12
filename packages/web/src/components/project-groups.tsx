@@ -262,7 +262,7 @@ function ProjectGroup({
           <span
             data-slot="project-attention"
             title={`${waiting} task${waiting === 1 ? '' : 's'} need${waiting === 1 ? 's' : ''} you`}
-            className="sr-only"
+            className="pointer-events-none relative shrink-0 rounded-full bg-pending/15 px-1.5 py-0.5 text-[10px] font-medium text-pending-strong"
           >
             {waiting}
           </span>
@@ -356,7 +356,7 @@ function ProjectGroup({
             to={scopeTo(project.id, '/')}
             onClick={onNavigate}
             data-slot="project-group-more"
-            className="sr-only focus:not-sr-only focus:flex focus:h-9 focus:px-3"
+            className="flex min-h-9 items-center rounded-md px-3 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
           >
             More…
           </Link>

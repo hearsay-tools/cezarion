@@ -724,3 +724,15 @@
 @media (hover: hover) {
   [data-slot='task-row'] > [data-slot='pin-toggle']:not([data-pinned]) { min-width: 0; min-height: 0; }
 }
+
+/* The mobile design reserves 20px of layout for its menu glyph, with a 44px hit area. */
+[data-slot='mobile-top-bar'] { background: var(--task-brand-bg); }
+[data-slot='mobile-top-bar'] button[aria-label='Open menu'] {
+  position: relative; width: 20px; min-width: 20px; margin-left: 0;
+}
+[data-slot='mobile-top-bar'] button[aria-label='Open menu']::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -12px; right: -12px;
+}
+[data-slot='mobile-top-bar'] > div { height: 51px; }
+/* Leading activity dots use the readable accent; unread completions keep brand purple. */
+[data-slot='task-row'] > [data-slot='status-dot'][data-tone='accent'] { background-color: var(--accent-text); }

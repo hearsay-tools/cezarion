@@ -231,6 +231,8 @@ describe('ProjectGroups', () => {
     await waitFor(() =>
       expect(group('cezar').querySelector('[data-slot="project-attention"]')?.textContent).toBe('2'),
     )
+    expect(group('cezar').querySelector('[data-slot="project-attention"]')?.classList.contains('sr-only')).toBe(false)
+    expect(group('cezar').querySelector('[data-slot="project-group-more"]')?.classList.contains('sr-only')).toBe(false)
     // Nothing waiting, nothing to badge — a "0" here is noise, not information.
     expect(group('shop').querySelector('[data-slot="project-attention"]')).toBeNull()
   })
