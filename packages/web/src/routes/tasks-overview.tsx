@@ -508,7 +508,7 @@ function OverviewTab({
       )}
     >
       {children}
-      {count > 0 ? <span className="font-mono text-[11px] tabular-nums">{count}</span> : null}
+      {count > 0 ? <span className="tabular-nums"> · {count}</span> : null}
     </button>
   )
 }

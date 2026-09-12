@@ -809,8 +809,8 @@ describe('TasksOverview — header', () => {
     })
     const active = screen.getByRole('button', { name: /^Active/ })
     const archived = screen.getByRole('button', { name: /^Archived/ })
-    expect(active.textContent).toBe('Active2')
-    expect(archived.textContent).toBe('Archived1')
+    expect(active.textContent).toBe('Active · 2')
+    expect(archived.textContent).toBe('Archived · 1')
     expect(active.getAttribute('aria-pressed')).toBe('true')
 
     fireEvent.click(archived)
