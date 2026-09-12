@@ -1,0 +1,32 @@
+[
+  {
+    "theme": "light",
+    "opensByPointer": true,
+    "opensByKeyboard": true,
+    "projectLinkNavigates": true,
+    "projectFocusRestored": true,
+    "menuFocusRestored": true,
+    "pickerBounds": {
+      "x": 291.703125,
+      "y": 3.5,
+      "width": 96.296875,
+      "height": 44
+    },
+    "url": "http://127.0.0.1:44864/p/website/"
+  },
+  {
+    "theme": "dark",
+    "opensByPointer": true,
+    "opensByKeyboard": true,
+    "projectLinkNavigates": true,
+    "projectFocusRestored": true,
+    "menuFocusRestored": true,
+    "pickerBounds": {
+      "x": 291.703125,
+      "y": 3.5,
+      "width": 96.296875,
+      "height": 44
+    },
+    "url": "http://127.0.0.1:44864/p/website/"
+  }
+]

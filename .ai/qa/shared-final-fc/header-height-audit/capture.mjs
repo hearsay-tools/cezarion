@@ -1,0 +1,15 @@
+import {chromium} from '/tmp/cez160-webkit/node_modules/playwright/index.mjs';
+import {readFileSync,writeFileSync,readdirSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import assert from 'node:assert/strict';
+const out='.ai/qa/runtime-verified/header-height-audit',base='/tmp/fc764-final-integrated',dist=base+'/packages/cezar/web/dist';
+const hash=b=>createHash('sha256').update(b).digest('hex');
+const browser=await chromium.launch({headless:true,executablePath:'/home/agent/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome',args:['--no-sandbox']});
+const frames=[];
+for(const [theme,id,route,height] of [['light','mZMB8','new',72],['dark','Pusy6','new',72],['light','O2W1k','new',72],['dark','pf8QM','new',72],['light','EKi57','skills',64],['dark','cvBro','skills',64],['light','C2sfEo','workflows',64],['dark','s0JzCL','workflows',64],['light','cgGWE','tasks/10000000-0000-4000-8000-000000000000',64]]){
+ const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});await context.addInitScript(t=>localStorage.setItem('cez-theme',t),theme);const page=await context.newPage();await page.goto('http://127.0.0.1:44864/p/iac/'+route);const header=page.locator('[data-slot="desktop-breadcrumb"]');await header.waitFor();await page.evaluate(()=>document.fonts.ready);await page.waitForTimeout(200);const box=await header.boundingBox();assert.equal(box.height,height);assert.equal(await header.evaluate(e=>getComputedStyle(e).paddingLeft),height===72?'44px':'36px');const main=await page.locator('main').boundingBox();assert.equal(main.y,height);await page.screenshot({path:out+'/'+id+'.png',clip:{x:264,y:0,width:1176,height:96}});frames.push({id,theme,route,header:box,main,expectedHeight:height,sourcePngSha256:hash(readFileSync('.ai/design-reference/iteration-3/design/'+id+'.png')),browserPngSha256:hash(readFileSync(out+'/'+id+'.png'))});await context.close();
+}
+const context=await browser.newContext({viewport:{width:402,height:900}});const page=await context.newPage();await page.goto('http://127.0.0.1:44864/p/iac/new');const mobile=await page.locator('[data-slot="mobile-top-bar"]').boundingBox();assert.equal(mobile.height,52);await context.close();await browser.close();
+const server=JSON.parse(readFileSync(base+'/.ai/qa/runtime-verified/independent-review/shell/server-proof.json'));const cmd=readFileSync('/proc/'+server.pid+'/cmdline','utf8').split('\0');assert(cmd.includes(base+'/packages/cezar/dist/index.js'));
+const assets=[];for(const f of ['index.html',...readdirSync(dist+'/assets').map(f=>'assets/'+f)]){const sha=hash(readFileSync(dist+'/'+f));assert.equal(hash(Buffer.from(await(await fetch('http://127.0.0.1:44864/'+f)).arrayBuffer())),sha);assets.push({file:f,sha256:sha});}
+writeFileSync(out+'/proof.json',JSON.stringify({at:new Date().toISOString(),snapshot:base,pid:server.pid,cmd,frames,mobile,assets,sourceSha256:hash(readFileSync(base+'/packages/web/src/components/app-shell.tsx'))},null,2));console.log('9 desktop header captures and main offsets, mobile 52px, served assets verified');

@@ -1,0 +1,57 @@
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/579bfd25-ba83-4860-a925-83649ee5a6d2
+
+ ✓ |web| src/routes/settings/worktrees-panel.test.tsx (6 tests) 531ms
+ ✓ |web| src/routes/settings/agent-config-section.test.tsx (9 tests) 692ms
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > updates enablement immediately and restores the confirmed state when a write fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > updates enablement immediately and restores the confirmed state when a write fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a successful retry when a pending enablement write fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a newer runtime incident from the provider-status cache when a toggle fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a newer runtime incident from the provider-status cache when a toggle fails
+The current testing environment is not configured to support act(...)
+
+ ✓ |web| src/routes/settings/provider-settings.test.tsx (20 tests) 1255ms
+ ✓ |web| src/routes/settings/prompt-templates-section.test.tsx (16 tests) 1703ms
+     ✓ assigning shows a chip and Save PUTs the skills alongside the template  305ms
+ ✓ |web| src/routes/settings/notifications-section.test.tsx (8 tests) 522ms
+ ✓ |web| src/routes/settings/project-location.test.tsx (7 tests) 859ms
+     ✓ "Open with" lists the machine's apps, minus the agent CLIs  375ms
+ ✓ |web| src/routes/settings/project-general.test.tsx (8 tests) 940ms
+     ✓ removes the project after a confirm, then leaves the URL that just stopped resolving  490ms
+ ✓ |web| src/routes/settings/agent-descriptors.test.ts (5 tests) 8ms
+ ✓ |web| src/routes/settings/resources-section.test.tsx (10 tests) 1130ms
+     ✓ links workspace limits to the per-project controls  354ms
+ ✓ |web| src/routes/settings/settings.test.tsx (22 tests) 1259ms
+ ✓ |web| src/routes/settings/accounts-defaults.test.tsx (10 tests) 1103ms
+     ✓ survives a server that has never heard of agent defaults  325ms
+ ✓ |web| src/routes/settings/skills-section.test.tsx (5 tests) 597ms
+     ✓ links installation status to the boot project skill catalog  341ms
+ ✓ |web| src/routes/settings/bookmarklets-section.test.tsx (9 tests) 329ms
+ ✓ |web| src/routes/settings/agents-section.test.tsx (26 tests) 2551ms
+     ✓ keeps a saved disconnected runner selected while disabling its runner and model controls  306ms
+ ✓ |web| src/routes/settings/worktrees-section.test.tsx (4 tests) 198ms
+ ✓ |web| src/routes/settings/projects-section.test.tsx (25 tests) 2816ms
+ ✓ |web| src/routes/settings/accounts-section.test.tsx (35 tests) 2906ms
+     ✓ lists the discovered account with no edit controls at all  330ms
+
+ Test Files  17 passed (17)
+      Tests  225 passed (225)
+   Start at  14:02:16
+   Duration  6.95s (transform 12.47s, setup 0ms, import 29.21s, tests 19.40s, environment 13.51s)

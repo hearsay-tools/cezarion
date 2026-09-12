@@ -1,0 +1,10 @@
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/fc764c2b-4841-49fc-93e3-bbb6f8775207
+
+ ✓ |web| src/components/app-shell.test.tsx (89 tests) 1939ms
+
+ Test Files  1 passed (1)
+      Tests  89 passed (89)
+   Start at  14:20:12
+   Duration  3.75s (transform 560ms, setup 0ms, import 1.13s, tests 1.94s, environment 542ms)
+

@@ -1,0 +1,10 @@
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/579bfd25-ba83-4860-a925-83649ee5a6d2
+
+ ✓ |web| src/routes/settings/accounts-defaults.test.tsx (10 tests) 697ms
+ ✓ |web| src/routes/settings/accounts-section.test.tsx (36 tests) 1907ms
+
+ Test Files  2 passed (2)
+      Tests  46 passed (46)
+   Start at  14:13:06
+   Duration  4.47s (transform 2.23s, setup 0ms, import 3.75s, tests 2.60s, environment 1.12s)

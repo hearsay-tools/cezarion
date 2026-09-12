@@ -1,0 +1,376 @@
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/fc764c2b-4841-49fc-93e3-bbb6f8775207
+
+ ❯ |web| src/components/app-shell.test.tsx (82 tests | 1 failed) 2138ms
+     ✓ renders the routed view in the main region 202ms
+     ✓ renders the Poppins Cezarion wordmark from the approved shared shell 23ms
+     ✓ uses the same token-driven wordmark in light mode 33ms
+     ✓ resets the main scroller to the top on navigation (#mobile-scroll-top) 62ms
+     ✓ leaves task-to-task arrival to the destination transcript owner (#761) 30ms
+     ✓ restores the generic top reset when leaving a task thread (#761) 49ms
+     ✓ grants scroll ownership only to exact scoped and unscoped main task routes 0ms
+     ✓ renders the whole nav as real router links 16ms
+     ✓ drops the GitHub item when the forge is unavailable 15ms
+     ✓ drops the Automations item when the capability is off 16ms
+     ✓ shows the Automations item once the capability is on 17ms
+       ✓ / → Tasks 24ms
+       ✓ /git → Git 33ms
+       ✓ /skills → Skills 21ms
+       ✓ /tasks/abc123 → Tasks 14ms
+       ✓ lights nothing on a full-screen surface like /new 14ms
+       ✓ links to /new 31ms
+       ✓ renders the C hint (the browser-usable accelerator; ⌘N only fires in the desktop shell) 44ms
+       ✓ is shown by default 22ms
+       ✓ is omitted in single-project mode while normal navigation remains 32ms
+     ✓ puts the theme toggle in the sidebar footer 17ms
+       ✓ keeps the footer controls in one non-wrapping row 10ms
+       ✓ keeps search near the wordmark and outside the footer 14ms
+       ✓ keeps tools and theme together, with accessible version text and global settings in the same row 18ms
+       ✓ renders search as a full-width launcher that still opens the palette 18ms
+       ✓ still shows the version chip update affordance (#368) in the narrower row 10ms
+       ✓ makes the version chip the one control that gives, so a nightly version cannot push the row out 16ms
+       ✓ renders no repo chip, badge or version chip when unfed 10ms
+       ✓ renders the repo chip and version chip from props 11ms
+         ✓ stays plain while the registry has nothing newer 11ms
+         ✓ stays plain when latestVersion equals the running version 12ms
+         ✓ pulses and names the newer version when one exists 11ms
+       ✓ renders the Inbox badge only for a non-zero count 41ms
+       ✓ renders a quiet accessible Skills update marker in desktop and mobile navigation 101ms
+       ✓ renders no Skills marker without an actionable update 11ms
+       ✓ reserves the quick-list, tools and composer slots for later Steps 11ms
+       ✓ offers the workspace tasks page even with one project 11ms
+       ✓ links out of every project scope 8ms
+       ✓ stays put while the project groups scroll 10ms
+       ✓ marks itself the current page only on /tasks 17ms
+       ✓ renders the banner when one is passed 10ms
+       ✓ renders nothing when absent — no empty slot to push the scroller down 9ms
+       ✓ sits outside the scrolling main region, not inside it 12ms
+       ✓ is its own grid row, above the scroller and below the mobile bar 11ms
+       ✓ hides the sidebar below md and shows it from md up 9ms
+       ✓ shows the mobile top bar below md only 10ms
+       ✓ titles the mobile bar from the active route 10ms
+       ✓ starts at the approved 264px when nothing has been stored 9ms
+       ✓ restores the width the browser remembers 9ms
+       ✓ is a keyboard-operable separator that reports its range 10ms
+       ✓ widens on drag and persists what it landed on 17ms
+       ✓ clamps a drag at both bounds rather than letting the column collapse or take over 23ms
+       ✓ takes focus on grab, so the arrow keys work right after a mouse drag 33ms
+       ✓ opts out of browser touch panning, so a touch drag resizes instead of scrolling 14ms
+       ✓ ignores a non-primary button, so a right-click on the border resizes nothing 21ms
+       ✓ steps with the arrow keys and jumps to the bounds with Home/End 35ms
+       ✓ leaves every other key to the browser — Tab must still move focus 11ms
+       ✓ resets to the default on double-click 19ms
+       ✓ keeps the drawer independent of desktop resizing and reserves its dismissal strip 43ms
+       ✓ declares the container the rows size their metadata against 9ms
+       ✓ is exactly one viewport tall and never scrolls the document 9ms
+       ✓ makes the main region the only scroller, and contains its overscroll 12ms
+       ✓ pads for the safe-area insets 9ms
+       ✓ renders nothing when no banner is passed 11ms
+       ✓ renders the banner above the routed view 12ms
+       ✓ is a peer of the scroller, not a child of it, so route headers cannot paint over it 12ms
+       ✓ is closed until the menu button is pressed 42ms
+       ✓ is a dialog with an accessible name 47ms
+       ✓ advertises the drawer from the menu button 44ms
+       ✓ hides the rest of the tree from assistive tech while open 36ms
+       ✓ moves focus into the drawer and restores it to the menu button on close 54ms
+       ✓ closes on Escape 41ms
+       ✓ closes when the backdrop is tapped 36ms
+       ✓ renders the same nav as the desktop sidebar 44ms
+       ✓ marks the active nav item inside the drawer too 30ms
+       ✓ closes when a nav item inside it navigates 56ms
+       ✓ closes when the already-active nav item is re-clicked 47ms
+       ✓ closes before the New task anchor hands off to the legacy document 46ms
+       ✓ closes when the viewport widens past md, where the real sidebar takes over 40ms
+       ✓ pads the drawer for the safe-area insets 41ms
+   ✓ keeps project and page context in the desktop breadcrumb 12ms
+   × opens project navigation from the mobile project control and restores its focus 63ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/components/app-shell.test.tsx > opens project navigation from the mobile project control and restores its focus
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Switch project: demo"
+
+Here are the accessible roles:
+
+  complementary:
+
+  Name "":
+  [36m<aside[39m
+    [33mclass[39m=[32m"relative hidden shrink-0 flex-col border-r border-border bg-sidebar md:flex"[39m
+    [33mdata-slot[39m=[32m"sidebar"[39m
+    [33mstyle[39m=[32m"width: 264px;"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Search…":
+  [36m<button[39m
+    [33mclass[39m=[32m"flex h-11 w-full items-center gap-2 rounded-lg border border-border bg-[var(--task-brand-bg)] px-2.5 text-left text-xs font-normal text-muted-foreground transition-colors hover:border-[var(--composer-border)] hover:text-foreground md:h-10"[39m
+    [33mdata-slot[39m=[32m"command-palette-hint"[39m
+    [33mtitle[39m=[32m"Search — command palette (⌘K / Ctrl+K)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Add project":
+  [36m<button[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Add project"[39m
+    [33mclass[39m=[32m"inline-flex shrink-0 items-center justify-center gap-[7px] rounded-md font-semibold whitespace-nowrap transition-[background-color,border-color,opacity,filter] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 hover:bg-muted hover:text-foreground text-[13px] size-9 p-0 text-muted-foreground"[39m
+    [33mdata-size[39m=[32m"default"[39m
+    [33mdata-slot[39m=[32m"dropdown-menu-trigger"[39m
+    [33mdata-state[39m=[32m"closed"[39m
+    [33mdata-variant[39m=[32m"ghost"[39m
+    [33mid[39m=[32m"radix-_r_dr_"[39m
+    [33mtitle[39m=[32m"Add project"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Theme: dark. Switch to system.":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Theme: dark. Switch to system."[39m
+    [33mclass[39m=[32m"inline-flex shrink-0 items-center justify-center gap-[7px] font-semibold whitespace-nowrap transition-[background-color,border-color,opacity,filter] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 text-muted-foreground hover:bg-muted hover:text-foreground size-[30px] rounded-sm"[39m
+    [33mdata-size[39m=[32m"icon-sm"[39m
+    [33mdata-slot[39m=[32m"theme-toggle"[39m
+    [33mdata-theme-pref[39m=[32m"dark"[39m
+    [33mdata-variant[39m=[32m"ghost"[39m
+    [33mtitle[39m=[32m"Theme: dark"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Open menu":
+  [36m<button[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"dialog"[39m
+    [33maria-label[39m=[32m"Open menu"[39m
+    [33mclass[39m=[32m"inline-flex shrink-0 items-center justify-center gap-[7px] rounded-md font-semibold whitespace-nowrap transition-[background-color,border-color,opacity,filter] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 text-muted-foreground hover:bg-muted hover:text-foreground -ml-1.5 size-11"[39m
+    [33mdata-size[39m=[32m"icon"[39m
+    [33mdata-slot[39m=[32m"sheet-trigger"[39m
+    [33mdata-state[39m=[32m"closed"[39m
+    [33mdata-variant[39m=[32m"ghost"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  link:
+
+  Name "New task":
+  [36m<a[39m
+    [33mclass[39m=[32m"inline-flex items-center rounded-md whitespace-nowrap transition-[background-color,border-color,opacity,filter] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 hover:bg-muted hover:text-foreground text-[13px] relative h-[42px] min-w-0 flex-1 justify-start gap-2.5 px-2.5 font-medium text-muted-foreground"[39m
+    [33mdata-discover[39m=[32m"true"[39m
+    [33mdata-size[39m=[32m"default"[39m
+    [33mdata-slot[39m=[32m"button"[39m
+    [33mdata-variant[39m=[32m"ghost"[39m
+    [33mhref[39m=[32m"/p/demo/new"[39m
+  [36m/>[39m
+
+  Name "Inbox":
+  [36m<a[39m
+    [33mclass[39m=[32m"flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-muted md:min-h-[42px]"[39m
+    [33mdata-discover[39m=[32m"true"[39m
+    [33mhref[39m=[32m"/p/demo/inbox"[39m
+  [36m/>[39m
+
+  Name "Automations":
+  [36m<a[39m
+    [33mclass[39m=[32m"flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-muted md:min-h-[42px]"[39m
+    [33mdata-discover[39m=[32m"true"[39m
+    [33mhref[39m=[32m"/p/demo/automations"[39m
+  [36m/>[39m
+
+  Name "Second project":
+  [36m<a[39m
+    [33mdata-discover[39m=[32m"true"[39m
+    [33mhref[39m=[32m"/p/second/skills"[39m
+  [36m/>[39m
+
+  Name "All tasks":
+  [36m<a[39m
+    [33maria-label[39m=[32m"All tasks"[39m
+    [33mclass[39m=[32m"selection-row flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"[39m
+    [33mdata-discover[39m=[32m"true"[39m
+    [33mdata-slot[39m=[32m"all-tasks-link"[39m
+    [33mhref[39m=[32m"/tasks"[39m
+    [33mtitle[39m=[32m"All tasks"[39m
+  [36m/>[39m
+
+  Name "Global settings":
+  [36m<a[39m
+    [33maria-label[39m=[32m"Global settings"[39m
+    [33mclass[39m=[32m"inline-flex shrink-0 items-center justify-center gap-[7px] rounded-md font-semibold whitespace-nowrap transition-[background-color,border-color,opacity,filter] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 text-muted-foreground hover:bg-muted hover:text-foreground size-9"[39m
+    [33mdata-discover[39m=[32m"true"[39m
+    [33mdata-size[39m=[32m"icon"[39m
+    [33mdata-slot[39m=[32m"global-settings-link"[39m
+    [33mdata-variant[39m=[32m"ghost"[39m
+    [33mhref[39m=[32m"/settings/global"[39m
+    [33mtitle[39m=[32m"Global settings"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  navigation:
+
+  Name "Workspace":
+  [36m<nav[39m
+    [33maria-label[39m=[32m"Workspace"[39m
+    [33mclass[39m=[32m"shrink-0 px-4"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  separator:
+
+  Name "Resize the sidebar":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Resize the sidebar"[39m
+    [33maria-orientation[39m=[32m"vertical"[39m
+    [33maria-valuemax[39m=[32m"420"[39m
+    [33maria-valuemin[39m=[32m"264"[39m
+    [33maria-valuenow[39m=[32m"264"[39m
+    [33mclass[39m=[32m"absolute inset-y-0 -right-[2px] z-20 w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-[var(--composer-border)] focus-visible:bg-[var(--composer-border)] focus-visible:outline-none"[39m
+    [33mdata-slot[39m=[32m"sidebar-resize-handle"[39m
+    [33mrole[39m=[32m"separator"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Drag to resize the sidebar — double-click to reset"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  banner:
+
+  Name "":
+  [36m<header[39m
+    [33mclass[39m=[32m"row-start-1 border-b border-border bg-card pt-[env(safe-area-inset-top)] md:hidden"[39m
+    [33mdata-slot[39m=[32m"mobile-top-bar"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<header[39m
+    [33mclass[39m=[32m"row-start-1 hidden h-16 min-w-0 items-center gap-3 border-b border-border px-9 text-[13px] text-muted-foreground md:flex"[39m
+    [33mdata-slot[39m=[32m"desktop-breadcrumb"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  main:
+
+  Name "":
+  [36m<main[39m
+    [33mclass[39m=[32m"row-start-3 min-h-0 overflow-y-auto overscroll-contain"[39m
+    [33mdata-slot[39m=[32m"main"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p />[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body[39m
+  [33mstyle[39m=[32m""[39m
+[36m>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"flex h-dvh overflow-hidden bg-background text-foreground pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"[39m
+      [33mdata-slot[39m=[32m"app-shell"[39m
+    [36m>[39m
+      [36m<aside[39m
+        [33mclass[39m=[32m"relative hidden shrink-0 flex-col border-r border-border bg-sidebar md:flex"[39m
+        [33mdata-slot[39m=[32m"sidebar"[39m
+        [33mstyle[39m=[32m"width: 264px;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"[39m
+          [33mdata-slot[39m=[32m"sidebar-content"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-[9px] px-4 pt-5 pb-2"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-[23px] leading-normal font-semibold tracking-[-0.03em] text-foreground"[39m
+              [33mdata-slot[39m=[32m"brand-wordmark"[39m
+            [36m>[39m
+              [0mCezarion[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"px-4 pb-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"flex h-11 w-full items-center gap-2 rounded-lg border border-border bg-[var(--task-brand-bg)] px-2.5 text-left text-xs font-normal text-muted-foreground transition-colors hover:border-[var(--composer-border)] hover:text-foreground md:h-10"[39m
+              [33mdata-slot[39m=[32m"command-palette-hint"[39m
+              [33mtitle[39m=[32m"Search — command palette (⌘K / Ctrl+K)"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"size-4 shrink-0"[39m
+                [33mdata-design-icon[39m=[32m"search"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"none"[39m
+                [33mviewBox[39m=[32m"0 0 13.99993896484375 14"[39m
+                [33mwidth[39m=[32m"24"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M6.00537 1.17578q-0.04102 0.01367-0.23584 0.02734-0.57422 0.07178-1.16211 0.29053-0.58789 0.21533-1.09375 0.5503-0.39307 0.2666-0.74853 0.61181-0.35547 0.3418-0.62207 0.7041-0.646 0.92285-0.86817 2.03028-0.05811 0.28027-0.07861 0.46142-0.02051 0.18115-0.02051 0.57422 0 0.43408 0.02734 0.68018 0.02734 0.24268 0.12647 0.59472 0.19482 0.75537 0.60156 1.43555 0.40674 0.67676 0.96729 1.18262 0.40674 0.3623 0.81689 0.60156 0.41357 0.23926 0.91944 0.43408 1.06299 0.39307 2.21826 0.29395 1.15527-0.09912 2.1499-0.65967 0.12646-0.06836 0.33496-0.2085 0.2085-0.14014 0.29395-0.21191l0.05468-0.05469 1.10743 1.10742q1.12109 1.104 1.20312 1.15528 0.08545 0.04785 0.23926 0.04785 0.15381 0 0.23584-0.03418 0.08545-0.0376 0.18115-0.1333 0.09912-0.09912 0.1333-0.18115 0.0376-0.08545 0.0376-0.23926 0-0.15381-0.05127-0.23584-0.04785-0.08545-1.15186-1.20654l-1.10742-1.10743 0.05469-0.06836q0.05811-0.05469 0.19824-0.25293 0.82373-1.23047 0.89209-2.70703 0.07178-1.47656-0.63916-2.76513-0.5332-0.96729-1.42187-1.64405-0.88867-0.68018-1.95508-0.9331-0.29395-0.06836-0.54004-0.09571-0.24268-0.03076-0.60498-0.04443-0.43408 0-0.49219 0z m0.7417 1.17578q0.37939 0.01367 0.79297 0.14014 0.41357 0.12646 0.78955 0.32129 0.7417 0.39307 1.28857 1.08008 0.54687 0.68359 0.75538 1.49707 0.07178 0.28027 0.09228 0.49902 0.02051 0.21533 0.02051 0.50928 0 0.70068-0.19483 1.30224-0.39307 1.16211-1.33984 1.91065-0.94336 0.74853-2.16016 0.875-0.19824 0.01367-0.49218 0.00683-0.29395-0.00684-0.48877-0.03418-0.5332-0.08545-1.03907-0.30761-0.50244-0.22559-0.93652-0.56055-0.14014-0.12646-0.35205-0.3418-0.2085-0.21875-0.33154-0.37256-0.57422-0.76904-0.7417-1.69531-0.08545-0.43408-0.06494-0.90918 0.02051-0.4751 0.11963-0.89551 0.29395-1.14844 1.18945-1.95849 0.89551-0.81348 2.05762-1.02539 0.18115-0.02734 0.42041-0.04102 0.23926-0.01367 0.34863-0.01367l0.2666 0.01367z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"truncate"[39m
+              [36m>[39m
+                [0mSearch…[0m
+              [36m</span>[39m
+              [36m<kbd[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"ml-auto shrink-0 font-sans text-[10px] font-normal text-soft-foreground"[39m
+              [36m>[39m
+                [0mCtrl+K[0m
+              [36m</kbd>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex gap-1.5 px-4 pb-2"[39m
+          [36m>[39m
+            [36m<a[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-md whitespace-nowrap transition-[background-color,border-color,opacity,filter] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 hover:bg-muted hover:text-foreground text-[13px] relative h-[42px] min-w-0 flex-1 justify-start gap-2.5 px-2.5 font-medium text-muted-foreground"[39m
+              [33mdata-discover[39m=[32m"true"[39m
+              [33mdata-size[39m=[32m"default"[39m
+              [33mdata-slot[39m=[32m"button"[39m
+              [33mdata-variant[39m=[32m"ghost"[39m
+              [33mhref[39m=[32m"/p/demo/new"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"size-[18px]"[39m
+                [33mdata-design-icon[39m=[32m"plus"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"none"[39m
+                [33mviewBox[39m=[32m"0 0 13.99993896484375 14"[39m
+                [33mwidth[39m=[32m"24"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M6.90088 2.35156q-0.0957 0.01367-0.17432 0.05127-0.0752 0.03418-0.15381 0.12647-0.0752 0.08887-0.11279 0.16748-0.03418 0.0752-0.03418 0.32812l0 3.40088-3.66748 0-0.08545 0.04102q-0.22217 0.11279-0.30078 0.33838-0.0752 0.22217 0.00684 0.43408 0.05811 0.0957 0.14013 0.18115 0.08545 0.08203 0.16748 0.11963 0.08545 0.03418 0.33838 0.03418l3.40088 0 0 3.40088q0 0.25293 0.03418 0.33838 0.0376 0.08203 0.11963 0.16748 0.08545 0.08203 0.18799 0.1333 0.10596 0.04785 0.23242 0.04785 0.12646 0 0.229-0.04785 0.1059...
+ ❯ Object.getElementError ../../node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/app-shell.test.tsx:892:25
+    890| it('opens project navigation from the mobile project control and resto…
+    891|   renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main'…
+    892|   const picker = screen.getByRole('button', { name: 'Switch project: d…
+       |                         ^
+    893|   picker.focus()
+    894|   fireEvent.click(picker)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 81 passed (82)
+   Start at  13:55:32
+   Duration  4.13s (transform 683ms, setup 0ms, import 1.24s, tests 2.14s, environment 588ms)
+

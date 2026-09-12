@@ -1,0 +1,1334 @@
+[
+  {
+    "name": "EKi57",
+    "reference": "EKi57",
+    "viewport": {
+      "width": 1440,
+      "height": 1400
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "EKi57.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "585bbc832549a5001560753cdfbd538583915cd40a239d7ff9b32655961cf5c1",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills",
+    "overflow": false
+  },
+  {
+    "name": "kmHeY",
+    "reference": "kmHeY",
+    "viewport": {
+      "width": 402,
+      "height": 1098
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "kmHeY.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "2fc3a58a781b2144e5b97562583257da1d5f5bace6663c6a39c3f46a9022cb6e",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills",
+    "overflow": false
+  },
+  {
+    "name": "cvBro",
+    "reference": "cvBro",
+    "viewport": {
+      "width": 1440,
+      "height": 1400
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "cvBro.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0703a285a2b1d05fa846185afb3f30c05b2349e33c4c470ee9319f173ad80716",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills",
+    "overflow": false
+  },
+  {
+    "name": "XdHUd",
+    "reference": "XdHUd",
+    "viewport": {
+      "width": 402,
+      "height": 1098
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "XdHUd.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "9d47d69e0041224c2496e2bfbe35ed1189ef2a11292bbddb672ce28ccbc89143",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills",
+    "overflow": false
+  },
+  {
+    "name": "acXhB",
+    "reference": "acXhB",
+    "viewport": {
+      "width": 402,
+      "height": 860
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "acXhB.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "56328817144968027a45539c9caa3d991084c2cdeb43f0ef9fcd218370b5406a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=award-level-visual-design",
+    "overflow": false
+  },
+  {
+    "name": "utoCL",
+    "reference": "utoCL",
+    "viewport": {
+      "width": 402,
+      "height": 860
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "utoCL.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "6b1e7e212ca5f6649675aca7459eaade179943de599e448f027806f8224bd0aa",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=award-level-visual-design",
+    "overflow": false
+  },
+  {
+    "name": "f2LGv",
+    "reference": "f2LGv",
+    "viewport": {
+      "width": 1440,
+      "height": 1400
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "f2LGv.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "bdb844cd5e761045458f2a199650ef6837442bbe77f8f5dbf21e7b6d3ee12c11",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "suUEJ",
+    "reference": "suUEJ",
+    "viewport": {
+      "width": 1440,
+      "height": 1400
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "suUEJ.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "f3215592702b9c90fcb6ce308708f801d4689ee1bfb4aa524892dc5353fe2ce9",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "MB5Yx",
+    "reference": "MB5Yx",
+    "viewport": {
+      "width": 402,
+      "height": 1230
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "MB5Yx.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8ff9b8c8cbce3f7c5137ffa291d834474d43fc5b8e15e6c3fbcf5893ba2f952a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "IbcKi",
+    "reference": "IbcKi",
+    "viewport": {
+      "width": 402,
+      "height": 1230
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "IbcKi.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "d1f13adf6966eb18b802279ab4fdfbd1c7d96034b696671552a5e920e41d67d4",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "C2sfEo",
+    "reference": "C2sfEo",
+    "viewport": {
+      "width": 1440,
+      "height": 1600
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "C2sfEo.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8e6bcbbd9168b78926fcce3d2bc42a858799c83cc28cf39f799ab93bf1416a58",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "selector-C2sfEo",
+    "reference": "C2sfEo",
+    "viewport": {
+      "width": 1440,
+      "height": 1600
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "selector-C2sfEo.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8e6bcbbd9168b78926fcce3d2bc42a858799c83cc28cf39f799ab93bf1416a58",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "aa0TQ",
+    "reference": "aa0TQ",
+    "viewport": {
+      "width": 402,
+      "height": 1862
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "aa0TQ.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "48b0e320e39bc4102a60efb03b4580b07107818dfa603b5090601386007605ec",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "selector-aa0TQ",
+    "reference": "aa0TQ",
+    "viewport": {
+      "width": 402,
+      "height": 1862
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "selector-aa0TQ.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "48b0e320e39bc4102a60efb03b4580b07107818dfa603b5090601386007605ec",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "s0JzCL",
+    "reference": "s0JzCL",
+    "viewport": {
+      "width": 1440,
+      "height": 1600
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "s0JzCL.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "ee607d6c3f132d4379961db448253d81882e378f742e7d7d52c0d518ffa388fb",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "selector-s0JzCL",
+    "reference": "s0JzCL",
+    "viewport": {
+      "width": 1440,
+      "height": 1600
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "selector-s0JzCL.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "ee607d6c3f132d4379961db448253d81882e378f742e7d7d52c0d518ffa388fb",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "Ae0n6",
+    "reference": "Ae0n6",
+    "viewport": {
+      "width": 402,
+      "height": 1862
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "Ae0n6.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "f574157c203098d43dfe9d83fd87990f70e52acd5d295bca9e02320d5782da94",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "selector-Ae0n6",
+    "reference": "Ae0n6",
+    "viewport": {
+      "width": 402,
+      "height": 1862
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "selector-Ae0n6.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "f574157c203098d43dfe9d83fd87990f70e52acd5d295bca9e02320d5782da94",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "VDDSI",
+    "reference": "VDDSI",
+    "viewport": {
+      "width": 1440,
+      "height": 2000
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "VDDSI.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "c988d234666247ba840b142bdb59cbeb43fcf5aa2bcc9ddb7c45a271a3d575b0",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "MmQCH",
+    "reference": "MmQCH",
+    "viewport": {
+      "width": 1440,
+      "height": 2000
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "MmQCH.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8af285e6188a8139d21e14e2aabda91ab1b2b083587a0dbc4125c7ec6049a77f",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "Zsg4w",
+    "reference": "Zsg4w",
+    "viewport": {
+      "width": 402,
+      "height": 2268
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "Zsg4w.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "4f7d68e57cfd00b259f1081c923972642eb94426e04aa8d0e6db7b6086062476",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "e7UWy",
+    "reference": "e7UWy",
+    "viewport": {
+      "width": 402,
+      "height": 2268
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "e7UWy.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "af650039c03dd04306e21e8c95b181555b413e308f5a0452c54494cc41ddb07e",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows",
+    "overflow": false
+  },
+  {
+    "name": "gqaUM",
+    "reference": "gqaUM",
+    "viewport": {
+      "width": 1440,
+      "height": 1400
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "gqaUM.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "30acfc80b2f62352d587bff3a6440bbe22cdb2007d3650d8756df39e5efd1c43",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__bm",
+    "overflow": false
+  },
+  {
+    "name": "EsGpp",
+    "reference": "EsGpp",
+    "viewport": {
+      "width": 1440,
+      "height": 1400
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "EsGpp.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "3b411eb14eefa0c0c2cf26332ec2f328c995513c06e0c973c25f79cb6f15d524",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__bm",
+    "overflow": false
+  },
+  {
+    "name": "YS15Y",
+    "reference": "YS15Y",
+    "viewport": {
+      "width": 402,
+      "height": 1333
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "YS15Y.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0dd0f0fc55f789cbc99875eecd31e6a65050bf798b8e3cb056f39f93ce39662b",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__bm",
+    "overflow": false
+  },
+  {
+    "name": "wLVhd",
+    "reference": "wLVhd",
+    "viewport": {
+      "width": 402,
+      "height": 1333
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "wLVhd.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "55966f6c06a7df6b7a29320bbcf57fb99e7d8fc0640c46ffdab54bc0aae498eb",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__bm",
+    "overflow": false
+  },
+  {
+    "name": "add-step-desktop-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "add-step-desktop-light.png",
+    "content": "add-step-desktop-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "delete-desktop-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "delete-desktop-light.png",
+    "content": "delete-desktop-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "overwrite-desktop-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "overwrite-desktop-light.png",
+    "content": "overwrite-desktop-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "yaml-desktop-light",
+    "reference": "C2sfEo",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "yaml-desktop-light.png",
+    "content": "yaml-desktop-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8e6bcbbd9168b78926fcce3d2bc42a858799c83cc28cf39f799ab93bf1416a58",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "step-menu-desktop-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "step-menu-desktop-light.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "filter-empty-desktop-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "filter-empty-desktop-light.png",
+    "content": "filter-empty-desktop-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "add-step-mobile-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "add-step-mobile-light.png",
+    "content": "add-step-mobile-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "delete-mobile-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "delete-mobile-light.png",
+    "content": "delete-mobile-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "overwrite-mobile-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "overwrite-mobile-light.png",
+    "content": "overwrite-mobile-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "yaml-mobile-light",
+    "reference": "C2sfEo",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "yaml-mobile-light.png",
+    "content": "yaml-mobile-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8e6bcbbd9168b78926fcce3d2bc42a858799c83cc28cf39f799ab93bf1416a58",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "step-menu-mobile-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "step-menu-mobile-light.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "filter-empty-mobile-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "filter-empty-mobile-light.png",
+    "content": "filter-empty-mobile-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "add-step-desktop-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "add-step-desktop-dark.png",
+    "content": "add-step-desktop-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "delete-desktop-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "delete-desktop-dark.png",
+    "content": "delete-desktop-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "overwrite-desktop-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "overwrite-desktop-dark.png",
+    "content": "overwrite-desktop-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "yaml-desktop-dark",
+    "reference": "s0JzCL",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "yaml-desktop-dark.png",
+    "content": "yaml-desktop-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "ee607d6c3f132d4379961db448253d81882e378f742e7d7d52c0d518ffa388fb",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "step-menu-desktop-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "step-menu-desktop-dark.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "filter-empty-desktop-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "filter-empty-desktop-dark.png",
+    "content": "filter-empty-desktop-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "add-step-mobile-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "add-step-mobile-dark.png",
+    "content": "add-step-mobile-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "delete-mobile-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "delete-mobile-dark.png",
+    "content": "delete-mobile-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "overwrite-mobile-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "overwrite-mobile-dark.png",
+    "content": "overwrite-mobile-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "yaml-mobile-dark",
+    "reference": "s0JzCL",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "yaml-mobile-dark.png",
+    "content": "yaml-mobile-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "ee607d6c3f132d4379961db448253d81882e378f742e7d7d52c0d518ffa388fb",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "step-menu-mobile-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "step-menu-mobile-dark.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "filter-empty-mobile-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 402,
+      "height": 854
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "filter-empty-mobile-dark.png",
+    "content": "filter-empty-mobile-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "manage-current-light",
+    "reference": "MB5Yx",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "manage-current-light.png",
+    "content": "manage-current-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8ff9b8c8cbce3f7c5137ffa291d834474d43fc5b8e15e6c3fbcf5893ba2f952a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-available-light",
+    "reference": "MB5Yx",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "manage-available-light.png",
+    "content": "manage-available-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8ff9b8c8cbce3f7c5137ffa291d834474d43fc5b8e15e6c3fbcf5893ba2f952a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-updating-light",
+    "reference": "MB5Yx",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "manage-updating-light.png",
+    "content": "manage-updating-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8ff9b8c8cbce3f7c5137ffa291d834474d43fc5b8e15e6c3fbcf5893ba2f952a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-error-light",
+    "reference": "MB5Yx",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "manage-error-light.png",
+    "content": "manage-error-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8ff9b8c8cbce3f7c5137ffa291d834474d43fc5b8e15e6c3fbcf5893ba2f952a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-disabled-light",
+    "reference": "MB5Yx",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "manage-disabled-light.png",
+    "content": "manage-disabled-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8ff9b8c8cbce3f7c5137ffa291d834474d43fc5b8e15e6c3fbcf5893ba2f952a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-filter-empty-light",
+    "reference": "MB5Yx",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "manage-filter-empty-light.png",
+    "content": "manage-filter-empty-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8ff9b8c8cbce3f7c5137ffa291d834474d43fc5b8e15e6c3fbcf5893ba2f952a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "skills-error-light",
+    "reference": "MB5Yx",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "skills-error-light.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8ff9b8c8cbce3f7c5137ffa291d834474d43fc5b8e15e6c3fbcf5893ba2f952a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills",
+    "overflow": false
+  },
+  {
+    "name": "manage-error-light",
+    "reference": "MB5Yx",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "manage-error-light.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "8ff9b8c8cbce3f7c5137ffa291d834474d43fc5b8e15e6c3fbcf5893ba2f952a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-current-dark",
+    "reference": "IbcKi",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "manage-current-dark.png",
+    "content": "manage-current-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "d1f13adf6966eb18b802279ab4fdfbd1c7d96034b696671552a5e920e41d67d4",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-available-dark",
+    "reference": "IbcKi",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "manage-available-dark.png",
+    "content": "manage-available-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "d1f13adf6966eb18b802279ab4fdfbd1c7d96034b696671552a5e920e41d67d4",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-updating-dark",
+    "reference": "IbcKi",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "manage-updating-dark.png",
+    "content": "manage-updating-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "d1f13adf6966eb18b802279ab4fdfbd1c7d96034b696671552a5e920e41d67d4",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-error-dark",
+    "reference": "IbcKi",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "manage-error-dark.png",
+    "content": "manage-error-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "d1f13adf6966eb18b802279ab4fdfbd1c7d96034b696671552a5e920e41d67d4",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-disabled-dark",
+    "reference": "IbcKi",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "manage-disabled-dark.png",
+    "content": "manage-disabled-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "d1f13adf6966eb18b802279ab4fdfbd1c7d96034b696671552a5e920e41d67d4",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "manage-filter-empty-dark",
+    "reference": "IbcKi",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "manage-filter-empty-dark.png",
+    "content": "manage-filter-empty-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "d1f13adf6966eb18b802279ab4fdfbd1c7d96034b696671552a5e920e41d67d4",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "skills-error-dark",
+    "reference": "IbcKi",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "skills-error-dark.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "d1f13adf6966eb18b802279ab4fdfbd1c7d96034b696671552a5e920e41d67d4",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills",
+    "overflow": false
+  },
+  {
+    "name": "manage-error-dark",
+    "reference": "IbcKi",
+    "viewport": {
+      "width": 402,
+      "height": 1189
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "manage-error-dark.png",
+    "content": null,
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "d1f13adf6966eb18b802279ab4fdfbd1c7d96034b696671552a5e920e41d67d4",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/skills?skill=__import",
+    "overflow": false
+  },
+  {
+    "name": "import-desktop-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "import-desktop-light.png",
+    "content": "import-desktop-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "import-error-desktop-light",
+    "reference": "lRC5W",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "import-error-desktop-light.png",
+    "content": "import-error-desktop-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "0bdb1d9ab1bd3de07d00f95316f5862ff1e104cc12a0cc8c2e4720cf84acdc3c",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "import-mobile-light",
+    "reference": "djknR",
+    "viewport": {
+      "width": 402,
+      "height": 422
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "import-mobile-light.png",
+    "content": "import-mobile-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "dea844e5f7d1cb0492384352757b2d38f67e7410609c7386c6cba1278f54ef92",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "import-error-mobile-light",
+    "reference": "djknR",
+    "viewport": {
+      "width": 402,
+      "height": 422
+    },
+    "theme": "light",
+    "density": "comfortable",
+    "actual": "import-error-mobile-light.png",
+    "content": "import-error-mobile-light-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "dea844e5f7d1cb0492384352757b2d38f67e7410609c7386c6cba1278f54ef92",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "import-desktop-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "import-desktop-dark.png",
+    "content": "import-desktop-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "import-error-desktop-dark",
+    "reference": "KwkJs",
+    "viewport": {
+      "width": 1440,
+      "height": 1250
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "import-error-desktop-dark.png",
+    "content": "import-error-desktop-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "27a2ada5c94fef64611c11959ef7dfd5f23abaeb515cdb2adc25c0c3c88c885a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "import-mobile-dark",
+    "reference": "MF4eF",
+    "viewport": {
+      "width": 402,
+      "height": 422
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "import-mobile-dark.png",
+    "content": "import-mobile-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "5e55c5c080dc57b7cebf7b7a6c6bc4e2095f0b85e917a4a117440e6965be140a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  },
+  {
+    "name": "import-error-mobile-dark",
+    "reference": "MF4eF",
+    "viewport": {
+      "width": 402,
+      "height": 422
+    },
+    "theme": "dark",
+    "density": "comfortable",
+    "actual": "import-error-mobile-dark.png",
+    "content": "import-error-mobile-dark-content.png",
+    "fixture": "fixture.json",
+    "indexSha256": "525eff597c5986e12da6076a55e0dd08cf165420c25b53c149775ccff9e71d87",
+    "referencePngSha256": "5e55c5c080dc57b7cebf7b7a6c6bc4e2095f0b85e917a4a117440e6965be140a",
+    "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+    "url": "http://127.0.0.1:44863/p/fixture-repo/workflows/fix-and-verify",
+    "overflow": false
+  }
+]

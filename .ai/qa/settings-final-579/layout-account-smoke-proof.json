@@ -1,0 +1,11 @@
+{
+  "sourceCommit": "11e224698236ed4aeac663d02e974d41ce8ad545",
+  "checkedAt": "2026-09-12T12:20:09.600Z",
+  "checks": [
+    "Named-account Rename persists through the real API and original label restored through UI.",
+    "Remove opens existing confirmation; Cancel preserves the registered account.",
+    "Identity details stay closed during account management.",
+    "Model-agent chooser changes editor only; persisted runner and models remain unchanged."
+  ],
+  "disclosure": "Real isolated APIs, no response mocks during these checks; no authentication, identity read, account removal or model mutation performed."
+}

@@ -1,0 +1,121 @@
+
+> test
+> vitest run packages/web/src/components/project-groups.test.tsx packages/web/src/components/task-quick-list.test.tsx
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/fc764c2b-4841-49fc-93e3-bbb6f8775207
+
+ ❯ |web| src/components/task-quick-list.test.tsx (50 tests | 1 failed) 745ms
+     ✓ renders the buckets in the mockup order with their runs 47ms
+     ✓ links every row to its task 97ms
+     ✓ names a row by its auto-summary once one exists — the title, the tooltip and the PR chip agree 26ms
+     ✓ shows the diff pair when a turn recorded one, and nothing when none exists 31ms
+     ✓ flags a repointed-worktree diff so the sidebar number explains itself (#751) 8ms
+     ✓ marks the row for the open task active, from the route 7ms
+       ✓ paints one dot per row, from deriveAttention 11ms
+       ✓ pulses the transitioning rows only 4ms
+       ✓ appears only when the run has a pullRequestUrl, and opens it 15ms
+       ✓ also appears for a referenced PR — the task worked ON it (#407) 13ms
+       ✓ is a sibling of the row link, not nested inside it 7ms
+       ✓ leads the row and takes the age slot, spelling the number rather than the word "PR" (#788) 3ms
+       ✓ carries the issue when no PR exists yet — the number the title prefix was about 13ms
+       ✓ still paints a number it cannot link — an inert chip beats losing the reference 5ms
+       ✓ drops the NNN: prefix the chip is already showing, and keeps the full title on hover 5ms
+       ✓ keeps the prefix when it is a DIFFERENT number from the chip — two facts, not one 5ms
+       ✓ keeps a leading number that is not a reference at all 5ms
+       ✓ gives the title a floor and makes the diff pair the element that drops 5ms
+       ✓ gives the collapsed variant tile the same floor 6ms
+       × shows a compact age, from finishedAt once the run is over 15ms
+       ✓ shows the queue position instead of an age for queued runs 9ms
+       ✓ keeps the queue position even when the row has a reference chip 5ms
+       ✓ still drops the age for a referenced row that is not queued 4ms
+       ✓ collapses into one tile with the shared title and an ×N count 17ms
+       ✓ expands and collapses on click, showing a lettered row per variant 35ms
+       ✓ offers a ⚖ compare link beside the tile, pointing at /compare/:groupId 8ms
+       ✓ omits unknown token directions while preserving independently visible cost 15ms
+       ✓ gates variant token directions and cost independently 12ms
+       ✓ renders pinned runs under a Pinned header at the top, once 7ms
+       ✓ offers Pin on an ordinary row and Unpin on a pinned one, reporting the state asked for 23ms
+       ✓ stays reachable on a device that cannot hover — the drawer has no pointer 19ms
+       ✓ paints no pin control at all when no container wired one 3ms
+       ✓ paints none in the archived view either — `groupRuns` never reads the pin there 3ms
+       ✓ keeps the status dot on a pinned row — Pinned says where it is, not how it is 5ms
+       ✓ shows counts and which view is on 10ms
+       ✓ reports the view the user picked 13ms
+       ✓ renders no count for an empty bucket 9ms
+       ✓ flags waiting runs on the Active tab only while you are looking elsewhere 11ms
+       ✓ shows the archived view when asked 7ms
+       ✓ says there are no tasks, without inventing any 7ms
+       ✓ says the archive is empty 2ms
+     ✓ renders nothing until /api/v1/runs answers — no invented rows, no premature empty state 14ms
+     ✓ renders the live run list 19ms
+     ✓ lights the row for the task open at /tasks/:id, including its child routes 15ms
+     ✓ pins a row through POST /pin, in the active project scope (#935) 74ms
+     ✓ drives the sidebar Active/Archived view 44ms
+   ✓ identifies owned worker rows without nested links or changing ordinary titles 12ms
+   ✓ places a worker below its parent even when their statuses put them in different buckets 4ms
+   ✓ keeps an independently pinned worker in Pinned when its parent is recent 5ms
+   ✓ shows both tracker references on the separate badge line 6ms
+ ❯ |web| src/components/project-groups.test.tsx (16 tests | 1 failed) 898ms
+     ✓ caps an expanded group at 10 rows and links More… at that project’s tasks pane  332ms
+     ✓ orders groups by lastOpenedAt and only fetches the expanded one 73ms
+     ✓ shows destinations for the selected project and keeps every other project reachable 81ms
+     ✓ gates the selected project's GitHub destination on its own forge 61ms
+     ✓ preserves the automations capability gate (true) when switching projects 71ms
+     ✓ preserves the automations capability gate (false) when switching projects 50ms
+     ✓ round-trips a collapse through this browser’s storage, never the server 42ms
+     ✓ starts from the stored collapse rather than the active-project default 9ms
+     × badges a group with its needs-you count 27ms
+     ✓ the boot group reads the 'default' cache entry — the one the stream patches 18ms
+     ✓ keeps pinned rows past the 10-row cap, and spends the budget on the rest (#935) 28ms
+     ✓ pins through the row's OWN project, not the one the URL names (#935) 23ms
+     ✓ retains the pin on failed unpin, explains retry, then moves the row on success 49ms
+     ✓ renders a missing project greyed and inert, with no nav behind it 9ms
+     ✓ marks no project as selected on a page that belongs to none 13ms
+     ✓ still marks the scoped project on a project page 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/components/project-groups.test.tsx > ProjectGroups > badges a group with its needs-you count
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/components/project-groups.test.tsx:234:108
+    232|       expect(group('cezar').querySelector('[data-slot="project-attenti…
+    233|     )
+    234|     expect(group('cezar').querySelector('[data-slot="project-attention…
+       |                                                                                                            ^
+    235|     expect(group('cezar').querySelector('[data-slot="project-group-mor…
+    236|     // Nothing waiting, nothing to badge — a "0" here is noise, not in…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |web| src/components/task-quick-list.test.tsx > TaskQuickList > ages and queue positions > shows a compact age, from finishedAt once the run is over
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/components/task-quick-list.test.tsx:383:130
+    381|       })
+    382|       expect(metadataText(row('old'))).toBe('Old2h')
+    383|       expect(Array.from(row('old').querySelectorAll('span')).find(el =…
+       |                                                                                                                                  ^
+    384|       expect(metadataText(row('new'))).toBe('New4m')
+    385|     })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 64 passed (66)
+   Start at  13:16:31
+   Duration  4.00s (transform 1.99s, setup 0ms, import 3.41s, tests 1.64s, environment 2.16s)

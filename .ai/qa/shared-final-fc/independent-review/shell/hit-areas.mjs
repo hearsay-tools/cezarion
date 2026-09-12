@@ -1,0 +1,11 @@
+import {chromium} from '/tmp/cez160-webkit/node_modules/playwright/index.mjs';
+import {writeFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const b=await chromium.launch({headless:true,executablePath:'/home/agent/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome',args:['--no-sandbox']});const p=await b.newPage({viewport:{width:402,height:900},reducedMotion:'reduce'});
+await p.goto('http://127.0.0.1:44864/p/iac/workflows');await p.locator('[data-slot="wb-step-actions"]').first().waitFor();
+const menu=p.getByRole('button',{name:'Open menu',exact:true}),box=await menu.boundingBox();assert.equal(box.width,20);assert.equal((await p.locator('[data-slot="mobile-top-bar"]').boundingBox()).height,52);
+await p.mouse.click(box.x-10,box.y+box.height/2);await p.locator('[data-slot="mobile-nav-drawer"]').waitFor();await p.keyboard.press('Escape');await p.waitForTimeout(700);
+const action=p.locator('[data-slot="wb-step-actions"]').first(),a=await action.boundingBox();assert.equal(a.height,26);assert.equal(a.width,26);await p.mouse.click(a.x-5,a.y+a.height/2);await p.locator('[data-slot="wb-step-remove"]').waitFor();await p.keyboard.press('Escape');
+await p.setViewportSize({width:1440,height:1120});await p.evaluate(async()=>{await document.fonts.load('12px "IBM Plex Mono"');await document.fonts.load('12px "JetBrains Mono Variable"');await document.fonts.ready;});
+const fonts=await p.evaluate(()=>({body:getComputedStyle(document.body).fontFamily,branch:getComputedStyle(document.querySelector('[data-slot="project-branch"]')).fontFamily,loaded:[...document.fonts].filter(f=>f.status==='loaded').map(f=>({family:f.family,weight:f.weight}))}));
+writeFileSync('.ai/qa/runtime-verified/independent-review/shell/hit-areas.json',JSON.stringify({mobileHeaderHeight:52,menuLayoutWidth:20,menuGutterClickOpenedDrawer:true,workflowActionLayout:26,actionGutterClickOpenedMenu:true,fonts},null,2));await b.close();

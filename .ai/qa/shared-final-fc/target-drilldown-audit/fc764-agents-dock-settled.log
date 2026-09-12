@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /tmp/fc764-final-integrated/packages/web/e2e
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  14:30:22
+   Duration  7.12s (transform 40ms, setup 0ms, import 54ms, tests 6.94s, environment 0ms)
+

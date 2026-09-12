@@ -1,0 +1,79 @@
+
+ RUN  v4.1.10 /tmp/fc764-final-integrated/packages/web/e2e
+
+ ❯ |e2e| agents-dock.e2e.ts (4 tests | 3 failed) 79040ms
+     × a row opens the drill-down sheet with that agent’s output and nobody else’s 25612ms
+     × the long agent panel scrolls, detaches from follow-tail, and exposes the jump pill 25291ms
+     × collapses to a one-line odometer 25324ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |e2e| agents-dock.e2e.ts > the Agents dock against a replayed fan-out > a row opens the drill-down sheet with that agent’s output and nobody else’s
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="subagent-sheet"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:180:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-agents-dock-2862776 wait --fn document.querySelector('[data-slot="subagent-sheet"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:180:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 2863228, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  |e2e| agents-dock.e2e.ts > the Agents dock against a replayed fan-out > the long agent panel scrolls, detaches from follow-tail, and exposes the jump pill
+Error: cezar e2e: agent-browser wait --fn document.querySelector('[data-slot="subagent-sheet"] [data-slot="transcript-viewport"]') !== null failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:212:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-agents-dock-2862776 wait --fn document.querySelector('[data-slot="subagent-sheet"] [data-slot="transcript-viewport"]') !== null --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:212:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 2864469, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  |e2e| agents-dock.e2e.ts > the Agents dock against a replayed fan-out > collapses to a one-line odometer
+Error: cezar e2e: agent-browser wait --fn document.querySelectorAll('[data-slot="agent-item"]').length === 0 failed
+ ❯ AgentBrowser.run agent-browser.ts:157:13
+    155|       })
+    156|     } catch (cause) {
+    157|       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} fail…
+       |             ^
+    158|     }
+    159|     const parsed = JSON.parse(stdout) as { success: boolean; data?: un…
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:256:13
+
+Caused by: Error: Command failed: /tmp/cez-e2e-86/agent-browser --session e2e-agents-dock-2862776 wait --fn document.querySelectorAll('[data-slot="agent-item"]').length === 0 --json
+ ❯ AgentBrowser.run agent-browser.ts:150:16
+ ❯ AgentBrowser.waitForFunction agent-browser.ts:209:10
+ ❯ agents-dock.e2e.ts:256:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { status: 1, signal: null, output: [ null, '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', '' ], pid: 2865960, stdout: '{"success":false,"data":null,"error":"Wait timed out after 25000ms"}\n', stderr: '' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 1 passed (4)
+   Start at  14:27:22
+   Duration  79.23s (transform 45ms, setup 0ms, import 59ms, tests 79.04s, environment 0ms)
+

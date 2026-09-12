@@ -1,0 +1,339 @@
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/579bfd25-ba83-4860-a925-83649ee5a6d2
+
+ ✓ |web| src/test/fixture-serve-env.test.ts (5 tests) 58ms
+ ✓ |web| src/components/command-palette.test.tsx (57 tests) 3186ms
+     ✓ opens on '⌘K'  302ms
+ ✓ |web| src/components/app-shell.test.tsx (81 tests) 3283ms
+ ✓ |web| src/routes/settings/projects-section.test.tsx (25 tests) 3696ms
+       ✓ removes a tag from its chip, and with Backspace on an empty field  303ms
+ ✓ |web| src/routes/settings/accounts-section.test.tsx (35 tests) 3929ms
+     ✓ lists the discovered account with no edit controls at all  336ms
+ ✓ |web| src/routes/tasks-overview.test.tsx (75 tests) 5607ms
+     ✓ opens the keyboard actions menu and uses the existing archive handler  529ms
+ ✓ |web| src/routes/task-thread/task-thread.test.tsx (70 tests) 5728ms
+     ✓ keeps provider authorization recovery visible after the run reaches done  441ms
+     ✓ marking unread inside the open thread is NOT re-stamped by the auto-read effect  313ms
+ ✓ |web| src/routes/task-thread/run-header.test.tsx (88 tests) 8145ms
+     ✓ pencil flips the h1 into an input; Enter PATCHes the trimmed title exactly once  327ms
+   ✓ confirms archive before retiring an active-list task  333ms
+ ✓ |web| src/components/composer/composer.test.tsx (78 tests) 3560ms
+ ✓ |web| src/routes/global-tasks.test.tsx (52 tests) 8713ms
+     ✓ lists every project’s tasks and links each into its OWN project  411ms
+     ✓ searches across title, project and branch  671ms
+       ✓ carries the search box into the URL, debounced  389ms
+       ✓ clears the grouping too — Clear is the one way back to a plain list  308ms
+       ✓ opens on hover, and stays open while the pointer travels into it  485ms
+       ✓ closes once the pointer leaves both  351ms
+     ✓ renders the server’s error rather than an empty table  1030ms
+ ✓ |web| src/routes/task-thread/follow-up-engine.test.tsx (32 tests) 4520ms
+     ✓ defaults the effort pill to the run pin and omits it when untouched (#45)  353ms
+     ✓ drops a previous run's effort pick when the thread switches runs (#45)  454ms
+     ✓ clears an inherited effort when a model change makes it unsupported  342ms
+     ✓ sends the chosen runner + model through to /continue  419ms
+ ✓ |web| src/routes/settings/agents-section.test.tsx (26 tests) 3422ms
+     ✓ keeps the anchored Providers section in an explicit disclosure  307ms
+     ✓ keeps a saved disconnected runner selected while disabling its runner and model controls  396ms
+ ✓ |web| src/routes.test.tsx (129 tests) 9895ms
+     ✓ with the registry unavailable, handles a saved location for the boot project  1048ms
+     ✓ with the registry unavailable, handles a saved location for another project  1045ms
+     ✓ falls through the default alias when health and registry both fail  2066ms
+     ✓ a registry error still resolves the alias via health instead of loading forever  1033ms
+     ✓ with the registry errored and no health either, the alias mounts the scope rather than spin  1036ms
+ ✓ |web| src/api/queries.test.tsx (60 tests) 4528ms
+     ✓ surfaces an ApiError instead of synthesizing disconnected providers  1036ms
+     ✓ surfaces an ApiError rather than pretending it has data  1037ms
+ ✓ |web| src/routes/workflows/workflows.test.tsx (24 tests) 4112ms
+     ✓ a cold /workflows opens the repo’s first saved workflow (built-ins skipped)  344ms
+     ✓ makes Save the sole primary toolbar action and keeps destructive emphasis inside confirmation  309ms
+     ✓ adds a selected skill from the Add step picker without changing the draft on cancel  655ms
+     ✓ remove drops exactly that card  383ms
+ ✓ |web| src/routes/repo-git/repo-git.test.tsx (29 tests) 3817ms
+     ✓ renders the header, the segment tabs and the working-tree diff from /api/v1/repo/changes  596ms
+     ✓ a clean tree renders the honest empty state  499ms
+ ✓ |web| src/routes/skills.test.tsx (22 tests) 2935ms
+     ✓ renders project-first with bold project rows and source tags (#377)  461ms
+     ✓ keeps the newer apply result when a slower check response arrives afterward  497ms
+ ✓ |web| src/routes/inbox.test.tsx (41 tests) 3692ms
+     ✓ a multi-backend host offers the runner pill, and the pick reaches the POST  386ms
+     ✓ shared engine pills filter effort and drop a pick unsupported by the next model  719ms
+ ✓ |web| src/api/run-history.test.tsx (7 tests) 3668ms
+     ✓ falls back to the protected full replay when either optimized request cannot load  1037ms
+     ✓ fallback jump preserves full replay and its live SSE when history is unavailable  1044ms
+     ✓ fallback jump preserves full replay and its live SSE when context is unavailable  1038ms
+ ✓ |web| src/routes/new-task-project.test.tsx (5 tests) 2956ms
+     ✓ is preselected from the URL scope and lists the registry with branches  967ms
+     ✓ re-resolves the skills, workflows and config pickers against the new project  643ms
+     ✓ keeps drafts isolated per project — one composer never leaks into the other  609ms
+     ✓ submits to the SELECTED project and clears only that project’s draft text  470ms
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > updates enablement immediately and restores the confirmed state when a write fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > updates enablement immediately and restores the confirmed state when a write fails
+The current testing environment is not configured to support act(...)
+
+ ✓ |web| src/components/app-shell-container.test.tsx (34 tests) 2678ms
+     ✓ renders the inbox badge from /api/v1/todos  376ms
+     ✓ keeps the shared archive filter reachable in Tools for a multi-project session tree  499ms
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a successful retry when a pending enablement write fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a newer runtime incident from the provider-status cache when a toggle fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a newer runtime incident from the provider-status cache when a toggle fails
+The current testing environment is not configured to support act(...)
+
+ ✓ |web| src/routes/settings/provider-settings.test.tsx (20 tests) 1955ms
+     ✓ presents discovery truth, enablement, and runtime recovery without hiding diagnostics  491ms
+ ✓ |web| src/routes/task-git/task-files.test.tsx (11 tests) 2192ms
+     ✓ renders the header with Files active, the root listing, and the select-a-file prompt  556ms
+     ✓ a text file previews with line numbers and Shiki tokens by extension  465ms
+ ✓ |web| src/routes/task-git/task-changes.test.tsx (18 tests) 2757ms
+     ✓ renders the run header with the Changes tab active and all tabs deep-linkable  560ms
+     ✓ gives the tree column its own bounded scroller, not the page’s  598ms
+ ✓ |web| src/routes/compare-variants.test.tsx (13 tests) 2786ms
+     ✓ renders a column per variant: letter, status pill, spend, --stat text, Progress excerpt  509ms
+     ✓ retries a failed group without losing the comparison URL  1167ms
+ ✓ |web| src/routes/settings/prompt-templates-section.test.tsx (16 tests) 2000ms
+ ✓ |web| src/routes/task-thread/run-relationships.test.tsx (14 tests) 1499ms
+ ✓ |web| src/routes/task-thread/markdown.test.tsx (22 tests) 1586ms
+     ✓ renders a ts fence as a code block with language chip and copy button, tokens on --syn-*  737ms
+ ✓ |web| src/routes/task-thread/review-panel.test.tsx (17 tests) 1693ms
+     ✓ renders the violet banner + panel ONLY while the run rests at review  417ms
+     ✓ shows the working spinner only during a live running turn, not while monitoring  359ms
+ ✓ |web| src/components/project-groups.test.tsx (16 tests) 1737ms
+     ✓ caps an expanded group at 10 rows and links More… at that project’s tasks pane  433ms
+ ✓ |web| src/components/tools-menu.test.tsx (24 tests) 1678ms
+ ✓ |web| src/routes/settings/project-location.test.tsx (7 tests) 1369ms
+     ✓ "Open with" lists the machine's apps, minus the agent CLIs  646ms
+     ✓ a pick opens the project folder through the server — the path never travels  355ms
+ ✓ |web| src/routes/settings/settings.test.tsx (22 tests) 1807ms
+ ✓ |web| src/routes/github/github-route-wiring.test.tsx (2 tests) 2360ms
+     ✓ /github → /github/issues/:n keeps the clicked hit  1664ms
+     ✓ /github/prs → /github/prs/:n keeps the clicked hit  694ms
+ ✓ |web| src/routes/settings/agent-config-section.test.tsx (8 tests) 952ms
+     ✓ renders read-only in hosted mode — no Save button  360ms
+ ✓ |web| src/routes/task-thread/thread-items.test.tsx (36 tests) 1117ms
+ ✓ |web| src/routes/settings/resources-section.test.tsx (10 tests) 1260ms
+     ✓ links workspace limits to the per-project controls  331ms
+ ✓ |web| src/routes/settings/project-general.test.tsx (8 tests) 969ms
+     ✓ removes the project after a confirm, then leaves the URL that just stopped resolving  389ms
+ ✓ |web| src/components/diff/diff.test.tsx (19 tests) 1257ms
+     ✓ shows the aggregate ± stat across files  409ms
+ ✓ |web| src/components/clone-project-dialog.test.tsx (6 tests) 724ms
+     ✓ previews <projectsDir>/<repo> from the typed url and posts the trimmed reference  364ms
+ ✓ |web| src/api/global-events.test.tsx (49 tests) 1254ms
+     ✓ refreshes the cross-project index from ANOTHER project’s run event  412ms
+     ✓ coalesces a burst of run events into ONE index refresh  437ms
+ ✓ |web| src/components/task-quick-list.test.tsx (50 tests) 1043ms
+ ✓ |web| src/routes/new-task.test.tsx (116 tests) 23289ms
+     ✓ keeps run options in a disclosure separate from prompt, agent selection, and submission  944ms
+     ✓ filters effort by model and resets an unsupported pick before submission  646ms
+     ✓ shows the runner pill with >1 backend, and switching runner swaps the model presets  316ms
+     ✓ picking the SELECTED row again clears it — for a skill and for a workflow  460ms
+     ✓ a cleared pill stays cleared for the NEXT task, and the started one is not remembered  309ms
+     ✓ posts worktree:false after opt-out for every single-step source shape  569ms
+     ✓ single-backend hosts omit `runner` when it matches the server default  301ms
+     ✓ uses the active project default rather than the boot project health default  303ms
+     ✓ ?skill=&ref= prefill: ref becomes the text, the skill is selected — beating the draft  314ms
+     ✓ submit in plan mode POSTs /api/v1/plan (never /api/v1/runs) and opens the review overlay  417ms
+     ✓ a degraded answer shows the fallback note instead of a rationale  344ms
+     ✓ ✕ removes a step and ↑/↓ reorder (the touch-honest path)  305ms
+     ✓ asks for the name in a dialog and posts { name, steps } — no overwrite key uninvited  319ms
+     ✓ a 409 opens the overwrite confirm; Yes retries with overwrite: true  471ms
+     ✓ NEVER overwrites a draft the user already typed  311ms
+     ✓ sends `default` explicitly when the repo points elsewhere — not an absent key  305ms
+     ✓ sends the picked account on the wire  321ms
+     ✓ drops an account belonging to another runner when the runner switches  313ms
+   ✓ a late plan start cannot clear a remounted draft  347ms
+ ✓ |web| src/routes/task-thread/ask-card.test.tsx (17 tests) 708ms
+ ✓ |web| src/routes/settings/accounts-defaults.test.tsx (9 tests) 1020ms
+     ✓ survives a server that has never heard of agent defaults  349ms
+ ✓ |web| src/components/reference-chip.test.tsx (31 tests) 769ms
+ ✓ |web| src/components/add-project-dialog.test.tsx (10 tests) 975ms
+ ✓ |web| src/components/reference-status.test.tsx (20 tests) 1069ms
+ ✓ |web| src/lib/highlighter.test.ts (7 tests) 357ms
+ ✓ |web| src/components/composer/dictation.test.tsx (10 tests) 611ms
+ ✓ |web| src/routes/task-thread/session-transcript.test.tsx (14 tests) 692ms
+     ✓ renders the canonical entry primitives in document mode  357ms
+ ✓ |web| src/components/diff/diff-virtualize.test.tsx (9 tests) 771ms
+     ✓ gives no-wrap unified rows a width floor, so a size-contained row cannot shrink the horizontal scroll  342ms
+ ✓ |web| src/routes/settings/bookmarklets-section.test.tsx (9 tests) 614ms
+ ✓ |web| src/routes/task-thread/subagent-sheet.test.tsx (15 tests) 926ms
+ ✓ |web| src/routes/automations/automations.test.tsx (7 tests) 543ms
+   ✓ shows the saved trigger and enables an edited automation only when selected  394ms
+ ✓ |web| src/components/provider-banner-container.test.tsx (4 tests) 460ms
+ ✓ |web| src/routes/cross-project-task-navigation.test.tsx (2 tests) 962ms
+     ✓ reads the run from its own project when the row is clicked on the global Tasks page  863ms
+ ✓ |web| src/routes/settings/skills-section.test.tsx (5 tests) 667ms
+     ✓ links installation status to the boot project skill catalog  412ms
+ ✓ |web| src/routes/settings/worktrees-panel.test.tsx (6 tests) 699ms
+     ✓ opens a worktree through the discovered local folder target  400ms
+ ✓ |web| src/components/picker-pill.test.tsx (1 test) 365ms
+     ✓ keeps radio options selectable and renders a disabled status row  364ms
+ ✓ |web| src/lib/use-task-table-columns.test.tsx (5 tests) 584ms
+ ✓ |web| src/components/provider-banner.test.tsx (14 tests) 454ms
+ ✓ |web| src/routes/task-thread/step-rail.test.tsx (27 tests) 387ms
+ ✓ |web| src/routes/task-git/commit-list.test.tsx (6 tests) 766ms
+     ✓ stays flat exactly at the threshold  303ms
+ ✓ |web| src/components/ui/toaster.test.tsx (5 tests) 251ms
+ ✓ |web| src/routes/plan-review.test.tsx (1 test) 298ms
+ ✓ |web| src/components/engine-pills.test.ts (28 tests) 658ms
+ ✓ |web| src/routes/settings/notifications-section.test.tsx (8 tests) 567ms
+ ✓ |web| src/components/design-icons.test.tsx (3 tests) 423ms
+ ✓ |web| src/routes/task-thread/subagent-replay.test.tsx (4 tests) 462ms
+     ✓ shows each agent’s children in stream order, matching the fixture  452ms
+ ✓ |web| src/routes/settings/worktrees-section.test.tsx (4 tests) 387ms
+ ✓ |web| src/components/theme-toggle.test.tsx (8 tests) 369ms
+ ✓ |web| src/routes/task-thread/thread-scroller-virtualizer.test.tsx (1 test) 321ms
+     ✓ shifts measurements for history prepends, but not live appends  319ms
+ ✓ |web| src/routes/task-thread/thread-open-cards.test.tsx (4 tests) 342ms
+ ✓ |web| src/components/last-location-controller.test.tsx (9 tests) 271ms
+ ✓ |web| src/components/ghost-code-backdrop.test.tsx (7 tests) 223ms
+ ✓ |web| src/design-guardian.test.ts (15 tests) 205ms
+ ✓ |web| src/components/centered-state.test.tsx (11 tests) 336ms
+ ✓ |web| src/lib/use-now.test.tsx (2 tests) 227ms
+ ✓ |web| src/components/reference-conflict-action.test.tsx (4 tests) 386ms
+ ✓ |web| src/components/ui/button.test.tsx (14 tests) 334ms
+ ✓ |web| src/routes/task-thread/agents-dock.test.tsx (17 tests) 372ms
+ ✓ |web| src/routes/workspace-tools.test.tsx (3 tests) 361ms
+ ✓ |web| src/lib/project-router.test.tsx (12 tests) 221ms
+ ✓ |web| src/components/list-view.test.tsx (3 tests) 263ms
+ ✓ |web| src/lib/tasks-table.test.ts (80 tests) 73ms
+ ✓ |web| src/api/run-events.test.ts (24 tests) 63ms
+ ✓ |web| src/components/theme-provider.test.tsx (18 tests) 158ms
+ ✓ |web| src/components/zoomable-image.test.tsx (2 tests) 233ms
+ ✓ |web| src/components/diff-stat.test.tsx (8 tests) 92ms
+ ✓ |web| src/components/code-editor.test.tsx (7 tests) 93ms
+ ✓ |web| src/routes/task-thread/plan-dock.test.tsx (14 tests) 179ms
+ ✓ |web| src/routes/task-thread/thread-scroller.test.tsx (10 tests) 227ms
+ ✓ |web| src/lib/use-command-shortcut.test.tsx (38 tests) 56ms
+stderr | src/components/run-notifications.test.tsx > RunNotifications > a constructor that throws (Android Chrome) is swallowed — the courtesy never crashes the app
+[vitest] The vi.fn() mock did not use 'function' or 'class' in its implementation, see https://vitest.dev/api/vi#vi-spyon for examples.
+
+ ✓ |web| src/components/run-notifications.test.tsx (11 tests) 77ms
+ ✓ |web| src/lib/keyboard-inset.test.ts (23 tests) 27ms
+ ✓ |web| src/lib/global-tasks.test.ts (36 tests) 36ms
+ ✓ |web| src/api/project-scope-context.test.tsx (7 tests) 53ms
+ ✓ |web| src/components/diff/diff-fallback.test.tsx (2 tests) 66ms
+ ✓ |web| src/components/pill.test.tsx (10 tests) 81ms
+ ✓ |web| src/lib/workflow-builder.test.ts (28 tests) 31ms
+ ✓ |web| src/lib/task-groups.test.ts (85 tests) 39ms
+ ✓ |web| src/routes/github/github-filter.test.ts (16 tests) 24ms
+ ✓ |web| src/api/events.test.ts (45 tests) 24ms
+ ✓ |web| src/lib/prompt-templates.test.ts (47 tests) 30ms
+ ✓ |web| src/routes/task-thread/run-actions.test.ts (74 tests) 51ms
+ ✓ |web| src/routes/task-git/file-tree.test.ts (7 tests) 44ms
+ ✓ |web| src/routes/task-thread/run-reconcile.test.ts (23 tests) 87ms
+ ✓ |web| src/api/client.test.ts (83 tests) 65ms
+ ✓ |web| src/lib/theme.test.ts (39 tests) 63ms
+ ✓ |web| src/routes/task-thread/subagent-dock.test.ts (46 tests) 38ms
+ ✓ |web| src/components/status-dot.test.tsx (9 tests) 127ms
+ ✓ |web| src/lib/provider-status.test.ts (35 tests) 38ms
+ ✓ |web| src/lib/utils.test.ts (26 tests) 37ms
+ ✓ |web| src/lib/project-tags.test.ts (9 tests) 40ms
+ ✓ |web| src/routes/new-task-form.test.ts (44 tests) 16ms
+ ✓ |web| src/lib/unified-diff.test.ts (8 tests) 13ms
+ ✓ |web| src/lib/skills.test.ts (50 tests) 31ms
+ ✓ |web| src/routes/task-thread/thread-state.test.ts (81 tests) 45ms
+ ✓ |web| src/components/directional-usage.test.tsx (3 tests) 89ms
+ ✓ |web| src/lib/attention.test.ts (55 tests) 12ms
+ ✓ |web| src/routes/task-thread/thread-groups.test.ts (38 tests) 17ms
+ ✓ |web| src/lib/git-actions.test.ts (37 tests) 12ms
+ ✓ |web| src/components/diff/parse-patch.test.ts (13 tests) 17ms
+ ✓ |web| src/components/diff/word-diff.test.ts (9 tests) 8ms
+ ✓ |web| src/lib/github-task.test.ts (36 tests) 37ms
+ ✓ |web| src/api/ws.test.ts (12 tests) 21ms
+ ✓ |web| src/components/diff/diff-scroll.test.ts (13 tests) 7ms
+ ✓ |web| src/lib/task-columns.test.ts (6 tests) 6ms
+ ✓ |web| src/lib/notifications.test.ts (20 tests) 14ms
+ ✓ |web| src/lib/format.test.ts (28 tests) 9ms
+ ✓ |web| src/routes/settings/agent-descriptors.test.ts (5 tests) 11ms
+ ✓ |web| src/lib/use-document-title.test.ts (7 tests) 24ms
+ ✓ |web| src/components/nav-items.test.ts (32 tests) 15ms
+ ✓ |web| src/routes/task-thread/thread-scroll.test.ts (21 tests) 12ms
+ ✓ |web| src/lib/read-state.test.ts (20 tests) 9ms
+ ✓ |web| src/components/composer/composer-text.test.ts (15 tests) 7ms
+ ✓ |web| src/lib/appearance.test.ts (6 tests) 12ms
+ ✓ |web| src/routes/new-task-plan.test.ts (35 tests) 10ms
+ ✓ |web| src/routes/new-task-params.test.ts (17 tests) 19ms
+ ✓ |web| src/lib/bookmarklet.test.ts (11 tests) 17ms
+ ✓ |web| src/lib/use-submit-shortcut.test.ts (21 tests) 11ms
+ ✓ |web| src/lib/github-list-width.test.ts (14 tests) 17ms
+ ✓ |web| src/routes/new-task-draft.test.ts (13 tests) 11ms
+ ✓ |web| src/components/composer/composer-attachments.test.ts (28 tests) 21ms
+ ✓ |web| src/vite-config.test.ts (2 tests) 4ms
+ ✓ |web| src/routes/new-task-autostart.test.ts (9 tests) 5ms
+ ✓ |web| src/lib/sidebar-width.test.ts (18 tests) 48ms
+ ✓ |web| src/lib/provider-auth-alert.test.ts (5 tests) 6ms
+ ✓ |web| src/lib/token-metrics.test.ts (6 tests) 4ms
+ ✓ |web| src/api/contract-pipeline.test.ts (2 tests) 8ms
+ ✓ |web| src/routes/task-git/worktree-files.test.ts (5 tests) 6ms
+ ✓ |web| src/lib/last-location.test.ts (23 tests) 6ms
+ ✓ |web| src/routes/github/hand-to-agent-draft.test.ts (8 tests) 7ms
+ ✓ |web| src/routes/task-thread/active-provider.test.ts (4 tests) 5ms
+ ✓ |web| src/routes/task-thread/ask-answer.test.ts (18 tests) 9ms
+ ✓ |web| src/lib/sidebar-collapse.test.ts (10 tests) 6ms
+ ✓ |web| src/routes/github/github.test.tsx (153 tests) 42098ms
+   ✓ /github/prs/:n/changes renders PR-only file review navigation and completeness  484ms
+     ✓ shows authoritative merge state and confirms the reviewed head on /github/prs/137/changes  494ms
+     ✓ a runner + model pick rides the POST alongside the workflow routing  562ms
+     ✓ switching backend resets the model pick — the presets are per runner  517ms
+     ✓ the pick survives switching to another issue (it is a way of working, not a property of one item)  448ms
+     ✓ disables click and shortcut starts with no connected provider while browsing and editing stay live  364ms
+     ✓ posts the picked account as agentProfile  327ms
+     ✓ sends the discovered account explicitly when it is picked over the project’s selection  352ms
+     ✓ drops the account when the agent changes  412ms
+     ✓ the skills dropdown is project-first with bold project rows (#377), and keeps selection visible as chips  384ms
+     ✓ nothing selected → quick-task, and the queued affordance links the new run  323ms
+     ✓ skills without a workflow become the steps chain (spec 008)  319ms
+     ✓ a run started while ui-state is unavailable skips the bump rather than wiping the map  302ms
+     ✓ a repeat hand-off pre-selects the previous workflow + skills on a fresh mount  493ms
+     ✓ deselecting the skill takes the auto-applied text back out again, leaving the reference  309ms
+     ✓ marks Assigned to me active only when the viewer is the sole assignee, including manual selection  346ms
+   ✓ selects multiple assignees and retains filter chrome during refresh  322ms
+   ✓ does not restore a stale board selection after refresh returns projects=undefined  331ms
+     ✓ searches exact numeric 4507 despite an open substring match  553ms
+     ✓ searches exact numeric #4507 despite an open substring match  569ms
+     ✓ reports exact lookup unavailable alongside local substring rows  558ms
+     ✓ reports exact lookup empty alongside local substring rows  562ms
+     ✓ shows refresh failure beside cached hits and recovers with local matches false  663ms
+     ✓ shows refresh failure beside cached hits and recovers with local matches true  672ms
+     ✓ hides old hits immediately on change to Stream and retains URL-selected detail  1670ms
+     ✓ hides old hits immediately on change to another query and retains URL-selected detail  1573ms
+     ✓ hides old hits immediately on change to 4508 and retains URL-selected detail  1523ms
+     ✓ hides old hits immediately on change to  and retains URL-selected detail  1647ms
+     ✓ hydrates searched PR checks within 100 numbers with selected detail null  1130ms
+     ✓ hydrates searched PR checks within 100 numbers with selected detail 9999  1251ms
+     ✓ finds a merged PR the open list never contained — the bug in #730  530ms
+     ✓ keeps a clicked cross-state hit open across the /github → /github/issues/:n hop  541ms
+     ✓ keeps a clicked cross-state hit open across the /github/prs → /github/prs/:n hop  551ms
+     ✓ opens a searched item in the detail pane, like any listed row  448ms
+     ✓ does not shell out while the local filter still matches something  847ms
+     ✓ reports an unavailable search with the server’s own reason  478ms
+     ✓ drops the empty-state wrapper entirely once hits arrive, so its padding leaves no gap (#838)  467ms
+     ✓ states plainly that nothing matched in ANY state when the search comes back empty  460ms
+     ✓ stops rendering hits once the local filter matches the query again (#856)  652ms
+     ✓ never repeats a listed item under "Found on GitHub" mid-debounce either (#856)  495ms
+     ✓ says the search failed when the REQUEST failed, not just when the driver degraded  386ms
+     ✓ uses the full local narrow to trigger search, then ANDs labels and board with OR assignees  596ms
+     ✓ keeps the selected remote detail when filters hide its row  458ms
+     ✓ refresh retries an incomplete search without losing the active filter  446ms
+     ✓ does not claim exhaustive absence when filters discard a truncated search window  417ms
+     ✓ reports incomplete search board metadata without clearing query or selected board  418ms
+   ✓ debounces to the settled query and never searches after clearing to a label-only narrow  934ms
+
+ Test Files  158 passed (158)
+      Tests  3693 passed (3693)
+   Start at  13:37:51
+   Duration  45.11s (transform 17.62s, setup 0ms, import 96.10s, tests 216.11s, environment 94.90s)

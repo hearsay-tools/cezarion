@@ -1,0 +1,698 @@
+{
+  "penSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+  "headers": [
+    {
+      "frame": "mZMB8",
+      "frameName": "1C. Desktop light \u00b7 Start",
+      "node": "MVOM5",
+      "name": "Workspace header",
+      "height": 72
+    },
+    {
+      "frame": "Pusy6",
+      "frameName": "1D. Desktop dark \u00b7 Start",
+      "node": "BHn6U",
+      "name": "Workspace header",
+      "height": 72
+    },
+    {
+      "frame": "C9o2u",
+      "frameName": "Cezarion \u00b7 Shared components",
+      "node": "DO42o",
+      "name": "Shell / Desktop header",
+      "height": 72
+    },
+    {
+      "frame": "cgGWE",
+      "frameName": "2A. Task session \u00b7 Desktop light",
+      "node": "xGZxU",
+      "name": "Session breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "igwKt",
+      "frameName": "2B. Task session \u00b7 Desktop dark",
+      "node": "UQ4jY",
+      "name": "Session breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "HYltX",
+      "frameName": "3A. Expanded activity \u00b7 Desktop light",
+      "node": "uLiBn",
+      "name": "Session breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "r7humJ",
+      "frameName": "3B. Expanded activity \u00b7 Desktop dark",
+      "node": "r49f2",
+      "name": "Session breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "HcGEf",
+      "frameName": "4A. Project tasks \u00b7 Desktop light",
+      "node": "LTJn1",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "FsD5O",
+      "frameName": "4B. Project tasks \u00b7 Desktop dark",
+      "node": "WZeSv",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "c1EQa",
+      "frameName": "5A. All tasks \u00b7 Desktop light",
+      "node": "TcDK8",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "T5Xpa",
+      "frameName": "5B. All tasks \u00b7 Desktop dark",
+      "node": "DxTMY",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "rUusA",
+      "frameName": "6A. Git \u00b7 Changes \u00b7 Desktop light",
+      "node": "dwiQW",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "qxKBh",
+      "frameName": "6B. Git \u00b7 Changes \u00b7 Desktop dark",
+      "node": "Zu0z4",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "FZ2Hk",
+      "frameName": "7A. Git \u00b7 Commits \u00b7 Desktop light",
+      "node": "MHMS0",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "g2Jzw",
+      "frameName": "7B. Git \u00b7 Commits \u00b7 Desktop dark",
+      "node": "BfrA6",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "bI71R",
+      "frameName": "8A. Git \u00b7 Branches \u00b7 Desktop light",
+      "node": "hzOyv",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "JYHsj",
+      "frameName": "8B. Git \u00b7 Branches \u00b7 Desktop dark",
+      "node": "gMST8",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "tVifC",
+      "frameName": "9A. GitHub \u00b7 Desktop light",
+      "node": "zNEgN",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "AKO2L",
+      "frameName": "9B. GitHub \u00b7 Desktop dark",
+      "node": "s2F2gy",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "EKi57",
+      "frameName": "10A. Skills \u00b7 Desktop light",
+      "node": "gkj9H",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "cvBro",
+      "frameName": "10B. Skills \u00b7 Desktop dark",
+      "node": "F0K4P",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "C2sfEo",
+      "frameName": "11A. Workflows \u00b7 Desktop light",
+      "node": "JsI1N",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "s0JzCL",
+      "frameName": "11B. Workflows \u00b7 Desktop dark",
+      "node": "MDKFW",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "PPxMw",
+      "frameName": "S01. Project settings / General \u00b7 Desktop light",
+      "node": "P6gU9",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "T4h3KX",
+      "frameName": "S01. Project settings / General \u00b7 Desktop dark",
+      "node": "o8IQro",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "aFFvV",
+      "frameName": "S07. Global settings / General \u00b7 Desktop light",
+      "node": "V0xrf",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "oHH3V",
+      "frameName": "S07. Global settings / General \u00b7 Desktop dark",
+      "node": "vQgE7",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "QifUP",
+      "frameName": "14A. Task changes \u00b7 Desktop light",
+      "node": "S4muHv",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "X79RX",
+      "frameName": "14B. Task changes \u00b7 Desktop dark",
+      "node": "PIlId",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "PjeE9",
+      "frameName": "15A. Task commits \u00b7 Desktop light",
+      "node": "qqE4j",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "HClxj",
+      "frameName": "15B. Task commits \u00b7 Desktop dark",
+      "node": "wHllh",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "MFtcY",
+      "frameName": "16A. Task files \u00b7 Desktop light",
+      "node": "MTJtI",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "l3f2r3",
+      "frameName": "16B. Task files \u00b7 Desktop dark",
+      "node": "h3pAq",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "gqaUM",
+      "frameName": "10. Run from GitHub \u00b7 Desktop light",
+      "node": "pXGu4",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "EsGpp",
+      "frameName": "10. Run from GitHub \u00b7 Desktop dark",
+      "node": "rfDoZ",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "f2LGv",
+      "frameName": "10. Manage skills \u00b7 Desktop light",
+      "node": "u0X0s",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "suUEJ",
+      "frameName": "10. Manage skills \u00b7 Desktop dark",
+      "node": "gZdIX",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "VDDSI",
+      "frameName": "11. Workflow Auto open \u00b7 Desktop light",
+      "node": "QoJub",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "MmQCH",
+      "frameName": "11. Workflow Auto open \u00b7 Desktop dark",
+      "node": "h49JvG",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "e8wQer",
+      "frameName": "19A. Inbox \u00b7 Follow-up review",
+      "node": "N3P6Vw",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "f2220g",
+      "frameName": "20A. Automations \u00b7 List and activity",
+      "node": "UEwRA",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "UFERI",
+      "frameName": "20B. Automations \u00b7 Editor",
+      "node": "JwWr5",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "yH9DZ",
+      "frameName": "21A. Variant comparison \u00b7 Results",
+      "node": "WSaE7",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "empfw",
+      "frameName": "22A. Plan review \u00b7 Reorder and start",
+      "node": "iU0gI",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "O2W1k",
+      "frameName": "23A. New task \u00b7 Starters and follow-ups",
+      "node": "G8TOI",
+      "name": "Workspace header",
+      "height": 72
+    },
+    {
+      "frame": "qTzd6",
+      "frameName": "24A. Shared navigation \u00b7 Optional tools and project entry",
+      "node": "JuD49",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "M5SWe",
+      "frameName": "25A. Project tasks \u00b7 Full resource table and column menu",
+      "node": "N8cn0x",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "AHKNo",
+      "frameName": "26A. All tasks \u00b7 Grouping, tags and run actions",
+      "node": "w6QTfM",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "I44Ul8",
+      "frameName": "27A. GitHub \u00b7 PR conversation, filters and readiness",
+      "node": "MXGon",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "ZhHkR",
+      "frameName": "28A. Task actions \u00b7 Menu and handoff reader",
+      "node": "uWfzg",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "zSB9u",
+      "frameName": "27B. GitHub PR \u00b7 Changes, blocked merge and confirmation",
+      "node": "Z1N2FG",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "ur8ZK",
+      "frameName": "S02. Project settings / Agents \u00b7 Desktop light",
+      "node": "C2i94k",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "w1inBF",
+      "frameName": "S03. Project settings / Agent config \u00b7 Desktop light",
+      "node": "K1QAYX",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "LmL0v",
+      "frameName": "S04. Project settings / Worktrees \u00b7 Desktop light",
+      "node": "Elw0U",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "cv6mn",
+      "frameName": "S06. Project settings / Prompt templates \u00b7 Desktop light",
+      "node": "VIDG0",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "x1Iye",
+      "frameName": "S09. Global settings / Notifications \u00b7 Desktop light",
+      "node": "a137j",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "sBaI8",
+      "frameName": "S10. Global settings / Resources \u00b7 Desktop light",
+      "node": "p09J7",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "RysDF",
+      "frameName": "S11. Global settings / Skills \u00b7 Desktop light",
+      "node": "W8oUU",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "XLiCf",
+      "frameName": "S12. Global settings / Agent accounts \u00b7 Desktop light",
+      "node": "mFUPU",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "Id0Gw",
+      "frameName": "S13. Global settings / Projects \u00b7 Desktop light",
+      "node": "ffSaQ",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "moM53",
+      "frameName": "19A. Inbox \u00b7 Follow-up review \u00b7 Dark",
+      "node": "Q2Vs7Q",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "s6Ih0I",
+      "frameName": "20A. Automations \u00b7 List and activity \u00b7 Dark",
+      "node": "GDcjS",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "YVkaw",
+      "frameName": "20B. Automations \u00b7 Editor \u00b7 Dark",
+      "node": "R8FDT",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "owGYp",
+      "frameName": "21A. Variant comparison \u00b7 Results \u00b7 Dark",
+      "node": "E8kuQ",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "Oo1J1",
+      "frameName": "22A. Plan review \u00b7 Reorder and start \u00b7 Dark",
+      "node": "giJJD",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "pf8QM",
+      "frameName": "23A. New task \u00b7 Starters and follow-ups \u00b7 Dark",
+      "node": "vR1Pg",
+      "name": "Workspace header",
+      "height": 72
+    },
+    {
+      "frame": "OREDs",
+      "frameName": "24A. Shared navigation \u00b7 Optional tools and project entry \u00b7 Dark",
+      "node": "ZhR4P",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "ofMmL",
+      "frameName": "25A. Project tasks \u00b7 Full resource table and column menu \u00b7 Dark",
+      "node": "CKHpE",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "UzdJ2",
+      "frameName": "26A. All tasks \u00b7 Grouping, tags and run actions \u00b7 Dark",
+      "node": "e6ltcW",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "HBMSk",
+      "frameName": "27A. GitHub \u00b7 PR conversation, filters and readiness \u00b7 Dark",
+      "node": "FaYrU",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "ef75D",
+      "frameName": "28A. Task actions \u00b7 Menu and handoff reader \u00b7 Dark",
+      "node": "XhjIX",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "Z3tJLp",
+      "frameName": "27B. GitHub PR \u00b7 Changes, blocked merge and confirmation \u00b7 Dark",
+      "node": "yVvsz",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "cQJod",
+      "frameName": "S02. Project settings / Agents \u00b7 Desktop dark",
+      "node": "KeYof",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "v9iCdT",
+      "frameName": "S03. Project settings / Agent config \u00b7 Desktop dark",
+      "node": "aJtko",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "u8PPZ3",
+      "frameName": "S04. Project settings / Worktrees \u00b7 Desktop dark",
+      "node": "DJqF3",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "v5h5dm",
+      "frameName": "S06. Project settings / Prompt templates \u00b7 Desktop dark",
+      "node": "kTgkX",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "c96HBw",
+      "frameName": "S09. Global settings / Notifications \u00b7 Desktop dark",
+      "node": "n5vVCG",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "iBtG5",
+      "frameName": "S10. Global settings / Resources \u00b7 Desktop dark",
+      "node": "wqcgY",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "tWnpG",
+      "frameName": "S11. Global settings / Skills \u00b7 Desktop dark",
+      "node": "g6wjxY",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "XvWFg",
+      "frameName": "S12. Global settings / Agent accounts \u00b7 Desktop dark",
+      "node": "gk1yV",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "pHBjV",
+      "frameName": "S13. Global settings / Projects \u00b7 Desktop dark",
+      "node": "G6y4K",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "kDsvU",
+      "frameName": "27C. GitHub PR \u00b7 Checks passing, requirements unknown",
+      "node": "PzWk8",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "zze3r",
+      "frameName": "27C. GitHub PR \u00b7 Requirements unknown \u00b7 Desktop dark",
+      "node": "bcz81",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "h8VpfA",
+      "frameName": "S05. Project settings / Bookmarklets \u00b7 Desktop light",
+      "node": "g3XvI",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "f03Qc",
+      "frameName": "S08. Global settings / Appearance \u00b7 Desktop light",
+      "node": "CEkSG",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "wC1Sd",
+      "frameName": "S05. Project settings / Bookmarklets \u00b7 Desktop dark",
+      "node": "Rpfvm",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "n27mE",
+      "frameName": "S08. Global settings / Appearance \u00b7 Desktop dark",
+      "node": "Iv6LB",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "t5OS8c",
+      "frameName": "R1. Sidebar minimum / default \u00b7 264px \u00b7 Desktop light",
+      "node": "Rwonn",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "wDyFh",
+      "frameName": "R1. Sidebar minimum / default \u00b7 264px \u00b7 Desktop dark",
+      "node": "XAOMC",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "IbsZT",
+      "frameName": "R1. Sidebar maximum \u00b7 420px \u00b7 Desktop light",
+      "node": "Tt96k",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "IFqhi",
+      "frameName": "R1. Sidebar maximum \u00b7 420px \u00b7 Desktop dark",
+      "node": "jDB4w",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "pg6Nc",
+      "frameName": "R2. GitHub list minimum \u00b7 280px \u00b7 Desktop light",
+      "node": "Tf7J2",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "ZhYVg",
+      "frameName": "R2. GitHub list minimum \u00b7 280px \u00b7 Desktop dark",
+      "node": "RIvwJ",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "Gg8yJ",
+      "frameName": "R2. GitHub list default \u00b7 360px \u00b7 Desktop light",
+      "node": "K8FGN",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "gW5PQ",
+      "frameName": "R2. GitHub list default \u00b7 360px \u00b7 Desktop dark",
+      "node": "qGGNl",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "CEQfL",
+      "frameName": "R2. GitHub list maximum \u00b7 520px \u00b7 Desktop light",
+      "node": "ssSfA",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "vETJh",
+      "frameName": "R2. GitHub list maximum \u00b7 520px \u00b7 Desktop dark",
+      "node": "TMt25",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "pwW2r",
+      "frameName": "19B. Inbox \u00b7 Empty \u00b7 Desktop light",
+      "node": "e4NRN1",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    },
+    {
+      "frame": "DZts9",
+      "frameName": "19B. Inbox \u00b7 Empty \u00b7 Desktop dark",
+      "node": "c1vWcZ",
+      "name": "Shared page breadcrumb",
+      "height": 64
+    }
+  ]
+}

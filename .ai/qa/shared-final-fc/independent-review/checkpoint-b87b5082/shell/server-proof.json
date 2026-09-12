@@ -1,0 +1,14 @@
+{
+  "source": "/tmp/fc764-final-integrated",
+  "sourceCommit": "cc7f104b3d71491b1d1291db8bfac7108b36a7b8",
+  "entry": "/tmp/fc764-final-integrated/packages/cezar/dist/index.js",
+  "entrySha256": "214803a074b27bf490e746f35e1df16310d21e9088e7fdd6ca663df945fcb233",
+  "webRoot": "/tmp/fc764-final-integrated/packages/cezar/web/dist",
+  "indexSha256": "8c15d6e9a1639f6022e82cf1ddfbc401b15473ab360348110f2d8e62555478b0",
+  "pid": 2575062,
+  "repo": "/tmp/fc764-final-integrated/.ai/qa/runtime-verified/independent-review/shell/repos/iac",
+  "cezHome": "/tmp/fc764-final-integrated/.ai/qa/runtime-verified/independent-review/shell/cez-home",
+  "baseUrl": "http://127.0.0.1:44864",
+  "startedAt": "2026-09-12T11:49:42.449Z",
+  "credentials": "Child receives only PATH and explicit CEZ fixture flags; no inherited credentials"
+}

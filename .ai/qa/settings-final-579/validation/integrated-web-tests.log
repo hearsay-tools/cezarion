@@ -1,0 +1,452 @@
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/579bfd25-ba83-4860-a925-83649ee5a6d2
+
+ ✓ |web| src/routes/settings/prompt-templates-section.test.tsx (16 tests) 2385ms
+     ✓ lists skills project-first and bold, matching every other skill picker (#377)  418ms
+ ✓ |web| src/routes/settings/agents-section.test.tsx (26 tests) 4715ms
+     ✓ keeps the anchored Providers section in an explicit disclosure  381ms
+     ✓ keeps a saved disconnected runner selected while disabling its runner and model controls  401ms
+ ✓ |web| src/routes/settings/projects-section.test.tsx (25 tests) 5774ms
+     ✓ lists every registered project with its status, source and path  618ms
+     ✓ renders the 400 reason from the writability probe INLINE, verbatim  340ms
+     ✓ removes a project only after a confirm that promises no files are deleted  438ms
+       ✓ refuses a duplicate locally rather than sending a no-op the server would 200  360ms
+       ✓ removes a tag from its chip, and with Backspace on an empty field  414ms
+       ✓ puts the row back when the server refuses the edit  389ms
+ ✓ |web| src/routes/settings/accounts-section.test.tsx (35 tests) 5893ms
+     ✓ lists the discovered account with no edit controls at all  608ms
+     ✓ renames without touching the folder  340ms
+     ✓ confirms a removal by saying what is NOT deleted  335ms
+     ✓ browsing FILLS the folder field rather than replacing it as a hidden selection  305ms
+ ✓ |web| src/api/queries.test.tsx (60 tests) 4671ms
+     ✓ surfaces an ApiError instead of synthesizing disconnected providers  1034ms
+     ✓ surfaces an ApiError rather than pretending it has data  1035ms
+ ✓ |web| src/routes/tasks-overview.test.tsx (75 tests) 9559ms
+     ✓ opens the keyboard actions menu and uses the existing archive handler  979ms
+     ✓ disables the shared archive controls while a request is pending  332ms
+     ✓ offers Archive finished only while finished runs exist, and only on the Active tab  353ms
+     ✓ filters by title, branch and workflow through the search box  405ms
+     ✓ adopts persisted workspace choices, updates optimistically, and reloads the server answer  646ms
+     ✓ posts to /api/v1/runs/archive-finished and refetches the authoritative list  400ms
+     ✓ keeps query and rows on archive failure and exposes a retryable action  419ms
+ ✓ |web| src/routes/global-tasks.test.tsx (52 tests) 10617ms
+     ✓ lists every project’s tasks and links each into its OWN project  598ms
+     ✓ filters by tag across projects, and toggles back off  312ms
+     ✓ searches across title, project and branch  709ms
+       ✓ writes each facet into the URL as it is picked  317ms
+       ✓ carries the search box into the URL, debounced  408ms
+       ✓ counts the grouping in the Clear badge, not just the facets  340ms
+     ✓ paints a conflict here exactly as the task’s own page does, and offers the same fix  380ms
+       ✓ opens on hover, and stays open while the pointer travels into it  526ms
+       ✓ closes once the pointer leaves both  456ms
+     ✓ renders the server’s error rather than an empty table  1054ms
+ ✓ |web| src/routes/task-thread/task-thread.test.tsx (70 tests) 9489ms
+     ✓ keeps provider authorization recovery visible after the run reaches done  643ms
+     ✓ marking unread inside the open thread is NOT re-stamped by the auto-read effect  332ms
+     ✓ a later fresh visit marks it read again — reopening the mail still counts  659ms
+     ✓ the control appears as soon as opening the task has marked it read  316ms
+     ✓ keeps Stop reachable for running tasks  322ms
+ ✓ |web| src/routes/task-thread/run-header.test.tsx (88 tests) 10358ms
+     ✓ shows the exact persisted deadline in a time element  333ms
+     ✓ pencil flips the h1 into an input; Enter PATCHes the trimmed title exactly once  391ms
+     ✓ toggles open, fetches the handoff and renders it as markdown  542ms
+ ✓ |web| src/routes/settings/settings.test.tsx (22 tests) 1920ms
+     ✓ normalizes a persisted legacy accent while applying density at boot  302ms
+ ✓ |web| src/routes.test.tsx (129 tests) 10713ms
+     ✓ opens shared workspace diagnostics without forcing a project redirect  479ms
+     ✓ with the registry unavailable, handles a saved location for the boot project  1049ms
+     ✓ with the registry unavailable, handles a saved location for another project  1060ms
+     ✓ falls through the default alias when health and registry both fail  2080ms
+     ✓ a registry error still resolves the alias via health instead of loading forever  1034ms
+     ✓ with the registry errored and no health either, the alias mounts the scope rather than spin  1046ms
+ ✓ |web| src/api/run-history.test.tsx (7 tests) 3721ms
+     ✓ falls back to the protected full replay when either optimized request cannot load  1036ms
+     ✓ fallback jump preserves full replay and its live SSE when history is unavailable  1046ms
+     ✓ fallback jump preserves full replay and its live SSE when context is unavailable  1041ms
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > updates enablement immediately and restores the confirmed state when a write fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > updates enablement immediately and restores the confirmed state when a write fails
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > rolls back and reports a failed Claude write despite a later Codex write
+The current testing environment is not configured to support act(...)
+
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a successful retry when a pending enablement write fails
+The current testing environment is not configured to support act(...)
+
+ ✓ |web| src/routes/task-thread/follow-up-engine.test.tsx (32 tests) 4799ms
+     ✓ defaults the effort pill to the run pin and omits it when untouched (#45)  360ms
+     ✓ drops a previous run's effort pick when the thread switches runs (#45)  528ms
+     ✓ clears an inherited effort when a model change makes it unsupported  452ms
+     ✓ sends the chosen runner + model through to /continue  311ms
+     ✓ shows a read-only native model while locked and still permits switching runners  304ms
+stderr | src/routes/settings/provider-settings.test.tsx > ProviderSettings > preserves a newer runtime incident from the provider-status cache when a toggle fails
+The current testing environment is not configured to support act(...)
+
+ ✓ |web| src/routes/settings/provider-settings.test.tsx (20 tests) 2451ms
+     ✓ always renders Claude Code, Codex, OpenCode, and pi cards in that order  356ms
+     ✓ presents discovery truth, enablement, and runtime recovery without hiding diagnostics  426ms
+ ✓ |web| src/routes/settings/resources-section.test.tsx (10 tests) 1693ms
+     ✓ links workspace limits to the per-project controls  454ms
+ ✓ |web| src/routes/workflows/workflows.test.tsx (24 tests) 4525ms
+     ✓ adds a selected skill from the Add step picker without changing the draft on cancel  871ms
+     ✓ a 409 opens the overwrite confirm; confirming retries with overwrite: true  349ms
+ ✓ |web| src/routes/repo-git/repo-git.test.tsx (29 tests) 4376ms
+     ✓ renders the header, the segment tabs and the working-tree diff from /api/v1/repo/changes  812ms
+     ✓ a clean tree renders the honest empty state  516ms
+     ✓ asks for explicit confirmation when the server reports dirty_tree  347ms
+     ✓ shows both reported risks and Cancel leaves the repository untouched  316ms
+ ✓ |web| src/components/app-shell.test.tsx (81 tests) 5671ms
+     ✓ renders the routed view in the main region  459ms
+       ✓ renders a quiet accessible Skills update marker in desktop and mobile navigation  320ms
+ ✓ |web| src/components/command-palette.test.tsx (57 tests) 5397ms
+     ✓ opens on '⌘K'  694ms
+ ✓ |web| src/routes/compare-variants.test.tsx (13 tests) 3240ms
+     ✓ renders a column per variant: letter, status pill, spend, --stat text, Progress excerpt  553ms
+     ✓ retries a failed group without losing the comparison URL  1341ms
+ ✓ |web| src/routes/settings/accounts-defaults.test.tsx (9 tests) 1333ms
+     ✓ survives a server that has never heard of agent defaults  455ms
+ ✓ |web| src/routes/inbox.test.tsx (41 tests) 4316ms
+     ✓ a multi-backend host offers the runner pill, and the pick reaches the POST  728ms
+     ✓ shared engine pills filter effort and drop a pick unsupported by the next model  648ms
+     ✓ a model pick rides along with the runner  305ms
+ ✓ |web| src/routes/settings/project-general.test.tsx (8 tests) 1533ms
+     ✓ removes the project after a confirm, then leaves the URL that just stopped resolving  739ms
+ ✓ |web| src/routes/settings/agent-config-section.test.tsx (8 tests) 1585ms
+     ✓ a file selection never survives an agent switch  423ms
+     ✓ renders read-only in hosted mode — no Save button  440ms
+ ✓ |web| src/routes/new-task-project.test.tsx (5 tests) 3708ms
+     ✓ is preselected from the URL scope and lists the registry with branches  994ms
+     ✓ re-resolves the skills, workflows and config pickers against the new project  712ms
+     ✓ keeps drafts isolated per project — one composer never leaks into the other  985ms
+     ✓ submits to the SELECTED project and clears only that project’s draft text  763ms
+ ✓ |web| src/routes/settings/project-location.test.tsx (7 tests) 1866ms
+     ✓ "Open with" lists the machine's apps, minus the agent CLIs  913ms
+     ✓ a pick opens the project folder through the server — the path never travels  374ms
+ ✓ |web| src/routes/skills.test.tsx (22 tests) 3721ms
+     ✓ renders project-first with bold project rows and source tags (#377)  507ms
+     ✓ keeps the newer apply result when a slower check response arrives afterward  620ms
+ ✓ |web| src/components/composer/composer.test.tsx (78 tests) 5309ms
+ ✓ |web| src/routes/settings/skills-section.test.tsx (5 tests) 1005ms
+     ✓ links installation status to the boot project skill catalog  658ms
+ ✓ |web| src/routes/settings/worktrees-panel.test.tsx (6 tests) 913ms
+     ✓ opens a worktree through the discovered local folder target  450ms
+ ✓ |web| src/routes/task-git/task-changes.test.tsx (18 tests) 3379ms
+     ✓ renders the run header with the Changes tab active and all tabs deep-linkable  699ms
+     ✓ builds the tree (compacted folders, per-file ±) and renders the diff beside it  452ms
+     ✓ gives the tree column its own bounded scroller, not the page’s  638ms
+ ✓ |web| src/routes/github/github-route-wiring.test.tsx (2 tests) 2172ms
+     ✓ /github → /github/issues/:n keeps the clicked hit  1482ms
+     ✓ /github/prs → /github/prs/:n keeps the clicked hit  688ms
+ ✓ |web| src/components/app-shell-container.test.tsx (34 tests) 3408ms
+     ✓ renders the inbox badge from /api/v1/todos  365ms
+     ✓ keeps the shared archive filter reachable in Tools for a multi-project session tree  399ms
+ ✓ |web| src/routes/task-git/task-files.test.tsx (11 tests) 3004ms
+     ✓ renders the header with Files active, the root listing, and the select-a-file prompt  596ms
+     ✓ a text file previews with line numbers and Shiki tokens by extension  657ms
+     ✓ a per-file 409 shows the server words as a refusal, not an outage  405ms
+ ✓ |web| src/api/global-events.test.tsx (49 tests) 1377ms
+     ✓ refreshes the cross-project index from ANOTHER project’s run event  437ms
+     ✓ coalesces a burst of run events into ONE index refresh  442ms
+ ✓ |web| src/routes/task-thread/markdown.test.tsx (22 tests) 2212ms
+     ✓ renders a ts fence as a code block with language chip and copy button, tokens on --syn-*  1056ms
+       ✓ confirms before following a link, in OUR dialog and not Streamdown’s inline one  356ms
+ ✓ |web| src/routes/task-thread/thread-items.test.tsx (36 tests) 1652ms
+     ✓ renders accessible fixed recovery guidance for claude  504ms
+ ✓ |web| src/routes/task-thread/review-panel.test.tsx (17 tests) 2385ms
+     ✓ renders the violet banner + panel ONLY while the run rests at review  682ms
+     ✓ shows the working spinner only during a live running turn, not while monitoring  473ms
+     ✓ refetches the diff on every re-entry into review (legacy parity)  377ms
+ ✓ |web| src/routes/task-thread/run-relationships.test.tsx (14 tests) 2287ms
+   ✓ keeps a scoped parent link in the shared header on tab   604ms
+ ✓ |web| src/components/diff/diff.test.tsx (19 tests) 1520ms
+     ✓ shows the aggregate ± stat across files  493ms
+ ✓ |web| src/routes/settings/notifications-section.test.tsx (8 tests) 645ms
+ ✓ |web| src/routes/cross-project-task-navigation.test.tsx (2 tests) 1026ms
+     ✓ reads the run from its own project when the row is clicked on the global Tasks page  837ms
+ ✓ |web| src/components/diff/diff-virtualize.test.tsx (9 tests) 1041ms
+     ✓ renders every file, each hinted for content-visibility skipping  302ms
+     ✓ gives no-wrap unified rows a width floor, so a size-contained row cannot shrink the horizontal scroll  451ms
+ ✓ |web| src/components/add-project-dialog.test.tsx (10 tests) 1292ms
+     ✓ lists the browse root, badges git repos, and renders no "up" row when parent is null  303ms
+     ✓ navigates into a folder and back up, asking the server for each path  402ms
+ ✓ |web| src/routes/new-task.test.tsx (116 tests) 30963ms
+     ✓ keeps run options in a disclosure separate from prompt, agent selection, and submission  1217ms
+     ✓ renders the design hero without decorative backdrops and focuses the textarea  335ms
+     ✓ suggested chips fill the textarea (and only fill — no fetch, no navigation)  534ms
+     ✓ filters effort by model and resets an unsupported pick before submission  815ms
+     ✓ shows the runner pill with >1 backend, and switching runner swaps the model presets  548ms
+     ✓ preselects the draft pick, and drops it when the catalog no longer has it  390ms
+     ✓ the source menu groups: Project skills (bold), Workflows, Global last  389ms
+     ✓ multi-keyword search: "fix issue" matches om-fix via hyphen-split keywords (#411)  314ms
+     ✓ picking the SELECTED row again clears it — for a skill and for a workflow  434ms
+     ✓ posts worktree:false after opt-out for every single-step source shape  623ms
+     ✓ picking a model and ×2 variants rides along; {runs} answer navigates to the FIRST variant  511ms
+     ✓ posts generateFollowups:false from an inbox-less server  320ms
+     ✓ text and picker choices survive an unmount/remount (navigation away and back)  497ms
+     ✓ ?skill=&ref= prefill: ref becomes the text, the skill is selected — beating the draft  386ms
+     ✓ ?todo= prefill: the entry id rides along to POST /api/v1/runs so the inbox entry is marked  320ms
+     ✓ carries todoId even when follow-up generation is switched off  425ms
+     ✓ persists in the draft store across unmount/remount  322ms
+     ✓ a degraded answer shows the fallback note instead of a rationale  507ms
+     ✓ shows the busy state while planning: "Planning…" on the segment, submit disabled  406ms
+     ✓ ✕ removes a step and ↑/↓ reorder (the touch-honest path)  615ms
+     ✓ removing everything leaves the honest empty line and disables Start + Save  448ms
+     ✓ ▶ Start posts the EDITED steps inline — the exact wire payload — and navigates  659ms
+     ✓ ▶ Start omits a locked native default from the planned run request  323ms
+     ✓ ▶ Start uses project config while boot health is still pending  427ms
+     ✓ does not start a reviewed plan after provider status loses every connection  324ms
+     ✓ Discard closes the overlay and hands back the draft untouched  306ms
+     ✓ asks for the name in a dialog and posts { name, steps } — no overwrite key uninvited  442ms
+     ✓ a 409 opens the overwrite confirm; Yes retries with overwrite: true  511ms
+     ✓ a non-409 failure surfaces the server message and keeps the dialog open  386ms
+     ✓ switching to a skill with nothing assigned takes the auto-applied text back out  494ms
+     ✓ NEVER overwrites a draft the user already typed  596ms
+     ✓ the auto-applied text is what actually gets submitted  321ms
+     ✓ sends the picked account on the wire  372ms
+   ✓ a late plan start cannot clear a remounted draft  490ms
+   ✓ clears the submitted dictation draft after delayed creation succeeds  325ms
+ ✓ |web| src/components/reference-status.test.tsx (20 tests) 1272ms
+ ✓ |web| src/components/project-groups.test.tsx (16 tests) 1972ms
+     ✓ caps an expanded group at 10 rows and links More… at that project’s tasks pane  677ms
+ ✓ |web| src/components/tools-menu.test.tsx (24 tests) 1719ms
+ ✓ |web| src/components/task-quick-list.test.tsx (50 tests) 1502ms
+ ✓ |web| src/components/reference-chip.test.tsx (31 tests) 1283ms
+     ✓ explains the status in words before the chip is ever clicked  308ms
+ ✓ |web| src/components/design-icons.test.tsx (3 tests) 512ms
+ ✓ |web| src/routes/task-thread/ask-card.test.tsx (17 tests) 1328ms
+     ✓ renders the header, question and each option with its description  438ms
+ ✓ |web| src/components/engine-pills.test.ts (28 tests) 721ms
+ ✓ |web| src/routes/task-git/commit-list.test.tsx (6 tests) 838ms
+     ✓ stays flat exactly at the threshold  385ms
+ ✓ |web| src/routes/settings/bookmarklets-section.test.tsx (9 tests) 1177ms
+     ✓ keeps the generic launcher manual when auto-submit is enabled and filters only skill launchers  399ms
+ ✓ |web| src/routes/settings/worktrees-section.test.tsx (4 tests) 536ms
+ ✓ |web| src/routes/task-thread/subagent-sheet.test.tsx (15 tests) 1145ms
+ ✓ |web| src/routes/automations/automations.test.tsx (7 tests) 1005ms
+   ✓ shows the saved trigger and enables an edited automation only when selected  672ms
+ ✓ |web| src/components/clone-project-dialog.test.tsx (6 tests) 1419ms
+     ✓ previews <projectsDir>/<repo> from the typed url and posts the trimmed reference  604ms
+ ✓ |web| src/components/composer/dictation.test.tsx (10 tests) 1198ms
+     ✓ the mic renders labeled "Dictation" when the API exists, left of send  529ms
+ ✓ |web| src/lib/use-task-table-columns.test.tsx (5 tests) 841ms
+     ✓ does not write before initial state loads, then preserves its nested siblings  475ms
+ ✓ |web| src/components/provider-banner-container.test.tsx (4 tests) 932ms
+     ✓ persists dismissals optimistically and keeps them hidden after remount  674ms
+ ✓ |web| src/lib/highlighter.test.ts (7 tests) 935ms
+     ✓ highlights TypeScript through the CSS-variable theme — colors are var(--syn-*), never hex  727ms
+ ✓ |web| src/routes/task-thread/step-rail.test.tsx (27 tests) 780ms
+     ✓ one row per step with the mapped glyph, name, kind and position  427ms
+ ✓ |web| src/routes/task-thread/session-transcript.test.tsx (14 tests) 1195ms
+     ✓ renders the canonical entry primitives in document mode  776ms
+ ✓ |web| src/components/ui/button.test.tsx (14 tests) 366ms
+ ✓ |web| src/components/centered-state.test.tsx (11 tests) 449ms
+ ✓ |web| src/components/provider-banner.test.tsx (14 tests) 784ms
+     ✓ keeps a cached runtime incident visible when a background refetch fails  414ms
+ ✓ |web| src/components/picker-pill.test.tsx (1 test) 867ms
+     ✓ keeps radio options selectable and renders a disabled status row  865ms
+ ✓ |web| src/routes/task-thread/thread-open-cards.test.tsx (4 tests) 528ms
+     ✓ a user-opened card comes back open after unmount/remount; an untouched one stays default  363ms
+ ✓ |web| src/components/reference-conflict-action.test.tsx (4 tests) 452ms
+ ✓ |web| src/components/theme-toggle.test.tsx (8 tests) 472ms
+     ✓ renders an icon button reflecting the current choice  319ms
+ ✓ |web| src/routes/workspace-tools.test.tsx (3 tests) 426ms
+     ✓ opens both existing project flows from the shared workspace page  335ms
+ ✓ |web| src/design-guardian.test.ts (15 tests) 265ms
+ ✓ |web| src/components/list-view.test.tsx (3 tests) 261ms
+ ✓ |web| src/routes/plan-review.test.tsx (1 test) 660ms
+     ✓ disables Start and exposes accessible setup guidance when starting is unavailable  654ms
+ ✓ |web| src/components/ui/toaster.test.tsx (5 tests) 566ms
+     ✓ shows a toast() message as a status live region and auto-dismisses it  326ms
+ ✓ |web| src/routes/task-thread/subagent-replay.test.tsx (4 tests) 546ms
+     ✓ shows each agent’s children in stream order, matching the fixture  539ms
+ ✓ |web| src/routes/task-thread/thread-scroller-virtualizer.test.tsx (1 test) 489ms
+     ✓ shifts measurements for history prepends, but not live appends  487ms
+ ✓ |web| src/lib/project-router.test.tsx (12 tests) 282ms
+ ✓ |web| src/routes/task-thread/agents-dock.test.tsx (17 tests) 312ms
+ ✓ |web| src/components/last-location-controller.test.tsx (9 tests) 464ms
+     ✓ keeps the settled final location after rapid navigation  326ms
+ ✓ |web| src/components/zoomable-image.test.tsx (2 tests) 245ms
+ ✓ |web| src/components/theme-provider.test.tsx (18 tests) 231ms
+ ✓ |web| src/components/ghost-code-backdrop.test.tsx (7 tests) 451ms
+ ✓ |web| src/lib/use-now.test.tsx (2 tests) 291ms
+ ❯ |web| src/test/fixture-serve-env.test.ts (5 tests | 2 failed) 107ms
+   ✓ rejects a non-Git fixture below an ambient Git repository before a server can start 31ms
+   ✓ accepts a fixture that owns its Git root, including a canonical symlink alias 16ms
+   × accepts a genuinely non-Git fixture and always pins its home 18ms
+   × removes inherited and caller-supplied Git redirection from both discovery and child environment 25ms
+   ✓ refuses uncertain discovery instead of treating it as a non-Git fixture 14ms
+ ✓ |web| src/components/pill.test.tsx (10 tests) 94ms
+ ✓ |web| src/routes/task-thread/thread-scroller.test.tsx (10 tests) 165ms
+ ✓ |web| src/routes/task-thread/plan-dock.test.tsx (14 tests) 152ms
+stderr | src/components/run-notifications.test.tsx > RunNotifications > a constructor that throws (Android Chrome) is swallowed — the courtesy never crashes the app
+[vitest] The vi.fn() mock did not use 'function' or 'class' in its implementation, see https://vitest.dev/api/vi#vi-spyon for examples.
+
+ ✓ |web| src/components/diff/diff-fallback.test.tsx (2 tests) 103ms
+ ✓ |web| src/components/run-notifications.test.tsx (11 tests) 117ms
+ ✓ |web| src/components/code-editor.test.tsx (7 tests) 169ms
+ ✓ |web| src/components/diff-stat.test.tsx (8 tests) 188ms
+ ✓ |web| src/api/client.test.ts (83 tests) 86ms
+ ✓ |web| src/components/directional-usage.test.tsx (3 tests) 58ms
+ ✓ |web| src/api/run-events.test.ts (24 tests) 233ms
+ ✓ |web| src/lib/tasks-table.test.ts (80 tests) 117ms
+ ✓ |web| src/components/status-dot.test.tsx (9 tests) 86ms
+ ✓ |web| src/components/diff/parse-patch.test.ts (13 tests) 26ms
+ ✓ |web| src/lib/use-command-shortcut.test.tsx (38 tests) 105ms
+ ✓ |web| src/lib/github-task.test.ts (36 tests) 23ms
+ ✓ |web| src/routes/task-thread/thread-state.test.ts (81 tests) 59ms
+ ✓ |web| src/routes/task-thread/run-reconcile.test.ts (23 tests) 90ms
+ ✓ |web| src/routes/new-task-form.test.ts (44 tests) 44ms
+ ✓ |web| src/routes/settings/agent-descriptors.test.ts (5 tests) 18ms
+ ✓ |web| src/lib/task-groups.test.ts (85 tests) 63ms
+ ✓ |web| src/lib/global-tasks.test.ts (36 tests) 81ms
+ ✓ |web| src/lib/keyboard-inset.test.ts (23 tests) 97ms
+ ✓ |web| src/api/project-scope-context.test.tsx (7 tests) 98ms
+ ✓ |web| src/lib/prompt-templates.test.ts (47 tests) 59ms
+ ✓ |web| src/lib/workflow-builder.test.ts (28 tests) 65ms
+ ✓ |web| src/lib/skills.test.ts (50 tests) 32ms
+ ✓ |web| src/lib/theme.test.ts (39 tests) 74ms
+ ✓ |web| src/components/diff/diff-scroll.test.ts (13 tests) 21ms
+ ✓ |web| src/routes/task-thread/thread-groups.test.ts (38 tests) 28ms
+ ✓ |web| src/routes/task-git/file-tree.test.ts (7 tests) 57ms
+ ✓ |web| src/lib/project-tags.test.ts (9 tests) 36ms
+ ✓ |web| src/routes/github/github-filter.test.ts (16 tests) 61ms
+ ✓ |web| src/lib/task-columns.test.ts (6 tests) 21ms
+ ✓ |web| src/lib/git-actions.test.ts (37 tests) 25ms
+ ✓ |web| src/lib/format.test.ts (28 tests) 20ms
+ ✓ |web| src/api/events.test.ts (45 tests) 60ms
+ ✓ |web| src/lib/use-document-title.test.ts (7 tests) 46ms
+ ✓ |web| src/components/diff/word-diff.test.ts (9 tests) 22ms
+ ✓ |web| src/routes/task-thread/run-actions.test.ts (74 tests) 67ms
+ ✓ |web| src/routes/task-thread/subagent-dock.test.ts (46 tests) 50ms
+ ✓ |web| src/routes/task-thread/thread-scroll.test.ts (21 tests) 18ms
+ ✓ |web| src/lib/utils.test.ts (26 tests) 39ms
+ ✓ |web| src/lib/sidebar-width.test.ts (18 tests) 12ms
+ ✓ |web| src/lib/attention.test.ts (55 tests) 26ms
+ ✓ |web| src/api/ws.test.ts (12 tests) 37ms
+ ✓ |web| src/components/nav-items.test.ts (32 tests) 20ms
+ ✓ |web| src/lib/bookmarklet.test.ts (11 tests) 8ms
+ ✓ |web| src/lib/provider-status.test.ts (35 tests) 47ms
+ ✓ |web| src/components/composer/composer-attachments.test.ts (28 tests) 21ms
+ ✓ |web| src/lib/use-submit-shortcut.test.ts (21 tests) 7ms
+ ✓ |web| src/routes/new-task-draft.test.ts (13 tests) 15ms
+ ✓ |web| src/lib/appearance.test.ts (6 tests) 22ms
+ ✓ |web| src/lib/notifications.test.ts (20 tests) 31ms
+ ✓ |web| src/lib/read-state.test.ts (20 tests) 10ms
+ ✓ |web| src/lib/github-list-width.test.ts (14 tests) 24ms
+ ✓ |web| src/routes/new-task-plan.test.ts (35 tests) 18ms
+ ✓ |web| src/lib/unified-diff.test.ts (8 tests) 26ms
+ ✓ |web| src/api/contract-pipeline.test.ts (2 tests) 6ms
+ ✓ |web| src/routes/new-task-params.test.ts (17 tests) 9ms
+ ✓ |web| src/routes/github/hand-to-agent-draft.test.ts (8 tests) 9ms
+ ✓ |web| src/components/composer/composer-text.test.ts (15 tests) 12ms
+ ✓ |web| src/lib/token-metrics.test.ts (6 tests) 5ms
+ ✓ |web| src/lib/provider-auth-alert.test.ts (5 tests) 5ms
+ ✓ |web| src/routes/new-task-autostart.test.ts (9 tests) 6ms
+ ✓ |web| src/routes/task-git/worktree-files.test.ts (5 tests) 4ms
+ ✓ |web| src/lib/last-location.test.ts (23 tests) 9ms
+ ✓ |web| src/routes/task-thread/ask-answer.test.ts (18 tests) 15ms
+ ✓ |web| src/vite-config.test.ts (2 tests) 6ms
+ ✓ |web| src/routes/task-thread/active-provider.test.ts (4 tests) 5ms
+ ✓ |web| src/lib/sidebar-collapse.test.ts (10 tests) 7ms
+ ✓ |web| src/routes/github/github.test.tsx (153 tests) 51727ms
+   ✓ /github/prs/:n/changes renders PR-only file review navigation and completeness  924ms
+     ✓ restores one stored width for Issues and PRs  348ms
+     ✓ exposes the separator range and persists pointer changes  469ms
+     ✓ supports keyboard bounds and reset while ignoring non-primary pointer input  378ms
+     ✓ offers the automations shortcut only while the capability is on  370ms
+     ✓ a PR row hydrates its checks glyph lazily by outcome (#664); an issue row shows none  345ms
+     ✓ shows the exact open count from the single fast load — no 30+ guesswork (#664)  305ms
+     ✓ clicking Pull requests persists the choice via PUT /api/v1/ui-state  372ms
+     ✓ shows authoritative merge state and confirms the reviewed head on /github/prs/137  417ms
+     ✓ shows authoritative merge state and confirms the reviewed head on /github/prs/137/changes  688ms
+     ✓ allows an explicit rules override while warning that GitHub still authorizes it  340ms
+     ✓ an untouched cold-load panel posts the connected runner and no model  323ms
+     ✓ a runner + model pick rides the POST alongside the workflow routing  480ms
+     ✓ switching backend resets the model pick — the presets are per runner  366ms
+     ✓ the pick survives switching to another issue (it is a way of working, not a property of one item)  399ms
+     ✓ drops the account when the agent changes  349ms
+     ✓ keeps the model pin when only the account changes  417ms
+     ✓ the workflow dropdown lists, filters, selects — and re-selecting deselects  324ms
+     ✓ the skills dropdown is project-first with bold project rows (#377), and keeps selection visible as chips  556ms
+     ✓ nothing selected → quick-task, and the queued affordance links the new run  320ms
+     ✓ confirms the hand-off with a toast — the inline affordance is off-screen on a phone  358ms
+     ✓ a custom prompt is handed over WITH the item reference, not instead of it (#524)  410ms
+     ✓ a selected workflow rides the POST, with toggled skills as a prompt hint  363ms
+     ✓ skills without a workflow become the steps chain (spec 008)  304ms
+     ✓ a successful run spends that item’s draft  323ms
+     ✓ spending the draft clears the textarea THERE AND THEN, not only on the next mount  342ms
+     ✓ inserting a second template stacks it below the first, separated by a blank line  383ms
+     ✓ marks Assigned to me active only when the viewer is the sole assignee, including manual selection  476ms
+     ✓ keeps issue filters off the PR list when changing tabs  303ms
+   ✓ does not restore a stale board selection after refresh returns projects=undefined  378ms
+     ✓ searches exact numeric 4507 despite an open substring match  570ms
+     ✓ searches exact numeric #4507 despite an open substring match  691ms
+     ✓ reports exact lookup unavailable alongside local substring rows  579ms
+     ✓ reports exact lookup empty alongside local substring rows  608ms
+     ✓ shows refresh failure beside cached hits and recovers with local matches false  731ms
+     ✓ shows refresh failure beside cached hits and recovers with local matches true  863ms
+     ✓ hides old hits immediately on change to Stream and retains URL-selected detail  1713ms
+     ✓ hides old hits immediately on change to another query and retains URL-selected detail  1826ms
+     ✓ hides old hits immediately on change to 4508 and retains URL-selected detail  1759ms
+     ✓ hides old hits immediately on change to  and retains URL-selected detail  1660ms
+     ✓ hydrates searched PR checks within 100 numbers with selected detail null  1315ms
+     ✓ hydrates searched PR checks within 100 numbers with selected detail 9999  1206ms
+     ✓ finds a merged PR the open list never contained — the bug in #730  567ms
+     ✓ keeps a clicked cross-state hit open across the /github → /github/issues/:n hop  702ms
+     ✓ keeps a clicked cross-state hit open across the /github/prs → /github/prs/:n hop  792ms
+     ✓ opens a searched item in the detail pane, like any listed row  556ms
+     ✓ does not shell out while the local filter still matches something  873ms
+     ✓ reports an unavailable search with the server’s own reason  476ms
+     ✓ drops the empty-state wrapper entirely once hits arrive, so its padding leaves no gap (#838)  475ms
+     ✓ states plainly that nothing matched in ANY state when the search comes back empty  466ms
+     ✓ stops rendering hits once the local filter matches the query again (#856)  871ms
+     ✓ never repeats a listed item under "Found on GitHub" mid-debounce either (#856)  730ms
+     ✓ says the search failed when the REQUEST failed, not just when the driver degraded  473ms
+     ✓ uses the full local narrow to trigger search, then ANDs labels and board with OR assignees  1089ms
+     ✓ keeps the selected remote detail when filters hide its row  660ms
+     ✓ refresh retries an incomplete search without losing the active filter  562ms
+     ✓ does not claim exhaustive absence when filters discard a truncated search window  476ms
+     ✓ reports incomplete search board metadata without clearing query or selected board  435ms
+   ✓ debounces to the settled query and never searches after clearing to a label-only narrow  975ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| src/test/fixture-serve-env.test.ts > accepts a genuinely non-Git fixture and always pins its home
+Error: cezar e2e: Git resolves outside fixture /home/agent/projects/cezar/.ai/cezar/tmp/579bfd25-ba83-4860-a925-83649ee5a6d2/cez-fixture-boundary-uSmOK5; refusing server boot
+ ❯ fixtureServeEnv e2e/agent-browser.ts:75:13
+     73|   if (discovery.status === 0 && !discovery.error) {
+     74|     if (realpathSync(discovery.stdout.trim()) !== fixtureRoot) {
+     75|       throw new Error(`cezar e2e: Git resolves outside fixture ${fixtu…
+       |             ^
+     76|     }
+     77|   } else if (discovery.error || discovery.status !== 128 ||
+ ❯ src/test/fixture-serve-env.test.ts:35:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |web| src/test/fixture-serve-env.test.ts > removes inherited and caller-supplied Git redirection from both discovery and child environment
+Error: cezar e2e: Git resolves outside fixture /home/agent/projects/cezar/.ai/cezar/tmp/579bfd25-ba83-4860-a925-83649ee5a6d2/cez-fixture-boundary-xOwi1t; refusing server boot
+ ❯ fixtureServeEnv e2e/agent-browser.ts:75:13
+     73|   if (discovery.status === 0 && !discovery.error) {
+     74|     if (realpathSync(discovery.stdout.trim()) !== fixtureRoot) {
+     75|       throw new Error(`cezar e2e: Git resolves outside fixture ${fixtu…
+       |             ^
+     76|     }
+     77|   } else if (discovery.error || discovery.status !== 128 ||
+ ❯ src/test/fixture-serve-env.test.ts:44:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 157 passed (158)
+      Tests  2 failed | 3691 passed (3693)
+   Start at  13:36:07
+   Duration  56.36s (transform 22.33s, setup 0ms, import 132.00s, tests 282.66s, environment 132.27s)

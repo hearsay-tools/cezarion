@@ -1,0 +1,205 @@
+{
+  "sourceCommit": "6e9ad6110eaf5db0a0ff9765a4129c7a021bbeab",
+  "sourceSha256": "8ac8d1f603359d8f17d13c0b8cd21e70d0f6662e8e2e9400382f96489eda4fc1",
+  "indexSha256": "efefc873037d2a8a79c376ddce4d44338c5aaea37535d3c3e8ab97070f784aa8",
+  "designSourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+  "pairs": [
+    {
+      "id": "ur8ZK",
+      "name": "S02. Project settings / Agents · Desktop light",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/ur8ZK.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/579bfd25-ba83-4860-a925-83649ee5a6d2/.ai/qa/settings/switch-thumbs/ur8ZK.png",
+      "designPngSha256": "774e0615bc609106c428025e00e9a65d9dc9f1f9baf73ee320a614cf24a9bb79",
+      "browserPngSha256": "513c3d91fe31c005b33c5672872eaeed1dbb2fbd0aef4060c82c858655cd6773",
+      "sourceCommit": "6e9ad6110eaf5db0a0ff9765a4129c7a021bbeab",
+      "sourceSha256": "8ac8d1f603359d8f17d13c0b8cd21e70d0f6662e8e2e9400382f96489eda4fc1",
+      "indexSha256": "efefc873037d2a8a79c376ddce4d44338c5aaea37535d3c3e8ab97070f784aa8",
+      "viewport": {
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2
+      },
+      "theme": "light",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44659/p/fixture-repo-v2/settings/agents",
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2,
+        "theme": "light",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Real runner/account choices and per-field saves retained. Scoped violet actions, white switch thumbs and regular control labels follow the reference.",
+      "acceptance": "Layout corrections compared with confirmed reference; behavior and data adaptations documented.",
+      "thumbs": [
+        {
+          "label": "Live title updates",
+          "state": "true",
+          "display": "block",
+          "width": 18,
+          "height": 18,
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "label": "Review changes before finishing",
+          "state": "true",
+          "display": "block",
+          "width": 18,
+          "height": 18,
+          "background": "rgb(255, 255, 255)"
+        }
+      ]
+    },
+    {
+      "id": "cQJod",
+      "name": "S02. Project settings / Agents · Desktop dark",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/cQJod.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/579bfd25-ba83-4860-a925-83649ee5a6d2/.ai/qa/settings/switch-thumbs/cQJod.png",
+      "designPngSha256": "9c5773a2e38684492bd1da1d1e9ee9dad4fb48bda9c11f25ec565d1a964ada17",
+      "browserPngSha256": "31583d0b25ca0d7e7af09290e30af84a3bb3dd920cc14fd37908870be44fabea",
+      "sourceCommit": "6e9ad6110eaf5db0a0ff9765a4129c7a021bbeab",
+      "sourceSha256": "8ac8d1f603359d8f17d13c0b8cd21e70d0f6662e8e2e9400382f96489eda4fc1",
+      "indexSha256": "efefc873037d2a8a79c376ddce4d44338c5aaea37535d3c3e8ab97070f784aa8",
+      "viewport": {
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2
+      },
+      "theme": "dark",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44659/p/fixture-repo-v2/settings/agents",
+        "width": 1440,
+        "height": 1280,
+        "dpr": 2,
+        "theme": "dark",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Real runner/account choices and per-field saves retained. Scoped violet actions, white switch thumbs and regular control labels follow the reference.",
+      "acceptance": "Layout corrections compared with confirmed reference; behavior and data adaptations documented.",
+      "thumbs": [
+        {
+          "label": "Live title updates",
+          "state": "true",
+          "display": "block",
+          "width": 18,
+          "height": 18,
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "label": "Review changes before finishing",
+          "state": "true",
+          "display": "block",
+          "width": 18,
+          "height": 18,
+          "background": "rgb(255, 255, 255)"
+        }
+      ]
+    },
+    {
+      "id": "JWelK",
+      "name": "S02. Project settings / Agents · Mobile light",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/JWelK.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/579bfd25-ba83-4860-a925-83649ee5a6d2/.ai/qa/settings/switch-thumbs/JWelK.png",
+      "designPngSha256": "84d235035c80f3dd571af1f7fbfc2ab16a0e8039e43c15c30e8f8cb41dec9a67",
+      "browserPngSha256": "5c054665a376f5096d1282e8f752749876a25b7e717c5e423959116017a28ebe",
+      "sourceCommit": "6e9ad6110eaf5db0a0ff9765a4129c7a021bbeab",
+      "sourceSha256": "8ac8d1f603359d8f17d13c0b8cd21e70d0f6662e8e2e9400382f96489eda4fc1",
+      "indexSha256": "efefc873037d2a8a79c376ddce4d44338c5aaea37535d3c3e8ab97070f784aa8",
+      "viewport": {
+        "width": 402,
+        "height": 1103,
+        "dpr": 2
+      },
+      "theme": "light",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44659/p/fixture-repo-v2/settings/agents",
+        "width": 402,
+        "height": 1103,
+        "dpr": 2,
+        "theme": "light",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Real runner/account choices and per-field saves retained. Scoped violet actions, white switch thumbs and regular control labels follow the reference.",
+      "acceptance": "Layout corrections compared with confirmed reference; behavior and data adaptations documented.",
+      "thumbs": [
+        {
+          "label": "Live title updates",
+          "state": "true",
+          "display": "block",
+          "width": 18,
+          "height": 18,
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "label": "Review changes before finishing",
+          "state": "true",
+          "display": "block",
+          "width": 18,
+          "height": 18,
+          "background": "rgb(255, 255, 255)"
+        }
+      ]
+    },
+    {
+      "id": "U6TLR",
+      "name": "S02. Project settings / Agents · Mobile dark",
+      "designPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/9ae05dcc-cc09-405c-9934-ab364076aa21/.ai/design-reference/iteration-3/design/U6TLR.png",
+      "browserPng": "/home/agent/projects/cezar/.ai/cezar/worktrees/579bfd25-ba83-4860-a925-83649ee5a6d2/.ai/qa/settings/switch-thumbs/U6TLR.png",
+      "designPngSha256": "6277c0637867c2f10e494edae036a661d8e219a9ab649435e371522f707c99ff",
+      "browserPngSha256": "802ac1f21e63812021f92d3330d13217098bc69a65628f35dab29e2f12614f62",
+      "sourceCommit": "6e9ad6110eaf5db0a0ff9765a4129c7a021bbeab",
+      "sourceSha256": "8ac8d1f603359d8f17d13c0b8cd21e70d0f6662e8e2e9400382f96489eda4fc1",
+      "indexSha256": "efefc873037d2a8a79c376ddce4d44338c5aaea37535d3c3e8ab97070f784aa8",
+      "viewport": {
+        "width": 402,
+        "height": 1103,
+        "dpr": 2
+      },
+      "theme": "dark",
+      "density": "comfortable",
+      "observed": {
+        "url": "http://127.0.0.1:44659/p/fixture-repo-v2/settings/agents",
+        "width": 402,
+        "height": 1103,
+        "dpr": 2,
+        "theme": "dark",
+        "density": "comfortable",
+        "font": "Poppins, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+        "loading": [],
+        "overflow": false
+      },
+      "notes": "Real runner/account choices and per-field saves retained. Scoped violet actions, white switch thumbs and regular control labels follow the reference.",
+      "acceptance": "Layout corrections compared with confirmed reference; behavior and data adaptations documented.",
+      "thumbs": [
+        {
+          "label": "Live title updates",
+          "state": "true",
+          "display": "block",
+          "width": 18,
+          "height": 18,
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "label": "Review changes before finishing",
+          "state": "true",
+          "display": "block",
+          "width": 18,
+          "height": 18,
+          "background": "rgb(255, 255, 255)"
+        }
+      ]
+    }
+  ],
+  "behavior": "Both accessible switches toggle through actual API and restore original populated booleans."
+}

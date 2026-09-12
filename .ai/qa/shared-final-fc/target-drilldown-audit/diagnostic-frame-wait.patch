@@ -1,0 +1,66 @@
+--- original-agents-dock.e2e.ts
++++ diagnostic-only-agents-dock.e2e.ts
+@@ -141,6 +141,7 @@
+     // The dock mounts only once the replay has produced the fan-out.
+     browser.waitForFunction(`document.querySelector('${DOCK} > button') !== null`)
+     expect(browser.evaluate(`document.querySelector('${DOCK} > button').getAttribute('aria-expanded')`)).toBe('false')
++    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
+     browser.click(`${DOCK} > button`)
+     browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 2`)
+     browser.waitForFunction(
+@@ -172,10 +173,12 @@
+     browser.goto(`${baseUrl}/tasks/${RUN_ID}`)
+     browser.waitForFunction(`document.querySelector('${DOCK} > button') !== null`)
+     expect(browser.evaluate(`document.querySelector('${DOCK} > button').getAttribute('aria-expanded')`)).toBe('false')
++    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
+     browser.click(`${DOCK} > button`)
+     browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 2`)
+ 
+     // The second agent's row — a real dialog-opening button.
++    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
+     browser.click(`${ROW}:nth-of-type(2) button`)
+     browser.waitForFunction(`document.querySelector('[data-slot="subagent-sheet"]') !== null`)
+ 
+@@ -206,14 +209,17 @@
+     browser.goto(`${baseUrl}/tasks/${RUN_ID}`)
+     browser.waitForFunction(`document.querySelector('${DOCK} > button') !== null`)
+     expect(browser.evaluate(`document.querySelector('${DOCK} > button').getAttribute('aria-expanded')`)).toBe('false')
+-    browser.click(`${DOCK} > button`)
+-    browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 2`)
++    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
++    browser.click(`${DOCK} > button`)
++    browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 2`)
++    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
+     browser.click(`${ROW}:nth-of-type(1) button`)
+     browser.waitForFunction(`document.querySelector('[data-slot="subagent-sheet"] [data-slot="transcript-viewport"]') !== null`)
+ 
+     browser.waitForFunction(`Math.abs(document.querySelector('[data-slot="subagent-sheet"]').getBoundingClientRect().right - innerWidth) < 2`)
+     // The shared transcript folds completed streaks; open the actual earlier-tools
+     // disclosure before measuring a deliberately long child transcript.
++    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
+     browser.click('[data-slot="subagent-sheet"] [data-slot="tool-streak"] button')
+     browser.waitForFunction(`document.querySelector('[data-slot="subagent-sheet"] [data-slot="tool-streak"] [aria-expanded="true"]') !== null`)
+     const metrics = JSON.parse(
+@@ -242,6 +248,7 @@
+     })()`)
+     browser.waitForFunction(`document.querySelector('[data-slot="subagent-sheet"] [data-slot="jump-to-latest"]') !== null`)
+     browser.screenshot(join(artifactsDir, 'agents-dock-long-transcript.png'))
++    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
+     browser.click('[data-slot="subagent-sheet"] [data-slot="jump-to-latest"]')
+   }, 120_000)
+ 
+@@ -249,9 +256,11 @@
+     browser.goto(`${baseUrl}/tasks/${RUN_ID}`)
+     browser.waitForFunction(`document.querySelector('${DOCK} > button') !== null`)
+     expect(browser.evaluate(`document.querySelector('${DOCK} > button').getAttribute('aria-expanded')`)).toBe('false')
+-    browser.click(`${DOCK} > button`)
+-    browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 2`)
+-
++    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
++    browser.click(`${DOCK} > button`)
++    browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 2`)
++
++    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
+     browser.click(`${DOCK} > button`)
+     browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 0`)
+     expect(browser.evaluate(`document.querySelector('[data-slot="agents-count"]').textContent`)).toContain('2/2')

@@ -1,0 +1,10 @@
+{
+  "collapsePersists": true,
+  "folderDisclosureDistinctFromLink": true,
+  "projectLinkNavigates": true,
+  "crossProjectPinAddressesWebsite": true,
+  "pinMovesIntoPinned": true,
+  "archivedFilterShowsArchived": true,
+  "archivedDisablesPin": true,
+  "cleanupRestoredFixture": true
+}

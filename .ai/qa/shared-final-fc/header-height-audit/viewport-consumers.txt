@@ -1,0 +1,10 @@
+packages/web/src/components/app-shell.test.tsx:911:it.each(['/skills', '/workflows', '/p/iac/runs/123', '/p/iac/git', '/settings/global'])('retains the source 64px page header at %s', (route) => {
+packages/web/src/components/app-shell.test.tsx:913:  expect(container.querySelector('[data-slot="desktop-breadcrumb"]')?.classList.contains('h-16')).toBe(true)
+packages/web/src/components/app-shell.tsx:245:          <header data-slot="desktop-breadcrumb" className={cn("row-start-1 hidden min-w-0 items-center gap-3 border-b border-border px-9 text-[13px] text-muted-foreground md:flex", areaPathname === '/new' ? 'h-[72px]' : 'h-16')}>
+packages/web/src/routes/task-git/task-files.test.tsx:141:    expect(pane.className).toContain('md:max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)]')
+packages/web/src/routes/task-git/task-changes.tsx:202:            className="sticky top-4 hidden max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] w-60 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-3.5 md:block lg:w-[250px]"
+packages/web/src/routes/task-git/task-files.tsx:84:            className="w-full shrink-0 rounded-xl border border-border bg-card p-3.5 md:sticky md:top-[var(--diff-sticky-top)] md:max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] md:w-60 md:overflow-y-auto md:overscroll-contain lg:w-72"
+packages/web/src/routes/task-git/task-changes.test.tsx:190:    expect(pane.className).toContain('max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)]')
+packages/web/src/routes/task-git/task-changes.test.tsx:194:    // The cap deducts the shared 64px breadcrumb and the pane’s main-relative 1rem offset.
+packages/web/src/routes/repo-git/repo-git.test.tsx:184:    expect(pane.className).toContain('max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)]')
+packages/web/src/routes/repo-git/repo-changes.tsx:89:            className="sticky top-4 hidden max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] w-60 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-3.5 md:block lg:w-[250px]"

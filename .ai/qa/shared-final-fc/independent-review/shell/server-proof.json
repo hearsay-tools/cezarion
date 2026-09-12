@@ -1,0 +1,14 @@
+{
+  "source": "/home/agent/projects/cezar/.ai/cezar/worktrees/fc764c2b-4841-49fc-93e3-bbb6f8775207",
+  "sourceCommit": "1c030910a5b43953f30012ccd0add4a0412ebb4f",
+  "entry": "/home/agent/projects/cezar/.ai/cezar/worktrees/fc764c2b-4841-49fc-93e3-bbb6f8775207/packages/cezar/dist/index.js",
+  "entrySha256": "214803a074b27bf490e746f35e1df16310d21e9088e7fdd6ca663df945fcb233",
+  "webRoot": "/home/agent/projects/cezar/.ai/cezar/worktrees/fc764c2b-4841-49fc-93e3-bbb6f8775207/packages/cezar/web/dist",
+  "indexSha256": "a54bb3425532050c7fc28fb2d563628541d3a03419d079b0a47bb6893512d261",
+  "pid": 2140676,
+  "repo": "/home/agent/projects/cezar/.ai/cezar/worktrees/fc764c2b-4841-49fc-93e3-bbb6f8775207/.ai/qa/runtime-verified/independent-review/shell/repos/iac",
+  "cezHome": "/home/agent/projects/cezar/.ai/cezar/worktrees/fc764c2b-4841-49fc-93e3-bbb6f8775207/.ai/qa/runtime-verified/independent-review/shell/cez-home",
+  "baseUrl": "http://127.0.0.1:44864",
+  "startedAt": "2026-09-12T11:19:17.059Z",
+  "credentials": "Child receives only PATH and explicit CEZ fixture flags; no inherited credentials"
+}

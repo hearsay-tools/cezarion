@@ -1,0 +1,11 @@
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/579bfd25-ba83-4860-a925-83649ee5a6d2
+
+ ✓ |web| src/routes/settings/prompt-templates-section.test.tsx (16 tests) 1140ms
+ ✓ |web| src/routes/settings/projects-section.test.tsx (25 tests) 1940ms
+ ✓ |web| src/routes/settings/accounts-section.test.tsx (35 tests) 2108ms
+
+ Test Files  3 passed (3)
+      Tests  76 passed (76)
+   Start at  13:41:17
+   Duration  4.93s (transform 2.85s, setup 0ms, import 4.99s, tests 5.19s, environment 1.76s)
