@@ -1,0 +1,6 @@
+{
+  "url": "https://unpkg.com/lucide-static@0.563.0/font/lucide.woff2",
+  "sha256": "f1654f59e9ccfcbad10e1543d96c4971f54c9c393452c6d0cf603683410fe381",
+  "bytes": 260240,
+  "evidence": "Exact URL emitted by pen.dev DEBUG loading lucide-0; independently downloaded bytes for provenance. Per-glyph paths are from pen.dev HTML export."
+}

@@ -1,0 +1,1279 @@
+{
+  "baseline": "c3f4d228:cezarion.pen",
+  "baselineSha256": "af48b9442e9a0b3eed8bc5e00cfd4aae3b94ca561a2efb76830b8c61dac92b1f",
+  "sourceSha256": "37378246893ba6259088ec3ddb2702e4220f44ca643ac13e5ac293263021a74b",
+  "matching": "158 unique exact top-level names; normalize IDs and ID references to named ancestor paths; ignore only top-level canvas x/y",
+  "limitation": "Declaration comparison, not pixel equivalence; shared component and variable changes may affect otherwise unchanged declarations. Old design.pen/main 71-new claim is invalid for this baseline.",
+  "variablesChanged": true,
+  "documentFontsChanged": true,
+  "counts": {
+    "changed": 151,
+    "same": 7
+  },
+  "frames": [
+    {
+      "id": "xD5Vz",
+      "name": "1A. Brand light · Start",
+      "baselineId": "x4dva",
+      "baselineNormalizedSha256": "606e6445e80912211cbd3956252662698c56b16ccc1a1a3ade0480b74b571ace",
+      "sourceNormalizedSha256": "6924a9bff93596d3db62947d2119177e79e446a2635299352a3f7379b23ed794",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "NMS9D",
+      "name": "1B. Brand dark · Start",
+      "baselineId": "yhesD",
+      "baselineNormalizedSha256": "18b260b36f0491e9caf6728230b8d296500d5209203250d39c09c76b932b9d15",
+      "sourceNormalizedSha256": "345b8c866bc74290c080a43035c8d25fa9ea92a87beb9ef80318a9973eb10930",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "twLlb",
+      "name": "1C. Desktop light · Start",
+      "baselineId": "mZMB8",
+      "baselineNormalizedSha256": "e10bbd0ed1d369b202c73b5a538fc95648979de5eb75d2c591be6face337f035",
+      "sourceNormalizedSha256": "ce0f1058d423616816ad14ba544c8c49b649ce16cae9fb6ee139f914e11ae309",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "qtABD",
+      "name": "1D. Desktop dark · Start",
+      "baselineId": "Pusy6",
+      "baselineNormalizedSha256": "ad514348fbf99070161c40ed35720970fbe9f39f50ce397e1465c73e73f31ab9",
+      "sourceNormalizedSha256": "117305ea8edcb9021df32b2e1550b26425fa4e8fce6ece18a2ebe7485aeeb02e",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "nXpJf",
+      "name": "Cezarion · Shared components",
+      "baselineId": "C9o2u",
+      "baselineNormalizedSha256": "ff9be8b7fcde27afe3f8b32c6588b6d6cce51eb97925544867bd432d05f0dfbb",
+      "sourceNormalizedSha256": "e6ff856289393c7c94d5e3c12ca8e28d45db274edb915439fafd077870599462",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "gC8ds",
+      "name": "2A. Task session · Desktop light",
+      "baselineId": "cgGWE",
+      "baselineNormalizedSha256": "198abe7c8e48b69b46364353061179dfeb310b4b124b865935bb1e40d5c05c91",
+      "sourceNormalizedSha256": "d1e4cd43ed46e01ee1af37e320f6f6ae06e0bf5cb5556af7aa3c02e376fd73df",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "RWNTz",
+      "name": "2B. Task session · Desktop dark",
+      "baselineId": "igwKt",
+      "baselineNormalizedSha256": "2cbb0135cca6fee52fee5b6acdc2227b958c90ac1a02bea1aa5d97a2093b20c9",
+      "sourceNormalizedSha256": "cafa586a9251a1dbd5799be4f6bf5d2a4a673e4988e7e2ea892aa3a2f40f84c0",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "StTvu",
+      "name": "2C. Task session · Mobile light",
+      "baselineId": "gVXYn",
+      "baselineNormalizedSha256": "45bd74dd8c49610636ce09dc676748e627c5b3443980f00b94367bec79afc842",
+      "sourceNormalizedSha256": "a7009ed8bba0aa6de3328a552527a854bbc254f8ef1256e40adc2ea7278b91e2",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "SAzUR",
+      "name": "2D. Task session · Mobile dark",
+      "baselineId": "nu4S5",
+      "baselineNormalizedSha256": "0db03cfa061216bc91c272f63474c08466f99b806f29e396bef789ede1896b0b",
+      "sourceNormalizedSha256": "03d4379852076937f6cd609ec1cca17497799b4361b66fcd1aadfda0e4962be3",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Qwe6U",
+      "name": "2E. Session navigation open · Mobile light",
+      "baselineId": "h690uO",
+      "baselineNormalizedSha256": "a83de970c8bf5f36767f807d00d2e8a982e90a42cd42c0f0b40a52467b6bd06c",
+      "sourceNormalizedSha256": "899cd70106fe52d6a908d317ab13b3c293cf041a27d6bf58edc6db430d5cb2a6",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "YJIDa",
+      "name": "2F. Session navigation open · Mobile dark",
+      "baselineId": "L0VfI",
+      "baselineNormalizedSha256": "4cf274c851c7bfba628a7af530e7a70de46921d8000601911ebe8102d73bc741",
+      "sourceNormalizedSha256": "3163b43ed5531c44fdfa5341492a2473593114639a95f135c4597a89cdf275c5",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Dr8VY",
+      "name": "3A. Expanded activity · Desktop light",
+      "baselineId": "HYltX",
+      "baselineNormalizedSha256": "ec254b43c681c0e2b058b437e029f85f5615d2c6350a7b169134834586017f0f",
+      "sourceNormalizedSha256": "c06bd001213c73db6ed37e639de340dd528c2c108473f6dff8965093810daf1f",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "HJtbl",
+      "name": "3B. Expanded activity · Desktop dark",
+      "baselineId": "r7humJ",
+      "baselineNormalizedSha256": "a1c25bd0300a54c6be420909ab0d0ae6a2aa30caaebb9ceae1da172af3f26793",
+      "sourceNormalizedSha256": "ac692be3d079c6a71f4b1844f98f54f471096d22b66c6194469d151a0bcf3c81",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "laAFF",
+      "name": "3C. Expanded activity · Mobile light",
+      "baselineId": "zwIL4",
+      "baselineNormalizedSha256": "a47c0b425dc5dba59b1032b5b127f95abe76b60326c07746be16f57cffe01608",
+      "sourceNormalizedSha256": "906fd2bfe3e2a4a72c73f7f2d33d5125585fac1e5adf891dcf8f82a16ebd01d3",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "yjIzI",
+      "name": "3D. Expanded activity · Mobile dark",
+      "baselineId": "es88m",
+      "baselineNormalizedSha256": "49a62cc9b47f351c320252b68f7948288d3b08dd94e4aea766d6070be8d6948f",
+      "sourceNormalizedSha256": "c32bf4029c13838b11e1aa47e8a7c26da723087a53f694bbb1292e0a57f178ca",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "vmodY",
+      "name": "4A. Project tasks · Desktop light",
+      "baselineId": "HcGEf",
+      "baselineNormalizedSha256": "5acbc3710b96d756fa89b6471031e5cc57782d7b0417b304dfcdfc33121c1252",
+      "sourceNormalizedSha256": "622287fbb58f390bce4d9b1ea12ad6d77110d154cd4601fe56389ed1aad7f667",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "cKQLR",
+      "name": "4C. Project tasks · Mobile light",
+      "baselineId": "rstLr",
+      "baselineNormalizedSha256": "3abedb19c83c76d1a1f4ee248016c4f65d4cba7035684658edb6524702dd0886",
+      "sourceNormalizedSha256": "9c44f0a956cfb28873681d2d5717d3894d1b1e163ce36e0be3bee8a928c4e552",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Bs14b",
+      "name": "4B. Project tasks · Desktop dark",
+      "baselineId": "FsD5O",
+      "baselineNormalizedSha256": "47627a0ee501ff1b42fd86690d9234649d065658ac45dba209d10842dbd0b3c3",
+      "sourceNormalizedSha256": "4532cffca978601817ddd6990681db93450bf594c1a67cb5bb06f2ce74198659",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "zExdi",
+      "name": "4D. Project tasks · Mobile dark",
+      "baselineId": "x3GLa",
+      "baselineNormalizedSha256": "554f2d281e38f89f4f81ae4b9c82f7ca5b078bd4b879b0850e476e2a7eb2e4a2",
+      "sourceNormalizedSha256": "68078191feffa8714bf568d9606c36039c02a3770378ad9506108901b8facd54",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "WoTim",
+      "name": "5A. All tasks · Desktop light",
+      "baselineId": "c1EQa",
+      "baselineNormalizedSha256": "e3a78032c25ea42bd587c63dae3bd3a173637d97759a381809f530401229e6a3",
+      "sourceNormalizedSha256": "1ce784466a15dc59143ac08e4afd2fcdbdf802a22ac9028afa9cb6ced2eeb154",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "bticP",
+      "name": "5C. All tasks · Mobile light",
+      "baselineId": "dVuKR",
+      "baselineNormalizedSha256": "7350d494a166a16e44bc75b51b067ff837798688c20646ce819b7e82f52cc20d",
+      "sourceNormalizedSha256": "ad5e17ca869b7640027e2b4378de8ddc637e109f5a30d6928db1ab76f567a4e9",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "BmuxZ",
+      "name": "5B. All tasks · Desktop dark",
+      "baselineId": "T5Xpa",
+      "baselineNormalizedSha256": "9bd6561676bfa6accdc09e83c3efe773f8cfe518118a63dc429ab626c64219a7",
+      "sourceNormalizedSha256": "a7272931c2bb7ea401be4908fc1699129aecd1d393594142278a2a2914f72626",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Y2moBg",
+      "name": "5D. All tasks · Mobile dark",
+      "baselineId": "tQmNd",
+      "baselineNormalizedSha256": "ac26900e6d839204582e6f59fa1849f686eb1df2a93adb7df1848fa7022f394e",
+      "sourceNormalizedSha256": "a0734398c1bc883ab0ec038ee8f92c09ade31efc6a3d1e8fbf55c09b4977605f",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "DxDiN",
+      "name": "6A. Git · Changes · Desktop light",
+      "baselineId": "rUusA",
+      "baselineNormalizedSha256": "00ffcd2a8e0582f9ce3e7f7c07fba242823d094c1bf9dd7bd8faf32063481e14",
+      "sourceNormalizedSha256": "375ee664bc2cc8264eb4d4c2c88a94f6242ba01329939257e9bd7f02be29ff4d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "nBRj3",
+      "name": "6C. Git · Changes · Mobile light",
+      "baselineId": "p8bEI",
+      "baselineNormalizedSha256": "ad5ace41621aa5ca19a3d07f3354efa2d5a9ae707db3e0bb94714c822dce8528",
+      "sourceNormalizedSha256": "509ce5477a449958babadb08a9e2bdec214a1194ed899539499594d34b9b7dc8",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "z0bbUQ",
+      "name": "6B. Git · Changes · Desktop dark",
+      "baselineId": "qxKBh",
+      "baselineNormalizedSha256": "a2d85559995b5156686f4d9833a225791f8f9ffff85ca7bdf9bbfa50db69e30d",
+      "sourceNormalizedSha256": "6c21851126914bddeff95ffbdee876ec42f1ddfae0847125fd09f4cfdbdba8fc",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "xMIvZ",
+      "name": "6D. Git · Changes · Mobile dark",
+      "baselineId": "CvQao",
+      "baselineNormalizedSha256": "4bb4c9126234bc084f2a6f144999c1c3550bb4283f758c314503d1b5443de4a9",
+      "sourceNormalizedSha256": "780125823fb31070fd1aa95a341acfdf7dc5a17cbfd3f9bb2dfc5dd823b70260",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "LIIH1",
+      "name": "7A. Git · Commits · Desktop light",
+      "baselineId": "FZ2Hk",
+      "baselineNormalizedSha256": "96155621697494d2d0c3b1435b887b9ff43a98d6b18d966fc5d0e80282c37b97",
+      "sourceNormalizedSha256": "21598855bc88b5e7679b55e4928a2dc0a8b421721f5cd52c4978befa41a7d3a5",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "EWv8V",
+      "name": "7C. Git · Commits · Mobile light",
+      "baselineId": "LqDjB",
+      "baselineNormalizedSha256": "7208c85af25b3c45eec6179d34e894bf397ee3beaf5583d5e71d41323f51ebb3",
+      "sourceNormalizedSha256": "0757a5b336fbb81dbe33c8be3d2611b75b84ae85f50fafbea67bebdca420bad4",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Axp2R",
+      "name": "7B. Git · Commits · Desktop dark",
+      "baselineId": "g2Jzw",
+      "baselineNormalizedSha256": "a9c00fbf729f32d0729f93836f35af581a6be56f7af22ca25415bb84f77a6505",
+      "sourceNormalizedSha256": "b70155fd2a42168161691ef9d83a81d4c8140c2d445bd21ba3cf5a2620126898",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "UjbfQ",
+      "name": "7D. Git · Commits · Mobile dark",
+      "baselineId": "D53pMS",
+      "baselineNormalizedSha256": "e05a0947c2f9dbf47ff5765a0d8fd12cd99619556efe9440c54f99380374a58c",
+      "sourceNormalizedSha256": "9e8fb17b957434e17655359e642c95ccd2c62049c12724720fcc5e2aaf0c28bf",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "h68qF",
+      "name": "8A. Git · Branches · Desktop light",
+      "baselineId": "bI71R",
+      "baselineNormalizedSha256": "cb8e79ce5eadc592f41bc9a90350facea916157ff644b4cbdfaca4c89f7f2a8a",
+      "sourceNormalizedSha256": "9e75601b194be750b7a4aeeb86cf791b3b94e1cde81be669b46dc3095cd817f9",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "h3xWP",
+      "name": "8C. Git · Branches · Mobile light",
+      "baselineId": "o67XB",
+      "baselineNormalizedSha256": "bbee6c49f60d0c8df68399a702199e419e97a691656e6dc88bdf87713d50916d",
+      "sourceNormalizedSha256": "f1b09634ced6d8de51cba35ecacb9d3d222d9073d4055713c38251e6ff670b02",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "lfmHq",
+      "name": "8B. Git · Branches · Desktop dark",
+      "baselineId": "JYHsj",
+      "baselineNormalizedSha256": "cb4d6ee2fdafeaf5bef733c0d681d71fafc4480bf5943752d2a49524eae93279",
+      "sourceNormalizedSha256": "a1da228fa6565043a1f89d5b9bbe3cea326540b3494e4e39980d293c2d6a5bf3",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "N7h8fV",
+      "name": "8D. Git · Branches · Mobile dark",
+      "baselineId": "ZmozS",
+      "baselineNormalizedSha256": "afcdcfb6305610a8d8e6c9c1ef52f63e6364dce7a34101a56e0f12cd07a3e43e",
+      "sourceNormalizedSha256": "0c3e7eba9ea12d31d0aaeb96dc1380d77787750c03aab1a00ab658b7a4386b08",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "pV64O",
+      "name": "9A. GitHub · Desktop light",
+      "baselineId": "tVifC",
+      "baselineNormalizedSha256": "03b84bbcaebd9a7c61b6aa2c70ea49e4a35b673cb50a3e53ce9dc45fb5ceecf7",
+      "sourceNormalizedSha256": "2bb534a2321bd1dd9ada9254d595bcc83536608ea3c0421076365bfb0f06b960",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Oe3RJ",
+      "name": "9C. GitHub · Mobile light",
+      "baselineId": "zu66o",
+      "baselineNormalizedSha256": "eea47a464b1df3626623bd8b3b91a25565e4a28a635705a4412f06ff2a481bfa",
+      "sourceNormalizedSha256": "6a52ef64efed056e3b929068ddaf0d71e00d66ed604728806461094465385b3d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "ZUfRo",
+      "name": "9B. GitHub · Desktop dark",
+      "baselineId": "AKO2L",
+      "baselineNormalizedSha256": "5b002301c600ae0274e1ae5d77611283ec506db7ecb7cbe693eb47c821eacd3e",
+      "sourceNormalizedSha256": "fc5843cd15231ea2b341c5cf01e9685b129b78308fea6b994c65b71ffebcd8d9",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "WgKmT",
+      "name": "9D. GitHub · Mobile dark",
+      "baselineId": "eOnqx",
+      "baselineNormalizedSha256": "422bccb710d9820f709428773566c31b768d24227bd5b4f6fd11ad9118122ea4",
+      "sourceNormalizedSha256": "8fe8305f2bc159f9d393e34e9020886c6dadbf862c1ebb2012a42ade432657ac",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "JfXUf",
+      "name": "10A. Skills · Desktop light",
+      "baselineId": "EKi57",
+      "baselineNormalizedSha256": "e7373ddcddc46d8b2542cae9a5da63227a5ffbc2c0611219de570da62609f1aa",
+      "sourceNormalizedSha256": "4f8c5eb79225b622d2287333d661ea94d621ce9c089cf976bdb01caa293914d1",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "md67O",
+      "name": "10C. Skills · Mobile light",
+      "baselineId": "kmHeY",
+      "baselineNormalizedSha256": "4487dae22b609ae07f261f7dbf1fc644d174d97c3d383248848cca4b77c4e736",
+      "sourceNormalizedSha256": "335eaee2d6df595afe07c137b047c0076317fd3359d05f7a1e7d7cb7007dc30d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "WygR0",
+      "name": "10B. Skills · Desktop dark",
+      "baselineId": "cvBro",
+      "baselineNormalizedSha256": "da76f2b7f50727e6779932e958dfe6c77dad436634273d75484b265c56abba62",
+      "sourceNormalizedSha256": "d1c5bf982c3d81ed53c7f51e6c73a9a245474f893bc921c7cffc0a1cf1baf706",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "FaZPm",
+      "name": "10D. Skills · Mobile dark",
+      "baselineId": "XdHUd",
+      "baselineNormalizedSha256": "500c026794b143298f1e4bd669f660703cd85cbf57133eb851f171524b3e6d76",
+      "sourceNormalizedSha256": "00a6e56fa053015a6fcfb49dce5e124693445d8d68208475a1819ce90a90bbeb",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "S446C7",
+      "name": "11A. Workflows · Desktop light",
+      "baselineId": "C2sfEo",
+      "baselineNormalizedSha256": "16247b285d5515742eae437d6e97626a4a8d8e9c35de367a4cee17849d34936a",
+      "sourceNormalizedSha256": "bff0ff073ea8df77d1b1c8099113f406f10a23c35a01734e411ed6e9318b5259",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "DZvRy",
+      "name": "11C. Workflows · Mobile light",
+      "baselineId": "aa0TQ",
+      "baselineNormalizedSha256": "de0e000837c7e8d45bd8fa60240f003756867a24664b705e596f2269e5f605c9",
+      "sourceNormalizedSha256": "8adeeb72fdbb9eafabe161055c7522289241a49a6c99192baeca29ad8b8b5e04",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "e0YGQ",
+      "name": "11B. Workflows · Desktop dark",
+      "baselineId": "s0JzCL",
+      "baselineNormalizedSha256": "764d8ffc449ade233d939313fbe4ed2204a28a6597943195c49aa80bee4a3a22",
+      "sourceNormalizedSha256": "bf6be6e8807b93f8be5f3b84d5942c83d583edd891fc07cdd50d27c21f1b6093",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "vLA8k",
+      "name": "11D. Workflows · Mobile dark",
+      "baselineId": "Ae0n6",
+      "baselineNormalizedSha256": "cf7b5d489ae9781805c8d74c5691b3e6d5714e95cd8e4d3c72416b979dcb9492",
+      "sourceNormalizedSha256": "6d920b90cf00304b8579658725cf9adab6ffe3243e98b64f5ac632839979958b",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "qLCvH",
+      "name": "12A. Project settings · Desktop light",
+      "baselineId": "PPxMw",
+      "baselineNormalizedSha256": "f7d33c2b8cbe34aa265aec758a27464f2a15110e8cf94263f03f65bba283965b",
+      "sourceNormalizedSha256": "c5e3a042bd047a26a5c666f83a10d1293515646c616a7d760f8cf3fdedc1eda4",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "rJ0pc",
+      "name": "12C. Project settings · Mobile light",
+      "baselineId": "x7yBQu",
+      "baselineNormalizedSha256": "14e433aeddd42d2d45713eb65bf5205c6446a1e11ce366c550c48e04e5880715",
+      "sourceNormalizedSha256": "a06edef8d731bd6de7245ea93bc9fc1e168a55661c14de7733415ab8e1a47d26",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "anT0g",
+      "name": "12B. Project settings · Desktop dark",
+      "baselineId": "T4h3KX",
+      "baselineNormalizedSha256": "e68940784af9202f1b6764b436bf9a62a9b6ca2d5e3746268d2eaca16c9d8a5a",
+      "sourceNormalizedSha256": "93b7471d336e0de783df6dc6c009c6f36daf15804084c311756b8e316991efa7",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "h9Eij",
+      "name": "12D. Project settings · Mobile dark",
+      "baselineId": "Y9V5h2",
+      "baselineNormalizedSha256": "14e89ad3775b83ec833c74ee64b8b5605d37b149a52987ef472e6e232f0541a1",
+      "sourceNormalizedSha256": "5adaea42a0c3dc3ed359a6b31edae97914823e8b496e6d849ca07b48c1a12295",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "BNmM5",
+      "name": "13A. Global settings · Desktop light",
+      "baselineId": "aFFvV",
+      "baselineNormalizedSha256": "3abf99110f3594084b1af1b89df3c154cf120f28cecb2c965ca5abc2ff09fd32",
+      "sourceNormalizedSha256": "f3f54dcb633fe3665a8a08cf83c421bdafa1f09ec64fd13635b6fe40bb411972",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "c6wef",
+      "name": "13C. Global settings · Mobile light",
+      "baselineId": "yqIfL",
+      "baselineNormalizedSha256": "323455b3738ade1f2ba19d7716a87546db4855e41b621d33d01bdcb5177684e3",
+      "sourceNormalizedSha256": "f937696da5c4b99b20d12ebeeb9f821dde710737a82084a57fd8987ebdbc3360",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "FKM0u",
+      "name": "13B. Global settings · Desktop dark",
+      "baselineId": "oHH3V",
+      "baselineNormalizedSha256": "a5dae7c5dd5d00aac007e833bc81d45db8ef607c0ccb8e313eec4cb09b090d65",
+      "sourceNormalizedSha256": "e1e0cf8647d42e043a14b02e60bf2b636ae2ae3d0b5ac744e1f49c9f295b3190",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "O5aKA7",
+      "name": "13D. Global settings · Mobile dark",
+      "baselineId": "TrsF6",
+      "baselineNormalizedSha256": "b5cf35a14053f67abd3bfbe900a960ba8be6adedc3bd5c1cbe8760cdde88a4d3",
+      "sourceNormalizedSha256": "cb31c2bfc4b8da1bbb77da63788b3d0e1b7a037b91b8e9eced49cf6713f093c9",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "iVBEz",
+      "name": "14A. Task changes · Desktop light",
+      "baselineId": "QifUP",
+      "baselineNormalizedSha256": "c52f2033bd4a8938a3accb4225e0232f97b4aec334b2fc854020a6688664ea61",
+      "sourceNormalizedSha256": "dbb9bb4fa66aede55d702bfa8b7def5ebda452819857a6fbd7a0f952fa71192b",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "W6uZ8g",
+      "name": "14C. Task changes · Mobile light",
+      "baselineId": "M8dqPj",
+      "baselineNormalizedSha256": "f043c19b7db286bdcf9614d48e1f38ec68d5672475c5a6aa680ea1ea18e36397",
+      "sourceNormalizedSha256": "edd5f9451727137a2f44891713fe88760eee1dae2d3361d2dc304c26a651b48d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "ap7Mt",
+      "name": "14B. Task changes · Desktop dark",
+      "baselineId": "X79RX",
+      "baselineNormalizedSha256": "2d77963a7e98a3a380084edb65342d03881163fbc72f4f82ca9ff5c6e03e8467",
+      "sourceNormalizedSha256": "769cfa851cad6476e8d4fc80d8975ef421058da32bafb4519be0e5abeb2312fc",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "cnw7H",
+      "name": "14D. Task changes · Mobile dark",
+      "baselineId": "rxmtI",
+      "baselineNormalizedSha256": "ec3e2a647dd2a321eec677f8c3f49d223dd947fc11d833f277cc4fa2041ef4a1",
+      "sourceNormalizedSha256": "82d8305fd58e6a37afe0bb1f41e0458d4c824094732366c67c6023bfb236166c",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "qUwn3",
+      "name": "15A. Task commits · Desktop light",
+      "baselineId": "PjeE9",
+      "baselineNormalizedSha256": "947ae6042d9db08a9a4cb0bd18f8e31b79fbaa2463722226838e9054063d9796",
+      "sourceNormalizedSha256": "f62529bd41abb236de921a8b276630356b5d759c096afd39affd181061b88770",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "ARRoD",
+      "name": "15C. Task commits · Mobile light",
+      "baselineId": "feU0A",
+      "baselineNormalizedSha256": "514fceb8ba9f1335c9fd99beb8b6e0c03bde80301b245dae9e7f1e3d19fde068",
+      "sourceNormalizedSha256": "497ccd089bc7b95bd585871eaaac700baebd1c876d50de61721b0ce9c19171b7",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Pxt3r",
+      "name": "15B. Task commits · Desktop dark",
+      "baselineId": "HClxj",
+      "baselineNormalizedSha256": "27d0e24f4bcfd9f32f655e5b429b88c92e71fb7f1edd802fe8561a1875bfa202",
+      "sourceNormalizedSha256": "fc6b36e75c990b766da4e6af2d5ce23d2bc7babf04f267e576d5cc4c8586958b",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "eoegy",
+      "name": "15D. Task commits · Mobile dark",
+      "baselineId": "ODSy3",
+      "baselineNormalizedSha256": "567c3c3dea4b0a7a9507a8b793077354fff1304aa5b03e52e684f7f1ad1e5a86",
+      "sourceNormalizedSha256": "45b35a63a82c6f694cd6fb236f0e5e766022423398572f822f0f6e3fbdea9086",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "NYkfL",
+      "name": "16A. Task files · Desktop light",
+      "baselineId": "MFtcY",
+      "baselineNormalizedSha256": "c6284fa961700d45b7872d461503002c01153d592547437aa63876d81219ecae",
+      "sourceNormalizedSha256": "4decef678b4dea6a9196d260b790a7a9f00063cbb7b1a86fa9f533afd7124313",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "UWL9H",
+      "name": "16C. Task files · Mobile light",
+      "baselineId": "LAKkC",
+      "baselineNormalizedSha256": "6f1b008f7733f670abff533a801c0a69f4d236dc6923b6415cec30d100de886c",
+      "sourceNormalizedSha256": "d38c7248d8a7d6ac0080e07b93db831da61963046e38a2b4446a4e4f5da232cf",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "pg6P9",
+      "name": "16B. Task files · Desktop dark",
+      "baselineId": "l3f2r3",
+      "baselineNormalizedSha256": "6cbbad62f789eb5486f7c17593d84c95718f4031c0fff7bad42cce28e74f828a",
+      "sourceNormalizedSha256": "abe7b4863ce1a18293d25da7bb8815166caea6a7ca26e7a200e99eba34683971",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "aoWNz",
+      "name": "16D. Task files · Mobile dark",
+      "baselineId": "S1Gdo",
+      "baselineNormalizedSha256": "e99d434a6b25a4b404efecf190c2d4cad8907115522f81557264792dca59b434",
+      "sourceNormalizedSha256": "6191a85d379d891b0b79f7ab1cd7de9ab1d1ce2a0fbbb278c9dff09326c28884",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Zbjzg",
+      "name": "00. Cezarion · Remaining pages review index",
+      "baselineId": "hRiPv",
+      "baselineNormalizedSha256": "14ce17b1b960ae20c372c53d9f524fe5d845e11f1f75f0fab57b59189bcfe17b",
+      "sourceNormalizedSha256": "8e4a9689c849661aa78ae12355cfff2e69e2c0a19ef280876bd0657f32290da0",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "t9WKAM",
+      "name": "17. Sidebar indicators · Desktop light",
+      "baselineId": "T2fE7",
+      "baselineNormalizedSha256": "462d9248a877ff06b0750ec9b24bd98b077d9dfcac33685a7013d016164f08ce",
+      "sourceNormalizedSha256": "8251db4eca84b6574ec24777fe274cc82055bcf3fd4bf36ce33504e48e9b824b",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Y6ofnn",
+      "name": "17. Sidebar indicators · Desktop dark",
+      "baselineId": "L61J13",
+      "baselineNormalizedSha256": "100b4519a2ba201d4a7f86867a05b591044ec8487b090036b340ba828674acc0",
+      "sourceNormalizedSha256": "1666c75c3989e30a1a5fe274b8c22819f80064923988aa80c97329cf939586a3",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "rCjjT",
+      "name": "17. Sidebar indicators · Mobile light",
+      "baselineId": "cfIXv",
+      "baselineNormalizedSha256": "80358007481a7f61374dc49a14ef51472befc28862ba7dabae348108b46e32f6",
+      "sourceNormalizedSha256": "d77c24f419738b584be639b440bd104547b77aa4b6ceeeae5276245de01586b7",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "h1kN5a",
+      "name": "17. Sidebar indicators · Mobile dark",
+      "baselineId": "zSP4H",
+      "baselineNormalizedSha256": "ba719b792fac96c9d2d48cb6ed5e400e43b332ebdb2a846597a81ca64499d3a5",
+      "sourceNormalizedSha256": "1962e037ba33fc51d7bf62e83312aab6f0cdcdeac7cf93e58e253b87789b2b89",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "hkFbY",
+      "name": "18. Appearance · Density and reading-width behavior",
+      "baselineId": "OeHGM",
+      "baselineNormalizedSha256": "84697ded1eea8f35cb014a26c457f5175b7b574ef59517d2738b2f2bd290019f",
+      "sourceNormalizedSha256": "a154c94352552d3c9e134f63fc918eb77dd6e5c9c9d18dba3f5d50889470f9a0",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "LT4cB",
+      "name": "10. Run from GitHub · Desktop light",
+      "baselineId": "gqaUM",
+      "baselineNormalizedSha256": "d2e3f76b450135f1794ce5504ab091bb127453955691faf501d7b1c872d739bf",
+      "sourceNormalizedSha256": "29987f95d3e096013565ffd72fafbc16d8c60b7ea8e31c91d22abba0bc4a3f33",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "tAPGJ",
+      "name": "10. Run from GitHub · Desktop dark",
+      "baselineId": "EsGpp",
+      "baselineNormalizedSha256": "84b311c40ebfe9cbaee575b19186794dd49638c7fae62651dec03849c28b3b76",
+      "sourceNormalizedSha256": "b15604771d36d5f98c67af9895ad7a823b037a175d93b45895b8c39763cdb556",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "g3NKCA",
+      "name": "10. Run from GitHub · Mobile light",
+      "baselineId": "YS15Y",
+      "baselineNormalizedSha256": "f7941a8b2b906b6b8de78f2485185daa19b8b2e3f04d10d1b91f9201a75cebd2",
+      "sourceNormalizedSha256": "704dafec264f8354eaa3230dfd618a336e3847f58414c73da0abdc097bb86992",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "M5Ynqs",
+      "name": "10. Run from GitHub · Mobile dark",
+      "baselineId": "wLVhd",
+      "baselineNormalizedSha256": "9ee903ee7e6a4d405541ec1d9704d6fd1e250d06893e21b7bf89a1bf67ed2b68",
+      "sourceNormalizedSha256": "273fec7bac96c20cd2db3226614df0fd66441b0ec56bfe7cfe34c52bd8e2ca99",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "fR8Bl",
+      "name": "10. Skill detail · Mobile light",
+      "baselineId": "acXhB",
+      "baselineNormalizedSha256": "9d8d3e945e101a50bab05c93f65742bd4c30cfffbf45ae4c5257e82a983478c3",
+      "sourceNormalizedSha256": "0d3f59dda0ce464508359e13d2cb99ed26645fdce495360a0afab631c646f3e6",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "UUyVL",
+      "name": "10. Skill detail · Mobile dark",
+      "baselineId": "utoCL",
+      "baselineNormalizedSha256": "7751372ec9d0b1eaff627b8e3bafcadb29747ef73ee7ffe9ac80f8f3fb2075e9",
+      "sourceNormalizedSha256": "6824566d8d11ece2ca464c925ae188b788d23a9fd38e8c20ffca310d70e2ddff",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "QGPE7",
+      "name": "10. Manage skills · Desktop light",
+      "baselineId": "f2LGv",
+      "baselineNormalizedSha256": "5b469d1b64cc21a46382784c3514ca0e31100fe608a69935a37c61161e8fcd19",
+      "sourceNormalizedSha256": "b665fd310d4c92bd06275ef15de8a93b7cafac0d21be1dcb376ab8117968c6bb",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "x3aaN",
+      "name": "10. Manage skills · Desktop dark",
+      "baselineId": "suUEJ",
+      "baselineNormalizedSha256": "1baad26931a3118827c5a38045cb4b3f1d931f168e3d2f68f17a1ffec045fbbd",
+      "sourceNormalizedSha256": "c7b0222c2aa27b5c3a802f872b85f80e843377bddf319658337445e3de484584",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "n0DGX",
+      "name": "10. Manage skills · Mobile light",
+      "baselineId": "MB5Yx",
+      "baselineNormalizedSha256": "50bd17b00eede7cd9113814ed84aaaa5ad757618ca04ce6e6b13a5c119a5bbfd",
+      "sourceNormalizedSha256": "49c23d1c2f1c52b3301b1f803051424d4c8485605fdc0015f445d8344f30953e",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "rIXH7",
+      "name": "10. Manage skills · Mobile dark",
+      "baselineId": "IbcKi",
+      "baselineNormalizedSha256": "fe9182dbd810529b5951f94ea7867b4924aeeb2c56ba9877b947c0a789201f44",
+      "sourceNormalizedSha256": "5d1059523b5a08b33a53babe75344fc3e5a25cce2a58e50a36544aa6dd072ec5",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "jb9Yb",
+      "name": "11. Workflow Auto open · Desktop light",
+      "baselineId": "VDDSI",
+      "baselineNormalizedSha256": "cd269b9c632b14682980d07c9f5748d06a402e0e67bae0fefc612f6f7d6f4bf7",
+      "sourceNormalizedSha256": "6c09a6e0ea8832c1e17043532520e7344a11a4975cf896932298fa1ddf7d8a78",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "VS5gA",
+      "name": "11. Workflow Auto open · Desktop dark",
+      "baselineId": "MmQCH",
+      "baselineNormalizedSha256": "cb45b94f6175337fdda25e064f1c945819f72f29b3c48d046d725bc64d4c7e98",
+      "sourceNormalizedSha256": "9c78da9c74e95390cfda5a9bbc8b81920f632b456aed24de1fe67e01434edc3a",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "mU8TX",
+      "name": "11. Workflow Auto open · Mobile light",
+      "baselineId": "Zsg4w",
+      "baselineNormalizedSha256": "5041ea62a6f8ccf4bddc0655b626888d5a124cdb6bf35fce987f7363febbdfc5",
+      "sourceNormalizedSha256": "218c8ba29bb36659c59b1b70eb7188406a71f4bbbd41cd7af9c791403eca0658",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "AjVTx",
+      "name": "11. Workflow Auto open · Mobile dark",
+      "baselineId": "e7UWy",
+      "baselineNormalizedSha256": "0e243a6dfbe2bf00d55303598d6a4d9747bdd41054fd0195a4ee3de65b6931d5",
+      "sourceNormalizedSha256": "5892c90ebf5a9574a63b2bafb22e4d4886c3a582669bcc01e9510e0a561d0dcf",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "lwULN",
+      "name": "19A. Inbox · Follow-up review",
+      "baselineId": "e8wQer",
+      "baselineNormalizedSha256": "c181ccc861bb45391fc00605388ff0fb874079d1e06d0334848a40749ee1e370",
+      "sourceNormalizedSha256": "4486dd8a76a1e9bf21d712ca2416c2aaacb25dfaf1feae0bc4fd529b5818a315",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "vFhip",
+      "name": "20A. Automations · List and activity",
+      "baselineId": "f2220g",
+      "baselineNormalizedSha256": "6d226246918807e8399868111e7b32203a4ac5b5a5463ae369a1b25891a8715c",
+      "sourceNormalizedSha256": "1c4542bb2fa6d87981587804a3630cd657004fed284c3dca37ca54bb7ffff13c",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Q0JpNn",
+      "name": "20B. Automations · Editor",
+      "baselineId": "UFERI",
+      "baselineNormalizedSha256": "760919d846f4267c71d94a0acef6462e7049fd5f553ce10871bd3e2e33623eac",
+      "sourceNormalizedSha256": "7b815322eebd7cde6b355afd4d64922c5ee0e32601423d1cb49fa05a402e589d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "E2pFB",
+      "name": "21A. Variant comparison · Results",
+      "baselineId": "yH9DZ",
+      "baselineNormalizedSha256": "e4193bde0ef76b0c405469f0e6e32bb1796102184900ef236715f262234e796a",
+      "sourceNormalizedSha256": "d15dc6706acfa11f853a3fedaab5a3a7c75fa98892dc96c9af9954c9b164fb53",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "rwgD6",
+      "name": "22A. Plan review · Reorder and start",
+      "baselineId": "empfw",
+      "baselineNormalizedSha256": "11ce52b379b88781200624c6505098d781c625371d5f3b20d928315aecc56965",
+      "sourceNormalizedSha256": "e49dc1ef0bed9edc024afbf6239b7e9b163fabc2ce40b3ef870621ebd955cc61",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "HU3Q7",
+      "name": "23A. New task · Starters and follow-ups",
+      "baselineId": "O2W1k",
+      "baselineNormalizedSha256": "658e96091ef1fefc5ebf43736771cde78274168b3b277b9bb21f782c5d6485a3",
+      "sourceNormalizedSha256": "e6db71f53283f6be5c080f7b39287a82f4d5731383b480711664d145861b5382",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "AvnOO",
+      "name": "24A. Shared navigation · Optional tools and project entry",
+      "baselineId": "qTzd6",
+      "baselineNormalizedSha256": "c3e62873caec96994726b34b3b1fc2961a6b0796d8c9af753c73c951e9bd9a68",
+      "sourceNormalizedSha256": "8593eca2572ecc554a7af1a4a2eacd4a3025dae09142a57183564f4b0952e5b1",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "o4b4a2",
+      "name": "25A. Project tasks · Full resource table and column menu",
+      "baselineId": "M5SWe",
+      "baselineNormalizedSha256": "73cf29bb9e223d990400c4ce0182940cfdffd22f73993706df85e9cebe6455ab",
+      "sourceNormalizedSha256": "fcbd6fda7a000676b9684293f639ccd8be492fda5112e2228bdeddb3da222146",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "J2T61f",
+      "name": "26A. All tasks · Grouping, tags and run actions",
+      "baselineId": "AHKNo",
+      "baselineNormalizedSha256": "ed4249a994fd3bd988a7f8f6f4364da90932ff6786e95aed7e0bfa9e0b08bf96",
+      "sourceNormalizedSha256": "3388df02353d020fd657a548be3365d619be60429b32ef26ddde15dce3d08e1b",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "MAoLU",
+      "name": "27A. GitHub · PR conversation, filters and readiness",
+      "baselineId": "I44Ul8",
+      "baselineNormalizedSha256": "7694a70dc176f06030e2065f9a23fe47b6266378c3418a42f6686ba0e56fbe97",
+      "sourceNormalizedSha256": "72f0f414b131dd9e60667b812225f20aed66d7e86397e7966e21e34f692693c2",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "dABhL",
+      "name": "28A. Task actions · Menu and handoff reader",
+      "baselineId": "ZhHkR",
+      "baselineNormalizedSha256": "fa34d0fac7da42f215128bab35c02208d4265f61ea363b3b513e491e3eebda2d",
+      "sourceNormalizedSha256": "2f363128dbb76af8c17b22935b66e6eba9ee3879139df45d9f88d6c39ca676b7",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "ghWjg",
+      "name": "29A. Confirmation dialogs · Tasks, variants and plans",
+      "baselineId": "rEzlh",
+      "baselineNormalizedSha256": "12a1674577742ff2bef588884ad166499be6e240185b3382bd2517ff52282728",
+      "sourceNormalizedSha256": "12a1674577742ff2bef588884ad166499be6e240185b3382bd2517ff52282728",
+      "declarationStatus": "same"
+    },
+    {
+      "id": "aMnx1",
+      "name": "27B. GitHub PR · Changes, blocked merge and confirmation",
+      "baselineId": "zSB9u",
+      "baselineNormalizedSha256": "859f4ded92e23411e7e8bb1b1caf8977ed1b919d144ea0fa7b0c5a285655b456",
+      "sourceNormalizedSha256": "165ff57cbfcc6e936de2bb0feac930d3715c30b59696002eae5cf5ac1fc337f9",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "t0g2h",
+      "name": "30A. Project settings · Agents",
+      "baselineId": "ur8ZK",
+      "baselineNormalizedSha256": "26ee4d1ebec49df007046416095a66b246a79fd1b3d6d1c00ef09577460393b4",
+      "sourceNormalizedSha256": "d64713823b0db55d56616804a495bd3e323a116df66728e2a1983f6b1957104d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "eDIGx",
+      "name": "30B. Project settings · Agent config",
+      "baselineId": "w1inBF",
+      "baselineNormalizedSha256": "92a16772abc526d7bb115c4f2ea2319495841caf59ff09c3a776f876029a5461",
+      "sourceNormalizedSha256": "8bb8ca1ba9644725148961b4c004049ceecc4ece48c53c5d5cd1d657a5b1b70c",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "PBf5F",
+      "name": "30C. Project settings · Worktrees",
+      "baselineId": "LmL0v",
+      "baselineNormalizedSha256": "308e5f081aa52e120061987abcfe14e6af39a501141dd182fad3b427661ccfa9",
+      "sourceNormalizedSha256": "1e55fe909f67a88655dd7c5a4b7709766151381c629bd7174449620ad2c702f1",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "SRaON",
+      "name": "30D. Project settings · Prompt templates",
+      "baselineId": "cv6mn",
+      "baselineNormalizedSha256": "ccd24e644ba7010a86f2699415018025866f2c0dcbb0b45c6db565392088a6d1",
+      "sourceNormalizedSha256": "f89afa1e6ec04f183e8e045c7bd2abc6bf829ed9d598ad42d09150e12b39ed9d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Z9By1",
+      "name": "31A. Global settings · Notifications",
+      "baselineId": "x1Iye",
+      "baselineNormalizedSha256": "903a61559e258a000f10ebde1bf5cdc3c1b018e5adc0c7f4b101ff2c589d8613",
+      "sourceNormalizedSha256": "f44730080855cb9695750db36bf968debe5aa31b969f3bbd73f280b7c2ee0056",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "AzGdn",
+      "name": "31B. Global settings · Resources",
+      "baselineId": "sBaI8",
+      "baselineNormalizedSha256": "fa9e66913bffb8054ac51489994338d15b14d637dd86fc860ae451c533591b1a",
+      "sourceNormalizedSha256": "1664fe6fafe968f4306df6e61e79ca503b2266d616d7f0c52e21418b2798f7a5",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "AN5gN",
+      "name": "31C. Global settings · Skills",
+      "baselineId": "RysDF",
+      "baselineNormalizedSha256": "60d3e596776d331fb4c2d3b3993d412c95e823b29d5b9493324a4d93de342d7b",
+      "sourceNormalizedSha256": "f13c7acb4f0e85c42b290a7826d371da7a43edab607aff37723cd5b4fb92df50",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Sa02O",
+      "name": "31D. Global settings · Agent accounts",
+      "baselineId": "XLiCf",
+      "baselineNormalizedSha256": "5a84effeab1fc8eb4ffddd608e05705e6caa33a7f163140c8cafcfd9af1b759a",
+      "sourceNormalizedSha256": "4fcb6d737ab2c64abbf699333667cfc55279949468afb1cbdd7bf5c118a97d7a",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "SN7pd",
+      "name": "31E. Global settings · Projects",
+      "baselineId": "Id0Gw",
+      "baselineNormalizedSha256": "5140b8824479bf108f228b805c8e17042ebfe6100b730f1e4862753e519080b3",
+      "sourceNormalizedSha256": "827d737cb40781add1f53f9433e546bfe95deb886942ab26755e5216cc3fcc85",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "TYwHz",
+      "name": "32A. Workflow editing · Import, Add step and Delete",
+      "baselineId": "lRC5W",
+      "baselineNormalizedSha256": "a3c2aac882d6048b3cb10e67af57d217fd820ca3143f374e3523e0a1b0556141",
+      "sourceNormalizedSha256": "a3c2aac882d6048b3cb10e67af57d217fd820ca3143f374e3523e0a1b0556141",
+      "declarationStatus": "same"
+    },
+    {
+      "id": "gHoB0",
+      "name": "33A. Optional features · Disabled, empty and waiting states",
+      "baselineId": "mpyjl",
+      "baselineNormalizedSha256": "1e0b51a37e551b6ad9a27ee7be489bbed8a675aa7c31887e679ded29b21594d5",
+      "sourceNormalizedSha256": "1e0b51a37e551b6ad9a27ee7be489bbed8a675aa7c31887e679ded29b21594d5",
+      "declarationStatus": "same"
+    },
+    {
+      "id": "pubJt",
+      "name": "19A. Inbox · Mobile light",
+      "baselineId": "N6NED",
+      "baselineNormalizedSha256": "e11d1740a472c549aa0a9d70c4bab00f986e9be66d01fc27a8732c4d6228bb8b",
+      "sourceNormalizedSha256": "21d74ea1ba48f99cd60254360c4bf1896c69ce5f37c3d5522edf11595958cd0f",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Y9GMYF",
+      "name": "20B. Automation editor · Mobile light",
+      "baselineId": "Jn0Bt",
+      "baselineNormalizedSha256": "764c32a84b685b0e4f1b72b3e971fbf55c6eea5d4abd355f43493afab71867ce",
+      "sourceNormalizedSha256": "0bcdc9f5826c742876ca781ac902b0ba9e3471ce239e17db67d1586a5d4a9e93",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "sA0J5",
+      "name": "21A. Compare variants · Mobile light",
+      "baselineId": "hG4Cl",
+      "baselineNormalizedSha256": "375495abe44d45c1289367208006629b1977e114d0cb796ff91061147fbff3f6",
+      "sourceNormalizedSha256": "15c199fd37f773e97d77a13eb4475fca98584ff0fe6c42ec33b63535827065e4",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "y6mdNp",
+      "name": "22A. Plan review · Mobile light",
+      "baselineId": "i9Si8J",
+      "baselineNormalizedSha256": "4d70fa8a2ab72b16a357c144d316c2f65b6e451d441e2b01842cf03a3c903b07",
+      "sourceNormalizedSha256": "5f7dc8d96848df82ec3bec85e2fcbd828b52c379bd54f8260192105f386ffb3c",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "DgFDf",
+      "name": "28A. Task actions · Mobile light",
+      "baselineId": "ogTQi",
+      "baselineNormalizedSha256": "7357c4e5b9f27305325262905de7b3d45e4778228e85113080389a3dd606d128",
+      "sourceNormalizedSha256": "7ce7647abb7f3dbce7605963e4f9c59a6f30c63dd75139187acbbee82a08ae2f",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "KVEBF",
+      "name": "27B. PR changes and merge · Mobile light",
+      "baselineId": "RvbXf",
+      "baselineNormalizedSha256": "10e5653c5908fc784a5e0752744a6b0b5ac24306c65d7a904cc5c53f0b888fc5",
+      "sourceNormalizedSha256": "932a819499310b4b787ccd188a4c1ff6febae83e35fda41bd22b76d345275ad2",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "hcJW7",
+      "name": "31B. Resource settings · Mobile light",
+      "baselineId": "OGJJ1",
+      "baselineNormalizedSha256": "c4cb22ea2025a7940d335ccd98449300ef3e3fade884e4164fbfa4454e0a5759",
+      "sourceNormalizedSha256": "28aeb45456a2ff1ba632c89aa19d78215392150ed461bf6467fcbe80b4ce0ae6",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "cpiTh",
+      "name": "32A. Import workflow · Mobile light",
+      "baselineId": "djknR",
+      "baselineNormalizedSha256": "9fd6d4363198e8c6107213b8c2206aab434087ea71818e8c173d2f5f1593e6b3",
+      "sourceNormalizedSha256": "d3826717f7ee9eff5f1d3572a8141d6148a9e099f7b555698f260706c99f7061",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "F9bVC",
+      "name": "25B. Project tasks · Mobile floating New task",
+      "baselineId": "lpRVc",
+      "baselineNormalizedSha256": "1ddcefe91d17bbfbf483a8766556fa2ba9039db4f247365715c6ab8f49c55826",
+      "sourceNormalizedSha256": "876d8219eb127f010310dc7f6ea887dd285cf5ad6316cab27df93cb632e3ea39",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "yrCXo",
+      "name": "19A. Inbox · Follow-up review · Dark",
+      "baselineId": "moM53",
+      "baselineNormalizedSha256": "6c7db3b1fc65736b0ea86a5ff57f680f8342f21023d5553ddf7ed394e3b68e4e",
+      "sourceNormalizedSha256": "f0b75cd230b8a556676465e5f6fa5d6684bc6d81025d16db783a8a44a966b95f",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "vHYVq",
+      "name": "20A. Automations · List and activity · Dark",
+      "baselineId": "s6Ih0I",
+      "baselineNormalizedSha256": "5593120a1ef713a1f36852211ed34e0e9a517d9947bfafa2bfda2b2b4c192a53",
+      "sourceNormalizedSha256": "bbc461a587027d3ae13ea7c735a54fadef891a7635e0e903afe7097eed65e857",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "hegUC",
+      "name": "20B. Automations · Editor · Dark",
+      "baselineId": "YVkaw",
+      "baselineNormalizedSha256": "662609311d6898a16e66b3734d1a909b95a660b750c4c63a41f8dfad0f00f72b",
+      "sourceNormalizedSha256": "8f6cde5e0c683cca163c4797039dccad8e9299d0f2a5bcfd1969d4a8d61de4e1",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "NkEDk",
+      "name": "21A. Variant comparison · Results · Dark",
+      "baselineId": "owGYp",
+      "baselineNormalizedSha256": "08cc895712f66640588fcf9a64543684583ec9425e4bd37778b8a73b5782cf87",
+      "sourceNormalizedSha256": "f8cf8db4b6482fe70a4079077344bb8ba82e1ca47fbf106104a97cc855e72b76",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "iVNMT",
+      "name": "22A. Plan review · Reorder and start · Dark",
+      "baselineId": "Oo1J1",
+      "baselineNormalizedSha256": "53e9a4d6cc51617294bc41ae6987c964aa4f1135a91dc2eb8271184d865232bf",
+      "sourceNormalizedSha256": "3b2f514daee0e5316738ca7745182572ae84953a71c1500cddebf5dddcc54f47",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "R5A7rF",
+      "name": "23A. New task · Starters and follow-ups · Dark",
+      "baselineId": "pf8QM",
+      "baselineNormalizedSha256": "7786d63b297a763e54b858cc1e99a82ed6f83679531a2839de07234321006566",
+      "sourceNormalizedSha256": "e98088859a1831043867582e8ed48732418ea388bb51656b6f67d9db757f77a2",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "ZFjwR",
+      "name": "24A. Shared navigation · Optional tools and project entry · Dark",
+      "baselineId": "OREDs",
+      "baselineNormalizedSha256": "358816e41ff58a61e952b7ce1837079d19edd9539cec717ca1d962c17a3f5b76",
+      "sourceNormalizedSha256": "ad79d1f34a445ee801018734e3adfdbaca5042c2a8c04a428a7dc204d96267e3",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "KHzma",
+      "name": "25A. Project tasks · Full resource table and column menu · Dark",
+      "baselineId": "ofMmL",
+      "baselineNormalizedSha256": "0cac521da45507d9d6eb9fc48334fd52f6f0020c7c58d4f2b21f7752952e604a",
+      "sourceNormalizedSha256": "17640a3371bc331f58a765000e9c38d30bd4e4a9186ed1b8fd307c9b0c5a2de4",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "utdkB",
+      "name": "26A. All tasks · Grouping, tags and run actions · Dark",
+      "baselineId": "UzdJ2",
+      "baselineNormalizedSha256": "40bbff6d5e95f0b2523372b606fbe997429b1bd28a4e376d19fcf03141aaf052",
+      "sourceNormalizedSha256": "700b8d05585bb6e7d50f2e6e670366dc3f75a8fc7329390fa4fd1c2b0074a60d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "T95KVV",
+      "name": "27A. GitHub · PR conversation, filters and readiness · Dark",
+      "baselineId": "HBMSk",
+      "baselineNormalizedSha256": "01863919504c91f762841760b002288655de8548969fa3bdcc5c1d25b7fc75e4",
+      "sourceNormalizedSha256": "cf8eca10b5545b2d763237ec375244d4f1f5ecf23616b93619ccd66009acdfa0",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Fsizd",
+      "name": "28A. Task actions · Menu and handoff reader · Dark",
+      "baselineId": "ef75D",
+      "baselineNormalizedSha256": "125164adc3ce0f14b2c4375bea061dcc61c12c0ce662cbdc82f924e3a380098a",
+      "sourceNormalizedSha256": "8ded99fbb108d851a21b261131020abe36939b03db9bd3fa64e580ea99edfec1",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "uSLd4",
+      "name": "29A. Confirmation dialogs · Tasks, variants and plans · Dark",
+      "baselineId": "c6ANji",
+      "baselineNormalizedSha256": "ef8ad8cebf7411525ee7c87258ee159a764d2eefa97e51c72bd55474048357fa",
+      "sourceNormalizedSha256": "ef8ad8cebf7411525ee7c87258ee159a764d2eefa97e51c72bd55474048357fa",
+      "declarationStatus": "same"
+    },
+    {
+      "id": "t6Imv",
+      "name": "27B. GitHub PR · Changes, blocked merge and confirmation · Dark",
+      "baselineId": "Z3tJLp",
+      "baselineNormalizedSha256": "bc0d8e24f9f395e193652d761a52ea278c818ced375538072004cd9440365f81",
+      "sourceNormalizedSha256": "b5782bb74424e01fc8936cac87a9c267e66565d55cd125b364e3fc888d0c7e4d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "TN9Ej",
+      "name": "30A. Project settings · Agents · Dark",
+      "baselineId": "cQJod",
+      "baselineNormalizedSha256": "33a25d4899b473f91c1d16d6083bf1595d03f3b1f227313e518984d1f9e7477e",
+      "sourceNormalizedSha256": "857745d295d6ee3ce07f7e54129a695ca73017b90fead49a401811935a7f953e",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "FQr7q",
+      "name": "30B. Project settings · Agent config · Dark",
+      "baselineId": "v9iCdT",
+      "baselineNormalizedSha256": "3d0f3e874bf55073e4ce056c4246d4c09c2591d5f4603b670dcab40ea272235b",
+      "sourceNormalizedSha256": "b9d11bc5cb6be0182d6b5fe39458a2aae2d987f4239e4db45ed9e6954e4bcc5a",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "e2S835",
+      "name": "30C. Project settings · Worktrees · Dark",
+      "baselineId": "u8PPZ3",
+      "baselineNormalizedSha256": "d11fdec4a57eb58a6d5421e28c7bce7965ebb4ebb5b17bec7227c8791b1144c0",
+      "sourceNormalizedSha256": "422fe7e9c7af711887eac6a37fd28e79e1ed74f9084a619e67fb09eccad3ff8e",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "PxeWg",
+      "name": "30D. Project settings · Prompt templates · Dark",
+      "baselineId": "v5h5dm",
+      "baselineNormalizedSha256": "4ca1334ed5ada6c2e8455921b2b1a077fee7362560a5c92d060bd872e2d318ea",
+      "sourceNormalizedSha256": "9f4cfed0e2e8d96f94b7ed33b6f3a8deb32f1a67305e17764cad58f11a16559e",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "HVu0D",
+      "name": "31A. Global settings · Notifications · Dark",
+      "baselineId": "c96HBw",
+      "baselineNormalizedSha256": "b97c46d35fe049759eeea0796b47dd240198ebd1a3342111ea08147ec7088ca7",
+      "sourceNormalizedSha256": "34cd1838e3e9aae8b664b3b9739984b6734410699d07b58d30d854c0183ae987",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "chAPL",
+      "name": "31B. Global settings · Resources · Dark",
+      "baselineId": "iBtG5",
+      "baselineNormalizedSha256": "bc1b2b90daa55da1683d1368dff6d51a877220277a93f61c62652abb9ded52f5",
+      "sourceNormalizedSha256": "a74d6c71f006da9bd5b91f0783a98fceb6bac7ac308ff94d66c67de6a16ddb7a",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "xH7vU",
+      "name": "31C. Global settings · Skills · Dark",
+      "baselineId": "tWnpG",
+      "baselineNormalizedSha256": "936a3cd651902334b2d2c600afb4699a4e94012ab73181ff9828575fdd661959",
+      "sourceNormalizedSha256": "963d9742b3f44aed54461771ce4c235aab042459d70f689e21f2554fd2f03f7a",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "XS7nt",
+      "name": "31D. Global settings · Agent accounts · Dark",
+      "baselineId": "XvWFg",
+      "baselineNormalizedSha256": "837dff3b159b8da2eed94e6897e77ee66e1bee66f5d28e456bda3952dae021ff",
+      "sourceNormalizedSha256": "e13db86f206a92a8b310f49af217745fa7ee039a542031309849f26f1212d21d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "lUOHx",
+      "name": "31E. Global settings · Projects · Dark",
+      "baselineId": "pHBjV",
+      "baselineNormalizedSha256": "002b28dcf985b36db10f5512358ee1e23b5640a71291c363d67e394a1c550dae",
+      "sourceNormalizedSha256": "851c919eca3fd67573aa07ca3643496e47d57a3f9e982d59f68bc5bb19e16938",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "vxfF8",
+      "name": "32A. Workflow editing · Import, Add step and Delete · Dark",
+      "baselineId": "KwkJs",
+      "baselineNormalizedSha256": "16d732706a251348a2d2a1b625028931354c19f3be56ad440b202228ace85342",
+      "sourceNormalizedSha256": "16d732706a251348a2d2a1b625028931354c19f3be56ad440b202228ace85342",
+      "declarationStatus": "same"
+    },
+    {
+      "id": "lzI1Q",
+      "name": "33A. Optional features · Disabled, empty and waiting states · Dark",
+      "baselineId": "NQePM",
+      "baselineNormalizedSha256": "9ac983d510e19b8d762f8186241037b0db41c69b7cf5f076c8d5f152280b8906",
+      "sourceNormalizedSha256": "9ac983d510e19b8d762f8186241037b0db41c69b7cf5f076c8d5f152280b8906",
+      "declarationStatus": "same"
+    },
+    {
+      "id": "K6EBZm",
+      "name": "19A. Inbox · Mobile dark",
+      "baselineId": "ITZ94",
+      "baselineNormalizedSha256": "a26105b87d5495a88aec9d21d462400261ec0c8cb38f36cda9b627f4b5b818f0",
+      "sourceNormalizedSha256": "cb773323bf4edf204bf53cc4e2838a0946de9c009236f741ce23516d8dcdcad1",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "UIfcs",
+      "name": "20B. Automation editor · Mobile dark",
+      "baselineId": "Itxee",
+      "baselineNormalizedSha256": "f6da8086e60005261e580a0e2296b9414c0a221669fa1e48b802914394cfe004",
+      "sourceNormalizedSha256": "caee7479981a476e0025e119925caa5cc26d4c518ae098ebdc5c63686c85ac0a",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "tV7Vf",
+      "name": "21A. Compare variants · Mobile dark",
+      "baselineId": "iQvMt",
+      "baselineNormalizedSha256": "92be20dfc76a468839e8a22e3b86d271340179b401314de8aa88d39be58a2ec3",
+      "sourceNormalizedSha256": "08604f842deaebc645c4574825ffc25b9baa48940cd4707af4d845896be8b39c",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "D5ua2",
+      "name": "22A. Plan review · Mobile dark",
+      "baselineId": "PFLKh",
+      "baselineNormalizedSha256": "0a0952aabb0ab53d1587b671b6b0e238c18880b78cd956a3ba287a43c8a6abd8",
+      "sourceNormalizedSha256": "59ab5596a433b5db0a8fd24b6f28f413ad6c04b70bc8e4328e53d714a4069a8b",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "xHfq2",
+      "name": "28A. Task actions · Mobile dark",
+      "baselineId": "myX8Q",
+      "baselineNormalizedSha256": "c46b555b564bbf2d876e49672a08680ab3e2ee70e4b6a0f34e81075af2d1184c",
+      "sourceNormalizedSha256": "a62fa21758fada0d36bcd3b9c2b63aa1e7db8553f507a65638d5936579370be8",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "C2LEL",
+      "name": "27B. PR changes and merge · Mobile dark",
+      "baselineId": "MnEgv",
+      "baselineNormalizedSha256": "5733a1efe9e9502f69192885de8c8d91b46f4f2b3edd7cdd2628ac7f17a3a850",
+      "sourceNormalizedSha256": "955edac15891a96d96bc4513ef89d6fcdb9d65272596df6a889e451e18d1bac8",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "Y3hl1v",
+      "name": "31B. Resource settings · Mobile dark",
+      "baselineId": "jCdnx",
+      "baselineNormalizedSha256": "75d2562470cbf55e76297d5b75e8250158ae5910c5a9f448587c4ed4f75cd84a",
+      "sourceNormalizedSha256": "6c0a2ac4aeb38d1ccd1e0235a558721d1d984a3b4a013ac8e2c9e57f93b42d84",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "d0G4G",
+      "name": "32A. Import workflow · Mobile dark",
+      "baselineId": "MF4eF",
+      "baselineNormalizedSha256": "9ab16373ad0782d7e4f6c1f803863db32914a66c030e6ebe8fbe1aab0af737e9",
+      "sourceNormalizedSha256": "edf6e0b78d2f80549499c68381114b176317d4aa00ac33e12159e53046c099ed",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "ZZg1y",
+      "name": "25B. Project tasks · Mobile floating New task · Dark",
+      "baselineId": "R2OII2",
+      "baselineNormalizedSha256": "80ccdd9e8d0d3d90acc7f86c229a9cf04f092264970efeea3468e59f0c9d5e96",
+      "sourceNormalizedSha256": "ff53fd9b563b4a87494c6d9a3928be61caf86187969f5522a4fe15050b50440d",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "eGAZH",
+      "name": "00B. Implementation gaps · Coverage and handoff index",
+      "baselineId": "mxZSz",
+      "baselineNormalizedSha256": "2606cab8b24fed56218bb6c8170e81e5118b22f926bd245b4f3db2c1feb32bb3",
+      "sourceNormalizedSha256": "2606cab8b24fed56218bb6c8170e81e5118b22f926bd245b4f3db2c1feb32bb3",
+      "declarationStatus": "same"
+    },
+    {
+      "id": "BeRrd",
+      "name": "27C. GitHub PR · Checks passing, requirements unknown",
+      "baselineId": "kDsvU",
+      "baselineNormalizedSha256": "2efd60c0ebd0ef1bc0a8ac9e0c8b9a95a075a5b36b5eff64e6afd59a2b8f2155",
+      "sourceNormalizedSha256": "b6c8a9ce553ed760a03572725de8b0f6e8d0a7177c759fe5dc668ec226362beb",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "FPdeC",
+      "name": "27C. GitHub PR · Requirements unknown · Desktop dark",
+      "baselineId": "zze3r",
+      "baselineNormalizedSha256": "045152526c1cae1b81665b56b3ac862d81479ced9a97c8c63845b7939dfc0a40",
+      "sourceNormalizedSha256": "95cfc69c82bcc7edf71e7653e5cc0b70003383cc02551eddfedc2fab9a6bd372",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "z7LPU8",
+      "name": "27C. GitHub PR · Requirements unknown · Mobile light",
+      "baselineId": "Pf2JI",
+      "baselineNormalizedSha256": "ddf125f976f3ab64a2665d5e7ab40c208cba2184d02cf37d5a742a77997a438c",
+      "sourceNormalizedSha256": "eb1c72a4f867ebec47d480cfe4b6f6dcadf5091a8ac90fee0136ce5bed2360ce",
+      "declarationStatus": "changed"
+    },
+    {
+      "id": "e9APk2",
+      "name": "27C. GitHub PR · Requirements unknown · Mobile dark",
+      "baselineId": "mC4Fw",
+      "baselineNormalizedSha256": "1b50bf07f4a630be09a5fa03320316904b7f896e87b109df9fe1b9df8e957cd1",
+      "sourceNormalizedSha256": "b3207fe9b3e073f4fffcbeef817c8634e4e751d38f18e0a7f9bf40376b630a60",
+      "declarationStatus": "changed"
+    }
+  ]
+}

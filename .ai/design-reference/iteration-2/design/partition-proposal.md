@@ -1,7 +1,7 @@
 # Implementation Partition Proposal — Iteration 2
 
 ## Summary
-158 frames total: 71 new, 2 content-changed, 85 identical to committed baseline (`design.pen` on `main`).
+158 frames total. Baseline correction: all 158 unique frame names exist in `c3f4d228:cezarion.pen`; 151 normalized declarations changed and seven match, with shared font/variable changes also affecting rendering. The former 71-new / 2-changed / 85-identical claim used the wrong baseline and is withdrawn. See `../font-audit/README.md` and the corrected manifest. Partition suggestions below are historical proposals, not verified diff classifications.
 
 ## Priority Tiers
 

@@ -1,0 +1,5 @@
+# Large downloaded font evidence remains local; hashes and exact public URLs are committed.
+*.font
+# The full export is committed losslessly compressed.
+all-frames.html
+twLlb.html
