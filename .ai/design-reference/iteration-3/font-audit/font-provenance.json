@@ -1,0 +1,137 @@
+{
+  "capture": "Fresh pen.dev session4248; public fonts.gstatic.com responses only; PNG mZMB8 exported fresh",
+  "fonts": [
+    {
+      "file": "8d909883de81344e0fbcfef30e931872e92d9aeecdf85b6dcf6e0b28c078e98e.font",
+      "names": [
+        "Medium",
+        "Poppins",
+        "Poppins Medium",
+        "Regular"
+      ],
+      "hasU2304": false,
+      "hasU21BB": false,
+      "glyphCount": 471
+    },
+    {
+      "file": "82387b972ce226190d722d731b1ba5b103106f868b5b266be4f6857b212a856d.font",
+      "names": [
+        "Noto Sans SC",
+        "Noto Sans SC Thin",
+        "Regular",
+        "Thin"
+      ],
+      "hasU2304": false,
+      "hasU21BB": false,
+      "glyphCount": 30890
+    },
+    {
+      "file": "7b8cac46a1c86d2533a616b1fcf4e1926b8e39bda69034508b0df96791f56d97.font",
+      "names": [
+        "Noto Sans",
+        "Regular"
+      ],
+      "hasU2304": false,
+      "hasU21BB": false,
+      "glyphCount": 3094
+    },
+    {
+      "file": "7cd81998a15203d3b457d31345590181e8933ca3de20361722d996491b132b83.font",
+      "names": [
+        "Noto Sans KR",
+        "Noto Sans KR Thin",
+        "Regular",
+        "Thin"
+      ],
+      "hasU2304": false,
+      "hasU21BB": false,
+      "glyphCount": 23174
+    },
+    {
+      "file": "522e50bd93d30ca91266bf06e4dcf2051b926a01f027f794754d735aa7186b1f.font",
+      "names": [
+        "Noto Sans JP",
+        "Noto Sans JP Thin",
+        "Regular",
+        "Thin"
+      ],
+      "hasU2304": false,
+      "hasU21BB": false,
+      "glyphCount": 16732
+    },
+    {
+      "file": "707fdc5c8bab57a90061c6a8ed7b70d5ffb82fc810e994e79f90bace890c255a.font",
+      "names": [
+        "Poppins",
+        "Regular"
+      ],
+      "hasU2304": false,
+      "hasU21BB": false,
+      "glyphCount": 471
+    },
+    {
+      "file": "f67f40c65f929f029827ab37cfdc4897dfd9ae3c28d9e98ba46e0d52e39eb97e.font",
+      "names": [
+        "Noto Sans Symbols 2",
+        "Regular"
+      ],
+      "hasU2304": false,
+      "hasU21BB": false,
+      "glyphCount": 2955
+    },
+    {
+      "file": "248c0244b350ec68880996aa6be6d7796274b49992d5fcbbefe251906aa4ea36.font",
+      "names": [
+        "Poppins",
+        "Poppins SemiBold",
+        "Regular",
+        "SemiBold"
+      ],
+      "hasU2304": false,
+      "hasU21BB": false,
+      "glyphCount": 471
+    },
+    {
+      "file": "ab08018ccd276b79fb2c636bb95b9c543598f9d50505fe92506fcb4dae7810cd.font",
+      "names": [
+        "IBM Plex Mono",
+        "Regular"
+      ],
+      "hasU2304": false,
+      "hasU21BB": true,
+      "glyphCount": 930
+    },
+    {
+      "file": "f7a4886e34cc167efeac865b26321f65d823141584959fae9eaad8b3a2895f46.font",
+      "names": [
+        "Noto Emoji",
+        "Regular"
+      ],
+      "hasU2304": false,
+      "hasU21BB": false,
+      "glyphCount": 1503
+    },
+    {
+      "file": "6ce0f80c4d3e5b8ff32174239fc4c7efc1fdc3251b21f45702e206b59ee45ac6.font",
+      "names": [
+        "Noto Sans TC",
+        "Noto Sans TC Thin",
+        "Regular",
+        "Thin"
+      ],
+      "hasU2304": false,
+      "hasU21BB": false,
+      "glyphCount": 20745
+    },
+    {
+      "file": "192a3158a926768d1fa520164f0fb0f40a6ad085435aa854e43eb14cb40d1aab.font",
+      "names": [
+        "JetBrains Mono",
+        "Regular"
+      ],
+      "hasU2304": true,
+      "hasU21BB": false,
+      "glyphCount": 976
+    }
+  ]
+}
