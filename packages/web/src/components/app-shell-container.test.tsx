@@ -1,5 +1,5 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -332,6 +332,32 @@ describe('sidebar wiring', () => {
     expect(document.querySelector('[data-slot="task-quick-list"]')).toBeNull()
     // …and so does the repo chip, which the boot project's own group header now carries.
     expect(repoChip()).toBeNull()
+  })
+
+  it('keeps Inbox and Automations inside project groups, not as workspace links', async () => {
+    serve({
+      '/api/v1/health': {
+        ...HEALTH,
+        capabilities: { ...HEALTH.capabilities, followups: true, automations: true },
+      },
+      '/api/v1/todos': TODOS,
+      '/api/v1/projects': {
+        projects: [
+          { ...PROJECT, forge: 'github' },
+          { ...PROJECT, id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z', forge: 'github' },
+        ],
+        bootProject: 'cezar',
+        projectsDir: '/home/me/cezar/projects',
+      },
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/p/cezar/runs': [],
+    })
+    renderShell()
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="project-group"]')).toHaveLength(2))
+    expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull()
+    const cezar = within(document.querySelector('[data-slot="project-group"][data-project="cezar"]') as HTMLElement)
+    expect(cezar.getByRole('link', { name: 'Inbox' }).getAttribute('href')).toBe('/p/cezar/inbox')
+    expect(cezar.getByRole('link', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
   })
 
   it('keeps the shared archive filter reachable in Tools for a multi-project session tree', async () => {

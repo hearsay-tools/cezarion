@@ -142,8 +142,8 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
               // No forge prop: each group gates its own GitHub tab on its registry entry's
               // `forge` field (#698) — the boot folder's health-level answer says nothing
               // about the other projects in the workspace.
-              inboxAvailable={false}
-              automationsAvailable={false}
+              inboxAvailable={inboxAvailable}
+              automationsAvailable={automationsAvailable}
               inboxCount={todos.data?.length ?? null}
               skillsUpdateAvailable={skillsUpdateAvailable}
             />

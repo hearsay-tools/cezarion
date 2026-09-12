@@ -120,22 +120,22 @@ describe('AppShell', () => {
     renderShell()
     const links = allNavLinks()
     expect(links.map((a) => a.textContent)).toEqual([
-      'Inbox',
-      'Automations',
       'Tasks',
+      'Inbox',
       'Git',
       'GitHub',
+      'Automations',
       'Skills',
       'Workflows',
       'Settings',
     ])
     // Deep-linkable per Step 2.1: every nav row is an <a href>, not a button with an onClick.
     expect(links.map((a) => a.getAttribute('href'))).toEqual([
-      '/inbox',
-      '/automations',
       '/',
+      '/inbox',
       '/git',
       '/github',
+      '/automations',
       '/skills',
       '/workflows',
       '/settings',

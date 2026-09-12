@@ -533,17 +533,6 @@ function SidebarContent({
       </div>
 
 
-      <nav aria-label="Workspace" className="shrink-0 px-4">
-        {items.filter((item) => item.inbox || item.automations).map((item) => {
-          const Icon = item.icon
-          return <Link key={item.to} to={item.to} onClick={onNavigate} aria-current={activeTo === item.to ? 'page' : undefined}
-            className={cn('flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-muted md:min-h-[42px]', activeTo === item.to && 'bg-[var(--task-brand-selected)] text-accent-text')}>
-            <Icon aria-hidden="true" className="size-4 shrink-0" />{item.label}
-            {item.inbox && inboxCount ? <span data-slot="nav-badge" className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10px] text-accent-strong-foreground">{inboxCount}</span> : null}
-          </Link>
-        })}
-      </nav>
-
       {sessionScope ? <div className="shrink-0 px-4 pb-3">{sessionScope}</div> : null}
       {projectGroups ? (
         <>
@@ -562,7 +551,7 @@ function SidebarContent({
         <div data-slot="single-project-navigation" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {repo ? <div className="mx-4 mb-1 flex min-h-[55px] items-center gap-2 rounded-md bg-muted px-2 text-[13px] font-semibold"><FolderIcon aria-hidden="true" className="size-[18px] shrink-0 text-muted-foreground" /><span className="min-w-0"><span data-slot="repo-chip" className="block truncate">{repo.name}</span><span className="block truncate font-['IBM_Plex_Mono'] text-[10px] font-normal text-soft-foreground">{repo.branch}</span></span></div> : null}
           <nav aria-label="Main" className="flex flex-col gap-0.5 px-4">
-            {items.filter((item) => !item.inbox && !item.automations).map((item) => {
+            {items.map((item) => {
               const isActive = item.to === activeTo
               const Icon = item.icon
               // Link, not NavLink, on purpose. NavLink derives `aria-current` from its own prefix
