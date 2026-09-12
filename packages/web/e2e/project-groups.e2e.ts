@@ -247,7 +247,7 @@ describe('the grouped multi-project sidebar', () => {
 
     // The whole point of a group: it links into a project that is NOT the active one.
     expect(hrefs(bootProject)).toEqual(expectedNavHrefs(bootProject))
-    expect(hrefs(ALPHA.id)).toEqual([])
+    expect(hrefs(ALPHA.id)).toEqual(expectedNavHrefs(ALPHA.id))
 
     // `/git` is a flat, project-agnostic route, so exactly one Git row may claim the URL — the
     // one in the scoped group. Alpha's Git link points elsewhere and must stay unmarked.
@@ -256,8 +256,8 @@ describe('the grouped multi-project sidebar', () => {
         .map((a) => new URL(a.href).pathname)`)
     ).toEqual([scoped(bootProject, '/git')])
 
-    // The inactive project's name opens its scoped tasks; navigation is shown only for
-    // the current project in the source design, so inspect Alpha after actually entering it.
+    // The inactive project's name opens its scoped tasks. Entering Alpha lights its Git
+    // row and collapses the boot group (no stored pin), so only Alpha claims the URL.
     browser.click('[data-slot="project-group"][data-project="e2e-alpha"] a[aria-label="Open e2e alpha"]')
     browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/')}'`)
     browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav') !== null`)

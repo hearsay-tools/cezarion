@@ -151,19 +151,40 @@ describe('ProjectGroups', () => {
     expect(asked).not.toContain('/api/v1/p/shop/runs')
   })
 
-  it('shows destinations for the selected project and keeps every other project reachable', async () => {
+  it('puts the branch on the same row as the project name, to the right', async () => {
+    serve({ '/api/v1/p/cezar/runs': [] })
+    renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
+    await waitFor(() => expect(header('cezar').getAttribute('aria-expanded')).toBe('true'))
+    const name = within(group('cezar')).getByRole('link', { name: 'Open cezar' })
+    const branch = group('cezar').querySelector('[data-slot="project-branch"]')
+    expect(branch?.textContent).toBe('main')
+    expect(name.contains(branch)).toBe(false)
+    expect(name.parentElement).toBe(branch?.parentElement)
+    expect(header('cezar').parentElement).toBe(branch?.parentElement)
+  })
+
+  it('shows each expanded group’s own nav, and lights only the active one', async () => {
     storeCollapsed({ shop: false })
     serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
     renderGroups([project(), project({ id: 'shop', name: 'shop' })])
     expect(within(group('shop')).getByRole('link', { name: 'Open shop' }).getAttribute('href')).toBe('/p/shop/')
-    expect(within(group('shop')).queryByRole('navigation')).toBeNull()
-    const nav = within(group('cezar')).getByRole('navigation')
-    expect(within(nav).getByRole('link', { current: 'page' }).textContent).toBe('Tasks')
-    fireEvent.click(screen.getByRole('link', { name: 'Open shop' }))
-    const shopNav = await screen.findByRole('navigation', { name: 'shop navigation' })
-    expect(within(shopNav).getAllByRole('link').map(a => a.getAttribute('href'))).toEqual([
+    const shopNav = within(group('shop')).getByRole('navigation', { name: 'shop navigation' })
+    expect(within(shopNav).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([
       '/p/shop/', '/p/shop/git', '/p/shop/github', '/p/shop/skills', '/p/shop/workflows', '/p/shop/settings',
     ])
+    expect(within(shopNav).queryByRole('link', { current: 'page' })).toBeNull()
+    const nav = within(group('cezar')).getByRole('navigation')
+    expect(within(nav).getByRole('link', { current: 'page' }).textContent).toBe('Tasks')
+  })
+
+  it('unfolds a collapsed group when its project name is clicked', async () => {
+    storeCollapsed({ shop: true })
+    serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
+    renderGroups([project(), project({ id: 'shop', name: 'shop' })])
+    expect(header('shop').getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(screen.getByRole('link', { name: 'Open shop' }))
+    await waitFor(() => expect(header('shop').getAttribute('aria-expanded')).toBe('true'))
+    expect(within(group('shop')).getByRole('navigation', { name: 'shop navigation' })).toBeTruthy()
   })
 
   it("gates the selected project's GitHub destination on its own forge", async () => {

@@ -125,7 +125,6 @@ export function ProjectGroups({
           project={project}
           boot={project.id === bootProjectId}
           active={project.id === scopedProjectId}
-          showNavigation={project.id === (scopedProjectId ?? bootProjectId)}
           collapsed={isProjectCollapsed(collapsed, project.id, collapseAnchorId)}
           onToggle={toggle}
           view={view}
@@ -148,7 +147,6 @@ function ProjectGroup({
   project,
   boot,
   active,
-  showNavigation,
   collapsed,
   onToggle,
   view,
@@ -166,7 +164,6 @@ function ProjectGroup({
   /** The boot project's runs cache lives under the `'default'` scope key (it mounts
    *  unscoped) — see `useProjectRuns`' `boot` parameter. */
   boot: boolean
-  showNavigation: boolean
   active: boolean
   collapsed: boolean
   onToggle: (projectId: string) => void
@@ -250,14 +247,12 @@ function ProjectGroup({
       data-active={active ? '' : undefined}
       className="mb-3"
     >
-      <div className={cn('relative flex w-full items-center gap-2 rounded-md bg-muted px-2 text-left text-[13px] font-semibold', collapsed ? 'min-h-10 py-2' : 'min-h-[55px] py-2.5')}>
+      <div className="relative flex min-h-10 w-full items-center gap-2 rounded-md bg-muted px-2 py-2 text-left text-[13px] font-semibold">
         <button type="button" onClick={() => onToggle(project.id)} aria-expanded={!collapsed} aria-controls={bodyId}
           aria-label={`Toggle ${project.name}`} data-slot="project-group-header" className="absolute inset-0 rounded-md hover:bg-muted/80" />
         {collapsed ? <FolderIcon className="pointer-events-none relative size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" /> : <FolderOpenIcon className="pointer-events-none relative size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />}
-        <span className="pointer-events-none relative min-w-0 flex-1">
-          <Link to={scopeTo(project.id, '/')} onClick={onNavigate} className="pointer-events-auto block truncate" aria-label={`Open ${project.name}`}>{project.name}</Link>
-          {project.branch && !collapsed ? <span data-slot="project-branch" className="mt-0.5 block truncate font-['IBM_Plex_Mono'] text-[10px] leading-[14px] font-normal text-soft-foreground">{project.branch}</span> : null}
-        </span>
+        <Link to={scopeTo(project.id, '/')} onClick={() => { onNavigate?.(); if (collapsed) onToggle(project.id) }} className="pointer-events-auto relative min-w-0 flex-1 truncate" aria-label={`Open ${project.name}`}>{project.name}</Link>
+        {project.branch ? <span data-slot="project-branch" className="pointer-events-none relative max-w-[40%] shrink-0 truncate font-['IBM_Plex_Mono'] text-[10px] leading-[14px] font-normal text-soft-foreground">{project.branch}</span> : null}
         {waiting ? (
           <span
             data-slot="project-attention"
@@ -278,7 +273,7 @@ function ProjectGroup({
           // indented relationship rail, inside QuickListBuckets (design.pen frames 17).
           className="mt-1"
         >
-          {showNavigation ? <nav aria-label={`${project.name} navigation`} className="flex flex-col gap-0.5">
+          <nav aria-label={`${project.name} navigation`} className="flex flex-col gap-0.5">
             {/* Forge-gated per PROJECT (#698): the entry's own remote decides whether THIS
                 group offers a GitHub tab — the boot folder's health-level forge answer says
                 nothing about the other projects in the workspace. Whether `gh` itself works
@@ -327,7 +322,7 @@ function ProjectGroup({
                 </Link>
               )
             })}
-          </nav> : null}
+          </nav>
 
           {/* This group's own project, explicitly: a collapsed sidebar can show six projects at
               once, and #42 means a different pull request in each of them. */}
