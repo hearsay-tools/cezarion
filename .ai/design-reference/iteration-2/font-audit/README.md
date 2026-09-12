@@ -18,6 +18,12 @@ JetBrains Mono **does contain U+2304** (`uni2304`). The visual probe renders tha
 
 For implementation, preserve Poppins for UI copy and use an explicit, coverage-tested fallback for the individual glyph, or the supplied Lucide `chevron-down` / `refresh-cw` geometry. Do not reproduce the square. There is no exposed per-glyph fallback registration or rich-text font-run API in this version's supported execute/schema surface. Consequently no speculative font replacement or text mutation was applied to the design merely to hide the artifact. The PNGs are faithful source references with these defects explicitly disclosed, not defect-free references.
 
+## Direct implementation lookup
+
+`icon-correspondence.csv` joins all 3,337 actual icon instances to frame name/ID, adjacent label text, ancestor name/ID context, glyph family/name, size/style, fills and exact SVG file. This is the per-icon correspondence for implementation. In `twLlb`, the inherited name “New task icon” is reused for New task→`plus`, All tasks→`layers`, Tasks→`list-todo`, Git→`git-branch`, GitHub→`github`, Skills→`sparkles`, Workflows→`workflow`, Settings→`settings`, and Global settings→`settings-2`. Using the inherited name as the glyph mapping would be wrong.
+
+`frame-name-map.json` confirms every one of the 158 unique view/reference-board names against its new ID and baseline ID, with image paths and defect flags. `override-review-flags.json` distinguishes confirmed visual defects (the two text-glyph fallback failures) from inherited-name ambiguity and intentional Material hollow-ring styling. It does not label uninspected overrides as visually consistent. Rebuild these joins with `build-correspondence.py`.
+
 ## Exact icons
 
 Raw `type: icon` nodes comprise 285 Lucide nodes plus one Material Symbols Rounded `circle`. That count is **not** the expanded icon inventory. Component references and overrides produce **3,337 exported icon instances: 2,968 Lucide and 369 Material Symbols Rounded circles**. They use **73 family/name definitions: 72 Lucide names plus Material Symbols Rounded `circle`**.
