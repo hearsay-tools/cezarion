@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowUpIcon, CheckIcon, ChevronDownIcon, MicIcon, PaperclipIcon, PlayIcon, SquareIcon, TerminalIcon, XIcon } from 'lucide-react'
+import { ArrowUpIcon, CheckIcon, ChevronDownIcon, CpuIcon, MicIcon, PaperclipIcon, PlayIcon, SquareIcon, TerminalIcon, XIcon } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -66,6 +66,8 @@ export interface ComposerProps {
   stopping?: boolean
   emptySubmitLabel?: string
   compactFeedback?: boolean
+  /** Idle guidance occupies the already-reserved submission status space. */
+  idleFeedback?: ReactNode
   pendingLabel?: string
   failureHint?: string
   clearOnSuccess?: boolean
@@ -142,6 +144,7 @@ export function Composer({
   stopping = false,
   emptySubmitLabel,
   compactFeedback = false,
+  idleFeedback,
   pendingLabel = 'Starting task…',
   failureHint = 'Could not confirm submission. Check Tasks before you retry. Your draft is kept.',
   clearOnSuccess = true,
@@ -583,7 +586,7 @@ export function Composer({
                     <p className="font-medium text-foreground">{submissionError}</p>
                     <p>{failureHint}</p>
                   </>
-                ) : null}
+                ) : idleFeedback ?? null}
               </div>
             </div>
           ) : null}
@@ -750,7 +753,7 @@ export function Composer({
                 <div className="contents" inert={readOnly || undefined}>{footerStart}</div>
                 {executionOptions || sessionControls ? <div>{dictationButton}</div> : null}
               </div>
-              {sessionModel ? <div data-slot="session-model" inert={readOnly || undefined}><span>Model</span>{sessionModel}</div> : null}
+              {sessionModel ? <div data-slot="session-model" inert={readOnly || undefined}><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-icon" /><span>Model</span>{sessionModel}</div> : null}
               {executionOptions ? null : submissionControls}
 
             </div>

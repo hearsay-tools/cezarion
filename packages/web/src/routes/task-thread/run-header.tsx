@@ -165,6 +165,9 @@ export function RunHeader({
     >
       <div className="w-full">
         <div data-slot="run-title-row" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
+          <p data-slot="session-kind" className="text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase md:hidden">
+            {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
+          </p>
           <EditableTitle run={run} />
           <Pill dot={attention.tone} pulse={attention.pulse}>
             {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
@@ -809,18 +812,18 @@ function ActionsKebab({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-slot="run-actions-menu" className="w-[270px] max-w-[calc(100vw-2rem)] p-3">
         <DropdownMenuLabel className="px-2 py-3 text-[10px] font-normal text-muted-foreground">TASK ACTIONS</DropdownMenuLabel>
+        <DropdownMenuItem onSelect={onToggleNotes}>
+          <FileTextIcon aria-hidden="true" /> Notes / handoff
+        </DropdownMenuItem>
+        <OpenInMenuForRun run={run} canResume={flags.terminal} onResume={() => actions.terminal.mutate()} onOpen={onOpenChooser} />
+        {command ? <DropdownMenuItem onSelect={() => void copyToClipboard(command, 'Command copied to clipboard.')}>
+          <CopyIcon aria-hidden="true" /> Copy resume command
+        </DropdownMenuItem> : null}
         {flags.finish ? (
           <DropdownMenuItem disabled={actions.finish.isPending} onSelect={() => actions.setConfirming('finish')}>
             <CheckIcon aria-hidden="true" /> Finish
           </DropdownMenuItem>
         ) : null}
-        <OpenInMenuForRun run={run} canResume={flags.terminal} onResume={() => actions.terminal.mutate()} onOpen={onOpenChooser} />
-        {command ? <DropdownMenuItem onSelect={() => void copyToClipboard(command, 'Command copied to clipboard.')}>
-          <CopyIcon aria-hidden="true" /> Copy resume command
-        </DropdownMenuItem> : null}
-        <DropdownMenuItem onSelect={onToggleNotes}>
-          <FileTextIcon aria-hidden="true" /> Notes
-        </DropdownMenuItem>
         {flags.markUnread ? (
           <DropdownMenuItem
             disabled={actions.markUnread.isPending}
@@ -838,19 +841,19 @@ function ActionsKebab({
             onCheckedChange={() => actions.pin.mutate()}
           >
             {run.pinned ? <PinOffIcon aria-hidden="true" /> : <PinIcon aria-hidden="true" />}
-            {run.pinned ? 'Unpin' : 'Pin'}
+            {run.pinned ? 'Unpin task' : 'Pin task'}
           </DropdownMenuCheckboxItem>
         ) : null}
         {flags.archive ? (
           <DropdownMenuItem disabled={actions.archive.isPending} onSelect={() => run.archived ? actions.archive.mutate() : actions.setConfirming('archive')}>
             {run.archived ? <ArchiveRestoreIcon aria-hidden="true" /> : <ArchiveIcon aria-hidden="true" />}
-            {run.archived ? 'Unarchive' : 'Archive'}
+            {run.archived ? 'Unarchive' : 'Archive task'}
           </DropdownMenuItem>
         ) : null}
         {flags.deleteRun ? <DropdownMenuSeparator /> : null}
         {flags.deleteRun ? (
           <DropdownMenuItem variant="destructive" onSelect={() => actions.setConfirming('delete')}>
-            <Trash2Icon aria-hidden="true" /> Delete
+            <Trash2Icon aria-hidden="true" /> Delete task…
           </DropdownMenuItem>
         ) : null}
       </DropdownMenuContent>

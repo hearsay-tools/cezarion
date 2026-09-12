@@ -4,3 +4,22 @@
 @media (max-width: 767px) {
   [data-slot='notes-panel'], .task-action-panel { padding: 18px; }
 }
+
+[data-slot='run-actions-menu'] [role^='menuitem'] > svg { display: none; }
+
+@media (max-width: 767px) {
+  [data-slot='run-title-row'] { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+  [data-slot='run-title-row'] [data-slot='session-kind'] { grid-column: 1; grid-row: 1; }
+  [data-slot='run-title-row'] > .group { grid-column: 1 / -1; grid-row: 2; max-width: 100%; }
+  [data-slot='run-title-row'] > .group h1 { font-size: 20px; line-height: 1.4; }
+  [data-slot='run-title-row'] > [data-slot='pill'] { grid-column: 2; grid-row: 1; }
+  [data-slot='run-title-row'] > span:last-child { grid-column: 3; grid-row: 1; }
+}
+
+[data-slot='notes-panel'] .thread-markdown { font-size: 13px; line-height: 1.6; color: var(--muted-foreground); }
+[data-slot='notes-panel'] .thread-markdown :is(h1, h2, h3) { margin-top: 20px; margin-bottom: 8px; font-size: 16px; font-weight: 400; line-height: 1.5; color: var(--foreground); }
+[data-slot='notes-panel'] > div:first-child h2,
+.task-action-panel h2 { font-size: 18px; font-weight: 400; }
+[data-slot='notes-panel'] button,
+.task-action-panel button { font-size: 13px; font-weight: 400; }
+.task-action-panel h3 { font-size: 16px; font-weight: 400; }

@@ -203,14 +203,14 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
   // Pin (#935) is in every row: unlike every other action here it asks nothing of the engine,
   // so it is offered whatever the run is doing — only archiving takes it away.
   const matrix: Array<{ status: RunStatus; visible: string[] }> = [
-    { status: 'queued', visible: ['Notes', 'Pin'] },
-    { status: 'running', visible: ['Notes', 'Pin'] },
-    { status: 'waiting', visible: ['Finish', 'Notes', 'Pin'] },
+    { status: 'queued', visible: ['Notes / handoff', 'Pin task'] },
+    { status: 'running', visible: ['Notes / handoff', 'Pin task'] },
+    { status: 'waiting', visible: ['Notes / handoff', 'Finish', 'Pin task'] },
     // Terminal folded into the Open in… menu — it shows whenever the session can be resumed.
-    { status: 'review', visible: ['Finish', 'Open in…', 'Copy resume command', 'Notes', 'Pin', 'Archive', 'Delete'] },
-    { status: 'done', visible: [ 'Open in…', 'Copy resume command', 'Notes', 'Pin', 'Archive', 'Delete'] },
-    { status: 'failed', visible: [ 'Open in…', 'Copy resume command', 'Notes', 'Pin', 'Archive', 'Delete'] },
-    { status: 'cancelled', visible: [ 'Open in…', 'Copy resume command', 'Notes', 'Pin', 'Archive', 'Delete'] },
+    { status: 'review', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Finish', 'Pin task', 'Archive task', 'Delete task…'] },
+    { status: 'done', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Archive task', 'Delete task…'] },
+    { status: 'failed', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Archive task', 'Delete task…'] },
+    { status: 'cancelled', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Archive task', 'Delete task…'] },
   ]
 
   it.each(matrix)('$status → $visible', ({ status, visible }) => {
@@ -224,7 +224,7 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
   it('an archived run offers Unarchive instead of Archive', () => {
     stubFetch()
     renderHeader(run('done', { archived: true }))
-    expect(actionBar().queryByRole('menuitem', { name: 'Archive' })).toBeNull()
+    expect(actionBar().queryByRole('menuitem', { name: 'Archive task' })).toBeNull()
     expect(actionBar().getByRole('menuitem', { name: 'Unarchive' })).not.toBeNull()
   })
 
@@ -253,7 +253,7 @@ describe('Mark unread (#775)', () => {
     renderHeader(readDone())
     actionBar()
     const names = [...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map(el => el.textContent?.trim())
-    expect(names).toEqual([ 'Open in…', 'Copy resume command', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
+    expect(names).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive task', 'Delete task…'])
   })
 
   it.each([
@@ -347,7 +347,7 @@ describe('actions hit their endpoints', () => {
   it('Pin → POST /pin with the flipped flag, and reads Unpin once pinned (#935)', async () => {
     const sent = stubFetch()
     renderHeader(run('done'))
-    fireEvent.click(actionBar().getByRole('menuitemcheckbox', { name: 'Pin' }))
+    fireEvent.click(actionBar().getByRole('menuitemcheckbox', { name: 'Pin task' }))
     await waitFor(() => {
       expect(sent.find((r) => r.path === '/api/v1/runs/r1/pin')?.body).toEqual({ pinned: true })
     })
@@ -355,7 +355,7 @@ describe('actions hit their endpoints', () => {
     cleanup()
     const unpinning = stubFetch()
     renderHeader(run('done', { pinned: true, pinnedAt: '2026-08-29T10:00:00.000Z' }))
-    fireEvent.click(actionBar().getByRole('menuitemcheckbox', { name: 'Unpin' }))
+    fireEvent.click(actionBar().getByRole('menuitemcheckbox', { name: 'Unpin task' }))
     await waitFor(() => {
       expect(unpinning.find((r) => r.path === '/api/v1/runs/r1/pin')?.body).toEqual({ pinned: false })
     })
@@ -364,8 +364,8 @@ describe('actions hit their endpoints', () => {
   it('an archived run offers no pin at all — archiving retires it (#935)', () => {
     stubFetch()
     renderHeader(run('done', { archived: true }))
-    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Pin' })).toBeNull()
-    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Unpin' })).toBeNull()
+    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Pin task' })).toBeNull()
+    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Unpin task' })).toBeNull()
   })
 
   it('Pin is in the mobile kebab too', async () => {
@@ -373,13 +373,13 @@ describe('actions hit their endpoints', () => {
     renderHeader(run('running'))
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Run actions' }))
     const menu = within(await screen.findByRole('menu'))
-    expect(menu.getByRole('menuitemcheckbox', { name: 'Pin', checked: false })).not.toBeNull()
+    expect(menu.getByRole('menuitemcheckbox', { name: 'Pin task', checked: false })).not.toBeNull()
   })
 
   it('Delete confirms, DELETEs, and navigates home', async () => {
     const sent = stubFetch()
     renderHeader(run('failed'))
-    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete task…' }))
 
     expect(sent.some((r) => r.method === 'DELETE')).toBe(false)
     const dialog = await screen.findByRole('alertdialog')
@@ -396,7 +396,7 @@ describe('actions hit their endpoints', () => {
   it('the delete confirm button stays "Delete task" even for a long task name, which appears in the description instead (#403)', async () => {
     const longTitle = 'create a github issue for saving unsuccessfully finished tasks automatically'
     renderHeader(run('failed', { titleSummary: longTitle }))
-    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete task…' }))
 
     const dialog = await screen.findByRole('alertdialog')
     expect(within(dialog).getByRole('button', { name: 'Delete task' })).not.toBeNull()
@@ -406,7 +406,7 @@ describe('actions hit their endpoints', () => {
   it('dismissing the confirm keeps the run', async () => {
     const sent = stubFetch()
     renderHeader(run('done'))
-    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete task…' }))
     const dialog = await screen.findByRole('alertdialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => {
@@ -420,7 +420,7 @@ describe('actions hit their endpoints', () => {
       '/api/v1/runs/r1/archive': () => jsonResponse({ error: 'run is still active' }, 409),
     })
     renderHeader(run('done'))
-    const button = actionBar().getByRole('menuitem', { name: 'Archive' })
+    const button = actionBar().getByRole('menuitem', { name: 'Archive task' })
     await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.click(button)
     fireEvent.click(screen.getByRole('button', { name: 'Archive task' }))
@@ -614,7 +614,7 @@ describe('notes panel', () => {
     })
     renderHeader(run('done'))
 
-    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Notes' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Notes / handoff' }))
     await waitFor(() => {
       expect(document.querySelector('[data-slot="notes-panel"]')).not.toBeNull()
     })
@@ -622,7 +622,7 @@ describe('notes panel', () => {
     // Rendered markdown, not echoed source.
     expect(document.querySelector('[data-slot="notes-panel"]')?.textContent).not.toContain('#')
 
-    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Notes' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Notes / handoff' }))
     expect(document.querySelector('[data-slot="notes-panel"]')).toBeNull()
   })
 
@@ -631,7 +631,7 @@ describe('notes panel', () => {
       '/api/v1/runs/r1/handoff': () => new Response('', { status: 200 }),
     })
     renderHeader(run('running'))
-    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Notes' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Notes / handoff' }))
     await screen.findByText('No notes yet — the handoff file is seeded when the task starts.')
   })
 })
@@ -1292,7 +1292,7 @@ it('uses one actions menu and omits the legacy action and resume rows', () => {
 it('confirms archive before retiring an active-list task', async () => {
   const sent = stubFetch()
   renderHeader(run('done'))
-  fireEvent.click(actionBar().getByRole('menuitem', { name: 'Archive' }))
+  fireEvent.click(actionBar().getByRole('menuitem', { name: 'Archive task' }))
   expect(sent.some(r => r.path.endsWith('/archive'))).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: 'Archive task' }))
   await waitFor(() => expect(sent.find(r => r.path.endsWith('/archive'))?.body).toEqual({ archived: true }))

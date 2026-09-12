@@ -4,6 +4,8 @@ import {
   CircleSlashIcon,
   CpuIcon,
   GitBranchIcon,
+  GaugeIcon,
+  TerminalIcon,
   SlidersHorizontalIcon,
   EyeIcon,
   FolderOpenIcon,
@@ -601,6 +603,12 @@ export function NewTaskRoute() {
           ref={composerRef}
           onSubmit={submit}
           retainDraftUntilSuccess
+          idleFeedback={
+            <div data-slot="new-task-mode-note" className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+              <span>{draft.planFirst ? 'Review the plan before starting the task.' : 'Start immediately with the selected configuration.'}</span>
+              <kbd className="hidden font-sans md:inline">{submitShortcutHint()}</kbd>
+            </div>
+          }
           pendingLabel={draft.planFirst ? 'Planning task…' : 'Starting task…'}
           failureHint={draft.planFirst ? 'Could not create the plan. Your draft is kept. Please retry.' : undefined}
           clearOnSuccess={!draft.planFirst}
@@ -658,7 +666,7 @@ export function NewTaskRoute() {
                 {/* Runner, model and effort stay with the editor in the approved desktop
                     composition. Run isolation and automation choices live in the side panel. */}
                 {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
-                  <RunnerPill
+                  <span className="new-task-runner-control"><TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-icon" /><RunnerPill
                     runners={runners}
                     value={displayRunner}
                     accounts={accountChoices}
@@ -672,12 +680,12 @@ export function NewTaskRoute() {
                       })
                     }
                     disabled={!providersReady}
-                  />
+                  /></span>
                 ) : null}
                 <PickerPill
                   slot="model-pill"
                   ariaLabel="Model"
-                  label={<span className="new-task-model-label"><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-icon" /><span className="flex min-w-0 flex-col gap-1 text-left"><span className="text-[10px] font-semibold text-muted-foreground uppercase">Model</span><span className="truncate text-sm text-foreground">{models.find((m) => m.id === model)?.label ?? 'auto'}</span></span></span>}
+                  label={<span className="new-task-model-label"><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-icon" /><span className="flex min-w-0 items-center gap-2 text-left"><span className="text-[10px] font-semibold tracking-[0.05em] text-muted-foreground uppercase">Model</span><span className="truncate text-sm text-foreground">{models.find((m) => m.id === model)?.label ?? 'auto'}</span></span></span>}
                   value={model}
                   disabled={!providersReady}
                   readOnly={modelsLocked}
@@ -699,7 +707,7 @@ export function NewTaskRoute() {
                 <PickerPill
                   slot="effort-pill"
                   ariaLabel="Effort"
-                  label={<span><span className="mr-2 text-[10px] text-muted-foreground">Effort</span>{effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}</span>}
+                  label={<span className="inline-flex items-center gap-2"><GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-icon" /><span className="text-[10px] text-muted-foreground">Effort</span>{effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}</span>}
                   value={effort}
                   disabled={!providersReady}
                   readOnly={modelsLocked}
@@ -715,7 +723,7 @@ export function NewTaskRoute() {
                     desc: option.desc,
                   }))}
                 />
-              </div>
+                  </div>
           }
           executionOptions={
             <div className="flex min-w-0 flex-col gap-4">
@@ -772,7 +780,7 @@ export function NewTaskRoute() {
             {followupsToggleShown ? <section data-slot="followups-options" aria-label="Follow-ups preference" className="rounded-xl border border-border bg-card p-4">
               <GenerateFollowupsToggle on={generateFollowupsOn} onChange={(on) => update({ generateFollowups: on })} />
             </section> : null}
-            </div>
+                </div>
           }
           footerEnd={
             <>
@@ -798,10 +806,7 @@ export function NewTaskRoute() {
             </>
           }
         />
-        <div data-slot="new-task-mode-note" className="mt-5 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
-          <span>{draft.planFirst ? 'Review the plan before starting the task.' : 'Start immediately with the selected configuration.'}</span>
-          <kbd className="hidden font-sans md:inline">{submitShortcutHint()}</kbd>
-        </div>
+
       </div>
 
       {plan !== null ? (

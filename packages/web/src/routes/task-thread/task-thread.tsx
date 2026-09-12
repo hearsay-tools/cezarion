@@ -310,7 +310,7 @@ export function ThreadView({
 
       {/* Row spacing lives on each thread row (pb-2.5, both render modes measure alike);
           this gap only separates the sections — rows, empty state, footer, review panel. */}
-      <div className="mx-auto flex w-full max-w-[var(--measure)] flex-1 flex-col gap-2.5 px-3 py-3 md:gap-3.5 md:px-16 md:py-5">
+      <div className="mx-auto flex w-full max-w-[var(--measure)] flex-1 flex-col gap-2.5 px-[18px] py-3 md:gap-3.5 md:px-16 md:py-5">
         {history ? (
           <HistoryBoundary
             hasOlder={history.hasOlder}
@@ -417,7 +417,7 @@ export function ThreadView({
             <JumpToLatestPill onJump={scroll.jumpToLatest} />
           </div>
         ) : null}
-        <div className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-1.5 px-3 md:gap-2.5 md:px-16">
+        <div className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-1.5 px-[14px] md:gap-2.5 md:px-16">
           {run.steps.length > 0 ? (
             <div data-slot="session-workflow-summary" className="rounded-xl border border-border bg-card px-3 py-2">
               <WorkflowSteps runId={run.id} steps={run.steps} />
