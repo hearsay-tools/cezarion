@@ -70,7 +70,7 @@ function renderOverview(props: Partial<ComponentProps<typeof TasksOverview>> = {
       </Routes>
     </MemoryRouter>
   )
-  if (!detailed) { fireEvent.click(screen.getByRole("button", { name: "Columns" })); fireEvent.click(screen.getByRole("button", { name: "Summary view" })); fireEvent.keyDown(document.activeElement!, { key: "Escape" }) }
+  if (detailed) { fireEvent.click(screen.getByRole("button", { name: "Columns" })); fireEvent.click(screen.getByRole("button", { name: "Resource columns" })); fireEvent.keyDown(document.activeElement!, { key: "Escape" }) }
   return { ...utils, onViewChange, onArchiveFinished, onMarkAllRead, onRename }
 }
 
@@ -479,7 +479,10 @@ describe('TasksOverview — the table', () => {
     )
     expect(allHeaders.filter((header) => header === 'IN / OUT' || header === 'Cost')).toEqual(headers)
     const rowText = tableRow('visibility')?.textContent ?? ''
-    const cardText = card('visibility')?.textContent ?? ''
+    const mobile = card('visibility') as HTMLElement
+    expect(mobile.textContent).not.toContain('184.7k')
+    fireEvent.click(within(mobile).getByRole('button', { name: 'Show resources' }))
+    const cardText = mobile.textContent ?? ''
     expect(rowText.includes('184.7k / 2.4k')).toBe(tokens)
     expect(cardText.includes('IN 184.7k · OUT 2.4k')).toBe(tokens)
     expect(rowText.includes('$0.31')).toBe(cost)
@@ -953,6 +956,7 @@ describe('TasksOverview — mobile cards and FAB', () => {
     expect(tableRow('folded-mobile')?.querySelector('td[data-column-id="workflow"]')?.textContent).toBe('')
     expect(tableRow('folded-mobile')?.querySelector('td[data-column-id="branch"]')?.textContent).toBe('')
     expect(card('folded-mobile')?.textContent).toContain('autofix')
+    fireEvent.click(within(card('folded-mobile') as HTMLElement).getByRole('button', { name: 'Show resources' }))
     expect(card('folded-mobile')?.textContent).toContain('feat/mobile-stays')
   })
 
@@ -1001,12 +1005,14 @@ describe('TasksOverview — mobile cards and FAB', () => {
       '/tasks/c1'
     )
     expect(c.textContent).toContain('feat')
+    expect(c.textContent).not.toContain('cez/8f31ab02')
+    fireEvent.click(within(c).getByRole('button', { name: 'Show resources' }))
     expect(c.textContent).toContain('cez/8f31ab02')
     // The meta row carries the diff pair, like the mockup card (branch · ± · tokens).
     expect(c.querySelector('[data-slot="diff-stat"]')?.textContent).toBe('+128 −14')
     expect(c.textContent).toContain('IN 184.7k · OUT 2.4k')
     expect(c.textContent).toContain('$0.31')
-    expect(c.textContent).toContain('12m')
+    expect(c.textContent).toContain('40m') // Started age, matching the desktop summary.
     expect(c.querySelector('[data-slot="pr-chip"]')?.getAttribute('href')).toBe('https://github.com/o/r/pull/402')
   })
 
@@ -1024,6 +1030,7 @@ describe('TasksOverview — mobile cards and FAB', () => {
       ],
     })
     const hidden = card('hidden-card') as HTMLElement
+    fireEvent.click(within(hidden).getByRole('button', { name: 'Show resources' }))
     expect(hidden.textContent).not.toContain('184.7k')
     expect(hidden.textContent).toContain('cez/hidden')
     expect(hidden.querySelector('[data-slot="diff-stat"]')?.textContent).toBe('+2 −1')
@@ -1191,6 +1198,9 @@ describe('TasksOverviewRoute — wired to the app', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
+    fireEvent.click(await screen.findByRole('button', { name: 'Columns' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
     const restore = await screen.findByRole('button', { name: 'Expand Branch column', pressed: false })
     restore.focus()
     fireEvent.click(restore)
@@ -1221,6 +1231,9 @@ describe('TasksOverviewRoute — wired to the app', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
+    fireEvent.click(await screen.findByRole('button', { name: 'Columns' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
     expect(await screen.findByRole('button', { name: 'Fold Branch column', pressed: true })).not.toBeNull()
   })
 
@@ -1257,6 +1270,9 @@ describe('TasksOverviewRoute — wired to the app', () => {
     renderApp([run({ id: 'rn1', title: 'Old name', status: 'done' })])
     await waitFor(() => expect(tableRow('rn1')).not.toBeNull())
 
+    fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
     fireEvent.click(within(tableRow('rn1') as HTMLElement).getByRole('button', { name: 'Rename task' }))
     const input = within(tableRow('rn1') as HTMLElement).getByLabelText('Task title')
     fireEvent.change(input, { target: { value: 'New name' } })
@@ -1311,7 +1327,7 @@ describe('design frame 4 task summary', () => {
   })
 })
 
-it('shows the saved resource table by default and exposes saved column choices', () => {
+it('opens the full resource table and exposes saved column choices', () => {
   renderOverview({ runs: [run({ id: 'default-resources' })] })
   expect(document.querySelector('[data-slot="tasks-table"]')?.hasAttribute('hidden')).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: 'Columns' }))

@@ -240,7 +240,7 @@ export function PlanReview({
             {startUnavailableAction}
           </p>
         ) : null}
-        <div className="flex items-center gap-2 px-5 py-3.5 pb-[max(14px,env(safe-area-inset-bottom))]">
+        <div data-slot="plan-actions" className="flex flex-wrap items-center gap-3 px-6 pt-3 pb-6">
           <Button
             type="button"
             data-slot="plan-start"
@@ -255,7 +255,7 @@ export function PlanReview({
             {starting ? 'Starting…' : 'Start'}
           </Button>
           <SaveAsChain steps={plan.steps} disabled={empty} />
-          <Button type="button" variant="ghost" className="ml-auto" onClick={onDiscard}>
+          <Button type="button" variant="outline" onClick={onDiscard}>
             Discard
           </Button>
         </div>
@@ -329,7 +329,9 @@ function SaveAsChain({ steps, disabled }: { steps: WorkflowStepDef[]; disabled: 
               void save(false)
             }}
           >
+            <label htmlFor="plan-chain-name" className="mb-2 block text-[11px] text-muted-foreground">Chain name</label>
             <Input
+              id="plan-chain-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
               aria-label="Chain name"
@@ -342,7 +344,7 @@ function SaveAsChain({ steps, disabled }: { steps: WorkflowStepDef[]; disabled: 
                 Cancel
               </Button>
               <Button type="submit" disabled={name.trim() === '' || saving}>
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? 'Saving…' : 'Save chain'}
               </Button>
             </DialogFooter>
           </form>
@@ -362,8 +364,8 @@ function SaveAsChain({ steps, disabled }: { steps: WorkflowStepDef[]; disabled: 
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep the existing chain</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void save(true)}>Overwrite</AlertDialogAction>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void save(true)}>Overwrite chain</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

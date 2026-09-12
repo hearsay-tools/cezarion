@@ -118,7 +118,7 @@ async function waitForColumns(count: number) {
 // ---- the columns ------------------------------------------------------------------------------
 
 describe('the compare columns', () => {
-  it('renders a column per variant: letter, status pill, spend, --stat text, Progress excerpt', async () => {
+  it('renders a column per variant: letter, status text, spend, --stat text, Progress excerpt', async () => {
     stubFetch(group(variant('A', 'review'), variant('B', 'done')))
     renderCompare()
     await waitForColumns(2)
@@ -130,8 +130,8 @@ describe('the compare columns', () => {
     // The letter badge and the canonical attention grammar: review → "needs review",
     // done → "done" (deriveAttention, not a second hand-rolled mapping).
     expect(a?.querySelector('[data-slot="variant-letter"]')?.textContent).toBe('A')
-    expect(a?.querySelector('[data-slot="pill"]')?.textContent).toContain('needs review')
-    expect(b?.querySelector('[data-slot="pill"]')?.textContent).toContain('done')
+    expect(a?.querySelector('[data-slot="variant-status"]')?.textContent).toContain('needs review')
+    expect(b?.querySelector('[data-slot="variant-status"]')?.textContent).toContain('done')
 
     // Directional tokens and cost per column.
     expect(a?.textContent).toContain('IN 92.0k · OUT 4.2k')
@@ -271,7 +271,7 @@ describe('✔ Pick this one', () => {
     await waitForColumns(2)
 
     fireEvent.click(pickButtons()[0] as HTMLButtonElement)
-    fireEvent.click(screen.getByRole('button', { name: 'Keep comparing' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(sent.filter((r) => r.method === 'POST')).toHaveLength(0)
     expect(screen.queryByTestId('thread-probe')).toBeNull()
   })

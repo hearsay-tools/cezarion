@@ -357,6 +357,19 @@ describe('global tasks page', () => {
   })
 
   describe('filters live in the URL', () => {
+    it('lets a restored grouped view collapse and reopen its filters', async () => {
+      stubFetch()
+      renderPage(createQueryClient(), '/tasks?group=project')
+      await screen.findByText('Add checkout endpoint')
+      const toggle = screen.getByRole('button', { name: 'Filters' })
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      fireEvent.click(toggle)
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
+      fireEvent.click(toggle)
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      expect(search()).toBe('?group=project')
+    })
+
     it('restores a filtered, grouped view from the query string alone', async () => {
       // The refresh case: a reload re-enters the route with only the URL to go on.
       stubFetch()

@@ -258,16 +258,15 @@ describe('the inbox card list', () => {
     )
   })
 
-  it('every card wears the attention grammar\'s "needs you" dot — amber, pulsing', async () => {
+  it('uses the design’s text-only card heading and retains its actionability label', async () => {
     stubFetch()
     renderInbox()
 
     await waitFor(() => expect(cards()).toHaveLength(2))
     for (const card of cards()) {
-      const dot = card.querySelector<HTMLElement>('[data-slot="status-dot"]')
-      expect(dot?.dataset.tone).toBe('pending')
-      expect(dot?.className).toContain('animate-pulse')
-      expect(dot?.getAttribute('title')).toBe('needs you')
+      expect(card.querySelector('[data-slot="status-dot"]')).toBeNull()
+      expect(card.querySelector('[data-slot="todo-summary"]')?.textContent).toBeTruthy()
+      expect(card.querySelector('[data-slot="todo-meta"]')?.textContent).toMatch(/Runnable follow-up|Note only/)
     }
   })
 })
@@ -667,8 +666,8 @@ describe('empty and error states', () => {
       return found!
     })
     expect(state.getAttribute('data-tone')).toBe('neutral')
-    expect(state.textContent).toContain('Inbox empty')
-    expect(state.textContent).toContain('follow-up suggestions')
+    expect(state.textContent).toContain('You’re all caught up')
+    expect(state.textContent).toContain('No follow-ups to review.')
   })
 
   it('an all-started inbox is an empty inbox — the audit trail is not a card list', async () => {
@@ -879,9 +878,9 @@ describe('the inbox gate (#471)', () => {
     const sent = stubFetch({ 'GET /api/v1/health': () => healthResponse(false) })
     renderInbox()
 
-    expect(await screen.findByText('The follow-up inbox is off')).toBeTruthy()
-    // The distinction matters: "Inbox empty" would blame the agents for a switched-off feature.
-    expect(screen.queryByText('Inbox empty')).toBeNull()
+    expect(await screen.findByText('Inbox is off')).toBeTruthy()
+    // The distinction matters: "You’re all caught up" would blame the agents for a switched-off feature.
+    expect(screen.queryByText('You’re all caught up')).toBeNull()
     // And it tells the user how to get it back.
     expect(screen.getByText(/CEZ_FOLLOWUPS=1/)).toBeTruthy()
     const header = document.querySelector('[data-route="inbox"] header')
@@ -904,10 +903,10 @@ describe('the inbox gate (#471)', () => {
     renderInbox()
 
     await waitFor(() => expect(cards()).toHaveLength(2))
-    expect(screen.queryByText('The follow-up inbox is off')).toBeNull()
+    expect(screen.queryByText('Inbox is off')).toBeNull()
   })
 
-  it('never flashes "Inbox empty" before health says the inbox is off', async () => {
+  it('never flashes "You’re all caught up" before health says the inbox is off', async () => {
     // An inbox-less server answers [] too, so the empty state must wait for health — otherwise
     // the route flashes exactly the lie it exists to avoid, then corrects itself.
     let releaseHealth = () => {}
@@ -931,11 +930,11 @@ describe('the inbox gate (#471)', () => {
     renderInbox()
     // Todos have answered [] and health has not: the honest answer is to render neither state.
     await waitFor(() => expect(cards()).toHaveLength(0))
-    expect(screen.queryByText('Inbox empty')).toBeNull()
+    expect(screen.queryByText('You’re all caught up')).toBeNull()
 
     act(() => releaseHealth())
-    expect(await screen.findByText('The follow-up inbox is off')).toBeTruthy()
-    expect(screen.queryByText('Inbox empty')).toBeNull()
+    expect(await screen.findByText('Inbox is off')).toBeTruthy()
+    expect(screen.queryByText('You’re all caught up')).toBeNull()
   })
 
   it('does not park the list while health is still unknown', async () => {
@@ -944,7 +943,7 @@ describe('the inbox gate (#471)', () => {
     stubFetch()
     renderInbox()
     await waitFor(() => expect(cards()).toHaveLength(2))
-    expect(screen.queryByText('The follow-up inbox is off')).toBeNull()
+    expect(screen.queryByText('Inbox is off')).toBeNull()
   })
 })
 

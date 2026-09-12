@@ -1,20 +1,18 @@
 import './task-flows.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckIcon, InboxIcon, PlayIcon, TriangleAlertIcon } from 'lucide-react'
+import { InboxIcon, TriangleAlertIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Link, useNavigate } from '@/lib/project-router'
 
 import { removeTodo, startTodo } from '@/api/client'
-import { queryKeys, useHealth, useRuns, useTodos, useUiState } from '@/api/queries'
+import { queryKeys, useHealth, useRuns, useTodos, useUiState, useProjects, useReferenceProjectId } from '@/api/queries'
 import type { TodoItem } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { EnginePills, engineBody, useResolvedEngine, type EnginePick } from '@/components/engine-pills'
 import { PromptTemplateMenu } from '@/components/prompt-template-menu'
-import { StatusDot } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toaster'
-import { deriveAttention } from '@/lib/attention'
 import { shortAge } from '@/lib/format'
 import { insertTemplate, normalizePromptTemplates } from '@/lib/prompt-templates'
 import { isHttpUrl } from '@/lib/utils'
@@ -43,13 +41,7 @@ import { isHttpUrl } from '@/lib/utils'
  * query from the SSE `todos` event and the shell derives the badge from it — this route only
  * reads the same query, so the two can never disagree.
  *
- * Every card wears the attention grammar's "needs you" rung (`deriveAttention` on `waiting`):
- * an inbox entry is by definition an agent waiting on a human decision, so the dot is the
- * same amber pulse a waiting run shows — one grammar, not a second dialect.
  */
-
-/** The one attention rung an inbox entry can be on — see the doc block above. */
-const CARD_ATTENTION = deriveAttention({ status: 'waiting' })
 
 /** The legacy `visibleTodos()` rule: started entries are the audit trail, not the inbox. */
 export function visibleTodos(todos: readonly TodoItem[]): TodoItem[] {
@@ -76,11 +68,14 @@ export function InboxRoute() {
   // Only to tell "source task" links from "source task deleted" — the legacy check against
   // its run map. The overview keeps this query warm, so revisits cost nothing.
   const runs = useRuns()
+  const projectId = useReferenceProjectId()
+  const projects = useProjects()
+  const projectName = projects.data?.projects?.find((project) => project.id === projectId)?.name
 
   const todos = todosQuery.data === undefined ? undefined : visibleTodos(todosQuery.data)
 
   return (
-    <div data-route="inbox" className="task-flow-page flex min-h-full flex-col">
+    <div data-route="inbox" data-inbox-empty={todos?.length === 0 && !inboxOff} className="task-flow-page flex min-h-full flex-col">
       {/* Desktop header — below `md` the shell's top bar already says "Inbox". */}
       <header className="flex shrink-0 flex-col gap-5">
         <h1 className="text-[28px] font-medium">Inbox</h1>
@@ -96,8 +91,8 @@ export function InboxRoute() {
           <CenteredState
             icon={<InboxIcon />}
             tone="neutral"
-            title="The follow-up inbox is off"
-            subtitle="Agents are not asked to leave follow-ups. Set CEZ_FOLLOWUPS=1 and restart cezar to turn the inbox on."
+            title="Inbox is off"
+            subtitle="Agents are not asked to leave follow-ups. Set CEZ_FOLLOWUPS=1 and restart Cezarion to enable Inbox."
             heading="h2"
           />
         ) : todos === undefined ? (
@@ -121,8 +116,8 @@ export function InboxRoute() {
             <CenteredState
               icon={<InboxIcon />}
               tone="neutral"
-              title="Inbox empty"
-              subtitle="Agents drop follow-up suggestions here when they finish a task."
+              title="You’re all caught up"
+              subtitle="No follow-ups to review. New suggestions and notes from your agents will appear here."
               heading="h2"
             />
           )
@@ -132,6 +127,7 @@ export function InboxRoute() {
               <TodoCard
                 key={todo.id}
                 todo={todo}
+                projectName={projectName}
                 sourceTaskExists={
                   todo.taskId === undefined
                     ? null
@@ -148,10 +144,12 @@ export function InboxRoute() {
 
 function TodoCard({
   todo,
+  projectName,
   /** null: no source task at all; false: it existed once but was deleted. */
   sourceTaskExists,
 }: {
   todo: TodoItem
+  projectName?: string
   sourceTaskExists: boolean | null
 }) {
   const navigate = useNavigate()
@@ -225,16 +223,11 @@ function TodoCard({
   return (
     <li
       data-slot="todo-card"
+      data-runnable={runnable}
       data-id={todo.id}
       className="flex flex-col gap-2.5 rounded-lg border border-border bg-card p-4 shadow-xs"
     >
       <div className="flex items-start gap-3">
-        <StatusDot
-          tone={CARD_ATTENTION.tone}
-          pulse={CARD_ATTENTION.pulse}
-          title={CARD_ATTENTION.label}
-          className="mt-[5px]"
-        />
         <div className="min-w-0 flex-1">
           <p data-slot="todo-summary" className="text-sm leading-snug font-medium text-foreground">
             {todo.summary}
@@ -243,6 +236,7 @@ function TodoCard({
             data-slot="todo-meta"
             className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-soft-foreground"
           >
+            {projectName ? <span>{projectName}</span> : null}
             <span>{runnable ? 'Runnable follow-up' : 'Note only'}</span>
             {todo.ts ? <span>{shortAge(todo.ts)} ago</span> : null}
             {todo.action ? <span>{todo.action}</span> : null}
@@ -327,19 +321,9 @@ function TodoCard({
               // stopped at the keystroke rather than by a 400 on Run (the Settings inputs cap the
               // same way).
               maxLength={20_000}
-              className="min-h-16 text-[13px]"
+              className="min-h-11 text-[13px]"
             />
-            <div className="flex items-center gap-2">
-              <PromptTemplateMenu templates={templates} onInsert={insertNotesTemplate} />
-              <button
-                type="button"
-                data-slot="todo-instructions-hide"
-                onClick={() => setNotesOpen(false)}
-                className="text-xs font-medium text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground"
-              >
-                Hide
-              </button>
-            </div>
+
           </div>
         ) : (
           <button
@@ -354,7 +338,8 @@ function TodoCard({
           </button>
         )
       ) : null}
-        <div data-slot="todo-actions" className="flex flex-wrap items-center gap-2">
+        <div data-slot="todo-actions" className="flex flex-wrap items-center gap-3">
+          {runnable && notesOpen ? <><PromptTemplateMenu templates={templates} onInsert={insertNotesTemplate} /><Button type="button" variant="outline" data-slot="todo-instructions-hide" onClick={() => setNotesOpen(false)}>Hide instructions</Button></> : null}
           {runnable ? (
             <>
               <Button
@@ -366,12 +351,11 @@ function TodoCard({
                 disabled={busy || !resolved.canRun}
                 onClick={() => start.mutate()}
               >
-                <PlayIcon aria-hidden="true" className="size-3" />
-                Run
+                Run follow-up
               </Button>
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 data-action="todo-dismiss"
                 title="Check off (remove)"
@@ -384,14 +368,13 @@ function TodoCard({
           ) : (
             <Button
               type="button"
-              variant="primary"
+              variant="outline"
               size="sm"
               data-action="todo-acknowledge"
               title="Acknowledge and remove this note"
               disabled={busy}
               onClick={() => dismiss.mutate()}
             >
-              <CheckIcon aria-hidden="true" className="size-3" />
               Acknowledge
             </Button>
           )}

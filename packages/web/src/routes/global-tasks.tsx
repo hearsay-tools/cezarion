@@ -10,6 +10,7 @@ import {
   PlusIcon,
   SearchIcon,
   SearchXIcon,
+  SlidersHorizontalIcon,
   XIcon,
 } from 'lucide-react'
 import * as React from 'react'
@@ -270,6 +271,7 @@ export function GlobalTasksRoute() {
    * filters — never when it is simply catching up to what was typed. Without it, a flush landing
    * mid-word would overwrite the characters typed since.
    */
+  const [filterDetailsOpen, setFilterDetailsOpen] = React.useState(groupBy !== 'none' || filters.tags.length > 0)
   const [queryDraft, setQueryDraft] = React.useState(filters.query)
   const sentQuery = React.useRef(filters.query)
   React.useEffect(() => {
@@ -335,7 +337,7 @@ export function GlobalTasksRoute() {
 
   if (index.isError || projects.isError) {
     return (
-      <div data-route="global-tasks" className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+      <div data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
         <CenteredState
           icon={<LayersIcon />}
           tone="danger"
@@ -365,9 +367,9 @@ export function GlobalTasksRoute() {
   )
 
   return (
-    <div data-route="global-tasks" className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <div data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       <header className="flex shrink-0 flex-col gap-[22px]">
-        <div className="flex flex-col gap-2"><h1 className="text-[28px] font-semibold tracking-tight">All tasks</h1><p className="text-[13px] text-muted-foreground">Filter across projects and act on each run without opening the session.</p></div>
+        <div className="flex flex-col gap-2"><h1 className="text-[30px] font-semibold tracking-tight">All tasks</h1><p className="text-[13px] text-muted-foreground">{groupBy === 'none' ? 'Every project. One place to review what your agents have shipped.' : 'Filter across projects and act on each run without opening the session.'}</p></div>
         <div className="flex items-center gap-6 border-b border-border">
           <ViewTab view="active" current={view} onSelect={setView}>
             Active
@@ -381,6 +383,7 @@ export function GlobalTasksRoute() {
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
           <div className="min-w-0 basis-full md:flex-1 md:basis-auto">{search}</div>
+          <Button variant="outline" aria-expanded={filterDetailsOpen} onClick={() => setFilterDetailsOpen((open) => !open)}><SlidersHorizontalIcon aria-hidden="true" />Filters</Button>
           <Button asChild className="min-h-11"><Link to={scopeTo(projects.data?.bootProject ?? 'default', '/new')}><PlusIcon aria-hidden="true" />New task</Link></Button>
         </div>
       </header>
@@ -451,8 +454,9 @@ export function GlobalTasksRoute() {
             ))}
           </ReferenceStatusProvider>
         )}
+        {groupBy === 'none' && visible.length > 0 ? <p className="text-[11px] text-muted-foreground">Resource details—including tokens, cost, CPU and peak memory—are available when a task row is expanded.</p> : null}
         {registry.length > 1 ? <section data-slot="other-projects" className="rounded-lg border border-border bg-card p-5">
-          <h2 className="text-base font-semibold">Workspace projects</h2>
+          <h2 className="text-base font-semibold">Other projects</h2>
           <div className="mt-3 flex flex-col divide-y divide-border">{registry.map((project) => <div key={project.id} className="flex min-h-14 items-center justify-between gap-3">
             <span className="min-w-0 truncate text-[13px]">{project.name}</span>
             <Link to={scopeTo(project.id, '/')} className="inline-flex min-h-11 shrink-0 items-center rounded-md px-3 text-xs text-accent-text hover:bg-accent-strong/10">View tasks<span className="sr-only"> for {project.name}</span></Link>
@@ -592,7 +596,7 @@ function FilterBar({
             .map(withCount(counts.workflows))}
           emptyLabel="No tasks to filter"
         />
-        <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+        <div data-slot="group-controls" className="flex flex-wrap items-center gap-2"><span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
         <span className="text-[11px] font-medium text-soft-foreground">Group by</span>
         {/* Pressing the pressed one releases it — see `toggleGroupBy`, which is why there is
             no "None" button to hunt for. */}
@@ -602,7 +606,7 @@ function FilterBar({
           value={groupBy}
           options={GROUP_BY_OPTIONS}
           onChange={(picked) => onGroupByChange(toggleGroupBy(groupBy, picked))}
-        />
+        /></div>
         {canReset({ filters, groupBy }) ? (
           <button
             type="button"
@@ -680,6 +684,7 @@ function TaskList({
       data-slot="global-tasks-table"
       className="overflow-x-auto rounded-lg border border-border bg-card p-5"
     >
+      <div data-slot="global-summary-head" aria-hidden="true">{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <span key={label}>{label}</span>)}</div>
       <TooltipProvider>
             {tasks.map((task) => (
               <TaskRow
@@ -743,7 +748,7 @@ function TaskRow({
   const usage = usageCells(run, run.usage)
 
   return (
-    <article data-slot="global-task-row" data-run-id={run.id} data-project={run.projectId} className="hover:bg-muted max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-border max-md:py-5 max-md:first:pt-0 max-md:last:border-0 max-md:last:pb-0">
+    <article data-status={run.status} data-expanded={resourcesOpen} data-slot="global-task-row" data-run-id={run.id} data-project={run.projectId} className="hover:bg-muted max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-border max-md:py-5 max-md:first:pt-0 max-md:last:border-0 max-md:last:pb-0">
       {/* The one column with no fixed width, so every pixel the others give up lands here — and
           dropping Branch gave up 140 of them. A cross-project list is read by TITLE. */}
       <div data-slot="global-task-title">
@@ -774,7 +779,7 @@ function TaskRow({
           ) : null}
         </span>
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Pill dot={attention.tone} pulse={attention.pulse}>{attention.label}</Pill>
+          <button type="button" aria-expanded={resourcesOpen} aria-label={`${resourcesOpen ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} onClick={() => setResourcesOpen((value) => !value)} aria-describedby={`global-status-${run.projectId}-${run.id}`} title="Resources and actions" className="min-h-[26px] rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted"><Pill id={`global-status-${run.projectId}-${run.id}`} dot={attention.tone} pulse={attention.pulse}>{attention.label}</Pill></button>
       {showProject ? (
         <span className="text-[11px] text-muted-foreground">
           <Link to={scopeTo(run.projectId, '/')} className="truncate hover:text-foreground">
@@ -793,7 +798,7 @@ function TaskRow({
           null
         )}
       </span>
-          <button type="button" aria-expanded={resourcesOpen} aria-label={`${resourcesOpen ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} onClick={() => setResourcesOpen((value) => !value)} className="min-h-11 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted">Resources</button>
+
         </div>
       </div>
       <div data-slot="global-task-references">
@@ -806,6 +811,7 @@ function TaskRow({
       <div data-slot="global-task-workflow" className="text-[12.5px] text-muted-foreground">
         {run.workflow}
       </div>
+      <div data-slot="global-task-diff" className="text-xs text-muted-foreground"><span title="Change totals are available in the project task list">—</span></div>
       <div data-slot="global-task-age" className="text-right text-xs text-soft-foreground tabular-nums">
         {shortAge(run.startedAt ?? run.createdAt, now)}
       </div>

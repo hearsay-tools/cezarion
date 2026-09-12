@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveIcon,
   CheckCheckIcon,
-  ChevronDownIcon,
   ChevronsLeftIcon,
   ChevronsRightIcon,
   Clock3Icon,
@@ -28,7 +27,7 @@ import { Link, useNavigate } from '@/lib/project-router'
 
 import { archiveFinished, markAllRunsSeen, patchRun } from '@/api/client'
 import { useRunUsage } from '@/api/global-events'
-import { queryKeys, useHealth, usePinRun, useReferenceProjectId, useRuns } from '@/api/queries'
+import { queryKeys, useHealth, usePinRun, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
@@ -105,6 +104,7 @@ export function TasksOverview({
   expandedColumns = normalizeExpandedColumns(undefined),
   onToggleColumn = () => undefined,
   columnsPending = false,
+  projectName,
   error,
   onRetry,
 }: {
@@ -129,6 +129,8 @@ export function TasksOverview({
   /** Presentation capability; defaults visible for older health responses and direct renders. */
   showTokens?: boolean
   showCost?: boolean
+  /** The current registered project; omitted until the registry is available. */
+  projectName?: string
   /** Workspace-global desktop column choices; absent ids use registry defaults. */
   expandedColumns?: NormalizedExpandedColumns
   onToggleColumn?: (id: TaskColumnId) => void
@@ -138,7 +140,7 @@ export function TasksOverview({
   onRetry?: () => void
 }) {
   const [query, setQuery] = React.useState('')
-  const [detailedTable, setDetailedTable] = React.useState(true)
+  const [detailedTable, setDetailedTable] = React.useState(false)
   const headerRef = React.useRef<HTMLElement>(null)
   const archiveSelected = React.useRef(false)
   const [actionsOpen, setActionsOpen] = React.useState(false)
@@ -173,7 +175,7 @@ export function TasksOverview({
       {/* One set of search/view controls across breakpoints keeps query and selection intact.
           Mobile places search above the list filters; the shell already supplies its title. */}
       <header ref={headerRef} className="flex shrink-0 flex-col gap-[22px]">
-        <div className="flex flex-col gap-2"><h1 className="text-[28px] font-semibold tracking-tight">Project tasks</h1><p className="text-[13px] text-muted-foreground">Review runs, pull requests and resource usage.</p></div>
+        <div className="flex flex-col gap-2"><h1 className="text-[30px] font-semibold tracking-tight">Project tasks</h1><p className="text-[13px] text-muted-foreground">{projectName ? `${projectName} · ` : ''}Review runs, pull requests and resource usage.</p></div>
         <div className="flex gap-6 border-b border-border">
           <OverviewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
             Active
@@ -206,7 +208,7 @@ export function TasksOverview({
             variant="ghost"
             size="sm"
             data-slot="archive-finished"
-            className="hidden md:inline-flex"
+            className="inline-flex"
             disabled={archivePending}
             aria-busy={archivePending}
             onClick={onArchiveFinished}
@@ -275,7 +277,7 @@ export function TasksOverview({
           <p className="mt-4 text-xs text-muted-foreground">Saved automatically. Tokens and cost appear only when supported.</p>
           <Button variant="outline" className="mt-4" onClick={() => setDetailedTable((value) => !value)}>{detailedTable ? 'Summary view' : 'Resource columns'}</Button>
         </PopoverContent></Popover>
-        <Button asChild className="hidden min-h-11 md:inline-flex"><Link to="/new"><PlusIcon aria-hidden="true" />New task</Link></Button>
+        <Button asChild data-slot="new-task-inline" className="min-h-11 inline-flex"><Link to="/new"><PlusIcon aria-hidden="true" />New task</Link></Button>
         </div>
       </header>
 
@@ -284,7 +286,7 @@ export function TasksOverview({
           <TasksEmptyState view={view} query={query} />
         ) : (
           <>
-            {!detailedTable ? <SummaryTasksTable runs={visible} positions={positions} onRename={onRename} onTogglePin={pinToggle} now={now} showTokens={showTokens} showCost={showCost} /> : null}
+            {!detailedTable ? <SummaryTasksTable projectName={projectName} runs={visible} positions={positions} onRename={onRename} onTogglePin={pinToggle} now={now} showTokens={showTokens} showCost={showCost} /> : null}
             {/* The detailed table retains every saved column preference. */}
             <div
               data-slot="tasks-table"
@@ -343,6 +345,7 @@ export function TasksOverview({
                 <TaskCard
                   key={run.id}
                   run={run}
+                  projectName={projectName}
                   queuePosition={run.status === 'queued' ? (positions.get(run.id) ?? null) : null}
                   now={now}
                   showTokens={showTokens}
@@ -351,6 +354,7 @@ export function TasksOverview({
                 />
               ))}
             </div>
+            <p className="mt-[22px] text-[11px] text-muted-foreground md:hidden">Resource details—including tokens, cost, CPU and peak memory—are available when a task row is expanded.</p>
           </>
         )}
 
@@ -438,7 +442,8 @@ function TasksEmptyState({ view, query }: { view: ListView; query: string }) {
 
 /** Frame 4: five scan columns, with resources disclosed per task. The optional detailed table
  * above still owns workspace column preferences, so switching presentation never rewrites them. */
-function SummaryTasksTable({ runs, positions, onRename, onTogglePin, now, showTokens, showCost }: {
+function SummaryTasksTable({ projectName, runs, positions, onRename, onTogglePin, now, showTokens, showCost }: {
+  projectName?: string
   runs: RunRecord[]
   positions: Map<string, number>
   onRename: (id: string, title: string) => void
@@ -448,9 +453,9 @@ function SummaryTasksTable({ runs, positions, onRename, onTogglePin, now, showTo
   showCost: boolean
 }) {
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set())
-  return <div data-slot="tasks-summary" className="hidden rounded-lg border border-border bg-card p-5 md:block">
+  return <div data-slot="tasks-summary" className="hidden md:block"><div className="rounded-lg border border-border bg-card p-5">
     <table className="w-full table-fixed border-collapse">
-      <colgroup><col /><col className="w-[13%]" /><col className="w-[11%]" /><col className="w-[14%]" /><col className="w-[8%]" /></colgroup>
+      <colgroup><col /><col className="w-[136px]" /><col className="w-[106px]" /><col className="w-[116px]" /><col className="w-[70px]" /></colgroup>
       <thead><tr>{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <th key={label} className="h-8 border-b border-border text-left text-[10px] font-medium uppercase text-muted-foreground">{label}</th>)}</tr></thead>
       <tbody>{runs.map((run) => {
         const attention = deriveAttention(run)
@@ -459,19 +464,18 @@ function SummaryTasksTable({ runs, positions, onRename, onTogglePin, now, showTo
         const open = expanded.has(run.id)
         const detailId = `task-resources-${run.id}`
         return <React.Fragment key={run.id}>
-          <tr data-slot="task-summary-row" className="group/row border-b border-border last:border-0">
+          <tr data-status={run.status} data-slot="task-summary-row" className="group/row border-b border-border last:border-0">
             <td className="py-5 pr-4 align-top">
               <TitleCell run={run} to={`/tasks/${run.id}`} onRename={onRename} onTogglePin={onTogglePin} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Pill dot={attention.tone} pulse={attention.pulse}>{attention.label}{scheduled ? ` ${scheduled.label}` : ''}</Pill>
+                <button type="button" aria-label={`${open ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} aria-expanded={open} aria-controls={detailId} aria-describedby={`summary-status-${run.id}`} onClick={() => setExpanded((current) => { const next = new Set(current); if (open) next.delete(run.id); else next.add(run.id); return next })} className="inline-flex min-h-[26px] items-center gap-1 rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"><Pill id={`summary-status-${run.id}`} dot={attention.tone} pulse={attention.pulse}>{attention.label}{scheduled ? ` ${scheduled.label}` : ''}</Pill></button>
+                {projectName ? <span className="text-xs text-muted-foreground">{projectName}</span> : null}
                 {run.status === 'queued' ? <span className="text-xs text-muted-foreground">#{positions.get(run.id)} in queue</span> : null}
-                <button type="button" aria-label={`${open ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} aria-expanded={open} aria-controls={detailId} onClick={() => setExpanded((current) => { const next = new Set(current); if (open) next.delete(run.id); else next.add(run.id); return next })} className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
-                  Resources <ChevronDownIcon className={cn('size-3', open && 'rotate-180')} aria-hidden="true" />
-                </button>
+
               </div>
             </td>
             <td className="truncate pr-3 text-xs text-muted-foreground" title={workflowLabel(run)}>{workflowLabel(run)}</td>
-            <td className="pr-2 text-xs">{run.diffStat ? <DiffStatLabel stat={run.diffStat} compact /> : <Dash />}</td>
+            <td className="pr-2 text-xs">{run.diffStat ? <DiffStatLabel stat={run.diffStat} /> : <Dash />}</td>
             <td className="pr-2">{reference ? <TaskReferenceChip run={run} reference={reference} compact /> : <Dash />}</td>
             <td className="text-xs text-muted-foreground">{shortAge(run.startedAt ?? run.createdAt, now)}</td>
           </tr>
@@ -479,7 +483,7 @@ function SummaryTasksTable({ runs, positions, onRename, onTogglePin, now, showTo
         </React.Fragment>
       })}</tbody>
     </table>
-    <p className="mt-5 text-[11px] text-muted-foreground">Expand a task’s resources for details. Resource columns shows the full table and your saved column choices.</p>
+    </div><p className="mt-[22px] text-[11px] text-muted-foreground">Resource details—including tokens, cost, CPU and peak memory—are available when a task row is expanded.</p>
   </div>
 }
 
@@ -894,7 +898,7 @@ function TitleCell({
         title={title}
         className={cn(
           'line-clamp-2 min-w-0 flex-1 whitespace-normal rounded-sm text-[13px] leading-[18px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
-          unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
+          unread ? 'font-semibold text-foreground' : readDone ? 'font-normal text-foreground' : 'font-medium'
         )}
       >
         {title}
@@ -996,6 +1000,7 @@ function BoundedMetric({ text, accessibleText }: { text: string; accessibleText?
 /** One run, one card — the `<md` framing of the same row. */
 function TaskCard({
   run,
+  projectName,
   queuePosition,
   now,
   showTokens,
@@ -1003,6 +1008,7 @@ function TaskCard({
   onTogglePin,
 }: {
   run: RunRecord
+  projectName?: string
   queuePosition: number | null
   now: number
   showTokens: boolean
@@ -1018,12 +1024,11 @@ function TaskCard({
   // Read/unread (#unread-done-items) — the same promote-unread / dim-read treatment as the row.
   const unread = isUnread(run)
   const readDone = isReadDoneItem(run)
-  const cost = formatCost(run.costUsd)
-  const hasDirectionalUsage = run.inputTokens !== undefined || run.outputTokens !== undefined
 
   return (
     <div
       data-slot="task-card"
+      data-status={run.status}
       data-run-id={run.id}
       onClick={(event) => {
         // `button` as well as `a` since the card grew the pin (#935): a control inside the card
@@ -1034,15 +1039,15 @@ function TaskCard({
       className="cursor-pointer border-b border-border py-5 first:pt-0 last:border-0 last:pb-0"
     >
       <div className="flex flex-wrap items-start gap-2.5">
-        <Pill dot={attention.tone} pulse={attention.pulse} className="mt-px shrink-0" title={scheduled?.title}>
+        <button data-slot="mobile-resources-toggle" type="button" aria-controls={`mobile-resources-${run.id}`} aria-describedby={`mobile-status-${run.id}`} aria-label={resourcesOpen ? 'Hide resources' : 'Show resources'} title={resourcesOpen ? 'Hide resources' : 'Show resources'} aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}><Pill id={`mobile-status-${run.id}`} dot={attention.tone} pulse={attention.pulse} className="mt-px shrink-0" title={scheduled?.title}>
           {attention.label}
           {scheduled ? <span className="tabular-nums">{scheduled.label}</span> : null}
-        </Pill>
+        </Pill></button>
         <Link
           to={to}
           className={cn(
             'order-first w-full min-w-0 rounded-sm text-[13.5px] leading-[1.35] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
-            unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
+            unread ? 'font-semibold text-foreground' : readDone ? 'font-normal text-foreground' : 'font-medium'
           )}
         >
           {run.delegation?.role === 'worker' ? <span className="mr-2 text-xs text-muted-foreground">Worker</span> : null}
@@ -1058,9 +1063,7 @@ function TaskCard({
             className="mt-1.5 shrink-0"
           />
         ) : null}
-        <span className="mt-0.5 shrink-0 text-[11.5px] text-supporting-foreground tabular-nums">
-          {shortAge(run.finishedAt ?? run.createdAt, now)}
-        </span>
+        {projectName ? <span className="text-xs text-muted-foreground">{projectName}</span> : null}
         {/* Always visible here, not hover-revealed: a card has no hover to speak of on the
             device it exists for, and it is the only place a pin can be set or seen on mobile. */}
         {onTogglePin ? (
@@ -1071,47 +1074,12 @@ function TaskCard({
           />
         ) : null}
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-[11.5px] font-medium text-muted-foreground tabular-nums">
+      <div data-slot="mobile-task-meta" className="mt-4 grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 text-xs text-muted-foreground">
         <span>{workflowLabel(run)}</span>
-        {queuePosition !== null ? (
-          <>
-            <Sep />
-            <span data-slot="queue-note">#{queuePosition} in queue</span>
-          </>
-        ) : (
-          <>
-            {run.branch ? (
-              <>
-                <Sep />
-                <span>{run.branch}</span>
-              </>
-            ) : null}
-            {/* Branch · ±diff · IN/OUT · cost — the compact card's meta order. */}
-            {run.diffStat ? (
-              <>
-                <Sep />
-                <DiffStatLabel stat={run.diffStat} className="text-[11.5px]" />
-              </>
-            ) : null}
-            {showTokens && hasDirectionalUsage ? (
-              <>
-                <Sep />
-                <DirectionalUsage inputTokens={run.inputTokens} outputTokens={run.outputTokens} />
-              </>
-            ) : null}
-            {showCost && cost ? (
-              <>
-                <Sep />
-                <span>{cost}</span>
-              </>
-            ) : null}
-          </>
-        )}
-        {reference ? (
-          <TaskReferenceChip run={run} reference={reference} className="h-5" />
-        ) : null}
+        {queuePosition !== null ? <span data-slot="queue-note">#{queuePosition} in queue</span> : run.diffStat ? <DiffStatLabel stat={run.diffStat} /> : <Dash />}
+        <span>{shortAge(run.startedAt ?? run.createdAt, now)}</span>
       </div>
-      <button data-slot="mobile-resources-toggle" type="button" className="mt-3 min-h-11 rounded-md border border-border px-3 text-xs" aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}>{resourcesOpen ? 'Hide resources' : 'Show resources'}</button>
+      {reference ? <div className="mt-3"><TaskReferenceChip run={run} reference={reference} /></div> : null}
       {resourcesOpen ? <MobileResources run={run} showTokens={showTokens} showCost={showCost} /> : null}
     </div>
   )
@@ -1121,7 +1089,8 @@ function TaskCard({
 function MobileResources({ run, showTokens, showCost }: { run: RunRecord; showTokens: boolean; showCost: boolean }) {
   const sample = useRunUsage(run.id)
   const resources = usageCells(run, sample)
-  return <dl className="mt-3 grid grid-cols-2 gap-3 rounded-md bg-muted p-3 text-xs">
+  return <dl id={`mobile-resources-${run.id}`} className="mt-3 grid grid-cols-2 gap-3 rounded-md bg-muted p-3 text-xs">
+    {run.branch ? <div><dt>Branch</dt><dd>{run.branch}</dd></div> : null}
     <div><dt>CPU</dt><dd>{resources.cpu.text || '—'}</dd></div><div><dt>Memory</dt><dd>{resources.mem.text || '—'}</dd></div>
     {showTokens ? <div><dt>IN / OUT</dt><dd><DirectionalUsage inputTokens={run.inputTokens} outputTokens={run.outputTokens} /></dd></div> : null}
     {showCost ? <div><dt>Cost</dt><dd>{formatCost(run.costUsd) || '—'}</dd></div> : null}
@@ -1192,6 +1161,8 @@ export function TasksOverviewRoute() {
   // provider wraps it instead, so the chips deep in the table and the cards read their status
   // from context and nothing in between has to relay it.
   const projectId = useReferenceProjectId()
+  const projects = useProjects()
+  const projectName = projects.data?.projects?.find((project) => project.id === projectId)?.name
   const referenceRequests = React.useMemo(
     () =>
       // `taskReference`, singular: this table paints exactly one chip per row (the strongest
@@ -1209,6 +1180,7 @@ export function TasksOverviewRoute() {
     <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
       <TasksOverview
         runs={runs.data}
+        projectName={projectName}
         error={runs.error?.message}
         onRetry={() => void runs.refetch()}
         view={view}

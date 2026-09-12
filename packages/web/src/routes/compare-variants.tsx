@@ -10,7 +10,6 @@ import { queryKeys, useGroup, useHealth, useRuns } from '@/api/queries'
 import type { GroupVariant } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { DirectionalUsage } from '@/components/directional-usage'
-import { Pill } from '@/components/pill'
 import { RunDiff } from '@/components/run-diff'
 import {
   AlertDialog,
@@ -75,11 +74,11 @@ export function CompareVariantsRoute() {
   if (group.isError) {
     const notFound = group.error instanceof ApiError && group.error.status === 404
     return (
-      <div data-route="compare" className="flex min-h-full flex-col">
+      <div data-route="compare" className="task-flow-page flex min-h-full flex-col">
         <CenteredState
           icon={notFound ? <SearchXIcon /> : <ScaleIcon />}
           tone={notFound ? 'neutral' : 'danger'}
-          title={notFound ? 'No such variant group' : 'Could not load the variants'}
+          title={notFound ? 'No such variant group' : 'Could not load variants'}
           subtitle={
             notFound
               ? 'No runs share this group id. The group may have been deleted, or a winner was already picked and the others removed.'
@@ -143,12 +142,11 @@ function CompareView({
           <span>Compare variants</span>
         </h1>
         <p className="text-[13px] text-muted-foreground">
-          {title} · {variants.length} variants of the same task, each in its own worktree — pick the diff you
-          want to keep. The others are cancelled and archived, their worktrees and branches removed.
+          {title} · {variants.length} {allTerminal ? 'completed variants with distinct committed diffs.' : 'variants of the same task, each in its own worktree.'}
         </p>
       </header>
 
-      {!allTerminal ? <p role="status" className="rounded-xl border border-border bg-card p-5 text-sm">Variants are still running. Picking a result is available when every variant finishes.</p> : null}
+      {!allTerminal ? <section role="status" className="rounded-xl border border-border bg-card p-5"><h2 className="text-lg font-normal">Variants are still running</h2><p className="mt-3 text-[13px] text-muted-foreground">Compare progress now. Picking a result is disabled until every variant finishes.</p></section> : null}
       <div
         data-slot="compare-columns"
         className={cn(
@@ -169,14 +167,14 @@ function CompareView({
         ))}
       </div>
 
-      <section aria-label="Full diffs" className="flex flex-col gap-2">
+      <section aria-label="Full diffs" className="flex flex-col gap-[22px]">
         {variants.map((variant) => (
           <VariantDiff key={variant.id} variant={variant} />
         ))}
       </section>
 
       <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent data-slot="variant-confirm-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>Pick variant {confirming?.variant}?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -187,7 +185,7 @@ function CompareView({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep comparing</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               data-slot="confirm-pick"
               onClick={() => {
@@ -195,7 +193,6 @@ function CompareView({
                 setConfirming(null)
               }}
             >
-              <CheckIcon aria-hidden="true" />
               Pick variant {confirming?.variant}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -239,9 +236,7 @@ function VariantColumn({
         >
           {variant.variant}
         </span>
-        <Pill dot={attention.tone} pulse={attention.pulse}>
-          {attention.label}
-        </Pill>
+        <span data-slot="variant-status" className="text-lg font-normal">· <span className="capitalize">{attention.label}</span></span>
         {(showTokens && hasDirectionalUsage) || (showCost && cost) ? (
           <span
             data-slot="variant-token-metrics"
