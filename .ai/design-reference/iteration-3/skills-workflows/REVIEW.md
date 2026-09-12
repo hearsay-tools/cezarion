@@ -2,6 +2,8 @@
 
 This is **not a visual-parity sign-off**. The scoped implementation, behavioral checks, and populated browser evidence are ready for parent review. Shared shell/token/glyph integration is still outstanding, and the residual differences below remain visible.
 
+Additional real-API verification is recorded in `real-runtime/README.md`: ten supplementary browser captures and a persisted workflow import/reorder/save/conflict/overwrite/reload/delete round trip, using the parent's reusable isolated fixture. The service's 93 assets match the same build. These content-different captures supplement the original 74 matched-fixture entries and do not establish additional exact visual matches.
+
 ## Source and ownership
 
 - Confirmed source: parent `cezarion.pen`, commit `ac3f4a89`.
