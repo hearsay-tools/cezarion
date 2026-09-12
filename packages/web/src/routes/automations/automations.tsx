@@ -116,7 +116,7 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
                     <div><h2 className="font-semibold">{automation.name}</h2><p className="mt-6 text-[13px] text-muted-foreground">{automation.events.join(', ')} · every {Math.round(automation.intervalSeconds / 60)} min</p></div>
                     <span className="rounded-lg border px-4 py-3 text-xs">{automation.enabled ? 'Enabled' : 'Paused'}</span>
                   </div>
-                  <p data-slot="automation-scheduler" className="mt-4 text-xs text-success">Scheduler {data.scheduler.state} · GitHub {data.available ? 'available' : 'unavailable'}{data.reason ? ` · ${data.reason}` : ''}</p>
+                  <SchedulerStatus data={data} />
                   <div className="mt-4 flex flex-wrap gap-3">
                     <Button variant="outline" asChild><Link to={`/automations/${automation.id}`}>Edit</Link></Button>
                     <Button variant="outline" asChild><Link to={`/automations/${automation.id}/log`}>Execution log</Link></Button>
@@ -128,12 +128,17 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
               ))}
             </div>
           )}
-          {data.automations.length === 0 ? <p className="mt-4 text-xs text-muted-foreground">Scheduler {data.scheduler.state} · GitHub {data.available ? 'available' : 'unavailable'}{data.reason ? ` · ${data.reason}` : ''}</p> : null}
+          {data.automations.length === 0 ? <SchedulerStatus data={data} /> : null}
           {data.automations.map((automation) => <AutomationLog key={automation.id} automationId={automation.id} automationName={automation.name} showName={data.automations.length > 1} inline />)}
         </>
       )}
     </PageFrame>
   )
+}
+
+function SchedulerStatus({ data }: { data: AutomationsResponse }) {
+  const tone = !data.available ? 'text-destructive' : data.scheduler.state === 'scheduled' ? 'text-success' : 'text-muted-foreground'
+  return <p data-slot="automation-scheduler" className={`mt-4 text-xs ${tone}`}>Scheduler {data.scheduler.state} · GitHub {data.available ? 'available' : 'unavailable'}{data.reason ? ` · ${data.reason}` : ''}</p>
 }
 
 function AutomationLog({ automationId, automationName, inline = false, showName = false }: { automationId: string; automationName?: string; inline?: boolean; showName?: boolean }) {

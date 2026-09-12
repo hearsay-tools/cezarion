@@ -63,3 +63,24 @@ it.each(['list', 'new', 'edit', 'log'] as const)('keeps %s gated when automation
   expect(screen.queryByRole('button', { name: 'Save automation' })).toBeNull()
   expect(fetch).not.toHaveBeenCalled()
 })
+
+it.each([
+  { available: true, state: 'scheduled', tone: 'text-success', reason: undefined },
+  { available: true, state: 'idle', tone: 'text-muted-foreground', reason: undefined },
+  { available: false, state: 'scheduled', tone: 'text-destructive', reason: 'GitHub authentication expired.' },
+  { available: false, state: 'idle', tone: 'text-destructive', reason: 'No GitHub remote configured.' },
+])('renders scheduler $state with availability $available honestly for populated and empty lists', async ({ available, state, tone, reason }) => {
+  for (const automations of [[automation], []]) {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => json(String(input).includes('/automation-log')
+      ? { records: [] }
+      : { automations, available, reason, scheduler: { state } })))
+    const client = createQueryClient()
+    client.setQueryData(queryKeys.health, { capabilities: { automations: true } })
+    render(<QueryClientProvider client={client}><MemoryRouter><AutomationsRoute /></MemoryRouter></QueryClientProvider>)
+    const status = await screen.findByText(`Scheduler ${state} · GitHub ${available ? 'available' : 'unavailable'}${reason ? ` · ${reason}` : ''}`)
+    expect(status.classList.contains(tone)).toBe(true)
+    if (tone !== 'text-success') expect(status.classList.contains('text-success')).toBe(false)
+    cleanup()
+    client.clear()
+  }
+})
