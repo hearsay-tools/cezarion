@@ -1,4 +1,5 @@
-import { GitBranchIcon, WrapTextIcon } from 'lucide-react'
+import { CircleHelpIcon, Columns2Icon, WrapTextIcon } from 'lucide-react'
+import { GitBranchIcon } from './design-icons'
 
 import type { DiffMode } from '@/components/diff'
 import { Button } from '@/components/ui/button'
@@ -65,10 +66,11 @@ function ModeButton({
       aria-pressed={active}
       onClick={() => onModeChange(value)}
       className={cn(
-        'min-h-11 rounded-lg border border-border bg-card px-3 text-xs font-medium capitalize',
+        'inline-flex items-center gap-2 min-h-11 rounded-lg border border-border bg-card px-3 text-xs font-medium capitalize',
         active ? 'border-accent-text/40 text-accent-text' : 'text-muted-foreground hover:text-foreground',
       )}
     >
+      {value === 'unified' ? <CircleHelpIcon aria-hidden="true" className="size-4" /> : <Columns2Icon aria-hidden="true" className="size-4" />}
       {value}
     </button>
   )

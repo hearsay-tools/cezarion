@@ -1,11 +1,5 @@
-import {
-  EllipsisVerticalIcon,
-  ExternalLinkIcon,
-  GitCommitHorizontalIcon,
-  GitPullRequestIcon,
-  SquareTerminalIcon,
-  UploadIcon,
-} from 'lucide-react'
+import { EllipsisVerticalIcon, ExternalLinkIcon, SquareTerminalIcon,  } from 'lucide-react'
+import { GitCommitHorizontalIcon, GitPullRequestIcon, UploadIcon } from './design-icons'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { DiffStat } from '@open-mercato/cezar-api-client'

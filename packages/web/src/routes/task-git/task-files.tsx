@@ -1,4 +1,5 @@
-import { FolderTreeIcon, TriangleAlertIcon } from 'lucide-react'
+import { FolderTreeIcon } from 'lucide-react'
+import { SearchIcon, TriangleAlertIcon } from './design-icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useState } from 'react'
@@ -51,13 +52,16 @@ function FilesView({ run }: { run: ApiRun }) {
           className="flex min-w-0 gap-2 px-[18px] pt-[22px] md:px-9"
           onSubmit={event => { event.preventDefault(); if (filePath.trim()) setSelected(filePath.trim()) }}
         >
+          <label className="relative min-w-0 flex-1">
+          <SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
           <Input
             aria-label="File path in the worktree"
             placeholder="Open a file by path…"
             value={filePath}
             onChange={event => setFilePath(event.target.value)}
-            className="h-11 min-w-0 flex-1 bg-card"
+            className="h-11 min-w-0 bg-card pl-10"
           />
+          </label>
           <Button type="submit" variant="outline" className="h-11 shrink-0" disabled={!filePath.trim()}>Open file</Button>
         </form>
       ) : null}
@@ -74,7 +78,7 @@ function FilesView({ run }: { run: ApiRun }) {
           subtitle={root.error.message}
         />
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col items-stretch gap-5 px-[18px] py-[22px] [--diff-sticky-top:1rem] md:flex-row md:items-start md:px-9">
+        <div className="flex min-h-0 flex-col items-stretch gap-5 px-[18px] py-[22px] [--diff-sticky-top:1rem] md:flex-row md:items-start md:px-9">
           {/* Sticky beside a long preview on desktop, with its own scroller so a deep tree scrolls
               without dragging the preview along; first in the stack (and no scroller of its own) on
               phones, where the page IS the pane. The cap reads the same var the pin is set from, so
@@ -83,10 +87,10 @@ function FilesView({ run }: { run: ApiRun }) {
             data-slot="files-tree-pane"
             className="w-full shrink-0 rounded-xl border border-border bg-card p-3.5 md:sticky md:top-[var(--diff-sticky-top)] md:max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] md:w-60 md:overflow-y-auto md:overscroll-contain lg:w-72"
           >
-            <h2 className="mb-3 text-xs font-semibold">Worktree files</h2>
+            <h2 className="sr-only">Worktree files</h2>
             <FilesTree runId={run.id} selected={selected} onSelect={setSelected} />
           </aside>
-          <FilePreview runId={run.id} path={selected} className="min-h-[400px] min-w-0 flex-1 bg-card" />
+          <FilePreview runId={run.id} path={selected} className="min-h-[200px] min-w-0 flex-1 bg-card md:min-h-[400px]" />
         </div>
       )}
       <p className="px-[18px] pb-6 text-xs text-muted-foreground md:px-9">Browsing files is read-only. Worktree contents may differ from your main checkout.</p>

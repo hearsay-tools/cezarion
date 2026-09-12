@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckIcon, GitBranchIcon, GitPullRequestIcon, PlusIcon } from 'lucide-react'
+import { GitBranchIcon, GitPullRequestIcon, PlusIcon, SearchIcon } from '../task-git/design-icons'
 import { useState, type FormEvent } from 'react'
 
 import { createRepoBranch, putConfig } from '@/api/client'
@@ -79,38 +79,40 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
   return (
     <section data-slot="repo-branches" className="grid min-w-0 grid-cols-1 gap-5 px-[18px] py-[22px] md:grid-cols-[minmax(0,1fr)_290px] md:px-9">
       <div className="min-w-0 rounded-xl border border-border bg-card p-5">
-        <h2 className="text-xs font-semibold tracking-wide text-soft-foreground uppercase">Branches</h2>
+        <h2 className="sr-only">Branches</h2>
+        <label className="relative block">
+        <SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
         <Input
           aria-label="Filter branches"
           placeholder="Filter branches…"
           value={branchQuery}
           onChange={(event) => setBranchQuery(event.target.value)}
-          className="mt-3 h-11"
+          className="h-11 pl-10"
         />
-        <ul data-slot="repo-branch-list" className="mt-2 flex max-h-[28rem] min-w-0 flex-col divide-y divide-border overflow-y-auto overscroll-contain">
+        </label>
+        <ul data-slot="repo-branch-list" className="mt-4 flex min-w-0 flex-col divide-y divide-border border-t border-border md:max-h-[40rem] md:overflow-y-auto md:overscroll-contain">
           {filteredBranches.map((name) => {
             const current = name === info.branch
             return (
-              <li key={name} data-slot="branch-row" data-branch={name} className="flex min-h-11 items-center gap-2 py-1">
-                <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className={cn('min-w-0 truncate text-[13px]', current && 'font-semibold')}>{name}</span>
+              <li key={name} data-slot="branch-row" data-branch={name} className="flex min-h-20 flex-col items-start justify-center gap-2 py-3 md:flex-row md:items-center md:justify-start md:py-2.5">
+                <span className={cn('min-w-0 truncate text-[13px]', current && 'font-normal')}>{name}</span>
                 {current ? (
                   <span
                     data-slot="branch-current"
-                    className="flex shrink-0 items-center gap-1 rounded-sm bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground"
+                    className="md:ml-auto flex shrink-0 items-center rounded-md bg-accent-strong/10 px-2 py-1.5 text-[10px] font-medium text-accent-text"
                   >
-                    <CheckIcon aria-hidden="true" className="size-3" />
-                    current
+                    Current
                   </span>
                 ) : (
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     data-action="switch-branch"
-                    className="ml-auto"
+                    className="md:ml-auto h-11"
                     disabled={branchAction.isPending}
                     onClick={() => branchAction.mutate(name)}
                   >
+                    <GitBranchIcon aria-hidden="true" />
                     Switch
                   </Button>
                 )}
@@ -126,34 +128,38 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
       </div>
 
       <div className="min-w-0 self-start rounded-xl border border-border bg-card p-5">
-        <h2 className="text-sm font-semibold">Create a branch</h2>
-        <form data-slot="branch-create" className="mt-3 flex flex-col items-stretch gap-3" onSubmit={submitCreate}>
+        <h2 className="text-base font-semibold">Create a branch</h2>
+        <form data-slot="branch-create" className="mt-7 flex flex-col items-stretch gap-3" onSubmit={submitCreate}>
+          <label htmlFor="new-branch-name" className="text-sm font-medium">Branch name</label>
+          <p className="-mt-1 text-xs text-muted-foreground">Create from the selected base.</p>
           <Input
+            id="new-branch-name"
             aria-label="New branch name"
             placeholder="new-branch-name"
-            className="h-11"
+            className="h-11 bg-background"
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
           />
           <Button
             type="submit"
-            variant="outline"
+            variant="primary"
             size="sm"
             className="min-h-11 self-start"
             data-action="create-branch"
             disabled={!newName.trim() || branchAction.isPending}
           >
             <PlusIcon aria-hidden="true" />
-            Create
+            Create branch
           </Button>
         </form>
         <div className="mt-5">
           <label
             htmlFor="base-branch-picker"
-            className="text-xs font-semibold tracking-wide text-soft-foreground uppercase"
+            className="text-sm font-medium"
           >
             Agents’ base branch
           </label>
+          <p className="mt-2 text-xs text-muted-foreground">New task worktrees branch from this.</p>
           {/* A native <select>: a handful of branch names needs no popover machinery, and the
               OS picker is the better control on phones. */}
           <select
@@ -171,9 +177,8 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
               </option>
             ))}
           </select>
-          <p className="mt-1 text-[11px] text-soft-foreground">New task worktrees branch from this.</p>
         </div>
-        <p className="mt-4 text-xs leading-relaxed text-muted-foreground">Switching branches changes your working tree. Review uncommitted changes first.</p>
+        <p className="mt-3 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">Switching branches changes your working tree. Review uncommitted changes first.</p>
       </div>
 
       {health.data?.forge?.available ? <ForgePullRequests /> : null}

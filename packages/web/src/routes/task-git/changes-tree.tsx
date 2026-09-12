@@ -1,4 +1,5 @@
-import { ChevronRightIcon, FileIcon, FolderIcon } from 'lucide-react'
+import { FileIcon } from 'lucide-react'
+import { ChevronRightIcon, FolderIcon } from './design-icons'
 import { useState } from 'react'
 
 import { cn } from '@/lib/utils'

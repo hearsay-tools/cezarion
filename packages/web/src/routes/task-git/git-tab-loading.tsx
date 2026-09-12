@@ -1,4 +1,5 @@
-import { LoaderCircleIcon, SearchXIcon, TriangleAlertIcon } from 'lucide-react'
+import { LoaderCircleIcon, SearchXIcon } from 'lucide-react'
+import { TriangleAlertIcon } from './design-icons'
 import { Link } from '@/lib/project-router'
 
 import { ApiError } from '@/api/client'

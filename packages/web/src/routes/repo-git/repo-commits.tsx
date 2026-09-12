@@ -1,4 +1,5 @@
-import { ArrowLeftIcon, GitCommitHorizontalIcon, SearchXIcon, TriangleAlertIcon } from 'lucide-react'
+import { SearchXIcon } from 'lucide-react'
+import { ArrowLeftIcon, GitCommitHorizontalIcon, TriangleAlertIcon } from '../task-git/design-icons'
 import { useState } from 'react'
 import { useParams } from 'react-router'
 

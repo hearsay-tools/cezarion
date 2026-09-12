@@ -59,3 +59,20 @@
   .gh-engine-fields { column-gap: 8px; }
   .gh-engine-fields > button { padding-inline: 8px; gap: 4px; }
 }
+/* PR detail cards use the reference's document typography. The exact-head summary,
+   per-check links and refresh action remain visible alongside readiness. */
+[data-pr-detail='true'] [data-slot='gh-meta'] { font-family: inherit; font-size: 12px; color: var(--muted-foreground); }
+[data-slot='gh-merge-box'] > div > svg { display: none; }
+[data-slot='gh-merge-box'] h3 { font-size: 18px; font-weight: 400; }
+[data-slot='gh-merge-box'] ul { margin-top: 20px; font-size: 13px; }
+[data-slot='gh-merge-box'] ul > li + li { margin-top: 16px; }
+[data-slot='gh-merge-box'] select + button { background: var(--accent-strong); color: var(--accent-strong-foreground); }
+
+[data-route='github']:not([data-pr-detail='true']) [data-slot='gh-tabs'] > a { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding-inline: 0; color: var(--muted-foreground); }
+[data-route='github']:not([data-pr-detail='true']) [data-slot='gh-tabs'] > a[aria-current='page'] { color: var(--accent-text); border-color: var(--accent-strong); }
+[data-route='github']:not([data-pr-detail='true']) [data-slot='gh-tabs'] { flex-direction: row; flex-wrap: wrap; }
+[data-pr-detail='true'] [data-slot='gh-header'] h1 { font-weight: 400; }
+
+[data-slot='gh-merge-confirm'] [data-variant='primary'] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
+
+[data-slot='gh-merge-box']:not([data-eligibility='ready']) h3 { color: var(--pending-strong); }

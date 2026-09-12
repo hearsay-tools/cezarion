@@ -1,14 +1,7 @@
 import './github-layout.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  EyeIcon,
-  PlayIcon,
-  SparklesIcon,
-  WorkflowIcon,
-  XIcon,
-} from 'lucide-react'
+import { EyeIcon, PlayIcon,  } from 'lucide-react'
+import { CheckIcon, ChevronDownIcon, SparklesIcon, WorkflowIcon, XIcon } from '../task-git/design-icons'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Link } from '@/lib/project-router'
 

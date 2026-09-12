@@ -1,4 +1,5 @@
-import { GitBranchIcon, TriangleAlertIcon } from 'lucide-react'
+import './repo-git.css'
+import { GitBranchIcon, TriangleAlertIcon } from '../task-git/design-icons'
 
 import { useRepo } from '@/api/queries'
 import type { RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
@@ -74,7 +75,7 @@ function RepoView({ repo, info, tab }: { repo: RepoResponse; info: RepoInfo; tab
           <RepoPull repo={repo} info={info} />
         </div>
 
-        <div data-slot="repo-tabs" className="flex items-end gap-4 border-b border-border [&>a]:min-h-11">
+        <div data-slot="repo-tabs" className="flex items-end gap-6 border-b border-border [&>a]:min-h-11">
           <TabLink to="/git" active={tab === 'changes'}>
             Changes
           </TabLink>

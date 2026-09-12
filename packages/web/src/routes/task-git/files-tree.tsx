@@ -1,4 +1,5 @@
-import { ChevronRightIcon, FileIcon, FolderIcon, ImageIcon } from 'lucide-react'
+import { ImageIcon } from 'lucide-react'
+import { ChevronRightIcon, FileCodeIcon, FolderIcon } from './design-icons'
 import { useState } from 'react'
 
 import { useRunFile } from '@/api/queries'
@@ -49,14 +50,14 @@ function DirChildren({
 
   if (entry.isPending) {
     return (
-      <li data-slot="files-tree-loading" className="px-1.5 py-1 text-xs text-soft-foreground" style={{ paddingLeft: `${24 + depth * 14}px` }}>
+      <li data-slot="files-tree-loading" className="px-1.5 py-1 text-xs text-soft-foreground" style={{ paddingLeft: `${6 + depth * 14}px` }}>
         Loading…
       </li>
     )
   }
   if (entry.isError) {
     return (
-      <li data-slot="files-tree-error" className="px-1.5 py-1 text-xs text-danger" style={{ paddingLeft: `${24 + depth * 14}px` }}>
+      <li data-slot="files-tree-error" className="px-1.5 py-1 text-xs text-danger" style={{ paddingLeft: `${6 + depth * 14}px` }}>
         {entry.error.message}
       </li>
     )
@@ -64,7 +65,7 @@ function DirChildren({
   if (entry.data.type !== 'dir') return null
   if (entry.data.entries.length === 0) {
     return (
-      <li data-slot="files-tree-empty" className="px-1.5 py-1 text-xs text-soft-foreground" style={{ paddingLeft: `${24 + depth * 14}px` }}>
+      <li data-slot="files-tree-empty" className="px-1.5 py-1 text-xs text-soft-foreground" style={{ paddingLeft: `${6 + depth * 14}px` }}>
         Empty directory
       </li>
     )
@@ -125,15 +126,15 @@ function DirNode({
         data-state={open ? 'open' : 'closed'}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex min-h-11 w-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="flex min-h-11 md:min-h-8 w-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-muted-foreground hover:bg-muted hover:text-foreground"
         style={{ paddingLeft: `${6 + depth * 14}px` }}
       >
         <ChevronRightIcon
           aria-hidden="true"
-          className={cn('size-3.5 shrink-0 transition-transform motion-reduce:transition-none', open && 'rotate-90')}
+          className={cn('order-last ml-auto size-3.5 shrink-0 transition-transform motion-reduce:transition-none', open && 'rotate-90')}
         />
         <FolderIcon aria-hidden="true" className="size-3.5 shrink-0" />
-        <span className="min-w-0 truncate font-medium">{name}</span>
+        <span className="min-w-0 truncate font-normal">{name}</span>
       </button>
       {open ? (
         <ul className="flex flex-col gap-px">
@@ -160,7 +161,7 @@ function FileNode({
   onSelect: (path: string) => void
 }) {
   const active = selected === path
-  const Icon = isImagePath(path) ? ImageIcon : FileIcon
+  const Icon = isImagePath(path) ? ImageIcon : FileCodeIcon
   return (
     <li>
       <button
@@ -170,10 +171,10 @@ function FileNode({
         aria-current={active ? 'true' : undefined}
         onClick={() => onSelect(path)}
         className={cn(
-          'flex min-h-11 w-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-1 text-left hover:bg-muted',
+          'flex min-h-11 md:min-h-8 w-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-1 text-left hover:bg-muted',
           active ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
         )}
-        style={{ paddingLeft: `${24 + depth * 14}px` }}
+        style={{ paddingLeft: `${6 + depth * 14}px` }}
       >
         <Icon aria-hidden="true" className="size-3.5 shrink-0" />
         <span className="min-w-0 truncate">{name}</span>

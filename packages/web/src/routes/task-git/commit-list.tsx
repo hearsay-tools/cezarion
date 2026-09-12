@@ -1,4 +1,4 @@
-import { GitCommitHorizontalIcon, SearchIcon } from 'lucide-react'
+import { GitCommitHorizontalIcon, SearchIcon } from './design-icons'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { Virtualizer } from 'virtua'
 
@@ -31,7 +31,7 @@ import { cn } from '@/lib/utils'
 /** Commit rows past which the list goes through virtua. */
 export const COMMIT_VIRTUALIZE_THRESHOLD = 150
 
-/** Two-line history row (76px), plus the divider. Keep the virtual estimate and flat placeholder aligned. */
+/** Desktop history-row estimate. Virtua measures expanded mobile rows after mounting. */
 const ROW_HEIGHT_PX = 77
 
 export interface CommitListItem {
@@ -76,7 +76,7 @@ export function CommitList({ slot, commits, className }: { slot: string; commits
     return () => window.removeEventListener('resize', measure)
   }, [virtual])
 
-  const rows = filtered.map((commit) => <CommitRow key={commit.sha} commit={commit} />)
+  const rows = filtered.map((commit) => <CommitRow key={commit.sha} commit={commit} detailed={slot === 'task-commits' && commits.length === 1} />)
 
   return (
     <>
@@ -108,7 +108,7 @@ export function CommitList({ slot, commits, className }: { slot: string; commits
   )
 }
 
-function CommitRow({ commit }: { commit: CommitListItem }) {
+function CommitRow({ commit, detailed }: { commit: CommitListItem; detailed: boolean }) {
   return (
     // Not a <ul>/<li>: virtua inserts its own positioned wrapper between the list and the
     // items, which would break that parent/child contract. A plain list of links reads the
@@ -118,16 +118,17 @@ function CommitRow({ commit }: { commit: CommitListItem }) {
         data-slot="commit-row"
         data-sha={commit.sha}
         to={commit.href}
-        className="flex min-h-[76px] min-w-0 items-center gap-3 rounded-sm py-3 hover:bg-muted"
+        className={cn("flex min-h-[76px] min-w-0 flex-col items-start gap-3 rounded-sm py-4 hover:bg-muted", !detailed && "md:flex-row md:items-center md:py-3")}
       >
         <GitCommitHorizontalIcon aria-hidden="true" className="size-4 shrink-0 text-accent-text" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-medium">{commit.subject}</span>
+        <span className={cn("min-w-0 w-full", !detailed && "md:w-auto md:flex-1")}>
+          <span className="block text-[13px] font-normal md:truncate">{commit.subject}</span>
           <span className="mt-1 block truncate text-[11px] text-soft-foreground">
             {commit.author} · {commit.when}
           </span>
         </span>
         <span className="shrink-0 rounded-md bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">{commit.shaLabel}</span>
+        {detailed ? <span className="inline-flex min-h-11 items-center rounded-lg bg-action px-3 text-xs font-medium text-action-foreground">View changes</span> : null}
       </Link>
     </div>
   )

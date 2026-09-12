@@ -192,7 +192,10 @@ describe('the Changes tab route', () => {
     // …and a wheel that bottoms out inside the tree must not chain into the diff.
     expect(pane.className).toContain('overscroll-contain')
     // The cap deducts the shared 64px breadcrumb and the pane’s main-relative 1rem offset.
-    expect(pane.className).toContain('sticky top-4')
+    expect(pane.className).toContain('md:sticky md:top-4')
+    // Mobile retains the file navigator above the diff instead of hiding it.
+    expect(pane.className.split(' ')).not.toContain('hidden')
+    expect(pane.parentElement?.className).toContain('flex-col')
     expect(pane.parentElement?.className).toContain('[--diff-sticky-top:0px] md:[--diff-sticky-top:1rem]')
   })
 

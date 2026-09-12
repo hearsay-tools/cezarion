@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { GitPullRequestArrowIcon, LoaderCircleIcon } from 'lucide-react'
+import { GitBranchIcon } from '../task-git/design-icons'
 import { useRef, useState } from 'react'
 
 import { getRepoPullBranches, pullRepo } from '@/api/client'
@@ -85,12 +86,15 @@ export function RepoPull({ repo, info }: { repo: RepoResponse; info: RepoInfo })
           <label htmlFor="repo-pull-branch" className="sr-only">
             Branch to pull
           </label>
+          <div className="relative min-w-0">
+          <GitBranchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
           <select
             id="repo-pull-branch"
             value={selectedBranch}
             disabled={selectDisabled}
             onChange={(event) => setSelectedBranch(event.target.value)}
-            className="h-11 min-w-0 flex-1 rounded-md border border-input bg-card px-3 font-mono text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50 md:w-48"
+            className="h-11 max-w-full min-w-[88px] appearance-none rounded-lg border border-input bg-card pr-3 pl-9 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
+            style={{ width: `${Math.max(88, selectedBranch.length * 8 + 56)}px` }}
           >
             {options.map((branch) => (
               <option key={branch} value={branch} disabled={!selectedIsLocal && branch === selectedBranch}>
@@ -98,6 +102,7 @@ export function RepoPull({ repo, info }: { repo: RepoResponse; info: RepoInfo })
               </option>
             ))}
           </select>
+          </div>
           <Button
             ref={pullButtonRef}
             type="button"
@@ -115,9 +120,9 @@ export function RepoPull({ repo, info }: { repo: RepoResponse; info: RepoInfo })
             {switchesBranch ? 'Switch & pull' : 'Pull'}
           </Button>
         </div>
-        <p data-slot="repo-pull-note" className="mt-1 break-all text-[11px] text-soft-foreground md:text-left">
+        {unavailableReason || switchesBranch ? <p data-slot="repo-pull-note" className="mt-1 break-all text-[11px] text-soft-foreground md:text-left">
           {unavailableReason ?? `${selectedBranch} stays checked out after the pull.`}
-        </p>
+        </p> : null}
       </div>
 
       <AlertDialog

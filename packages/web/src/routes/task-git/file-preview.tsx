@@ -1,4 +1,5 @@
-import { FileQuestionIcon, FileWarningIcon, FileXIcon, MousePointerClickIcon, TriangleAlertIcon } from 'lucide-react'
+import { FileQuestionIcon, FileWarningIcon, FileXIcon } from 'lucide-react'
+import { FileSearchIcon, TriangleAlertIcon } from './design-icons'
 import { useEffect, useMemo, useState } from 'react'
 
 import { ApiError, runFileRawUrl } from '@/api/client'
@@ -24,11 +25,12 @@ export function FilePreview({ runId, path, className }: { runId: string; path: s
     return (
       <Pane className={className}>
         <CenteredState
-          icon={<MousePointerClickIcon />}
+          icon={<FileSearchIcon />}
           tone="neutral"
           heading="h2"
           title="Select a file"
-          subtitle="Pick a file from the tree to preview it here."
+          subtitle="Pick a file from this task’s worktree to inspect its contents."
+          className="[&_[data-slot=centered-state-tile]]:size-10 [&_[data-slot=centered-state-tile]]:border-0 [&_[data-slot=centered-state-tile]]:bg-transparent [&_[data-slot=centered-state-tile]]:text-accent-text [&_[data-slot=centered-state-tile]]:shadow-none [&_h2]:text-xl"
         />
       </Pane>
     )
@@ -129,7 +131,7 @@ function FileEntryView({
 /** The preview card — same bordered grammar as the diff facade's file cards. */
 function Pane({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <section data-slot="file-preview" className={cn('overflow-hidden rounded-lg border border-border bg-card', className)}>
+    <section data-slot="file-preview" className={cn('flex flex-col overflow-hidden rounded-lg border border-border bg-card', className)}>
       {children}
     </section>
   )

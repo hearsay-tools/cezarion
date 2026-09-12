@@ -1,11 +1,12 @@
-import { ArrowLeftIcon, GitCommitHorizontalIcon, SearchXIcon, TriangleAlertIcon } from 'lucide-react'
+import { SearchXIcon } from 'lucide-react'
+import { ArrowLeftIcon, FileCodeIcon, GitCommitHorizontalIcon, TriangleAlertIcon } from './design-icons'
 import { useState } from 'react'
 import { useParams } from 'react-router'
 
 import { Link } from '@/lib/project-router'
 
 import { ApiError } from '@/api/client'
-import { useRun, useRunCommit, useRunCommits } from '@/api/queries'
+import { useRun, useRunChanges, useRunCommit, useRunCommits } from '@/api/queries'
 import type { ApiRun, RunCommit } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { Diff, type DiffMode } from '@/components/diff'
@@ -78,6 +79,7 @@ function CommitsView({ run }: { run: ApiRun }) {
               href: `/tasks/${run.id}/commits/${commit.sha}`,
             }))}
           />
+          <TaskChangedFiles run={run} />
         </div>
       )}
     </div>
@@ -147,4 +149,22 @@ function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
       )}
     </section>
   )
+}
+
+/** Reuses the task diff payload; paths lead to the existing structured Changes view. */
+function TaskChangedFiles({ run }: { run: ApiRun }) {
+  const changes = useRunChanges(run.id, isRunActive(run.status))
+  if (changes.isPending) return <p className="mt-[22px] text-xs text-muted-foreground">Loading changed files…</p>
+  if (changes.isError) return <p role="status" className="mt-[22px] text-xs text-danger">Could not load changed files: {changes.error.message}</p>
+  if (changes.data.files.length === 0) return null
+  return <section data-slot="task-commit-files" className="mt-[22px] rounded-[10px] border border-border bg-card p-5">
+    <h2 className="mb-3 text-xs font-semibold">{changes.data.files.length} changed files</h2>
+    <ul className="space-y-2">
+      {changes.data.files.map(file => <li key={file.path}>
+        <Link to={`/tasks/${run.id}/changes`} className="flex min-h-8 items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+          <FileCodeIcon aria-hidden="true" className="size-3.5 shrink-0" /><span className="break-all">{file.path}</span>
+        </Link>
+      </li>)}
+    </ul>
+  </section>
 }

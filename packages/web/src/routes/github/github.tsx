@@ -1,23 +1,7 @@
 import './github-layout.css'
 import { hashKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  ArrowLeftIcon,
-  CircleCheckIcon,
-  CheckIcon,
-  CircleIcon,
-  CircleDotIcon,
-  CircleXIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  ExternalLinkIcon,
-  GitPullRequestIcon,
-  MessageSquareIcon,
-  LoaderCircleIcon,
-  RefreshCwIcon,
-  SearchIcon,
-  TagIcon,
-  TriangleAlertIcon,
-} from 'lucide-react'
+import { ChevronLeftIcon, ExternalLinkIcon, MessageSquareIcon, LoaderCircleIcon, TagIcon,  } from 'lucide-react'
+import { ArrowLeftIcon, CircleCheckIcon, CheckIcon, CircleIcon, CircleDotIcon, CircleXIcon, ChevronRightIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon } from '../task-git/design-icons'
 import {
   useEffect,
   useMemo,
@@ -600,7 +584,7 @@ export function GithubRoute({
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
             <h1 className="w-full text-[28px] font-semibold tracking-tight">GitHub</h1>
             {gh.repo ? (
-              <span data-slot="gh-repo" className="min-w-0 truncate font-mono text-[11px] text-soft-foreground">
+              <span data-slot="gh-repo" className="min-w-0 truncate text-[13px] text-muted-foreground">
                 {gh.repo}
               </span>
             ) : null}
@@ -999,6 +983,7 @@ function GithubDetail({
       </Link>
 
       <div data-slot="gh-description-card" className={item.kind === 'pr' ? 'rounded-xl border border-border bg-card p-6' : undefined}>
+      {item.kind === 'pr' ? <h2 className="mb-4 text-[22px] leading-snug font-normal">#{item.number} {item.title}</h2> : null}
       <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[10.5px] text-soft-foreground">
         <span>#{item.number}</span>·<span>{kindWord}</span>·<span>opened by {item.author}</span>·
         <span>{shortAge(item.createdAt)} ago</span>
@@ -1036,7 +1021,7 @@ function GithubDetail({
         )}
       </p>
 
-      <h2 className="mt-2 text-xl leading-snug font-semibold">{item.title}</h2>
+      {item.kind !== 'pr' ? <h2 className="mt-2 text-xl leading-snug font-semibold">{item.title}</h2> : null}
 
       {item.kind === 'pr' ? (
         <nav aria-label="Pull request detail" className="mt-4 flex border-b border-border">
@@ -1163,7 +1148,7 @@ function GithubMergeBox({ number }: { number: number }) {
   const mergeEnabled = Boolean(selectedMethod && (state.canMerge || (state.canOverride && overrideRules)))
 
   return (
-    <section data-slot="gh-merge-box" aria-live="polite" className="mt-6 rounded-lg border border-border bg-card p-4">
+    <section data-slot="gh-merge-box" data-eligibility={state.eligibility} aria-live="polite" className="mt-6 rounded-lg border border-border bg-card p-4">
       <div className="flex items-start gap-3">
         {state.canMerge ? (
           <CheckIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-success" />
