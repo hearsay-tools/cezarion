@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { GitPullRequestArrowIcon, LoaderCircleIcon } from 'lucide-react'
-import { GitBranchIcon } from '../task-git/design-icons'
+import { GitBranchIcon } from '@/components/design-icons'
 import { useRef, useState } from 'react'
 
 import { getRepoPullBranches, pullRepo } from '@/api/client'
@@ -87,7 +87,7 @@ export function RepoPull({ repo, info }: { repo: RepoResponse; info: RepoInfo })
             Branch to pull
           </label>
           <div className="relative min-w-0">
-          <GitBranchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
+          <GitBranchIcon size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
           <select
             id="repo-pull-branch"
             value={selectedBranch}

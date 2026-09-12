@@ -1,5 +1,5 @@
 import { ImageIcon } from 'lucide-react'
-import { ChevronRightIcon, FileCodeIcon, FolderIcon } from './design-icons'
+import { ChevronRightIcon, FileCodeIcon, FolderIcon } from '@/components/design-icons'
 import { useState } from 'react'
 
 import { useRunFile } from '@/api/queries'
@@ -129,11 +129,11 @@ function DirNode({
         className="flex min-h-11 md:min-h-8 w-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-muted-foreground hover:bg-muted hover:text-foreground"
         style={{ paddingLeft: `${6 + depth * 14}px` }}
       >
-        <ChevronRightIcon
+        <ChevronRightIcon size={16}
           aria-hidden="true"
           className={cn('order-last ml-auto size-3.5 shrink-0 transition-transform motion-reduce:transition-none', open && 'rotate-90')}
         />
-        <FolderIcon aria-hidden="true" className="size-3.5 shrink-0" />
+        <FolderIcon size={16} aria-hidden="true" className="size-3.5 shrink-0" />
         <span className="min-w-0 truncate font-normal">{name}</span>
       </button>
       {open ? (

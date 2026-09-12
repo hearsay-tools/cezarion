@@ -1,5 +1,5 @@
-import { CircleHelpIcon, Columns2Icon, WrapTextIcon } from 'lucide-react'
-import { GitBranchIcon } from './design-icons'
+import { CircleHelpIcon, WrapTextIcon } from 'lucide-react'
+import { GitBranchIcon, Columns2Icon } from '@/components/design-icons'
 
 import type { DiffMode } from '@/components/diff'
 import { Button } from '@/components/ui/button'
@@ -70,7 +70,7 @@ function ModeButton({
         active ? 'border-accent-text/40 text-accent-text' : 'text-muted-foreground hover:text-foreground',
       )}
     >
-      {value === 'unified' ? <CircleHelpIcon aria-hidden="true" className="size-4" /> : <Columns2Icon aria-hidden="true" className="size-4" />}
+      {value === 'unified' ? <CircleHelpIcon aria-hidden="true" className="size-4" /> : <Columns2Icon size={16} aria-hidden="true" className="size-4" />}
       {value}
     </button>
   )
@@ -83,7 +83,7 @@ export function BranchChip({ branch }: { branch: string }) {
       data-slot="branch-chip"
       className="flex min-w-0 items-center gap-1 rounded-sm border border-border bg-card px-1.5 py-px font-mono text-[11px] font-medium"
     >
-      <GitBranchIcon aria-hidden="true" className="size-3 shrink-0" />
+      <GitBranchIcon size={16} aria-hidden="true" className="size-3 shrink-0" />
       <span className="truncate">{branch}</span>
     </span>
   )

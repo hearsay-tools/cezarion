@@ -1,7 +1,7 @@
 import './github-layout.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { EyeIcon, PlayIcon,  } from 'lucide-react'
-import { CheckIcon, ChevronDownIcon, SparklesIcon, WorkflowIcon, XIcon } from '../task-git/design-icons'
+import { CheckIcon, ChevronDownIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Link } from '@/lib/project-router'
 
@@ -283,7 +283,7 @@ export function HandToAgent({
               className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-danger/10 hover:text-danger"
             >
               {name}
-              <XIcon aria-hidden="true" className="size-3" />
+              <XIcon size={16} aria-hidden="true" className="size-3" />
             </button>
           ))}
         </div>
@@ -343,7 +343,7 @@ export function HandToAgent({
         {queuedRunId ? (
           <>
             <span data-slot="gh-queued" className="flex items-center gap-1 text-xs font-medium text-success">
-              <CheckIcon aria-hidden="true" className="size-3.5" />
+              <CheckIcon size={16} aria-hidden="true" className="size-3.5" />
               queued
             </span>
             <Link
@@ -393,9 +393,9 @@ function WorkflowPicker({
           aria-label="Choose a workflow"
           className={cn(chipClass, value && 'border-foreground/60 font-mono text-[11.5px] font-semibold text-foreground')}
         >
-          <WorkflowIcon aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
+          <WorkflowIcon size={16} aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
           <span className="max-w-44 truncate">{value ?? 'workflow'}</span>
-          <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
+          <ChevronDownIcon size={16} aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={8} className="w-[320px] max-w-[calc(100vw-2rem)] p-0">
@@ -430,7 +430,7 @@ function WorkflowPicker({
                       </span>
                     ) : null}
                     {selected ? (
-                      <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
+                      <CheckIcon size={16} aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
                     ) : null}
                   </CommandItem>
                 )
@@ -500,7 +500,7 @@ function SkillsPicker({
         >
           <EyeIcon aria-hidden="true" className="size-3.5" />
         </button>
-        {isSelected ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
+        {isSelected ? <CheckIcon size={16} aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
       </CommandItem>
     )
   }
@@ -523,9 +523,9 @@ function SkillsPicker({
             aria-label="Choose skills"
             className={cn(chipClass, selected.length > 0 && 'border-foreground/60 font-semibold text-foreground')}
           >
-            <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
+            <SparklesIcon size={16} aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
             skills{selected.length > 0 ? ` · ${selected.length}` : ''}
-            <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
+            <ChevronDownIcon size={16} aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" sideOffset={8} className="w-[336px] max-w-[calc(100vw-2rem)] p-0">

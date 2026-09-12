@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { FileDiffIcon, GitCommitHorizontalIcon } from './design-icons'
+import { FileDiffIcon, GitCommitHorizontalIcon } from '@/components/design-icons'
 import { useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 
@@ -175,7 +175,7 @@ function ChangesView({ run }: { run: ApiRun }) {
         </p>
       ) : changes.isError ? (
         <CenteredState
-          icon={changesRefused ? <FileDiffIcon /> : <GitCommitHorizontalIcon />}
+          icon={changesRefused ? <FileDiffIcon size={16} /> : <GitCommitHorizontalIcon size={16} />}
           tone={changesRefused ? 'neutral' : 'danger'}
           heading="h2"
           title={changesRefused ? 'No changes to show' : 'Could not load the changes'}
@@ -183,7 +183,7 @@ function ChangesView({ run }: { run: ApiRun }) {
         />
       ) : files.length === 0 ? (
         <CenteredState
-          icon={<FileDiffIcon />}
+          icon={<FileDiffIcon size={16} />}
           tone="neutral"
           heading="h2"
           title="No changes yet"

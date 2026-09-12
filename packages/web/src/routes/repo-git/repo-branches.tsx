@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { GitBranchIcon, GitPullRequestIcon, PlusIcon, SearchIcon } from '../task-git/design-icons'
+import { GitBranchIcon, GitPullRequestIcon, PlusIcon, SearchIcon } from '@/components/design-icons'
 import { useState, type FormEvent } from 'react'
 
 import { createRepoBranch, putConfig } from '@/api/client'
@@ -81,7 +81,7 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
       <div className="min-w-0 rounded-xl border border-border bg-card p-5">
         <h2 className="sr-only">Branches</h2>
         <label className="relative block">
-        <SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
+        <SearchIcon size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
         <Input
           aria-label="Filter branches"
           placeholder="Filter branches…"
@@ -112,7 +112,7 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
                     disabled={branchAction.isPending}
                     onClick={() => branchAction.mutate(name)}
                   >
-                    <GitBranchIcon aria-hidden="true" />
+                    <GitBranchIcon size={16} aria-hidden="true" />
                     Switch
                   </Button>
                 )}
@@ -148,7 +148,7 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
             data-action="create-branch"
             disabled={!newName.trim() || branchAction.isPending}
           >
-            <PlusIcon aria-hidden="true" />
+            <PlusIcon size={16} aria-hidden="true" />
             Create branch
           </Button>
         </form>
@@ -218,7 +218,7 @@ function ForgePullRequests() {
 function PullRequestRow({ pr }: { pr: GithubItem }) {
   const inner = (
     <>
-      <GitPullRequestIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+      <GitPullRequestIcon size={16} aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="shrink-0 font-mono text-[11px] text-muted-foreground">#{pr.number}</span>
       <span className="min-w-0 flex-1 truncate text-[13px]">{pr.title}</span>
       {pr.checks ? <ChecksBadge checks={pr.checks} /> : null}

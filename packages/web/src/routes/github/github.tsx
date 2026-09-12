@@ -1,7 +1,7 @@
 import './github-layout.css'
 import { hashKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeftIcon, ExternalLinkIcon, MessageSquareIcon, LoaderCircleIcon, TagIcon,  } from 'lucide-react'
-import { ArrowLeftIcon, CheckIcon, CircleIcon, CircleDotIcon, CircleXIcon, ChevronRightIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon } from '../task-git/design-icons'
+import { ArrowLeftIcon, CheckIcon, CircleIcon, CircleDotIcon, CircleXIcon, ChevronRightIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon } from '@/components/design-icons'
 import {
   useEffect,
   useMemo,
@@ -455,7 +455,7 @@ export function GithubRoute({
       return (
         <div data-route="github" className="flex min-h-full flex-col">
           <CenteredState
-            icon={<TriangleAlertIcon />}
+            icon={<TriangleAlertIcon size={16} />}
             tone="danger"
             title="Could not load GitHub"
             subtitle={list.error.message}
@@ -614,7 +614,7 @@ export function GithubRoute({
               onClick={() => refresh.mutate()}
               className="gh-utility"
             >
-              <RefreshCwIcon
+              <RefreshCwIcon size={16}
                 aria-hidden="true"
                 className={cn('size-3.5', refresh.isPending && 'motion-safe:animate-spin')}
               />
@@ -623,7 +623,7 @@ export function GithubRoute({
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="relative min-w-0 basis-full md:flex-1 md:basis-auto">
-              <SearchIcon
+              <SearchIcon size={16}
                 aria-hidden="true"
                 className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-soft-foreground"
               />
@@ -760,7 +760,7 @@ export function GithubRoute({
           </GithubDetail>
         ) : (
           <CenteredState
-            icon={view === 'issues' ? <CircleDotIcon /> : <GitPullRequestIcon />}
+            icon={view === 'issues' ? <CircleDotIcon size={16} /> : <GitPullRequestIcon size={16} />}
             tone="neutral"
             heading="h2"
             title={number === null ? 'Nothing selected' : 'Not found'}
@@ -929,7 +929,7 @@ function LabelFilter({
                     style={labelChipStyle(colors[label])}
                   />
                   <span className="min-w-0 flex-1 truncate">{label}</span>
-                  {on ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
+                  {on ? <CheckIcon size={16} aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
                 </CommandItem>
               )
             })}
@@ -979,7 +979,7 @@ function GithubDetail({
         data-slot="gh-back"
         className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden"
       >
-        <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
+        <ArrowLeftIcon size={16} aria-hidden="true" className="size-3.5" />
         Back to the list
       </Link>
 
@@ -1069,10 +1069,10 @@ type MergeRequirementState = 'passing' | 'failing' | 'pending' | 'unknown'
 
 function MergeRequirementIcon({ state }: { state: MergeRequirementState }) {
   const iconClass = 'size-4 shrink-0'
-  if (state === 'passing') return <CheckIcon aria-hidden="true" data-slot="gh-merge-status-passing" className={cn(iconClass, 'text-success')} />
-  if (state === 'failing') return <CircleXIcon aria-hidden="true" data-slot="gh-merge-status-failing" className={cn(iconClass, 'text-danger')} />
+  if (state === 'passing') return <CheckIcon size={16} aria-hidden="true" data-slot="gh-merge-status-passing" className={cn(iconClass, 'text-success')} />
+  if (state === 'failing') return <CircleXIcon size={16} aria-hidden="true" data-slot="gh-merge-status-failing" className={cn(iconClass, 'text-danger')} />
   if (state === 'pending') return <LoaderCircleIcon aria-hidden="true" data-slot="gh-merge-status-pending" className={cn(iconClass, 'animate-spin text-warning')} />
-  return <CircleIcon aria-hidden="true" data-slot="gh-merge-status-unknown" className={cn(iconClass, 'text-soft-foreground')} />
+  return <CircleIcon size={16} aria-hidden="true" data-slot="gh-merge-status-unknown" className={cn(iconClass, 'text-soft-foreground')} />
 }
 
 function GithubMergeBox({ number }: { number: number }) {
@@ -1152,9 +1152,9 @@ function GithubMergeBox({ number }: { number: number }) {
     <section data-slot="gh-merge-box" data-eligibility={state.eligibility} aria-live="polite" className="mt-6 rounded-lg border border-border bg-card p-4">
       <div className="flex items-start gap-3">
         {state.canMerge ? (
-          <CheckIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-success" />
+          <CheckIcon size={16} aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-success" />
         ) : (
-          <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-warning" />
+          <TriangleAlertIcon size={16} aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-warning" />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1166,7 +1166,7 @@ function GithubMergeBox({ number }: { number: number }) {
               disabled={refreshMergeState.isPending}
               onClick={() => refreshMergeState.mutate()}
             >
-              <RefreshCwIcon aria-hidden="true" className={cn('size-3.5', refreshMergeState.isPending && 'animate-spin')} />
+              <RefreshCwIcon size={16} aria-hidden="true" className={cn('size-3.5', refreshMergeState.isPending && 'animate-spin')} />
               Refresh
             </Button>
           </div>
@@ -1315,7 +1315,7 @@ function GithubPrChanges({ item }: { item: GithubItem }) {
         <div className="min-w-0">
           <div className="mb-2 flex justify-end gap-1">
             <Button aria-label="Previous file" variant="outline" size="icon" className="min-h-11 min-w-11" disabled={current <= 0} onClick={() => setSelected(files[current - 1]?.path ?? null)}><ChevronLeftIcon /></Button>
-            <Button aria-label="Next file" variant="outline" size="icon" className="min-h-11 min-w-11" disabled={current < 0 || current >= files.length - 1} onClick={() => setSelected(files[current + 1]?.path ?? null)}><ChevronRightIcon /></Button>
+            <Button aria-label="Next file" variant="outline" size="icon" className="min-h-11 min-w-11" disabled={current < 0 || current >= files.length - 1} onClick={() => setSelected(files[current + 1]?.path ?? null)}><ChevronRightIcon size={16} /></Button>
           </div>
           {files.length === 0 ? <p className="text-sm text-muted-foreground">No changed files match this filter.</p> : <>
             <Diff files={diffFiles.filter((file) => file.path === selected)} wrap className="min-w-0" />

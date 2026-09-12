@@ -1,5 +1,5 @@
 import { SearchXIcon } from 'lucide-react'
-import { ArrowLeftIcon, GitCommitHorizontalIcon, TriangleAlertIcon } from '../task-git/design-icons'
+import { ArrowLeftIcon, GitCommitHorizontalIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useState } from 'react'
 import { useParams } from 'react-router'
 
@@ -30,7 +30,7 @@ export function RepoCommitsSection({ log }: { log: LogEntry[] }) {
   if (log.length === 0) {
     return (
       <CenteredState
-        icon={<GitCommitHorizontalIcon />}
+        icon={<GitCommitHorizontalIcon size={16} />}
         tone="neutral"
         heading="h2"
         title="No commits yet"
@@ -72,7 +72,7 @@ function CommitDiffView({ sha }: { sha: string }) {
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border px-4 py-2 md:px-6">
         <Button asChild variant="ghost" size="sm" data-slot="commit-back">
           <Link to="/git/commits">
-            <ArrowLeftIcon aria-hidden="true" />
+            <ArrowLeftIcon size={16} aria-hidden="true" />
             All commits
           </Link>
         </Button>
@@ -88,7 +88,7 @@ function CommitDiffView({ sha }: { sha: string }) {
         </p>
       ) : commit.isError ? (
         <CenteredState
-          icon={refused ? <SearchXIcon /> : <TriangleAlertIcon />}
+          icon={refused ? <SearchXIcon /> : <TriangleAlertIcon size={16} />}
           tone={refused ? 'neutral' : 'danger'}
           heading="h2"
           title={refused ? 'Commit not found' : 'Could not load the commit'}
@@ -105,7 +105,7 @@ function CommitDiffView({ sha }: { sha: string }) {
           </div>
           {commit.data.files.length === 0 ? (
             <CenteredState
-              icon={<GitCommitHorizontalIcon />}
+              icon={<GitCommitHorizontalIcon size={16} />}
               tone="neutral"
               heading="h2"
               title="No file changes"

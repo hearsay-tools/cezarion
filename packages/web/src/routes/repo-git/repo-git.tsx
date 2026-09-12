@@ -1,5 +1,5 @@
 import './repo-git.css'
-import { GitBranchIcon, TriangleAlertIcon } from '../task-git/design-icons'
+import { GitBranchIcon, TriangleAlertIcon } from '@/components/design-icons'
 
 import { useRepo } from '@/api/queries'
 import type { RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
@@ -34,7 +34,7 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
     return (
       <div data-route="repo-git" className="flex min-h-full flex-col">
         <CenteredState
-          icon={<TriangleAlertIcon />}
+          icon={<TriangleAlertIcon size={16} />}
           tone="danger"
           title="Could not load the repository"
           subtitle={repo.error.message}
@@ -47,7 +47,7 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
     return (
       <div data-route="repo-git" className="flex min-h-full flex-col">
         <CenteredState
-          icon={<GitBranchIcon />}
+          icon={<GitBranchIcon size={16} />}
           tone="neutral"
           title="Not a git repository"
           subtitle="cezar is running outside a git repository — start it inside one to browse changes, commits and branches."

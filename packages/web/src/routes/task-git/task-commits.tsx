@@ -1,5 +1,5 @@
 import { SearchXIcon } from 'lucide-react'
-import { ArrowLeftIcon, FileCodeIcon, GitCommitHorizontalIcon, TriangleAlertIcon } from './design-icons'
+import { ArrowLeftIcon, FileCodeIcon, GitCommitHorizontalIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useState } from 'react'
 import { useParams } from 'react-router'
 
@@ -49,7 +49,7 @@ function CommitsView({ run }: { run: ApiRun }) {
         </p>
       ) : commits.isError ? (
         <CenteredState
-          icon={<GitCommitHorizontalIcon />}
+          icon={<GitCommitHorizontalIcon size={16} />}
           tone={commits.error instanceof ApiError && commits.error.status === 409 ? 'neutral' : 'danger'}
           heading="h2"
           title={
@@ -61,7 +61,7 @@ function CommitsView({ run }: { run: ApiRun }) {
         />
       ) : commits.data.commits.length === 0 ? (
         <CenteredState
-          icon={<GitCommitHorizontalIcon />}
+          icon={<GitCommitHorizontalIcon size={16} />}
           tone="neutral"
           heading="h2"
           title="No commits yet"
@@ -101,7 +101,7 @@ function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border px-4 py-2 md:px-6">
         <Button asChild variant="ghost" size="sm" data-slot="commit-back">
           <Link to={`/tasks/${runId}/commits`}>
-            <ArrowLeftIcon aria-hidden="true" />
+            <ArrowLeftIcon size={16} aria-hidden="true" />
             All commits
           </Link>
         </Button>
@@ -117,7 +117,7 @@ function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
         </p>
       ) : commit.isError ? (
         <CenteredState
-          icon={refused ? <SearchXIcon /> : <TriangleAlertIcon />}
+          icon={refused ? <SearchXIcon /> : <TriangleAlertIcon size={16} />}
           tone={refused ? 'neutral' : 'danger'}
           heading="h2"
           title={refused ? 'Commit not found' : 'Could not load the commit'}
@@ -134,7 +134,7 @@ function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
           </div>
           {commit.data.files.length === 0 ? (
             <CenteredState
-              icon={<GitCommitHorizontalIcon />}
+              icon={<GitCommitHorizontalIcon size={16} />}
               tone="neutral"
               heading="h2"
               title="No file changes"
@@ -162,7 +162,7 @@ function TaskChangedFiles({ run }: { run: ApiRun }) {
     <ul className="space-y-4">
       {changes.data.files.map(file => <li key={file.path}>
         <Link to={`/tasks/${run.id}/changes`} className="flex min-h-11 items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
-          <FileCodeIcon aria-hidden="true" className="size-[15px] shrink-0" /><span className="break-all">{file.path}</span>
+          <FileCodeIcon size={16} aria-hidden="true" className="size-[15px] shrink-0" /><span className="break-all">{file.path}</span>
         </Link>
       </li>)}
     </ul>

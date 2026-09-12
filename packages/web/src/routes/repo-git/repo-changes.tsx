@@ -1,4 +1,4 @@
-import { FileDiffIcon, TriangleAlertIcon } from '../task-git/design-icons'
+import { FileDiffIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useMemo, useRef, useState } from 'react'
 
 import { ApiError } from '@/api/client'
@@ -66,7 +66,7 @@ export function RepoChangesSection() {
         </p>
       ) : changes.isError ? (
         <CenteredState
-          icon={refused ? <FileDiffIcon /> : <TriangleAlertIcon />}
+          icon={refused ? <FileDiffIcon size={16} /> : <TriangleAlertIcon size={16} />}
           tone={refused ? 'neutral' : 'danger'}
           heading="h2"
           title={refused ? 'No changes to show' : 'Could not load the changes'}
@@ -74,7 +74,7 @@ export function RepoChangesSection() {
         />
       ) : files.length === 0 ? (
         <CenteredState
-          icon={<FileDiffIcon />}
+          icon={<FileDiffIcon size={16} />}
           tone="neutral"
           heading="h2"
           title="Working tree clean"

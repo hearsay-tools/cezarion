@@ -1,4 +1,4 @@
-import { FileDiffIcon, GitCommitHorizontalIcon, SearchIcon } from './design-icons'
+import { FileDiffIcon, GitCommitHorizontalIcon, SearchIcon } from '@/components/design-icons'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Virtualizer } from 'virtua'
 
@@ -81,7 +81,7 @@ export function CommitList({ slot, commits, className, heading }: { slot: string
   return (
     <>
       <label className="relative mb-[22px] block">
-        <SearchIcon aria-hidden="true" className="pointer-events-none absolute top-3.5 left-3 size-4 text-muted-foreground" />
+        <SearchIcon size={16} aria-hidden="true" className="pointer-events-none absolute top-3.5 left-3 size-4 text-muted-foreground" />
         <Input aria-label="Search commit messages" placeholder="Search commit messages…" value={query} onChange={event => setQuery(event.target.value)} className="h-11 bg-card pl-10" />
       </label>
       <div
@@ -121,7 +121,7 @@ function CommitRow({ commit, detailed }: { commit: CommitListItem; detailed: boo
         to={commit.href}
         className={cn("flex min-h-[76px] min-w-0 flex-col items-start gap-3 rounded-sm py-4 hover:bg-muted", !detailed && "md:flex-row md:items-center md:py-3")}
       >
-        <GitCommitHorizontalIcon aria-hidden="true" className={cn("shrink-0 text-accent-text", detailed ? "size-[22px]" : "size-4")} />
+        <GitCommitHorizontalIcon size={16} aria-hidden="true" className={cn("shrink-0 text-accent-text", detailed ? "size-[22px]" : "size-4")} />
         <span className={cn("min-w-0 w-full", !detailed && "md:w-auto md:flex-1")}>
           <span className={cn("block font-normal", detailed ? "text-[22px] leading-snug" : "text-[13px] md:truncate")}>{commit.subject}</span>
           <span className="mt-1 block truncate text-[11px] text-soft-foreground">
@@ -129,7 +129,7 @@ function CommitRow({ commit, detailed }: { commit: CommitListItem; detailed: boo
           </span>
         </span>
         <span className="shrink-0 rounded-md bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">{commit.shaLabel}</span>
-        {detailed ? <span className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-action px-3 text-xs font-medium text-action-foreground"><FileDiffIcon aria-hidden="true" className="size-4" />View changes</span> : null}
+        {detailed ? <span className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-action px-3 text-xs font-medium text-action-foreground"><FileDiffIcon size={16} aria-hidden="true" className="size-4" />View changes</span> : null}
       </Link>
     </div>
   )

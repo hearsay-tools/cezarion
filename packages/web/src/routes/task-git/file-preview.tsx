@@ -1,5 +1,5 @@
 import { FileQuestionIcon, FileWarningIcon, FileXIcon } from 'lucide-react'
-import { FileSearchIcon, TriangleAlertIcon } from './design-icons'
+import { FileSearchIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useEffect, useMemo, useState } from 'react'
 
 import { ApiError, runFileRawUrl } from '@/api/client'
@@ -25,7 +25,7 @@ export function FilePreview({ runId, path, className }: { runId: string; path: s
     return (
       <Pane className={className}>
         <CenteredState
-          icon={<FileSearchIcon />}
+          icon={<FileSearchIcon size={16} />}
           tone="neutral"
           heading="h2"
           title="Select a file"
@@ -50,7 +50,7 @@ export function FilePreview({ runId, path, className }: { runId: string; path: s
     return (
       <Pane className={className}>
         <CenteredState
-          icon={refused ? <FileXIcon /> : <TriangleAlertIcon />}
+          icon={refused ? <FileXIcon /> : <TriangleAlertIcon size={16} />}
           tone={refused ? 'neutral' : 'danger'}
           heading="h2"
           title={refused ? 'Cannot preview this file' : 'Could not load this file'}

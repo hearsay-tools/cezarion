@@ -1,5 +1,5 @@
 import { LoaderCircleIcon, SearchXIcon } from 'lucide-react'
-import { TriangleAlertIcon } from './design-icons'
+import { TriangleAlertIcon } from '@/components/design-icons'
 import { Link } from '@/lib/project-router'
 
 import { ApiError } from '@/api/client'
@@ -33,7 +33,7 @@ export function GitTabLoadError({ tab, error }: { tab: Exclude<RunTab, 'session'
   return (
     <div data-route={`task-${tab}`} className="flex min-h-full flex-col">
       <CenteredState
-        icon={notFound ? <SearchXIcon /> : <TriangleAlertIcon />}
+        icon={notFound ? <SearchXIcon /> : <TriangleAlertIcon size={16} />}
         tone={notFound ? 'neutral' : 'danger'}
         title={notFound ? 'Task not found' : 'Could not load this task'}
         subtitle={

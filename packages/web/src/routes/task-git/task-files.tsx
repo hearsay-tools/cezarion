@@ -1,5 +1,5 @@
 import { FolderTreeIcon } from 'lucide-react'
-import { SearchIcon, TriangleAlertIcon } from './design-icons'
+import { SearchIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useState } from 'react'
@@ -53,7 +53,7 @@ function FilesView({ run }: { run: ApiRun }) {
           onSubmit={event => { event.preventDefault(); if (filePath.trim()) setSelected(filePath.trim()) }}
         >
           <label className="relative min-w-0 flex-1">
-          <SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
+          <SearchIcon size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
           <Input
             aria-label="File path in the worktree"
             placeholder="Open a file by path…"
@@ -71,7 +71,7 @@ function FilesView({ run }: { run: ApiRun }) {
         </p>
       ) : root.isError ? (
         <CenteredState
-          icon={refused ? <FolderTreeIcon /> : <TriangleAlertIcon />}
+          icon={refused ? <FolderTreeIcon /> : <TriangleAlertIcon size={16} />}
           tone={refused ? 'neutral' : 'danger'}
           heading="h2"
           title={refused ? 'No files to browse' : 'Could not load the files'}
