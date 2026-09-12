@@ -1,0 +1,12 @@
+
+> @open-mercato/cezar-web@0.12.2 test
+> vitest run src/routes/skills.test.tsx src/routes/workflows/workflows.test.tsx src/lib/workflow-builder.test.ts
+
+
+ RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/e9330592-29ca-48af-a180-1bcdc689258d/packages/web
+
+
+ Test Files  3 passed (3)
+      Tests  74 passed (74)
+   Start at  12:32:55
+   Duration  4.01s (transform 1.75s, setup 0ms, import 2.68s, tests 3.25s, environment 1.07s)

@@ -1,3 +1,4 @@
+import '@/routes/skills-workflows.css'
 import { ArrowRightIcon } from 'lucide-react'
 import { Link } from '@/lib/project-router'
 
@@ -30,7 +31,7 @@ export function SkillSourceTag({ source, className }: { source: Skill['source'];
         className,
       )}
     >
-      {source}
+      {source === 'team' ? 'Team' : source}
     </span>
   )
 }
@@ -49,8 +50,8 @@ export function SkillDetailBody({
   return (
     <div data-slot="skill-detail" className="min-w-0">
       <div className="flex min-w-0 flex-col items-start gap-4">
-        <SkillSourceTag source={skill.source} />
-        <Heading className="min-w-0 text-2xl font-medium break-words [overflow-wrap:anywhere]">
+        <span className="sw-detail-source"><SkillSourceTag source={skill.source} /> skill</span>
+        <Heading className="min-w-0 text-[19px] font-normal md:text-2xl break-words [overflow-wrap:anywhere]">
           {skill.name}
         </Heading>
       </div>
@@ -78,7 +79,7 @@ export function SkillDetailBody({
             </ul>
           ) : (
             <p className="mt-1.5 text-xs text-soft-foreground">
-              Not referenced by any workflow yet — quick-task picks it up when the task mentions it.
+              Not referenced by a workflow yet. quick-task can use it when the task mentions it.
             </p>
           )}
         </section>

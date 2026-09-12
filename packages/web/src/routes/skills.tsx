@@ -1,8 +1,10 @@
+import './skills-workflows.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeftIcon,
   DownloadIcon,
   RefreshCwIcon,
+  SearchIcon,
   SparklesIcon,
   TriangleAlertIcon,
   ZapIcon,
@@ -113,8 +115,8 @@ function SkillsCatalog() {
     <div data-slot="skills-section" className="@container flex min-w-0 flex-col gap-[22px]">
       <header className="flex flex-col gap-4 @min-[700px]:flex-row @min-[700px]:items-center @min-[700px]:justify-between">
         <div>
-          <h1 className="text-[30px] font-semibold tracking-tight">Skills</h1>
-          <p className="mt-1 text-[13px] text-muted-foreground">Markdown playbooks your agents can follow.</p>
+          <h1 className="text-[25px] font-semibold md:text-[30px]">Skills</h1>
+          <p className="mt-2 text-xs text-muted-foreground md:text-[13px]">Markdown playbooks your agents can follow.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {canImport ? (
@@ -122,7 +124,7 @@ function SkillsCatalog() {
               to={`/skills?skill=${IMPORT}`}
               data-slot="import-skills-row"
               aria-current={selection === IMPORT ? 'page' : undefined}
-              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-medium hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-medium aria-[current=page]:bg-accent-strong/10 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
             >
               <DownloadIcon aria-hidden="true" className="size-4 text-link-foreground" />
               Manage skills
@@ -132,7 +134,7 @@ function SkillsCatalog() {
             to={`/skills?skill=${BOOKMARKLETS}`}
             data-slot="bookmarklets-row"
             aria-current={selection === BOOKMARKLETS ? 'page' : undefined}
-            className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-medium hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+            className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-medium aria-[current=page]:bg-accent-strong/10 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
           >
             <ZapIcon aria-hidden="true" className="size-4 text-link-foreground" />
             Run from GitHub
@@ -143,14 +145,17 @@ function SkillsCatalog() {
         'flex-col items-start gap-2 sm:flex-row sm:items-center @min-[650px]:flex',
         param === null ? 'flex' : 'hidden',
       )}>
+        <div className="sw-search relative w-full min-w-0 flex-1">
+          <SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
         <Input
           data-slot="skills-filter"
           placeholder="Filter skills…"
           aria-label="Filter skills"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          className="h-11 min-w-0 flex-1 bg-card text-[13px]"
+          className="h-11 min-w-0 bg-card pl-9 text-xs"
         />
+        </div>
         <button
           type="button"
           data-slot="skills-refresh"
@@ -167,7 +172,7 @@ function SkillsCatalog() {
         </button>
       </div>
 
-      <div className="grid min-w-0 items-start gap-[22px] @min-[650px]:grid-cols-[minmax(220px,28%)_minmax(0,1fr)]">
+      <div className="grid min-w-0 items-start gap-[22px] @min-[650px]:grid-cols-[minmax(220px,310px)_minmax(0,1fr)]">
         <section
           data-slot="skills-list"
           className={cn(
@@ -185,7 +190,7 @@ function SkillsCatalog() {
               </li>
             ) : shown.length > 0 ? (
               shown.map((skill) => (
-                <SkillRow key={skill.path} skill={skill} active={selection === skill.name} />
+                <SkillRow key={skill.path} skill={skill} active={selection === skill.name} highlighted={(selection === IMPORT || selection === BOOKMARKLETS) && skill === skills[0]} />
               ))
             ) : (
               <li className="px-2.5 py-2 text-xs leading-relaxed text-soft-foreground">
@@ -242,7 +247,7 @@ function SkillsCatalog() {
   )
 }
 
-function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
+function SkillRow({ skill, active, highlighted }: { skill: Skill; active: boolean; highlighted: boolean }) {
   const project = isProjectSkill(skill)
   return (
     <li>
@@ -250,11 +255,12 @@ function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
         to={`/skills?skill=${encodeURIComponent(skill.name)}`}
         data-slot="skill-row"
         data-skill={skill.name}
+        data-highlighted={highlighted || undefined}
         data-project={project ? 'true' : undefined}
         aria-current={active ? 'page' : undefined}
         className={cn(
           'selection-row flex min-h-24 flex-col gap-2 rounded-lg border-b border-border p-3 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
-          active && 'border-transparent bg-accent-strong/10',
+          (active || highlighted) && 'border-transparent bg-accent-strong/10',
         )}
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -262,7 +268,7 @@ function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
           <span
             className={cn(
               'min-w-0 break-words text-[13px]',
-              project ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground',
+              project ? 'font-semibold text-foreground' : 'font-normal text-muted-foreground',
             )}
           >
             {skill.name}

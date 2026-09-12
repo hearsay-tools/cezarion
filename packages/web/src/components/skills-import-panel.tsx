@@ -1,5 +1,6 @@
+import '@/routes/skills-workflows.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2Icon, RefreshCwIcon, SparklesIcon, TriangleAlertIcon } from 'lucide-react'
+import { CheckCircle2Icon, RefreshCwIcon, SearchIcon, MinusIcon, PlusIcon, SquareCheckIcon, SquareIcon, TriangleAlertIcon } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 
 import { applySkillsUpdate, checkSkillsUpdate, createRun, putWorkspaceUiState } from '@/api/client'
@@ -167,17 +168,7 @@ export function ImportSkillsPanel({ projectId }: { projectId: string }) {
       <p className="mb-4 text-[10px] font-medium tracking-wide text-link-foreground">OPEN-MERCATO / SKILLS</p>
       <h2 className="text-2xl font-medium">Manage skills</h2>
       <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
-        Reusable, technology-agnostic agent skills from{' '}
-        <a
-          href={SKILLS_REPO_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="underline underline-offset-2 hover:text-foreground"
-        >
-          open-mercato/skills
-        </a>{' '}
-        — PR creation, code review, CI stabilisation, spec writing and more. They&apos;re all in your catalog
-        and the composer picker by default; uncheck any you don&apos;t want.
+        Choose which <a href={SKILLS_REPO_URL} target="_blank" rel="noreferrer">open-mercato</a> skills appear in your catalog and composer picker. All are enabled by default; uncheck any you don’t want.
       </p>
 
       <p className="mt-3 text-xs text-muted-foreground">Applies across projects · saved automatically</p>
@@ -185,18 +176,21 @@ export function ImportSkillsPanel({ projectId }: { projectId: string }) {
       <SkillsUpdateCard projectId={projectId} state={update.data} loadError={update.error} />
 
       <p className="mt-4 text-xs text-soft-foreground">
-        These checkboxes choose what cezar shows; updates refresh installed skill files.
+        Checkboxes control visibility. Updating refreshes installed skill files; it does not change your selection.
       </p>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="sw-import-controls mt-4 flex flex-wrap items-center gap-2">
+        <div className="sw-search relative min-w-0 flex-1">
+          <SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
         <Input
           data-slot="import-filter"
           placeholder="Filter skills…"
           aria-label="Filter skills"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          className="h-11 min-w-0 flex-1 text-[13px]"
+          className="h-11 min-w-0 pl-9 text-xs"
         />
+        </div>
         <button
           type="button"
           data-slot="import-all"
@@ -204,6 +198,7 @@ export function ImportSkillsPanel({ projectId }: { projectId: string }) {
           onClick={enableOrDisableAll}
           className="h-11 shrink-0 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-55"
         >
+          {allImported ? <MinusIcon aria-hidden="true" className="size-4" /> : <PlusIcon aria-hidden="true" className="size-4" />}
           {allImported ? 'Remove all' : 'Enable all'}
         </button>
       </div>
@@ -225,22 +220,24 @@ export function ImportSkillsPanel({ projectId }: { projectId: string }) {
                   checked && 'bg-background',
                 )}
               >
+                <span className="relative size-5 shrink-0">
                 <input
                   type="checkbox"
                   data-slot="import-toggle"
                   checked={checked}
                   onChange={() => toggle(skill.name)}
-                  className="mt-0.5 size-3.5 shrink-0"
+                  className="peer absolute inset-0 m-0 size-5 opacity-0"
                 />
+                {checked ? <SquareCheckIcon aria-hidden="true" className="pointer-events-none size-5 text-link-foreground peer-focus-visible:outline-2 peer-focus-visible:outline-ring" /> : <SquareIcon aria-hidden="true" className="pointer-events-none size-5 text-link-foreground peer-focus-visible:outline-2 peer-focus-visible:outline-ring" />}
+                </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex min-w-0 items-center gap-2">
-                    <SparklesIcon aria-hidden="true" className="size-3.5 shrink-0 text-soft-foreground" />
                     <span className="min-w-0 break-words text-[13px] font-medium text-foreground">
                       {skill.name}
                     </span>
                   </span>
                   {skill.description ? (
-                    <span className="mt-1 block pl-[22px] text-xs leading-relaxed text-soft-foreground">
+                    <span className="mt-2 block text-xs leading-relaxed text-soft-foreground">
                       {skill.description}
                     </span>
                   ) : null}
@@ -354,6 +351,7 @@ function SkillsUpdateCard({
         <div className="flex flex-col items-start gap-3">
           <div className="min-w-0">
             <p className="text-[13px] font-medium text-foreground">{message}</p>
+            <p className="mt-4 text-xs text-soft-foreground">Project and global installations are checked separately.</p>
             {state?.checkedAt ? (
               <p className="mt-1 text-xs text-soft-foreground">
                 Last checked {new Date(state.checkedAt).toLocaleString()}.
@@ -401,6 +399,7 @@ function SkillsUpdateCard({
               disabled={checkMutation.isPending}
               onClick={() => run('check')}
             >
+              <RefreshCwIcon aria-hidden="true" className="size-4" />
               Check again
             </Button>
           ) : state?.status === 'unavailable' || loadError ? (
