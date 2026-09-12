@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { BotIcon } from 'lucide-react'
+import { BotIcon, CpuIcon } from '@/components/design-icons'
+
 import { useState, type ReactNode } from 'react'
 
 import { putConfig } from '@/api/client'
@@ -118,71 +119,74 @@ function AgentsForm({
     )
 
   const renderModel = (runner: (typeof RUNNERS)[number]) => {
-  const provider = providerStatusFor(providerStatus.data, runner.id)
-  const providerConnected =
-    !providerStatus.isPending &&
-    !providerStatus.isError &&
-    provider?.enabled === true &&
-    provider.status === 'connected'
-  const providerReason = providerStatus.isPending
-    ? 'Checking provider authentication…'
-    : providerStatus.isError
-      ? 'Provider authentication could not be verified.'
-      : provider?.enabled === false
-        ? 'This provider is disabled. Enable it above or choose another provider.'
-      : providerConnected
-        ? undefined
-        : 'Connect this provider before selecting it.'
-  const catalog = catalogs[runner.id]
-  const catalogStatus = modelCatalogStatus(runner.id, catalog.data, catalog.isError, catalog.isFetching)
-  const modelOptions = modelsForRunner(runner.id, catalog.data, [
-    config.defaultModels[runner.id],
-  ])
-  const configuredModel = config.defaultModels[runner.id] ?? ''
-  const configuredModelLabel =
-    modelOptions.find((model) => model.id === configuredModel)?.label ??
-    configuredModel ??
-    'auto (default)'
-  return (
-    <section key={runner.id} className="settings-field flex flex-col gap-2">
-      <h2>Default model · {runner.id === 'codex' ? 'Codex' : runner.id === 'claude' ? 'Claude Code' : runner.label}</h2>
-      {config.modelsLocked ? (
-        <output
-          aria-label={`Default model for ${runner.label}`}
-          data-slot="agents-model"
-          data-runner={runner.id}
-          title="Model selection is locked to native coding-agent settings."
-          className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs"
-        >
-          {configuredModelLabel}
-        </output>
-      ) : (
-        <select
-          aria-label={`Default model for ${runner.label}`}
-          data-slot="agents-model"
-          data-runner={runner.id}
-          value={configuredModel}
-          title={providerReason ?? runner.desc}
-          disabled={save.isPending || !providerConnected}
-          onChange={(event) =>
-            save.mutate({
-              defaultModels: { [runner.id]: event.target.value || null } as Partial<
-                Record<Runner, string | null>
-              >,
-            })
-          }
-          className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
-        >
-          {modelOptions.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.id === '' ? 'Native agent default' : model.label}
-            </option>
-          ))}
-          {catalogStatus ? <option disabled>{catalogStatus}</option> : null}
-        </select>
-      )}
-    </section>
-  )
+    const provider = providerStatusFor(providerStatus.data, runner.id)
+    const providerConnected =
+      !providerStatus.isPending &&
+      !providerStatus.isError &&
+      provider?.enabled === true &&
+      provider.status === 'connected'
+    const providerReason = providerStatus.isPending
+      ? 'Checking provider authentication…'
+      : providerStatus.isError
+        ? 'Provider authentication could not be verified.'
+        : provider?.enabled === false
+          ? 'This provider is disabled. Enable it above or choose another provider.'
+        : providerConnected
+          ? undefined
+          : 'Connect this provider before selecting it.'
+    const catalog = catalogs[runner.id]
+    const catalogStatus = modelCatalogStatus(runner.id, catalog.data, catalog.isError, catalog.isFetching)
+    const modelOptions = modelsForRunner(runner.id, catalog.data, [
+      config.defaultModels[runner.id],
+    ])
+    const configuredModel = config.defaultModels[runner.id] ?? ''
+    const configuredModelLabel =
+      modelOptions.find((model) => model.id === configuredModel)?.label ??
+      configuredModel ??
+      'auto (default)'
+    return (
+      <section key={runner.id} className="settings-field flex flex-col gap-2">
+        <h2>Default model · {runner.id === 'codex' ? 'Codex' : runner.id === 'claude' ? 'Claude Code' : runner.label}</h2>
+        <div className="settings-model-control">
+        <CpuIcon aria-hidden="true" className="size-4 text-accent-text" />
+        {config.modelsLocked ? (
+          <output
+            aria-label={`Default model for ${runner.label}`}
+            data-slot="agents-model"
+            data-runner={runner.id}
+            title="Model selection is locked to native coding-agent settings."
+            className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs"
+          >
+            {configuredModelLabel}
+          </output>
+        ) : (
+          <select
+            aria-label={`Default model for ${runner.label}`}
+            data-slot="agents-model"
+            data-runner={runner.id}
+            value={configuredModel}
+            title={providerReason ?? runner.desc}
+            disabled={save.isPending || !providerConnected}
+            onChange={(event) =>
+              save.mutate({
+                defaultModels: { [runner.id]: event.target.value || null } as Partial<
+                  Record<Runner, string | null>
+                >,
+              })
+            }
+            className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
+          >
+            {modelOptions.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.id === '' ? 'Native agent default' : model.label}
+              </option>
+            ))}
+            {catalogStatus ? <option disabled>{catalogStatus}</option> : null}
+          </select>
+        )}
+        </div>
+      </section>
+    )
   }
 
   return (

@@ -1,4 +1,5 @@
-import { TriangleAlertIcon } from 'lucide-react'
+import { TriangleAlertIcon } from '@/components/design-icons'
+
 import { useEffect, useRef, useState } from 'react'
 
 import { useHealth, useLaunchKey, useProjects, useSkills } from '@/api/queries'

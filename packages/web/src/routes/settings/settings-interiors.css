@@ -166,3 +166,31 @@
 .settings-config-picker summary { padding: 12px; font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
 .settings-config-picker nav { border-top: 1px solid var(--border); padding: 16px; }
 .settings-panel [data-slot=settings-config-editor] > [data-slot=code-editor] { margin-top: 8px; }
+
+/* The index frames retain their explanatory heading; section drill-ins use the quieter title. */
+.settings-route[data-route=settings] .settings-route-header > p,
+.settings-route[data-route=settings-global] .settings-route-header > p { display: block; }
+.settings-route[data-route=settings] .settings-route-header h1,
+.settings-route[data-route=settings-global] .settings-route-header h1 { font-weight: 600; }
+.settings-route[data-route=settings-global] [data-slot=settings-index] a > span:nth-child(2) > span:first-child { font-weight: 400; }
+.settings-route[data-route=settings-global] [data-slot=settings-index] a > span:nth-child(2) > span + span { margin-top: 8px; }
+.settings-route[data-route=settings-global] [data-slot=settings-index] + p { display: none; }
+@media (max-width: 767px) {
+  .settings-route { gap: 16px; }
+  .settings-route[data-route=settings] [data-slot=settings-index] { gap: 0; margin-top: 0; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 10px 10px; padding: 12px 16px; background: var(--card); }
+  .settings-route[data-route=settings] [data-slot=settings-index] a { border: 0; border-radius: 0; padding: 16px 0; }
+  .settings-route[data-route=settings] [data-slot=settings-index] a > span:first-child,
+  .settings-route[data-route=settings] [data-slot=settings-index] a > span:nth-child(2) > span + span { display: none; }
+  .settings-route[data-route=settings] [data-slot=settings-index] a > span:nth-child(2) > span:first-child { font-size: 13px; font-weight: 400; color: var(--muted-foreground); }
+}
+
+.settings-panel [data-slot=accounts-tabs] [role=tab] { flex: 0 0 auto; }
+.settings-panel [data-slot=accounts-tabs] { justify-content: flex-start; }
+@media (max-width: 767px) {
+  .settings-panel .settings-resource-controls input { flex-basis: 100%; }
+  .settings-panel [data-slot=resources-composer-defaults] select { width: 100%; }
+}
+
+.settings-model-control { position: relative; }
+.settings-model-control > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.settings-panel .settings-model-control :is(select,output) { padding-left: 36px; }

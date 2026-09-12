@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckIcon, ChevronDownIcon, NotebookPenIcon, PlusIcon, SparklesIcon, XIcon } from 'lucide-react'
+import { CheckIcon, ChevronDownIcon, NotebookPenIcon, PlusIcon, SparklesIcon, XIcon } from '@/components/design-icons'
+
 import { useRef, useState, type ReactNode } from 'react'
 
 import { putUiState } from '@/api/client'

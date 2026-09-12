@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { GaugeIcon } from 'lucide-react'
+import { GaugeIcon } from '@/components/design-icons'
+
 import { useState } from 'react'
 import { Link } from 'react-router'
 
@@ -134,7 +135,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
     >
       <SettingsField
         title="Max parallel tasks"
-        hint="Limit simultaneously running tasks across projects. The rest wait in the queue."
+        hint="Limit simultaneously running tasks."
       >
         <select
           aria-label="Max parallel tasks"
@@ -188,7 +189,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
 
       <SettingsField
         title="Monitoring wake-up"
-        hint="Park uses no model turns. Re-check sends the same agent a follow-up on this cadence until work completes or the 40-wakeup safety cap is reached."
+        hint="Wake monitoring sessions periodically."
       >
         <div className="settings-resource-controls flex flex-wrap items-center gap-2">
           <Switch
@@ -227,7 +228,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
 
       <SettingsField
         title="Auto-resume after a usage limit"
-        hint="Resume eligible tasks 30 seconds after the provider usage limit resets, up to 12 times. When off, resume manually with Continue."
+        hint="Resume eligible tasks once the provider usage limit resets."
       >
         <Switch
           aria-label="Auto-resume after a usage limit"
@@ -243,7 +244,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
 
       <SettingsField
         title="Per-task memory limit"
-        hint="When a task's whole process tree crosses this, the engine pauses it with a warning and starts the next queued task. Leave empty for no limit."
+        hint="Leave blank for no limit."
       >
         <div className="settings-resource-controls flex flex-wrap items-center gap-2">
           <input
@@ -282,7 +283,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
 
       <SettingsField
         title="New task defaults"
-        hint="Set stable composer defaults across projects. Explicit choices and run-shape constraints still win."
+        hint="Apply to new tasks unless overridden."
       >
         <div className="grid gap-4 sm:grid-cols-2" data-slot="resources-composer-defaults">
           <label className="grid gap-1.5 text-sm">

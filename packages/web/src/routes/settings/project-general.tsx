@@ -91,7 +91,7 @@ export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilit
             title="Max parallel tasks"
             hint={
               config.data
-                ? `How many of this project's tasks may run at once. The workspace limit (${config.data.resources.maxParallel}) still applies as an overall ceiling, so a higher value here has no extra effect until that one is raised.`
+                ? `The workspace limit (${config.data.resources.maxParallel}) still applies as an overall ceiling.`
                 : "How many of this project's tasks may run at once. The workspace limit still applies as an overall ceiling."
             }
           >

@@ -1,5 +1,6 @@
 import './settings-interiors.css'
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
+import { ChevronDownIcon, ChevronRightIcon } from '@/components/design-icons'
+
 import { Link as RouterLink, NavLink as RouterNavLink } from 'react-router'
 import type { Capabilities } from '@open-mercato/cezar-api-client'
 import { Link as ScopedLink, NavLink as ScopedNavLink } from '@/lib/project-router'
@@ -206,6 +207,7 @@ export function SettingsIndexRoute({ scope, capabilities }: {
               `capabilities` travels because the registry half of that page is exactly what
               single-project mode disables, the same gate `visibleSettingsSections` applies. */}
           {global ? <section className="mb-5 rounded-lg border border-border bg-card p-5"><span className="inline-flex rounded bg-accent-strong/10 px-2 py-1 text-[11px] text-accent-text">Stored locally · ~/.cezar</span><p className="mt-4 text-[13px] text-muted-foreground">Changes here apply across every connected project. Agent instructions and worktree settings remain project-specific.</p></section> : <ProjectGeneral capabilities={capabilities} />}
+          {!global ? <h2 className="settings-other-title mt-6 rounded-t-lg border border-b-0 border-border bg-card px-5 pt-5 text-base font-semibold md:hidden">Other project settings</h2> : null}
           <ul
             data-slot="settings-index"
             className={cn(

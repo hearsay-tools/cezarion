@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { FoldersIcon, XIcon } from 'lucide-react'
+import { FoldersIcon, XIcon } from '@/components/design-icons'
+
 import { useMemo, useRef, useState } from 'react'
 
 import { putWorkspaceConfig } from '@/api/client'
@@ -267,7 +268,7 @@ function RegistryTable({
   return (
     <SettingsField
       title="Registered projects"
-      hint={`Every folder cezar has run in, plus the ones added from the GUI. “Tags” group connected repositories — give the API, the web app and the design system a shared “storefront” tag and the global Tasks page can show all three as one piece of work. “Max parallel” caps how many of that project's tasks run at once; the workspace limit (${workspaceMax}) still applies as an overall ceiling, so a per-project value above it has no extra effect until the workspace limit is raised. Removing a project only unregisters it — no files on disk are deleted.`}
+      hint="Connected repositories. Removing a project only unregisters it — no files on disk are deleted."
     >
       {registry.projects.length === 0 ? (
         <p data-slot="projects-empty" className="text-[13px] text-soft-foreground">
