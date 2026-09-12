@@ -17,9 +17,9 @@
 [data-route='new'] .new-task-run-settings > button > span:first-child > span:last-child { font-size: 10px; line-height: 1.6; }
 [data-route='new'] .new-task-run-settings > button[aria-checked='false'] > span:last-child > span { background: var(--muted-foreground); }
 @media (min-width: 1280px) {
-  [data-route='new'] [data-slot='execution-options'][open] { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
-  [data-route='new'] [data-slot='execution-options'][open] > summary { min-height: 0; padding: 0; }
-  [data-route='new'] [data-slot='execution-options'] > div { display: contents; }
+  [data-route='new'] [data-slot='execution-options'][open] { padding: 20px; }
+  [data-route='new'] [data-slot='execution-options'][open] > summary { min-height: 0; margin-bottom: 16px; padding: 0; }
+  [data-route='new'] [data-slot='execution-options'] > div { display: flex; flex-direction: column; gap: 16px; padding: 0; }
   [data-route='new'] [data-slot='execution-options'] > div > * { margin-block: 0; }
   [data-route='new'] [data-slot='execution-options'] > div > p:first-child { padding: 0; border: 0; line-height: 1.6; }
   [data-route='new'] .new-task-run-settings { border-top: 1px solid var(--border); }
