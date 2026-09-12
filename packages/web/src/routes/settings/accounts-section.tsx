@@ -272,6 +272,7 @@ function AgentTab({
   onRemove: (account: AgentProfile) => void
 }) {
   const installed = check?.available === true
+  const discoveredCount = accounts.filter((account) => account.isDefault).length
 
   return (
     <div data-slot="accounts-provider" data-provider={provider} className="flex flex-col gap-4">
@@ -285,7 +286,7 @@ function AgentTab({
           <span data-slot="agent-installed">Not installed — <code>{PROVIDER_INSTALL[provider]}</code></span>
         )}
         {installed && check?.version ? <><span aria-hidden="true"> · </span><span data-slot="agent-version">{check.version}</span></> : null}
-        <span className="settings-account-count">{accounts.length} {accounts.length === 1 ? 'account (discovered)' : `accounts (1 discovered, ${accounts.length - 1} added)`}</span>
+        <span className="settings-account-count">{accounts.length} {accounts.length === 1 ? 'account' : 'accounts'} ({discoveredCount} discovered, {accounts.length - discoveredCount} added)</span>
       </div>
 
       <ul className="bg-card">
@@ -386,13 +387,13 @@ function DefaultsForNewProjects({ profiles }: { profiles: AgentProfilesResponse 
         <label className="settings-model-agent-choice">
           <span>Default model for</span>
           <select aria-label="Model agent" value={modelRunner ?? runner} onChange={(event) => setModelRunner(event.target.value as Runner)}>
-            {RUNNERS.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+            {RUNNERS.map((entry) => <option key={entry.id} value={entry.id}>{PROVIDER_LABEL[entry.id]}</option>)}
           </select>
         </label>
         {RUNNERS.filter((entry) => entry.id === (modelRunner ?? runner)).map((entry) => (
           <label key={entry.id} className="settings-account-model flex items-center gap-3">
             <CpuIcon className="size-4 text-accent-icon shrink-0" />
-            <span className="w-24 shrink-0 text-xs text-muted-foreground">{entry.label}</span>
+            <span className="w-24 shrink-0 text-xs text-muted-foreground">{PROVIDER_LABEL[entry.id]}</span>
             <select
               aria-label={`Default model for ${entry.label}`}
               data-slot="accounts-default-model"

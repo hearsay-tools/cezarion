@@ -209,6 +209,13 @@ const openDetails = async (id: string) => {
 }
 
 describe('the agent accounts section', () => {
+  it('does not invent a discovered login when the selected provider has no account rows', async () => {
+    serve({ editable: true, profileCapableProviders: ['claude', 'codex'], defaults: {}, selections: {}, profiles: [] })
+    renderAccounts()
+    await waitFor(() => expect(document.querySelector('.settings-account-count')?.textContent).toBe('0 accounts (0 discovered, 0 added)'))
+    expect(rows()).toHaveLength(0)
+  })
+
   it('lists the discovered account with no edit controls at all', async () => {
     serve({ editable: true, profileCapableProviders: ['claude', 'codex'],
       defaults: {},
