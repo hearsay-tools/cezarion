@@ -1,3 +1,0 @@
-import {execFileSync} from 'node:child_process';import {resolve} from 'node:path';
-const q=resolve('.ai/qa/runtime-verified'),o=resolve('.ai/qa/final-integrated/pairs');const cli=(...a)=>execFileSync(q+'/browser.sh',a,{env:{...process.env,RUNTIME_BROWSER_SESSION:'final-selection-source-86'},encoding:'utf8'});
-for(const theme of ['light','dark']){cli('set','viewport','360','1100');cli('open','http://127.0.0.1:44786/p/default/skills');cli('wait','400');cli('eval',`document.documentElement.classList.toggle('light',${theme==='light'});document.documentElement.classList.toggle('dark',${theme==='dark'})`);cli('wait','400');cli('screenshot',o+'/selection-skills-mobile-'+theme+'.png');}

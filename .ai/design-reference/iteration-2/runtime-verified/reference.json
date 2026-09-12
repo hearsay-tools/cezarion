@@ -1,9 +1,0 @@
-{
-  "assignedSha256": "37378246893ba6259088ec3ddb2702e4220f44ca643ac13e5ac293263021a74b",
-  "frameCount": 158,
-  "checkedAtStart": true,
-  "sourceFileChangedDuringAudit": true,
-  "laterSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
-  "laterFrameCount": 193,
-  "note": "Original 158 frame IDs, names, CSS dimensions and exported PNGs retained. Full original pen was read but not copied before parent replaced it. Do not regenerate original captures from current live pen."
-}

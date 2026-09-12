@@ -1,1 +1,0 @@
-Initial gate results: typecheck PASS; npm test7985/7999 (10timeouts,2offline-fallback behavior failures,2stale expectations corrected); core unitPASS; buildPASS; package27PASS. Whole bounded rerun in progress to confirm all unrelated tests. No source fix applied pending ownership routing.

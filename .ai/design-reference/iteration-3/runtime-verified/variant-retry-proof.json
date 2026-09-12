@@ -1,7 +1,0 @@
-{
-  "originalRoute": "/p/fixture-repo-v2/compare/fixture-group",
-  "afterRetryRoute": "/p/fixture-repo-v2/compare/fixture-group",
-  "errorCleared": true,
-  "variantPickButtonsAfterRecovery": 2,
-  "method": "Removed browser network abort then clicked actual Retry control. No variant selected."
-}

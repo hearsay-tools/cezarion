@@ -1,8 +1,0 @@
-
- RUN  v4.1.10 /home/agent/projects/cezar/.ai/cezar/worktrees/445dfcc8-7d69-4d12-96bd-e22acb47fbc5/packages/web
-
-
- Test Files  7 passed (7)
-      Tests  193 passed (193)
-   Start at  12:43:48
-   Duration  11.02s (transform 3.08s, setup 0ms, import 8.84s, tests 18.89s, environment 4.85s)

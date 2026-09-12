@@ -1,7 +1,0 @@
-
-> typecheck:web
-> npm run typecheck -w @open-mercato/cezar-web
-
-
-> @open-mercato/cezar-web@0.12.2 typecheck
-> tsc --noEmit

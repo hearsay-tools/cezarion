@@ -1,9 +1,0 @@
-# Session tab and layout corrections
-
-[44 refreshed design/browser pairs](index.html), against confirmed193-frame source SHA256 `56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8`. Earlier evidence37880e87 is preserved; its34 new-task/picker states remain unchanged.
-
-Owned fixes: purple active tabs,44px height,12px labels,24/20px gaps;22px desktop heading inset and12px pre-tab spacing;16/14px conversation row spacing;14/12px request padding;4px desktop report inset;12px report sections and4px heading/detail gaps; correct Streamdown emphasis color/mobile12px type; closed event follows the report; activity cards use one source-colored surface and10/12px insets. Numeric spacing follows density, reading width is retained, and the composer stays in document flow.
-
-40 pairs useef2841f1; four activity pairs use37d501a0 (only tool-card surfaces/padding changed). Each record has exact build/source/fixture and image hashes. Geometry checks cover12 viewport/theme/density states.134 header/scroll/transcript tests,36 tool tests, web build and seven actual-browser checks pass, including tail jump and actual-text continuation.
-
-Remaining reference differences: actual history boundary, metadata disclosures, task stage/worker navigation, tool-group structure and populated transcript length differ from the static source. No historical provider identity or full-report link is invented. Mobile composer extends below a short viewport because real content and controls stay in document flow; Jump reaches its tail. Frame18 is a spacing specification;28/29 show component specimens rather than simultaneous runtime screens. Shared header is independently reviewed by its owner; source2A specifies64px, so the earlier blanket64-versus72 claim does not apply to that frame. Per-pair notes retain these limits without treating them as authorization blockers.

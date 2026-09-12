@@ -1,8 +1,0 @@
-[
-  {
-    "name": "typecheck",
-    "command": "npm run typecheck",
-    "exitCode": 0,
-    "seconds": 8.5
-  }
-]

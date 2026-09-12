@@ -28,6 +28,18 @@ skills-lock.json
 .ai/qa/*.log
 .ai/qa/.build-cache
 .ai/qa/cez-home/
+# Keep dated markdown reports and .ai/qa/assets/; drop generated evidence dumps.
+.ai/qa/**
+!.ai/qa/.gitkeep
+!.ai/qa/*.md
+!.ai/qa/assets/
+!.ai/qa/assets/**
+
+# Pen sources and exported design-reference dumps — local only
+*.pen
+.ai/design-reference/
+.ai/font-audit-reference/
+WORKER-STATUS.md
 
 # local symlink into .agents/skills
 .claude/skills

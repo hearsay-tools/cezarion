@@ -1,7 +1,0 @@
-# Outstanding independent review
-
-The Tools change is ready in worker e2fa39fa packages/web/src/routes/workspace-tools.tsx. Exact diff and paired screenshots: ../tools-verified/source.diff and ../tools-verified/comparison.html. Build, final typecheck, and19existing tests pass. No app files outside this route changed.
-
-Parent request a4bc5baf-b659-42b3-93b7-0cc6b5cec246 timed out. Follow-up sending failed with `capacity_limit: Conversation capacity limit reached`. Owned-worker instruction says “cannot ... accept your own review”; no independent review has been received. Following the instruction to continue without a user gate, the tested source is committed for independent review as577299ab; committing does not accept the review. QA capture scripts are16f8e5ff. Earlier QA fixture commit d523d138 remains available. No pushes or PRs.
-
-Current coverage is182frame page captures plus separate states for9specimenframes; the remaining2frames are component/behavior specification boards. This is baseline coverage, not final acceptance of the other workers’ visual implementation. Sidebar fixture includes12reference statuses with top/middle/bottom scroll captures; individual glyph styling remains for shared owner review. Typography-candidates.csv contains908exact-text candidate differences, normalized for font-weight aliases and excluding unresolved relative line-heights; these require context review, not blind replacement.

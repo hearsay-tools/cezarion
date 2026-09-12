@@ -1,3 +1,0 @@
-const fs=require('node:fs');const crypto=require('node:crypto');const path=require('node:path');
-const original=globalThis.fetch;
-globalThis.fetch=async function(input,...args){const url=typeof input==='string'?input:input?.url||String(input);const response=await original.call(this,input,...args);if(/^https:\/\/fonts\.gstatic\.com\//.test(url)){const bytes=Buffer.from(await response.clone().arrayBuffer());const hash=crypto.createHash('sha256').update(bytes).digest('hex');const dir=path.resolve('.ai/design-reference/iteration-2/font-audit');fs.writeFileSync(path.join(dir,hash+'.font'),bytes);fs.appendFileSync(path.join(dir,'font-fetch.ndjson'),JSON.stringify({url,status:response.status,sha256:hash,bytes:bytes.length})+'\n');}return response;};

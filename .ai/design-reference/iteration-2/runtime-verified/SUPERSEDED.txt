@@ -1,1 +1,0 @@
-SUPERSEDED BY USER: old158frame design references are WRONG for currenttask. Preserve onlyhistorically. Current source56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8 has193frames. Do not use this gallery for current visual acceptance.

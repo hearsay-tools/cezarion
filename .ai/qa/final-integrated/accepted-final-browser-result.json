@@ -1,5 +1,0 @@
-{
-  "command": "npm test -- --config packages/web/e2e/vitest.config.ts",
-  "exitCode": 1,
-  "seconds": 708.9
-}
