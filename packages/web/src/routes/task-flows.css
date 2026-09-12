@@ -97,8 +97,7 @@
 [data-slot="automation-inline-log"] li time { margin-left: auto; }
 
 [data-slot="todo-engine"] { gap: 12px; }
-[data-slot="todo-engine"] > button { border-radius: 8px; border-color: var(--border); padding: 10px 16px; color: var(--foreground); font-size: 12px; font-weight: 500; min-height: 44px; }
-[data-slot="todo-engine"] > button::before { content: attr(aria-label) ' ·'; white-space: nowrap; }
+[data-slot="todo-engine"] > button { border-radius: 8px; border-color: var(--border); padding: 10px 12px; color: var(--foreground); font-size: 12px; font-weight: 500; min-height: 44px; }
 [data-slot="todo-engine"] > button > span { text-transform: capitalize; }
 [data-slot="todo-actions"] [data-slot="prompt-template-trigger"] { border-radius: 8px; }
 [data-slot="todo-meta"] > * + *::before { content: '·'; margin-right: 8px; }

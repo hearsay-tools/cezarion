@@ -1,4 +1,4 @@
-import { ChevronDownIcon, NotebookPenIcon, SparklesIcon } from 'lucide-react'
+import { ChevronDownIcon, NotebookPenIcon, SparklesIcon } from '@/components/design-icons'
 import { useRef, useState } from 'react'
 import { useNavigate } from '@/lib/project-router'
 
@@ -39,7 +39,7 @@ export function PromptTemplateMenu({
   /** Drop the "templates" label and render just the icon — the /new composer footer, where the
    *  pill row is already full and every one of these competes with the send button for space. */
   iconOnly = false,
-  label = 'templates',
+  label = 'Template',
 }: {
   templates: readonly PromptTemplate[]
   onInsert: (text: string) => void
@@ -67,15 +67,15 @@ export function PromptTemplateMenu({
           disabled={disabled}
           className={cn(
             'inline-flex h-[26px] items-center gap-1.5 rounded-full border border-border bg-card text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
-            iconOnly ? 'w-[26px] justify-center px-0' : 'px-2.5',
+            iconOnly ? 'w-[26px] justify-center px-0' : 'h-11 gap-2 rounded-lg px-3 text-foreground',
             triggerClassName,
           )}
         >
-          <NotebookPenIcon aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
+          <NotebookPenIcon aria-hidden="true" className={iconOnly ? "size-3 shrink-0 text-accent-icon" : "size-[18px] shrink-0 text-muted-foreground"} />
           {iconOnly ? null : (
             <>
               {label}
-              <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
+              <ChevronDownIcon aria-hidden="true" className="size-[13px] shrink-0 text-soft-foreground" />
             </>
           )}
         </button>

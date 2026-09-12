@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, renderHook, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,7 +7,7 @@ import { createQueryClient } from '@/api/query-client'
 import type { Runner } from '@open-mercato/cezar-api-client'
 import { EFFORT_OPTIONS } from '@/routes/new-task-form'
 
-import { engineBody, engineRunBody, type EnginePick, type ResolvedEngine, useResolvedEngine } from './engine-pills'
+import { EnginePills, engineBody, engineRunBody, type EnginePick, type ResolvedEngine, useResolvedEngine } from './engine-pills'
 
 /**
  * `engineBody` (#401) is the one place the create-run body rules live for the Inbox and the
@@ -405,5 +405,35 @@ describe('useResolvedEngine agent accounts', () => {
 
     expect(result.current.accounts).toEqual([])
     expect(engineRunBody(result.current)).toEqual(engineBody(result.current))
+  })
+})
+
+
+describe('EnginePills presentation and choices', () => {
+  it('keeps runner switching and effort intact with the approved glyph controls', async () => {
+    stubResolverFetch({ providers: { providers: [
+      { provider: 'claude', status: 'connected', enabled: true },
+      { provider: 'codex', status: 'connected', enabled: true },
+    ] } })
+    const onChange = vi.fn()
+    render(createElement(QueryClientProvider, { client: createQueryClient() },
+      createElement(EnginePills, { pick: { runner: 'claude', model: 'opus', effort: 'high', account: null }, onChange })))
+    const runner = await screen.findByRole('button', { name: 'Runner' })
+    expect(runner.querySelector('svg')?.getAttribute('data-design-icon')).toBe('terminal')
+    expect(screen.getByRole('button', { name: 'Model' }).querySelector('svg')?.getAttribute('data-design-icon')).toBe('cpu')
+    expect(screen.getByRole('button', { name: 'Effort' }).querySelector('svg')?.getAttribute('data-design-icon')).toBe('gauge')
+    fireEvent.pointerDown(runner)
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /codex/i }))
+    expect(onChange).toHaveBeenCalledWith({ runner: 'codex', model: null, effort: 'high', account: null })
+  })
+
+  it('shows Default for an implicit model and retains the single-provider rule', async () => {
+    stubResolverFetch({ providers: { providers: [{ provider: 'codex', status: 'connected', enabled: true }] }, projectDefault: 'codex' })
+    render(createElement(QueryClientProvider, { client: createQueryClient() },
+      createElement(EnginePills, { pick: { runner: null, model: null, effort: null, account: null }, onChange: vi.fn() })))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Model' }).hasAttribute('disabled')).toBe(false))
+    expect(screen.getByRole('button', { name: 'Model' }).textContent).toBe('Model · Default')
+    expect(screen.queryByRole('button', { name: 'Runner' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Effort' })).not.toBeNull()
   })
 })

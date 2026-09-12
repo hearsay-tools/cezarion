@@ -828,8 +828,11 @@ describe('Add instructions', () => {
     renderInbox()
     await openInstructions()
 
+    const trigger = cards()[0]!.querySelector('[data-slot="prompt-template-trigger"]')!
+    expect(trigger.textContent).toBe('Template')
+    expect(trigger.querySelector('svg')?.getAttribute('data-design-icon')).toBe('notebook-pen')
     // A Popover + cmdk (matching the skill pickers), so: click, not pointerdown.
-    fireEvent.click(cards()[0]!.querySelector('[data-slot="prompt-template-trigger"]')!)
+    fireEvent.click(trigger)
     await waitFor(() => expect(document.querySelector('[data-template="add-tests"]')).not.toBeNull())
     fireEvent.click(document.querySelector('[data-template="add-tests"]')!)
 
