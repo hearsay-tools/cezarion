@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { BotIcon, CpuIcon } from '@/components/design-icons'
+import { BotIcon } from '@/components/design-icons'
 
 import { useState, type ReactNode } from 'react'
 
@@ -145,17 +145,17 @@ function AgentsForm({
       configuredModel ??
       'auto (default)'
     return (
-      <section key={runner.id} className="settings-field flex flex-col gap-2">
-        <h2>Default model · {runner.id === 'codex' ? 'Codex' : runner.id === 'claude' ? 'Claude Code' : runner.label}</h2>
-        <div className="settings-model-control">
-        <CpuIcon aria-hidden="true" className="size-4 text-accent-text" />
+      <label key={runner.id} className="settings-option-row">
+        <div>
+          <h3>{runner.label}</h3>
+        </div>
         {config.modelsLocked ? (
           <output
             aria-label={`Default model for ${runner.label}`}
             data-slot="agents-model"
             data-runner={runner.id}
             title="Model selection is locked to native coding-agent settings."
-            className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs"
+            className="block rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs"
           >
             {configuredModelLabel}
           </output>
@@ -174,7 +174,7 @@ function AgentsForm({
                 >,
               })
             }
-            className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
+            className="block rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
           >
             {modelOptions.map((model) => (
               <option key={model.id} value={model.id}>
@@ -184,8 +184,7 @@ function AgentsForm({
             {catalogStatus ? <option disabled>{catalogStatus}</option> : null}
           </select>
         )}
-        </div>
-      </section>
+      </label>
     )
   }
 
@@ -201,7 +200,16 @@ function AgentsForm({
         onPick={(runner) => save.mutate({ defaultRunner: runner })}
       />
 
-      {RUNNERS.map(renderModel)}
+      <Field
+        title="Default model"
+        hint={
+          config.modelsLocked
+            ? 'Models are locked to the defaults configured in the native coding-agent settings.'
+            : 'The model preselected in the composer for each runner. Auto lets the runner decide per task.'
+        }
+      >
+        <div className="flex flex-col gap-4">{RUNNERS.map(renderModel)}</div>
+      </Field>
 
       <Field
         title="System prompt"

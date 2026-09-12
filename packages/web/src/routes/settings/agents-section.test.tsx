@@ -439,6 +439,8 @@ describe('the agents form', () => {
     renderAt('/settings/agents')
     await waitFor(() => expect(form()).not.toBeNull())
     expect(screen.queryByText('Additional agent models')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Default model' })).toBeTruthy()
+    expect(screen.getByText(/The model preselected in the composer/)).toBeTruthy()
     expect(
       [...document.querySelectorAll('[data-slot="agents-model"]')].map((el) => el.getAttribute('data-runner')),
     ).toEqual(['claude', 'codex', 'opencode', 'pi'])

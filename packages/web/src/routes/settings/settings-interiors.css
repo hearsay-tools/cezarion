@@ -98,7 +98,7 @@
 .settings-panel .settings-option-row p { margin-top: 8px; line-height: 1.6; }
 .settings-panel .settings-option-row label { flex-shrink: 0; }
 .settings-panel .settings-option-row label > span { display: none; }
-.settings-panel .settings-option-row select { width: auto; min-width: 12rem; max-width: 16rem; }
+.settings-panel .settings-option-row :is(select, output) { width: auto; min-width: 12rem; max-width: 16rem; }
 .settings-panel .settings-form-actions { display: flex; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--border); padding-top: 20px; }
 .settings-panel [data-slot=accounts-tabs] { gap: 8px; }
 .settings-panel [data-slot=accounts-tabs] button { border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; }
