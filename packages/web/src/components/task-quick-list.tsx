@@ -1,7 +1,8 @@
 import { ChevronDownIcon } from '@/components/design-icons'
 import { ScaleIcon } from 'lucide-react'
+import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
-import { useHealth, usePinRun, useReferenceProjectId, useRuns } from '@/api/queries'
+import { useHealth, usePinRun, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useProjectMatch } from '@/lib/project-router'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
@@ -579,7 +580,24 @@ export function TaskQuickListContainer({ showViewControls = true }: { showViewCo
 export function SidebarSessionScope() {
   const [view, setView] = useListView()
   const runs = useRuns()
-  const counts = listCounts(runs.data ?? [])
+  const registry = useProjects().data
+  const otherLists = useQueries({
+    queries: (registry?.projects ?? [])
+      .filter((project) => project.id !== registry?.bootProject)
+      .map((project) => ({
+        queryKey: [project.id, 'runs', 'list'] as const,
+        queryFn: async () => [] as RunRecord[],
+        enabled: false,
+      })),
+  })
+  const seen = new Set<string>()
+  const combined: RunRecord[] = []
+  for (const run of [...(runs.data ?? []), ...otherLists.flatMap((query) => query.data ?? [])]) {
+    if (seen.has(run.id)) continue
+    seen.add(run.id)
+    combined.push(run)
+  }
+  const counts = listCounts(combined)
   return (
     <div data-slot="sidebar-session-scope" role="group" aria-label="Session scope" className="flex w-full gap-1 rounded-lg bg-muted p-[3px]">
       <ViewTab view="active" current={view} onSelect={setView} count={counts.active}>

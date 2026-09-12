@@ -405,6 +405,33 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(document.querySelector('[data-run-id="active-session"]')).not.toBeNull())
   })
 
+  it('counts Active/Archived in Tools across every expanded project, not only boot', async () => {
+    localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ shop: false }))
+    const bootActive = run({ id: 'boot-active', titleSummary: 'Boot active' })
+    const shopWaiting = run({ id: 'shop-wait', titleSummary: 'Shop waiting', status: 'waiting' })
+    serve({
+      '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
+      '/api/v1/todos': [],
+      '/api/v1/projects': {
+        projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' }],
+        bootProject: 'cezar',
+        projectsDir: '/projects',
+      },
+      '/api/v1/runs': [bootActive],
+      '/api/v1/p/cezar/runs': [bootActive],
+      '/api/v1/p/shop/runs': [shopWaiting],
+      '/api/v1/workspace/ui-state': {},
+    })
+    renderShell('/p/cezar/new')
+    await screen.findByRole('link', { name: /Shop waiting/ })
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Tools' }), { button: 0, ctrlKey: false })
+    const scope = await screen.findByRole('group', { name: 'Session scope' })
+    expect(within(scope).getByRole('button', { name: /^Active/ }).textContent).toContain('2')
+    fireEvent.click(within(scope).getByRole('button', { name: /^Archived/ }))
+    expect(scope.querySelector('[data-slot="waiting-dot"]')).not.toBeNull()
+    localStorage.removeItem('cez-sidebar-collapsed')
+  })
+
   it('shows the version chip even outside a git repo', async () => {
     serve({ '/api/v1/health': { ...HEALTH, repo: null }, '/api/v1/todos': [] })
     renderShell()
