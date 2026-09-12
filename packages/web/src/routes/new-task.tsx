@@ -855,7 +855,7 @@ function WorktreeToggle({
       className="flex items-center justify-between gap-3 px-0 py-3 text-left"
     >
       <span><span className="block text-[13px] font-medium">Worktree</span><span className="block text-[10px] text-muted-foreground">Run in an isolated working copy</span></span>
-      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-card', on && 'ml-auto')} /></span>
+      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-accent-strong-foreground', on && 'ml-auto')} /></span>
     </button>
   )
 }
@@ -890,7 +890,7 @@ function AutonomousToggle({
       className="flex items-center justify-between gap-3 px-0 py-3 text-left disabled:opacity-50"
     >
       <span><span className="block text-[13px] font-medium">Autonomous</span><span className="block text-[10px] text-muted-foreground">Let the agent proceed without prompts</span></span>
-      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-card', on && 'ml-auto')} /></span>
+      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-accent-strong-foreground', on && 'ml-auto')} /></span>
     </button>
   )
 }
@@ -920,7 +920,7 @@ function GenerateFollowupsToggle({
       className="flex min-h-11 w-full items-center justify-between gap-4 text-left text-foreground"
     >
       <span><span className="block text-[15px]">Follow-ups</span><span className="mt-1 block text-xs leading-[1.5] text-muted-foreground">Generate suggestions in Inbox after this task. Enabled by default; your choice is remembered.</span></span>
-      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-card', on && 'ml-auto')} /></span>
+      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-accent-strong-foreground', on && 'ml-auto')} /></span>
     </button>
   )
 }

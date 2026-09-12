@@ -683,7 +683,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
               <details className="mt-4 min-w-0">
                 <summary
                   data-slot="wb-yaml-toggle"
-                  className="inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-border px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-ring"
+                  className="inline-flex min-h-[44px] cursor-pointer items-center rounded-lg border border-border px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-ring"
                 >
                   <FileCodeIcon aria-hidden="true" className="mr-2 size-4" />
                   View YAML
