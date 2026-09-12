@@ -23,3 +23,11 @@
 [data-slot='notes-panel'] button,
 .task-action-panel button { font-size: 13px; font-weight: 400; }
 .task-action-panel h3 { font-size: 16px; font-weight: 400; }
+
+/* Confirmed 193-frame source: session tabs in 2A–2D and 3A–3D. */
+[data-slot='run-tabs'] { gap: calc(var(--spacing) * 6); }
+[data-slot='run-tabs'] > a { height: 44px; padding-inline: 4px; font-size: 12px; font-weight: 400; }
+[data-slot='run-tabs'] > a[aria-current='page'] { color: var(--accent-text); border-bottom-color: var(--accent-strong); }
+@media (max-width: 767px) {
+  [data-slot='run-tabs'] { gap: calc(var(--spacing) * 5); }
+}

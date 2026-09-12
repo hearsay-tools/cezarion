@@ -310,7 +310,7 @@ export function ThreadView({
 
       {/* Row spacing lives on each thread row (pb-2.5, both render modes measure alike);
           this gap only separates the sections — rows, empty state, footer, review panel. */}
-      <div className="mx-auto flex w-full max-w-[var(--measure)] flex-1 flex-col gap-2.5 px-[18px] py-3 md:gap-3.5 md:px-16 md:py-5">
+      <div data-slot="session-conversation" className="mx-auto flex w-full max-w-[var(--measure)] flex-1 flex-col gap-2.5 px-[18px] py-3 md:gap-3.5 md:px-16 md:py-5">
         {history ? (
           <HistoryBoundary
             hasOlder={history.hasOlder}

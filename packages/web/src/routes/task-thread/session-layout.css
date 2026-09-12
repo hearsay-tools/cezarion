@@ -47,3 +47,20 @@
 }
 
 [data-route='task-thread'] [data-slot='user-bubble'] { font-size: 13px; }
+
+/* Keep the reading measure and numeric density scale; match source conversation spacing. */
+[data-route='task-thread'] [data-slot='session-conversation'] { padding-block: calc(var(--spacing) * 5.5) calc(var(--spacing) * 4); gap: calc(var(--spacing) * 4); }
+[data-route='task-thread'] [data-slot='thread-row'] { padding-bottom: calc(var(--spacing) * 4); }
+[data-route='task-thread'] [data-slot='user-bubble'] { padding: calc(var(--spacing) * 3.5) 18px; }
+[data-route='task-thread'] [data-slot='user-bubble'] > p:first-child { margin-bottom: 7px; }
+[data-route='task-thread'] [data-slot='assistant-message'] { padding-inline: 4px; }
+[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > :is(p, ul, ol, table, blockquote) { margin-block: calc(var(--spacing) * 3); }
+[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > :first-child { margin-top: 0; }
+[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > :last-child { margin-bottom: 0; }
+@media (max-width: 767px) {
+  [data-route='task-thread'] [data-slot='session-conversation'] { padding-block: calc(var(--spacing) * 4); gap: calc(var(--spacing) * 3.5); }
+  [data-route='task-thread'] [data-slot='thread-row'] { padding-bottom: calc(var(--spacing) * 3.5); }
+  [data-route='task-thread'] [data-slot='user-bubble'] { padding: calc(var(--spacing) * 3); font-size: 12px; }
+  [data-route='task-thread'] [data-slot='user-bubble'] > p:first-child { margin-bottom: 6px; }
+  [data-route='task-thread'] [data-slot='assistant-message'] { padding-inline: 0; }
+}
