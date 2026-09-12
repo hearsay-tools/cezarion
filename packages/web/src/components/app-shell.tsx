@@ -1,4 +1,4 @@
-import { FolderIcon, FolderPlusIcon, LayersIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon, Settings2Icon, XIcon } from '@/components/design-icons'
+import { ChevronDownIcon, FolderIcon, FolderPlusIcon, LayersIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon, Settings2Icon, XIcon } from '@/components/design-icons'
 
 import * as React from 'react'
 import type { ReactNode } from 'react'
@@ -157,6 +157,7 @@ export function AppShell({
   const activeTo = areaPathname === '/new' ? '/new' : activeNavPath(areaPathname)
   const current = activeNavItem(areaPathname)
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const mobileNavTrigger = React.useRef<HTMLButtonElement | null>(null)
   const mainRef = React.useRef<HTMLElement>(null)
   const routeOwnsArrival = routeOwnsScrollArrival(pathname)
   // The desktop column's width (#788). Read once, lazily, from `localStorage` — it is a
@@ -230,10 +231,17 @@ export function AppShell({
       >
         <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
         {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
-        <MobileNavDrawer {...nav} onNavigate={() => setMenuOpen(false)} />
+        <MobileNavDrawer {...nav} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
+          // Both mobile controls open the same drawer. Restore the actual opener, rather
+          // than Radix's single trigger ref (which otherwise points at the last mount).
+          if (mobileNavTrigger.current?.isConnected) {
+            event.preventDefault()
+            mobileNavTrigger.current.focus()
+          }
+        }} />
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
-          <MobileTopBar title={current?.label ?? 'cezar'} repo={repo} />
+          <MobileTopBar title={current?.label ?? 'cezar'} repo={repo} onTrigger={(button) => { mobileNavTrigger.current = button }} />
           <header data-slot="desktop-breadcrumb" className="row-start-1 hidden h-16 min-w-0 items-center gap-3 border-b border-border px-9 text-[13px] text-muted-foreground md:flex">
             <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
             {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
@@ -413,11 +421,12 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
  * dismiss-on-tap, and `aria-hidden` on everything outside the portal — which is how it delivers
  * modality (it does not set `aria-modal`; `hideOthers` is the stronger guarantee).
  */
-function MobileNavDrawer({ onNavigate, ...props }: NavProps & { onNavigate: () => void }) {
+function MobileNavDrawer({ onNavigate, onCloseAutoFocus, ...props }: NavProps & { onNavigate: () => void; onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus'] }) {
   return (
     <SheetContent
       side="left"
       data-slot="mobile-nav-drawer"
+      onCloseAutoFocus={onCloseAutoFocus}
       overlayClassName="bg-[var(--nav-scrim)]"
       showCloseButton={false}
       // The drawer is the sidebar: same width, same surface token, and no padding of its own —
@@ -825,7 +834,7 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
 }
 
 /** Mobile chrome (<md): the sidebar's replacement. Its menu button opens `MobileNavDrawer`. */
-function MobileTopBar({ title, repo }: { title: string; repo: RepoChip | null }) {
+function MobileTopBar({ title, repo, onTrigger }: { title: string; repo: RepoChip | null; onTrigger: (button: HTMLButtonElement) => void }) {
   return (
     <header
       data-slot="mobile-top-bar"
@@ -841,6 +850,7 @@ function MobileTopBar({ title, repo }: { title: string; repo: RepoChip | null })
             variant="ghost"
             size="icon"
             aria-label="Open menu"
+            onClick={(event) => onTrigger(event.currentTarget)}
             // 44px: the minimum touch target, overriding the 36px desktop icon-button size.
             className="-ml-1.5 size-11"
           >
@@ -848,7 +858,17 @@ function MobileTopBar({ title, repo }: { title: string; repo: RepoChip | null })
           </Button>
         </SheetTrigger>
         <span className="shrink-0 text-[19px] font-semibold tracking-[-0.03em]">Cezarion</span>
-        {repo ? <span className="ml-auto flex min-w-0 items-center gap-2 text-xs"><FolderIcon aria-hidden="true" className="size-4 shrink-0" /><span className="max-w-28 truncate">{repo.name}</span></span> : null}
+        {repo ? (
+          <SheetTrigger asChild>
+            <button type="button" data-slot="mobile-project-picker" aria-label={`Switch project: ${repo.name}`}
+              onClick={(event) => onTrigger(event.currentTarget)}
+              className="ml-auto flex h-11 min-w-0 items-center gap-2 text-[13px] focus-visible:outline-2 focus-visible:outline-ring">
+              <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
+              <span className="max-w-28 truncate">{repo.name}</span>
+              <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          </SheetTrigger>
+        ) : null}
         {title !== 'cezar' ? (
           <>
             <span aria-hidden="true" className={cn("text-soft-foreground", repo && "hidden")}>·</span>

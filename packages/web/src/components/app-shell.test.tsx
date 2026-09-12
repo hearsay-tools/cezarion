@@ -886,3 +886,18 @@ it('keeps project and page context in the desktop breadcrumb', () => {
   expect(breadcrumb?.textContent).toContain('Skills')
   expect(breadcrumb?.textContent).toContain('main')
 })
+
+it('opens project navigation from the mobile project control and restores its focus', async () => {
+  renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main' }, projectGroups: <RouterLink to="/p/second/skills">Second project</RouterLink> })
+  const picker = screen.getByRole('button', { name: 'Switch project: demo' })
+  picker.focus()
+  fireEvent.click(picker)
+  const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
+  expect(drawer).not.toBeNull()
+  expect(within(drawer).getByRole('link', { name: 'Second project' })).toBeTruthy()
+  fireEvent.keyDown(drawer, { key: 'Escape' })
+  await waitFor(() => expect(document.activeElement).toBe(picker))
+  fireEvent.click(picker)
+  fireEvent.click(within(document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement).getByRole('link', { name: 'Second project' }))
+  await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/p/second/skills'))
+})

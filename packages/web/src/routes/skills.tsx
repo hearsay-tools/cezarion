@@ -190,7 +190,7 @@ function SkillsCatalog() {
               </li>
             ) : shown.length > 0 ? (
               shown.map((skill) => (
-                <SkillRow key={skill.path} skill={skill} active={selection === skill.name} highlighted={(selection === IMPORT || selection === BOOKMARKLETS) && skill === skills[0]} />
+                <SkillRow key={skill.path} skill={skill} active={selection === skill.name} highlighted={selection === IMPORT && skill === skills[0]} />
               ))
             ) : (
               <li className="px-2.5 py-2 text-xs leading-relaxed text-soft-foreground">

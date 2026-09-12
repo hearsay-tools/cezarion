@@ -160,3 +160,62 @@
   [data-slot="wb-import-panel"] > div { margin-top: 0; }
   [data-slot="wb-import-panel"] button { min-height: 50px; height: 50px; padding-inline: 15px; }
 }
+
+/* Source frame geometry: inset strokes and explicit text line boxes. */
+[data-slot="wb-step-grip"] span { border-radius: 5px; }
+[data-slot="wb-main"], [data-slot="wb-aside"] { padding: 19px; }
+[data-slot="wb-step"] { padding: 15px; }
+[data-slot="wb-step-heading"] > div { font-size: 15px; line-height: 24px; }
+[data-slot="wb-step-summary"], [data-slot="wb-main"] > p:first-child,
+[data-slot="wb-main"] footer p, [data-slot="wb-aside"] > p { line-height: 19px; }
+[data-slot="wb-main"] > p:last-of-type { line-height: 18px; }
+[data-slot="wb-main"] footer { padding-top: 15px; }
+[data-slot="wb-aside"] > p { margin-top: 16px; }
+[data-slot="wb-aside"] h3 { line-height: 21px; }
+[data-slot="wb-load"] label { line-height: 16px; }
+[data-slot="wb-description"] { font-size: 13px; line-height: 21px; }
+/* Use separate selectors: a mixed :is() would lend the most specific member's
+   weight to every control and prevent the border compensation from winning. */
+[data-slot="wb-new"], [data-slot="wb-save"], [data-slot="wb-auto-run"] { gap: 8px; padding-inline: 12px; }
+[data-slot="wb-actions"] button, [data-slot="wb-main"] > button,
+[data-slot="wb-step"] > div:last-child button, [data-slot="wb-auto-cancel"],
+[data-slot="wb-yaml-toggle"] { gap: 8px; padding-inline: 11px; }
+[data-slot="skills-refresh"] { padding-inline: 11px; }
+[data-slot="skills-section"] > header a { gap: 10px; padding-inline: 13px; min-height: 43px; height: 43px; position: relative; }
+[data-slot="skills-section"] > header a::after { content: ''; position: absolute; inset: -.5px 0; }
+[data-slot="skill-row"] > span:first-child { font-size: 13px; line-height: 21px; }
+[data-slot="skill-row"]:has([data-source="team"]) > span:first-child > span { line-height: 21px; }
+[data-slot="skill-row"] > span:nth-child(2) { line-height: 18px; }
+[data-slot="skill-detail"] > div:first-child > :is(h2,h3) { line-height: 30px; }
+[data-slot="skill-used-by"] > h3 { line-height: 19px; }
+[data-slot="skill-used-by"] > p { line-height: 19px; }
+[data-slot="skill-body"] .thread-markdown p { line-height: 21px; }
+[data-slot="skill-body"] .thread-markdown :is(ul,ol) { line-height: 19px; }
+[data-slot="skill-body"] .thread-markdown ul { list-style: none; }
+[data-slot="skill-body"] .thread-markdown ul > li::before { content: '• '; white-space: pre; }
+@media (max-width: 639px) {
+  [data-slot="wb-main"] footer { gap: 14px; }
+}
+@media (min-width: 768px) {
+  [data-slot="skill-detail"] > div:first-child > :is(h2,h3) { line-height: 38px; }
+}
+
+[data-slot="wb-auto-panel"] > h2 { line-height: 29px; }
+[data-slot="wb-auto-panel"] > p { line-height: 21px; }
+[data-slot="wb-auto-panel"] > p:last-child { font-size: 11px; line-height: 18px; }
+[data-slot="wb-auto-text"] { line-height: 22px; }
+@container (max-width: 649px) {
+  [data-slot="skill-row"][aria-current="page"] { box-shadow: inset 0 -1px var(--border); }
+}
+[data-slot="wb-yaml-toggle"] svg { margin-right: 0; }
+[data-slot="skills-import-panel"] > h2 { line-height: 45px; }
+[data-slot="skills-import-panel"] > p:not(:first-child) { line-height: 19px; }
+[data-slot="skills-import-panel"] > p:nth-of-type(2) { line-height: 21px; }
+[data-slot="skills-update-card"] > div > div > p:first-child { line-height: 22px; }
+[data-slot="skills-update-card"] > div > div > p:nth-child(2) { line-height: 18px; }
+[data-slot="skills-update-card"] button { gap: 8px; padding-inline: 11px; }
+[data-slot="import-row"] > span:last-child > span:first-child { line-height: 21px; }
+[data-slot="import-row"] > span:last-child > span:last-child:not(:first-child) { line-height: 19px; }
+@media (max-width: 767px) {
+  [data-slot="skills-import-panel"] > h2 { line-height: 38px; }
+}

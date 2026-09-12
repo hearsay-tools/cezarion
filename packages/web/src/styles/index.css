@@ -736,3 +736,5 @@
 [data-slot='mobile-top-bar'] > div { height: 51px; }
 /* Leading activity dots use the readable accent; unread completions keep brand purple. */
 [data-slot='task-row'] > [data-slot='status-dot'][data-tone='accent'] { background-color: var(--accent-text); }
+
+[data-slot='mobile-status']:empty { display: none; }
