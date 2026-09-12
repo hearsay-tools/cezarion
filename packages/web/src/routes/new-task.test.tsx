@@ -398,6 +398,10 @@ describe('the hero surface', () => {
     serve()
     renderNewTask()
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('What should the agent work on?')
+    expect(document.querySelector('[data-slot="page-eyebrow"]')?.textContent).toBe('NEW TASK')
+    expect(document.querySelector('[data-slot="page-description"]')?.textContent).toBe(
+      'Describe the outcome. Configure the run. Review everything before it lands.',
+    )
     expect(screen.getByText('Runs in an isolated worktree — review everything before it lands.')).toBeTruthy()
     expect(document.querySelector('[data-route="new"] [data-slot="twinkle-backdrop"]')).toBeNull()
     // Asserted here for the DEFAULT run mode only. #793: this line used to be printed
@@ -409,16 +413,12 @@ describe('the hero surface', () => {
     await waitFor(() => expect(document.activeElement).toBe(textarea()))
   })
 
-  it('suggested chips fill the textarea (and only fill — no fetch, no navigation)', async () => {
+  it('does not render suggestion chips — design.pen 1A–1D have none', async () => {
     serve()
     renderNewTask()
     await pillReady()
-    const chips = document.querySelectorAll('[data-slot="suggested-chip"]')
-    expect(chips.length).toBe(3)
-    fireEvent.click(chips[0] as HTMLElement)
-    expect(textarea().value).toBe('Review recent changes')
-    expect(requests.some((r) => r.method === 'POST')).toBe(false)
-    expect(location()).toBe('/new')
+    expect(document.querySelector('[data-slot="suggested-chip"]')).toBeNull()
+    expect(screen.queryByText('Start with a suggestion')).toBeNull()
   })
 })
 

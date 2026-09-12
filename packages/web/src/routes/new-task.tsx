@@ -100,9 +100,8 @@ import { PlanReview } from './plan-review'
 import './new-task.css'
 
 /**
- * `/new` — the full-screen new-task hero (spec §"New task (full-screen, #386)"; visual
- * contract docs/mockups/new-task.html): centered composer card on the twinkle surface, the
- * runner/model controls below the editor, with suggested task starters above it.
+ * `/new` — Start from design.pen 1A–1D: page intro, editor + model/effort, then the 330px
+ * execution panel on desktop. Mobile keeps those controls in document flow under the draft.
  * In plan-first mode (#383, the `Start | Plan first` segment) submit runs `POST /api/plan`
  * and opens the review page (plan-review.tsx) instead of starting a run.
  *
@@ -570,24 +569,16 @@ export function NewTaskRoute() {
 
       <div ref={draftPanelRef} style={plan !== null ? { display: 'none' } : undefined} className="relative z-[1] mx-auto w-full max-w-none px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
         <header className="mb-7 max-md:mb-5">
-          <p className="mb-2 hidden md:block text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
-            New task
+          <p data-slot="page-eyebrow" className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
+            NEW TASK
           </p>
           <h1 className="text-[30px] leading-[normal] font-semibold tracking-[-0.9px] max-md:text-[22px] max-md:leading-[29px] max-md:tracking-[-0.6px]">
             What should the agent work on?
           </h1>
-          {/* Follows the resolved run mode (#793). Printing the isolation promise
-              unconditionally made this line false for every run the user opted out of — and
-              for a non-git folder, where there is no worktree to opt into. */}
-          <p data-slot="run-mode-note" className="mt-2 hidden text-[13px] text-muted-foreground md:block">
-            {composerRunModeNote({ worktree: worktreeOn, hasGit })}
+          <p data-slot="page-description" className="mt-2 hidden text-[13px] text-muted-foreground md:block">
+            Describe the outcome. Configure the run. Review everything before it lands.
           </p>
         </header>
-
-        <section aria-label="Suggested task starters" className="mb-7">
-          <p className="mb-3 text-xs font-normal text-muted-foreground">Start with a suggestion</p>
-          <SuggestedChips onPick={(text) => update({ text })} />
-        </section>
 
         <Composer
           ref={composerRef}
@@ -796,6 +787,9 @@ export function NewTaskRoute() {
             </>
           }
         />
+        <p data-slot="run-mode-note" className="mt-2.5 text-[13px] text-muted-foreground">
+          {composerRunModeNote({ worktree: worktreeOn, hasGit })}
+        </p>
 
       </div>
 
@@ -1419,32 +1413,6 @@ function ModeSegment({
       >
         {planning ? 'Planning…' : 'Plan first'}
       </button>
-    </div>
-  )
-}
-
-/** Honest static starters (the mockup's ghost chips): they only fill the textarea — the user
- *  still aims and submits. */
-const SUGGESTIONS = [
-  'Review recent changes',
-  'Find a bug',
-  'Add missing tests',
-]
-
-function SuggestedChips({ onPick }: { onPick: (text: string) => void }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {SUGGESTIONS.map((suggestion) => (
-        <button
-          key={suggestion}
-          type="button"
-          data-slot="suggested-chip"
-          onClick={() => onPick(suggestion)}
-          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-muted"
-        >
-          {suggestion}
-        </button>
-      ))}
     </div>
   )
 }

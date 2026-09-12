@@ -126,7 +126,7 @@ describe('the full-screen /new against a live dry-run server', () => {
         `document.activeElement === document.querySelector('[data-slot="composer"] textarea')`,
       ),
     ).toBe(true)
-    expect(browser.count('[data-slot="suggested-chip"]')).toBe(3)
+    expect(browser.count('[data-slot="suggested-chip"]')).toBe(0)
   })
 
   it('the pill row resolves: no source picked, runner pill iff >1 backend, base: main, ×1', async () => {

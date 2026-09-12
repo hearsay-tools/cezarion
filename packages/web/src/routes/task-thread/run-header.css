@@ -37,5 +37,8 @@
 [data-slot='run-meta'] { margin-top: calc(var(--spacing) * 2.5); }
 @media (min-width: 768px) {
   [data-slot='run-header'] { padding-top: calc(var(--spacing) * 5.5); }
+  [data-slot='run-title-row'] { display: flex; flex-wrap: nowrap; align-items: center; gap: 12px; }
+  [data-slot='run-title-row'] > .group { flex: 1; min-width: 0; max-width: none; }
   [data-slot='run-title-row'] h1 { font-size: 25px; letter-spacing: -0.7px; }
+  [data-slot='run-title-row'] > span:last-child { margin-left: 0; }
 }

@@ -425,6 +425,17 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
               onChange={(event) => setDraft({ ...draft, name: event.target.value })}
               className="h-12 bg-card text-sm"
             />
+            <label htmlFor="workflow-description" className="text-xs font-semibold">
+              Description
+            </label>
+            <Textarea
+              id="workflow-description"
+              data-slot="wb-description"
+              aria-label="Description"
+              value={draft.description}
+              onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+              className="min-h-[72px] bg-card p-3.5 text-sm"
+            />
           </section>
           <div
             data-slot="wb-actions"

@@ -57,10 +57,7 @@
 [data-route='new'] [data-slot='composer-feedback'] > div { padding-inline: 0; }
 
 @media (min-width: 1280px) {
-  /* Include the reserved feedback row in the side panel's span so a visible follow-up
-   * preference cannot stretch the editor and submission controls. */
   [data-route='new'] .new-task-composer { align-items: start; }
-  [data-route='new'] .new-task-composer [data-slot='composer-execution-panel'] { grid-row: 1 / 5; }
   [data-route='new'] .new-task-submission { margin-top: 8px; }
 }
 
