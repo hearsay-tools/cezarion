@@ -124,7 +124,7 @@
 }
 
 [data-inbox-empty="true"] [data-slot="centered-state"] { min-height: 440px; flex: none; border: 0; border-radius: 0; background: transparent; }
-[data-inbox-empty="true"] [data-slot="centered-state"] h2 { font-size: 22px; font-weight: 400; }
+[data-inbox-empty="true"] [data-slot="centered-state"] h2 { font-size: 22px; font-weight: 500; }
 [data-inbox-empty="true"] [data-slot="centered-state"] p { max-width: 460px; font-size: 13px; }
 
 [data-slot="variant-confirm-dialog"], [data-slot="plan-save-dialog"], [data-slot="plan-overwrite-dialog"] { padding: 24px; gap: 18px; border-radius: 12px; }
