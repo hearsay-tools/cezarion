@@ -571,7 +571,7 @@ export function NewTaskRoute() {
           <p className="mb-2 hidden md:block text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
             New task
           </p>
-          <h1 className="text-[30px] leading-tight font-semibold tracking-[-0.025em] max-md:text-[22px]">
+          <h1 className="text-[30px] leading-[normal] font-semibold tracking-[-0.9px] max-md:text-[22px] max-md:leading-[29px] max-md:tracking-[-0.6px]">
             What should the agent work on?
           </h1>
           {/* Follows the resolved run mode (#793). Printing the isolation promise
