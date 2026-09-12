@@ -1,4 +1,4 @@
-import { BotIcon, ChevronDownIcon } from 'lucide-react'
+import { BotIcon, ChevronDownIcon } from '@/components/design-icons'
 import { useState } from 'react'
 
 import type { ToolStatus } from '@open-mercato/cezar-api-client'

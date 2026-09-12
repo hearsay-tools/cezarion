@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowUpIcon, CheckIcon, ChevronDownIcon, CpuIcon, MicIcon, PaperclipIcon, PlayIcon, SquareIcon, TerminalIcon, XIcon } from 'lucide-react'
+import { PlayIcon } from 'lucide-react'
+import { ArrowUpIcon, CheckIcon, ChevronDownIcon, CpuIcon, MicIcon, PaperclipIcon, SquareIcon, TerminalIcon, XIcon } from '@/components/design-icons'
 import {
   useCallback,
   useEffect,

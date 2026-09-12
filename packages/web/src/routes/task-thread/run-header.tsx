@@ -1,22 +1,7 @@
 import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  ArchiveIcon,
-  ArchiveRestoreIcon,
-  BotIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  CopyIcon,
-  EllipsisIcon,
-  FileTextIcon,
-  MailIcon,
-  PencilIcon,
-  PinIcon,
-  PinOffIcon,
-  SquareTerminalIcon,
-  Trash2Icon,
-  XIcon,
-} from 'lucide-react'
+import { ArchiveRestoreIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
+import { ArchiveIcon, BotIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
 import { Fragment, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
 

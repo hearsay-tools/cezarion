@@ -1,4 +1,4 @@
-import { ArrowDownIcon } from 'lucide-react'
+import { ArrowDownIcon } from '@/components/design-icons'
 import {
   useCallback,
   useEffect,

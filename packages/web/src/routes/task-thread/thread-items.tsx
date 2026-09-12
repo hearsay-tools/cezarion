@@ -1,19 +1,5 @@
-import {
-  BotIcon,
-  BrainIcon,
-  ChevronRightIcon,
-  FileTextIcon,
-  FolderInputIcon,
-  GlobeIcon,
-  ListTodoIcon,
-  LoaderCircleIcon,
-  PaperclipIcon,
-  SearchIcon,
-  SquarePenIcon,
-  SquareTerminalIcon,
-  Trash2Icon,
-  WrenchIcon,
-} from 'lucide-react'
+import { BrainIcon, FileTextIcon, FolderInputIcon, GlobeIcon, LoaderCircleIcon, SquarePenIcon, SquareTerminalIcon } from 'lucide-react'
+import { BotIcon, ChevronRightIcon, ListTodoIcon, PaperclipIcon, SearchIcon, Trash2Icon, WrenchIcon } from '@/components/design-icons'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'

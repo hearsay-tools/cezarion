@@ -1,18 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  CheckIcon,
-  CircleSlashIcon,
-  CpuIcon,
-  GitBranchIcon,
-  GaugeIcon,
-  TerminalIcon,
-  SlidersHorizontalIcon,
-  EyeIcon,
-  FolderOpenIcon,
-  SparklesIcon,
-  WorkflowIcon,
-  XIcon,
-} from 'lucide-react'
+import { EyeIcon } from 'lucide-react'
+import { CheckIcon, CircleSlashIcon, CpuIcon, GitBranchIcon, GaugeIcon, TerminalIcon, SlidersHorizontalIcon, FolderOpenIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 

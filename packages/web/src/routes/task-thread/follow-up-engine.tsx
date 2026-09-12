@@ -1,4 +1,4 @@
-import { GaugeIcon, TerminalIcon } from 'lucide-react'
+import { GaugeIcon, TerminalIcon } from '@/components/design-icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 

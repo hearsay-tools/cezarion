@@ -1,12 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  CheckIcon,
-  CopyIcon,
-  CornerUpLeftIcon,
-  ExternalLinkIcon,
-  EyeIcon,
-  GitPullRequestIcon,
-} from 'lucide-react'
+import { CornerUpLeftIcon, ExternalLinkIcon, EyeIcon } from 'lucide-react'
+import { CheckIcon, CopyIcon, GitPullRequestIcon } from '@/components/design-icons'
 import { useEffect, useRef, useState } from 'react'
 
 import { ApiError, continueRun, createRunPr } from '@/api/client'

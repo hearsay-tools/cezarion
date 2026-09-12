@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import { BotIcon, ChevronDownIcon, GitBranchIcon } from 'lucide-react'
+import { BotIcon, ChevronDownIcon, GitBranchIcon } from '@/components/design-icons'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { runTitle } from '@/lib/task-groups'
 import type { ApiRun, WorkerDestroy } from '@open-mercato/cezar-api-client'
