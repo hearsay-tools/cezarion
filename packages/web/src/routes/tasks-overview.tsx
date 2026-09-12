@@ -1,27 +1,7 @@
 import './task-lists.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  ArchiveIcon,
-  CheckCheckIcon,
-  ChevronsLeftIcon,
-  ChevronsRightIcon,
-  Clock3Icon,
-  CoinsIcon,
-  CpuIcon,
-  DollarSignIcon,
-  FileDiffIcon,
-  GitBranchIcon,
-  ListChecksIcon,
-  LinkIcon,
-  MemoryStickIcon,
-  MoreHorizontalIcon,
-  PencilIcon,
-  PlusIcon,
-  ScaleIcon,
-  SearchIcon,
-  SearchXIcon,
-  WorkflowIcon,
-} from 'lucide-react'
+import { CheckCheckIcon, ChevronsLeftIcon, ChevronsRightIcon, Clock3Icon, CoinsIcon, DollarSignIcon, ListChecksIcon, LinkIcon, MemoryStickIcon, MoreHorizontalIcon, PencilIcon, ScaleIcon, SearchXIcon } from 'lucide-react'
+import { ArchiveIcon, CpuIcon, FileDiffIcon, GitBranchIcon, PlusIcon, SearchIcon, WorkflowIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { Link, useNavigate } from '@/lib/project-router'
 

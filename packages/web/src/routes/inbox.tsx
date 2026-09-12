@@ -1,6 +1,6 @@
 import './task-flows.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { InboxIcon, TriangleAlertIcon } from 'lucide-react'
+import { InboxIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useRef, useState } from 'react'
 import { Link, useNavigate } from '@/lib/project-router'
 

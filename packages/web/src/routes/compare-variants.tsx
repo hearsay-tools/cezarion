@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckIcon, ChevronRightIcon, ScaleIcon, SearchXIcon } from 'lucide-react'
+import { ScaleIcon, SearchXIcon } from 'lucide-react'
+import { CheckIcon, ChevronRightIcon } from '@/components/design-icons'
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router'
 

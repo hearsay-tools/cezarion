@@ -1,7 +1,7 @@
 import '../task-flows.css'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useParams } from 'react-router'
-import { ZapIcon } from 'lucide-react'
+import { ZapIcon } from '@/components/design-icons'
 import type { AutomationDefinition, AutomationLogRecord, AutomationsResponse } from '@open-mercato/cezar-api-client'
 
 import { checkAutomation, createAutomation, getAutomationCheck, getAutomationLog, getAutomations, setAutomationEnabled, updateAutomation } from '@/api/client'

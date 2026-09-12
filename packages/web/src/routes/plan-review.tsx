@@ -1,10 +1,7 @@
 import './task-flows.css'
 import { useQueryClient } from '@tanstack/react-query'
-import {
-  GripVerticalIcon,
-  PlayIcon,
-  XIcon,
-} from 'lucide-react'
+import { PlayIcon } from 'lucide-react'
+import { GripVerticalIcon, XIcon } from '@/components/design-icons'
 import { useState, type DragEvent, type ReactNode } from 'react'
 
 import { ApiError, createWorkflow } from '@/api/client'

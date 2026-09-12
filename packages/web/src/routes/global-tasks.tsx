@@ -1,18 +1,7 @@
 import './task-lists.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  ArchiveIcon,
-  ArchiveRestoreIcon,
-  EyeIcon,
-  EyeOffIcon,
-  LayersIcon,
-  ListChecksIcon,
-  PlusIcon,
-  SearchIcon,
-  SearchXIcon,
-  SlidersHorizontalIcon,
-  XIcon,
-} from 'lucide-react'
+import { ArchiveRestoreIcon, EyeIcon, EyeOffIcon, ListChecksIcon, SearchXIcon } from 'lucide-react'
+import { ArchiveIcon, LayersIcon, PlusIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { Link, useSearchParams } from 'react-router'
 
