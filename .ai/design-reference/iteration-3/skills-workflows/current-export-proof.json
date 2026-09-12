@@ -170,5 +170,10 @@
     "bundledAdvancePx": 260.7,
     "oldTextColumnPx": 260,
     "correctedTextColumnPx": 262
-  }
+  },
+  "shellParentCommit": "15ef08fc",
+  "shellWorkerCommit": "e05520da",
+  "finalBuildSha256": "aa6553609cc4175d91d071c51fd1ee19523e0d3663f27cbdc0c88b87d95fe351",
+  "integratedVerificationAt": "2026-09-12T10:55:18.244Z",
+  "tests": 192
 }

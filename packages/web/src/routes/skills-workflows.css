@@ -106,7 +106,7 @@
 
 [data-slot="wb-step-actions"] svg, [data-slot="wb-skill-add"] svg { width: 18px; height: 18px; }
 [data-slot="wb-save"] svg, [data-slot="wb-auto-run"] svg { width: 16px; height: 16px; }
-[data-slot="skill-row"] [data-slot="skill-source"] { line-height: 1.2; }
+[data-slot="skill-row"] [data-slot="skill-source"] { line-height: 1.5; }
 [data-slot="skill-row"] > span:nth-child(2) { line-height: 1.6; }
 :is([data-slot="wb-import-panel"], [data-slot="wb-add-dialog"], .sw-workflow-confirm) { box-shadow: none; }
 [data-slot="wb-import-panel"] [data-slot="dialog-title"] { line-height: 1.6; }
