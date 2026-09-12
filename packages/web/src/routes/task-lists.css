@@ -158,3 +158,10 @@
 }
 [data-route="tasks"][data-presentation="resources"] [data-slot="new-task-inline"],
 [data-slot="table-title-editor"] button:first-of-type { background: var(--accent-strong); color: white; }
+
+/* Summary references use the design's plain status label. The shared chip still
+   owns navigation, live status, its accessible name and the conflict-action panel. */
+:is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"]) { height: auto; border: 0; border-radius: 0; background: transparent; padding: 0; gap: 0; font-family: inherit; font-size: 12px; font-weight: 400; color: var(--accent-text); white-space: nowrap; }
+:is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"]) > svg { display: none; }
+:is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"])[data-status="merged"]::after { content: ' · Merged'; white-space: pre; }
+:is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"])[data-conflicting="true"]::after { content: ' · Conflicts'; white-space: pre; }
