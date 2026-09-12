@@ -416,7 +416,7 @@ describe('the hero surface', () => {
     const chips = document.querySelectorAll('[data-slot="suggested-chip"]')
     expect(chips.length).toBe(3)
     fireEvent.click(chips[0] as HTMLElement)
-    expect(textarea().value).toContain('failing or flaky test')
+    expect(textarea().value).toBe('Review recent changes')
     expect(requests.some((r) => r.method === 'POST')).toBe(false)
     expect(location()).toBe('/new')
   })
@@ -1215,7 +1215,8 @@ describe('submit', () => {
     expect(modelPill.textContent).toContain('native-sonnet')
     expect(modelPill.textContent).not.toContain('opus')
     expect(modelPill.tagName).toBe('SPAN')
-    expect(modelPill.querySelector('svg')).toBeNull()
+    // A locked model keeps its identity icon, but offers no dropdown affordance.
+    expect(modelPill.querySelector(':scope > svg')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Model' })).toBeNull()
 
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Runner' }))

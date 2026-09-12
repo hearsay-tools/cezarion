@@ -1,0 +1,6 @@
+[data-slot='task-confirmation'] { padding: 24px; border-radius: 12px; }
+[data-slot='task-confirmation'] [data-slot='alert-dialog-title'] { font-size: 20px; font-weight: 500; }
+[data-slot='task-confirmation'] [data-slot='alert-dialog-description'] { font-size: 13px; line-height: 1.6; }
+@media (max-width: 767px) {
+  [data-slot='notes-panel'], .task-action-panel { padding: 18px; }
+}

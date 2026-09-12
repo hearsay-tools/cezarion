@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowUpIcon, CheckIcon, ChevronDownIcon, MicIcon, PaperclipIcon, PlayIcon, SquareIcon, XIcon } from 'lucide-react'
+import { ArrowUpIcon, CheckIcon, ChevronDownIcon, MicIcon, PaperclipIcon, PlayIcon, SquareIcon, TerminalIcon, XIcon } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -707,7 +707,7 @@ export function Composer({
             onPaste={onPaste}
           />
 
-          {executionOptions ? <p className="px-5 pt-3 pb-2 text-xs text-muted-foreground">⌁ &nbsp; Type / for a skill or workflow</p> : null}
+          {executionOptions ? <p data-slot="composer-skill-hint" className="flex items-center gap-2 px-5 pt-3 pb-2 text-xs text-muted-foreground"><TerminalIcon aria-hidden="true" className="size-[15px] shrink-0" />Type / for a skill or workflow</p> : null}
           {sessionControls && recording ? <div data-slot="session-controls" inert={readOnly || undefined}>{sessionControls}</div> : null}
           {recording ? (
             <div>

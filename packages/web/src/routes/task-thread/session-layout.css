@@ -30,3 +30,8 @@
 @media (max-width: 767px) {
   .task-open-targets { align-items: flex-start; flex-direction: column; }
 }
+/* The report remains the streamed Markdown. Only its reading typography changes. */
+[data-route='task-thread'] [data-slot='assistant-message'] { font-size: 13px; line-height: 1.7; color: var(--muted-foreground); }
+[data-route='task-thread'] [data-slot='assistant-message'] :is(h1, h2, h3, h4, strong) { color: var(--foreground); }
+[data-route='task-thread'] [data-slot='assistant-message'] h2 { font-size: 20px; line-height: 1.4; }
+[data-route='task-thread'] .session-composer [data-slot='composer-editor'] { border-color: var(--composer-border); }

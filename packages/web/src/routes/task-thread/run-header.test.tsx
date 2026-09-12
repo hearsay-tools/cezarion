@@ -383,7 +383,7 @@ describe('actions hit their endpoints', () => {
 
     expect(sent.some((r) => r.method === 'DELETE')).toBe(false)
     const dialog = await screen.findByRole('alertdialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete task' }))
     await waitFor(() => {
       expect(sent.some((r) => r.method === 'DELETE' && r.path === '/api/v1/runs/r1')).toBe(true)
     })
@@ -393,13 +393,13 @@ describe('actions hit their endpoints', () => {
     })
   })
 
-  it('the delete confirm button stays "Delete" even for a long task name, which appears in the description instead (#403)', async () => {
+  it('the delete confirm button stays "Delete task" even for a long task name, which appears in the description instead (#403)', async () => {
     const longTitle = 'create a github issue for saving unsuccessfully finished tasks automatically'
     renderHeader(run('failed', { titleSummary: longTitle }))
     fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete' }))
 
     const dialog = await screen.findByRole('alertdialog')
-    expect(within(dialog).getByRole('button', { name: 'Delete' })).not.toBeNull()
+    expect(within(dialog).getByRole('button', { name: 'Delete task' })).not.toBeNull()
     expect(within(dialog).getByText(longTitle)).not.toBeNull()
   })
 
@@ -408,7 +408,7 @@ describe('actions hit their endpoints', () => {
     renderHeader(run('done'))
     fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete' }))
     const dialog = await screen.findByRole('alertdialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep it' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => {
       expect(screen.queryByRole('alertdialog')).toBeNull()
     })

@@ -1,3 +1,4 @@
+import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveIcon,
@@ -863,26 +864,29 @@ function ConfirmDialog({ run, actions }: { run: ApiRun; actions: RunActions }) {
   const lastKind = useRef(confirming)
   if (confirming !== null) lastKind.current = confirming
   const kind = confirming ?? lastKind.current
-  const title = kind === 'finish' ? 'Finish task?' : kind === 'archive' ? 'Archive task?' : 'Delete this task?'
-  const label = kind === 'finish' ? 'Review and finish' : kind === 'archive' ? 'Archive task' : 'Delete'
+  const title = kind === 'finish' ? 'Finish task?' : kind === 'archive' ? 'Archive task?' : 'Delete task permanently?'
+  const label = kind === 'finish' ? 'Review and finish' : kind === 'archive' ? 'Archive task' : 'Delete task'
   return (
     <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && actions.setConfirming(null)}>
-      <AlertDialogContent>
+      <AlertDialogContent data-slot="task-confirmation" className="sm:max-w-[660px]">
         <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogTitle className={kind === 'delete' ? 'text-danger' : undefined}>{title}</AlertDialogTitle>
           <AlertDialogDescription>
               <>
-                {kind === 'finish' ? 'Continue through the existing change-review gate before finalizing.' : kind === 'archive' ? 'Move this task out of Active tasks. You can restore it from Archived.' : 'This removes the run, its transcript, its worktree and its branch. There is no undo.'}
-                <span className="mt-1 block truncate font-medium text-foreground" title={runTitle(run)}>
-                  {runTitle(run)}
-                </span>
+                {kind === 'finish' ? 'Finish “' : kind === 'archive' ? 'Move “' : 'Delete “'}
+                <span className="font-medium text-foreground" title={runTitle(run)}>{runTitle(run)}</span>
+                {kind === 'finish'
+                  ? '”. Continue through the existing change-review gate before finalizing.'
+                  : kind === 'archive'
+                    ? '” out of Active tasks. You can restore it from Archived.'
+                    : '” and its transcript, worktree and branch. This cannot be undone.'}
               </>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Keep it</AlertDialogCancel>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            className={kind === 'delete' ? 'bg-danger text-danger-foreground hover:brightness-[0.96]' : undefined}
+            className={kind === 'delete' ? 'bg-danger text-danger-foreground hover:brightness-[0.96]' : 'bg-accent-strong text-accent-strong-foreground hover:brightness-[0.96]'}
             onClick={() => {
               if (kind === 'finish') actions.finish.mutate()
               else if (kind === 'archive') actions.archive.mutate()

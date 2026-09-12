@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CheckIcon,
-  ChevronDownIcon,
   CircleSlashIcon,
+  CpuIcon,
+  GitBranchIcon,
+  SlidersHorizontalIcon,
   EyeIcon,
   FolderOpenIcon,
-  PlusIcon,
   SparklesIcon,
-  SquareIcon,
   WorkflowIcon,
   XIcon,
 } from 'lucide-react'
@@ -107,6 +107,7 @@ import {
 import { parseNewTaskParams } from './new-task-params'
 import { buildPlannedRunBody, pendingPlanOf, type PendingPlan } from './new-task-plan'
 import { PlanReview } from './plan-review'
+import './new-task.css'
 
 /**
  * `/new` — the full-screen new-task hero (spec §"New task (full-screen, #386)"; visual
@@ -575,12 +576,12 @@ export function NewTaskRoute() {
 
 
 
-      <div className="relative z-[1] mx-auto w-full max-w-[1180px] px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
+      <div className="relative z-[1] mx-auto w-full max-w-none px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
         <header className="mb-7 max-md:mb-5">
           <p className="mb-2 hidden md:block text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
             New task
           </p>
-          <h1 className="text-[28px] leading-tight font-semibold tracking-[-0.025em] max-md:text-[22px]">
+          <h1 className="text-[30px] leading-tight font-semibold tracking-[-0.025em] max-md:text-[22px]">
             What should the agent work on?
           </h1>
           {/* Follows the resolved run mode (#793). Printing the isolation promise
@@ -591,8 +592,8 @@ export function NewTaskRoute() {
           </p>
         </header>
 
-        <section aria-label="Suggested task starters" className="mb-6">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">Start with a suggestion</p>
+        <section aria-label="Suggested task starters" className="mb-7">
+          <p className="mb-3 text-xs font-normal text-muted-foreground">Start with a suggestion</p>
           <SuggestedChips onPick={(text) => update({ text })} />
         </section>
 
@@ -676,7 +677,7 @@ export function NewTaskRoute() {
                 <PickerPill
                   slot="model-pill"
                   ariaLabel="Model"
-                  label={<span className="flex min-w-0 flex-col text-left"><span className="text-[10px] text-muted-foreground uppercase">Model</span><span className="truncate text-sm text-foreground">{models.find((m) => m.id === model)?.label ?? 'auto'}</span></span>}
+                  label={<span className="new-task-model-label"><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-icon" /><span className="flex min-w-0 flex-col gap-1 text-left"><span className="text-[10px] font-semibold text-muted-foreground uppercase">Model</span><span className="truncate text-sm text-foreground">{models.find((m) => m.id === model)?.label ?? 'auto'}</span></span></span>}
                   value={model}
                   disabled={!providersReady}
                   readOnly={modelsLocked}
@@ -720,7 +721,7 @@ export function NewTaskRoute() {
             <div className="flex min-w-0 flex-col gap-4">
             <details data-slot="execution-options" open className="group rounded-xl border border-border bg-card xl:self-start">
               <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
-                <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
+                <SlidersHorizontalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-icon" />
                 <span className="font-medium text-foreground">Execution settings</span>
                 <span data-slot="execution-summary" hidden className="min-w-0 basis-full truncate pl-5 xl:ml-auto xl:basis-auto xl:pl-0">
                   {RUNNERS.find((runner) => runner.id === displayRunner)?.label ?? displayRunner}
@@ -765,12 +766,11 @@ export function NewTaskRoute() {
                   ) : null}
                   {repo.data ? <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Base branch</span><BaseBranchPill repo={repo.data} /></div> : null}
                 </div>
-                <p className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block">{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
+                <p data-slot="execution-tip" className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block"><GitBranchIcon aria-hidden="true" className="mb-2 size-[18px] text-accent-icon" />{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
               </div>
             </details>
             {followupsToggleShown ? <section data-slot="followups-options" aria-label="Follow-ups preference" className="rounded-xl border border-border bg-card p-4">
               <GenerateFollowupsToggle on={generateFollowupsOn} onChange={(on) => update({ generateFollowups: on })} />
-              <p className="mt-2 text-[11px] leading-5 text-muted-foreground">Generate suggestions in Inbox after this task. Enabled by default; your choice is remembered.</p>
             </section> : null}
             </div>
           }
@@ -798,7 +798,10 @@ export function NewTaskRoute() {
             </>
           }
         />
-
+        <div data-slot="new-task-mode-note" className="mt-5 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+          <span>{draft.planFirst ? 'Review the plan before starting the task.' : 'Start immediately with the selected configuration.'}</span>
+          <kbd className="hidden font-sans md:inline">{submitShortcutHint()}</kbd>
+        </div>
       </div>
 
       {plan !== null ? (
@@ -920,14 +923,11 @@ function GenerateFollowupsToggle({
           ? 'Agents can add newly discovered follow-up work to the task inbox'
           : 'Follow-up generation is off; agents still maintain the handoff journal'
       }
-      className="flex min-h-11 w-full items-center gap-3 text-left text-[13px] font-medium text-foreground"
+      aria-label="Follow-ups"
+      className="flex min-h-11 w-full items-center justify-between gap-4 text-left text-foreground"
     >
-      {on ? (
-        <CheckIcon aria-hidden="true" className="size-5 shrink-0 rounded border border-accent-strong bg-accent-strong p-0.5 text-accent-strong-foreground" />
-      ) : (
-        <SquareIcon aria-hidden="true" className="size-5 shrink-0 text-muted-foreground" />
-      )}
-      Follow-ups
+      <span><span className="block text-[15px]">Follow-ups</span><span className="mt-1 block text-xs leading-[1.5] text-muted-foreground">Generate suggestions in Inbox after this task. Enabled by default; your choice is remembered.</span></span>
+      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-card', on && 'ml-auto')} /></span>
     </button>
   )
 }
@@ -1172,8 +1172,8 @@ function SourcePill({
     )
   }
 
-  const SourceIcon = source === null ? PlusIcon : source.source === 'skill' ? SparklesIcon : WorkflowIcon
-  // The + and generic label distinguish an empty choice. Keep its enabled boundary and ink
+  const SourceIcon = source === null || source.source === 'skill' ? SparklesIcon : WorkflowIcon
+  // The generic label distinguishes an empty choice. Keep its enabled boundary and ink
   // consistent with the other selectors; dashed boundaries mark disabled pills (#171).
   const trigger = (
     <button
@@ -1401,6 +1401,7 @@ function ModeSegment({
             : 'font-medium text-muted-foreground hover:text-foreground',
         )}
       >
+        {!planFirst ? <CheckIcon aria-hidden="true" className="size-3.5" /> : null}
         Start
       </button>
       <button
@@ -1427,9 +1428,9 @@ function ModeSegment({
 /** Honest static starters (the mockup's ghost chips): they only fill the textarea — the user
  *  still aims and submits. */
 const SUGGESTIONS = [
-  'Fix a failing or flaky test',
-  'Summarize recent commits on this branch',
-  'Update the README for recent changes',
+  'Review recent changes',
+  'Find a bug',
+  'Add missing tests',
 ]
 
 function SuggestedChips({ onPick }: { onPick: (text: string) => void }) {
@@ -1443,7 +1444,6 @@ function SuggestedChips({ onPick }: { onPick: (text: string) => void }) {
           onClick={() => onPick(suggestion)}
           className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-muted"
         >
-          <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
           {suggestion}
         </button>
       ))}
