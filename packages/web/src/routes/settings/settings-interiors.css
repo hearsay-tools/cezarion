@@ -42,14 +42,6 @@
 .settings-panel :is([data-slot="project-row"], [data-slot="worktree-row"]) > :is(th, td) { display: block; max-width: none; width: 100%; min-width: 0; text-align: left; padding: 0 12px; }
 .settings-panel :is([data-slot="project-row"], [data-slot="worktree-row"]) .truncate { white-space: normal; overflow-wrap: anywhere; }
 .settings-panel :is([data-slot="project-row"], [data-slot="worktree-row"]) td:last-child { border-top: 1px solid var(--border); padding-top: 12px; }
-@media (max-width: 767px) {
-  .settings-panel { padding: 20px; }
-  .settings-panel button:not([role=switch]) { min-height: 44px; }
-  .settings-panel [data-slot="notifications-section"] > section > div:first-child,
-  .settings-panel [data-slot="skills-settings-section"] > section > div:first-child { flex-direction: column; align-items: flex-start; }
-  .settings-panel [data-slot="agent-config-agents"] { flex-direction: column; }
-  .settings-panel [data-slot="accounts-tabs"] { flex-wrap: wrap; }
-}
 .settings-panel .settings-resource-controls input { flex: 1; width: 100%; }
 .settings-panel .settings-field:has([data-slot="resources-auto-resume"]),
 .settings-panel .settings-field:has([data-slot="resources-monitoring-wake-mode"]) { position: relative; }
@@ -60,10 +52,117 @@
 .settings-panel [data-slot="agent-config-group"] ul { flex-direction: row; flex-wrap: wrap; gap: 8px; }
 .settings-panel [data-slot="agent-config-file"] { border: 1px solid var(--border); padding: 10px 12px; }
 .settings-panel [data-slot="agent-config-file"][data-selected=true] { border-color: var(--accent-strong); color: var(--accent-text); }
+
+/* S01–S13: the Settings shell owns this rhythm, independent of the task reading width. */
+.settings-route { padding: 36px; gap: 22px; }
+.settings-route-body { gap: 24px; }
+.settings-section-picker { position: relative; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.settings-section-picker summary { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 12px 14px; list-style: none; cursor: pointer; font-size: 14px; }
+.settings-section-picker summary::-webkit-details-marker { display: none; }
+.settings-section-picker nav { display: grid; padding: 4px; border-top: 1px solid var(--border); }
+.settings-section-picker nav a { border-radius: 6px; padding: 12px; font-size: 13px; }
+.settings-section-picker nav a[aria-current=page] { background: color-mix(in srgb, var(--accent-strong) 12%, transparent); color: var(--accent-text); }
+.settings-panel { border-radius: 10px; }
+.settings-panel h3 { font-weight: 400; }
+.settings-panel :is([data-slot=notifications-section],[data-slot=skills-settings-section]) h2 { font-weight: 400; }
+.settings-panel :is([data-slot=notifications-section],[data-slot=skills-settings-section]) h2 + p { margin-top: 8px; line-height: 1.6; }
+.settings-panel :is([data-slot=notifications-section],[data-slot=skills-settings-section]) [role=switch] { margin-top: 8px; }
+.settings-panel [data-slot=appearance-section] { border: 0; border-radius: 0; }
+.settings-panel [data-slot=appearance-section] > section { gap: 12px; }
+.settings-panel [data-slot=appearance-section] > section + section { border-top: 1px solid var(--border); padding-top: 24px; }
+.settings-panel [data-slot=appearance-section] h2 { font-size: 14px; font-weight: 400; }
+.settings-panel [data-slot=appearance-section] h2 + p { margin-top: 8px; }
+.settings-panel [data-slot=appearance-section] [role=radiogroup] { padding: 0; gap: 10px; border: 0; background: transparent; }
+.settings-panel [data-slot=appearance-section] [role=radio] { border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 12px 16px; font-weight: 400; }
+.settings-panel [data-slot=appearance-section] [aria-checked=true] { background: color-mix(in srgb, var(--accent-strong) 12%, transparent); color: var(--accent-text); border-color: color-mix(in srgb, var(--accent-strong) 30%, var(--border)); }
+.settings-panel [data-slot=bookmarklet-panel] { padding: 0; }
+.settings-panel [data-slot=bookmarklet-panel] > span:first-child { align-self: flex-start; }
+.settings-panel [data-slot=bm-generic] { background: transparent; padding: 0 0 20px; border-width: 0 0 1px; border-radius: 0; }
+.settings-panel [data-slot=bm-row] { gap: 12px; }
+
+.settings-panel [data-slot=bm-link] svg { color: inherit; }
+.settings-panel [data-slot=notifications-permission] { margin: 20px 0; }
+.settings-panel [data-slot=notifications-permission][data-permission=denied] { color: var(--danger); }
+.settings-panel .settings-readout { padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.settings-panel .settings-disclosure { border-top: 1px solid var(--border); padding-top: 16px; font-size: 12px; color: var(--muted-foreground); }
+.settings-panel .settings-disclosure summary { cursor: pointer; padding: 4px 0; }
+.settings-panel .settings-disclosure > :not(summary) { margin-top: 12px; }
+.settings-panel [data-slot=agents-section] { gap: 20px; }
+.settings-panel [data-slot=agents-section] .settings-field + .settings-field { padding-top: 20px; }
+.settings-panel [data-slot=agents-system-prompt] { min-height: 64px; }
+.settings-panel .settings-toggle-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
+.settings-panel .settings-toggle-field h2 { font-size: 13px; font-weight: 400; }
+.settings-panel .settings-toggle-field + .settings-toggle-field { margin-top: -8px; }
+.settings-panel .settings-toggle-field label span { display: none; }
+.settings-panel .settings-toggle-field label { flex-shrink: 0; }
+.settings-panel .settings-form-actions { display: flex; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--border); padding-top: 20px; }
+.settings-panel [data-slot=accounts-tabs] { gap: 8px; }
+.settings-panel [data-slot=accounts-tabs] button { border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; }
+.settings-panel [data-slot=accounts-tabs] [data-state=active] { background: var(--accent-strong); color: white; }
+.settings-panel [data-slot=accounts-tabs] [data-state=active]::after { display: none; }
 @media (max-width: 767px) {
-  .settings-panel [data-slot="resources-auto-resume"],
-  .settings-panel [data-slot="resources-monitoring-wake-mode"] { position: static; }
-  .settings-panel .settings-field:has([data-slot="resources-auto-resume"]) > div:first-child,
-  .settings-panel .settings-field:has([data-slot="resources-monitoring-wake-mode"]) > div:first-child { padding-right: 0; }
-  .settings-panel [data-slot="agent-config-group"] li { max-width: 100%; }
+  .settings-route { padding: 28px 18px 32px; gap: 24px; }
+  .settings-route-header h1 { font-size: 24px; line-height: 36px; font-weight: 400; letter-spacing: 0; }
+  .settings-route-header > p { display: none; }
+  .settings-route-body { gap: 20px; }
+  .settings-panel { padding: 16px; }
+  .settings-panel-title { font-size: 20px; line-height: 30px; margin-bottom: 24px; }
+  .settings-panel button:not([role=switch]):not([data-slot=project-tag-suggestion]):not([data-slot=prompt-template-skill-chip]) { min-height: 44px; }
+  .settings-panel [data-slot=agent-config-agents] { flex-wrap: wrap; }
+  .settings-panel [data-slot=agent-config-group] li { max-width: 100%; }
+  .settings-panel [data-slot=accounts-tabs] { flex-wrap: wrap; }
+  .settings-panel [data-slot=appearance-section] [role=radiogroup] { display: grid; width: 100%; }
+  .settings-panel [data-slot=appearance-section] [role=radio] { justify-content: flex-start; }
+  .settings-panel .settings-resource-controls { align-items: stretch; }
+  .settings-panel [data-slot=agents-system-prompt] { min-height: 84px; }
 }
+
+.settings-panel .settings-retention-controls input { width: 100%; }
+.settings-panel .settings-retention-controls > span { display: none; }
+.settings-panel .settings-appearance-preview { padding: 20px; }
+.settings-panel [data-slot=appearance-theme] svg { display: none; }
+
+.settings-panel [data-slot=prompt-templates-section] > .settings-field > div:first-child > h2 { display: none; }
+.settings-panel [data-slot=prompt-templates-section] > .settings-field > div:first-child > p { margin-top: 0; }
+.settings-panel [data-slot=prompt-template-row] { padding-top: 12px; gap: 12px; }
+.settings-panel [data-slot=prompt-template-row] > label,
+.settings-panel [data-slot=prompt-template-row] > p,
+.settings-panel [data-slot=prompt-template-new] > label:not(:first-of-type) { margin-top: 8px; padding-top: 20px; border-top: 1px solid var(--border); }
+.settings-panel [data-slot=prompt-template-row] textarea { min-height: 44px; }
+.settings-panel [data-slot=prompt-template-skill-chip] { min-height: 28px; border: 0; border-radius: 4px; background: transparent; font-family: inherit; font-size: 13px; }
+.settings-panel [data-slot=prompt-template-skills-trigger] { border-radius: 6px; }
+.settings-panel [data-slot=accounts-defaults] { margin-top: 8px; }
+.settings-panel [data-slot=accounts-defaults] select { max-width: none; }
+.settings-panel [data-slot=accounts-provider] > dl { background: var(--background); }
+.settings-panel [data-slot=accounts-provider] > ul { border: 0; }
+.settings-panel [data-slot=account-row] { padding: 16px 0; }
+.settings-panel [data-slot=account-details] { background: var(--background); }
+.settings-route [data-slot=project-general] { gap: 20px; }
+.settings-route [data-slot=project-general] > section { padding: 20px; border-radius: 10px; }
+.settings-route [data-slot=project-general] [data-slot=project-facts] { border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+.settings-panel [data-slot=projects-section] .settings-field:has([data-slot=projects-browse-root]) > div:nth-child(2),
+.settings-panel [data-slot=projects-section] .settings-field:has([data-slot=projects-checkout-root]) > div:nth-child(2) { flex-wrap: wrap; }
+.settings-panel [data-slot=projects-section] .settings-field:has([data-slot=projects-browse-root]) button,
+.settings-panel [data-slot=projects-section] .settings-field:has([data-slot=projects-checkout-root]) button { margin-top: 8px; }
+.settings-panel :is([data-slot=projects-section],[data-slot=worktrees-panel]) .overflow-x-auto { border: 0; }
+.settings-panel :is([data-slot=project-row],[data-slot=worktree-row]) > :is(th,td) { padding-left: 0; padding-right: 0; }
+.settings-panel :is([data-slot=project-row],[data-slot=worktree-row]) > th { font-size: 14px; }
+.settings-panel :is([data-slot=project-row],[data-slot=worktree-row]) > td:nth-child(2) { padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); }
+.settings-panel :is([data-slot=project-row],[data-slot=worktree-row]) > td:last-child { margin-top: 8px; padding-top: 20px; }
+@media (max-width: 767px) {
+  .settings-panel [data-slot=accounts-defaults] label { flex-direction: column; align-items: stretch; }
+  .settings-panel [data-slot=accounts-defaults] label > span { width: auto; }
+  .settings-panel [data-slot=accounts-provider] dl > div { flex-wrap: wrap; }
+  .settings-route [data-slot=project-general] > section { padding: 16px; }
+}
+
+.settings-agent-picker { border: 1px solid var(--border); border-radius: 6px; background: var(--background); min-width: 0; }
+.settings-agent-picker summary { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 10px 12px; list-style: none; cursor: pointer; font-size: 13px; }
+.settings-agent-picker summary::-webkit-details-marker { display: none; }
+.settings-agent-picker [data-slot=agents-runner] { display: flex; flex-direction: column; width: 100%; max-width: none; border: 0; border-top: 1px solid var(--border); padding: 4px; }
+.settings-agent-picker [role=radio] { font-family: inherit; white-space: normal; }
+
+.settings-config-picker { border: 1px solid var(--border); border-radius: 8px; }
+.settings-config-picker summary { padding: 12px; font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
+.settings-config-picker nav { border-top: 1px solid var(--border); padding: 16px; }
+.settings-panel [data-slot=settings-config-editor] > [data-slot=code-editor] { margin-top: 8px; }

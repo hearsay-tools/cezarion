@@ -134,7 +134,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
     >
       <SettingsField
         title="Max parallel tasks"
-        hint="Limit simultaneously running tasks across projects. The rest wait in the queue; non-git folders run one at a time."
+        hint="Limit simultaneously running tasks across projects. The rest wait in the queue."
       >
         <select
           aria-label="Max parallel tasks"
@@ -167,7 +167,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
 
       <SettingsField
         title="Extra monitoring sessions"
-        hint="Additional capacity reserved for agents monitoring CI, workers, or commands."
+        hint="Additional capacity reserved for monitoring."
       >
         <select
           aria-label="Extra monitoring sessions"

@@ -246,7 +246,7 @@ afterEach(() => {
 })
 
 describe('the agents form', () => {
-  it('puts the anchored Providers section first', async () => {
+  it('keeps the anchored Providers section in an explicit disclosure', async () => {
     serve()
     renderAt('/settings/agents')
 
@@ -255,7 +255,7 @@ describe('the agents form', () => {
     expect(providers.id).toBe('providers')
     expect(providers.className).toContain('scroll-mt-20')
     expect(providers.className).not.toContain('scroll-mt-6')
-    expect(form()?.firstElementChild).toBe(providers)
+    expect(providers?.closest('details')?.querySelector('summary')?.textContent).toBe('Provider connections')
   })
 
   it('keeps a saved disconnected runner selected while disabling its runner and model controls', async () => {
@@ -581,7 +581,7 @@ describe('the agents form', () => {
       await screen.findByLabelText('Default model for claude')
       expect(rows().map((r) => r.getAttribute('data-value'))).toEqual(['claude', 'codex', 'opencode', 'pi'])
       // …and it is still called what it always was, because there is no account in play.
-      expect(document.body.textContent).toContain('Default runner')
+      expect(document.body.textContent).toContain('Default agent')
     })
 
     it('splits ONLY the agent that has a second login, and names each folder', async () => {

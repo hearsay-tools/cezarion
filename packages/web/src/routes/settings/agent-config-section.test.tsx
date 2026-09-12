@@ -200,7 +200,7 @@ describe('AgentConfigSection', () => {
     await waitFor(() => expect(screen.getByText(/Read-only/)).toBeTruthy())
     fireEvent.click(screen.getByText('.claude/settings.json'))
     await waitFor(() => expect(screen.getByLabelText('.claude/settings.json contents')).toBeTruthy())
-    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save file' })).toBeNull()
   })
 
   it('saves an edited file', async () => {
@@ -214,7 +214,7 @@ describe('AgentConfigSection', () => {
     fireEvent.click(screen.getByText('.claude/settings.json'))
     const editor = (await screen.findByLabelText('.claude/settings.json contents')) as HTMLTextAreaElement
     fireEvent.change(editor, { target: { value: '{"a":2}' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save file' }))
     await waitFor(() => expect(screen.getByText(/Saved/)).toBeTruthy())
   })
 })

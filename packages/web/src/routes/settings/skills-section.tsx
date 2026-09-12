@@ -96,6 +96,17 @@ function SkillsForm({
             </span>
           </div>
         </div>
+        <h3 className="mt-4 text-lg">Installation status</h3>
+        <p
+          data-slot="skills-installation-status"
+          role={updateError || update?.status === 'unavailable' ? 'status' : undefined}
+          className="text-[13px] text-soft-foreground"
+        >
+          {status}
+        </p>
+        <p className="mt-3 text-[13px] text-muted-foreground">Manage installed skills and sources from the Skills catalog.</p>
+        {projectId ? <Button asChild variant="outline" className="mt-2 self-start"><Link to={`/p/${encodeURIComponent(projectId)}/skills`}>Open Skills</Link></Button> : null}
+        <details className="settings-disclosure"><summary>Update preference inheritance</summary>
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
           <span>
             {inherited
@@ -113,16 +124,7 @@ function SkillsForm({
             Use default
           </Button>
         </div>
-        <h3 className="mt-4 text-lg">Installation status</h3>
-        <p
-          data-slot="skills-installation-status"
-          role={updateError || update?.status === 'unavailable' ? 'status' : undefined}
-          className="text-[13px] text-soft-foreground"
-        >
-          {status}
-        </p>
-        <p className="mt-3 text-[13px] text-muted-foreground">Manage installed skills and sources from the Skills catalog.</p>
-        {projectId ? <Button asChild variant="outline" className="mt-2 self-start"><Link to={`/p/${encodeURIComponent(projectId)}/skills`}>Open Skills</Link></Button> : null}
+        </details>
       </section>
     </div>
   )

@@ -1,5 +1,5 @@
 import { FileCogIcon } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { ApiError } from '@/api/client'
 import { useAgentConfig, useAgentConfigFile, useHealth, usePutAgentConfigFile } from '@/api/queries'
@@ -65,6 +65,7 @@ export function AgentConfigSection() {
 function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; installed: Runner[] }) {
   const [agentId, setAgentId] = useState<Runner>('claude')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const filePicker = useRef<HTMLDetailsElement>(null)
   const agent = descriptorFor(agentId)
   const selected = listing.files.find((f) => f.id === selectedId) ?? null
 
@@ -74,7 +75,8 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
   }
 
   return (
-    <div data-slot="agent-config" className="flex flex-col gap-4 p-4 md:p-6">
+    <div data-slot="agent-config" className="flex flex-col gap-5 p-4 md:p-6">
+      <p className="text-[13px] text-muted-foreground">Edit agent instructions and MCP configuration for this project.</p>
       {!listing.editable && (
         <div
           data-slot="agent-config-readonly"
@@ -118,14 +120,20 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
       )}
 
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6">
-        <nav data-slot="agent-config-nav" className="flex min-w-0 flex-col gap-5">
+        <details ref={filePicker} open={selected === null} className="settings-config-picker">
+          <summary>{selected ? `Configuration files · ${selected.label}` : 'Choose a configuration file'}</summary>
+          <nav data-slot="agent-config-nav" className="flex min-w-0 flex-col gap-5">
           <AgentPane
             agent={agent}
             listing={listing}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={(id) => {
+              setSelectedId(id)
+              if (filePicker.current) filePicker.current.open = false
+            }}
           />
-        </nav>
+          </nav>
+        </details>
 
         <div data-slot="agent-config-editor-pane" className="min-w-0">
           {selected ? (
@@ -268,8 +276,9 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <div data-slot="settings-config-editor" className="flex flex-col gap-3">
+      <h3 className="text-sm">Configuration file</h3>
+      <div className="settings-readout flex flex-wrap items-center gap-2">
         <span className="font-mono text-[13px]">{file.label}</span>
         <Badge variant="outline" className="text-[10px] uppercase">
           {file.format}
@@ -303,7 +312,7 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
           readOnly={!canWrite}
           onChange={setDraft}
           aria-label={`${file.label} contents`}
-          className="h-[26rem]"
+          className="h-[210px]"
         />
       )}
 
@@ -325,17 +334,17 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
       )}
 
       {canWrite && (
-        <div className="flex items-center gap-2">
+        <div className="settings-form-actions">
           <Button size="sm" onClick={save} disabled={!dirty || put.isPending}>
-            {file.exists ? 'Save' : 'Create'}
+            {file.exists ? 'Save file' : 'Create file'}
           </Button>
           <Button
             size="sm"
-            variant="ghost"
+            variant="outline"
             onClick={() => setDraft(null)}
             disabled={!dirty || put.isPending}
           >
-            Revert
+            Reset
           </Button>
           {dirty && <span className="text-[12px] text-soft-foreground">Unsaved changes</span>}
         </div>

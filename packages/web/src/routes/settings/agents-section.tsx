@@ -22,12 +22,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toaster'
 import { providerStatusFor } from '@/lib/provider-status'
 import {
-  DefaultAgentPicker,
   agentPickerRows,
   hasAgentAccounts,
 } from '@/components/default-agent-picker'
 import { modelCatalogStatus, modelsForRunner, RUNNERS } from '@/routes/new-task-form'
 import { ProviderSettings } from './provider-settings'
+
+import { SettingsAgentPicker } from './settings-agent-picker'
 
 /**
  * Settings → Agents (R6 Step 1.5, spec §"Settings"): today's scattered `PUT /api/config` knobs
@@ -116,13 +117,79 @@ function AgentsForm({
       },
     )
 
+  const renderModel = (runner: (typeof RUNNERS)[number]) => {
+  const provider = providerStatusFor(providerStatus.data, runner.id)
+  const providerConnected =
+    !providerStatus.isPending &&
+    !providerStatus.isError &&
+    provider?.enabled === true &&
+    provider.status === 'connected'
+  const providerReason = providerStatus.isPending
+    ? 'Checking provider authentication…'
+    : providerStatus.isError
+      ? 'Provider authentication could not be verified.'
+      : provider?.enabled === false
+        ? 'This provider is disabled. Enable it above or choose another provider.'
+      : providerConnected
+        ? undefined
+        : 'Connect this provider before selecting it.'
+  const catalog = catalogs[runner.id]
+  const catalogStatus = modelCatalogStatus(runner.id, catalog.data, catalog.isError, catalog.isFetching)
+  const modelOptions = modelsForRunner(runner.id, catalog.data, [
+    config.defaultModels[runner.id],
+  ])
+  const configuredModel = config.defaultModels[runner.id] ?? ''
+  const configuredModelLabel =
+    modelOptions.find((model) => model.id === configuredModel)?.label ??
+    configuredModel ??
+    'auto (default)'
+  return (
+    <section key={runner.id} className="settings-field flex flex-col gap-2">
+      <h2>Default model · {runner.id === 'codex' ? 'Codex' : runner.id === 'claude' ? 'Claude Code' : runner.label}</h2>
+      {config.modelsLocked ? (
+        <output
+          aria-label={`Default model for ${runner.label}`}
+          data-slot="agents-model"
+          data-runner={runner.id}
+          title="Model selection is locked to native coding-agent settings."
+          className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs"
+        >
+          {configuredModelLabel}
+        </output>
+      ) : (
+        <select
+          aria-label={`Default model for ${runner.label}`}
+          data-slot="agents-model"
+          data-runner={runner.id}
+          value={configuredModel}
+          title={providerReason ?? runner.desc}
+          disabled={save.isPending || !providerConnected}
+          onChange={(event) =>
+            save.mutate({
+              defaultModels: { [runner.id]: event.target.value || null } as Partial<
+                Record<Runner, string | null>
+              >,
+            })
+          }
+          className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
+        >
+          {modelOptions.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.id === '' ? 'Native agent default' : model.label}
+            </option>
+          ))}
+          {catalogStatus ? <option disabled>{catalogStatus}</option> : null}
+        </select>
+      )}
+    </section>
+  )
+  }
+
   return (
     <div
       data-slot="agents-section"
       className="mx-auto flex w-full max-w-2xl flex-col gap-7 p-4 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-6 md:pb-6"
     >
-      <ProviderSettings />
-
       <DefaultAgentField
         defaultRunner={config.defaultRunner}
         providerStatus={providerStatus}
@@ -130,88 +197,11 @@ function AgentsForm({
         onPick={(runner) => save.mutate({ defaultRunner: runner })}
       />
 
-      <Field
-        title="Default models"
-        hint={
-          config.modelsLocked
-            ? 'Models are locked to the defaults configured in the native coding-agent settings.'
-            : 'The model preselected in the composer for each runner. Auto lets the runner decide per task.'
-        }
-      >
-        <div className="flex w-full flex-col gap-5">
-          {RUNNERS.map((runner) => {
-            const provider = providerStatusFor(providerStatus.data, runner.id)
-            const providerConnected =
-              !providerStatus.isPending &&
-              !providerStatus.isError &&
-              provider?.enabled === true &&
-              provider.status === 'connected'
-            const providerReason = providerStatus.isPending
-              ? 'Checking provider authentication…'
-              : providerStatus.isError
-                ? 'Provider authentication could not be verified.'
-                : provider?.enabled === false
-                  ? 'This provider is disabled. Enable it above or choose another provider.'
-                : providerConnected
-                  ? undefined
-                  : 'Connect this provider before selecting it.'
-            const catalog = catalogs[runner.id]
-            const catalogStatus = modelCatalogStatus(runner.id, catalog.data, catalog.isError, catalog.isFetching)
-            const modelOptions = modelsForRunner(runner.id, catalog.data, [
-              config.defaultModels[runner.id],
-            ])
-            const configuredModel = config.defaultModels[runner.id] ?? ''
-            const configuredModelLabel =
-              modelOptions.find((model) => model.id === configuredModel)?.label ??
-              configuredModel ??
-              'auto (default)'
-            return (
-              <label key={runner.id} className="flex flex-col gap-2">
-                <span className="shrink-0 text-sm text-muted-foreground">{runner.label}</span>
-                {config.modelsLocked ? (
-                  <output
-                    aria-label={`Default model for ${runner.label}`}
-                    data-slot="agents-model"
-                    data-runner={runner.id}
-                    title="Model selection is locked to native coding-agent settings."
-                    className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs"
-                  >
-                    {configuredModelLabel}
-                  </output>
-                ) : (
-                  <select
-                    aria-label={`Default model for ${runner.label}`}
-                    data-slot="agents-model"
-                    data-runner={runner.id}
-                    value={configuredModel}
-                    title={providerReason ?? runner.desc}
-                    disabled={save.isPending || !providerConnected}
-                    onChange={(event) =>
-                      save.mutate({
-                        defaultModels: { [runner.id]: event.target.value || null } as Partial<
-                          Record<Runner, string | null>
-                        >,
-                      })
-                    }
-                    className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
-                  >
-                    {modelOptions.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.id === '' ? 'auto (default)' : model.label}
-                      </option>
-                    ))}
-                    {catalogStatus ? <option disabled>{catalogStatus}</option> : null}
-                  </select>
-                )}
-              </label>
-            )
-          })}
-        </div>
-      </Field>
+      {['codex', 'claude'].map((id) => RUNNERS.find((runner) => runner.id === id)!).map(renderModel)}
 
       <Field
         title="System prompt"
-        hint="Extra instructions appended to every run, whichever runner executes it. This is the only place it is edited."
+        hint="Extra instructions for every run in this project."
       >
         <Textarea
           aria-label="System prompt"
@@ -221,31 +211,11 @@ function AgentsForm({
           placeholder="Extra rules for every agent run — conventions, tone, review requirements…"
           className="min-h-24 w-full"
         />
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-action="agents-save-prompt"
-            disabled={promptSaved || promptOverLimit || save.isPending}
-            onClick={savePrompt}
-          >
-            Save
-          </Button>
-          {promptOverLimit ? (
-            <p data-slot="agents-prompt-limit" className="text-[11px] text-danger">
-              {trimmedPrompt.length.toLocaleString()} characters — the limit is{' '}
-              {SYSTEM_PROMPT_MAX.toLocaleString()}.
-            </p>
-          ) : (
-            <p className="text-[11px] text-soft-foreground">
-              Leave empty and save to clear. Applied to new runs only.
-            </p>
-          )}
-        </div>
+
       </Field>
 
       <Field
+        toggle
         title="Live title updates"
         hint="Refresh a task's short title through the namer model as the run progresses. A manual rename always wins and stops updates for that task."
       >
@@ -270,6 +240,7 @@ function AgentsForm({
       </Field>
 
       <Field
+        toggle
         title="Review changes before finishing"
         hint="When on, a task with changes pauses so you can Accept, Send back, or open a Draft PR. Autonomous tasks always skip this and finish on their own. Default: off — tasks finish without asking."
       >
@@ -319,6 +290,36 @@ function AgentsForm({
           </p>
         )}
       </Field>
+        <div className="settings-form-actions">
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            data-action="agents-save-prompt"
+            disabled={promptSaved || promptOverLimit || save.isPending}
+            onClick={savePrompt}
+          >
+            Save prompt
+          </Button>
+          {promptOverLimit ? (
+            <p data-slot="agents-prompt-limit" className="text-[11px] text-danger">
+              {trimmedPrompt.length.toLocaleString()} characters — the limit is{' '}
+              {SYSTEM_PROMPT_MAX.toLocaleString()}.
+            </p>
+          ) : (
+            <p className="text-[11px] text-soft-foreground">
+              Leave empty and save to clear. Applied to new runs only.
+            </p>
+          )}
+        </div>
+      <details className="settings-disclosure">
+        <summary>Additional agent models</summary>
+        <div className="flex flex-col gap-5">{RUNNERS.filter((runner) => runner.id !== 'codex' && runner.id !== 'claude').map(renderModel)}</div>
+      </details>
+      <details className="settings-disclosure">
+        <summary>Provider connections</summary>
+        <ProviderSettings />
+      </details>
     </div>
   )
 }
@@ -374,14 +375,10 @@ function DefaultAgentField({
 
   return (
     <Field
-      title={hasAccounts ? 'Default agent' : 'Default runner'}
-      hint={
-        hasAccounts
-          ? 'Preselected for new tasks in THIS repo, and used by the chain planner. Each task can still pick another agent or account. The account is stored on this machine only — it is never committed, so a teammate keeps their own.'
-          : 'Preselected for new tasks in THIS repo, and used by the chain planner. Each task can still pick another runner.'
-      }
+      title="Default agent"
+      hint="Project defaults. A task can override these choices."
     >
-      <DefaultAgentPicker
+      <SettingsAgentPicker
         rows={rows}
         runner={defaultRunner}
         accountFor={(id) => selection?.[id] ?? machine?.[id] ?? null}
@@ -411,7 +408,7 @@ function DefaultAgentField({
       ) : null}
       {hasAccounts ? (
         <p className="max-w-md text-[13px] text-muted-foreground">
-          Tasks already started under another account can’t be resumed here — their sessions live in
+          The account is personal and never committed. Tasks already started under another account can’t be resumed here — their sessions live in
           that account’s folder.
         </p>
       ) : null}
@@ -420,12 +417,12 @@ function DefaultAgentField({
 }
 
 /** The Appearance section's field chassis — same rhythm, so Settings reads as one surface. */
-function Field({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+function Field({ title, hint, children, toggle = false }: { title: string; hint: string; children: ReactNode; toggle?: boolean }) {
   return (
-    <section className="settings-field flex flex-col gap-2">
+    <section className={toggle ? "settings-toggle-field" : "settings-field flex flex-col gap-2"}>
       <div>
-        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-        <p className="text-[13px] text-muted-foreground">{hint}</p>
+        <h2 className="text-sm font-semibold text-foreground" title={toggle ? hint : undefined}>{title}</h2>
+        {!toggle && <p className="text-[13px] text-muted-foreground">{hint}</p>}
       </div>
       {children}
     </section>

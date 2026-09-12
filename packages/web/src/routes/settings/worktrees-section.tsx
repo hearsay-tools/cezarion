@@ -110,13 +110,14 @@ function WorktreesForm({ config }: { config: ConfigResponse }) {
           <span className="text-xs text-soft-foreground">worktrees</span>
           <Button
             type="button"
-            variant="outline"
+            variant="primary"
             size="sm"
+            className="self-start"
             data-action="resources-save-retention"
             disabled={retentionSaved || retentionInvalid || save.isPending}
             onClick={saveRetention}
           >
-            Save
+            Save retention
           </Button>
         </div>
         {retentionInvalid ? (
@@ -131,7 +132,7 @@ function WorktreesForm({ config }: { config: ConfigResponse }) {
       </SettingsField>
 
       <SettingsField
-        title="Worktrees"
+        title="Worktrees on disk"
         hint="Task worktrees currently on disk. Delete one to reclaim its space now, or reclaim everything past the keep-limit at once. Branches are always kept, so the work stays recoverable."
       >
         <WorktreesPanel />

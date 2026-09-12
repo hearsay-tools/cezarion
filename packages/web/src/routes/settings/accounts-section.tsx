@@ -48,9 +48,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { OpenInMenu, cliTargetRunner } from '@/components/open-in-menu'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
-import { DefaultAgentPicker, agentPickerRows } from '@/components/default-agent-picker'
+import { agentPickerRows } from '@/components/default-agent-picker'
 import { modelCatalogStatus, modelsForRunner, RUNNERS } from '@/routes/new-task-form'
 import { AddAccountDialog } from './add-account-dialog'
+
+import { SettingsAgentPicker } from './settings-agent-picker'
 
 /**
  * Global settings → Agent accounts (spec `.ai/specs/2026-07-29-agent-profiles.md`).
@@ -169,13 +171,9 @@ function AccountsPane({ data }: { data: AgentProfilesResponse }) {
       <div>
 
         <p className="text-[13px] text-muted-foreground">
-          One agent per tab: whether it is installed, and which logins you have. Add a second
-          config folder to keep a work account beside a personal one; each project picks which it
-          uses in its own Agents settings.
+          Manage runner installations, logins and defaults for new projects. Each project can choose its own agent and account.
         </p>
       </div>
-
-      <DefaultsForNewProjects profiles={data} />
 
       <Tabs defaultValue="claude">
         <TabsList variant="line" data-slot="accounts-tabs">
@@ -202,6 +200,8 @@ function AccountsPane({ data }: { data: AgentProfilesResponse }) {
           </TabsContent>
         ))}
       </Tabs>
+
+      <DefaultsForNewProjects profiles={data} />
 
       {/* Keyed by provider so reopening under a different agent starts from a clean form rather
           than the previous agent's half-typed folder. */}
@@ -336,7 +336,6 @@ function AgentTab({
   )
 }
 
-
 /**
  * What a project that has chosen nothing runs (spec 2026-07-29-agent-profiles).
  *
@@ -386,7 +385,7 @@ function DefaultsForNewProjects({ profiles }: { profiles: AgentProfilesResponse 
         </p>
       </div>
 
-      <DefaultAgentPicker
+      <SettingsAgentPicker
         rows={rows}
         runner={runner}
         accountFor={(id) => profiles.defaults[id] ?? null}

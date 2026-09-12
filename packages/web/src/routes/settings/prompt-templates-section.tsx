@@ -217,7 +217,7 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
             id="new-template-label"
             aria-label="New template label"
             data-slot="prompt-template-new-label"
-            placeholder='Label (e.g. "Add tests")'
+            placeholder="e.g. Review security"
             value={newLabel}
             maxLength={80}
             onChange={(event) => setNewLabel(event.target.value)}
@@ -227,7 +227,7 @@ function PromptTemplatesForm({ initial }: { initial: PromptTemplate[] }) {
             id="new-template-text"
             aria-label="New template text"
             data-slot="prompt-template-new-text"
-            placeholder="The instructions to insert…"
+            placeholder="Enter reusable instructions…"
             value={newText}
             maxLength={2000}
             onChange={(event) => setNewText(event.target.value)}

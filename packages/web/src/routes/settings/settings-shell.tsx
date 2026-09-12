@@ -1,6 +1,5 @@
 import './settings-interiors.css'
-import { ChevronRightIcon } from 'lucide-react'
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
 import { Link as RouterLink, NavLink as RouterNavLink } from 'react-router'
 import type { Capabilities } from '@open-mercato/cezar-api-client'
 import { Link as ScopedLink, NavLink as ScopedNavLink } from '@/lib/project-router'
@@ -14,7 +13,7 @@ import { visibleSettingsSections, type SettingsScope, type SettingsSection } fro
  *
  * Layout, both driven by the same `visibleSettingsSections(scope)` so they can never disagree:
  *  - desktop (`md:`): a left section nav beside the section's content;
- *  - mobile: a segmented pill row above the content (the area index renders the stacked
+ *  - mobile: a section disclosure above the content (the area index renders the stacked
  *    section list instead — the drill-in page small screens expect).
  *
  * ONE shell serves both areas since the multi-project split (step 3.5): project settings at
@@ -51,30 +50,6 @@ function navComponents(scope: SettingsScope) {
   return scope === 'global'
     ? { Link: RouterLink, NavLink: RouterNavLink }
     : { Link: ScopedLink, NavLink: ScopedNavLink }
-}
-
-const OVERFLOW_EPSILON_PX = 1
-const PILL_EDGE_GUTTER_PX = 12
-
-function revealPill(scroller: HTMLElement, pill: HTMLElement) {
-  const scrollerRect = scroller.getBoundingClientRect()
-  const pillRect = pill.getBoundingClientRect()
-  // Hidden desktop stand-ins and jsdom have no layout. Waiting for a real box also keeps the
-  // reveal from guessing before the mobile shell has settled.
-  if (scrollerRect.width <= 0 || pillRect.width <= 0) return
-
-  const visibleLeft = scrollerRect.left + PILL_EDGE_GUTTER_PX
-  const visibleRight = scrollerRect.right - PILL_EDGE_GUTTER_PX
-  let delta = 0
-  if (pillRect.left < visibleLeft) delta = pillRect.left - visibleLeft
-  else if (pillRect.right > visibleRight) delta = pillRect.right - visibleRight
-  if (delta === 0) return
-
-  // Scroll only this horizontal viewport. `scrollIntoView` may also move the page vertically,
-  // which is especially disruptive when a deep-linked settings section has restored its scroll.
-  const target = scroller.scrollLeft + delta
-  const outwardTarget = delta < 0 ? Math.floor(target) : Math.ceil(target)
-  scroller.scrollTo({ left: Math.max(0, outwardTarget), behavior: 'auto' })
 }
 
 function SectionNav({
@@ -136,120 +111,29 @@ function SectionNav({
   )
 }
 
-/** The mobile stand-in for the left nav: one segmented, scrollable pill row. */
-function SectionPills({
-  scope,
-  activeId,
-  capabilities,
-}: {
+/** Mobile sections use the reference's single disclosure, with ordinary scoped links. */
+function SectionPills({ scope, activeId, capabilities }: {
   scope: SettingsScope
-  activeId: SettingsSection['id']
+  activeId: SettingsSection['id'] | null
   capabilities?: Pick<Capabilities, 'singleProject'>
 }) {
   const { NavLink } = navComponents(scope)
-  const scrollerRef = useRef<HTMLElement>(null)
-  const [overflow, setOverflow] = useState({ start: false, end: false })
-  const updateOverflow = useCallback(() => {
-    const scroller = scrollerRef.current
-    if (!scroller) return
-    const start = scroller.scrollLeft > OVERFLOW_EPSILON_PX
-    const end = scroller.scrollWidth - scroller.clientWidth - scroller.scrollLeft > OVERFLOW_EPSILON_PX
-    setOverflow((current) =>
-      current.start === start && current.end === end ? current : { start, end },
-    )
-  }, [])
-  const revealActiveAndUpdateOverflow = useCallback(() => {
-    const scroller = scrollerRef.current
-    const active = scroller?.querySelector<HTMLElement>('[aria-current="page"]')
-    if (!scroller || !active) return
-    revealPill(scroller, active)
-    updateOverflow()
-  }, [updateOverflow])
-
-  useLayoutEffect(() => {
-    const scroller = scrollerRef.current
-    if (!scroller) return
-    revealActiveAndUpdateOverflow()
-
-    // The viewport changes on resize; pill widths also change with density and font layout.
-    // Observe both so a cue never goes stale while the page itself stays mounted.
-    const observer = typeof ResizeObserver === 'undefined'
-      ? undefined
-      : new ResizeObserver(revealActiveAndUpdateOverflow)
-    observer?.observe(scroller)
-    for (const pill of scroller.children) observer?.observe(pill)
-    window.addEventListener('resize', revealActiveAndUpdateOverflow)
-    return () => {
-      observer?.disconnect()
-      window.removeEventListener('resize', revealActiveAndUpdateOverflow)
-    }
-  }, [scope, capabilities?.singleProject, revealActiveAndUpdateOverflow])
-
-  useLayoutEffect(() => {
-    revealActiveAndUpdateOverflow()
-  }, [activeId, revealActiveAndUpdateOverflow])
-
+  const sections = visibleSettingsSections(scope, capabilities)
   return (
-    <div className="relative shrink-0 md:hidden">
-      <nav
-        ref={scrollerRef}
-        aria-label="Settings sections"
-        data-slot="settings-nav-mobile"
-        onScroll={updateOverflow}
-        onFocusCapture={(event) => {
-          const target = event.target
-          if (target instanceof HTMLElement) revealPill(event.currentTarget, target)
-        }}
-        className="flex gap-1.5 overflow-x-auto border-b border-border px-3 py-2.5"
-      >
-        {/* Never the active pill: the index is a different route, and reaching it from a section
-            is the whole reason this entry exists. */}
-        <NavLink
-          to={settingsIndexPath(scope)}
-          end
-          data-slot="settings-nav-index"
-          className="inline-flex min-h-11 items-center rounded-full border border-border bg-card px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors"
-        >
-          General
-        </NavLink>
-        {visibleSettingsSections(scope, capabilities).map((section) => (
-          <NavLink
-            key={section.id}
-            to={settingsSectionPath(scope, section.id)}
-            data-section={section.id}
-            aria-current={section.id === activeId ? 'page' : undefined}
-            className={cn(
-              'inline-flex min-h-11 items-center rounded-full border px-3 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors',
-              section.id === activeId
-                ? 'border-transparent bg-contrast text-contrast-foreground'
-                : 'border-border bg-card text-muted-foreground',
-            )}
-          >
+    <details key={`${scope}-${activeId}`} className="settings-section-picker md:hidden">
+      <summary>
+        {sections.find((section) => section.id === activeId)?.title ?? 'General'}
+        <ChevronDownIcon aria-hidden="true" className="size-5 text-muted-foreground" />
+      </summary>
+      <nav aria-label="Settings sections" data-slot="settings-nav-mobile">
+        <NavLink to={settingsIndexPath(scope)} end data-slot="settings-nav-index">General</NavLink>
+        {sections.map((section) => (
+          <NavLink key={section.id} to={settingsSectionPath(scope, section.id)} data-section={section.id}>
             {section.title}
           </NavLink>
         ))}
       </nav>
-      {/* These stay inside the row's existing 12px padding gutter. Active and focused pills are
-          revealed with the same inset, keeping labels and rings clear of the visual cue. */}
-      <span
-        aria-hidden="true"
-        data-slot="settings-overflow-start"
-        data-visible={overflow.start}
-        className={cn(
-          'pointer-events-none absolute inset-y-px left-0 z-10 w-3 bg-gradient-to-r from-background to-transparent',
-          !overflow.start && 'hidden',
-        )}
-      />
-      <span
-        aria-hidden="true"
-        data-slot="settings-overflow-end"
-        data-visible={overflow.end}
-        className={cn(
-          'pointer-events-none absolute inset-y-px right-0 z-10 w-3 bg-gradient-to-l from-background to-transparent',
-          !overflow.end && 'hidden',
-        )}
-      />
-    </div>
+    </details>
   )
 }
 
@@ -267,11 +151,11 @@ export function SettingsSectionRoute({
   return (
     <div
       data-route={scope === 'global' ? `settings-global-${section.id}` : `settings-${section.id}`}
-      className="mx-auto flex min-h-full w-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9"
+      className="settings-route mx-auto flex min-h-full w-full flex-col"
     >
       {/* Desktop header — below `md` the shell's top bar already says "Settings". The
           breadcrumb is what tells the two areas apart at a glance (mockup: "Global settings"). */}
-      <header className="flex shrink-0 flex-col gap-2">
+      <header className="settings-route-header flex shrink-0 flex-col gap-2">
         <h1 className="text-[28px] font-semibold tracking-tight">{scope === 'global' ? 'Global settings' : 'Project settings'}</h1>
         <p className="text-[13px] text-soft-foreground">{scope === 'global' ? 'Preferences for you and this machine, shared by every project.' : 'Configure this project and its agents.'}</p>
         {scope === 'global' ? (
@@ -280,7 +164,7 @@ export function SettingsSectionRoute({
           </span>
         ) : null}
       </header>
-      <div className="flex min-w-0 flex-1 flex-col gap-6 md:flex-row">
+      <div className="settings-route-body flex min-w-0 flex-1 flex-col md:flex-row">
         <SectionNav scope={scope} activeId={section.id} capabilities={capabilities} />
         <SectionPills scope={scope} activeId={section.id} capabilities={capabilities} />
         <section className="settings-panel min-w-0 self-start md:flex-1" aria-label={section.title}>
@@ -301,8 +185,8 @@ export function SettingsIndexRoute({ scope, capabilities }: {
   const { Link } = navComponents(scope)
   const global = scope === 'global'
   return (
-    <div data-route={global ? 'settings-global' : 'settings'} className="mx-auto flex min-h-full w-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
-      <header className="flex shrink-0 flex-col gap-2">
+    <div data-route={global ? 'settings-global' : 'settings'} className="settings-route mx-auto flex min-h-full w-full flex-col">
+      <header className="settings-route-header flex shrink-0 flex-col gap-2">
         <h1 className="text-[28px] font-semibold tracking-tight">{global ? 'Global settings' : 'Project settings'}</h1>
         <p className="text-[13px] text-soft-foreground">
           {global
@@ -310,8 +194,9 @@ export function SettingsIndexRoute({ scope, capabilities }: {
             : 'Configure this project and its agents.'}
         </p>
       </header>
-      <div className="flex min-w-0 flex-1 flex-col gap-6 md:flex-row">
+      <div className="settings-route-body flex min-w-0 flex-1 flex-col md:flex-row">
         <SectionNav scope={scope} activeId={null} capabilities={capabilities} />
+        <SectionPills scope={scope} activeId={null} capabilities={capabilities} />
         {/* No second h1 for small screens: the app shell's mobile top bar already titles the
             page "Settings" from the nav registry. */}
         <div className="flex min-w-0 flex-1 flex-col">
