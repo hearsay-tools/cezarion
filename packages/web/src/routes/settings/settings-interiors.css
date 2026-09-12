@@ -89,7 +89,7 @@
 .settings-panel .settings-disclosure > :not(summary) { margin-top: 12px; }
 .settings-panel [data-slot=agents-section] { gap: 20px; }
 .settings-panel [data-slot=agents-section] .settings-field + .settings-field { padding-top: 20px; }
-.settings-panel [data-slot=agents-system-prompt] { min-height: 64px; }
+.settings-panel [data-slot=agents-system-prompt] { min-height: 192px; }
 .settings-panel .settings-toggle-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
 .settings-panel .settings-toggle-field h2 { font-size: 13px; font-weight: 400; }
 .settings-panel .settings-toggle-field + .settings-toggle-field { margin-top: -8px; }
@@ -114,7 +114,7 @@
   .settings-panel [data-slot=appearance-section] [role=radiogroup] { display: grid; width: 100%; }
   .settings-panel [data-slot=appearance-section] [role=radio] { justify-content: flex-start; }
   .settings-panel .settings-resource-controls { align-items: stretch; }
-  .settings-panel [data-slot=agents-system-prompt] { min-height: 84px; }
+  .settings-panel [data-slot=agents-system-prompt] { min-height: 192px; }
 }
 
 .settings-panel .settings-retention-controls input { width: 100%; }

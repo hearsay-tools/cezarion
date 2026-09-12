@@ -201,7 +201,7 @@ function AgentsForm({
         onPick={(runner) => save.mutate({ defaultRunner: runner })}
       />
 
-      {['codex', 'claude'].map((id) => RUNNERS.find((runner) => runner.id === id)!).map(renderModel)}
+      {RUNNERS.map(renderModel)}
 
       <Field
         title="System prompt"
@@ -213,7 +213,7 @@ function AgentsForm({
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           placeholder="Extra rules for every agent run — conventions, tone, review requirements…"
-          className="min-h-24 w-full"
+          className="min-h-48 w-full"
         />
 
       </Field>
@@ -317,10 +317,6 @@ function AgentsForm({
           )}
         </div>
       <details className="settings-disclosure">
-        <summary>Additional agent models</summary>
-        <div className="flex flex-col gap-5">{RUNNERS.filter((runner) => runner.id !== 'codex' && runner.id !== 'claude').map(renderModel)}</div>
-      </details>
-      <details className="settings-disclosure">
         <summary>Provider connections</summary>
         <ProviderSettings />
       </details>
@@ -379,7 +375,7 @@ function DefaultAgentField({
 
   return (
     <Field
-      title="Default agent"
+      title="Default runner"
       hint="Project defaults. A task can override these choices."
     >
       <SettingsAgentPicker

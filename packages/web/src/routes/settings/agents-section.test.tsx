@@ -434,6 +434,16 @@ describe('the agents form', () => {
     await waitFor(() => expect(claude.value).toBe(''))
   })
 
+  it('lists every runner’s default model in the same place', async () => {
+    serve()
+    renderAt('/settings/agents')
+    await waitFor(() => expect(form()).not.toBeNull())
+    expect(screen.queryByText('Additional agent models')).toBeNull()
+    expect(
+      [...document.querySelectorAll('[data-slot="agents-model"]')].map((el) => el.getAttribute('data-runner')),
+    ).toEqual(['claude', 'codex', 'opencode', 'pi'])
+  })
+
   it('offers each runner the models its own host CLI reports (#794)', async () => {
     serve({
       hostModels: {
@@ -492,6 +502,7 @@ describe('the agents form', () => {
     await waitFor(() => expect(form()).not.toBeNull())
 
     const box = screen.getByLabelText<HTMLTextAreaElement>('System prompt')
+    expect(box.className).toContain('min-h-48')
     const saveButton = () => document.querySelector<HTMLButtonElement>('[data-action="agents-save-prompt"]')!
     // Unchanged draft: nothing to save.
     expect(saveButton().disabled).toBe(true)
@@ -580,8 +591,7 @@ describe('the agents form', () => {
       // Settled: the default-models field below it has rendered, so the pane is not mid-load.
       await screen.findByLabelText('Default model for claude')
       expect(rows().map((r) => r.getAttribute('data-value'))).toEqual(['claude', 'codex', 'opencode', 'pi'])
-      // …and it is still called what it always was, because there is no account in play.
-      expect(document.body.textContent).toContain('Default agent')
+      expect(document.body.textContent).toContain('Default runner')
     })
 
     it('splits ONLY the agent that has a second login, and names each folder', async () => {
@@ -598,7 +608,7 @@ describe('the agents form', () => {
       ])
       // The discovered account is the checked row until the repo says otherwise.
       expect(rowFor('claude', '')?.getAttribute('aria-checked')).toBe('true')
-      expect(document.body.textContent).toContain('Default agent')
+      expect(document.body.textContent).toContain('Default runner')
     })
 
     it('starts on the account the repo is already set to', async () => {
