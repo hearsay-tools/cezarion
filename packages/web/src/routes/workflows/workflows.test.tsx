@@ -489,14 +489,14 @@ describe('delete and “+ new”', () => {
 
 
 describe('design workflow controls', () => {
-  it('loads a selected workflow and edits its description in the portable draft', async () => {
+  it('has no Description form field; a loaded file’s description still round-trips in YAML', async () => {
     stubFetch()
     renderAt('/workflows')
     await waitFor(() => expect(stepCards()).toHaveLength(2))
+    expect(screen.queryByLabelText('Description')).toBeNull()
     fireEvent.change(screen.getByLabelText('Load an existing workflow'), { target: { value: 'quick-task' } })
     expect(nameInput().value).toBe('quick-task')
-    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'My edited description' } })
-    expect(yamlText()).toContain('My edited description')
+    expect(yamlText()).toContain('One agent run on your task — no ceremony.')
   })
 
   it('reorders without dragging and keeps boundary controls disabled', async () => {
