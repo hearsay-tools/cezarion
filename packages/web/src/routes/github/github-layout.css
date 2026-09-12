@@ -39,17 +39,6 @@
   [data-slot='gh-tabs'] { flex-direction: column; align-items: flex-start; }
 }
 [data-slot='gh-hand'] > [data-slot='prompt-template-trigger'] { align-self: flex-start; min-height: 44px; border-radius: 8px; padding: 0 12px; }
-[data-pr-detail='true'] [data-slot='gh-list'] { display: none; }
-[data-pr-detail='true'] [data-slot='gh-back'] { display: inline-flex; }
-[data-pr-detail='true'] [data-slot='gh-detail'] { background: transparent; border: none; }
-[data-pr-detail='true'] [data-slot='gh-detail-inner'] { padding: 0; }
-[data-pr-detail='true'] nav[aria-label='Pull request detail'] { gap: 12px; border: none; }
-[data-pr-detail='true'] nav[aria-label='Pull request detail'] > a { min-height: 44px; padding: 10px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
-[data-pr-detail='true'] nav[aria-label='Pull request detail'] > a[aria-current='page'] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
-@media (max-width: 767px) {
-  [data-pr-detail='true'] [data-slot='gh-description-card'] { padding: 16px; }
-  [data-pr-detail='true'] nav[aria-label='Pull request detail'] { align-items: flex-start; flex-direction: column; }
-}
 
 @media (max-width: 767px) {
   [data-slot='gh-list'][data-mobile-preview='true'] [data-slot='gh-rows'] > li:nth-child(n+3):not(:has([aria-current='page'])) { display: none; }
@@ -59,19 +48,15 @@
   .gh-engine-fields { column-gap: 8px; }
   .gh-engine-fields > button { padding-inline: 8px; gap: 4px; }
 }
-/* PR detail cards use the reference's document typography. The exact-head summary,
-   per-check links and refresh action remain visible alongside readiness. */
-[data-pr-detail='true'] [data-slot='gh-meta'] { font-family: inherit; font-size: 12px; color: var(--muted-foreground); }
 [data-slot='gh-merge-box'] > div > svg { display: none; }
 [data-slot='gh-merge-box'] h3 { font-size: 18px; font-weight: 400; }
 [data-slot='gh-merge-box'] ul { margin-top: 20px; font-size: 13px; }
 [data-slot='gh-merge-box'] ul > li + li { margin-top: 16px; }
 [data-slot='gh-merge-box'] select + button { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 
-[data-route='github']:not([data-pr-detail='true']) [data-slot='gh-tabs'] > a { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding-inline: 0; color: var(--muted-foreground); }
-[data-route='github']:not([data-pr-detail='true']) [data-slot='gh-tabs'] > a[aria-current='page'] { color: var(--accent-text); border-color: var(--accent-strong); }
-[data-route='github']:not([data-pr-detail='true']) [data-slot='gh-tabs'] { flex-direction: row; flex-wrap: wrap; }
-[data-pr-detail='true'] [data-slot='gh-header'] h1 { font-weight: 400; }
+[data-route='github'] [data-slot='gh-tabs'] > a { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding-inline: 0; color: var(--muted-foreground); }
+[data-route='github'] [data-slot='gh-tabs'] > a[aria-current='page'] { color: var(--accent-text); border-color: var(--accent-strong); }
+[data-route='github'] [data-slot='gh-tabs'] { flex-direction: row; flex-wrap: wrap; }
 
 [data-slot='gh-merge-confirm'] [data-variant='primary'] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 
@@ -80,7 +65,7 @@
 /* Confirmed 193-frame source, GitHub list and handoff: retain extra live metadata and
    utility actions while matching the document hierarchy and control geometry. */
 [data-slot='gh-tabs'] .gh-utility:first-of-type { margin-left: auto; }
-[data-route='github']:not([data-pr-detail='true']) [data-slot='gh-tabs'] { gap: 24px; border-bottom: 1px solid var(--border); }
+[data-route='github'] [data-slot='gh-tabs'] { gap: 24px; border-bottom: 1px solid var(--border); }
 [data-slot='gh-header'] > div:first-child { row-gap: 8px; }
 [data-slot='gh-search'] { border-radius: 8px; padding-left: 36px; font-size: 12px; }
 [data-slot='gh-rows'] { gap: 0; }
@@ -111,11 +96,10 @@
 [data-slot='gh-row'] > span:nth-child(2) { order: 2; }
 
 [data-slot='gh-merge-box'] [data-variant='primary'] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
-[data-pr-detail='true'] [data-slot='gh-header'] h1 { font-size: 28px; }
 
 [data-slot='gh-merge-box'][data-conflicting='true'] h3 { color: var(--conflict); }
 [data-slot='gh-bypass-warning'] { color: var(--pending-strong); }
 @media (max-width: 767px) {
-  [data-route='github']:not([data-pr-detail='true']) [data-slot='gh-filter-toolbar'] { flex-direction: column; align-items: flex-start; }
-  [data-route='github']:not([data-pr-detail='true']) [data-slot='gh-filter-toolbar'] > div:first-child { width: 100%; flex-basis: auto; }
+  [data-route='github'] [data-slot='gh-filter-toolbar'] { flex-direction: column; align-items: flex-start; }
+  [data-route='github'] [data-slot='gh-filter-toolbar'] > div:first-child { width: 100%; flex-basis: auto; }
 }

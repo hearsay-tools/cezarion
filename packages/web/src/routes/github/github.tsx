@@ -579,7 +579,7 @@ export function GithubRoute({
 
   return (
     // The list and detail stay in document flow; the shell remains the only page scroller.
-    <div data-route="github" data-pr-detail={view === 'prs' && n !== undefined || undefined} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <div data-route="github" className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
         <header data-slot="gh-header" className="flex shrink-0 flex-col gap-[22px]">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
             <h1 className="w-full text-[30px] font-semibold tracking-tight">GitHub</h1>

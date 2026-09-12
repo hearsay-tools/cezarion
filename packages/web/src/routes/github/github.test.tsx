@@ -306,6 +306,15 @@ it('/github/prs/:n/changes renders PR-only file review navigation and completene
   expect(screen.getByLabelText('Next file').hasAttribute('disabled')).toBe(false)
 })
 
+it.each(['/github/prs/137', '/github/prs/137/changes'])('keeps the PR list beside %s, like Issues', async (route) => {
+  stubFetch()
+  renderAt(route)
+  await screen.findByRole('heading', { name: 'GitHub' })
+  expect(document.querySelector('[data-route="github"]')?.hasAttribute('data-pr-detail')).toBe(false)
+  expect(document.querySelector('[data-slot="gh-list"]')).not.toBeNull()
+  expect(rows().length).toBeGreaterThan(0)
+})
+
 /** What the composer PRE-FILLS the box with for issue 142 (#524): the item's reference, and
  *  nothing else — no quoted body. `githubTaskRef`'s own byte-for-byte shape is pinned in
  *  `lib/github-task.test.ts`; here it is the baseline every box assertion measures against. */
