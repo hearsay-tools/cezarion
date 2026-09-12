@@ -49,3 +49,10 @@
   [data-route='new'] .new-task-composer [data-slot='composer-execution-panel'] { grid-row: 1 / 5; }
   [data-route='new'] .new-task-submission { margin-top: 8px; }
 }
+
+@media (max-width: 767px) {
+  [data-route='new'] .new-task-model-label > span > span:first-child,
+  [data-route='new'] [data-slot='effort-pill'] > span > span > span { display: none; }
+  [data-route='new'] .new-task-agent-options [data-slot='runner-pill']::before { content: none; }
+  [data-route='new'] [data-slot='execution-options'] { background: transparent; }
+}

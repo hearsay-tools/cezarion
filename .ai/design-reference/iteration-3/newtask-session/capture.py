@@ -39,7 +39,10 @@ def capture(frame,name,theme,route,action=None,density='comfortable',width='wide
  proof=js('JSON.stringify({url:location.href,font:getComputedStyle(document.body).fontFamily,density:document.documentElement.dataset.density,width:document.documentElement.dataset.width,theme:document.documentElement.className,overflow:document.documentElement.scrollWidth>innerWidth,assets:performance.getEntriesByType("resource").map(x=>x.name).filter(x=>x.includes("/assets/")),controls:[...document.querySelectorAll("button")].map(x=>x.getAttribute("aria-label")||x.innerText)})')
  records.append(dict(sourceSha256=manifest['penFileSha256'],fixtureSha256=hashlib.sha256((OUT/'serve-fixture.mjs').read_bytes()).hexdigest(),frame=frame,frameName=frames[frame]['name'],name=name,viewport=dict(width=w,height=h),theme=theme,density=density,readingWidth=width,buildIndexSha256=hashlib.sha256((ROOT/'packages/cezar/web/dist/index.html').read_bytes()).hexdigest(),fixture='serve-fixture.mjs',browser=path.name,design=design.name,browserProof=proof,verdict='pending visual inspection'))
  (OUT/'captures.json').write_text(json.dumps(records,indent=2)); print(name,flush=True)
-def click(label):cmd('click',f'[aria-label="{label}"]')
+def click(label):
+ selector=f'[aria-label="{label}"]'
+ js('(()=>{const e=document.querySelector('+json.dumps(selector)+');const r=e.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)e.scrollIntoView({block:"center",behavior:"instant"});})()'); settle()
+ cmd('click',selector)
 def menu():click('Run actions')
 def menuitem(text):
  menu(); js('Array.from(document.querySelectorAll("[role=menuitem]")).find(x=>x.textContent.trim()==='+json.dumps(text)+')?.click()')
