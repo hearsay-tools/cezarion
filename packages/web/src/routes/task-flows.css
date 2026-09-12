@@ -160,3 +160,18 @@
   [data-slot="plan-review"] [data-slot="plan-steps"] { padding-left: 20px; padding-right: 20px; }
   [data-slot="plan-review"] [data-slot="plan-actions"] { padding-left: 20px; padding-right: 20px; }
 }
+
+[data-slot="variant-confirm-dialog"] [data-slot="alert-dialog-action"],
+[data-slot="plan-overwrite-dialog"] [data-slot="alert-dialog-action"] { background: var(--accent-strong); color: white; }
+[data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"],
+[data-route="automations"] > [data-slot="centered-state"],
+[data-route="compare"] > [data-slot="centered-state"] { min-height: 0; flex: none; align-items: start; justify-content: start; padding: 24px; text-align: left; }
+[data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"] > div,
+[data-route="automations"] > [data-slot="centered-state"] > div,
+[data-route="compare"] > [data-slot="centered-state"] > div { max-width: none; align-items: start; gap: 20px; }
+[data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state-tile"],
+[data-route="automations"] > [data-slot="centered-state"] [data-slot="centered-state-tile"],
+[data-route="compare"] > [data-slot="centered-state"] [data-slot="centered-state-tile"] { display: none; }
+[data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"] :is(h1,h2),
+[data-route="automations"] > [data-slot="centered-state"] :is(h1,h2),
+[data-route="compare"] > [data-slot="centered-state"] :is(h1,h2) { font-size: 20px; font-weight: 400; }

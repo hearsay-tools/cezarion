@@ -108,7 +108,7 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
     >
       {error ? <div className="grid gap-3"><PageState text={error} /><Button variant="outline" onClick={() => void refresh()}>Retry</Button></div> : !data ? <PageState text="Loading automations…" /> : (
         <>
-          {data.automations.length === 0 ? <PageState text="No automations yet. Create one paused, test its bounded filter, then enable it from a current-time baseline." /> : (
+          {data.automations.length === 0 ? <section className="rounded-xl border border-border bg-card p-6"><h2 className="text-xl font-normal">No automations yet</h2><p className="mt-5 text-sm text-muted-foreground">Create a bounded trigger to start ordinary tasks from new GitHub issues.</p></section> : (
             <div className="grid gap-3">
               {data.automations.map((automation) => (
                 <article key={automation.id} className="rounded-xl border bg-card p-4">
