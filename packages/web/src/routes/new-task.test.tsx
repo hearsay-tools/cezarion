@@ -2016,7 +2016,7 @@ describe('save as chain', () => {
     fireEvent.click(document.querySelector('[data-slot="plan-save"]') as HTMLElement)
     const nameInput = await screen.findByLabelText('Chain name')
     fireEvent.change(nameInput, { target: { value: '  my chain  ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save chain' }))
 
     await waitFor(() =>
       expect(requests.some((r) => r.url === '/api/v1/workflows' && r.method === 'POST')).toBe(true),
@@ -2043,10 +2043,10 @@ describe('save as chain', () => {
 
     fireEvent.click(document.querySelector('[data-slot="plan-save"]') as HTMLElement)
     fireEvent.change(await screen.findByLabelText('Chain name'), { target: { value: 'my chain' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save chain' }))
 
     await screen.findByText('Overwrite “my chain”?')
-    fireEvent.click(screen.getByRole('button', { name: 'Overwrite' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Overwrite chain' }))
 
     await waitFor(() => {
       const saves = requests.filter((r) => r.url === '/api/v1/workflows' && r.method === 'POST')
@@ -2063,7 +2063,7 @@ describe('save as chain', () => {
 
     fireEvent.click(document.querySelector('[data-slot="plan-save"]') as HTMLElement)
     fireEvent.change(await screen.findByLabelText('Chain name'), { target: { value: 'bad' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save chain' }))
 
     await screen.findByText('step 2: needs prompt or command')
     expect(screen.getByLabelText('Chain name')).toBeTruthy()
