@@ -1,0 +1,2481 @@
+{
+  "version": "iteration-2",
+  "exportDate": "2026-09-12",
+  "penCliVersion": "0.3.7",
+  "penFile": "cezarion.pen",
+  "penFileSize": 4303348,
+  "penFileSha256": "37378246893ba6259088ec3ddb2702e4220f44ca643ac13e5ac293263021a74b",
+  "baselineFile": "design.pen (main branch)",
+  "fonts": {
+    "embedded": [
+      {
+        "name": "Inter Variable",
+        "weights": "100-900",
+        "format": "woff2",
+        "usage": "Primary UI font (aliased as $cezarion-font-ui)"
+      },
+      {
+        "name": "JetBrains Mono Variable",
+        "weights": "100-800",
+        "format": "woff2",
+        "usage": "Code / monospace"
+      }
+    ],
+    "referencedInNodes": [
+      "IBM Plex Mono",
+      "JetBrains Mono"
+    ],
+    "cssVariables": [
+      "$cezarion-font-ui"
+    ],
+    "systemFontsInstalled": false,
+    "renderingNote": "Embedded woff2 fonts used by pen.dev renderer; system font absence does NOT affect exports"
+  },
+  "reusableComponents": [
+    "Badge / Status",
+    "Button / Attach files",
+    "Button / Dictation",
+    "Button / Secondary action",
+    "Button / Start task",
+    "Catalog / Entry",
+    "Code / Diff excerpt",
+    "Composer / Input tools",
+    "Configuration / Desktop execution panel",
+    "Configuration / Execution controls",
+    "Configuration / Runner and effort",
+    "Control / Run mode",
+    "Control / Switch",
+    "Files / File row \u00b7 Desktop",
+    "Files / File row \u00b7 Mobile",
+    "Files / Folder row \u00b7 Desktop",
+    "Files / Folder row \u00b7 Mobile",
+    "Git / Commit row \u00b7 Desktop",
+    "Git / Commit row \u00b7 Mobile",
+    "GitHub / Prefilled task composer",
+    "Navigation / Item",
+    "Navigation / Multi-project session tree",
+    "Navigation / Parent and worker sessions",
+    "Navigation / Project disclosure",
+    "Navigation / Project picker",
+    "Navigation / Search",
+    "Navigation / Session entry",
+    "Navigation / Tracker reference",
+    "Picker / Effort",
+    "Picker / Model",
+    "Picker / Prompt template",
+    "Picker / Runner",
+    "Picker / Skill or workflow",
+    "Session / Expanded log and tool calls",
+    "Session / Mobile reply composer",
+    "Session / Reply composer",
+    "Session / Tabs",
+    "Session / Worker summary",
+    "Setting / Toggle with description",
+    "Setting / Value picker",
+    "Settings / Category link",
+    "Settings / Labeled value",
+    "Shell / Desktop header",
+    "Shell / Desktop sidebar",
+    "Shell / Mobile header",
+    "Skills / Header actions",
+    "Tasks / Summary row \u00b7 Desktop",
+    "Tasks / Summary row \u00b7 Mobile"
+  ],
+  "iconNodes": [
+    "Action icon",
+    "Agent accounts icon",
+    "Appearance icon",
+    "Dictate icon",
+    "New task icon",
+    "Notifications icon",
+    "Projects icon",
+    "Resources icon",
+    "Skills icon",
+    "Template icon"
+  ],
+  "totals": {
+    "frames": 158,
+    "new": 71,
+    "contentChanged": 2,
+    "identical": 85,
+    "exported": 158,
+    "desktop": 94,
+    "mobile": 64,
+    "light": 81,
+    "dark": 77
+  },
+  "frames": [
+    {
+      "id": "xD5Vz",
+      "name": "1A. Brand light \u00b7 Start",
+      "width": 402,
+      "height": 874,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/new-task",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "xD5Vz.png",
+      "screenshotBytes": 156375
+    },
+    {
+      "id": "NMS9D",
+      "name": "1B. Brand dark \u00b7 Start",
+      "width": 402,
+      "height": 874,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/new-task",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "NMS9D.png",
+      "screenshotBytes": 159126
+    },
+    {
+      "id": "twLlb",
+      "name": "1C. Desktop light \u00b7 Start",
+      "width": 1440,
+      "height": 1161,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/new-task",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "twLlb.png",
+      "screenshotBytes": 374572
+    },
+    {
+      "id": "qtABD",
+      "name": "1D. Desktop dark \u00b7 Start",
+      "width": 1440,
+      "height": 1161,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/new-task",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "qtABD.png",
+      "screenshotBytes": 382119
+    },
+    {
+      "id": "nXpJf",
+      "name": "Cezarion \u00b7 Shared components",
+      "width": 1660,
+      "height": null,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "(unmapped)",
+      "states": [
+        "reference"
+      ],
+      "diffStatus": "content_changed",
+      "screenshot": "nXpJf.png",
+      "screenshotBytes": 1244603
+    },
+    {
+      "id": "gC8ds",
+      "name": "2A. Task session \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1161,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId/session",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "content_changed",
+      "screenshot": "gC8ds.png",
+      "screenshotBytes": 492039
+    },
+    {
+      "id": "RWNTz",
+      "name": "2B. Task session \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1161,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId/session",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "RWNTz.png",
+      "screenshotBytes": 499757
+    },
+    {
+      "id": "StTvu",
+      "name": "2C. Task session \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId/session",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "StTvu.png",
+      "screenshotBytes": 228245
+    },
+    {
+      "id": "SAzUR",
+      "name": "2D. Task session \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId/session",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "SAzUR.png",
+      "screenshotBytes": 231390
+    },
+    {
+      "id": "Qwe6U",
+      "name": "2E. Session navigation open \u00b7 Mobile light",
+      "width": 402,
+      "height": 1260,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId (mobile nav)",
+      "states": [
+        "nav-open"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "Qwe6U.png",
+      "screenshotBytes": 137610
+    },
+    {
+      "id": "YJIDa",
+      "name": "2F. Session navigation open \u00b7 Mobile dark",
+      "width": 402,
+      "height": 1260,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId (mobile nav)",
+      "states": [
+        "nav-open"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "YJIDa.png",
+      "screenshotBytes": 142539
+    },
+    {
+      "id": "Dr8VY",
+      "name": "3A. Expanded activity \u00b7 Desktop light",
+      "width": 1440,
+      "height": 2100,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId/session",
+      "states": [
+        "expanded"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "Dr8VY.png",
+      "screenshotBytes": 709562
+    },
+    {
+      "id": "HJtbl",
+      "name": "3B. Expanded activity \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 2100,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId/session",
+      "states": [
+        "expanded"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "HJtbl.png",
+      "screenshotBytes": 719977
+    },
+    {
+      "id": "laAFF",
+      "name": "3C. Expanded activity \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId/session",
+      "states": [
+        "expanded"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "laAFF.png",
+      "screenshotBytes": 433130
+    },
+    {
+      "id": "yjIzI",
+      "name": "3D. Expanded activity \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId/session",
+      "states": [
+        "expanded"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "yjIzI.png",
+      "screenshotBytes": 437773
+    },
+    {
+      "id": "vmodY",
+      "name": "4A. Project tasks \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "vmodY.png",
+      "screenshotBytes": 319271
+    },
+    {
+      "id": "cKQLR",
+      "name": "4C. Project tasks \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "cKQLR.png",
+      "screenshotBytes": 152251
+    },
+    {
+      "id": "Bs14b",
+      "name": "4B. Project tasks \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "Bs14b.png",
+      "screenshotBytes": 325811
+    },
+    {
+      "id": "zExdi",
+      "name": "4D. Project tasks \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "zExdi.png",
+      "screenshotBytes": 154980
+    },
+    {
+      "id": "WoTim",
+      "name": "5A. All tasks \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/all-tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "WoTim.png",
+      "screenshotBytes": 359630
+    },
+    {
+      "id": "bticP",
+      "name": "5C. All tasks \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/all-tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "bticP.png",
+      "screenshotBytes": 195173
+    },
+    {
+      "id": "BmuxZ",
+      "name": "5B. All tasks \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/all-tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "BmuxZ.png",
+      "screenshotBytes": 367503
+    },
+    {
+      "id": "Y2moBg",
+      "name": "5D. All tasks \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/all-tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "Y2moBg.png",
+      "screenshotBytes": 199861
+    },
+    {
+      "id": "DxDiN",
+      "name": "6A. Git \u00b7 Changes \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/git/changes",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "DxDiN.png",
+      "screenshotBytes": 327131
+    },
+    {
+      "id": "nBRj3",
+      "name": "6C. Git \u00b7 Changes \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/git/changes",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "nBRj3.png",
+      "screenshotBytes": 171997
+    },
+    {
+      "id": "z0bbUQ",
+      "name": "6B. Git \u00b7 Changes \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/git/changes",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "z0bbUQ.png",
+      "screenshotBytes": 332894
+    },
+    {
+      "id": "xMIvZ",
+      "name": "6D. Git \u00b7 Changes \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/git/changes",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "xMIvZ.png",
+      "screenshotBytes": 174592
+    },
+    {
+      "id": "LIIH1",
+      "name": "7A. Git \u00b7 Commits \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/git/commits",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "LIIH1.png",
+      "screenshotBytes": 318155
+    },
+    {
+      "id": "EWv8V",
+      "name": "7C. Git \u00b7 Commits \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/git/commits",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "EWv8V.png",
+      "screenshotBytes": 160890
+    },
+    {
+      "id": "Axp2R",
+      "name": "7B. Git \u00b7 Commits \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/git/commits",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "Axp2R.png",
+      "screenshotBytes": 324821
+    },
+    {
+      "id": "UjbfQ",
+      "name": "7D. Git \u00b7 Commits \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/git/commits",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "UjbfQ.png",
+      "screenshotBytes": 166062
+    },
+    {
+      "id": "h68qF",
+      "name": "8A. Git \u00b7 Branches \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/git/branches",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "h68qF.png",
+      "screenshotBytes": 343318
+    },
+    {
+      "id": "h3xWP",
+      "name": "8C. Git \u00b7 Branches \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/git/branches",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "h3xWP.png",
+      "screenshotBytes": 191976
+    },
+    {
+      "id": "lfmHq",
+      "name": "8B. Git \u00b7 Branches \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/git/branches",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "lfmHq.png",
+      "screenshotBytes": 349542
+    },
+    {
+      "id": "N7h8fV",
+      "name": "8D. Git \u00b7 Branches \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/git/branches",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "N7h8fV.png",
+      "screenshotBytes": 195824
+    },
+    {
+      "id": "pV64O",
+      "name": "9A. GitHub \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1900,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/github",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "pV64O.png",
+      "screenshotBytes": 657151
+    },
+    {
+      "id": "Oe3RJ",
+      "name": "9C. GitHub \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/github",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "Oe3RJ.png",
+      "screenshotBytes": 417518
+    },
+    {
+      "id": "ZUfRo",
+      "name": "9B. GitHub \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1900,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/github",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "ZUfRo.png",
+      "screenshotBytes": 670023
+    },
+    {
+      "id": "WgKmT",
+      "name": "9D. GitHub \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/github",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "WgKmT.png",
+      "screenshotBytes": 426681
+    },
+    {
+      "id": "JfXUf",
+      "name": "10A. Skills \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1400,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/skills",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "JfXUf.png",
+      "screenshotBytes": 478765
+    },
+    {
+      "id": "md67O",
+      "name": "10C. Skills \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/skills",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "md67O.png",
+      "screenshotBytes": 168555
+    },
+    {
+      "id": "WygR0",
+      "name": "10B. Skills \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1400,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/skills",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "WygR0.png",
+      "screenshotBytes": 488215
+    },
+    {
+      "id": "FaZPm",
+      "name": "10D. Skills \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/skills",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "FaZPm.png",
+      "screenshotBytes": 171926
+    },
+    {
+      "id": "S446C7",
+      "name": "11A. Workflows \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1600,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/workflows",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "S446C7.png",
+      "screenshotBytes": 419325
+    },
+    {
+      "id": "DZvRy",
+      "name": "11C. Workflows \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/workflows",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "DZvRy.png",
+      "screenshotBytes": 272781
+    },
+    {
+      "id": "e0YGQ",
+      "name": "11B. Workflows \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1600,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/workflows",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "e0YGQ.png",
+      "screenshotBytes": 428023
+    },
+    {
+      "id": "vLA8k",
+      "name": "11D. Workflows \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/workflows",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "vLA8k.png",
+      "screenshotBytes": 277981
+    },
+    {
+      "id": "qLCvH",
+      "name": "12A. Project settings \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "qLCvH.png",
+      "screenshotBytes": 350751
+    },
+    {
+      "id": "rJ0pc",
+      "name": "12C. Project settings \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "rJ0pc.png",
+      "screenshotBytes": 217812
+    },
+    {
+      "id": "anT0g",
+      "name": "12B. Project settings \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "anT0g.png",
+      "screenshotBytes": 358856
+    },
+    {
+      "id": "h9Eij",
+      "name": "12D. Project settings \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "h9Eij.png",
+      "screenshotBytes": 221168
+    },
+    {
+      "id": "BNmM5",
+      "name": "13A. Global settings \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "BNmM5.png",
+      "screenshotBytes": 374939
+    },
+    {
+      "id": "c6wef",
+      "name": "13C. Global settings \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "c6wef.png",
+      "screenshotBytes": 195679
+    },
+    {
+      "id": "FKM0u",
+      "name": "13B. Global settings \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "FKM0u.png",
+      "screenshotBytes": 383465
+    },
+    {
+      "id": "O5aKA7",
+      "name": "13D. Global settings \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "O5aKA7.png",
+      "screenshotBytes": 199226
+    },
+    {
+      "id": "iVBEz",
+      "name": "14A. Task changes \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId/changes",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "iVBEz.png",
+      "screenshotBytes": 360096
+    },
+    {
+      "id": "W6uZ8g",
+      "name": "14C. Task changes \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId/changes",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "W6uZ8g.png",
+      "screenshotBytes": 208293
+    },
+    {
+      "id": "ap7Mt",
+      "name": "14B. Task changes \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId/changes",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "ap7Mt.png",
+      "screenshotBytes": 366267
+    },
+    {
+      "id": "cnw7H",
+      "name": "14D. Task changes \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId/changes",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "cnw7H.png",
+      "screenshotBytes": 211381
+    },
+    {
+      "id": "qUwn3",
+      "name": "15A. Task commits \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId/commits",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "qUwn3.png",
+      "screenshotBytes": 314108
+    },
+    {
+      "id": "ARRoD",
+      "name": "15C. Task commits \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId/commits",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "ARRoD.png",
+      "screenshotBytes": 150324
+    },
+    {
+      "id": "Pxt3r",
+      "name": "15B. Task commits \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId/commits",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "Pxt3r.png",
+      "screenshotBytes": 320429
+    },
+    {
+      "id": "eoegy",
+      "name": "15D. Task commits \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId/commits",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "eoegy.png",
+      "screenshotBytes": 153597
+    },
+    {
+      "id": "NYkfL",
+      "name": "16A. Task files \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId/files",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "NYkfL.png",
+      "screenshotBytes": 335673
+    },
+    {
+      "id": "UWL9H",
+      "name": "16C. Task files \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId/files",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "UWL9H.png",
+      "screenshotBytes": 186472
+    },
+    {
+      "id": "pg6P9",
+      "name": "16B. Task files \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId/files",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "pg6P9.png",
+      "screenshotBytes": 341496
+    },
+    {
+      "id": "aoWNz",
+      "name": "16D. Task files \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId/files",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "aoWNz.png",
+      "screenshotBytes": 188766
+    },
+    {
+      "id": "Zbjzg",
+      "name": "00. Cezarion \u00b7 Remaining pages review index",
+      "width": 1440,
+      "height": null,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "(unmapped)",
+      "states": [
+        "index"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "Zbjzg.png",
+      "screenshotBytes": 602577
+    },
+    {
+      "id": "t9WKAM",
+      "name": "17. Sidebar indicators \u00b7 Desktop light",
+      "width": 1100,
+      "height": null,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "(unmapped)",
+      "states": [
+        "indicators"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "t9WKAM.png",
+      "screenshotBytes": 463086
+    },
+    {
+      "id": "Y6ofnn",
+      "name": "17. Sidebar indicators \u00b7 Desktop dark",
+      "width": 1100,
+      "height": null,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "(unmapped)",
+      "states": [
+        "indicators"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "Y6ofnn.png",
+      "screenshotBytes": 467756
+    },
+    {
+      "id": "rCjjT",
+      "name": "17. Sidebar indicators \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "(unmapped)",
+      "states": [
+        "indicators"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "rCjjT.png",
+      "screenshotBytes": 446610
+    },
+    {
+      "id": "h1kN5a",
+      "name": "17. Sidebar indicators \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "(unmapped)",
+      "states": [
+        "indicators"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "h1kN5a.png",
+      "screenshotBytes": 453929
+    },
+    {
+      "id": "hkFbY",
+      "name": "18. Appearance \u00b7 Density and reading-width behavior",
+      "width": 1440,
+      "height": null,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "(unmapped)",
+      "states": [
+        "appearance"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "hkFbY.png",
+      "screenshotBytes": 868748
+    },
+    {
+      "id": "LT4cB",
+      "name": "10. Run from GitHub \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1400,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/github",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "LT4cB.png",
+      "screenshotBytes": 521512
+    },
+    {
+      "id": "tAPGJ",
+      "name": "10. Run from GitHub \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1400,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/github",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "tAPGJ.png",
+      "screenshotBytes": 529454
+    },
+    {
+      "id": "g3NKCA",
+      "name": "10. Run from GitHub \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/github",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "g3NKCA.png",
+      "screenshotBytes": 264389
+    },
+    {
+      "id": "M5Ynqs",
+      "name": "10. Run from GitHub \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/github",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "M5Ynqs.png",
+      "screenshotBytes": 268045
+    },
+    {
+      "id": "fR8Bl",
+      "name": "10. Skill detail \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/skills/:skillId",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "fR8Bl.png",
+      "screenshotBytes": 193419
+    },
+    {
+      "id": "UUyVL",
+      "name": "10. Skill detail \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/skills/:skillId",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "UUyVL.png",
+      "screenshotBytes": 198007
+    },
+    {
+      "id": "QGPE7",
+      "name": "10. Manage skills \u00b7 Desktop light",
+      "width": 1440,
+      "height": 1400,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/skills",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "QGPE7.png",
+      "screenshotBytes": 519222
+    },
+    {
+      "id": "x3aaN",
+      "name": "10. Manage skills \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1400,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/skills",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "x3aaN.png",
+      "screenshotBytes": 527947
+    },
+    {
+      "id": "n0DGX",
+      "name": "10. Manage skills \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/skills",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "n0DGX.png",
+      "screenshotBytes": 238426
+    },
+    {
+      "id": "rIXH7",
+      "name": "10. Manage skills \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/skills",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "rIXH7.png",
+      "screenshotBytes": 243439
+    },
+    {
+      "id": "jb9Yb",
+      "name": "11. Workflow Auto open \u00b7 Desktop light",
+      "width": 1440,
+      "height": 2000,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/workflows/:workflowId",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "jb9Yb.png",
+      "screenshotBytes": 520577
+    },
+    {
+      "id": "VS5gA",
+      "name": "11. Workflow Auto open \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 2000,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/workflows/:workflowId",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "VS5gA.png",
+      "screenshotBytes": 530031
+    },
+    {
+      "id": "mU8TX",
+      "name": "11. Workflow Auto open \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/workflows/:workflowId",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "mU8TX.png",
+      "screenshotBytes": 364209
+    },
+    {
+      "id": "AjVTx",
+      "name": "11. Workflow Auto open \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/workflows/:workflowId",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "identical",
+      "screenshot": "AjVTx.png",
+      "screenshotBytes": 371787
+    },
+    {
+      "id": "lwULN",
+      "name": "19A. Inbox \u00b7 Follow-up review",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/inbox",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "lwULN.png",
+      "screenshotBytes": 397896
+    },
+    {
+      "id": "vFhip",
+      "name": "20A. Automations \u00b7 List and activity",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/automations",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "vFhip.png",
+      "screenshotBytes": 317986
+    },
+    {
+      "id": "Q0JpNn",
+      "name": "20B. Automations \u00b7 Editor",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/automations",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "Q0JpNn.png",
+      "screenshotBytes": 331828
+    },
+    {
+      "id": "E2pFB",
+      "name": "21A. Variant comparison \u00b7 Results",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/variants",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "E2pFB.png",
+      "screenshotBytes": 294431
+    },
+    {
+      "id": "rwgD6",
+      "name": "22A. Plan review \u00b7 Reorder and start",
+      "width": 1440,
+      "height": 1260,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/new-task",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "rwgD6.png",
+      "screenshotBytes": 455025
+    },
+    {
+      "id": "HU3Q7",
+      "name": "23A. New task \u00b7 Starters and follow-ups",
+      "width": 1440,
+      "height": 1400,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/new-task",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "HU3Q7.png",
+      "screenshotBytes": 473380
+    },
+    {
+      "id": "AvnOO",
+      "name": "24A. Shared navigation \u00b7 Optional tools and project entry",
+      "width": 1440,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "(unmapped)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "AvnOO.png",
+      "screenshotBytes": 334274
+    },
+    {
+      "id": "o4b4a2",
+      "name": "25A. Project tasks \u00b7 Full resource table and column menu",
+      "width": 1680,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "o4b4a2.png",
+      "screenshotBytes": 424114
+    },
+    {
+      "id": "J2T61f",
+      "name": "26A. All tasks \u00b7 Grouping, tags and run actions",
+      "width": 1680,
+      "height": 1120,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/all-tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "J2T61f.png",
+      "screenshotBytes": 338044
+    },
+    {
+      "id": "MAoLU",
+      "name": "27A. GitHub \u00b7 PR conversation, filters and readiness",
+      "width": 1440,
+      "height": 1280,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/github",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "MAoLU.png",
+      "screenshotBytes": 370710
+    },
+    {
+      "id": "dABhL",
+      "name": "28A. Task actions \u00b7 Menu and handoff reader",
+      "width": 1440,
+      "height": 1280,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId (menu)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "dABhL.png",
+      "screenshotBytes": 433717
+    },
+    {
+      "id": "ghWjg",
+      "name": "29A. Confirmation dialogs \u00b7 Tasks, variants and plans",
+      "width": 1440,
+      "height": 1320,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "(overlays)",
+      "states": [
+        "dialog"
+      ],
+      "diffStatus": "new",
+      "screenshot": "ghWjg.png",
+      "screenshotBytes": 350434
+    },
+    {
+      "id": "aMnx1",
+      "name": "27B. GitHub PR \u00b7 Changes, blocked merge and confirmation",
+      "width": 1440,
+      "height": 1300,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/github",
+      "states": [
+        "dialog",
+        "blocked"
+      ],
+      "diffStatus": "new",
+      "screenshot": "aMnx1.png",
+      "screenshotBytes": 515721
+    },
+    {
+      "id": "t0g2h",
+      "name": "30A. Project settings \u00b7 Agents",
+      "width": 1440,
+      "height": 1200,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "t0g2h.png",
+      "screenshotBytes": 360901
+    },
+    {
+      "id": "eDIGx",
+      "name": "30B. Project settings \u00b7 Agent config",
+      "width": 1440,
+      "height": 1200,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "eDIGx.png",
+      "screenshotBytes": 345419
+    },
+    {
+      "id": "PBf5F",
+      "name": "30C. Project settings \u00b7 Worktrees",
+      "width": 1440,
+      "height": 1200,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "PBf5F.png",
+      "screenshotBytes": 351576
+    },
+    {
+      "id": "SRaON",
+      "name": "30D. Project settings \u00b7 Prompt templates",
+      "width": 1440,
+      "height": 1200,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "SRaON.png",
+      "screenshotBytes": 362417
+    },
+    {
+      "id": "Z9By1",
+      "name": "31A. Global settings \u00b7 Notifications",
+      "width": 1440,
+      "height": 1280,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "Z9By1.png",
+      "screenshotBytes": 378340
+    },
+    {
+      "id": "AzGdn",
+      "name": "31B. Global settings \u00b7 Resources",
+      "width": 1440,
+      "height": 1280,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "AzGdn.png",
+      "screenshotBytes": 404598
+    },
+    {
+      "id": "AN5gN",
+      "name": "31C. Global settings \u00b7 Skills",
+      "width": 1440,
+      "height": 1280,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/skills",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "AN5gN.png",
+      "screenshotBytes": 353823
+    },
+    {
+      "id": "Sa02O",
+      "name": "31D. Global settings \u00b7 Agent accounts",
+      "width": 1440,
+      "height": 1280,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "Sa02O.png",
+      "screenshotBytes": 416099
+    },
+    {
+      "id": "SN7pd",
+      "name": "31E. Global settings \u00b7 Projects",
+      "width": 1440,
+      "height": 1280,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "SN7pd.png",
+      "screenshotBytes": 367744
+    },
+    {
+      "id": "TYwHz",
+      "name": "32A. Workflow editing \u00b7 Import, Add step and Delete",
+      "width": 1440,
+      "height": 1250,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/workflows/edit",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "TYwHz.png",
+      "screenshotBytes": 309796
+    },
+    {
+      "id": "gHoB0",
+      "name": "33A. Optional features \u00b7 Disabled, empty and waiting states",
+      "width": 1440,
+      "height": 1100,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "(states)",
+      "states": [
+        "empty-state"
+      ],
+      "diffStatus": "new",
+      "screenshot": "gHoB0.png",
+      "screenshotBytes": 239030
+    },
+    {
+      "id": "pubJt",
+      "name": "19A. Inbox \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/inbox",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "pubJt.png",
+      "screenshotBytes": 248758
+    },
+    {
+      "id": "Y9GMYF",
+      "name": "20B. Automation editor \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "(unmapped)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "Y9GMYF.png",
+      "screenshotBytes": 169988
+    },
+    {
+      "id": "sA0J5",
+      "name": "21A. Compare variants \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "(unmapped)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "sA0J5.png",
+      "screenshotBytes": 193561
+    },
+    {
+      "id": "y6mdNp",
+      "name": "22A. Plan review \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/plan-review",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "y6mdNp.png",
+      "screenshotBytes": 264705
+    },
+    {
+      "id": "DgFDf",
+      "name": "28A. Task actions \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId (menu)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "DgFDf.png",
+      "screenshotBytes": 283532
+    },
+    {
+      "id": "KVEBF",
+      "name": "27B. PR changes and merge \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/github/pr/changes",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "KVEBF.png",
+      "screenshotBytes": 372542
+    },
+    {
+      "id": "hcJW7",
+      "name": "31B. Resource settings \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "(unmapped)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "hcJW7.png",
+      "screenshotBytes": 183993
+    },
+    {
+      "id": "cpiTh",
+      "name": "32A. Import workflow \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "(unmapped)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "cpiTh.png",
+      "screenshotBytes": 76928
+    },
+    {
+      "id": "F9bVC",
+      "name": "25B. Project tasks \u00b7 Mobile floating New task",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks",
+      "states": [
+        "floating"
+      ],
+      "diffStatus": "new",
+      "screenshot": "F9bVC.png",
+      "screenshotBytes": 164296
+    },
+    {
+      "id": "yrCXo",
+      "name": "19A. Inbox \u00b7 Follow-up review \u00b7 Dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/inbox",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "yrCXo.png",
+      "screenshotBytes": 406250
+    },
+    {
+      "id": "vHYVq",
+      "name": "20A. Automations \u00b7 List and activity \u00b7 Dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/automations",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "vHYVq.png",
+      "screenshotBytes": 324737
+    },
+    {
+      "id": "hegUC",
+      "name": "20B. Automations \u00b7 Editor \u00b7 Dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/automations",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "hegUC.png",
+      "screenshotBytes": 338942
+    },
+    {
+      "id": "NkEDk",
+      "name": "21A. Variant comparison \u00b7 Results \u00b7 Dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/variants",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "NkEDk.png",
+      "screenshotBytes": 300632
+    },
+    {
+      "id": "iVNMT",
+      "name": "22A. Plan review \u00b7 Reorder and start \u00b7 Dark",
+      "width": 1440,
+      "height": 1260,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/new-task",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "iVNMT.png",
+      "screenshotBytes": 462847
+    },
+    {
+      "id": "R5A7rF",
+      "name": "23A. New task \u00b7 Starters and follow-ups \u00b7 Dark",
+      "width": 1440,
+      "height": 1400,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/new-task",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "R5A7rF.png",
+      "screenshotBytes": 483242
+    },
+    {
+      "id": "ZFjwR",
+      "name": "24A. Shared navigation \u00b7 Optional tools and project entry \u00b7 Dark",
+      "width": 1440,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "(unmapped)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "ZFjwR.png",
+      "screenshotBytes": 340235
+    },
+    {
+      "id": "KHzma",
+      "name": "25A. Project tasks \u00b7 Full resource table and column menu \u00b7 Dark",
+      "width": 1680,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "KHzma.png",
+      "screenshotBytes": 432051
+    },
+    {
+      "id": "utdkB",
+      "name": "26A. All tasks \u00b7 Grouping, tags and run actions \u00b7 Dark",
+      "width": 1680,
+      "height": 1120,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/all-tasks",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "utdkB.png",
+      "screenshotBytes": 344963
+    },
+    {
+      "id": "T95KVV",
+      "name": "27A. GitHub \u00b7 PR conversation, filters and readiness \u00b7 Dark",
+      "width": 1440,
+      "height": 1280,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/github",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "T95KVV.png",
+      "screenshotBytes": 377481
+    },
+    {
+      "id": "Fsizd",
+      "name": "28A. Task actions \u00b7 Menu and handoff reader \u00b7 Dark",
+      "width": 1440,
+      "height": 1280,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/tasks/:taskId (menu)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "Fsizd.png",
+      "screenshotBytes": 441017
+    },
+    {
+      "id": "uSLd4",
+      "name": "29A. Confirmation dialogs \u00b7 Tasks, variants and plans \u00b7 Dark",
+      "width": 1440,
+      "height": 1320,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "(overlays)",
+      "states": [
+        "dialog"
+      ],
+      "diffStatus": "new",
+      "screenshot": "uSLd4.png",
+      "screenshotBytes": 357298
+    },
+    {
+      "id": "t6Imv",
+      "name": "27B. GitHub PR \u00b7 Changes, blocked merge and confirmation \u00b7 Dark",
+      "width": 1440,
+      "height": 1300,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/github",
+      "states": [
+        "dialog",
+        "blocked"
+      ],
+      "diffStatus": "new",
+      "screenshot": "t6Imv.png",
+      "screenshotBytes": 525468
+    },
+    {
+      "id": "TN9Ej",
+      "name": "30A. Project settings \u00b7 Agents \u00b7 Dark",
+      "width": 1440,
+      "height": 1200,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "TN9Ej.png",
+      "screenshotBytes": 368241
+    },
+    {
+      "id": "FQr7q",
+      "name": "30B. Project settings \u00b7 Agent config \u00b7 Dark",
+      "width": 1440,
+      "height": 1200,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "FQr7q.png",
+      "screenshotBytes": 353011
+    },
+    {
+      "id": "e2S835",
+      "name": "30C. Project settings \u00b7 Worktrees \u00b7 Dark",
+      "width": 1440,
+      "height": 1200,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "e2S835.png",
+      "screenshotBytes": 360408
+    },
+    {
+      "id": "PxeWg",
+      "name": "30D. Project settings \u00b7 Prompt templates \u00b7 Dark",
+      "width": 1440,
+      "height": 1200,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/settings",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "PxeWg.png",
+      "screenshotBytes": 370127
+    },
+    {
+      "id": "HVu0D",
+      "name": "31A. Global settings \u00b7 Notifications \u00b7 Dark",
+      "width": 1440,
+      "height": 1280,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "HVu0D.png",
+      "screenshotBytes": 386300
+    },
+    {
+      "id": "chAPL",
+      "name": "31B. Global settings \u00b7 Resources \u00b7 Dark",
+      "width": 1440,
+      "height": 1280,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "chAPL.png",
+      "screenshotBytes": 413322
+    },
+    {
+      "id": "xH7vU",
+      "name": "31C. Global settings \u00b7 Skills \u00b7 Dark",
+      "width": 1440,
+      "height": 1280,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/skills",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "xH7vU.png",
+      "screenshotBytes": 362061
+    },
+    {
+      "id": "XS7nt",
+      "name": "31D. Global settings \u00b7 Agent accounts \u00b7 Dark",
+      "width": 1440,
+      "height": 1280,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "XS7nt.png",
+      "screenshotBytes": 424817
+    },
+    {
+      "id": "lUOHx",
+      "name": "31E. Global settings \u00b7 Projects \u00b7 Dark",
+      "width": 1440,
+      "height": 1280,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/settings/global",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "lUOHx.png",
+      "screenshotBytes": 376708
+    },
+    {
+      "id": "vxfF8",
+      "name": "32A. Workflow editing \u00b7 Import, Add step and Delete \u00b7 Dark",
+      "width": 1440,
+      "height": 1250,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/workflows/edit",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "vxfF8.png",
+      "screenshotBytes": 312776
+    },
+    {
+      "id": "lzI1Q",
+      "name": "33A. Optional features \u00b7 Disabled, empty and waiting states \u00b7 Dark",
+      "width": 1440,
+      "height": 1100,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "(states)",
+      "states": [
+        "empty-state"
+      ],
+      "diffStatus": "new",
+      "screenshot": "lzI1Q.png",
+      "screenshotBytes": 242387
+    },
+    {
+      "id": "K6EBZm",
+      "name": "19A. Inbox \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/inbox",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "K6EBZm.png",
+      "screenshotBytes": 254733
+    },
+    {
+      "id": "UIfcs",
+      "name": "20B. Automation editor \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "(unmapped)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "UIfcs.png",
+      "screenshotBytes": 173167
+    },
+    {
+      "id": "tV7Vf",
+      "name": "21A. Compare variants \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "(unmapped)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "tV7Vf.png",
+      "screenshotBytes": 197761
+    },
+    {
+      "id": "D5ua2",
+      "name": "22A. Plan review \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/plan-review",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "D5ua2.png",
+      "screenshotBytes": 269683
+    },
+    {
+      "id": "xHfq2",
+      "name": "28A. Task actions \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks/:taskId (menu)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "xHfq2.png",
+      "screenshotBytes": 289149
+    },
+    {
+      "id": "C2LEL",
+      "name": "27B. PR changes and merge \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/github/pr/changes",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "C2LEL.png",
+      "screenshotBytes": 378908
+    },
+    {
+      "id": "Y3hl1v",
+      "name": "31B. Resource settings \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "(unmapped)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "Y3hl1v.png",
+      "screenshotBytes": 188825
+    },
+    {
+      "id": "d0G4G",
+      "name": "32A. Import workflow \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "(unmapped)",
+      "states": [
+        "default"
+      ],
+      "diffStatus": "new",
+      "screenshot": "d0G4G.png",
+      "screenshotBytes": 78175
+    },
+    {
+      "id": "ZZg1y",
+      "name": "25B. Project tasks \u00b7 Mobile floating New task \u00b7 Dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/tasks",
+      "states": [
+        "floating"
+      ],
+      "diffStatus": "new",
+      "screenshot": "ZZg1y.png",
+      "screenshotBytes": 168199
+    },
+    {
+      "id": "eGAZH",
+      "name": "00B. Implementation gaps \u00b7 Coverage and handoff index",
+      "width": 1440,
+      "height": 1220,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "(unmapped)",
+      "states": [
+        "index"
+      ],
+      "diffStatus": "new",
+      "screenshot": "eGAZH.png",
+      "screenshotBytes": 652042
+    },
+    {
+      "id": "BeRrd",
+      "name": "27C. GitHub PR \u00b7 Checks passing, requirements unknown",
+      "width": 1440,
+      "height": 1280,
+      "theme": "light",
+      "viewport": "desktop",
+      "route": "/p/:projectId/github",
+      "states": [
+        "checks"
+      ],
+      "diffStatus": "new",
+      "screenshot": "BeRrd.png",
+      "screenshotBytes": 413190
+    },
+    {
+      "id": "FPdeC",
+      "name": "27C. GitHub PR \u00b7 Requirements unknown \u00b7 Desktop dark",
+      "width": 1440,
+      "height": 1280,
+      "theme": "dark",
+      "viewport": "desktop",
+      "route": "/p/:projectId/github",
+      "states": [
+        "checks"
+      ],
+      "diffStatus": "new",
+      "screenshot": "FPdeC.png",
+      "screenshotBytes": 420460
+    },
+    {
+      "id": "z7LPU8",
+      "name": "27C. GitHub PR \u00b7 Requirements unknown \u00b7 Mobile light",
+      "width": 402,
+      "height": null,
+      "theme": "light",
+      "viewport": "mobile",
+      "route": "/p/:projectId/github",
+      "states": [
+        "checks"
+      ],
+      "diffStatus": "new",
+      "screenshot": "z7LPU8.png",
+      "screenshotBytes": 269847
+    },
+    {
+      "id": "e9APk2",
+      "name": "27C. GitHub PR \u00b7 Requirements unknown \u00b7 Mobile dark",
+      "width": 402,
+      "height": null,
+      "theme": "dark",
+      "viewport": "mobile",
+      "route": "/p/:projectId/github",
+      "states": [
+        "checks"
+      ],
+      "diffStatus": "new",
+      "screenshot": "e9APk2.png",
+      "screenshotBytes": 273854
+    }
+  ]
+}
