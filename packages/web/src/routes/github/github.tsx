@@ -621,7 +621,7 @@ export function GithubRoute({
               Refresh
             </button>
           </div>
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div data-slot="gh-filter-toolbar" className="flex flex-wrap items-center gap-2.5">
             <div className="relative min-w-0 basis-full md:flex-1 md:basis-auto">
               <SearchIcon size={16}
                 aria-hidden="true"
@@ -1149,7 +1149,7 @@ function GithubMergeBox({ number }: { number: number }) {
   const mergeEnabled = Boolean(selectedMethod && (state.canMerge || (state.canOverride && overrideRules)))
 
   return (
-    <section data-slot="gh-merge-box" data-eligibility={state.eligibility} aria-live="polite" className="mt-6 rounded-lg border border-border bg-card p-4">
+    <section data-slot="gh-merge-box" data-eligibility={state.eligibility} data-conflicting={state.mergeable === 'conflicting' ? 'true' : undefined} aria-live="polite" className="mt-6 rounded-lg border border-border bg-card p-4">
       <div className="flex items-start gap-3">
         {state.canMerge ? (
           <CheckIcon size={16} aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-success" />
@@ -1238,9 +1238,15 @@ function GithubMergeBox({ number }: { number: number }) {
         <DialogContent data-slot="gh-merge-confirm" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>{selectedMethod ? mergeLabels[selectedMethod] : 'Merge'} pull request #{number}?</DialogTitle>
-            <DialogDescription>
-              This will merge “{state.title}” into {state.baseRef}. GitHub will re-check the exact reviewed head before changing the repository.
-              {overrideRules && state.canOverride ? ' You are asking GitHub to bypass unmet repository requirements; GitHub may refuse if your permissions do not allow it.' : ''}
+            <DialogDescription asChild>
+              <div>
+                <p>This will merge “{state.title}” into {state.baseRef}. GitHub will re-check the exact reviewed head before changing the repository.</p>
+                {overrideRules && state.canOverride ? (
+                  <p data-slot="gh-bypass-warning" className="mt-4 text-sm text-warning">
+                    You are asking GitHub to bypass unmet repository requirements; GitHub may refuse if your permissions do not allow it.
+                  </p>
+                ) : null}
+              </div>
             </DialogDescription>
           </DialogHeader>
           {merge.error ? <p className="text-sm text-danger">{merge.error.message}</p> : null}

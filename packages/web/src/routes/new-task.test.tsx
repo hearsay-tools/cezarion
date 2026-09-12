@@ -1995,7 +1995,29 @@ describe('the plan flow', () => {
     )
   })
 
-  it('Discard closes the overlay and hands back the draft untouched', async () => {
+  it('embeds plan review in the page and Escape restores focus to the untouched draft', async () => {
+    serve()
+    renderNewTask()
+    await planTask('keep the keyboard draft')
+
+    expect(screen.getByRole('heading', { name: 'New task / Plan first', level: 1 })).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    const review = document.querySelector('[data-slot="plan-review"]')!
+    expect(document.activeElement).toBe(review)
+    fireEvent.click(screen.getByRole('button', { name: 'Save as chain' }))
+    const save = await screen.findByRole('dialog')
+    fireEvent.keyDown(save, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(document.querySelector('[data-slot="plan-review"]')).toBe(review)
+    fireEvent.keyDown(review, { key: 'Escape' })
+
+    await waitFor(() => expect(document.querySelector('[data-slot="plan-review"]')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(textarea()))
+    expect(textarea().value).toBe('keep the keyboard draft')
+    expect(requests.some((r) => r.url === '/api/v1/runs' && r.method === 'POST')).toBe(false)
+  })
+
+  it('Discard closes the review and hands back the draft untouched', async () => {
     serve()
     renderNewTask()
     await planTask('keep this text')

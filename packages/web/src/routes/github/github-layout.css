@@ -112,3 +112,10 @@
 
 [data-slot='gh-merge-box'] [data-variant='primary'] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 [data-pr-detail='true'] [data-slot='gh-header'] h1 { font-size: 28px; }
+
+[data-slot='gh-merge-box'][data-conflicting='true'] h3 { color: var(--conflict); }
+[data-slot='gh-bypass-warning'] { color: var(--pending-strong); }
+@media (max-width: 767px) {
+  [data-route='github']:not([data-pr-detail='true']) [data-slot='gh-filter-toolbar'] { flex-direction: column; align-items: flex-start; }
+  [data-route='github']:not([data-pr-detail='true']) [data-slot='gh-filter-toolbar'] > div:first-child { width: 100%; flex-basis: auto; }
+}

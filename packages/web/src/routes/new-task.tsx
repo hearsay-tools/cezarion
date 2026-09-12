@@ -104,7 +104,7 @@ import './new-task.css'
  * contract docs/mockups/new-task.html): centered composer card on the twinkle surface, the
  * runner/model controls below the editor, with suggested task starters above it.
  * In plan-first mode (#383, the `Start | Plan first` segment) submit runs `POST /api/plan`
- * and opens the review overlay (plan-review.tsx) instead of starting a run.
+ * and opens the review page (plan-review.tsx) instead of starting a run.
  *
  * This route also owns the saved-bookmarklet contract (spec 011, BACKWARD_COMPATIBILITY.md):
  * a full document load of `/new?skill=&ref=&auto=1&key=` auto-starts a run unattended when the
@@ -204,6 +204,7 @@ export function NewTaskRoute() {
   // icon trigger inserts one by hand at the caret, and a skill whose templates are assigned to it
   // applies them on selection — but only into a box the user has not typed in (`resolveAutoApply`).
   const composerRef = useRef<ComposerHandle>(null)
+  const draftPanelRef = useRef<HTMLDivElement>(null)
   const templates = useMemo(
     () => normalizePromptTemplates(uiState.data?.promptTemplates),
     [uiState.data?.promptTemplates],
@@ -561,12 +562,13 @@ export function NewTaskRoute() {
   return (
     <div
       data-route="new"
+      data-plan-review={plan !== null ? 'true' : undefined}
       className="relative isolate flex min-h-full flex-col overflow-x-clip pb-16"
     >
 
 
 
-      <div className="relative z-[1] mx-auto w-full max-w-none px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
+      <div ref={draftPanelRef} style={plan !== null ? { display: 'none' } : undefined} className="relative z-[1] mx-auto w-full max-w-none px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
         <header className="mb-7 max-md:mb-5">
           <p className="mb-2 hidden md:block text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
             New task
@@ -816,7 +818,10 @@ export function NewTaskRoute() {
           }
           onStepsChange={(steps) => setPlan((current) => (current ? { ...current, steps } : current))}
           onStart={() => void startPlanned()}
-          onDiscard={() => setPlan(null)}
+          onDiscard={() => {
+            setPlan(null)
+            requestAnimationFrame(() => draftPanelRef.current?.querySelector('textarea')?.focus())
+          }}
         />
       ) : null}
     </div>
