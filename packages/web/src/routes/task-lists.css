@@ -156,3 +156,5 @@
   [data-route="tasks"] [data-slot="tasks-toolbar"] > div:has(input) { grid-column: 1 / -1; }
   [data-route="tasks"] [data-slot="archive-finished"] { grid-column: 1; }
 }
+[data-route="tasks"][data-presentation="resources"] [data-slot="new-task-inline"],
+[data-slot="table-title-editor"] button:first-of-type { background: var(--accent-strong); color: white; }
