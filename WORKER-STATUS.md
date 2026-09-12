@@ -2,7 +2,7 @@
 
 Source corrections c74141b3 and test-only repairs204b78b1 are ready for parent integration. Allfive repository gates pass:386files/8011root,261unit,27package plus typecheck/build. Complete43file browser suite:373passed,6existing skipped,0failed. Exact final exits/logs and frozen29file manifest: `.ai/qa/final-integrated/final-serial-complete.json` and `final-serial-manifest.json`.
 
-Independent owned audit:193unique sourceframes,157owned/36delegated,152paired images inspected plus composite/state proofs. No known correctable mismatch remains in audited owned states. RealAPI/data limits and incompatible source variants remain explicitly qualified; this is not a claim that all193 mutually incompatible frames are simultaneously pixel matched. Final report: `.ai/qa/final-integrated/ACCEPTANCE.md`.
+Independent owned audit:193unique sourceframes,157owned/36delegated,152paired images inspected plus composite/state proofs. No known correctable mismatch remains in audited owned states. RealAPI/data limits and incompatible source variants remain explicitly qualified; this is not a claim that all193 mutually incompatible frames are simultaneously pixel matched. Final report: `.ai/qa/final-integrated/ACCEPTANCE.md`. Parent integration matches979 tested package/script and root build/test inputs exactly; no rerun required. The remaining36 shared references now map to fc’s completed independent review and final geometry/header/target evidence in shared-final-review-map.json. PR-ready summary: PR-BODY.md. Parent handles integration approval and push/CI coordination.
 
 Earlier mock writes outside fixtures are explicitly recorded in `mock-write-scope.json`: nine exact fixture lines removed only from this worker’s real handoff; two earlier parent handoff lines reported and left unchanged. No real run-record mutation is established; final child isolation is verified. No push, PR, merge, delegation or self-approval was performed. Historical notes below are chronological findings, not current blockers.
 
@@ -115,3 +115,6 @@ The requested bounded fallback fix is already current in8ec8fdbc81f17377f1ff0966
 ## 2026-09-12T15:13:32.707603+00:00 FINALall5repo gatesPASS: typecheck8.5s,386files8011root293.3s,261unit28.4s,build4.8s,27package13.1s. Whole379browserstillrunning52391 withnofailoutput15:13UTC. All29hashesandbuiltindex/serverentryunchanged. No newexactmockheartbeatlines inownhandoff.
 
 ## 2026-09-12T15:14:49.254097+00:00 FinalALLGREEN:5repo gates8011root/261unit/27package,whole43browserfiles373pass6existingskip.29frozenhashesverified. Test-onlycommit204b78b1 (23files) committed;4historicSkillsPNGsrestored. Sourcec741alreadyreported. Evidencefinalizationremaining.
+
+## 2026-09-12T15:20:41.353463+00:00 parent integration closeout
+979/979 package/script and checked root inputs match tested snapshot, no differences or untracked inputs. Shared36 reference map incorporates fc independent review, geometry closeout, header and target proofs with coverage qualifications. PR-BODY.md includes actual counts and API/source-variant limits. Evidence-only change; no rerun or publication.

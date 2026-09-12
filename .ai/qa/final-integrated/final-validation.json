@@ -15,5 +15,13 @@
   "ownedFrames": 157,
   "delegatedFrames": 36,
   "inspectedPairs": 152,
-  "remaining": "Documented dynamic/API differences and conflicting source variants; parent retains shared review and integration approval."
+  "remaining": "Documented dynamic/API differences and conflicting source variants; parent retains integration approval and push/CI coordination.",
+  "parentSnapshotParity": {
+    "files": 979,
+    "differences": 0,
+    "extraUntrackedFiles": 0,
+    "parentHead": "a4af36789b06c46fcdc59553e95baa34fee7f7dc",
+    "rerunRequired": false
+  },
+  "sharedReview": "All36 delegated references mapped to fc completed independent review and final scoped proofs; coverage types and genuine limits retained."
 }

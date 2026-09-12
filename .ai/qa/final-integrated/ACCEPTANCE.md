@@ -2,6 +2,8 @@
 
 **Final verification passes.** All five repository gates are green, and the complete browser suite passes373 tests with6 existing skips across43files. Source correction commit:c74141b3; test-only commit:204b78b1. Final29-file snapshot and command exits are recorded in `final-serial-manifest.json` and `final-serial-complete.json`.
 
+Parent integration at `a4af3678` matches all979 tracked package/script files and checked root package/lock/TypeScript/Vitest inputs byte-for-byte, with no extra untracked inputs in that scope (`parent-snapshot-parity.json`). Tests were not rerun because the tested inputs are identical. The PR-ready text is [PR-BODY.md](PR-BODY.md).
+
 ## Implementation and regression checks
 
 Already reported source commits:8ec8fdbc fixes the offline Tasks registry retry loop and Automation editor overflow;237df6c9 updates the action guardian and grouped diff-number expectation;463f7caa keeps New Task switch thumbs white and View YAML’s actual target44px at every density.
@@ -43,4 +45,4 @@ Historical owner baselines remain explicitly rejected. Capture source qualificat
 
 Real issue/PR text, authors, counts, timestamps, SHA, branch, runner/model/account/workflow values and versions replace samples. Extra refresh/search, privacy/scope/help, resource and worker controls remain. Global Changes has no API diffStat; PR assignee/board metadata is issue-only; historical per-turn runner/handoff timestamps are absent. These values were not fabricated. Selection borders/fills were checked against exact source nodes: mobile model has no stroke, desktop subtle borders measure1.26/1.39:1, and mobile Skills rows have uniform fills. Tests instead retain text/icon contrast, focus, native disabled and actual selection behavior.
 
-No known categoryA mismatch remains in the reviewed owned states. The parent retains shared/Skills review and integration approval. Detailed intermediate diagnoses remain in WORKER-STATUS and historical command logs.
+No known categoryA mismatch remains in the reviewed owned states. The combined review now includes fc’s completed independent shared/Skills review for the remaining36 references, explicitly mapped in shared-final-review-map.json to the collected final review, geometry closeout, header audit and target/drilldown proofs. Component/behavior boards remain qualified as such; neither reviewer claims193 simultaneous pixel-identical screens. The parent retains integration approval and push/CI coordination. Detailed intermediate diagnoses remain in WORKER-STATUS and historical command logs.
