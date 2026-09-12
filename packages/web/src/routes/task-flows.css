@@ -17,7 +17,7 @@
 [data-slot="variant-diffstat"] { white-space: pre-wrap; overflow-wrap: anywhere; background: transparent; padding: 8px 0; color: var(--success); }
 [data-slot="variant-progress"] { max-height: none; mask-image: none; overflow-wrap: anywhere; font-size: 13px; }
 [data-slot="variant-pick"] { align-self: start; }
-[data-slot="variant-diff"] > button { min-height: 52px; }
+[data-slot="variant-diff"] > button { min-height: 52px; font-size: 13px; font-weight: 400; }
 [data-slot="plan-review"] [data-slot="plan-step"] { display: grid; grid-template-columns: 14px 20px minmax(0, 1fr); align-items: start; padding: 16px; gap: 8px; }
 [data-slot="plan-review"] [data-slot="plan-step"] > div { display: contents; }
 [data-slot="plan-review"] [data-slot="plan-step"] > div > div { flex-wrap: wrap; }
@@ -101,7 +101,7 @@
 [data-slot="todo-actions"] [data-slot="prompt-template-trigger"] { border-radius: 8px; }
 [data-slot="todo-meta"] > * + *::before { content: '·'; margin-right: 8px; }
 [data-slot="todo-meta"] { column-gap: 8px; }
-[data-slot="todo-source"] { text-decoration: none; text-transform: capitalize; }
+[data-slot="todo-source"] { text-decoration: none; }
 [data-slot="todo-card"][data-runnable="false"] [data-slot="todo-summary"] { font-size: 17px; }
 @media (max-width: 767px) {
   .task-flow-page { padding-top: 20px; gap: 18px; }

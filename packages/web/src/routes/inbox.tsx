@@ -247,7 +247,7 @@ function TodoCard({
                   data-slot="todo-source"
                   className="text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground"
                 >
-                  source task
+                  Source task <span aria-hidden="true">↗</span>
                 </Link>
               ) : (
                 <span data-slot="todo-source-gone">source task deleted</span>
