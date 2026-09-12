@@ -142,7 +142,7 @@ function SkillsCatalog() {
         </div>
       </header>
       <div className={cn(
-        'flex-col items-start gap-2 sm:flex-row sm:items-center @min-[650px]:flex',
+        'flex-col items-start gap-2 sm:flex-row sm:items-center md:flex',
         param === null ? 'flex' : 'hidden',
       )}>
         <div className="sw-search relative w-full min-w-0 flex-1">
@@ -172,17 +172,17 @@ function SkillsCatalog() {
         </button>
       </div>
 
-      <div className="grid min-w-0 items-start gap-[22px] @min-[650px]:grid-cols-[minmax(220px,310px)_minmax(0,1fr)]">
+      <div className="grid min-w-0 items-start gap-[22px] md:grid-cols-[minmax(220px,310px)_minmax(0,1fr)]">
         <section
           data-slot="skills-list"
           className={cn(
-            'min-w-0 flex-col rounded-xl border border-border bg-card p-3 @min-[650px]:flex',
+            'min-w-0 flex-col rounded-xl border border-border bg-card p-3 md:flex',
             param === null ? 'flex' : 'hidden',
           )}
         >
           <ul
             data-slot="skill-rows"
-            className="flex min-h-0 flex-col gap-1 overflow-y-auto @min-[650px]:max-h-[calc(100dvh-280px)]"
+            className="flex min-h-0 flex-col gap-1 overflow-y-auto md:max-h-[calc(100dvh-280px)]"
           >
             {skillsQuery.isPending ? (
               <li role="status" aria-busy="true" className="min-h-72 p-3 text-[13px] text-soft-foreground">
@@ -204,7 +204,7 @@ function SkillsCatalog() {
         <section
           data-slot="skills-detail"
           className={cn(
-            'min-w-0 flex-col rounded-xl border border-border bg-card @min-[650px]:flex',
+            'min-w-0 flex-col rounded-xl border border-border bg-card md:flex',
             param === null ? 'hidden' : 'flex',
           )}
         >
@@ -212,7 +212,7 @@ function SkillsCatalog() {
             <Link
               to="/skills"
               data-slot="skills-back"
-              className="mb-4 inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted @min-[650px]:hidden"
+              className="mb-4 inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted md:hidden"
             >
               <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
               Back to skills
