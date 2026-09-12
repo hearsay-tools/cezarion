@@ -17,6 +17,9 @@
 [data-route='new'] .new-task-run-settings > button > span:first-child > span:last-child { font-size: 10px; line-height: 1.6; }
 [data-route='new'] .new-task-run-settings > button[aria-checked='false'] > span:last-child > span { background: var(--muted-foreground); }
 @media (min-width: 768px) {
+  [data-route='new'] [data-slot='composer-execution-panel'] > div { gap: 12px; }
+  [data-route='new'] .new-task-run-settings { margin-top: 0; }
+  [data-route='new'] .new-task-run-settings > div { min-height: 44px; }
   [data-route='new'] .new-task-editor { padding: 22px; }
   [data-route='new'] .new-task-editor > label { padding: 0; font-size: 11px; }
   [data-route='new'] .new-task-editor textarea { padding: 18px 0 0; min-height: 180px; line-height: 1.6; }
