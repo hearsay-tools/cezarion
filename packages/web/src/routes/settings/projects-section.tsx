@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { FoldersIcon, XIcon } from '@/components/design-icons'
 
 import { useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router'
+import { AddProjectDialog } from '@/components/add-project-dialog'
 
 import { putWorkspaceConfig } from '@/api/client'
 import {
@@ -108,6 +110,7 @@ function ProjectsPane({
   config: WorkspaceConfigResponse
   registry: ProjectsResponse
 }) {
+  const [adding, setAdding] = useState(false)
   return (
     <div
       data-slot="projects-section"
@@ -139,6 +142,8 @@ function ProjectsPane({
         refreshProjects
       />
       <RegistryTable registry={registry} workspaceMax={config.resources.maxParallel} />
+      <Button className="self-start" onClick={() => setAdding(true)}>Add project</Button>
+      {adding ? <AddProjectDialog open onOpenChange={setAdding} /> : null}
     </div>
   )
 }
@@ -367,6 +372,7 @@ function ProjectRow({
       </td>
       <td className="px-3 py-2 tabular-nums text-soft-foreground">{shortDate(project.addedAt)}</td>
       <td className="px-3 py-2 text-right">
+        {project.status !== 'missing' ? <Button asChild variant="outline" className="mr-2"><Link to={`/p/${encodeURIComponent(project.id)}`}>Open</Link></Button> : null}
         <Button
           type="button"
           variant="ghost"

@@ -63,7 +63,9 @@ function SkillsForm({
     if (update.scopes.every((scope) => scope.skills.length === 0))
       return 'No tracked Open Mercato installation found.'
     const count = new Set(update.scopes.flatMap((scope) => scope.skills)).size
-    return `${count} tracked Open Mercato skill${count === 1 ? '' : 's'} found.`
+    return update.status === 'current'
+      ? `${count} tracked skill${count === 1 ? '' : 's'} · Up to date`
+      : `${count} tracked Open Mercato skill${count === 1 ? '' : 's'} found.`
   })()
 
   return (
@@ -100,7 +102,7 @@ function SkillsForm({
         <p
           data-slot="skills-installation-status"
           role={updateError || update?.status === 'unavailable' ? 'status' : undefined}
-          className="text-[13px] text-soft-foreground"
+          className={update?.status === 'current' && update.scopes.some((scope) => scope.skills.length > 0) ? 'text-[13px] text-success' : 'text-[13px] text-soft-foreground'}
         >
           {status}
         </p>

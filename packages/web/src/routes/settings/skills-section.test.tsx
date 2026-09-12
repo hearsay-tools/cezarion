@@ -150,6 +150,12 @@ describe('Global settings → Skills', () => {
     await waitFor(() => expect(puts().at(-1)?.body).toEqual({ skillsAutoUpdate: null }))
   })
 
+  it('shows a current installation only when the server reports tracked skills', async () => {
+    serve({}, { status: 'current', scopes: [{ scope: 'project', status: 'current', available: true, skills: ['test', 'code'], checkedAt: null, updatedAt: null }] })
+    renderSkills()
+    expect(await screen.findByText('2 tracked skills · Up to date')).toBeTruthy()
+  })
+
   it('degrades to an unavailable status without disabling the preference', async () => {
     serve(
       {},
