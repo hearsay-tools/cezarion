@@ -666,7 +666,7 @@ export function NewTaskRoute() {
                 {/* Runner, model and effort stay with the editor in the approved desktop
                     composition. Run isolation and automation choices live in the side panel. */}
                 {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
-                  <span className="new-task-runner-control"><TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-icon" /><RunnerPill
+                  <span className="new-task-runner-control"><TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" /><RunnerPill
                     runners={runners}
                     value={displayRunner}
                     accounts={accountChoices}
@@ -685,7 +685,7 @@ export function NewTaskRoute() {
                 <PickerPill
                   slot="model-pill"
                   ariaLabel="Model"
-                  label={<span className="new-task-model-label"><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-icon" /><span className="flex min-w-0 items-center gap-2 text-left"><span className="text-[10px] font-semibold tracking-[0.05em] text-muted-foreground uppercase">Model</span><span className="truncate text-sm text-foreground">{models.find((m) => m.id === model)?.label ?? 'auto'}</span></span></span>}
+                  label={<span className="new-task-model-label"><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-text" /><span className="flex min-w-0 items-center gap-2 text-left"><span className="text-[10px] font-semibold tracking-[0.05em] text-muted-foreground uppercase">Model</span><span className="truncate text-sm text-foreground">{models.find((m) => m.id === model)?.label ?? 'auto'}</span></span></span>}
                   value={model}
                   disabled={!providersReady}
                   readOnly={modelsLocked}
@@ -707,7 +707,7 @@ export function NewTaskRoute() {
                 <PickerPill
                   slot="effort-pill"
                   ariaLabel="Effort"
-                  label={<span className="inline-flex items-center gap-2"><GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-icon" /><span className="text-[10px] text-muted-foreground">Effort</span>{effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}</span>}
+                  label={<span className="inline-flex items-center gap-2"><GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" /><span className="text-[11px] text-muted-foreground">Effort</span>{effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}</span>}
                   value={effort}
                   disabled={!providersReady}
                   readOnly={modelsLocked}
@@ -729,7 +729,7 @@ export function NewTaskRoute() {
             <div className="flex min-w-0 flex-col gap-4">
             <details data-slot="execution-options" open className="group rounded-xl border border-border bg-card xl:self-start">
               <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
-                <SlidersHorizontalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-icon" />
+                <SlidersHorizontalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />
                 <span className="font-medium text-foreground">Execution settings</span>
                 <span data-slot="execution-summary" hidden className="min-w-0 basis-full truncate pl-5 xl:ml-auto xl:basis-auto xl:pl-0">
                   {RUNNERS.find((runner) => runner.id === displayRunner)?.label ?? displayRunner}
@@ -774,7 +774,7 @@ export function NewTaskRoute() {
                   ) : null}
                   {repo.data ? <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Base branch</span><BaseBranchPill repo={repo.data} /></div> : null}
                 </div>
-                <p data-slot="execution-tip" className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block"><GitBranchIcon aria-hidden="true" className="mb-2 size-[18px] text-accent-icon" />{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
+                <p data-slot="execution-tip" className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block"><GitBranchIcon aria-hidden="true" className="mb-2 size-[18px] text-accent-text" />{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
               </div>
             </details>
             {followupsToggleShown ? <section data-slot="followups-options" aria-label="Follow-ups preference" className="rounded-xl border border-border bg-card p-4">

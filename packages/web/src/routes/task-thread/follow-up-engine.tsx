@@ -169,7 +169,7 @@ export function useContinueAction(run: ApiRun): ContinueAction {
     providerPending: continuation.providerPending,
     pills: (
       <div data-slot="follow-up-engine" className="session-engine-controls">
-        <div className="session-setting"><TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-icon" /><span data-slot="session-setting-label">Runner</span>
+        <div className="session-setting"><TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" /><span data-slot="session-setting-label">Runner</span>
         {/* Shown when there is a choice to make: more than one runner, or more than one login for
             one of them. A host with neither sees no pill, exactly as before. */}
         {runners.length > 1 || runners.some((id) => hasAccountChoice(accounts, id)) ? (
@@ -194,7 +194,7 @@ export function useContinueAction(run: ApiRun): ContinueAction {
           />
         ) : <span data-slot="session-runner-value">{runner}</span>}
         </div>
-        <div className="session-setting"><GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-icon" /><span data-slot="session-setting-label">Effort</span>
+        <div className="session-setting"><GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" /><span data-slot="session-setting-label">Effort</span>
         <PickerPill
           slot="follow-up-effort-pill"
           ariaLabel="Effort"

@@ -56,3 +56,7 @@
   [data-route='new'] .new-task-agent-options [data-slot='runner-pill']::before { content: none; }
   [data-route='new'] [data-slot='execution-options'] { background: transparent; }
 }
+
+@media (min-width: 768px) {
+  [data-route='new'] .new-task-agent-options [data-slot='runner-pill']::before { font-size: 11px; }
+}

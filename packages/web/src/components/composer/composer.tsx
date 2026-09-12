@@ -753,7 +753,7 @@ export function Composer({
                 <div className="contents" inert={readOnly || undefined}>{footerStart}</div>
                 {executionOptions || sessionControls ? <div>{dictationButton}</div> : null}
               </div>
-              {sessionModel ? <div data-slot="session-model" inert={readOnly || undefined}><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-icon" /><span>Model</span>{sessionModel}</div> : null}
+              {sessionModel ? <div data-slot="session-model" inert={readOnly || undefined}><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-text" /><span>Model</span>{sessionModel}</div> : null}
               {executionOptions ? null : submissionControls}
 
             </div>
