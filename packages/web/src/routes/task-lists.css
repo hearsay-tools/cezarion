@@ -130,7 +130,7 @@
 [data-slot="tasks-toolbar"] [data-slot="button"] { font-size: 12px; font-weight: 500; }
 @media (max-width: 767px) {
   [data-slot="tasks-toolbar"] { align-items: start; }
-  [data-slot="tasks-toolbar"] [data-slot="new-task-inline"] { grid-column: 1; margin-right: 0; }
+  [data-slot="tasks-toolbar"] [data-slot="new-task-inline"] { grid-column: 1; justify-self: start; margin-right: 0; }
   [data-slot="task-card"] > div:first-child > a { font-size: 13px; line-height: 1.6; }
   [data-slot="mobile-task-meta"] { margin-top: 10px; }
 }

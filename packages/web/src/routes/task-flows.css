@@ -161,7 +161,7 @@
   [data-slot="plan-review"] [data-slot="plan-actions"] { padding-left: 20px; padding-right: 20px; }
 }
 
-[data-slot="variant-confirm-dialog"] [data-slot="alert-dialog-action"],
+[data-slot="variant-confirm-dialog"] [data-slot="confirm-pick"],
 [data-slot="plan-overwrite-dialog"] [data-slot="alert-dialog-action"] { background: var(--accent-strong); color: white; }
 [data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"],
 [data-route="automations"] > [data-slot="centered-state"],
