@@ -582,10 +582,11 @@ export function GithubRoute({
     <div data-route="github" data-pr-detail={view === 'prs' && n !== undefined || undefined} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
         <header data-slot="gh-header" className="flex shrink-0 flex-col gap-[22px]">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <h1 className="w-full text-[28px] font-semibold tracking-tight">GitHub</h1>
+            <h1 className="w-full text-[30px] font-semibold tracking-tight">GitHub</h1>
             {gh.repo ? (
-              <span data-slot="gh-repo" className="min-w-0 truncate text-[13px] text-muted-foreground">
-                {gh.repo}
+              <span className="min-w-0 truncate text-[13px] text-muted-foreground">
+                <span data-slot="gh-repo">{gh.repo}</span>
+                <span data-slot="gh-synced"> · {gh.syncedAt ? `Synced ${shortAge(gh.syncedAt)} ago` : 'Not synced yet'}</span>
               </span>
             ) : null}
 
@@ -644,9 +645,8 @@ export function GithubRoute({
             />
           {view === 'issues' ? <IssueFilters data={{ ...gh, issues: [...gh.issues, ...(searchPayload?.items ?? [])] }} assignees={assigneeFilter} projectId={activeProject}
             onAssigneesChange={setAssigneeFilter} onProjectChange={setProjectFilter} /> : null}
+            <button type="button" disabled={!filtering} className="min-h-11 rounded-md border border-border bg-card px-4 text-xs disabled:opacity-50" onClick={clearFilters}>Clear filters</button>
           </div>
-          <button type="button" disabled={!filtering} className="self-start min-h-11 rounded-md border border-border bg-card px-4 text-xs disabled:opacity-50" onClick={clearFilters}>Clear filters</button>
-          <p data-slot="gh-synced" className="text-xs text-success">{gh.syncedAt ? `Synced ${shortAge(gh.syncedAt)} ago` : 'Not synced yet'}</p>
         </header>
       <div data-slot="gh-panes" className="flex min-h-0 min-w-0 flex-1 flex-col items-start gap-[22px] md:flex-row">
       {/* Issue list and detail stack on mobile. A selected PR has a full-width review surface. */}
@@ -836,6 +836,7 @@ function GithubRow({
         onFocus={prefetchThread}
         data-slot="gh-row"
         data-number={item.number}
+        data-kind={item.kind}
         aria-current={active ? 'page' : undefined}
         title="Drag into the composer to prefill a task"
         className={cn(
@@ -865,9 +866,9 @@ function GithubRow({
           ) : null}
         </span>
         {item.labels.length > 0 ? (
-          <span className="flex flex-wrap gap-1 pl-[22px]">
+          <span data-slot="gh-row-labels" className="flex flex-wrap gap-1 pl-[22px]">
             {item.labels.map((label) => (
-              <LabelChip key={label} label={label} color={colors[label]} />
+              <LabelChip key={label} label={label} color={colors[label]} plain />
             ))}
           </span>
         ) : null}
@@ -940,13 +941,13 @@ function LabelFilter({
 }
 
 /** A single label pill, tinted with its GitHub color (or neutral when unknown). */
-function LabelChip({ label, color }: { label: string; color: string | undefined }) {
+function LabelChip({ label, color, plain = false }: { label: string; color: string | undefined; plain?: boolean }) {
   return (
     <span
       data-slot="gh-label"
       data-label={label}
-      style={labelChipStyle(color)}
-      className="rounded-full border px-1.5 py-px text-[10px] font-medium"
+      style={plain ? undefined : labelChipStyle(color)}
+      className={plain ? "text-[11px] font-normal text-muted-foreground" : "rounded-full border px-1.5 py-px text-[10px] font-medium"}
     >
       {label}
     </span>
@@ -1021,7 +1022,7 @@ function GithubDetail({
         )}
       </p>
 
-      {item.kind !== 'pr' ? <h2 className="mt-2 text-xl leading-snug font-semibold">{item.title}</h2> : null}
+      {item.kind !== 'pr' ? <h2 className="mt-2 text-[22px] leading-snug font-normal">{item.title}</h2> : null}
 
       {item.kind === 'pr' ? (
         <nav aria-label="Pull request detail" className="mt-4 flex border-b border-border">

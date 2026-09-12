@@ -41,7 +41,7 @@ import {
   skillKeywords,
 } from '@/lib/skills'
 import { isSubmitShortcut, submitShortcutHint } from '@/lib/use-submit-shortcut'
-import { cn } from '@/lib/utils'
+import { cn, isHttpUrl } from '@/lib/utils'
 
 import { readFollowupPrompt, writeFollowupPrompt } from './hand-to-agent-draft'
 
@@ -238,12 +238,13 @@ export function HandToAgent({
     )
 
   return (
+    <>
     <section data-slot="gh-hand" className="mt-7 rounded-lg border border-border bg-card p-4">
-      <h3 className="text-xl font-medium text-foreground">
+      <h3 className="text-xl font-normal text-foreground">
         Hand this to the agent
       </h3>
 
-      <label className="gh-field"><span>Instructions for the agent</span>
+      <label className="gh-field gh-prompt-field"><span>Instructions for the agent</span>
       <Textarea
         ref={promptRef}
         data-slot="gh-custom-prompt"
@@ -320,11 +321,10 @@ export function HandToAgent({
           </span>
         ) : null}
       </div>
-
-
-
-
-      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+      <p className="text-[11px] leading-relaxed text-muted-foreground">{item.kind === 'pr' ? 'PR' : 'Issue'} number and link remain attached to the task. Edit the prompt before starting. Cmd/Ctrl+Enter submits; Enter adds a new line.</p>
+    </section>
+      <div data-slot="gh-handoff-actions" className="mt-[22px] flex flex-wrap items-center gap-2.5">
+        {isHttpUrl(item.url) ? <Button asChild variant="outline"><a href={item.url} target="_blank" rel="noopener noreferrer">Open in GitHub</a></Button> : null}
         <Button
           variant="primary"
           data-action="gh-run"
@@ -356,7 +356,7 @@ export function HandToAgent({
           </>
         ) : null}
       </div>
-    </section>
+    </>
   )
 }
 

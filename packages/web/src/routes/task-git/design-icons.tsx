@@ -1,7 +1,8 @@
 import type { SVGProps } from 'react'
 
 /** Exact filled Lucide font outlines exported from the authoritative cezarion.pen.
- * Source SHA256: 37378246893ba6259088ec3ddb2702e4220f44ca643ac13e5ac293263021a74b.
+ * Source SHA256: 56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8.
+ * All 23 viewBoxes and paths reverified byte-for-byte against iteration-3 icon-map.json.
  * Lucide contributors, ISC license; see design-icons.LICENSE. No stroke approximation.
  * Kept local to the Git slice while the shared adapter contract is unavailable. */
 export function ArrowLeftIcon(props: SVGProps<SVGSVGElement>) {

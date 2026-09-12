@@ -69,9 +69,9 @@ function CommitsView({ run }: { run: ApiRun }) {
         />
       ) : (
         <div className="px-[18px] py-[22px] md:px-9">
-          <h2 className="mb-4 text-sm font-semibold">{commits.data.commits.length} {commits.data.commits.length === 1 ? 'commit' : 'commits'} in this task</h2>
           <CommitList
             slot="task-commits"
+            heading={<h2 className="text-base font-semibold">{commits.data.commits.length} {commits.data.commits.length === 1 ? 'commit' : 'commits'} in this task</h2>}
             className="w-full"
             commits={commits.data.commits.map((commit: RunCommit) => ({
               ...commit,
@@ -158,11 +158,11 @@ function TaskChangedFiles({ run }: { run: ApiRun }) {
   if (changes.isError) return <p role="status" className="mt-[22px] text-xs text-danger">Could not load changed files: {changes.error.message}</p>
   if (changes.data.files.length === 0) return null
   return <section data-slot="task-commit-files" className="mt-[22px] rounded-[10px] border border-border bg-card p-5">
-    <h2 className="mb-3 text-xs font-semibold">{changes.data.files.length} changed files</h2>
-    <ul className="space-y-2">
+    <h2 className="mb-4 text-[15px] font-semibold">{changes.data.files.length} changed files</h2>
+    <ul className="space-y-4">
       {changes.data.files.map(file => <li key={file.path}>
-        <Link to={`/tasks/${run.id}/changes`} className="flex min-h-8 items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
-          <FileCodeIcon aria-hidden="true" className="size-3.5 shrink-0" /><span className="break-all">{file.path}</span>
+        <Link to={`/tasks/${run.id}/changes`} className="flex min-h-11 items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+          <FileCodeIcon aria-hidden="true" className="size-[15px] shrink-0" /><span className="break-all">{file.path}</span>
         </Link>
       </li>)}
     </ul>

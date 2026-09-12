@@ -76,3 +76,36 @@
 [data-slot='gh-merge-confirm'] [data-variant='primary'] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 
 [data-slot='gh-merge-box']:not([data-eligibility='ready']) h3 { color: var(--pending-strong); }
+
+/* Confirmed 193-frame source, GitHub list and handoff: retain extra live metadata and
+   utility actions while matching the document hierarchy and control geometry. */
+[data-slot='gh-tabs'] .gh-utility:first-of-type { margin-left: auto; }
+[data-route='github']:not([data-pr-detail='true']) [data-slot='gh-tabs'] { gap: 24px; border-bottom: 1px solid var(--border); }
+[data-slot='gh-header'] > div:first-child { row-gap: 8px; }
+[data-slot='gh-search'] { border-radius: 8px; padding-left: 36px; font-size: 12px; }
+[data-slot='gh-rows'] { gap: 0; }
+[data-slot='gh-rows'] > li + li { border-top: 1px solid var(--border); }
+[data-slot='gh-row'] { padding: 14px 12px; border-radius: 8px; }
+[data-slot='gh-row'][data-kind='issue'] > span:first-child > svg { display: none; }
+[data-slot='gh-row'][data-kind='issue'] > span { padding-left: 0; }
+[data-slot='gh-row'] > span:first-child > span { font-weight: 400; white-space: normal; }
+[data-slot='gh-row'] > span:nth-child(2) { font-family: inherit; font-size: 11px; }
+[data-slot='gh-detail-inner'] { padding: 24px; }
+[data-slot='gh-hand'] { border-color: color-mix(in srgb, var(--accent-strong) 24%, var(--border)); }
+.gh-prompt-field { gap: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 16px; }
+.gh-prompt-field [data-slot='gh-custom-prompt'] { min-height: 96px; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.gh-engine-fields [data-slot='model-pill'] { margin-top: 0; justify-content: flex-start; padding-left: 0; }
+.gh-engine-fields [data-slot='model-pill']::before { content: none; }
+.gh-field [data-slot='gh-workflow-trigger'] { font-family: inherit; font-weight: 400; }
+.gh-field [data-slot='gh-workflow-trigger'] > svg:first-child { display: none; }
+.gh-field [data-slot='gh-workflow-trigger'] > svg:last-child { order: -1; margin-left: 0; }
+.gh-field [data-slot='gh-workflow-trigger'] > span { margin-left: auto; }
+@media (max-width: 767px) {
+  [data-slot='gh-tabs'] .gh-utility:first-of-type { margin-left: 0; }
+  [data-slot='gh-detail-inner'] { padding: 16px; }
+}
+
+[data-slot='gh-row'][data-kind='issue'] > span:first-child { color: var(--foreground); }
+[data-slot='gh-row-labels'] { order: 1; }
+[data-slot='gh-row-labels'] > span + span::before { content: '·'; margin-right: 4px; }
+[data-slot='gh-row'] > span:nth-child(2) { order: 2; }
