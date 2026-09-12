@@ -1,4 +1,6 @@
-import { ChevronDownIcon, SettingsIcon } from 'lucide-react'
+import { ChevronDownIcon, SettingsIcon, WrenchIcon } from '@/components/design-icons'
+
+import type { ReactNode } from 'react'
 import { Link } from '@/lib/project-router'
 import { Link as RouterLink } from 'react-router'
 
@@ -77,7 +79,7 @@ export function forgeNote(health: HealthResponse): string | null {
   return `GitHub is unreachable — ${health.forge.reason ?? 'unknown reason'}. The GitHub tab is hidden until it comes back.`
 }
 
-export function ToolsMenu({ health }: { health: HealthResponse | undefined }) {
+export function ToolsMenu({ health, sessionScope }: { health: HealthResponse | undefined; sessionScope?: ReactNode }) {
   if (!health) return null
 
   // Green when cez can actually work: at least one agent CLI is present and the default runner
@@ -90,11 +92,13 @@ export function ToolsMenu({ health }: { health: HealthResponse | undefined }) {
         <button
           type="button"
           data-slot="tools-menu-trigger"
+          aria-label="Tools"
           title={toolsTooltip(health)}
-          className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:min-h-9"
+          className="relative flex size-9 items-center justify-center gap-0.5 rounded-lg text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:min-h-9"
         >
-          <StatusDot tone={blocker ? 'pending' : 'success'} />
-          Tools
+          <WrenchIcon className="size-4" aria-hidden="true" />
+          {blocker ? <StatusDot tone="pending" className="absolute top-1 right-1 size-1.5" /> : null}
+          <span className="sr-only">Tools</span>
           <ChevronDownIcon className="size-[11px]" aria-hidden="true" />
         </button>
       </DropdownMenuTrigger>
@@ -106,6 +110,7 @@ export function ToolsMenu({ health }: { health: HealthResponse | undefined }) {
         data-slot="tools-menu-content"
         className="w-[240px]"
       >
+        {sessionScope ? <div className="px-2 py-2">{sessionScope}</div> : null}
         <DropdownMenuLabel className="text-[11px] font-semibold tracking-[.04em] text-soft-foreground uppercase">
           Installed tools
         </DropdownMenuLabel>

@@ -18,7 +18,8 @@ afterEach(() => {
 describe('clampSidebarWidth', () => {
   it.each([
     // In range — rounded to whole pixels, because a drag produces fractions.
-    [232, 232],
+    [264, 264],
+    [232, MIN_SIDEBAR_WIDTH],
     [300, 300],
     [420, 420],
     [317.4, 317],

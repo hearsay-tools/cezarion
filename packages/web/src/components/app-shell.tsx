@@ -1,14 +1,5 @@
-import {
-  FolderIcon,
-  FolderOpenIcon,
-  LayersIcon,
-  MenuIcon,
-  PlusIcon,
-  SearchIcon,
-  ShieldCheckIcon,
-  SettingsIcon,
-  XIcon,
-} from 'lucide-react'
+import { FolderIcon, FolderPlusIcon, LayersIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon, Settings2Icon, XIcon } from '@/components/design-icons'
+
 import * as React from 'react'
 import type { ReactNode } from 'react'
 import { Link as RouterLink, matchPath, useLocation } from 'react-router'
@@ -247,7 +238,7 @@ export function AppShell({
             <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
             {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
             <span className="min-w-0 truncate">{breadcrumb?.page ?? current?.label ?? 'Cezarion'}</span>
-            {(breadcrumb?.branch ?? repo?.branch) ? <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]"><ShieldCheckIcon aria-hidden="true" className="size-4 text-accent-icon" />{breadcrumb?.branch ?? repo?.branch}</span> : null}
+            {(breadcrumb?.branch ?? repo?.branch) ? <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]"><ShieldCheckIcon aria-hidden="true" className="size-4 text-accent-text" />{breadcrumb?.branch ?? repo?.branch}</span> : null}
           </header>
 
           {banner ? (
@@ -408,7 +399,7 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
       // A 5px grab strip straddling the border, invisible until you reach for it. `touch-none`
       // is load-bearing rather than decorative: without it a touch drag is claimed by the
       // browser's own panning and scrolls the page instead of resizing the column.
-      className="absolute inset-y-0 -right-[2px] z-20 w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent-strong/40 focus-visible:bg-accent-strong/60 focus-visible:outline-none"
+      className="absolute inset-y-0 -right-[2px] z-20 w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-[var(--composer-border)] focus-visible:bg-[var(--composer-border)] focus-visible:outline-none"
     />
   )
 }
@@ -427,6 +418,7 @@ function MobileNavDrawer({ onNavigate, ...props }: NavProps & { onNavigate: () =
     <SheetContent
       side="left"
       data-slot="mobile-nav-drawer"
+      overlayClassName="bg-[var(--nav-scrim)]"
       showCloseButton={false}
       // The drawer is the sidebar: same width, same surface token, and no padding of its own —
       // SidebarContent brings its own. `sm:max-w-none` sheds the primitive's sheet width cap.
@@ -443,7 +435,7 @@ function MobileNavDrawer({ onNavigate, ...props }: NavProps & { onNavigate: () =
           <SheetClose asChild>
             {/* size-11: the ≥44px touch target the spec's mobile rules require. */}
             <Button variant="ghost" size="icon" aria-label="Close menu" className="absolute top-5 -right-14 size-11 text-accent-strong-foreground hover:bg-accent-strong-foreground/10 hover:text-accent-strong-foreground">
-              <XIcon className="size-[17px]" aria-hidden="true" />
+              <XIcon className="size-[22px]" aria-hidden="true" />
             </Button>
           </SheetClose>
         }
@@ -493,10 +485,10 @@ function SidebarContent({
       // an `@min-[…]/sidebar:` query and returns when the user drags the column wider.
       className="@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
-      <div className="flex items-center gap-[9px] px-[18px] pt-[26px] pb-4">
+      <div className="flex items-center gap-[9px] px-4 pt-5 pb-2">
         <span
           data-slot="brand-wordmark"
-          className="text-[23px] leading-none font-semibold tracking-[-0.03em] text-foreground"
+          className="text-[23px] leading-normal font-semibold tracking-[-0.03em] text-foreground"
         >
           Cezarion
         </span>
@@ -505,18 +497,18 @@ function SidebarContent({
         ) : null}
       </div>
 
-      <div className="px-[18px] pb-3">
+      <div className="px-4 pb-2">
         <CommandPaletteHint />
       </div>
 
-      <div className="flex gap-1.5 px-[18px] pb-3">
-        <Button asChild variant="ghost" className={cn("relative min-w-0 flex-1 justify-start text-muted-foreground", activeTo === "/new" && "bg-[var(--task-brand-selected)] text-accent-text")}>
+      <div className="flex gap-1.5 px-4 pb-2">
+        <Button asChild variant="ghost" className={cn("relative h-[42px] min-w-0 flex-1 justify-start gap-2.5 px-2.5 font-medium text-muted-foreground", activeTo === "/new" && "bg-[var(--task-brand-selected)] text-accent-text")}>
           {/* A Router Link since R4 Step 1.1: the React /new composer is real, so deliberate
               New task affordances stay inside the SPA. Full document loads of /new (the
               bookmarklet contract) land on the shell like any route (static-ui.ts) — the
               React composer has owned auto-start parity since R4 Step 1.3. */}
           <Link to="/new" onClick={onNavigate}>
-            <PlusIcon className="size-[15px]" aria-hidden="true" />
+            <PlusIcon className="size-[18px]" aria-hidden="true" />
             New task
             {/* Decorative: the `c`-to-create accelerator is registered in the command palette.
                 (⌘N is also bound there, but only the desktop shell receives it — the browser
@@ -531,7 +523,7 @@ function SidebarContent({
         </Button>
       </div>
 
-      {!singleProject ? <div className="shrink-0 px-4 pb-1"><AllTasksLink onNavigate={onNavigate} /></div> : null}
+
       <nav aria-label="Workspace" className="shrink-0 px-4">
         {items.filter((item) => item.inbox || item.automations).map((item) => {
           const Icon = item.icon
@@ -542,7 +534,7 @@ function SidebarContent({
           </Link>
         })}
       </nav>
-      {singleProject ? null : <div className="shrink-0 px-4 py-1"><AddProjectMenu /></div>}
+
       {sessionScope ? <div className="shrink-0 px-4 pb-3">{sessionScope}</div> : null}
       {projectGroups ? (
         <>
@@ -550,7 +542,7 @@ function SidebarContent({
               The whole area scrolls as one (per the sidebar mockup); collapsed groups are one row. */}
           <div
             data-slot="project-groups"
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 pt-1.5 pb-2"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-0 pb-2"
           >
             <SidebarNavigateContext.Provider value={onNavigate}>
               {projectGroups}
@@ -559,8 +551,8 @@ function SidebarContent({
         </>
       ) : (
         <div data-slot="single-project-navigation" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {repo ? <div className="mx-[18px] mt-2 mb-3 flex min-h-10 items-center gap-2 text-xs font-medium"><FolderIcon aria-hidden="true" className="size-4" /><span data-slot="repo-chip" className="min-w-0 truncate">{repo.name}</span><span className="ml-auto text-[10px] text-muted-foreground">{repo.branch}</span></div> : null}
-          <nav aria-label="Main" className="px-2.5 py-1.5">
+          {repo ? <div className="mx-4 mb-1 flex min-h-[55px] items-center gap-2 rounded-md bg-muted px-2 text-[13px] font-semibold"><FolderIcon aria-hidden="true" className="size-[18px] shrink-0 text-muted-foreground" /><span className="min-w-0"><span data-slot="repo-chip" className="block truncate">{repo.name}</span><span className="block truncate font-['IBM_Plex_Mono'] text-[10px] font-normal text-soft-foreground">{repo.branch}</span></span></div> : null}
+          <nav aria-label="Main" className="flex flex-col gap-0.5 px-4">
             {items.filter((item) => !item.inbox && !item.automations).map((item) => {
               const isActive = item.to === activeTo
               const Icon = item.icon
@@ -577,11 +569,11 @@ function SidebarContent({
                   className={cn(
                     // h-[34px] is the mockup's desktop row. In the drawer these are touch targets, so
                     // they relax to 44px — the one place the two framings legitimately differ.
-                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[34px]',
-                    isActive && 'bg-[var(--task-brand-selected)] font-semibold text-[var(--accent-text)]'
+                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-xs md:text-[11px] font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
+                    isActive && 'bg-[var(--task-brand-selected)] text-[var(--accent-text)]'
                   )}
                 >
-                  <Icon className="size-4 shrink-0" aria-hidden="true" />
+                  <Icon className="size-[15px] shrink-0 text-soft-foreground" aria-hidden="true" />
                   {item.label}
                   {item.badge === 'inbox-count' && inboxCount ? (
                     <span
@@ -619,7 +611,7 @@ function SidebarContent({
           {/* The single-project quick-list (Needs you / Working / Recent). */}
           <div
             data-slot="task-quick-list"
-            className="px-2.5 pb-2"
+            className="px-4 pb-2"
           >
             {taskQuickList}
           </div>
@@ -630,15 +622,17 @@ function SidebarContent({
         data-slot="sidebar-footer"
         className="shrink-0 px-4 pt-2 pb-3"
       >
-        <GlobalSettingsLink onNavigate={onNavigate} className="mb-2 w-full justify-start gap-3 text-xs" />
-        <div data-slot="sidebar-footer-controls" className="flex items-center gap-2 border-t border-border pt-2">
+
+        <div data-slot="sidebar-footer-controls" className="flex items-center justify-between gap-1 border-t border-border pt-3">
+          {!singleProject ? <><AllTasksLink onNavigate={onNavigate} /><AddProjectMenu /></> : null}
+          <GlobalSettingsLink onNavigate={onNavigate} />
           {/* SLOT — Step 4.2 mounts the Tools dropdown (aggregate status dot + tool versions) here. */}
-          <div data-slot="tools-menu" className="min-w-0 flex-1">
+          <div data-slot="tools-menu" className="shrink-0">
             {toolsMenu}
           </div>
           <ThemeToggle />
         </div>
-        {version ? <div className="mt-2 flex min-w-0 items-center gap-2 px-2"><VersionChip version={version} latestVersion={latestVersion} />{latestVersion && latestVersion !== version ? <span className="min-w-0 text-[10px] text-accent-text">Update available</span> : null}</div> : null}
+        {version ? <div className="sr-only"><VersionChip version={version} latestVersion={latestVersion} />{latestVersion && latestVersion !== version ? <span className="min-w-0 text-[10px] text-accent-text">Update available</span> : null}</div> : null}
       </div>
     </div>
   )
@@ -660,6 +654,8 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
     <RouterLink
       to="/tasks"
       data-slot="all-tasks-link"
+      aria-label="All tasks"
+      title="All tasks"
       onClick={onNavigate}
       aria-current={isActive ? 'page' : undefined}
       // Reads at the weight of a section header rather than a nav row: full-strength foreground
@@ -667,15 +663,15 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
       // rows are muted. The violet icon is the one spot of accent — the same hue the tag chips
       // and this page's own selected filters use, so the door and the room match.
       className={cn(
-        'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted md:h-9',
+        'selection-row flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted',
         isActive && 'bg-muted',
       )}
     >
       <LayersIcon
-        className={cn('size-4 shrink-0', isActive ? 'text-accent-icon' : 'text-muted-foreground')}
+        className={cn('size-4 shrink-0', isActive ? 'text-accent-text' : 'text-muted-foreground')}
         aria-hidden="true"
       />
-      All tasks
+      <span className="sr-only">All tasks</span>
     </RouterLink>
   )
 }
@@ -696,7 +692,7 @@ function GlobalSettingsLink({
   onNavigate?: () => void
 }) {
   return (
-    <Button asChild variant="ghost" size="icon" className={cn('h-11', className)}>
+    <Button asChild variant="ghost" size="icon" className={cn('size-9', className)}>
       <RouterLink
         to="/settings/global"
         data-slot="global-settings-link"
@@ -704,8 +700,8 @@ function GlobalSettingsLink({
         title="Global settings"
         onClick={onNavigate}
       >
-        <SettingsIcon className="size-4" aria-hidden="true" />
-        Global settings
+        <Settings2Icon className="size-4" aria-hidden="true" />
+        <span className="sr-only">Global settings</span>
       </RouterLink>
     </Button>
   )
@@ -740,10 +736,10 @@ function AddProjectMenu() {
           variant="ghost"
           aria-label="Add project"
           title="Add project"
-          className="min-h-11 w-full justify-start gap-2.5 px-2.5 text-[13px] font-medium text-muted-foreground md:min-h-9"
+          className="size-9 p-0 text-muted-foreground"
         >
-          <FolderOpenIcon className="size-4" aria-hidden="true" />
-          Add project
+          <FolderPlusIcon className="size-4" aria-hidden="true" />
+          <span className="sr-only">Add project</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
@@ -787,11 +783,11 @@ function CommandPaletteHint() {
       onClick={() => openCommandPalette()}
       className="flex h-11 w-full items-center gap-2 rounded-lg border border-border bg-[var(--task-brand-bg)] px-2.5 text-left text-xs font-normal text-muted-foreground transition-colors hover:border-[var(--composer-border)] hover:text-foreground md:h-10"
     >
-      <SearchIcon className="size-3.5 shrink-0" aria-hidden="true" />
+      <SearchIcon className="size-4 shrink-0" aria-hidden="true" />
       <span className="truncate">Search…</span>
       <kbd
         aria-hidden="true"
-        className="ml-auto shrink-0 font-mono text-[10px] font-normal text-soft-foreground"
+        className="ml-auto shrink-0 font-sans text-[10px] font-normal text-soft-foreground"
       >
         {commandShortcutHint('k')}
       </kbd>

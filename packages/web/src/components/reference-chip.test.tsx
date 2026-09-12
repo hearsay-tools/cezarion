@@ -90,7 +90,7 @@ describe('ReferenceChip with a status', () => {
     expect(waiting).not.toContain('text-accent-text')
   })
 
-  it('turns the WHOLE chip amber while checks run, and keeps the pulsing dot', () => {
+  it('turns the WHOLE chip amber while checks run, and uses the exact pulsing circle glyph', () => {
     // A neutral chip with one coloured dot reads as neutral when a table is scanned; the state
     // worth seeing at a glance is "something is happening to this right now".
     const chip = chipOf(<ReferenceChip reference={PR} taskTitle="t" status="checks-pending" />)
@@ -98,7 +98,8 @@ describe('ReferenceChip with a status', () => {
 
     expect(chip.className).toContain('text-pending-strong')
     expect(dot?.getAttribute('data-tone')).toBe('pending')
-    expect(dot?.className).toContain('animate-pulse')
+    expect(dot?.getAttribute('class')).toContain('animate-pulse')
+    expect(dot?.getAttribute('data-design-icon')).toBe('circle')
   })
 
   it('writes that amber with the INK token, not the dot fill', () => {

@@ -1,4 +1,5 @@
-import { PinIcon } from 'lucide-react'
+import { PinIcon } from '@/components/design-icons'
+
 import { cn } from '@/lib/utils'
 
 /**
@@ -44,12 +45,12 @@ export function PinToggle({
       }}
       className={cn(
         'inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-soft-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
-        pinned && 'text-accent-icon hover:text-accent-icon',
+        pinned && 'text-accent-text hover:text-accent-text',
         className,
         'max-md:min-h-11 max-md:min-w-11 no-hover:min-h-11 no-hover:min-w-11',
       )}
     >
-      <PinIcon className={cn('size-3', pinned && 'fill-current')} aria-hidden="true" />
+      <PinIcon className={cn('size-[18px]' )} aria-hidden="true" />
     </button>
   )
 }

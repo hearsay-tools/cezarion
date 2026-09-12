@@ -275,7 +275,7 @@ describe('sidebar wiring', () => {
   // CEZ_SINGLE_PROJECT pins this response to the boot row even when the saved registry has more.
   // The shell must collapse from that ordinary one-row response, not grow a second capability
   // branch for navigation: flat nav, one quick-list, repo chip, no group headers.
-  it('keeps the sidebar flat when single-project mode pins the registry to the boot project', async () => {
+  it('uses a project card when single-project mode pins the registry to the boot project', async () => {
     serve({
       '/api/v1/health': {
         ...HEALTH,
@@ -287,11 +287,9 @@ describe('sidebar wiring', () => {
     })
     renderShell()
 
-    await waitFor(() => expect(repoChip()).not.toBeNull())
-    expect(document.querySelector('[data-slot="project-groups"]')).toBeNull()
-    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
-    expect(document.querySelector('[data-slot="task-quick-list"]')).not.toBeNull()
-    expect(repoChip()?.textContent).toBe('cezar')
+    await waitFor(() => expect(document.querySelector('[data-slot="project-group-header"]')).not.toBeNull())
+    expect(screen.getByRole('navigation', { name: 'cezar navigation' })).toBeTruthy()
+    expect(document.querySelectorAll('[data-slot="project-group"]')).toHaveLength(1)
   })
 
   it('hides add-project chrome when health reports single-project mode', async () => {
@@ -309,7 +307,7 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(versionChip()).not.toBeNull())
     expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
     expect(screen.getByRole('link', { name: /New task/ })).toBeTruthy()
-    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
+    expect(screen.getByRole('navigation', { name: 'cezar navigation' })).toBeTruthy()
   })
 
   it('renders one collapsible group per project once the workspace has two', async () => {
@@ -336,7 +334,7 @@ describe('sidebar wiring', () => {
     expect(repoChip()).toBeNull()
   })
 
-  it('keeps the shared archive filter reachable above a multi-project session tree', async () => {
+  it('keeps the shared archive filter reachable in Tools for a multi-project session tree', async () => {
     const active = run({ id: 'active-session', titleSummary: 'Current session' })
     const archived = run({ id: 'archived-session', titleSummary: 'Archived session', status: 'done', archived: true })
     serve({
@@ -352,14 +350,15 @@ describe('sidebar wiring', () => {
     })
     renderShell('/p/cezar/new')
     await screen.findByRole('link', { name: /Current session/ })
-    const archivedTab = screen.getByRole('button', { name: /^Archived/ })
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Tools' }), { button: 0, ctrlKey: false })
+    const archivedTab = await screen.findByRole('button', { name: /^Archived/ })
     const tree = document.querySelector('[data-slot="project-groups"]')!
-    expect(archivedTab.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(tree.contains(archivedTab)).toBe(false)
     fireEvent.click(archivedTab)
-    await screen.findByRole('link', { name: /Archived session/ })
+    await waitFor(() => expect(document.querySelector('[data-run-id="archived-session"]')).not.toBeNull())
     expect(screen.queryByRole('link', { name: /Current session/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^Active/ }))
-    await screen.findByRole('link', { name: /Current session/ })
+    await waitFor(() => expect(document.querySelector('[data-run-id="active-session"]')).not.toBeNull())
   })
 
   it('shows the version chip even outside a git repo', async () => {

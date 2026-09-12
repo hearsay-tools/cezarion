@@ -75,10 +75,8 @@ describe('TaskQuickList', () => {
     })
 
     const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
-    expect(headers).toEqual(['Needs you', 'Working', 'Recent'])
-    expect(rowsIn('Needs you')).toEqual(['Structured changes endpoint1m'])
-    expect(rowsIn('Working')).toEqual(['Normalize agent-event protocol1m'])
-    expect(rowsIn('Recent')).toEqual(['README parallel-agents tagline1m'])
+    expect(headers).toEqual(['Recent'])
+    expect(rowsIn('Recent')).toEqual(['Structured changes endpoint1m', 'Normalize agent-event protocol1m', 'README parallel-agents tagline1m'])
   })
 
   it('links every row to its task', () => {
@@ -229,7 +227,7 @@ describe('TaskQuickList', () => {
       renderList({ runs: [run({ id: 'x', pullRequestUrl: 'https://github.com/o/r/pull/7' })] })
       const chip = document.querySelector('[data-slot="pr-chip"]') as HTMLElement
       expect(chip.closest('a[href^="/tasks/"]')).toBeNull()
-      expect(chip.parentElement?.getAttribute('data-slot')).toBe('task-row')
+      expect(chip.closest('[data-slot="task-row"]')).toBe(row('x'))
     })
 
     it('leads the row and takes the age slot, spelling the number rather than the word "PR" (#788)', () => {
@@ -238,7 +236,7 @@ describe('TaskQuickList', () => {
       })
       // Chip first, then the name: the number is the row's leading identifier, and the age it
       // displaces was the weaker of the two signals.
-      expect(rowsIn('Needs you')).toEqual(['#7Has a PR'])
+      expect(rowsIn('Recent')).toEqual(['#7Has a PR'])
     })
 
     it('carries the issue when no PR exists yet — the number the title prefix was about', () => {
@@ -522,10 +520,10 @@ describe('TaskQuickList', () => {
         onTogglePin: vi.fn(),
       })
       const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
-      expect(headers).toEqual(['Pinned', 'Needs you'])
+      expect(headers).toEqual(['Pinned', 'Recent'])
       expect(rowsIn('Pinned')).toHaveLength(1)
       expect(bucket('Pinned').querySelector('[data-run-id="kept"]')).not.toBeNull()
-      expect(bucket('Needs you').querySelector('[data-run-id="kept"]')).toBeNull()
+      expect(bucket('Recent').querySelector('[data-run-id="kept"]')).toBeNull()
     })
 
     it('offers Pin on an ordinary row and Unpin on a pinned one, reporting the state asked for', () => {
@@ -739,4 +737,19 @@ it('places a worker below its parent even when their statuses put them in differ
   expect(family).not.toBeNull()
   expect(family?.querySelector('[data-run-id="child"]')).not.toBeNull()
   expect(document.querySelectorAll('[data-run-id="child"]')).toHaveLength(1)
+})
+
+it('keeps an independently pinned worker in Pinned when its parent is recent', () => {
+  const worker = run({ id: 'child', pinned: true, delegation: { role: 'worker', permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'child', resourceId: 'child', kind: 'owned-isolated', path: '/child', branch: 'cez/child', baselineSha: 'a'.repeat(40) } } })
+  renderList({ runs: [run({ id: 'parent' }), worker] })
+  expect(bucket('Pinned').querySelector('[data-run-id="child"]')).not.toBeNull()
+  expect(row('child')?.closest('[data-slot="session-workers"]')).toBeNull()
+})
+
+it('shows both tracker references on the separate badge line', () => {
+  renderList({ runs: [run({ id: 'both', pullRequestUrl: 'https://github.com/o/r/pull/217', referencedIssueUrl: 'https://github.com/o/r/issues/214' })] })
+  const badges = row('both')?.querySelector('[data-slot="session-references"]')
+  expect(badges?.querySelector('[data-slot="pr-chip"]')?.textContent).toBe('#217')
+  expect(badges?.querySelector('[data-slot="issue-chip"]')?.textContent).toBe('#214')
+  expect(row('both')?.querySelector('a a')).toBeNull()
 })

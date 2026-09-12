@@ -1,24 +1,11 @@
-import {
-  ArrowUpRightIcon,
-  CircleCheckIcon,
-  CircleDotIcon,
-  CircleSlashIcon,
-  CircleXIcon,
-  GitMergeIcon,
-  GitPullRequestClosedIcon,
-  GitPullRequestDraftIcon,
-  GitPullRequestIcon,
-  MessageSquareWarningIcon,
-  TriangleAlertIcon,
-  type LucideIcon,
-} from 'lucide-react'
+import { CircleIcon, CircleCheckIcon, CircleDotIcon, CircleSlashIcon, CircleXIcon, GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon, MessageSquareWarningIcon, TriangleAlertIcon } from '@/components/design-icons'
+import type { ComponentType } from 'react'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import type * as React from 'react'
 import type { ReferenceStatus } from '@open-mercato/cezar-api-client'
 
 import { useReferenceStatus } from '@/components/reference-status'
 import type { ReferenceStatusEntry } from '@/api/queries'
-import { StatusDot } from '@/components/status-dot'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import {
   REFERENCE_CONFLICT,
@@ -62,7 +49,7 @@ const TONE_HOVER: Record<ReferenceStatusTone, string> = {
 /** One glyph per status, borrowed from the vocabulary GitHub itself uses, so the icon is legible
  *  before the tooltip is read. `checks-pending` has none: it renders the pulsing dot instead,
  *  which is the design system's own mark for a state that is still moving. */
-const STATUS_ICON: Record<ReferenceStatus, LucideIcon | null> = {
+const STATUS_ICON: Record<ReferenceStatus, ComponentType<React.SVGProps<SVGSVGElement>> | null> = {
   draft: GitPullRequestDraftIcon,
   'review-required': GitPullRequestIcon,
   'changes-requested': MessageSquareWarningIcon,
@@ -145,7 +132,7 @@ export function ReferenceChip({
   const conflicting = kind === 'PR' && (explicitConflicting ?? entry.conflicting) === true
   const presentation = conflicting ? REFERENCE_CONFLICT : statusPresentation
   const chipClass = cn(
-    'inline-flex h-[22px] items-center gap-1 rounded-full border px-2 font-mono text-[11px] font-semibold',
+    'inline-flex h-[22px] items-center gap-1 rounded-md border px-1.5 font-mono text-[10px] font-normal',
     TONE_CLASS[presentation?.tone ?? 'accent'],
     className,
   )
@@ -202,7 +189,6 @@ export function ReferenceChip({
         className={cn(chipClass, TONE_HOVER[presentation?.tone ?? 'accent'])}
       >
         {body}
-        <ArrowUpRightIcon className="size-2.5" aria-hidden="true" />
       </a>
     )
 
@@ -466,7 +452,7 @@ function lowerFirst(text: string): string {
 function StatusGlyph({ status }: { status?: ReferenceStatus }) {
   if (!status) return null
   if (status === 'checks-pending') {
-    return <StatusDot tone="pending" pulse className="size-[6px]" aria-hidden="true" />
+    return <CircleIcon data-slot="status-dot" data-tone="pending" className="size-3 animate-pulse motion-reduce:animate-none" aria-hidden="true" />
   }
   const Icon = STATUS_ICON[status]
   return Icon ? <Icon className="size-2.5 shrink-0" aria-hidden="true" /> : null

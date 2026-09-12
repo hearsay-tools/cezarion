@@ -14,12 +14,12 @@ export const SIDEBAR_WIDTH_STORAGE_KEY = 'cez-sidebar-width'
 /**
  * The bounds, in CSS pixels.
  *
- * `MIN` is the approved 232px Cezarion column from design.pen — the sidebar may grow but never
+ * `MIN` is the approved 264px Cezarion column from design.pen — the sidebar may grow but never
  * shrink below the width the navigation masters were designed around. `MAX` keeps a widened sidebar from
  * eating the thread it exists to navigate; 420px is roughly the point where the main column on a
  * 13" laptop stops being comfortable.
  */
-export const MIN_SIDEBAR_WIDTH = 232
+export const MIN_SIDEBAR_WIDTH = 264
 export const MAX_SIDEBAR_WIDTH = 420
 export const DEFAULT_SIDEBAR_WIDTH = MIN_SIDEBAR_WIDTH
 

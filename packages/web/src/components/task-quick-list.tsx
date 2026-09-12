@@ -1,4 +1,5 @@
-import { ChevronDownIcon, ScaleIcon } from 'lucide-react'
+import { ChevronDownIcon } from '@/components/design-icons'
+import { ScaleIcon } from 'lucide-react'
 import * as React from 'react'
 import { useHealth, usePinRun, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useProjectMatch } from '@/lib/project-router'
@@ -23,7 +24,7 @@ import {
   type QuickListBucket,
   type QuickListRow,
 } from '@/lib/task-groups'
-import { formatCost, taskReference } from '@/lib/tasks-table'
+import { formatCost, taskReference, taskReferences } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
@@ -138,12 +139,20 @@ export function QuickListBuckets({
       return next
     })
 
-  const plainRows = buckets.flatMap(bucket => bucket.rows).filter((row): row is Extract<QuickListRow, { kind: 'run' }> => row.kind === 'run')
+  // Sidebar organization is pin-based; the state remains on each row's independent dot.
+  const sidebarBuckets: QuickListBucket[] = []
+  for (const label of ['Pinned', 'Recent', 'Archived'] as const) {
+    const rows = buckets.filter(bucket => label === 'Recent' ? bucket.label !== 'Pinned' && bucket.label !== 'Archived' : bucket.label === label).flatMap(bucket => bucket.rows)
+    if (rows.length) sidebarBuckets.push({ label, rows })
+  }
+  const plainRows = sidebarBuckets.flatMap(bucket => bucket.rows).filter((row): row is Extract<QuickListRow, { kind: 'run' }> => row.kind === 'run')
   const parents = new Set(plainRows.filter(row => row.run.delegation?.role !== 'worker').map(row => row.run.id))
   const children = new Map<string, typeof plainRows>()
   for (const row of plainRows) {
     const metadata = row.run.delegation
     if (metadata?.role !== 'worker' || !parents.has(metadata.parentRunId)) continue
+    // An independently pinned worker must stay in Pinned rather than following an unpinned parent.
+    if (row.run.pinned && !plainRows.find(parent => parent.run.id === metadata.parentRunId)?.run.pinned) continue
     children.set(metadata.parentRunId, [...(children.get(metadata.parentRunId) ?? []), row])
   }
   const nested = new Set([...children.values()].flat().map(row => row.run.id))
@@ -151,16 +160,15 @@ export function QuickListBuckets({
 
   return (
     <>
-      <h2 className="px-3 pt-4 pb-2 text-[9px] font-medium tracking-[0.14em] text-muted-foreground uppercase">Sessions</h2>
-      {buckets.filter(bucket => bucket.rows.some(row => row.kind !== 'run' || !nested.has(row.run.id))).map((bucket) => (
+      {sidebarBuckets.filter(bucket => bucket.rows.some(row => row.kind !== 'run' || !nested.has(row.run.id))).map((bucket) => (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
-          <h2 className="sr-only">
+          <h2 className="pl-9 pt-3 pb-2 text-[9px] font-medium tracking-[0.14em] text-soft-foreground uppercase">
             {bucket.label}
           </h2>
           {bucket.rows.filter(row => row.kind !== 'run' || !nested.has(row.run.id)).map((row) => (
             <div key={row.kind === 'group' ? row.groupId : row.run.id} data-session-family={row.kind === 'run' ? row.run.id : undefined}>
               {renderRow(row)}
-              {row.kind === 'run' && children.has(row.run.id) ? <div className="ml-5 border-l border-border pl-3" data-slot="session-workers">{children.get(row.run.id)!.map(child => <div key={child.run.id}>{renderRow(child)}</div>)}</div> : null}
+              {row.kind === 'run' && children.has(row.run.id) ? <div className="ml-5" data-slot="session-workers">{children.get(row.run.id)!.map(child => <div key={child.run.id}>{renderRow(child)}</div>)}</div> : null}
             </div>
           ))}
         </div>
@@ -341,7 +349,6 @@ const ROW_PIN_CLASS =
   'w-0 overflow-hidden opacity-0' +
   ' group-hover/task-row:mr-1 group-hover/task-row:w-5 group-hover/task-row:opacity-100' +
   ' group-focus-within/task-row:mr-1 group-focus-within/task-row:w-5 group-focus-within/task-row:opacity-100' +
-  ' max-md:mr-1 max-md:w-11 max-md:opacity-100' +
   ' no-hover:mr-1 no-hover:size-11 no-hover:opacity-100' +
   ' data-[pinned=true]:mr-1 data-[pinned=true]:w-5 data-[pinned=true]:opacity-100'
 
@@ -375,6 +382,7 @@ function RunRow({
   // it was opened on. It is the row's leading chip AND the reason the title may drop its `NNN: `
   // prefix (#788, option C): the number is painted once, as a link, instead of twice as digits.
   const reference = taskReference(run)
+  const references = taskReferences(run)
   const title = runTitle(run)
   // Only when the two numbers are the same number — see `refPrefixMatches`. A run opened on issue
   // #788 that shipped as PR #790 keeps its prefix, because the chip is no longer saying it.
@@ -411,17 +419,12 @@ function RunRow({
     >
       {/* Outside the Link so it can lead the reference chip. The dot is a status indicator, not a
           navigation target, and the wrapper still owns the row's hover surface. */}
-      <StatusDot tone={attention.tone} pulse={attention.pulse} aria-label={attention.label} role="img" />
+      <StatusDot tone={attention.tone} pulse={attention.pulse} aria-label={attention.label} title={attention.label} role="img" />
       {/* The reference, ONCE (#788, option C): the number that used to be both a `775: ` title
           prefix and a trailing `PR ↗` chip is now one leading chip that is itself the link. */}
-      {reference ? (
-        <TaskReferenceChip
-          run={run}
-          reference={reference}
-          compact
-          className="h-auto shrink-0 gap-[2px] px-1.5 py-px text-[10.5px]"
-        />
-      ) : null}
+      {references.length ? <div data-slot="session-references" className="flex flex-wrap items-center gap-1">
+        {references.map(ref => <TaskReferenceChip key={`${ref.kind}-${ref.number}-${ref.url}`} run={run} reference={ref} compact className="h-auto shrink-0 gap-[2px] px-1 py-px text-[10px]" />)}
+      </div> : null}
       <Link
         to={scopeTo(scope, `/tasks/${run.id}`)}
         // `title` carries the FULL stored title — including a `NNN: ` prefix the chip let the
@@ -475,7 +478,7 @@ function RunRow({
             reference" alone would have silently deleted the queue position from every
             issue-driven queued row. */}
         {age && (queuePosition !== null || !reference) ? (
-          <span className="shrink-0 text-[11px] text-supporting-foreground tabular-nums">{age}</span>
+          <span className={cn("shrink-0 text-[11px] text-supporting-foreground tabular-nums", queuePosition === null && "sr-only")}>{age}</span>
         ) : null}
         {/* The unread marker (#unread-done-items): a trailing violet dot, opposite end and
             different hue from the leading status dot, so the two read as two signals. */}
@@ -489,7 +492,7 @@ function RunRow({
           />
         ) : null}
       </Link>
-      {!variant ? <span data-slot="session-role-status" className={cn("col-start-2 row-start-2 text-[10px] font-normal", run.status === 'done' ? 'text-success' : run.status === 'failed' ? 'text-danger' : 'text-accent-text')}>{run.delegation?.role === 'worker' ? 'Worker' : 'Parent'} · {attention.label}</span> : null}
+      {run.delegation?.role === 'worker' ? <span className="sr-only">Worker · {attention.label}</span> : null}
       {/* The pin (#935), a SIBLING of the Link for the same reason the status dot and the
           reference chip are: a button inside an anchor is invalid, and this one has its own
           target. Reveal rules in `ROW_PIN_CLASS`. */}
@@ -539,8 +542,7 @@ export function TaskQuickListContainer({ showViewControls = true }: { showViewCo
       projectId === undefined
         ? []
         : (runs.data ?? []).flatMap((run) => {
-            const reference = taskReference(run)
-            return reference ? [{ projectId, kind: reference.kind, number: reference.number }] : []
+            return taskReferences(run).map(reference => ({ projectId, kind: reference.kind, number: reference.number }))
           }),
     [runs.data, projectId],
   )

@@ -100,12 +100,9 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
 
   useDocumentTitle({ projectName, pageLabel })
 
-  // Multi-project sidebar only from the SECOND project on (multi-project spec, "Sidebar").
-  // With one registered project — or with the registry still loading, or unreachable — the
-  // group header would say nothing the repo chip does not already say, so the shell keeps the
-  // flat nav + single quick-list it has always had. That degenerate case is the upgrade path:
-  // an existing user boots the new version in their usual repo and sees no difference.
-  const projects = registry && registry.projects.length > 1 ? registry : null
+  // Registered projects share the same card navigation, including a one-project workspace.
+  // While the registry is absent, the presentational shell still renders its repo fallback.
+  const projects = registry && registry.projects.length > 0 ? registry : null
 
   return (
     // The sidebar's Active/Archived filter. The Tasks table owns a separate copy and is not a
@@ -134,9 +131,8 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         automationsAvailable={automationsAvailable}
         banner={<ProviderBannerContainer />}
         singleProject={health.data?.capabilities.singleProject === true}
-        sessionScope={<SidebarSessionScope />}
         taskQuickList={<TaskQuickListContainer showViewControls={false} />}
-        // Present only in a multi-project workspace; `AppShell` renders the flat nav and the
+        // Present for every populated registry; `AppShell` renders the fallback nav and the
         // quick-list above whenever this slot is absent.
         projectGroups={
           projects ? (
@@ -153,7 +149,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
             />
           ) : undefined
         }
-        toolsMenu={<ToolsMenu health={health.data} />}
+        toolsMenu={<ToolsMenu health={health.data} sessionScope={<SidebarSessionScope />} />}
       >
         {children}
       </AppShell>

@@ -151,70 +151,41 @@ describe('ProjectGroups', () => {
     expect(asked).not.toContain('/api/v1/p/shop/runs')
   })
 
-  it('renders each group’s nav scoped to that project', async () => {
+  it('shows destinations for the selected project and keeps every other project reachable', async () => {
     storeCollapsed({ shop: false })
     serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
-    renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
-
-    await waitFor(() => expect(header('shop').getAttribute('aria-expanded')).toBe('true'))
-    const shopNav = within(group('shop')).getByRole('navigation', { name: 'shop navigation' })
-    expect(within(shopNav).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([
-      '/p/shop/',
-      '/p/shop/git',
-      '/p/shop/github',
-      '/p/shop/skills',
-      '/p/shop/workflows',
-      '/p/shop/settings',
+    renderGroups([project(), project({ id: 'shop', name: 'shop' })])
+    expect(within(group('shop')).getByRole('link', { name: 'Open shop' }).getAttribute('href')).toBe('/p/shop/')
+    expect(within(group('shop')).queryByRole('navigation')).toBeNull()
+    const nav = within(group('cezar')).getByRole('navigation')
+    expect(within(nav).getByRole('link', { current: 'page' }).textContent).toBe('Tasks')
+    fireEvent.click(screen.getByRole('link', { name: 'Open shop' }))
+    const shopNav = await screen.findByRole('navigation', { name: 'shop navigation' })
+    expect(within(shopNav).getAllByRole('link').map(a => a.getAttribute('href'))).toEqual([
+      '/p/shop/', '/p/shop/git', '/p/shop/github', '/p/shop/skills', '/p/shop/workflows', '/p/shop/settings',
     ])
-    // Only the group that owns the URL lights a nav row — `/p/cezar/` is the Tasks area of
-    // exactly one project, not of every project whose nav lists a Tasks row.
-    expect(within(shopNav).queryByRole('link', { current: 'page' })).toBeNull()
-    const cezarNav = within(group('cezar')).getByRole('navigation', { name: 'cezar navigation' })
-    expect(within(cezarNav).getByRole('link', { current: 'page' }).textContent).toBe('Tasks')
   })
 
-  it("gates each group's GitHub tab on that project's own forge (#698)", async () => {
-    // Two expanded groups, one with a GitHub remote and one without: the GitHub nav item must
-    // follow each entry's own `forge` field, not one workspace-wide answer — the exact failure
-    // was every group hiding (or showing) GitHub based on the folder cezar was LAUNCHED in.
+  it("gates the selected project's GitHub destination on its own forge", async () => {
     storeCollapsed({ plain: false })
-    serve({
-      '/api/v1/p/cezar/runs': [],
-      '/api/v1/p/plain/runs': [],
-    })
-    renderGroups([
-      project(),
-      project({ id: 'plain', name: 'plain', forge: undefined, lastOpenedAt: '2026-07-19T00:00:00.000Z' }),
-    ])
-
-    await waitFor(() => expect(header('plain').getAttribute('aria-expanded')).toBe('true'))
-    const cezarNav = within(group('cezar')).getByRole('navigation', { name: 'cezar navigation' })
-    expect(within(cezarNav).getByRole('link', { name: 'GitHub' }).getAttribute('href')).toBe('/p/cezar/github')
-    const plainNav = within(group('plain')).getByRole('navigation', { name: 'plain navigation' })
-    expect(within(plainNav).queryByRole('link', { name: 'GitHub' })).toBeNull()
+    serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/plain/runs': [] })
+    renderGroups([project(), project({ id: 'plain', name: 'plain', forge: undefined })])
+    expect(screen.getByRole('link', { name: 'GitHub' }).getAttribute('href')).toBe('/p/cezar/github')
+    fireEvent.click(screen.getByRole('link', { name: 'Open plain' }))
+    await screen.findByRole('navigation', { name: 'plain navigation' })
+    expect(screen.queryByRole('link', { name: 'GitHub' })).toBeNull()
   })
 
-  // #801: every group reads ONE workspace capability, so no group can offer Automations while
-  // another hides it — and with the opt-in off, none of them offers it at all.
-  it("gates every group's Automations tab on the workspace capability (#801)", async () => {
+  it.each([true, false])('preserves the automations capability gate (%s) when switching projects', async (automations) => {
     storeCollapsed({ shop: false })
     serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
-    const shop = project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })
-    const view = renderGroups([project(), shop], '/p/cezar/', { automations: true })
-
-    await waitFor(() => expect(header('shop').getAttribute('aria-expanded')).toBe('true'))
+    renderGroups([project(), project({ id: 'shop', name: 'shop' })], '/p/cezar/', { automations })
     for (const id of ['cezar', 'shop']) {
-      const nav = within(group(id)).getByRole('navigation', { name: `${id} navigation` })
-      expect(within(nav).getByRole('link', { name: 'Automations' }).getAttribute('href'))
-        .toBe(`/p/${id}/automations`)
-    }
-
-    view.unmount()
-    renderGroups([project(), shop])
-    await waitFor(() => expect(header('shop').getAttribute('aria-expanded')).toBe('true'))
-    for (const id of ['cezar', 'shop']) {
-      const nav = within(group(id)).getByRole('navigation', { name: `${id} navigation` })
-      expect(within(nav).queryByRole('link', { name: 'Automations' })).toBeNull()
+      fireEvent.click(screen.getByRole('link', { name: `Open ${id}` }))
+      const nav = await screen.findByRole('navigation', { name: `${id} navigation` })
+      const link = within(nav).queryByRole('link', { name: 'Automations' })
+      if (automations) expect(link?.getAttribute('href')).toBe(`/p/${id}/automations`)
+      else expect(link).toBeNull()
     }
   })
 

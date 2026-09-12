@@ -238,10 +238,10 @@ describe('AppShell', () => {
       const search = content.querySelector('[data-slot="command-palette-hint"]') as HTMLElement
       expect(search).toBeTruthy()
       expect(footer().contains(search)).toBe(false)
-      expect(footer().firstElementChild?.getAttribute('data-slot')).toBe('global-settings-link')
+      expect(footer().firstElementChild?.getAttribute('data-slot')).toBe('sidebar-footer-controls')
     })
 
-    it('keeps tools and theme together, with version below and global settings above', () => {
+    it('keeps tools and theme together, with accessible version text and global settings in the same row', () => {
       renderShell('/', { version: '1.2.3', toolsMenu: <button type="button">Tools</button> })
       // The gear and the toggle are the pair that came apart in #702 — assert they share a parent,
       // and that the row is the whole of the footer's chrome rather than a subset of it.
@@ -255,7 +255,7 @@ describe('AppShell', () => {
       expect(row.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       // The gear pushes itself right; the toggle rides along at the end of the same row.
       const gear = footer().querySelector('[data-slot="global-settings-link"]') as HTMLElement
-      expect(gear.closest('a,button')?.parentElement).toBe(footer())
+      expect(gear.closest('a,button')?.parentElement).toBe(row)
     })
 
     it('renders search as a full-width launcher that still opens the palette', () => {
@@ -284,7 +284,7 @@ describe('AppShell', () => {
 
     /* The two-row footer holds only while something in the controls row can give: every icon
      * button is `shrink-0` (button base class), so a long version string — `0.9.2-nightly.…`,
-     * the nightly dist-tag of #876 — used to push the gear and the toggle outside the 232px
+     * the nightly dist-tag of #876 — used to push the gear and the toggle outside the 264px
      * column entirely. jsdom still measures nothing; what it can pin is which item yields. */
     it('makes the version chip the one control that gives, so a nightly version cannot push the row out', () => {
       renderShell('/', {
@@ -505,17 +505,17 @@ describe('AppShell', () => {
       fireEvent.pointerUp(el, { pointerId: 1, clientX: to })
     }
 
-    it('starts at the approved 232px when nothing has been stored', () => {
+    it('starts at the approved 264px when nothing has been stored', () => {
       renderShell()
-      expect(sidebar().style.width).toBe('232px')
+      expect(sidebar().style.width).toBe('264px')
       // No Tailwind width class left behind to fight the inline one.
-      expect(sidebar().className).not.toContain('w-[232px]')
+      expect(sidebar().className).not.toContain('w-[264px]')
     })
 
     it('restores the width the browser remembers', () => {
       localStorage.setItem('cez-sidebar-width', '350')
       renderShell()
-      // First paint, not an effect: a jump from 232 to 350 would be visible on every load.
+      // First paint, not an effect: a jump from 264 to 350 would be visible on every load.
       expect(sidebar().style.width).toBe('350px')
     })
 
@@ -526,14 +526,14 @@ describe('AppShell', () => {
       expect(el.getAttribute('aria-orientation')).toBe('vertical')
       expect(el.getAttribute('aria-label')).toBe('Resize the sidebar')
       expect(el.tabIndex).toBe(0)
-      expect(el.getAttribute('aria-valuenow')).toBe('232')
-      expect(el.getAttribute('aria-valuemin')).toBe('232')
+      expect(el.getAttribute('aria-valuenow')).toBe('264')
+      expect(el.getAttribute('aria-valuemin')).toBe('264')
       expect(el.getAttribute('aria-valuemax')).toBe('420')
     })
 
     it('widens on drag and persists what it landed on', () => {
       renderShell()
-      drag(232, 344)
+      drag(264, 344)
       expect(sidebar().style.width).toBe('344px')
       expect(handle().getAttribute('aria-valuenow')).toBe('344')
       expect(localStorage.getItem('cez-sidebar-width')).toBe('344')
@@ -541,17 +541,17 @@ describe('AppShell', () => {
 
     it('clamps a drag at both bounds rather than letting the column collapse or take over', () => {
       renderShell()
-      drag(232, 3000)
+      drag(264, 3000)
       expect(sidebar().style.width).toBe('420px')
       drag(420, -3000)
-      expect(sidebar().style.width).toBe('232px')
+      expect(sidebar().style.width).toBe('264px')
     })
 
     it('takes focus on grab, so the arrow keys work right after a mouse drag', () => {
       // `preventDefault()` on pointerdown (which stops the drag selecting the sidebar's text)
       // also suppresses the focus a press would otherwise give a tabIndex=0 element.
       renderShell()
-      drag(232, 320)
+      drag(264, 320)
       expect(document.activeElement).toBe(handle())
       fireEvent.keyDown(handle(), { key: 'ArrowRight' })
       expect(sidebar().style.width).toBe('336px')
@@ -566,23 +566,23 @@ describe('AppShell', () => {
       renderShell()
       const el = handle()
       el.setPointerCapture = vi.fn()
-      fireEvent.pointerDown(el, { button: 2, pointerId: 1, clientX: 232 })
+      fireEvent.pointerDown(el, { button: 2, pointerId: 1, clientX: 264 })
       fireEvent.pointerMove(el, { pointerId: 1, clientX: 400 })
-      expect(sidebar().style.width).toBe('232px')
+      expect(sidebar().style.width).toBe('264px')
       expect(el.setPointerCapture).not.toHaveBeenCalled()
     })
 
     it('steps with the arrow keys and jumps to the bounds with Home/End', () => {
       renderShell()
       fireEvent.keyDown(handle(), { key: 'ArrowRight' })
-      expect(sidebar().style.width).toBe('248px')
+      expect(sidebar().style.width).toBe('280px')
       fireEvent.keyDown(handle(), { key: 'ArrowLeft' })
-      expect(sidebar().style.width).toBe('232px')
+      expect(sidebar().style.width).toBe('264px')
       fireEvent.keyDown(handle(), { key: 'End' })
       expect(sidebar().style.width).toBe('420px')
       fireEvent.keyDown(handle(), { key: 'Home' })
-      expect(sidebar().style.width).toBe('232px')
-      expect(localStorage.getItem('cez-sidebar-width')).toBe('232')
+      expect(sidebar().style.width).toBe('264px')
+      expect(localStorage.getItem('cez-sidebar-width')).toBe('264')
     })
 
     it('leaves every other key to the browser — Tab must still move focus', () => {
@@ -590,7 +590,7 @@ describe('AppShell', () => {
       const event = createEvent.keyDown(handle(), { key: 'Tab' })
       fireEvent(handle(), event)
       expect(event.defaultPrevented).toBe(false)
-      expect(sidebar().style.width).toBe('232px')
+      expect(sidebar().style.width).toBe('264px')
     })
 
     it('resets to the default on double-click', () => {
@@ -598,8 +598,8 @@ describe('AppShell', () => {
       renderShell()
       expect(sidebar().style.width).toBe('400px')
       fireEvent.doubleClick(handle())
-      expect(sidebar().style.width).toBe('232px')
-      expect(localStorage.getItem('cez-sidebar-width')).toBe('232')
+      expect(sidebar().style.width).toBe('264px')
+      expect(localStorage.getItem('cez-sidebar-width')).toBe('264')
     })
 
     it('keeps the drawer independent of desktop resizing and reserves its dismissal strip', () => {
