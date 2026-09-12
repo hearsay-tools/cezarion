@@ -44,14 +44,11 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
       </button>
       {!data.viewerLogin ? <p className="w-full text-xs text-muted-foreground">GitHub login unavailable.</p> : null}
       {data.projects?.length ? (
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
-          Project board
-          <select aria-label="Project board" className={`${control} w-full min-w-0`} value={projectId}
-            onChange={event => onProjectChange(event.target.value)}>
-            <option value="">All boards</option>
-            {data.projects.map(board => <option key={board.id} value={board.id}>{board.title}</option>)}
-          </select>
-        </label>
+        <select aria-label="Project board" className={control} value={projectId}
+          onChange={event => onProjectChange(event.target.value)}>
+          <option value="">All boards</option>
+          {data.projects.map(board => <option key={board.id} value={board.id}>{board.title}</option>)}
+        </select>
       ) : <p className="w-full text-xs text-muted-foreground">{data.projectsReason ?? (data.projects ? 'No linked project boards.' : 'Project boards unavailable.')}</p>}
     </div>
   )

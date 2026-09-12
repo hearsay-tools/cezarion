@@ -2530,6 +2530,7 @@ describe('issue assignee and board controls', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Assigned to me' }))
     expect(rows().map(r => r.textContent).join()).toContain(ISSUE_142.title)
     expect(rows().map(r => r.textContent).join()).not.toContain(ISSUE_139.title)
+    expect(screen.queryByText('Project board')).toBeNull()
     fireEvent.change(screen.getByRole('combobox', { name: 'Project board' }), { target: { value: 'P1' } })
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search issues' }), { target: { value: 'no match' } })
     expect(rows()).toHaveLength(0)
