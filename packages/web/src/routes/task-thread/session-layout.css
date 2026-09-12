@@ -32,11 +32,11 @@
 }
 /* The report remains the streamed Markdown. Only its reading typography changes. */
 [data-route='task-thread'] [data-slot='assistant-message'] { font-size: 13px; line-height: 1.7; color: var(--muted-foreground); }
-[data-route='task-thread'] [data-slot='assistant-message'] :is(h1, h2, h3, h4, strong) { color: var(--foreground); }
+[data-route='task-thread'] [data-slot='assistant-message'] :is(h1, h2, h3, h4, strong, [data-streamdown="strong"]) { color: var(--foreground); }
 [data-route='task-thread'] [data-slot='assistant-message'] h2 { font-size: 20px; line-height: 1.4; }
 @media (max-width: 767px) {
   [data-route='task-thread'] [data-slot='assistant-message'] { font-size: 11px; line-height: 1.5; }
-  [data-route='task-thread'] [data-slot='assistant-message'] strong { font-size: 12px; }
+  [data-route='task-thread'] [data-slot='assistant-message'] :is(strong, [data-streamdown="strong"]) { font-size: 12px; }
   [data-route='task-thread'] [data-slot='assistant-message'] h2 { font-size: 18px; letter-spacing: -0.4px; }
 }
 [data-route='task-thread'] .session-composer [data-slot='composer-editor'] { border-color: var(--composer-border); }
@@ -67,5 +67,5 @@
 
 /* A closed event follows the report; the conversation flex space stays after it. */
 [data-route='task-thread'] [data-slot='thread-footer'][data-state='closed'] { margin-top: 0; border-top: 0; padding-top: 0; font-size: 10px; }
-[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> strong:only-child) { margin-bottom: calc(var(--spacing) * 1); }
-[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> strong:only-child) + p { margin-top: calc(var(--spacing) * 1); }
+[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> :is(strong, [data-streamdown="strong"]):only-child) { margin-bottom: calc(var(--spacing) * 1); }
+[data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> :is(strong, [data-streamdown="strong"]):only-child) + p { margin-top: calc(var(--spacing) * 1); }
