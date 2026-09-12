@@ -1,5 +1,5 @@
 import { FileCogIcon } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { ApiError } from '@/api/client'
 import { useAgentConfig, useAgentConfigFile, useHealth, usePutAgentConfigFile } from '@/api/queries'
@@ -65,9 +65,15 @@ export function AgentConfigSection() {
 function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; installed: Runner[] }) {
   const [agentId, setAgentId] = useState<Runner>('claude')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const filePicker = useRef<HTMLDetailsElement>(null)
   const agent = descriptorFor(agentId)
-  const selected = listing.files.find((f) => f.id === selectedId) ?? null
+  const selected = listing.files.find((f) => f.id === selectedId && f.runners.includes(agent.id)) ?? null
+  // One real file per purpose; a config that also holds MCP appears only once in this row.
+  const primaryFiles = agent.groups.slice().sort((a, b) =>
+    ['memory', 'settings', 'mcp'].indexOf(a.id) - ['memory', 'settings', 'mcp'].indexOf(b.id),
+  ).map((group) => {
+    const files = listing.files.filter(group.files)
+    return files.find((file) => file.scope === 'project') ?? files[0]
+  }).filter((file, index, files): file is AgentConfigFile => Boolean(file) && files.findIndex((other) => other?.id === file?.id) === index)
 
   const pickAgent = (id: Runner) => {
     setAgentId(id)
@@ -87,30 +93,26 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
         </div>
       )}
 
-      <div data-slot="agent-config-agents" role="tablist" className="flex flex-wrap gap-1 rounded-md bg-muted/40 p-1">
-        {AGENT_DESCRIPTORS.map((d) => (
-          <button
-            key={d.id}
-            type="button"
-            role="tab"
-            aria-selected={d.id === agent.id}
-            data-slot="agent-config-agent"
-            data-agent={d.id}
-            data-selected={d.id === agent.id}
-            onClick={() => pickAgent(d.id)}
-            className={cn(
-              'flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] transition-colors',
-              d.id === agent.id ? 'bg-background font-semibold shadow-sm' : 'hover:bg-muted/60',
-            )}
-          >
-            {d.label}
-            {!installed.includes(d.id) && (
-              <Badge variant="outline" className="text-[10px] text-soft-foreground">
-                not installed
-              </Badge>
-            )}
-          </button>
-        ))}
+      <div className="settings-config-toolbar">
+        <div data-slot="agent-config-primary-files" className="settings-config-file-row" aria-label={`${agent.label} configuration files`}>
+          {primaryFiles.map((file) => (
+            <button key={file.id} type="button" data-slot="agent-config-shortcut"
+              data-file={file.id} aria-pressed={selectedId === file.id}
+              onClick={() => setSelectedId(file.id)} title={`${file.scope} scope · ${file.path}`}>
+              {file.kind === 'mcp' ? 'MCP config' : file.label.split('/').at(-1)}
+            </button>
+          ))}
+        </div>
+        <label className="settings-config-agent-choice">
+          <span>Agent</span>
+          <select aria-label="Configuration agent" value={agent.id} onChange={(event) => pickAgent(event.target.value as Runner)}>
+            {AGENT_DESCRIPTORS.map((d) => (
+              <option key={d.id} value={d.id} data-slot="agent-config-agent" data-agent={d.id} data-selected={d.id === agent.id}>
+                {d.label}{installed.includes(d.id) ? '' : ' · not installed'}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {agent.note && (
@@ -120,21 +122,6 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
       )}
 
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6">
-        <details ref={filePicker} open={selected === null} className="settings-config-picker">
-          <summary>{selected ? `Configuration files · ${selected.label}` : 'Choose a configuration file'}</summary>
-          <nav data-slot="agent-config-nav" className="flex min-w-0 flex-col gap-5">
-          <AgentPane
-            agent={agent}
-            listing={listing}
-            selectedId={selectedId}
-            onSelect={(id) => {
-              setSelectedId(id)
-              if (filePicker.current) filePicker.current.open = false
-            }}
-          />
-          </nav>
-        </details>
-
         <div data-slot="agent-config-editor-pane" className="min-w-0">
           {selected ? (
             <FileEditor key={selected.id} file={selected} />
@@ -145,6 +132,13 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
           )}
         </div>
       </div>
+      <section className="settings-config-scopes" aria-label={`${agent.label} files and scopes`}>
+        <h3>All {agent.label} files and scopes</h3>
+        <p className="text-[12px] text-muted-foreground">Choose another scope below. Each file keeps its own precedence and save action.</p>
+        <nav data-slot="agent-config-nav" className="flex min-w-0 flex-col gap-5">
+          <AgentPane agent={agent} listing={listing} selectedId={selectedId} onSelect={setSelectedId} />
+        </nav>
+      </section>
     </div>
   )
 }
@@ -278,6 +272,7 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
   return (
     <div data-slot="settings-config-editor" className="flex flex-col gap-3">
       <h3 className="text-sm">Configuration file</h3>
+      <p data-slot="agent-config-scope" title={file.path} className="text-[12px] text-muted-foreground break-words">{file.scope.charAt(0).toUpperCase() + file.scope.slice(1)} scope · {file.path}</p>
       <div className="settings-readout flex flex-wrap items-center gap-2">
         <span className="font-mono text-[13px]">{file.label}</span>
         <Badge variant="outline" className="text-[10px] uppercase">
@@ -293,13 +288,10 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
         </a>
       </div>
 
-      <p data-slot="agent-config-precedence" className="text-[12px] text-soft-foreground">
-        {file.precedence}
-      </p>
-      <p data-slot="agent-config-effect" className="text-[12px] text-foreground/80">
-        {effectLabel(file)}
-        {file.hotReload ? ` ${file.hotReload}` : ''}
-      </p>
+      <div className="settings-config-content-heading">
+        <h3>{file.kind === 'mcp' || file.holdsMcp ? 'MCP configuration' : 'File contents'}</h3>
+        {(file.kind === 'mcp' || file.holdsMcp) && <p>Review server commands before saving. MCP servers execute locally.</p>}
+      </div>
 
       {fileQuery.isPending ? (
         <p className="text-[13px] text-soft-foreground">Loading file…</p>
@@ -349,6 +341,17 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
           {dirty && <span className="text-[12px] text-soft-foreground">Unsaved changes</span>}
         </div>
       )}
+      <div className="settings-config-save-help">
+      <p data-slot="agent-config-precedence" className="text-[12px] text-soft-foreground">
+        {file.precedence}
+      </p>
+      <p data-slot="agent-config-effect" className="text-[12px] text-foreground/80">
+        {effectLabel(file)}
+        {file.hotReload ? ` ${file.hotReload}` : ''}
+      </p>
+
+        {file.readOnlyReason && <p>{file.readOnlyReason}</p>}
+      </div>
     </div>
   )
 }

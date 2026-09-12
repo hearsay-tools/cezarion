@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ExternalLinkIcon, IdCardIcon } from 'lucide-react'
+import { CpuIcon } from '@/components/design-icons'
 import { Fragment, useState } from 'react'
 
 import { ApiError, putWorkspaceConfig } from '@/api/client'
@@ -74,10 +75,8 @@ import { SettingsAgentPicker } from './settings-agent-picker'
  * mode. Nothing fetches it until a person asks, which is what makes "hidden by default" mean the
  * data is absent from the page rather than merely unrendered.
  *
- * Rename and Remove live in that same panel rather than on the collapsed row. A row is a reading
- * surface — which account, where, signed in or not — and Remove sitting on it put a destructive
- * action one stray click from a list you scan. Behind "Show details" it is one deliberate click,
- * beside the folder and identity it actually applies to.
+ * Rename and Remove live in the account card's action row. They do not request account identity;
+ * "Show details" remains the only identity read, and Remove still requires confirmation.
  *
  * ## Three decisions worth reading
  *
@@ -171,7 +170,7 @@ function AccountsPane({ data }: { data: AgentProfilesResponse }) {
       <div>
 
         <p className="text-[13px] text-muted-foreground">
-          Manage runner installations, logins and defaults for new projects. Each project can choose its own agent and account.
+          Manage runner installations, logins and defaults for new projects.
         </p>
       </div>
 
@@ -194,6 +193,7 @@ function AccountsPane({ data }: { data: AgentProfilesResponse }) {
               check={health.data?.checks?.find((c) => c.name === provider)}
               accounts={data.profiles.filter((p) => p.provider === provider)}
               canCarryAccounts={data.profileCapableProviders.includes(provider)}
+              defaultAccountId={data.defaults[provider] ?? null}
               onAdd={() => setAdding(provider)}
               onRemove={setConfirming}
             />
@@ -258,6 +258,7 @@ function AgentTab({
   check,
   accounts,
   canCarryAccounts,
+  defaultAccountId,
   onAdd,
   onRemove,
 }: {
@@ -266,6 +267,7 @@ function AgentTab({
   check: BackendCheck | undefined
   accounts: AgentProfile[]
   canCarryAccounts: boolean
+  defaultAccountId: string | null
   onAdd: () => void
   onRemove: (account: AgentProfile) => void
 }) {
@@ -275,55 +277,28 @@ function AgentTab({
     <div data-slot="accounts-provider" data-provider={provider} className="flex flex-col gap-4">
       {/* Facts about the BINARY, not about any one account: a version and an install are shared by
           every login of the same CLI, so they belong here rather than repeated on each row. */}
-      <dl className="divide-y divide-border/60 overflow-hidden rounded-md border border-border bg-card text-[13px]">
-        <Row label="Installed">
-          {check === undefined ? (
-            <span className="text-muted-foreground">Checking…</span>
-          ) : installed ? (
-            <span data-slot="agent-installed">Yes</span>
-          ) : (
-            <span data-slot="agent-installed" className="text-muted-foreground">
-              No — <code className="text-[12px]">{PROVIDER_INSTALL[provider]}</code>
-            </span>
-          )}
-        </Row>
-        {installed && check?.version ? (
-          <Row label="Version">
-            <span data-slot="agent-version" className="font-mono text-[12.5px]">
-              {check.version}
-            </span>
-          </Row>
-        ) : null}
-        <Row label="Accounts">
-          <span>
-            {accounts.length === 1
-              ? 'the discovered one'
-              : `${accounts.length} (1 discovered, ${accounts.length - 1} added)`}
-          </span>
-        </Row>
-      </dl>
-
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-[13px] font-semibold text-foreground">Logins</h3>
-        {canCarryAccounts ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-action="accounts-add"
-            data-provider={provider}
-            onClick={onAdd}
-          >
-            Add account
-          </Button>
-        ) : null}
+      <h3 className="settings-account-provider-title">{PROVIDER_LABEL[provider]}</h3>
+      <div className="settings-account-installation settings-readout">
+        {check === undefined ? <span>Checking…</span> : installed ? (
+          <span data-slot="agent-installed">Installed</span>
+        ) : (
+          <span data-slot="agent-installed">Not installed — <code>{PROVIDER_INSTALL[provider]}</code></span>
+        )}
+        {installed && check?.version ? <><span aria-hidden="true"> · </span><span data-slot="agent-version">{check.version}</span></> : null}
+        <span className="settings-account-count">{accounts.length} {accounts.length === 1 ? 'account (discovered)' : `accounts (1 discovered, ${accounts.length - 1} added)`}</span>
       </div>
 
-      <ul className="divide-y divide-border/60 rounded-md border border-border bg-card">
-        {accounts.map((account) => (
-          <AccountRow key={account.id} account={account} onRemove={() => onRemove(account)} />
+      <ul className="bg-card">
+        {[...accounts].sort((a, b) => Number(b.id === defaultAccountId) - Number(a.id === defaultAccountId)).map((account) => (
+          <AccountRow key={account.id} account={account} isMachineDefault={defaultAccountId === account.id || (defaultAccountId === null && account.isDefault)} onRemove={() => onRemove(account)} />
         ))}
       </ul>
+
+      {canCarryAccounts ? (
+        <div className="settings-account-add-row">
+          <Button type="button" variant="outline" size="sm" data-action="accounts-add" data-provider={provider} onClick={onAdd}>Add account</Button>
+        </div>
+      ) : null}
 
       {!canCarryAccounts ? (
         <p data-slot="accounts-single-only" className="text-[11.5px] text-soft-foreground">
@@ -341,7 +316,7 @@ function AgentTab({
  *
  * Lives on THIS page rather than one of its own: it is the same subject — the logins on this
  * machine — and a second page would mean setting up an account here and then going elsewhere to say
- * "use it". Above the tabs because it is a cross-agent answer; splitting it into the per-agent tabs
+ * "use it". Below the account cards because it is a cross-agent answer; splitting it into the per-agent tabs
  * would mean visiting all three to read one fact.
  *
  * DEFAULTS, never overrides. A project's own `.ai/cezar/config.json` still wins key by key, and a
@@ -354,10 +329,11 @@ function AgentTab({
  * that is the point of them being here rather than in a repo's settings.
  */
 function DefaultsForNewProjects({ profiles }: { profiles: AgentProfilesResponse }) {
+  const [modelRunner, setModelRunner] = useState<Runner | null>(null)
   const queryClient = useQueryClient()
   const config = useWorkspaceConfig()
   const providerStatus = useProviderStatus()
-  // A row per runner, so every runner's own host catalog is needed at once (#794).
+  // Keep each host catalog available while the model-agent chooser switches (#794).
   const catalogs = useRunnerModelCatalogs()
   const select = useSelectAgentProfile()
 
@@ -406,11 +382,17 @@ function DefaultsForNewProjects({ profiles }: { profiles: AgentProfilesResponse 
         }}
       />
 
-      <div className="flex flex-col gap-2">
-        <span className="text-xs text-muted-foreground">Default model per agent</span>
-        {RUNNERS.map((entry) => (
-          <label key={entry.id} className="flex items-center gap-3">
-            <span className="w-24 shrink-0 font-mono text-xs text-muted-foreground">{entry.label}</span>
+      <div className="settings-account-models flex flex-col gap-2">
+        <label className="settings-model-agent-choice">
+          <span>Default model for</span>
+          <select aria-label="Model agent" value={modelRunner ?? runner} onChange={(event) => setModelRunner(event.target.value as Runner)}>
+            {RUNNERS.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+          </select>
+        </label>
+        {RUNNERS.filter((entry) => entry.id === (modelRunner ?? runner)).map((entry) => (
+          <label key={entry.id} className="settings-account-model flex items-center gap-3">
+            <CpuIcon className="size-4 text-accent-icon shrink-0" />
+            <span className="w-24 shrink-0 text-xs text-muted-foreground">{entry.label}</span>
             <select
               aria-label={`Default model for ${entry.label}`}
               data-slot="accounts-default-model"
@@ -432,7 +414,7 @@ function DefaultsForNewProjects({ profiles }: { profiles: AgentProfilesResponse 
             >
               {modelsForRunner(entry.id, catalogs[entry.id].data, [models[entry.id]]).map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.id === '' ? 'auto (default)' : model.label}
+                  {model.id === '' ? 'Native default' : model.label}
                 </option>
               ))}
               {modelCatalogStatus(entry.id, catalogs[entry.id].data, catalogs[entry.id].isError, catalogs[entry.id].isFetching) ? (
@@ -448,16 +430,7 @@ function DefaultsForNewProjects({ profiles }: { profiles: AgentProfilesResponse 
   )
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline gap-3 px-3.5 py-2.5">
-      <dt className="w-28 shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 flex-1">{children}</dd>
-    </div>
-  )
-}
-
-function AccountRow({ account, onRemove }: { account: AgentProfile; onRemove: () => void }) {
+function AccountRow({ account, isMachineDefault, onRemove }: { account: AgentProfile; isMachineDefault: boolean; onRemove: () => void }) {
   const [showDetails, setShowDetails] = useState(false)
   const routeId = agentAccountRouteId(account)
   const connect = useConnectAgentAccount()
@@ -475,7 +448,7 @@ function AccountRow({ account, onRemove }: { account: AgentProfile; onRemove: ()
       data-account={account.id}
       className="flex flex-col gap-2 px-3.5 py-3"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="settings-account-card">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-[13px] font-medium text-foreground">{account.label}</span>
@@ -485,6 +458,8 @@ function AccountRow({ account, onRemove }: { account: AgentProfile; onRemove: ()
               </Badge>
             ) : null}
           </div>
+          {isMachineDefault && <p className="settings-account-default-note">Default account for new projects. Credentials are not displayed.</p>}
+          <div className="settings-account-readout settings-readout">
           <p
             data-slot="account-path"
             className="mt-0.5 truncate font-mono text-[11.5px] text-soft-foreground"
@@ -505,15 +480,11 @@ function AccountRow({ account, onRemove }: { account: AgentProfile; onRemove: ()
               </span>
             ) : null}
           </div>
+          </div>
         </div>
 
-        {/* The collapsed row is a READING surface — which account, where, is it signed in. Every
-            action that CHANGES or DESTROYS something lives one deliberate click away, inside the
-            panel below. Connect and Check again are the two exceptions, and deliberately so: they
-            are how an account becomes usable at all, and the row's own "folder not created yet"
-            copy points at Connect. Burying the only sign-in path behind "Show details" is what left
-            an added account with no way to log in. */}
-        <div className="flex shrink-0 items-center gap-2">
+        {/* Public account actions stay separate from the opt-in identity details below. */}
+        <div className="settings-account-actions">
           {status?.status !== 'connected' ? (
             <Button
               type="button"
@@ -544,7 +515,7 @@ function AccountRow({ account, onRemove }: { account: AgentProfile; onRemove: ()
           ) : null}
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
             data-action="account-recheck"
             disabled={recheck.isPending}
@@ -557,11 +528,12 @@ function AccountRow({ account, onRemove }: { account: AgentProfile; onRemove: ()
           >
             Check again
           </Button>
+          <AccountManagement account={account} onRemove={onRemove} />
           {/* Identity is opt-in: nothing is requested until this is pressed, so an email is absent
               from the page rather than merely unrendered. */}
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
             data-action="account-details-toggle"
             aria-expanded={showDetails}
@@ -573,28 +545,23 @@ function AccountRow({ account, onRemove }: { account: AgentProfile; onRemove: ()
       </div>
 
       {showDetails ? (
-        <AccountDetails account={account} routeId={routeId} onRemove={onRemove} />
+        <AccountDetails account={account} routeId={routeId} />
       ) : null}
     </li>
   )
 }
 
-/** The opt-in half of a row: who this login is, its own config files, and managing it. */
+/** The opt-in half of a row: who this login is and its own config files. */
 function AccountDetails({
   account,
   routeId,
-  onRemove,
 }: {
   account: AgentProfile
   routeId: string
-  onRemove: () => void
 }) {
   const details = useAgentAccountDetails(routeId, true)
   const open = useOpenAgentAccountFile()
   const targets = useOpenTargets()
-  const [renaming, setRenaming] = useState(false)
-  const [draft, setDraft] = useState(account.label)
-  const rename = useUpdateAgentProfile()
 
   // Which detected apps can actually act on each thing — the same rule the route enforces, so the
   // menu never offers something that would come back a 400. A `cli:<runner>` handoff opens a task
@@ -683,16 +650,24 @@ function AccountDetails({
           }
         />
       </div>
+    </div>
+  )
+}
 
+/** Account actions do not fetch identity; Remove still opens the existing confirmation. */
+function AccountManagement({ account, onRemove }: { account: AgentProfile; onRemove: () => void }) {
+  const [renaming, setRenaming] = useState(false)
+  const [draft, setDraft] = useState(account.label)
+  const rename = useUpdateAgentProfile()
+  return <>
       {/* The discovered account carries no Rename/Remove at all — it is what cezar found, so either
           would imply a setting that does not exist. Nothing is rendered for it, not a disabled
           control, because a greyed-out Remove reads as "not allowed yet" rather than "not a thing". */}
       {account.isDefault ? null : (
         <div
           data-slot="account-manage"
-          className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-2.5"
+          className="settings-account-management"
         >
-          <span className="mr-1 text-xs text-muted-foreground">Account</span>
           {renaming ? (
             <>
               <input
@@ -751,7 +726,7 @@ function AccountDetails({
                 data-action="account-remove"
                 onClick={onRemove}
               >
-                Remove
+                Remove account
               </Button>
               {/* The label is cezar's own; the folder is the account. Saying so here is what keeps
                   Rename from reading as "point this at a different directory". */}
@@ -762,6 +737,5 @@ function AccountDetails({
           )}
         </div>
       )}
-    </div>
-  )
+  </>
 }

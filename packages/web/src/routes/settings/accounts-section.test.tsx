@@ -197,12 +197,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/**
- * Rename and Remove live inside "Show details", not on the collapsed row: a row is a reading
- * surface, and a destructive action on it sits one stray click away from a list you scan. So every
- * management assertion below opens the panel first — and the guards that those controls are ABSENT
- * check them with the panel open, or they would pass for the wrong reason.
- */
+/** Identity details remain opt-in; card management never needs this fetch. */
 const openDetails = async (id: string) => {
   const row = await waitFor(() => {
     expect(rowFor(id)).not.toBeNull()
@@ -390,32 +385,22 @@ describe('the agent accounts section', () => {
     })
   })
 
-  it('keeps Rename and Remove off the collapsed row, behind Show details', async () => {
-    serve({
-      defaults: {},
-      editable: true,
-      profileCapableProviders: ['claude', 'codex'],
-      selections: {},
-      profiles: [...DEFAULTS, profile({ id: 'klaudiusz', label: 'Klaudiusz' })],
-    })
+  it('offers card actions without fetching identity and keeps them when details close', async () => {
+    serve({ defaults: {}, editable: true, profileCapableProviders: ['claude', 'codex'],
+      selections: {}, profiles: [...DEFAULTS, profile({ id: 'klaudiusz', label: 'Klaudiusz' })] })
     renderAccounts()
-
-    // Scanning the list must not put a destructive action under the cursor.
     const row = await waitFor(() => {
       expect(rowFor('klaudiusz')).not.toBeNull()
       return rowFor('klaudiusz')!
     })
-    expect(row.querySelector('[data-action="account-remove"]')).toBeNull()
-    expect(row.querySelector('[data-action="account-rename"]')).toBeNull()
-    expect(row.querySelector('[data-slot="account-manage"]')).toBeNull()
-
-    await openDetails('klaudiusz')
     expect(row.querySelector('[data-action="account-remove"]')).not.toBeNull()
     expect(row.querySelector('[data-action="account-rename"]')).not.toBeNull()
-
-    // …and folding it away takes them with it.
+    expect(row.querySelector('[data-slot="account-details"]')).toBeNull()
+    expect(detailReads).toHaveLength(0)
+    await openDetails('klaudiusz')
     fireEvent.click(row.querySelector('[data-action="account-details-toggle"]')!)
-    await waitFor(() => expect(row.querySelector('[data-slot="account-manage"]')).toBeNull())
+    await waitFor(() => expect(row.querySelector('[data-slot="account-details"]')).toBeNull())
+    expect(row.querySelector('[data-slot="account-manage"]')).not.toBeNull()
   })
 
   it('renames without touching the folder', async () => {
@@ -777,7 +762,7 @@ describe('the agent accounts section', () => {
     await waitFor(() =>
       expect(document.querySelector('[data-slot="agent-version"]')?.textContent).toBe('2.1.220'),
     )
-    expect(document.querySelector('[data-slot="agent-installed"]')?.textContent).toBe('Yes')
+    expect(document.querySelector('[data-slot="agent-installed"]')?.textContent).toBe('Installed')
   })
 
   it('names the install command for an agent that is not on this machine', async () => {
