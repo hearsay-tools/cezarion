@@ -261,3 +261,6 @@
 .settings-panel [data-slot=accounts-defaults] .settings-model-agent-choice { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); }
 .settings-panel .settings-model-agent-choice select { width: auto; min-height: 28px; border: 0; background: transparent; font-size: 12px; }
 .settings-panel [data-slot=accounts-tabs] { padding: 0; }
+.settings-config-scopes [data-slot=agent-config-group] > ul > li { width: 100%; min-width: 0; }
+.settings-config-scopes [data-slot=agent-config-file] { min-width: 0; max-width: 100%; }
+.settings-panel [data-slot=settings-config-editor] > [data-slot=code-editor] { background: var(--background); }
