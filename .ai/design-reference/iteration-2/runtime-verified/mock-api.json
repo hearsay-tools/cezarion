@@ -1,0 +1,253 @@
+{
+  "disclosure": "Browser response fixtures only. No GitHub requests or automation launches. Responses validated with built contract schemas.",
+  "mocks": [
+    {
+      "path": "/github?*",
+      "body": {
+        "available": true,
+        "repo": "example/fixture",
+        "issues": [
+          {
+            "kind": "issue",
+            "number": 219,
+            "title": "Keep resource columns readable",
+            "author": "fixture-user",
+            "createdAt": "2026-09-12T09:29:17.582Z",
+            "labels": [
+              "enhancement"
+            ],
+            "body": "Refine session navigation and preserve keyboard controls.\n\n## Validation\n- Desktop and mobile checked\n- Light and dark themes verified",
+            "url": "https://github.com/example/fixture/pull/218",
+            "comments": 2,
+            "isDraft": false,
+            "additions": 42,
+            "deletions": 9,
+            "checks": "passing"
+          }
+        ],
+        "prs": [
+          {
+            "kind": "pr",
+            "number": 218,
+            "title": "Improve task session controls",
+            "author": "fixture-user",
+            "createdAt": "2026-09-12T09:29:17.582Z",
+            "labels": [
+              "enhancement"
+            ],
+            "body": "Refine session navigation and preserve keyboard controls.\n\n## Validation\n- Desktop and mobile checked\n- Light and dark themes verified",
+            "url": "https://github.com/example/fixture/pull/218",
+            "comments": 2,
+            "isDraft": false,
+            "additions": 42,
+            "deletions": 9,
+            "checks": "passing"
+          },
+          {
+            "kind": "pr",
+            "number": 220,
+            "title": "Review compact task layout",
+            "author": "fixture-user",
+            "createdAt": "2026-09-12T09:29:17.582Z",
+            "labels": [
+              "enhancement"
+            ],
+            "body": "Refine session navigation and preserve keyboard controls.\n\n## Validation\n- Desktop and mobile checked\n- Light and dark themes verified",
+            "url": "https://github.com/example/fixture/pull/218",
+            "comments": 2,
+            "isDraft": true,
+            "additions": 42,
+            "deletions": 9,
+            "checks": "passing"
+          }
+        ],
+        "viewerLogin": "fixture-user",
+        "labelColors": {
+          "enhancement": "7c3aed"
+        }
+      }
+    },
+    {
+      "path": "/github/checks*",
+      "body": {
+        "available": true,
+        "checks": {
+          "218": "passing",
+          "220": "pending"
+        }
+      }
+    },
+    {
+      "path": "/github/ref-status*",
+      "body": {
+        "available": true,
+        "prs": {
+          "218": "ready",
+          "220": "draft"
+        },
+        "issues": {},
+        "recheckAfterMs": null
+      }
+    },
+    {
+      "path": "/github/comments/*",
+      "body": {
+        "available": true,
+        "comments": [
+          {
+            "id": 1,
+            "author": "reviewer",
+            "createdAt": "2026-09-12T09:29:17.582Z",
+            "body": "The session navigation looks good. Please retain all keyboard shortcuts.",
+            "kind": "review",
+            "reviewState": "approved",
+            "url": "https://github.com/example/fixture/pull/218"
+          }
+        ],
+        "events": []
+      }
+    },
+    {
+      "path": "/github/prs/218/merge-state",
+      "body": {
+        "available": true,
+        "mergeState": {
+          "number": 218,
+          "title": "Improve task session controls",
+          "url": "https://github.com/example/fixture/pull/218",
+          "state": "open",
+          "isDraft": false,
+          "headRef": "feature/session-controls",
+          "baseRef": "main",
+          "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mergeable": "mergeable",
+          "reviewDecision": "approved",
+          "checks": [
+            {
+              "name": "Build and tests",
+              "state": "passing",
+              "required": null
+            }
+          ],
+          "methods": [
+            "squash"
+          ],
+          "defaultMethod": "squash",
+          "eligibility": "unknown",
+          "blockers": [
+            {
+              "code": "unknown-requirements",
+              "message": "Repository requirements are not available."
+            }
+          ],
+          "canMerge": false,
+          "canOverride": false
+        }
+      }
+    },
+    {
+      "path": "/github/prs/218/changes",
+      "body": {
+        "available": true,
+        "number": 218,
+        "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "files": [
+          {
+            "path": "src/session.ts",
+            "status": "modified",
+            "additions": 2,
+            "deletions": 1,
+            "patch": "@@ -1 +1,2 @@\n-export const title = \"Task\";\n+export const title = \"Session\";\n+export const keyboard = true;"
+          }
+        ],
+        "additions": 2,
+        "deletions": 1,
+        "truncated": false
+      }
+    },
+    {
+      "path": "/automations",
+      "body": {
+        "available": true,
+        "scheduler": {
+          "state": "idle"
+        },
+        "automations": [
+          {
+            "id": "fixture-auto",
+            "revision": 1,
+            "name": "Review new pull requests",
+            "description": "Prepare a local review when a matching pull request opens.",
+            "enabled": false,
+            "events": [
+              "pull_request.opened"
+            ],
+            "intervalSeconds": 300,
+            "filters": {
+              "lookbackDays": 7,
+              "maxRecords": 20
+            },
+            "task": {
+              "workflow": "quick-task",
+              "runner": "claude",
+              "prompt": "Review {{github.title}} and report actionable findings."
+            },
+            "createdAt": "2026-09-12T09:29:17.582Z",
+            "updatedAt": "2026-09-12T09:29:17.582Z",
+            "counts": {
+              "matches": 4,
+              "launched": 3,
+              "duplicates": 1,
+              "errors": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "path": "/automations/fixture-auto",
+      "body": {
+        "automation": {
+          "id": "fixture-auto",
+          "revision": 1,
+          "name": "Review new pull requests",
+          "description": "Prepare a local review when a matching pull request opens.",
+          "enabled": false,
+          "events": [
+            "pull_request.opened"
+          ],
+          "intervalSeconds": 300,
+          "filters": {
+            "lookbackDays": 7,
+            "maxRecords": 20
+          },
+          "task": {
+            "workflow": "quick-task",
+            "runner": "claude",
+            "prompt": "Review {{github.title}} and report actionable findings."
+          },
+          "createdAt": "2026-09-12T09:29:17.582Z",
+          "updatedAt": "2026-09-12T09:29:17.582Z"
+        }
+      }
+    },
+    {
+      "path": "/automations/fixture-auto/log",
+      "body": {
+        "records": [
+          {
+            "seq": 1,
+            "ts": "2026-09-12T09:29:17.582Z",
+            "automationId": "fixture-auto",
+            "revision": 1,
+            "event": "pull_request.opened",
+            "result": "launched",
+            "runId": "10000000-0000-4000-8000-000000000000",
+            "githubNumber": 218,
+            "githubTitle": "Improve task session controls"
+          }
+        ]
+      }
+    }
+  ]
+}

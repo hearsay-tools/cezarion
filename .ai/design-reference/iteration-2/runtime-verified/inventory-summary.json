@@ -1,0 +1,11 @@
+{
+  "total": 158,
+  "paired": 155,
+  "populatedPlanCaptures": 4,
+  "statusCounts": {
+    "captured; population and visual review pending": 139,
+    "pending specialized state fixture": 3,
+    "NOT ACCEPTED: required control was not opened": 2,
+    "captured base only; specialized state NOT verified": 14
+  }
+}
