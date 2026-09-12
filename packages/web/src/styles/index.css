@@ -738,3 +738,6 @@
 [data-slot='task-row'] > [data-slot='status-dot'][data-tone='accent'] { background-color: var(--accent-text); }
 
 [data-slot='mobile-status']:empty { display: none; }
+/* The menu's 44px hit region needs the source's fixed 14px screen gutter even
+   when density scales spacing tokens; ultra's 10.5px gutter clips its left edge. */
+[data-slot='mobile-top-bar'] > div { padding-inline: 14px; }
