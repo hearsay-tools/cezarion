@@ -138,3 +138,25 @@
 }
 [data-slot="plan-review"] [data-slot="plan-badge-skill"] { background: transparent; border: 0; color: inherit; padding: 0; font-family: inherit; font-size: inherit; }
 [data-slot="plan-review"] [data-slot="plan-badge-skill"]::before { content: "· "; }
+
+.automation-editor label { color: var(--muted-foreground); }
+.automation-editor label:has(input[type="checkbox"]) { color: var(--foreground); }
+@media (max-width: 767px) {
+  .automation-editor input:not([type="checkbox"]), .automation-editor textarea { font-size: 13px; line-height: 1.5; min-height: 50px; }
+  .automation-editor textarea { min-height: 72px; }
+}
+
+[data-inbox-empty="true"] [data-slot="centered-state-tile"] { width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); box-shadow: none; }
+[data-inbox-empty="true"] [data-slot="centered-state-tile"] svg { width: 32px; height: 32px; }
+@media (max-width: 767px) {
+  [data-slot="variant-column"] [data-slot="button"] { min-height: 50px; }
+  [data-slot="variant-progress"] { line-height: 1.6; }
+}
+
+[data-slot="plan-review"] [data-slot="dialog-header"] > div:first-child { position: relative; min-height: 14px; }
+[data-slot="plan-review"] [data-slot="dialog-header"] > div:first-child > button { position: absolute; right: 0; top: -8px; }
+@media (max-width: 767px) {
+  [data-slot="plan-review"] [data-slot="dialog-header"] { padding: 20px 20px 12px; }
+  [data-slot="plan-review"] [data-slot="plan-steps"] { padding-left: 20px; padding-right: 20px; }
+  [data-slot="plan-review"] [data-slot="plan-actions"] { padding-left: 20px; padding-right: 20px; }
+}

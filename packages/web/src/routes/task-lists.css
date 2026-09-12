@@ -125,3 +125,28 @@
   [data-presentation="summary"] > header > div:has(input) { align-items: start; flex-direction: column; }
   [data-slot="other-projects"] a { border: 1px solid var(--border); min-height: 44px; color: var(--foreground); }
 }
+
+[data-route="tasks"] h1, [data-presentation="summary"][data-route="global-tasks"] h1 { line-height: 1.2; letter-spacing: -0.7px; }
+[data-slot="tasks-toolbar"] [data-slot="button"] { font-size: 12px; font-weight: 500; }
+@media (max-width: 767px) {
+  [data-slot="tasks-toolbar"] { align-items: start; }
+  [data-slot="tasks-toolbar"] [data-slot="new-task-inline"] { margin-right: calc(100% - 104px); }
+  [data-slot="task-card"] > div:first-child > a { font-size: 13px; line-height: 1.6; }
+  [data-slot="mobile-task-meta"] { margin-top: 10px; }
+}
+
+[data-slot="other-projects"] a { border: 1px solid var(--border); min-height: 44px; color: var(--foreground); }
+[data-slot="other-projects"] > div > div { border: 0; }
+[data-presentation="summary"] [data-slot="global-task-title"] > span > a:not(.font-semibold) { font-weight: 400; color: var(--foreground); }
+@media (max-width: 767px) {
+  [data-presentation="summary"] > header > div:has(input) > div { width: 100%; }
+}
+
+@media (min-width: 768px) {
+  [data-route="tasks"][data-presentation="resources"] > header { flex-direction: row; flex-wrap: wrap; gap: 12px; align-items: center; }
+  [data-route="tasks"][data-presentation="resources"] > header > div:first-child { width: 100%; margin-bottom: 10px; }
+  [data-route="tasks"][data-presentation="resources"] h1 { font-size: 28px; font-weight: 400; }
+  [data-route="tasks"][data-presentation="resources"] > header > div:nth-child(2) { border: 0; gap: 8px; }
+  [data-route="tasks"][data-presentation="resources"] > header > div:nth-child(2) > button { min-height: 40px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; background: var(--card); }
+  [data-route="tasks"][data-presentation="resources"] [data-slot="tasks-toolbar"] { flex: 1; }
+}
