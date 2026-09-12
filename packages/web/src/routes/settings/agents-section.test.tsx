@@ -246,7 +246,7 @@ afterEach(() => {
 })
 
 describe('the agents form', () => {
-  it('puts the anchored Providers section first', async () => {
+  it('keeps the anchored Providers section in an explicit disclosure', async () => {
     serve()
     renderAt('/settings/agents')
 
@@ -255,7 +255,7 @@ describe('the agents form', () => {
     expect(providers.id).toBe('providers')
     expect(providers.className).toContain('scroll-mt-20')
     expect(providers.className).not.toContain('scroll-mt-6')
-    expect(form()?.firstElementChild).toBe(providers)
+    expect(providers?.closest('details')?.querySelector('summary')?.textContent).toBe('Provider connections')
   })
 
   it('keeps a saved disconnected runner selected while disabling its runner and model controls', async () => {
@@ -434,6 +434,18 @@ describe('the agents form', () => {
     await waitFor(() => expect(claude.value).toBe(''))
   })
 
+  it('lists every runner’s default model in the same place', async () => {
+    serve()
+    renderAt('/settings/agents')
+    await waitFor(() => expect(form()).not.toBeNull())
+    expect(screen.queryByText('Additional agent models')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Default model' })).toBeTruthy()
+    expect(screen.getByText(/The model preselected in the composer/)).toBeTruthy()
+    expect(
+      [...document.querySelectorAll('[data-slot="agents-model"]')].map((el) => el.getAttribute('data-runner')),
+    ).toEqual(['claude', 'codex', 'opencode', 'pi'])
+  })
+
   it('offers each runner the models its own host CLI reports (#794)', async () => {
     serve({
       hostModels: {
@@ -492,6 +504,7 @@ describe('the agents form', () => {
     await waitFor(() => expect(form()).not.toBeNull())
 
     const box = screen.getByLabelText<HTMLTextAreaElement>('System prompt')
+    expect(box.className).toContain('min-h-48')
     const saveButton = () => document.querySelector<HTMLButtonElement>('[data-action="agents-save-prompt"]')!
     // Unchanged draft: nothing to save.
     expect(saveButton().disabled).toBe(true)
@@ -521,6 +534,24 @@ describe('the agents form', () => {
     expect(document.querySelector('[data-slot="agents-prompt-limit"]')?.textContent).toContain('20,000')
     fireEvent.click(save)
     expect(puts()).toHaveLength(0)
+  })
+
+  it('keeps Save prompt under the textarea and groups the run options with descriptions', async () => {
+    serve()
+    renderAt('/settings/agents')
+    await waitFor(() => expect(form()).not.toBeNull())
+    const prompt = screen.getByLabelText('System prompt')
+    const save = document.querySelector('[data-action="agents-save-prompt"]')!
+    const live = screen.getByLabelText('Live title updates')
+    expect(prompt.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(save.compareDocumentPosition(live) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText(/Refresh a task's short title/)).toBeTruthy()
+    expect(screen.getByText(/a task with changes pauses/)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Task runs' })).toBeTruthy()
+    const group = document.querySelector('[data-slot="agents-task-runs"]')!
+    expect(group.contains(live)).toBe(true)
+    expect(group.contains(screen.getByLabelText('Review changes before finishing'))).toBe(true)
+    expect(group.contains(screen.getByRole('heading', { name: 'Base branch' }))).toBe(true)
   })
 
   it('base branch round-trips through the same PUT — "" means follow the checked-out branch', async () => {
@@ -580,7 +611,6 @@ describe('the agents form', () => {
       // Settled: the default-models field below it has rendered, so the pane is not mid-load.
       await screen.findByLabelText('Default model for claude')
       expect(rows().map((r) => r.getAttribute('data-value'))).toEqual(['claude', 'codex', 'opencode', 'pi'])
-      // …and it is still called what it always was, because there is no account in play.
       expect(document.body.textContent).toContain('Default runner')
     })
 
@@ -598,7 +628,7 @@ describe('the agents form', () => {
       ])
       // The discovered account is the checked row until the repo says otherwise.
       expect(rowFor('claude', '')?.getAttribute('aria-checked')).toBe('true')
-      expect(document.body.textContent).toContain('Default agent')
+      expect(document.body.textContent).toContain('Default runner')
     })
 
     it('starts on the account the repo is already set to', async () => {

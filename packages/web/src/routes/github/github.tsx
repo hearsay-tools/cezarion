@@ -1,22 +1,7 @@
+import './github-layout.css'
 import { hashKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  ArrowLeftIcon,
-  CircleCheckIcon,
-  CheckIcon,
-  CircleIcon,
-  CircleDotIcon,
-  CircleXIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  ExternalLinkIcon,
-  GitPullRequestIcon,
-  MessageSquareIcon,
-  LoaderCircleIcon,
-  RefreshCwIcon,
-  SearchIcon,
-  TagIcon,
-  TriangleAlertIcon,
-} from 'lucide-react'
+import { ChevronLeftIcon, ExternalLinkIcon, MessageSquareIcon, LoaderCircleIcon, TagIcon,  } from 'lucide-react'
+import { ArrowLeftIcon, CheckIcon, CircleIcon, CircleDotIcon, CircleXIcon, ChevronRightIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, TriangleAlertIcon } from '@/components/design-icons'
 import {
   useEffect,
   useMemo,
@@ -182,7 +167,7 @@ function GithubListResizeHandle({ width, onWidthChange }: GithubListResize) {
       onKeyDown={onKeyDown}
       onDoubleClick={() => onWidthChange(DEFAULT_GITHUB_LIST_WIDTH)}
       title="Drag to resize the GitHub list — double-click to reset"
-      className="absolute inset-y-0 -right-[2px] z-20 hidden w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-violet/40 focus-visible:bg-violet/60 focus-visible:outline-none md:block"
+      className="absolute inset-y-0 -right-[2px] z-20 hidden w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent-strong/40 focus-visible:bg-accent-strong/60 focus-visible:outline-none md:block"
     />
   )
 }
@@ -322,6 +307,7 @@ export function GithubRoute({
   // than a persisted one, exactly like the runner and the model beside it.
   const [engine, setEngine] = useState<EnginePick>({ runner: null, model: null, effort: null, account: null })
   const [githubListWidth, setGithubListWidth] = useState(readStoredGithubListWidth)
+  const [mobileListExpanded, setMobileListExpanded] = useState(false)
   const changeGithubListWidth = (next: number) => {
     const width = clampGithubListWidth(next)
     setGithubListWidth(width)
@@ -469,7 +455,7 @@ export function GithubRoute({
       return (
         <div data-route="github" className="flex min-h-full flex-col">
           <CenteredState
-            icon={<TriangleAlertIcon />}
+            icon={<TriangleAlertIcon size={16} />}
             tone="danger"
             title="Could not load GitHub"
             subtitle={list.error.message}
@@ -592,33 +578,30 @@ export function GithubRoute({
   )
 
   return (
-    // Bounded to the viewport (`h-full min-h-0`) so the PAGE never scrolls — each pane owns its
-    // own scroll (`overflow-y-auto`), so scrolling starts inside the issues/PR list (and the
-    // detail), and the list header stays pinned. `overscroll-contain` keeps a pane's scroll from
-    // chaining out to the shell.
-    <div data-route="github" className="flex h-full min-h-0 items-stretch">
-      {/* List pane. Below md it IS the page when no item is in the URL, and yields entirely
-          to the detail when one is — the same two-surfaces-one-URL rule the git tabs use. */}
-      <section
-        data-slot="gh-list"
-        style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
-        className={cn(
-          'relative w-full min-h-0 flex-col overflow-y-auto overscroll-contain border-border md:flex md:w-[var(--github-list-width)] md:shrink-0 md:border-r',
-          n === undefined ? 'flex' : 'hidden',
-        )}
-      >
-        <header data-slot="gh-header" className="sticky top-0 z-10 border-b border-border bg-background/95 px-4 pt-3 backdrop-blur">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <h1 className="sr-only text-lg font-semibold md:not-sr-only">GitHub</h1>
+    // The list and detail stay in document flow; the shell remains the only page scroller.
+    <div data-route="github" className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+        <header data-slot="gh-header" className="flex shrink-0 flex-col gap-[22px]">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            <h1 className="w-full text-[30px] font-semibold tracking-tight">GitHub</h1>
             {gh.repo ? (
-              <span data-slot="gh-repo" className="min-w-0 truncate font-mono text-[11px] text-soft-foreground">
-                {gh.repo}
+              <span className="min-w-0 truncate text-[13px] text-muted-foreground">
+                <span data-slot="gh-repo">{gh.repo}</span>
+                <span data-slot="gh-synced"> · {gh.syncedAt ? `Synced ${shortAge(gh.syncedAt)} ago` : 'Not synced yet'}</span>
               </span>
             ) : null}
+
+          </div>
+          <div data-slot="gh-tabs" className="flex min-h-11 flex-wrap items-center gap-3">
+            <TabLink to="/github" active={view === 'issues'} onClick={() => saveGithubView('issues')}>
+              Issues · {countLabel(gh.issues.length)}
+            </TabLink>
+            <TabLink to="/github/prs" active={view === 'prs'} onClick={() => saveGithubView('prs')}>
+              Pull requests · {countLabel(gh.prs.length)}
+            </TabLink>
             {automationsAvailable ? (
               <Link
                 to="/automations/new"
-                className="ml-auto shrink-0 text-[10px] font-medium text-primary hover:underline"
+                className="gh-utility"
               >
                 Set up automations
               </Link>
@@ -629,31 +612,18 @@ export function GithubRoute({
               title="Refresh from GitHub"
               disabled={refresh.isPending}
               onClick={() => refresh.mutate()}
-              // The automations link owns the `ml-auto` that pushes this cluster right; with the
-              // link gated away this button inherits it, so the header does not re-flow.
-              className={cn(
-                'flex shrink-0 items-center gap-1 rounded-full border border-border px-1.5 py-px text-[10px] font-medium text-soft-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-55',
-                !automationsAvailable && 'ml-auto',
-              )}
+              className="gh-utility"
             >
-              <RefreshCwIcon
+              <RefreshCwIcon size={16}
                 aria-hidden="true"
-                className={cn('size-[9px]', refresh.isPending && 'motion-safe:animate-spin')}
+                className={cn('size-3.5', refresh.isPending && 'motion-safe:animate-spin')}
               />
-              {gh.syncedAt ? `synced ${shortAge(gh.syncedAt)} ago` : 'refresh'}
+              Refresh
             </button>
           </div>
-          <div data-slot="gh-tabs" className="mt-2.5 flex items-end gap-1">
-            <TabLink to="/github" active={view === 'issues'} onClick={() => saveGithubView('issues')}>
-              Issues · {countLabel(gh.issues.length)}
-            </TabLink>
-            <TabLink to="/github/prs" active={view === 'prs'} onClick={() => saveGithubView('prs')}>
-              Pull requests · {countLabel(gh.prs.length)}
-            </TabLink>
-          </div>
-          <div className="mt-2.5 flex items-center gap-2 pb-3">
-            <div className="relative min-w-0 flex-1">
-              <SearchIcon
+          <div data-slot="gh-filter-toolbar" className="flex flex-wrap items-center gap-2.5">
+            <div className="relative min-w-0 basis-full md:flex-1 md:basis-auto">
+              <SearchIcon size={16}
                 aria-hidden="true"
                 className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-soft-foreground"
               />
@@ -673,11 +643,20 @@ export function GithubRoute({
               selected={labelFilter}
               onChange={setLabelFilter}
             />
-          </div>
           {view === 'issues' ? <IssueFilters data={{ ...gh, issues: [...gh.issues, ...(searchPayload?.items ?? [])] }} assignees={assigneeFilter} projectId={activeProject}
             onAssigneesChange={setAssigneeFilter} onProjectChange={setProjectFilter} /> : null}
-          {filtering ? <button type="button" className="mb-2 min-h-11 min-w-11 rounded-md px-2 text-sm text-foreground hover:bg-muted" onClick={clearFilters}>Clear filters</button> : null}
+            <button type="button" disabled={!filtering} className="min-h-11 rounded-md border border-border bg-card px-4 text-xs disabled:opacity-50" onClick={clearFilters}>Clear filters</button>
+          </div>
         </header>
+      <div data-slot="gh-panes" className="flex min-h-0 min-w-0 flex-1 flex-col items-start gap-[22px] md:flex-row">
+      {/* Issue list and detail stack on mobile. A selected PR has a full-width review surface. */}
+      <section
+        data-slot="gh-list"
+        data-mobile-preview={view === 'issues' && n !== undefined && !mobileListExpanded || undefined}
+        style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
+        className="relative flex w-full min-h-0 flex-col rounded-lg border border-border bg-card p-3 md:w-[var(--github-list-width)] md:shrink-0"
+      >
+
 
         {items.length === 0 ? (
           // Nothing in the OPEN list matched. Rather than the old flat "no match" — which was a
@@ -690,7 +669,7 @@ export function GithubRoute({
             </div>
           )
         ) : (
-          <ul data-slot="gh-rows" className="flex flex-col gap-0.5 px-2 py-2">
+          <ul data-slot="gh-rows" className="flex flex-col gap-1">
             {items.map((item) => (
               <GithubRow
                 key={item.url}
@@ -704,6 +683,18 @@ export function GithubRoute({
             ))}
           </ul>
         )}
+
+        {view === 'issues' && n !== undefined && items.length > 2 ? (
+          <Button
+            variant="outline"
+            className="mt-2 self-start md:hidden"
+            data-slot="gh-expand-list"
+            aria-expanded={mobileListExpanded}
+            onClick={() => setMobileListExpanded(expanded => !expanded)}
+          >
+            {mobileListExpanded ? 'Show fewer issues' : `View all ${items.length} issues`}
+          </Button>
+        ) : null}
 
         {items.length > 0 && searchWanted && emptyState ? (
           <div data-slot="gh-search-status" role="status" className="px-4 py-4 text-sm text-soft-foreground">
@@ -740,7 +731,7 @@ export function GithubRoute({
       <section
         data-slot="gh-detail"
         className={cn(
-          'min-w-0 min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain',
+          'w-full min-w-0 min-h-0 flex-1 flex-col rounded-lg border border-border bg-card',
           n === undefined ? 'hidden md:flex' : 'flex',
         )}
       >
@@ -769,7 +760,7 @@ export function GithubRoute({
           </GithubDetail>
         ) : (
           <CenteredState
-            icon={view === 'issues' ? <CircleDotIcon /> : <GitPullRequestIcon />}
+            icon={view === 'issues' ? <CircleDotIcon size={16} /> : <GitPullRequestIcon size={16} />}
             tone="neutral"
             heading="h2"
             title={number === null ? 'Nothing selected' : 'Not found'}
@@ -784,6 +775,7 @@ export function GithubRoute({
           />
         )}
       </section>
+      </div>
     </div>
   )
 }
@@ -844,17 +836,18 @@ function GithubRow({
         onFocus={prefetchThread}
         data-slot="gh-row"
         data-number={item.number}
+        data-kind={item.kind}
         aria-current={active ? 'page' : undefined}
         title="Drag into the composer to prefill a task"
         className={cn(
-          'flex flex-col gap-1 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
-          active && 'bg-muted',
+          'flex flex-col gap-2 rounded-md px-3 py-4 transition-colors hover:bg-muted',
+          active && 'bg-accent-strong/10 text-accent-text',
         )}
       >
         <span className="flex min-w-0 items-start gap-2 md:items-center">
           <Icon
             aria-hidden="true"
-            className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-violet')}
+            className={cn('mt-0.5 size-3.5 shrink-0 md:mt-0', item.kind === 'issue' ? 'text-success' : 'text-accent-icon')}
           />
           <span className={cn('line-clamp-2 min-w-0 text-[13px] font-medium md:block md:truncate', active && 'font-semibold')}>
             {item.title}
@@ -867,15 +860,15 @@ function GithubRow({
           <CommentCount count={item.comments} />
           {checks ? <ChecksGlyph checks={checks} /> : null}
           {queued ? (
-            <span data-slot="gh-queued-flag" className="font-sans font-medium text-violet">
+            <span data-slot="gh-queued-flag" className="font-sans font-medium text-accent-text">
               ↗ run queued
             </span>
           ) : null}
         </span>
         {item.labels.length > 0 ? (
-          <span className="flex flex-wrap gap-1 pl-[22px]">
+          <span data-slot="gh-row-labels" className="flex flex-wrap gap-1 pl-[22px]">
             {item.labels.map((label) => (
-              <LabelChip key={label} label={label} color={colors[label]} />
+              <LabelChip key={label} label={label} color={colors[label]} plain />
             ))}
           </span>
         ) : null}
@@ -909,7 +902,7 @@ function LabelFilter({
           disabled={options.length === 0}
           className={cn(
             'flex min-h-11 min-w-11 shrink-0 items-center gap-1 rounded-md border border-input bg-card px-2 py-1 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50',
-            selected.length > 0 && 'border-primary/60 text-foreground',
+            selected.length > 0 && 'border-accent-strong/60 text-foreground',
           )}
         >
           <TagIcon aria-hidden="true" className="size-3.5" />
@@ -936,7 +929,7 @@ function LabelFilter({
                     style={labelChipStyle(colors[label])}
                   />
                   <span className="min-w-0 flex-1 truncate">{label}</span>
-                  {on ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" /> : null}
+                  {on ? <CheckIcon size={16} aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
                 </CommandItem>
               )
             })}
@@ -948,13 +941,13 @@ function LabelFilter({
 }
 
 /** A single label pill, tinted with its GitHub color (or neutral when unknown). */
-function LabelChip({ label, color }: { label: string; color: string | undefined }) {
+function LabelChip({ label, color, plain = false }: { label: string; color: string | undefined; plain?: boolean }) {
   return (
     <span
       data-slot="gh-label"
       data-label={label}
-      style={labelChipStyle(color)}
-      className="rounded-full border px-1.5 py-px text-[10px] font-medium"
+      style={plain ? undefined : labelChipStyle(color)}
+      className={plain ? "text-[11px] font-normal text-muted-foreground" : "rounded-full border px-1.5 py-px text-[10px] font-medium"}
     >
       {label}
     </span>
@@ -986,10 +979,12 @@ function GithubDetail({
         data-slot="gh-back"
         className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden"
       >
-        <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
+        <ArrowLeftIcon size={16} aria-hidden="true" className="size-3.5" />
         Back to the list
       </Link>
 
+      <div data-slot="gh-description-card" className={item.kind === 'pr' ? 'rounded-xl border border-border bg-card p-6' : undefined}>
+      {item.kind === 'pr' ? <h2 className="mb-4 text-[22px] leading-snug font-normal">#{item.number} {item.title}</h2> : null}
       <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[10.5px] text-soft-foreground">
         <span>#{item.number}</span>·<span>{kindWord}</span>·<span>opened by {item.author}</span>·
         <span>{shortAge(item.createdAt)} ago</span>
@@ -1027,7 +1022,7 @@ function GithubDetail({
         )}
       </p>
 
-      <h2 className="mt-2 text-xl leading-snug font-semibold">{item.title}</h2>
+      {item.kind !== 'pr' ? <h2 className="mt-2 text-[22px] leading-snug font-normal">{item.title}</h2> : null}
 
       {item.kind === 'pr' ? (
         <nav aria-label="Pull request detail" className="mt-4 flex border-b border-border">
@@ -1056,10 +1051,10 @@ function GithubDetail({
 
       <GithubThread item={item} colors={colors} />
 
-      {item.kind === 'pr' ? <GithubMergeBox number={item.number} /> : null}
-
-      {children}
       </>}
+      </div>
+      {item.kind === 'pr' ? <GithubMergeBox number={item.number} /> : null}
+      {children}
     </article>
   )
 }
@@ -1074,10 +1069,10 @@ type MergeRequirementState = 'passing' | 'failing' | 'pending' | 'unknown'
 
 function MergeRequirementIcon({ state }: { state: MergeRequirementState }) {
   const iconClass = 'size-4 shrink-0'
-  if (state === 'passing') return <CircleCheckIcon aria-hidden="true" data-slot="gh-merge-status-passing" className={cn(iconClass, 'text-success')} />
-  if (state === 'failing') return <CircleXIcon aria-hidden="true" data-slot="gh-merge-status-failing" className={cn(iconClass, 'text-danger')} />
+  if (state === 'passing') return <CheckIcon size={16} aria-hidden="true" data-slot="gh-merge-status-passing" className={cn(iconClass, 'text-success')} />
+  if (state === 'failing') return <CircleXIcon size={16} aria-hidden="true" data-slot="gh-merge-status-failing" className={cn(iconClass, 'text-danger')} />
   if (state === 'pending') return <LoaderCircleIcon aria-hidden="true" data-slot="gh-merge-status-pending" className={cn(iconClass, 'animate-spin text-warning')} />
-  return <CircleIcon aria-hidden="true" data-slot="gh-merge-status-unknown" className={cn(iconClass, 'text-soft-foreground')} />
+  return <CircleIcon size={16} aria-hidden="true" data-slot="gh-merge-status-unknown" className={cn(iconClass, 'text-soft-foreground')} />
 }
 
 function GithubMergeBox({ number }: { number: number }) {
@@ -1142,7 +1137,7 @@ function GithubMergeBox({ number }: { number: number }) {
         : state.isDraft ? 'Draft'
           : state.mergeable === 'conflicting' ? 'Conflicts must be resolved'
             : state.canMerge ? 'Ready to merge'
-              : 'Merge blocked'
+              : state.eligibility === 'unknown' ? 'Merge blocked · Requirements unknown' : 'Merge blocked'
   const reviewState: MergeRequirementState =
     state.reviewDecision === 'approved' ? 'passing'
       : state.reviewDecision === 'unknown' ? 'unknown'
@@ -1154,12 +1149,12 @@ function GithubMergeBox({ number }: { number: number }) {
   const mergeEnabled = Boolean(selectedMethod && (state.canMerge || (state.canOverride && overrideRules)))
 
   return (
-    <section data-slot="gh-merge-box" aria-live="polite" className="mt-6 rounded-lg border border-border bg-card p-4">
+    <section data-slot="gh-merge-box" data-eligibility={state.eligibility} data-conflicting={state.mergeable === 'conflicting' ? 'true' : undefined} aria-live="polite" className="mt-6 rounded-lg border border-border bg-card p-4">
       <div className="flex items-start gap-3">
         {state.canMerge ? (
-          <CheckIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-success" />
+          <CheckIcon size={16} aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-success" />
         ) : (
-          <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-warning" />
+          <TriangleAlertIcon size={16} aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-warning" />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1171,7 +1166,7 @@ function GithubMergeBox({ number }: { number: number }) {
               disabled={refreshMergeState.isPending}
               onClick={() => refreshMergeState.mutate()}
             >
-              <RefreshCwIcon aria-hidden="true" className={cn('size-3.5', refreshMergeState.isPending && 'animate-spin')} />
+              <RefreshCwIcon size={16} aria-hidden="true" className={cn('size-3.5', refreshMergeState.isPending && 'animate-spin')} />
               Refresh
             </Button>
           </div>
@@ -1198,19 +1193,29 @@ function GithubMergeBox({ number }: { number: number }) {
             ))}
             {state.blockers.map((blocker) => <li key={blocker.code} className="text-soft-foreground">{blocker.message}</li>)}
           </ul>
+          {state.mergeable === 'conflicting' ? <Button className="mt-4" onClick={event => {
+            const prompt = event.currentTarget.closest('article')?.querySelector<HTMLTextAreaElement>('[data-slot="gh-custom-prompt"]')
+            prompt?.scrollIntoView({ block: 'center' })
+            prompt?.focus({ preventScroll: true })
+          }}>Run agent on this PR</Button> : null}
           {state.canOverride ? (
             <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-md border border-warning/40 bg-warning/5 p-3 text-xs">
               <input
                 type="checkbox"
                 checked={overrideRules}
                 onChange={(event) => setOverrideRules(event.target.checked)}
-                className="mt-0.5 size-4 accent-primary"
+                className="mt-0.5 size-4 accent-accent-strong"
               />
               <span>
                 <span className="block font-medium">Merge without waiting for requirements</span>
                 <span className="mt-0.5 block text-soft-foreground">GitHub will allow this only if your permissions can bypass the repository rules.</span>
               </span>
             </label>
+          ) : null}
+          {state.eligibility === 'unknown' ? (
+            <p className="mt-4 text-xs text-muted-foreground">
+              GitHub could not confirm review and branch-protection requirements. Passing checks do not establish merge readiness.
+            </p>
           ) : null}
           {state.state === 'open' && state.methods.length > 0 ? (
             <div className="mt-4 flex flex-col gap-2 sm:flex-row">
@@ -1233,9 +1238,15 @@ function GithubMergeBox({ number }: { number: number }) {
         <DialogContent data-slot="gh-merge-confirm" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>{selectedMethod ? mergeLabels[selectedMethod] : 'Merge'} pull request #{number}?</DialogTitle>
-            <DialogDescription>
-              This will merge “{state.title}” into {state.baseRef}. GitHub will re-check the exact reviewed head before changing the repository.
-              {overrideRules && state.canOverride ? ' You are asking GitHub to bypass unmet repository requirements; GitHub may refuse if your permissions do not allow it.' : ''}
+            <DialogDescription asChild>
+              <div>
+                <p>This will merge “{state.title}” into {state.baseRef}. GitHub will re-check the exact reviewed head before changing the repository.</p>
+                {overrideRules && state.canOverride ? (
+                  <p data-slot="gh-bypass-warning" className="mt-4 text-sm text-warning">
+                    You are asking GitHub to bypass unmet repository requirements; GitHub may refuse if your permissions do not allow it.
+                  </p>
+                ) : null}
+              </div>
             </DialogDescription>
           </DialogHeader>
           {merge.error ? <p className="text-sm text-danger">{merge.error.message}</p> : null}
@@ -1310,7 +1321,7 @@ function GithubPrChanges({ item }: { item: GithubItem }) {
         <div className="min-w-0">
           <div className="mb-2 flex justify-end gap-1">
             <Button aria-label="Previous file" variant="outline" size="icon" className="min-h-11 min-w-11" disabled={current <= 0} onClick={() => setSelected(files[current - 1]?.path ?? null)}><ChevronLeftIcon /></Button>
-            <Button aria-label="Next file" variant="outline" size="icon" className="min-h-11 min-w-11" disabled={current < 0 || current >= files.length - 1} onClick={() => setSelected(files[current + 1]?.path ?? null)}><ChevronRightIcon /></Button>
+            <Button aria-label="Next file" variant="outline" size="icon" className="min-h-11 min-w-11" disabled={current < 0 || current >= files.length - 1} onClick={() => setSelected(files[current + 1]?.path ?? null)}><ChevronRightIcon size={16} /></Button>
           </div>
           {files.length === 0 ? <p className="text-sm text-muted-foreground">No changed files match this filter.</p> : <>
             <Diff files={diffFiles.filter((file) => file.path === selected)} wrap className="min-w-0" />

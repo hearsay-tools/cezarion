@@ -1,4 +1,4 @@
-import { ChevronDownIcon } from 'lucide-react'
+import { ChevronDownIcon } from '@/components/design-icons'
 import { useState } from 'react'
 
 import type { PlanEntry, PlanStatus } from '@open-mercato/cezar-api-client'

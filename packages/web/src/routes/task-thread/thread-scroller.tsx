@@ -1,4 +1,4 @@
-import { ArrowDownIcon } from 'lucide-react'
+import { ArrowDownIcon } from '@/components/design-icons'
 import {
   useCallback,
   useEffect,
@@ -202,13 +202,16 @@ export function useThreadScroll(
     if (!scroller) return
     pendingRestoreRef.current = null
     stuckRef.current = true
+    // Refreshing paged history can remount the transcript before this promise settles.
+    // Let its replacement restore the user's new tail intent, not the old reading offset.
+    saveThreadScroll(viewKey, { top: scroller.scrollHeight - scroller.clientHeight, atBottom: true })
     void (onJumpToLatest?.() ?? Promise.resolve()).finally(() => {
       requestAnimationFrame(() => {
         const current = scrollElRef.current
         current?.scrollTo({ top: current.scrollHeight - current.clientHeight, behavior: 'smooth' })
       })
     })
-  }, [onJumpToLatest])
+  }, [onJumpToLatest, viewKey])
 
   // Arrival is the route-owned pre-paint write. AppShell deliberately does not reset task
   // routes, so a destination thread never exposes an intermediate top-of-transcript frame.
@@ -350,6 +353,11 @@ export function useThreadScroll(
         }
       })
       observer.observe(content)
+      const route = content.closest<HTMLElement>('[data-route="task-thread"]')
+      const header = route?.querySelector<HTMLElement>('[data-slot="run-header"]')
+      const dock = route?.querySelector<HTMLElement>('[data-slot="thread-dock"]')
+      if (header) observer.observe(header)
+      if (dock) observer.observe(dock)
     }
 
     return () => {

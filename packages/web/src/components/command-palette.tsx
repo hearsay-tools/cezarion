@@ -1,4 +1,5 @@
-import { CheckIcon, FolderOpenIcon, LayersIcon, MoonIcon, PlusIcon } from 'lucide-react'
+import { CheckIcon, FolderOpenIcon, LayersIcon, PlusIcon } from '@/components/design-icons'
+import { SunMoonIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { useNavigate as useRouterNavigate } from 'react-router'
 import { useHealth, useProjects, useRuns, useRunsIndex, useSkills, useUiState } from '@/api/queries'
@@ -501,7 +502,7 @@ function PaletteContent({ close }: { close: () => void }) {
                     </span>
                   ) : null}
                   {active ? (
-                    <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+                    <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
                   ) : null}
                 </CommandItem>
               )
@@ -534,7 +535,7 @@ function PaletteContent({ close }: { close: () => void }) {
               close()
             }}
           >
-            <MoonIcon aria-hidden="true" />
+            <SunMoonIcon aria-hidden="true" />
             Toggle theme
             <CommandShortcut className="tracking-normal">
               {theme} → {nextTheme}

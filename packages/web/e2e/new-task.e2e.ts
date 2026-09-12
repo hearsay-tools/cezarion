@@ -120,13 +120,13 @@ describe('the full-screen /new against a live dry-run server', () => {
     browser.waitForFunction(`document.querySelector('[data-route="new"]') !== null`)
     expect(browser.url()).toBe(`${baseUrl}${scoped('/new')}`)
     expect(browser.text('h1')).toBe('What should the agent work on?')
-    expect(browser.isVisible('[data-slot="twinkle-backdrop"]')).toBe(true)
+    expect(browser.isVisible('[data-route="new"] [data-slot="composer"]')).toBe(true)
     expect(
       browser.evaluate(
         `document.activeElement === document.querySelector('[data-slot="composer"] textarea')`,
       ),
     ).toBe(true)
-    expect(browser.count('[data-slot="suggested-chip"]')).toBe(3)
+    expect(browser.count('[data-slot="suggested-chip"]')).toBe(0)
   })
 
   it('the pill row resolves: no source picked, runner pill iff >1 backend, base: main, ×1', async () => {
@@ -165,7 +165,7 @@ describe('the full-screen /new against a live dry-run server', () => {
     )
     expect(browser.text('[data-slot="model-pill"]')).toContain(config.defaultModels?.claude || 'auto')
     expect(browser.text('[data-slot="variants-pill"]')).toContain('×1')
-    expect(browser.text('[data-slot="base-pill"]')).toContain('base: main')
+    expect(browser.text('[data-slot="base-pill"]')).toContain('main')
     browser.screenshot(`${artifactsDir}/new-task-hero.png`)
   })
 
@@ -234,6 +234,9 @@ describe('the full-screen /new against a live dry-run server', () => {
   })
 
   it('type + submit → the thread; the run record carries the exact skill chain', async () => {
+    // The multi-select picker stays open while choosing skills; dismiss before typing.
+    browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
     browser.click('[data-slot="composer"] textarea')
     browser.fill('[data-slot="composer"] textarea', 'Draft a spec for the new-task hero e2e.')
     browser.click('[aria-label="Start task"]')

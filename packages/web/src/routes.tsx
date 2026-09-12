@@ -33,6 +33,7 @@ import {
 import { TasksOverviewRoute } from './routes/tasks-overview'
 import { GlobalTasksRoute } from './routes/global-tasks'
 import { AutomationsRoute } from './routes/automations/automations'
+import { WorkspaceToolsRoute } from './routes/workspace-tools'
 
 /** Lazy ON PURPOSE: the thread view carries the markdown stack (Streamdown + remark/rehype,
  *  ~140 KB gz) — as a static import it would sit in the main bundle every visitor pays for
@@ -269,6 +270,7 @@ const PAGE_TITLE_ROUTES = [
   // The global page. It is not project-scoped, so it never carries a `/p/` prefix to strip —
   // but it goes through the same table, because the browser title is one mechanism.
   { pattern: '/tasks', pageLabel: 'All tasks' },
+  { pattern: '/tools', pageLabel: 'Workspace tools' },
   { pattern: '/new', pageLabel: 'New task' },
   { pattern: '/compare/:groupId', pageLabel: 'Compare' },
   { pattern: '/git/*', pageLabel: 'Git' },
@@ -521,6 +523,7 @@ export function AppRoutes() {
           keep redirecting to the boot project's thread (`LegacyPathRedirect` below owns it).
           React Router ranks this static segment above that `*`, so the two never compete. */}
       <Route path="/tasks" element={<GlobalTasksRoute />} />
+      <Route path="/tools" element={<WorkspaceToolsRoute />} />
 
       {/* Global settings (multi-project spec, step 3.5) — the one cockpit area that is NOT
           under `/p/:projectId`, because nothing here belongs to a project: appearance and

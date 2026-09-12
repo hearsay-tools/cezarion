@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckIcon, GitBranchIcon, GitPullRequestIcon, PlusIcon } from 'lucide-react'
+import { GitBranchIcon, GitPullRequestIcon, PlusIcon, SearchIcon } from '@/components/design-icons'
 import { useState, type FormEvent } from 'react'
 
 import { createRepoBranch, putConfig } from '@/api/client'
@@ -77,40 +77,42 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
   }
 
   return (
-    <section data-slot="repo-branches" className="flex flex-col gap-6 px-4 py-4 md:px-6">
-      <div>
-        <h2 className="text-xs font-semibold tracking-wide text-soft-foreground uppercase">Branches</h2>
+    <section data-slot="repo-branches" className="grid min-w-0 grid-cols-1 gap-5 px-[18px] py-[22px] md:grid-cols-[minmax(0,1fr)_290px] md:px-9">
+      <div className="min-w-0 rounded-xl border border-border bg-card p-5">
+        <h2 className="sr-only">Branches</h2>
+        <label className="relative block">
+        <SearchIcon size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
         <Input
           aria-label="Filter branches"
           placeholder="Filter branches…"
           value={branchQuery}
           onChange={(event) => setBranchQuery(event.target.value)}
-          className="mt-2 max-w-xl"
+          className="h-11 pl-10"
         />
-        <ul data-slot="repo-branch-list" className="mt-2 flex max-w-xl flex-col divide-y divide-border">
+        </label>
+        <ul data-slot="repo-branch-list" className="mt-4 flex min-w-0 flex-col divide-y divide-border border-t border-border md:max-h-[40rem] md:overflow-y-auto md:overscroll-contain">
           {filteredBranches.map((name) => {
             const current = name === info.branch
             return (
-              <li key={name} data-slot="branch-row" data-branch={name} className="flex min-h-9 items-center gap-2 py-1">
-                <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className={cn('min-w-0 truncate font-mono text-xs', current && 'font-semibold')}>{name}</span>
+              <li key={name} data-slot="branch-row" data-branch={name} className="flex min-h-20 flex-col items-start justify-center gap-2 py-3 md:flex-row md:items-center md:justify-start md:py-2.5">
+                <span className={cn('min-w-0 truncate text-[13px]', current && 'font-normal')}>{name}</span>
                 {current ? (
                   <span
                     data-slot="branch-current"
-                    className="flex shrink-0 items-center gap-1 rounded-sm bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground"
+                    className="md:ml-auto flex shrink-0 items-center rounded-md bg-accent-strong/10 px-2 py-1.5 text-[10px] font-medium text-accent-text"
                   >
-                    <CheckIcon aria-hidden="true" className="size-3" />
-                    current
+                    Current
                   </span>
                 ) : (
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     data-action="switch-branch"
-                    className="ml-auto"
+                    className="md:ml-auto h-11"
                     disabled={branchAction.isPending}
                     onClick={() => branchAction.mutate(name)}
                   >
+                    <GitBranchIcon size={16} aria-hidden="true" />
                     Switch
                   </Button>
                 )}
@@ -123,52 +125,60 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
             </li>
           ) : null}
         </ul>
+      </div>
 
-        <form data-slot="branch-create" className="mt-3 flex max-w-md items-center gap-2" onSubmit={submitCreate}>
+      <div className="min-w-0 self-start rounded-xl border border-border bg-card p-5">
+        <h2 className="text-base font-semibold">Create a branch</h2>
+        <form data-slot="branch-create" className="mt-7 flex flex-col items-stretch gap-3" onSubmit={submitCreate}>
+          <label htmlFor="new-branch-name" className="text-sm font-medium">Branch name</label>
+          <p className="-mt-1 text-xs text-muted-foreground">Create from the selected base.</p>
           <Input
+            id="new-branch-name"
             aria-label="New branch name"
             placeholder="new-branch-name"
+            className="h-11 bg-background"
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
           />
           <Button
             type="submit"
-            variant="outline"
+            variant="primary"
             size="sm"
+            className="min-h-11 self-start"
             data-action="create-branch"
             disabled={!newName.trim() || branchAction.isPending}
           >
-            <PlusIcon aria-hidden="true" />
-            Create
+            <PlusIcon size={16} aria-hidden="true" />
+            Create branch
           </Button>
         </form>
-      </div>
-
-      <div className="max-w-md">
-        <label
-          htmlFor="base-branch-picker"
-          className="text-xs font-semibold tracking-wide text-soft-foreground uppercase"
-        >
-          Agents’ base branch
-        </label>
-        {/* A native <select>: a handful of branch names needs no popover machinery, and the
-            OS picker is the better control on phones. */}
-        <select
-          id="base-branch-picker"
-          data-slot="base-branch-picker"
-          value={repo.baseBranch ?? ''}
-          disabled={setBase.isPending}
-          onChange={(event) => setBase.mutate(event.target.value === '' ? null : event.target.value)}
-          className="mt-1.5 block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
-        >
-          <option value="">follow checked-out branch (default)</option>
-          {repo.branches.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-        <p className="mt-1 text-[11px] text-soft-foreground">New task worktrees branch from this.</p>
+        <div className="mt-5">
+          <label
+            htmlFor="base-branch-picker"
+            className="text-sm font-medium"
+          >
+            Agents’ base branch
+          </label>
+          <p className="mt-2 text-xs text-muted-foreground">New task worktrees branch from this.</p>
+          {/* A native <select>: a handful of branch names needs no popover machinery, and the
+              OS picker is the better control on phones. */}
+          <select
+            id="base-branch-picker"
+            data-slot="base-branch-picker"
+            value={repo.baseBranch ?? ''}
+            disabled={setBase.isPending}
+            onChange={(event) => setBase.mutate(event.target.value === '' ? null : event.target.value)}
+            className="mt-1.5 block min-h-11 w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
+          >
+            <option value="">follow checked-out branch (default)</option>
+            {repo.branches.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="mt-3 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">Switching branches changes your working tree. Review uncommitted changes first.</p>
       </div>
 
       {health.data?.forge?.available ? <ForgePullRequests /> : null}
@@ -208,7 +218,7 @@ function ForgePullRequests() {
 function PullRequestRow({ pr }: { pr: GithubItem }) {
   const inner = (
     <>
-      <GitPullRequestIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+      <GitPullRequestIcon size={16} aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="shrink-0 font-mono text-[11px] text-muted-foreground">#{pr.number}</span>
       <span className="min-w-0 flex-1 truncate text-[13px]">{pr.title}</span>
       {pr.checks ? <ChecksBadge checks={pr.checks} /> : null}

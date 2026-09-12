@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -191,5 +191,34 @@ describe('BookmarkletPanel project scoping (multi-project spec, step 3.6)', () =
     await waitFor(() => expect(hrefOf('bm-generic')).toContain('key=k'))
     expect(hrefOf('bm-generic')).toContain(`/new?'+q`)
     expect(hrefOf('bm-generic')).not.toContain('/p/')
+  })
+})
+
+
+describe('BookmarkletPanel launcher interactions', () => {
+  it('keeps the generic launcher manual when auto-submit is enabled and filters only skill launchers', async () => {
+    serve({ '/api/v1/health': HEALTH, '/api/v1/launch-key': { key: 'sekret' } })
+    const view = renderPanel()
+    await waitFor(() => expect(label('/om-fix (cezar)')).toBeTruthy())
+    const genericBefore = hrefOf('bm-generic')
+    const skillBefore = hrefOf('bm-list')
+    fireEvent.click(view.getByRole('checkbox'))
+    expect(hrefOf('bm-generic')).toBe(genericBefore)
+    expect(hrefOf('bm-list')).not.toBe(skillBefore)
+    fireEvent.change(view.getByRole('textbox'), { target: { value: 'no-match' } })
+    expect(view.getByText('(no skills match)')).toBeTruthy()
+    expect(hrefOf('bm-generic')).toBe(genericBefore)
+  })
+
+  it('copies the generated URL and prevents a launcher click from executing', async () => {
+    serve({ '/api/v1/health': HEALTH, '/api/v1/launch-key': { key: 'sekret' } })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const view = renderPanel()
+    await waitFor(() => expect(label('/om-fix (cezar)')).toBeTruthy())
+    const anchor = label('/om-fix (cezar)') as HTMLAnchorElement
+    expect(fireEvent.click(anchor)).toBe(false)
+    fireEvent.click(view.getAllByRole('button', { name: 'Copy URL' })[1]!)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(anchor.getAttribute('href')))
   })
 })

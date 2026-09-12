@@ -16,7 +16,7 @@ function tileOf(container: HTMLElement): Element {
 describe('CenteredState', () => {
   // The design system's tile grammar, tone by tone (spec, "Design system": tinted border+fill).
   it.each([
-    ['primary', ['border-primary/25', 'bg-primary/15', 'text-primary']],
+    ['primary', ['border-accent-strong/25', 'bg-accent-strong/15', 'text-link-foreground']],
     ['neutral', ['border-border', 'bg-card', 'shadow-xs']],
     ['danger', ['border-danger/20', 'bg-danger/15', 'text-danger']],
   ] as const)('tints the tile for the %s tone', (tone, classes) => {
@@ -90,7 +90,7 @@ describe('TwinkleBackdrop', () => {
     expect(squares.length).toBeGreaterThan(5)
     for (const square of squares) {
       // Colors come from the theme tokens, never raw values.
-      expect(square.className).toMatch(/bg-(violet|primary|pending)/)
+      expect(square.className).toMatch(/bg-(accent-strong|action|pending)/)
       // The pulse is gated on motion-safe, so prefers-reduced-motion renders it static.
       expect(square.className).toContain('motion-safe:animate-pulse')
       expect(square.className).not.toMatch(/(?<!motion-safe:)animate-pulse/)

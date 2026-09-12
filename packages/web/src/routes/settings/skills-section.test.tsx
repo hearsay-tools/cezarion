@@ -117,6 +117,12 @@ afterEach(() => {
 const puts = () => requests.filter((request) => request.method === 'PUT')
 
 describe('Global settings → Skills', () => {
+  it('links installation status to the boot project skill catalog', async () => {
+    serve()
+    renderSkills()
+    const link = await screen.findByRole('link', { name: 'Open Skills' })
+    expect(link.getAttribute('href')).toBe('/p/boot/skills')
+  })
   it('renders the inherited default and quiet no-installation state', async () => {
     serve()
     renderSkills()
@@ -142,6 +148,12 @@ describe('Global settings → Skills', () => {
     await waitFor(() => expect((reset as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(reset)
     await waitFor(() => expect(puts().at(-1)?.body).toEqual({ skillsAutoUpdate: null }))
+  })
+
+  it('shows a current installation only when the server reports tracked skills', async () => {
+    serve({}, { status: 'current', scopes: [{ scope: 'project', status: 'current', available: true, skills: ['test', 'code'], checkedAt: null, updatedAt: null }] })
+    renderSkills()
+    expect(await screen.findByText('2 tracked skills · Up to date')).toBeTruthy()
   })
 
   it('degrades to an unavailable status without disabling the preference', async () => {

@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -312,6 +312,20 @@ describe('Agent accounts → Defaults for new projects', () => {
     // `null`, not an absent key: a partial patch cannot say "forget this" by omission, and a stale
     // value would keep seeding every unconfigured repo.
     expect(configPuts()[0]?.body).toEqual({ agentDefaults: { models: { claude: null } } })
+    expect(repoConfigWrites()).toHaveLength(0)
+  })
+
+  it('switches the model editor without changing the default runner or another agent model', async () => {
+    serve({ agentDefaults: { runner: 'claude', models: { claude: 'opus', codex: 'gpt-5.2-codex' } } })
+    renderAccounts()
+    const chooser = await screen.findByLabelText('Model agent')
+    fireEvent.change(chooser, { target: { value: 'codex' } })
+    const model = document.querySelector<HTMLSelectElement>('[data-slot="accounts-default-model"][data-runner="codex"]')!
+    expect(model.value).toBe('gpt-5.2-codex')
+    expect(configPuts()).toHaveLength(0)
+    fireEvent.change(model, { target: { value: '' } })
+    await waitFor(() => expect(configPuts()).toHaveLength(1))
+    expect(configPuts()[0]?.body).toEqual({ agentDefaults: { models: { codex: null } } })
     expect(repoConfigWrites()).toHaveLength(0)
   })
 

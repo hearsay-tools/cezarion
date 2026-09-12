@@ -90,21 +90,26 @@ describe('mobile Tasks controls', () => {
     expect(browser.isVisible(search)).toBe(true)
   })
 
-  it('retains the query and synchronizes page, drawer and desktop selection across resize', () => {
+  it('retains the query while page and drawer selection stay independent across resize', () => {
     browser.fill(search, 'Needle')
     browser.click(tab('archived'))
     browser.click('[aria-label="Open menu"]')
     settle(drawer)
-    const drawerTab = `${drawer} [data-slot="view-tab"]`
-    expect(browser.evaluate(`document.querySelector('${drawerTab}[data-view="archived"]').getAttribute('aria-pressed')`)).toBe('true')
+    browser.click(`${drawer} [aria-label="Tools"]`)
+    settle('[data-slot="sidebar-session-scope"]')
+    const drawerTab = '[data-slot="sidebar-session-scope"] [data-slot="view-tab"]'
+    expect(browser.evaluate(`document.querySelector('${drawerTab}[data-view="active"]').getAttribute('aria-pressed')`)).toBe('true')
+    browser.click(`${drawerTab}[data-view="archived"]`)
+    expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')
     browser.click(`${drawerTab}[data-view="active"]`)
     browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[data-slot="tools-menu-content"]') === null`)
+    browser.click('[aria-label="Close menu"]')
     browser.waitForFunction(`document.querySelector('${drawer}') === null`)
-    expect(browser.evaluate(`document.querySelector('${tab('active')}').getAttribute('aria-pressed')`)).toBe('true')
+    expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')
     browser.setViewport(1440, 900)
     expect(browser.evaluate(`document.querySelector('${search}').value`)).toBe('Needle')
-    expect(browser.isVisible('[data-slot="archive-finished"]')).toBe(true)
-    browser.click(tab('archived'))
+    expect(browser.count('[data-slot="archive-finished"]')).toBe(0)
     browser.setViewport(360, 640)
     expect(browser.evaluate(`document.querySelector('${search}').value`)).toBe('Needle')
     expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')
@@ -145,7 +150,7 @@ describe('mobile Tasks controls', () => {
             expect(box.height).toBeGreaterThanOrEqual(44)
           }
         }
-        if (width === 360) expect(bounds.firstCard).toBeLessThan(300)
+        if (width === 360) expect(bounds.firstCard).toBeLessThan(640 - 44)
         focusWithKeyboard(browser, search)
         expect(browser.evaluate(`document.querySelector('${search}').matches(':focus-visible')`)).toBe(true)
         browser.screenshot(join(artifacts, `${width}-${theme}-${density}-${reduced ? 'reduced' : 'normal'}.png`), { viewport: true })

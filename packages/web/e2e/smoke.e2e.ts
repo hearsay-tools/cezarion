@@ -51,11 +51,11 @@ beforeAll(async () => {
  *  forge to poll AND the operator's opt-in to exist at all. */
 function expectedNavLabels(): string[] {
   return [
-    'Tasks',
     ...(followupsAvailable ? ['Inbox'] : []),
+    ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
+    'Tasks',
     'Git',
     ...(forgeAvailable ? ['GitHub'] : []),
-    ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
     'Skills',
     'Workflows',
     'Settings',
@@ -75,50 +75,37 @@ function setTheme(theme: 'light' | 'dark'): void {
 }
 
 type BrandFacts = {
-  src: string
+  text: string
   width: number
   height: number
-  paintedTextHeight: number
+  fontFamily: string
+  fontSize: string
+  color: string
+  foreground: string
   headerOverflow: number
 }
 
-/** Measure the shipped SVG as the browser actually rasterizes it at CSS size. The right half is
- * the word rather than the atom mark; counting pixels that differ from its opaque background
- * catches a lockup whose box is technically visible while its letters are only a few pixels tall. */
+/** Measure the token-driven Poppins wordmark as the browser actually paints it. */
 function brandFacts(scope: string): BrandFacts {
   return browser.evaluate(`(() => {
     const root = document.querySelector(${JSON.stringify(scope)})
-    const img = root.querySelector('[data-slot="brand-lockup"]')
-    const header = img.parentElement
-    const rect = img.getBoundingClientRect()
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.round(rect.width)
-    canvas.height = Math.round(rect.height)
-    const context = canvas.getContext('2d')
-    context.drawImage(img, 0, 0, canvas.width, canvas.height)
-    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
-    const background = [pixels[0], pixels[1], pixels[2]]
-    let minY = canvas.height
-    let maxY = -1
-    for (let y = 0; y < canvas.height; y += 1) {
-      for (let x = Math.floor(canvas.width / 2); x < canvas.width; x += 1) {
-        const offset = (y * canvas.width + x) * 4
-        const contrast = Math.max(
-          Math.abs(pixels[offset] - background[0]),
-          Math.abs(pixels[offset + 1] - background[1]),
-          Math.abs(pixels[offset + 2] - background[2]),
-        )
-        if (contrast > 12) {
-          minY = Math.min(minY, y)
-          maxY = Math.max(maxY, y)
-        }
-      }
-    }
+    const wordmark = root.querySelector('[data-slot="brand-wordmark"]')
+    const header = wordmark.parentElement
+    const rect = wordmark.getBoundingClientRect()
+    const style = getComputedStyle(wordmark)
+    const probe = document.createElement('span')
+    probe.style.color = 'var(--foreground)'
+    document.body.appendChild(probe)
+    const foreground = getComputedStyle(probe).color
+    probe.remove()
     return {
-      src: img.getAttribute('src'),
+      text: wordmark.textContent,
       width: rect.width,
       height: rect.height,
-      paintedTextHeight: maxY < minY ? 0 : maxY - minY + 1,
+      fontFamily: style.fontFamily,
+      fontSize: style.fontSize,
+      color: style.color,
+      foreground,
       headerOverflow: header.scrollWidth - header.clientWidth,
     }
   })()`) as BrandFacts
@@ -159,8 +146,8 @@ describe('cockpit app shell', () => {
     browser.goto(baseUrl + scoped('/'))
 
     expect(browser.isVisible('[data-slot="sidebar"]')).toBe(true)
-    expect(browser.isVisible('[data-slot="brand-lockup"]')).toBe(true)
-    expect(browser.text('[data-slot="sidebar"] nav')).toContain('Tasks')
+    expect(browser.isVisible('[data-slot="brand-wordmark"]')).toBe(true)
+    expect(browser.text('[data-slot="sidebar"] nav[aria-label="Main"]')).toContain('Tasks')
 
     // The GitHub item waits on the health answer — settle it before sampling the nav.
     if (forgeAvailable) {
@@ -171,7 +158,7 @@ describe('cockpit app shell', () => {
     const labels = browser.evaluate(
       `Array.from(document.querySelectorAll('[data-slot="sidebar"] nav a')).map(a => {
         const clone = a.cloneNode(true)
-        clone.querySelector('[data-slot="nav-badge"]')?.remove()
+        clone.querySelector('[data-slot="nav-badge"], [data-slot="nav-unread-badge"]')?.remove()
         return clone.textContent.trim()
       })`
     )
@@ -180,14 +167,14 @@ describe('cockpit app shell', () => {
     // The "New task" CTA and its browser-usable accelerator hint. The desktop shell also
     // registers ⌘N, but browsers reserve that chord for opening a window.
     expect(browser.text(`[data-slot="sidebar"] a[href="${scoped('/new')}"]`)).toContain('New task')
-    expect(browser.text(`[data-slot="sidebar"] a[href="${scoped('/new')}"] kbd`)).toBe('C')
+    expect(browser.evaluate(`document.querySelector('[data-slot="sidebar"] a[href="${scoped('/new')}"] kbd').textContent`)).toBe('C')
 
     // The theme toggle lives in the footer.
     expect(browser.isVisible('[data-slot="sidebar-footer"] [data-slot="theme-toggle"]')).toBe(true)
 
-    // …on the footer's SECOND row, beside the gear — never stranded on a third line of its own
-    // (#702). Only a real layout engine can answer this: jsdom measures nothing, so the unit
-    // suite can pin the structure but not the geometry the 264px column actually produces.
+    // Search now leads the creation flow above New task; the footer's tools, version, settings,
+    // and theme controls remain on one row inside the 264px column. Only a real layout engine can
+    // answer this: jsdom measures nothing.
     const footerRows = browser.evaluate(`(() => {
       const footer = document.querySelector('[data-slot="sidebar-footer"]')
       // Centers, not tops: the gear (28px) and the toggle (30px) are different heights, and
@@ -196,50 +183,47 @@ describe('cockpit app shell', () => {
         const rect = el.getBoundingClientRect()
         return rect.top + rect.height / 2
       }
-      const center = (sel) => centerOf(footer.querySelector(sel))
       const controls = [
-        '[data-slot="command-palette-hint"]',
         '[data-slot="tools-menu-trigger"]',
-        '[data-slot="version-chip"]',
         '[data-slot="global-settings-link"]',
         '[data-slot="theme-toggle"]',
       ]
       return {
-        search: center('[data-slot="command-palette-hint"]'),
-        gear: center('[data-slot="global-settings-link"]'),
-        theme: center('[data-slot="theme-toggle"]'),
+        search: centerOf(document.querySelector('[data-slot="command-palette-hint"]')),
+        create: centerOf(document.querySelector('[data-slot="sidebar"] a[href$="/new"]')),
+        gear: centerOf(footer.querySelector('[data-slot="global-settings-link"]')),
+        theme: centerOf(footer.querySelector('[data-slot="theme-toggle"]')),
         rowCount: new Set(
           [...footer.querySelectorAll(controls.join(','))].map((el) => Math.round(centerOf(el)))
         ).size,
       }
-    })()`) as { search: number; gear: number; theme: number; rowCount: number }
+    })()`) as { search: number; create: number; gear: number; theme: number; rowCount: number }
 
-    // Row 1 is the search bar; row 2 carries the gear and the toggle on one shared centerline.
-    expect(footerRows.search).toBeLessThan(footerRows.gear)
+    expect(footerRows.search).toBeLessThan(footerRows.create)
+    expect(footerRows.create).toBeLessThan(footerRows.gear)
     expect(Math.abs(footerRows.theme - footerRows.gear)).toBeLessThanOrEqual(1)
-    // Exactly two rows — every other footer control shares the controls row's centerline.
-    expect(footerRows.rowCount).toBe(2)
+    expect(footerRows.rowCount).toBe(1)
   })
 
   it('keeps the themed wordmark readable and geometry-stable at the minimum sidebar width', () => {
     browser.goto(baseUrl + scoped('/'))
     setTheme('light')
-    browser.waitForFunction(`document.querySelector('[data-slot="brand-lockup"]')?.complete === true`)
     const light = brandFacts('[data-slot="sidebar"]')
 
-    expect(light.src).toBe('/cezarion-lockup-light.svg')
-    expect(light.height).toBeGreaterThanOrEqual(34)
-    expect(light.paintedTextHeight).toBeGreaterThanOrEqual(9)
+    expect(light.text).toBe('Cezarion')
+    expect(light.fontFamily).toContain('Poppins')
+    expect(light.fontSize).toBe('23px')
+    expect(light.height).toBeGreaterThanOrEqual(23)
+    expect(light.color).toBe(light.foreground)
     expect(light.headerOverflow).toBeLessThanOrEqual(0)
 
     browser.click('[data-slot="sidebar"] [data-slot="theme-toggle"]')
-    browser.waitForFunction(
-      `(() => { const img = document.querySelector('[data-slot="sidebar"] [data-slot="brand-lockup"]'); return img?.getAttribute('src') === '/cezarion-lockup-dark.svg' && img.complete && img.naturalWidth > 0 })()`,
-    )
+    browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
     const dark = brandFacts('[data-slot="sidebar"]')
-    expect(dark.src).toBe('/cezarion-lockup-dark.svg')
+    expect(dark.text).toBe('Cezarion')
     expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
-    expect(dark.paintedTextHeight).toBeGreaterThanOrEqual(9)
+    expect(dark.color).toBe(dark.foreground)
+    expect(dark.color).not.toBe(light.color)
     expect(dark.headerOverflow).toBeLessThanOrEqual(0)
   })
 
@@ -288,7 +272,8 @@ describe('cockpit app shell', () => {
     // the client → query → chip path really carries live API data, and stays true wherever the
     // suite runs (any checkout, any branch).
     const repoName = health.repoRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
-    expect(browser.text('[data-slot="repo-chip"]')).toBe(`${repoName} / ${health.repo?.branch}`)
+    expect(browser.text('[data-slot="repo-chip"]')).toBe(repoName)
+    expect(browser.evaluate(`document.querySelector('[data-slot="repo-chip"]').nextElementSibling.textContent`)).toBe(health.repo?.branch)
     expect(browser.text('[data-slot="version-chip"]')).toBe(`v${health.version}`)
 
     // Real values, not a placeholder that happens to match itself.
@@ -301,7 +286,11 @@ describe('cockpit app shell', () => {
   it('marks exactly one nav item active, following the route', () => {
     const activeLabel = () =>
       browser.evaluate(
-        `Array.from(document.querySelectorAll('[data-slot="sidebar"] nav a[aria-current="page"]')).map(a => a.textContent.trim())`
+        `Array.from(document.querySelectorAll('[data-slot="sidebar"] nav a[aria-current="page"]')).map(a => {
+          const clone = a.cloneNode(true)
+          clone.querySelector('[data-slot="nav-badge"], [data-slot="nav-unread-badge"]')?.remove()
+          return clone.textContent.trim()
+        })`
       )
 
     // Every URL below is a LEGACY flat one, so each load settles in two hops: the boot-project
@@ -356,10 +345,10 @@ describe('cockpit app shell', () => {
 
     setTheme('light')
     expect(browser.evaluate('document.documentElement.classList.contains("light")')).toBe(true)
-    // The palette really flipped: light `--background` is white, dark is near-black.
+    // The palette really flipped to the approved cool light canvas.
     expect(
       browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="app-shell"]')).backgroundColor`)
-    ).toBe('rgb(255, 255, 255)')
+    ).toBe('rgb(248, 250, 252)')
     browser.screenshot(`${artifactsDir}/shell-light.png`)
 
     setTheme('dark')
@@ -385,13 +374,20 @@ describe('mobile shell', () => {
     const bar = browser.evaluate(`(() => {
       const menu = document.querySelector('[data-slot="mobile-top-bar"] button')
       const rect = menu.getBoundingClientRect()
-      return { width: rect.width, height: rect.height, label: menu.getAttribute('aria-label') }
-    })()`) as { width: number; height: number; label: string }
+      // The approved 20px glyph reserves a 44px hit region through ::after.
+      const hit = getComputedStyle(menu, '::after')
+      const left = rect.left + Number.parseFloat(hit.left)
+      const right = rect.right - Number.parseFloat(hit.right)
+      const y = rect.top + rect.height / 2
+      return { width: right - left, height: rect.height, label: menu.getAttribute('aria-label'),
+        edgesHit: [left + 1, right - 1].every(x => menu.contains(document.elementFromPoint(x, y))) }
+    })()`) as { width: number; height: number; label: string; edgesHit: boolean }
 
     // Touch targets ≥44px (spec's mobile rules).
     expect(bar.label).toBe('Open menu')
     expect(bar.width).toBeGreaterThanOrEqual(44)
     expect(bar.height).toBeGreaterThanOrEqual(44)
+    expect(bar.edgesHit).toBe(true)
 
     browser.screenshot(`${artifactsDir}/shell-iphone.png`)
   })
@@ -457,7 +453,7 @@ describe('mobile shell', () => {
           minLinkHeight: Math.min(...links.map((a) => a.getBoundingClientRect().height)),
           labels: links.map((a) => {
             const clone = a.cloneNode(true)
-            clone.querySelector('[data-slot="nav-badge"]')?.remove()
+            clone.querySelector('[data-slot="nav-badge"], [data-slot="nav-unread-badge"]')?.remove()
             return clone.textContent.trim()
           }),
         }
@@ -466,7 +462,7 @@ describe('mobile shell', () => {
       // Anchored to the left edge, full height, and the sidebar's own width.
       expect(box.left).toBe(0)
       expect(box.top).toBe(0)
-      expect(box.width).toBe(264)
+      expect(box.width).toBe(322)
       expect(box.height).toBe(box.viewportHeight)
 
       // The backdrop really is a backdrop: it dims the whole viewport, not just the gap.
@@ -486,23 +482,21 @@ describe('mobile shell', () => {
         browser.goto(baseUrl + scoped('/'))
         setTheme('light')
         openDrawer()
-        browser.waitForFunction(
-          `document.querySelector('${DRAWER} [data-slot="brand-lockup"]')?.complete === true`,
-        )
         const light = brandFacts(DRAWER)
-        expect(light.src).toBe('/cezarion-lockup-light.svg')
-        expect(light.height).toBeGreaterThanOrEqual(34)
-        expect(light.paintedTextHeight).toBeGreaterThanOrEqual(9)
+        expect(light.text).toBe('Cezarion')
+        expect(light.fontFamily).toContain('Poppins')
+        expect(light.fontSize).toBe('23px')
+        expect(light.height).toBeGreaterThanOrEqual(23)
+        expect(light.color).toBe(light.foreground)
         expect(light.headerOverflow).toBeLessThanOrEqual(0)
 
         browser.click(`${DRAWER} [data-slot="theme-toggle"]`)
-        browser.waitForFunction(
-          `(() => { const img = document.querySelector('${DRAWER} [data-slot="brand-lockup"]'); return img?.getAttribute('src') === '/cezarion-lockup-dark.svg' && img.complete && img.naturalWidth > 0 })()`,
-        )
+        browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
         const dark = brandFacts(DRAWER)
-        expect(dark.src).toBe('/cezarion-lockup-dark.svg')
+        expect(dark.text).toBe('Cezarion')
         expect({ width: dark.width, height: dark.height }).toEqual({ width: light.width, height: light.height })
-        expect(dark.paintedTextHeight).toBeGreaterThanOrEqual(9)
+        expect(dark.color).toBe(dark.foreground)
+        expect(dark.color).not.toBe(light.color)
         expect(dark.headerOverflow).toBeLessThanOrEqual(0)
       } finally {
         browser.setViewport(IPHONE.width, IPHONE.height)

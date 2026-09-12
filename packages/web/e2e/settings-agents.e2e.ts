@@ -89,12 +89,16 @@ describe('settings → agents against the live dry-run server', () => {
 
   it('default runner: click writes config.json and GET /api/v1/config reads it back', async () => {
     gotoAgents()
+    browser.click('.settings-agent-picker summary')
     browser.click('[data-slot="agents-runner"] [data-value="codex"]')
     await waitForConfig((c) => c.defaultRunner === 'codex')
+    browser.waitForFunction(`document.querySelector('[data-slot="agents-runner"] [data-value="codex"]')?.getAttribute('aria-checked') === 'true'`)
     expect(browser.count('[data-slot="agents-runner"] [data-value="codex"][aria-checked="true"]')).toBe(1)
   })
 
   it('per-runner model preset: select writes the runner key, others untouched', async () => {
+    gotoAgents()
+    browser.waitForFunction(`document.querySelector('select[data-slot="agents-model"][data-runner="claude"]') !== null`)
     const before = await waitForConfig(() => true)
     setSelect('[data-slot="agents-model"][data-runner="claude"]', 'opus')
     const config = await waitForConfig((c) => c.defaultModels.claude === 'opus')
@@ -132,6 +136,7 @@ describe('settings → agents against the live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/settings-agents.png`)
 
     // Neutralize for the suites that follow (afterAll restores the file itself too).
+    browser.click('.settings-agent-picker summary')
     browser.click('[data-slot="agents-runner"] [data-value="claude"]')
     await waitForConfig((c) => c.defaultRunner === 'claude')
   })

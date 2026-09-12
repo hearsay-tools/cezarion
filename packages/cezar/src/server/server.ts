@@ -687,7 +687,7 @@ const UI_STATE_MAX_KEYS = 200;
  *  control the user just touched. Adding an appearance preference means adding
  *  it here in the same change. */
 const appearanceSchema = z.object({
-  accent: z.enum(['lime', 'violet']).optional(),
+  accent: z.enum(['cezarion', 'lime', 'violet']).optional(),
   density: z.enum(['comfortable', 'compact', 'ultra']).optional(),
   width: z.enum(['narrow', 'wide']).optional(),
 });

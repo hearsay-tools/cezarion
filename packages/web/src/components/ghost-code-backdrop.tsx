@@ -100,7 +100,7 @@ const SNIPPETS: GhostLine[][] = [
   [
     [c('/* the composer glow, one token deep */')],
     [p('.composer'), k(':focus-within'), p(' {')],
-    [p('  border-color: '), f('var'), p('(--primary);')],
+    [p('  border-color: '), f('var'), p('(--action);')],
     [p('  box-shadow: '), n('0 0 0 3px'), p(' '), f('var'), p('(--ring);')],
     [p('  transition: box-shadow '), n('120ms'), p(' ease;')],
     [p('}')],

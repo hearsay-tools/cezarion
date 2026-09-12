@@ -1,11 +1,12 @@
-import { ArrowLeftIcon, GitCommitHorizontalIcon, SearchXIcon, TriangleAlertIcon } from 'lucide-react'
+import { SearchXIcon } from 'lucide-react'
+import { ArrowLeftIcon, FileCodeIcon, GitCommitHorizontalIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useState } from 'react'
 import { useParams } from 'react-router'
 
 import { Link } from '@/lib/project-router'
 
 import { ApiError } from '@/api/client'
-import { useRun, useRunCommit, useRunCommits } from '@/api/queries'
+import { useRun, useRunChanges, useRunCommit, useRunCommits } from '@/api/queries'
 import type { ApiRun, RunCommit } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { Diff, type DiffMode } from '@/components/diff'
@@ -48,7 +49,7 @@ function CommitsView({ run }: { run: ApiRun }) {
         </p>
       ) : commits.isError ? (
         <CenteredState
-          icon={<GitCommitHorizontalIcon />}
+          icon={<GitCommitHorizontalIcon size={16} />}
           tone={commits.error instanceof ApiError && commits.error.status === 409 ? 'neutral' : 'danger'}
           heading="h2"
           title={
@@ -60,22 +61,26 @@ function CommitsView({ run }: { run: ApiRun }) {
         />
       ) : commits.data.commits.length === 0 ? (
         <CenteredState
-          icon={<GitCommitHorizontalIcon />}
+          icon={<GitCommitHorizontalIcon size={16} />}
           tone="neutral"
           heading="h2"
           title="No commits yet"
           subtitle="This task hasn't committed anything on its branch. Autosave commits and any the agent makes appear here."
         />
       ) : (
-        <CommitList
-          slot="task-commits"
-          className="mx-auto w-full max-w-[var(--measure)]"
-          commits={commits.data.commits.map((commit: RunCommit) => ({
-            ...commit,
-            shaLabel: commit.sha.slice(0, 8),
-            href: `/tasks/${run.id}/commits/${commit.sha}`,
-          }))}
-        />
+        <div className="px-[18px] py-[22px] md:px-9">
+          <CommitList
+            slot="task-commits"
+            heading={<h2 className="text-base font-semibold">{commits.data.commits.length} {commits.data.commits.length === 1 ? 'commit' : 'commits'} in this task</h2>}
+            className="w-full"
+            commits={commits.data.commits.map((commit: RunCommit) => ({
+              ...commit,
+              shaLabel: commit.sha.slice(0, 8),
+              href: `/tasks/${run.id}/commits/${commit.sha}`,
+            }))}
+          />
+          <TaskChangedFiles run={run} />
+        </div>
       )}
     </div>
   )
@@ -96,7 +101,7 @@ function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border px-4 py-2 md:px-6">
         <Button asChild variant="ghost" size="sm" data-slot="commit-back">
           <Link to={`/tasks/${runId}/commits`}>
-            <ArrowLeftIcon aria-hidden="true" />
+            <ArrowLeftIcon size={16} aria-hidden="true" />
             All commits
           </Link>
         </Button>
@@ -112,7 +117,7 @@ function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
         </p>
       ) : commit.isError ? (
         <CenteredState
-          icon={refused ? <SearchXIcon /> : <TriangleAlertIcon />}
+          icon={refused ? <SearchXIcon /> : <TriangleAlertIcon size={16} />}
           tone={refused ? 'neutral' : 'danger'}
           heading="h2"
           title={refused ? 'Commit not found' : 'Could not load the commit'}
@@ -129,14 +134,14 @@ function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
           </div>
           {commit.data.files.length === 0 ? (
             <CenteredState
-              icon={<GitCommitHorizontalIcon />}
+              icon={<GitCommitHorizontalIcon size={16} />}
               tone="neutral"
               heading="h2"
               title="No file changes"
               subtitle="This commit carries no diff of its own — a merge commit's changes live on the commits it merged."
             />
           ) : (
-            <div className="px-4 py-4 [--diff-sticky-top:0px] md:[--diff-sticky-top:10rem] md:px-6">
+            <div className="px-4 py-4 [--diff-sticky-top:0px] md:[--diff-sticky-top:1rem] md:px-6">
               <Diff files={commit.data.files} mode={effectiveMode} wrap={effectiveWrap} className="min-w-0" />
             </div>
           )}
@@ -144,4 +149,22 @@ function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
       )}
     </section>
   )
+}
+
+/** Reuses the task diff payload; paths lead to the existing structured Changes view. */
+function TaskChangedFiles({ run }: { run: ApiRun }) {
+  const changes = useRunChanges(run.id, isRunActive(run.status))
+  if (changes.isPending) return <p className="mt-[22px] text-xs text-muted-foreground">Loading changed files…</p>
+  if (changes.isError) return <p role="status" className="mt-[22px] text-xs text-danger">Could not load changed files: {changes.error.message}</p>
+  if (changes.data.files.length === 0) return null
+  return <section data-slot="task-commit-files" className="mt-[22px] rounded-[10px] border border-border bg-card p-5">
+    <h2 className="mb-4 text-[15px] font-semibold">{changes.data.files.length} changed files</h2>
+    <ul className="space-y-4">
+      {changes.data.files.map(file => <li key={file.path}>
+        <Link to={`/tasks/${run.id}/changes`} className="flex min-h-11 items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+          <FileCodeIcon size={16} aria-hidden="true" className="size-[15px] shrink-0" /><span className="break-all">{file.path}</span>
+        </Link>
+      </li>)}
+    </ul>
+  </section>
 }

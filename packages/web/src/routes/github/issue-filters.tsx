@@ -17,7 +17,7 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
   const options = [...logins.values()].sort((a, b) => a.localeCompare(b))
   const isMe = !!data.viewerLogin && assignees.length === 1 && assignees[0]?.toLowerCase() === data.viewerLogin.toLowerCase()
   return (
-    <div className="flex flex-wrap items-center gap-2 pb-3" data-slot="gh-issue-filters">
+    <div className="flex flex-wrap items-center gap-2" data-slot="gh-issue-filters">
       <Popover>
         <PopoverTrigger asChild>
           <button type="button" className={control} disabled={options.length === 0}>
@@ -44,14 +44,11 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
       </button>
       {!data.viewerLogin ? <p className="w-full text-xs text-muted-foreground">GitHub login unavailable.</p> : null}
       {data.projects?.length ? (
-        <label className="flex w-full min-w-0 flex-col gap-1 text-xs text-muted-foreground">
-          Project board
-          <select aria-label="Project board" className={`${control} w-full min-w-0`} value={projectId}
-            onChange={event => onProjectChange(event.target.value)}>
-            <option value="">All boards</option>
-            {data.projects.map(board => <option key={board.id} value={board.id}>{board.title}</option>)}
-          </select>
-        </label>
+        <select aria-label="Project board" className={control} value={projectId}
+          onChange={event => onProjectChange(event.target.value)}>
+          <option value="">All boards</option>
+          {data.projects.map(board => <option key={board.id} value={board.id}>{board.title}</option>)}
+        </select>
       ) : <p className="w-full text-xs text-muted-foreground">{data.projectsReason ?? (data.projects ? 'No linked project boards.' : 'Project boards unavailable.')}</p>}
     </div>
   )

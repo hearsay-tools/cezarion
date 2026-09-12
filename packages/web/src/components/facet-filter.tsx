@@ -80,7 +80,7 @@ export function FacetFilter({
           aria-label={`Filter by ${label.toLowerCase()}`}
           className={cn(
             'inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-            active && 'border-violet/40 bg-violet/10 text-foreground',
+            active && 'border-accent-strong/40 bg-accent-strong/10 text-foreground',
           )}
         >
           <span className={cn(active && 'text-soft-foreground')}>{label}</span>
@@ -113,7 +113,7 @@ export function FacetFilter({
                       aria-hidden="true"
                       className={cn(
                         'flex size-4 shrink-0 items-center justify-center rounded-[4px] border',
-                        checked ? 'border-violet bg-violet text-violet-foreground' : 'border-input',
+                        checked ? 'border-accent-strong bg-accent-strong text-accent-strong-foreground' : 'border-input',
                       )}
                     >
                       {checked ? <CheckIcon className="size-3" /> : null}
@@ -181,9 +181,9 @@ export function ToggleChip({
       className={cn(
         'inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors',
         tone === 'tag'
-          ? 'border-violet/25 bg-violet/10 text-violet hover:bg-violet/20'
+          ? 'border-accent-strong/25 bg-accent-strong/10 text-accent-text hover:bg-accent-strong/20'
           : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
-        selected && 'border-violet bg-violet text-violet-foreground hover:bg-violet',
+        selected && 'border-accent-strong bg-accent-strong text-accent-strong-foreground hover:bg-accent-strong',
       )}
     >
       {label}

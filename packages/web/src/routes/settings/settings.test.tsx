@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -107,31 +107,6 @@ function renderAt(entry: string, { singleProject = false }: { singleProject?: bo
   )
 }
 
-function elementRect(left: number, width: number): DOMRect {
-  return {
-    x: left,
-    y: 0,
-    width,
-    height: 40,
-    top: 0,
-    left,
-    right: left + width,
-    bottom: 40,
-    toJSON: () => ({}),
-  }
-}
-
-function setHorizontalGeometry(
-  element: HTMLElement,
-  { clientWidth, scrollWidth, scrollLeft }: { clientWidth: number; scrollWidth: number; scrollLeft: number },
-) {
-  Object.defineProperties(element, {
-    clientWidth: { configurable: true, value: clientWidth },
-    scrollWidth: { configurable: true, value: scrollWidth },
-    scrollLeft: { configurable: true, writable: true, value: scrollLeft },
-  })
-}
-
 beforeEach(() => serve())
 
 afterEach(() => {
@@ -203,129 +178,21 @@ describe('the settings shell', () => {
     expect([...pills.querySelectorAll('[data-section]')].length).toBe(PROJECT_SECTIONS.length)
   })
 
-  it('shows overflow cues only at edges with hidden mobile settings pills', () => {
-    renderAt('/settings/global/appearance')
-    const nav = document.querySelector<HTMLElement>('[data-slot="settings-nav-mobile"]')!
-    setHorizontalGeometry(nav, { clientWidth: 320, scrollWidth: 600, scrollLeft: 0 })
-
-    fireEvent.scroll(nav)
-    expect(document.querySelector('[data-slot="settings-overflow-start"]')?.getAttribute('data-visible')).toBe(
-      'false',
-    )
-    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
-      'true',
-    )
-
-    nav.scrollLeft = 140
-    fireEvent.scroll(nav)
-    expect(document.querySelector('[data-slot="settings-overflow-start"]')?.getAttribute('data-visible')).toBe(
-      'true',
-    )
-    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
-      'true',
-    )
-
-    nav.scrollLeft = 280
-    fireEvent.scroll(nav)
-    expect(document.querySelector('[data-slot="settings-overflow-start"]')?.getAttribute('data-visible')).toBe(
-      'true',
-    )
-    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
-      'false',
-    )
-  })
-
-  it('recalculates overflow cues when tab or viewport layout changes', () => {
-    let resize: ResizeObserverCallback | undefined
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resize = callback
-      }
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-    vi.stubGlobal('ResizeObserver', TestResizeObserver)
-
-    renderAt('/settings/global/appearance')
-    const nav = document.querySelector<HTMLElement>('[data-slot="settings-nav-mobile"]')!
-    setHorizontalGeometry(nav, { clientWidth: 320, scrollWidth: 320, scrollLeft: 0 })
-    fireEvent.scroll(nav)
-    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
-      'false',
-    )
-
-    setHorizontalGeometry(nav, { clientWidth: 280, scrollWidth: 520, scrollLeft: 0 })
-    expect(resize).toBeTypeOf('function')
-    act(() => resize?.([], {} as ResizeObserver))
-    expect(document.querySelector('[data-slot="settings-overflow-end"]')?.getAttribute('data-visible')).toBe(
-      'true',
-    )
-  })
-
-  it('reveals a directly opened active pill horizontally without moving the page', async () => {
-    const scrollTo = vi.fn()
-    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
-      configurable: true,
-      value: scrollTo,
-    })
-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const element = this as HTMLElement
-      if (element.dataset.slot === 'settings-nav-mobile') return elementRect(0, 320)
-      if (element.dataset.section === 'projects') return elementRect(500, 80)
-      return elementRect(16, 80)
-    })
-    const pageScroll = vi.spyOn(window, 'scrollTo')
-
+  it('names the directly linked section in the mobile disclosure', () => {
     renderAt('/settings/global/projects')
-
-    await waitFor(() => {
-      expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', left: 272 })
-    })
-    expect(pageScroll).not.toHaveBeenCalled()
+    const disclosure = document.querySelector<HTMLDetailsElement>('.settings-section-picker')!
+    expect(disclosure.open).toBe(false)
+    expect(disclosure.querySelector('summary')?.textContent).toBe('Projects')
+    expect(disclosure.querySelector('[aria-current="page"]')?.getAttribute('data-section')).toBe('projects')
   })
 
-  it('reveals a directly linked late pill after the mobile row becomes visible', () => {
-    const scrollTo = vi.fn()
-    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
-      configurable: true,
-      value: scrollTo,
-    })
-    let mobile = false
-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const element = this as HTMLElement
-      if (!mobile) return elementRect(0, 0)
-      if (element.dataset.slot === 'settings-nav-mobile') return elementRect(0, 320)
-      if (element.dataset.section === 'projects') return elementRect(500, 80)
-      return elementRect(16, 80)
-    })
-
-    renderAt('/settings/global/projects')
-    expect(scrollTo).not.toHaveBeenCalled()
-
-    mobile = true
-    fireEvent(window, new Event('resize'))
-    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', left: 272 })
-  })
-
-  it('reveals a pill immediately when keyboard focus reaches it', () => {
-    const scrollTo = vi.fn()
-    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
-      configurable: true,
-      value: scrollTo,
-    })
-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const element = this as HTMLElement
-      if (element.dataset.slot === 'settings-nav-mobile') return elementRect(0, 320)
-      if (element.dataset.section === 'projects') return elementRect(500.25, 80)
-      return elementRect(16, 80)
-    })
-
+  it('navigates from the mobile disclosure and closes it on the new section', async () => {
     renderAt('/settings/global/appearance')
-    scrollTo.mockClear()
-    fireEvent.focus(document.querySelector<HTMLElement>('[data-slot="settings-nav-mobile"] [data-section="projects"]')!)
-
-    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', left: 273 })
+    const disclosure = document.querySelector<HTMLDetailsElement>('.settings-section-picker')!
+    disclosure.open = true
+    fireEvent.click(disclosure.querySelector('[data-section="resources"]')!)
+    await waitFor(() => expect(document.querySelector('.settings-section-picker summary')?.textContent).toBe('Resources'))
+    expect(document.querySelector<HTMLDetailsElement>('.settings-section-picker')?.open).toBe(false)
   })
 
   it('every section keeps a way BACK to the index: the "General" nav entry', () => {
@@ -423,39 +290,36 @@ describe('the settings shell', () => {
 })
 
 describe('the appearance section (global scope)', () => {
-  it('persisted values apply at boot: server ui-state stamps the root and the controls', async () => {
+  it('normalizes a persisted legacy accent while applying density at boot', async () => {
     serve({ appearance: { accent: 'violet', density: 'compact' } })
     renderAt('/settings/global/appearance')
 
     await waitFor(() => {
-      expect(document.documentElement.dataset.accent).toBe('violet')
+      expect(localStorage.getItem('cez-accent')).toBe('cezarion')
     })
+    expect(document.documentElement.hasAttribute('data-accent')).toBe(false)
     expect(document.documentElement.dataset.density).toBe('compact')
-    expect(screen.getByRole('radio', { name: 'Violet' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.queryByRole('radiogroup', { name: 'Accent' })).toBeNull()
     expect(screen.getByRole('radio', { name: 'Compact' }).getAttribute('aria-checked')).toBe('true')
-    // The mirror follows the server, so the next cold load pre-paints the truth.
-    expect(localStorage.getItem('cez-accent')).toBe('violet')
     expect(localStorage.getItem('cez-density')).toBe('compact')
   })
 
-  it('accent round-trip: apply immediately, PUT the FULL appearance object', async () => {
+  it('keeps the sole accent in the full appearance payload while hiding its one-choice field', async () => {
     serve({ appearance: { density: 'compact' } })
     renderAt('/settings/global/appearance')
     await waitFor(() => {
       expect(screen.getByRole('radio', { name: 'Compact' }).getAttribute('aria-checked')).toBe('true')
     })
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Violet' }))
-    expect(document.documentElement.dataset.accent).toBe('violet')
+    expect(screen.queryByRole('radiogroup', { name: 'Accent' })).toBeNull()
+    fireEvent.click(screen.getByRole('radio', { name: 'Wide' }))
 
-    // The whole object, not a partial — the server's ui-state merge is shallow, so a bare
-    // `{ accent }` would silently drop the stored density.
     await waitFor(() => {
       expect(requests.find((r) => r.method === 'PUT' && r.url === '/api/v1/workspace/ui-state')?.body).toEqual({
-        appearance: { accent: 'violet', density: 'compact', width: 'narrow' },
+        appearance: { accent: 'cezarion', density: 'compact', width: 'wide' },
       })
     })
-    expect(localStorage.getItem('cez-accent')).toBe('violet')
+    expect(localStorage.getItem('cez-accent')).toBe('cezarion')
   })
 
   it('density flips back to the default and the attribute comes OFF the root', async () => {
@@ -469,7 +333,7 @@ describe('the appearance section (global scope)', () => {
     expect(document.documentElement.hasAttribute('data-density')).toBe(false)
     await waitFor(() => {
       expect(requests.find((r) => r.method === 'PUT' && r.url === '/api/v1/workspace/ui-state')?.body).toEqual({
-        appearance: { accent: 'lime', density: 'comfortable', width: 'narrow' },
+        appearance: { accent: 'cezarion', density: 'comfortable', width: 'narrow' },
       })
     })
   })
@@ -477,11 +341,9 @@ describe('the appearance section (global scope)', () => {
   it('reading width round-trip: Wide stamps the root and PUTs the full object; back to Narrow clears it', async () => {
     serve({ appearance: { accent: 'violet' } })
     renderAt('/settings/global/appearance')
-    // Wait for the server value to settle (Violet is server-provided; Narrow is the default and
-    // would report "checked" from the mirror before the GET even lands), so the pending load
-    // can't clobber the width write we're about to make.
+    // Wait for the server value to normalize so the pending load cannot clobber the width write.
     await waitFor(() => {
-      expect(screen.getByRole('radio', { name: 'Violet' }).getAttribute('aria-checked')).toBe('true')
+      expect(localStorage.getItem('cez-accent')).toBe('cezarion')
     })
     expect(screen.getByRole('radio', { name: 'Narrow' }).getAttribute('aria-checked')).toBe('true')
 
@@ -489,7 +351,7 @@ describe('the appearance section (global scope)', () => {
     expect(document.documentElement.dataset.width).toBe('wide')
     await waitFor(() => {
       expect(requests.find((r) => r.method === 'PUT' && r.url === '/api/v1/workspace/ui-state')?.body).toEqual({
-        appearance: { accent: 'violet', density: 'comfortable', width: 'wide' },
+        appearance: { accent: 'cezarion', density: 'comfortable', width: 'wide' },
       })
     })
 
@@ -531,13 +393,13 @@ describe('the settings split writes the right store', () => {
 
   it('appearance → /api/v1/workspace/ui-state, never the per-repo one', async () => {
     renderAt('/settings/global/appearance')
-    await waitFor(() => expect(screen.getByRole('radio', { name: 'Violet' })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Wide' })).toBeTruthy())
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Violet' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Wide' }))
 
     await waitFor(() => expect(putsTo('/api/v1/workspace/ui-state')).toHaveLength(1))
     expect(putsTo('/api/v1/workspace/ui-state')[0]?.body).toEqual({
-      appearance: { accent: 'violet', density: 'comfortable', width: 'narrow' },
+      appearance: { accent: 'cezarion', density: 'comfortable', width: 'wide' },
     })
     expect(putsTo('/api/v1/ui-state')).toHaveLength(0)
   })

@@ -4,8 +4,8 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
-/* Variant vocabulary comes from the mockups' `.btn-*` classes, not stock shadcn:
- * `primary` (lime) and `contrast` (inverse surface) are the two CTAs, `danger-ghost` is the
+/* Variant vocabulary comes from the Cezarion masters, not stock shadcn:
+ * `primary` (gold) and `contrast` (inverse surface) are the two CTAs, `danger-ghost` is the
  * destructive affordance. There is deliberately no `secondary`/`link` — the design system doesn't use them.
  */
 const buttonVariants = cva(
@@ -13,14 +13,14 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: "bg-primary text-primary-foreground hover:brightness-[0.96]",
+        primary: "bg-action text-action-foreground hover:brightness-[0.96]",
         contrast: "bg-contrast text-contrast-foreground hover:brightness-[0.96]",
-        outline: "border border-control-border bg-card hover:bg-muted",
+        outline: "border border-border bg-card text-foreground hover:bg-muted",
         ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
         "danger-ghost": "text-danger hover:bg-danger/10",
       },
       size: {
-        default: "h-9 px-3.5 text-[13.5px]",
+        default: "h-11 px-3.5 text-[13px]",
         sm: "h-[30px] rounded-sm px-2.5 text-[12.5px]",
         icon: "size-9",
         "icon-sm": "size-[30px] rounded-sm",

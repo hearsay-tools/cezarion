@@ -1,11 +1,5 @@
-import {
-  EllipsisVerticalIcon,
-  ExternalLinkIcon,
-  GitCommitHorizontalIcon,
-  GitPullRequestIcon,
-  SquareTerminalIcon,
-  UploadIcon,
-} from 'lucide-react'
+import { EllipsisVerticalIcon, ExternalLinkIcon, SquareTerminalIcon,  } from 'lucide-react'
+import { GitCommitHorizontalIcon, GitPullRequestIcon, UploadIcon } from '@/components/design-icons'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { DiffStat } from '@open-mercato/cezar-api-client'
@@ -53,7 +47,7 @@ export function GitToolbar({
   return (
     <div
       data-slot="git-toolbar"
-      className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border px-4 py-2 md:px-6"
+      className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 px-[18px] py-[22px] md:px-9 [&_button]:min-h-11"
     >
       {branch ? <BranchChip branch={branch} /> : null}
       {stat ? <AnimatedDiffStat stat={stat} /> : null}
@@ -98,9 +92,9 @@ export function GitToolbar({
 }
 
 const ACTION_ICONS: Record<GitActionId, ReactNode> = {
-  commit: <GitCommitHorizontalIcon aria-hidden="true" />,
-  push: <UploadIcon aria-hidden="true" />,
-  'create-pr': <GitPullRequestIcon aria-hidden="true" />,
+  commit: <GitCommitHorizontalIcon size={16} aria-hidden="true" />,
+  push: <UploadIcon size={16} aria-hidden="true" />,
+  'create-pr': <GitPullRequestIcon size={16} aria-hidden="true" />,
   'view-pr': <ExternalLinkIcon aria-hidden="true" />,
   'open-terminal': <SquareTerminalIcon aria-hidden="true" />,
 }

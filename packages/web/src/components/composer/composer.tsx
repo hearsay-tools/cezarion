@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowUpIcon, CheckIcon, ChevronDownIcon, MicIcon, PaperclipIcon, PlayIcon, SquareIcon, XIcon } from 'lucide-react'
+import { PlayIcon } from 'lucide-react'
+import { ArrowUpIcon, CheckIcon, ChevronDownIcon, CpuIcon, MicIcon, PaperclipIcon, SquareIcon, TerminalIcon, XIcon } from '@/components/design-icons'
 import {
   useCallback,
   useEffect,
@@ -49,7 +50,7 @@ import { formatElapsed, useDictation } from './dictation'
  * the Dictation mic (paseo pattern), and the Alt+A / Alt+C quick replies.
  *
  * Visual contract: docs/mockups/thread.html `.composer` — card, borderless textarea, footer
- * bar with paperclip · spacer · labeled Dictation · lime send.
+ * bar with paperclip · spacer · labeled Dictation · gold send.
  */
 // Session memory, matching run details: task tab navigation may remount the composer.
 const mobileOpenByTask = new Map<string, boolean>()
@@ -66,6 +67,8 @@ export interface ComposerProps {
   stopping?: boolean
   emptySubmitLabel?: string
   compactFeedback?: boolean
+  /** Idle guidance occupies the already-reserved submission status space. */
+  idleFeedback?: ReactNode
   pendingLabel?: string
   failureHint?: string
   clearOnSuccess?: boolean
@@ -87,7 +90,11 @@ export interface ComposerProps {
   footerStart?: ReactNode
   /** Rendered between Dictation and the send button — the /new mode segment + kbd hint. */
   footerEnd?: ReactNode
+  /** Session runner/effort row and model control, owned by the continuation hook. */
+  sessionControls?: ReactNode
+  sessionModel?: ReactNode
   /** New-task settings below a dedicated submission row; replies keep their compact footer. */
+  agentOptions?: ReactNode
   executionOptions?: ReactNode
   /** The send button's accessible name. */
   sendAriaLabel?: string
@@ -138,6 +145,7 @@ export function Composer({
   stopping = false,
   emptySubmitLabel,
   compactFeedback = false,
+  idleFeedback,
   pendingLabel = 'Starting task…',
   failureHint = 'Could not confirm submission. Check Tasks before you retry. Your draft is kept.',
   clearOnSuccess = true,
@@ -149,7 +157,10 @@ export function Composer({
   mobileDisclosureKey,
   footerStart,
   footerEnd,
+  sessionControls,
+  sessionModel,
   executionOptions,
+  agentOptions,
   sendAriaLabel = 'Send',
   disabled = false,
   disabledReason = 'Session closed — Continue to reopen.',
@@ -540,7 +551,7 @@ export function Composer({
       onClick={() => { if (!editsBlocked()) dictation.start() }}
     >
       <MicIcon aria-hidden="true" className="size-3.5" />
-      Dictation
+      {executionOptions || sessionControls ? null : 'Dictation'}
     </Button>
   ) : null
 
@@ -561,6 +572,60 @@ export function Composer({
     </Button>
   ) : null
 
+  const feedback = <>
+          {retainDraftUntilSuccess || onStop || stopping ? (
+            <div className={cn("overflow-y-auto px-3 pb-2 text-xs leading-5 text-muted-foreground md:px-4", compactFeedback ? "min-h-6" : "h-24 md:h-20")}>
+              <div
+                id={`${textareaId}-submission`}
+                role={submissionError === null ? 'status' : 'alert'}
+                aria-atomic="true"
+                tabIndex={submissionError === null ? undefined : 0}
+                className="break-words"
+              >
+                {stopPending ? 'Stopping execution. Your draft is kept.' : busy ? pendingLabel : submissionError !== null ? (
+                  <>
+                    <p className="font-medium text-foreground">{submissionError}</p>
+                    <p>{failureHint}</p>
+                  </>
+                ) : idleFeedback ?? null}
+              </div>
+            </div>
+          ) : null}
+  </>
+
+  const submissionControls = (
+              <div data-slot="composer-submit-row" className={cn('ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap', executionOptions && 'new-task-submission')}>
+                {executionOptions || sessionControls ? null : dictationButton}
+                {footerEnd ? (
+                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', executionOptions && 'mr-auto', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
+                    <div className="contents" inert={readOnly || undefined}>{footerEnd}</div>
+                  </div>
+                ) : null}
+                <div className="flex min-w-[100px] items-center justify-end gap-1" data-slot="composer-actions">
+                  {stopControl}
+                  {!primaryStop ? (
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      aria-label={submitLabel}
+                      aria-busy={busy && !stopPending || undefined}
+                      disabled={disabled || busy || stopPending || (!hasContent && !allowEmptySubmit)}
+                      className={cn(
+                        executionOptions ? 'h-12 w-full gap-2 px-6' : sessionControls ? 'h-11 w-auto gap-2 px-5' : 'size-11',
+                        !hasContent && emptySubmitLabel && 'w-auto px-3',
+                        'active:opacity-80',
+                      )}
+                      onClick={submitDraft}
+                    >
+                      {!sessionControls && !hasContent && emptySubmitLabel ? <PlayIcon aria-hidden="true" /> : null}
+                      {executionOptions || sessionControls || (!hasContent && emptySubmitLabel) ? submitLabel : null}
+                      {sessionControls || hasContent || !emptySubmitLabel ? <ArrowUpIcon aria-hidden="true" /> : null}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+  )
+
   return (
     <Popover open={menuOpen} onOpenChange={(open) => (open ? undefined : closeMenu())}>
       <PopoverAnchor asChild>
@@ -571,13 +636,17 @@ export function Composer({
           onDrop={onDrop}
           onDragOver={(event) => event.preventDefault()}
           className={cn(
-            'rounded-xl border border-border bg-card shadow-xs transition-[border-color,box-shadow]',
-            'focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15',
+            executionOptions && 'new-task-composer',
+            sessionControls && 'session-composer',
             disabled && 'opacity-80',
           )}
         >
-          {images.length > 0 ? (
-            <div data-slot="composer-thumbs" className="flex flex-wrap items-center gap-2 px-4 pt-3">
+          <div
+            data-slot="composer-editor"
+            className={cn("rounded-xl border border-[var(--composer-border)] bg-card shadow-none transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15", executionOptions && "new-task-editor")}
+          >
+            {images.length > 0 ? (
+            <div data-slot="composer-thumbs" className="flex flex-nowrap items-center gap-2 overflow-x-auto px-4 pt-3 md:flex-wrap md:overflow-visible">
               {images.map((attachment, index) => (
                 <button
                   key={`${attachment.name}-${index}`}
@@ -586,7 +655,7 @@ export function Composer({
                   title={readOnly ? 'Attachment submitted' : 'Click to remove'}
                   disabled={readOnly}
                   className={cn(
-                    'group relative overflow-hidden rounded-md border border-border',
+                    'group relative shrink-0 overflow-hidden rounded-md border border-border',
                     attachment.isImage
                       ? 'size-12'
                       : 'flex h-12 min-w-11 max-w-[200px] items-center gap-1.5 bg-muted/40 px-2.5 text-xs text-muted-foreground',
@@ -609,11 +678,11 @@ export function Composer({
                 </button>
               ))}
             </div>
-          ) : null}
+            ) : null}
 
           {/* A real label keeps password managers from treating nearby page text as a
               one-time-code prompt on client-side navigation (#71); aria-label alone doesn't. */}
-          <label htmlFor={textareaId} className="sr-only">{ariaLabel}</label>
+          <label htmlFor={textareaId} className={executionOptions ? "hidden px-5 pt-5 text-xs text-muted-foreground md:block" : "sr-only"}>{executionOptions ? "Task description" : ariaLabel}</label>
           <textarea
             ref={textareaRef}
             id={textareaId}
@@ -642,6 +711,8 @@ export function Composer({
             onPaste={onPaste}
           />
 
+          {executionOptions ? <p data-slot="composer-skill-hint" className="flex items-center gap-2 px-5 pt-3 pb-2 text-xs text-muted-foreground"><TerminalIcon aria-hidden="true" className="size-[15px] shrink-0" />Type / for a skill or workflow</p> : null}
+          {sessionControls && recording ? <div data-slot="session-controls" inert={readOnly || undefined}>{sessionControls}</div> : null}
           {recording ? (
             <div>
               <DictationBar
@@ -657,7 +728,8 @@ export function Composer({
           ) : (
             // The footer may WRAP (the /new pill row on narrow widths), but the trailing
             // controls wrap on phones to keep long model/account labels inside the viewport.
-            <div className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pt-1 pb-1.5 md:gap-y-1.5 md:px-2 md:pt-1.5 md:pb-2">
+            <div data-slot="composer-toolbar" className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pt-1 pb-1.5 md:gap-y-1.5 md:px-2 md:pt-1.5 md:pb-2">
+              {sessionControls ? <div data-slot="session-controls" inert={readOnly || undefined}>{sessionControls}</div> : null}
               {/* Tools and context wrap together. New-task execution options get their own
                   section; thread composers retain their compact, wrapping footer. */}
               <div data-slot="composer-footer-start" className={cn('flex min-w-0 flex-wrap items-center gap-1', executionOptions && 'w-full')}>
@@ -680,59 +752,22 @@ export function Composer({
                   </Button>
                 ) : null}
                 <div className="contents" inert={readOnly || undefined}>{footerStart}</div>
-                {executionOptions ? <div className="ml-auto">{dictationButton}</div> : null}
+                {executionOptions || sessionControls ? <div>{dictationButton}</div> : null}
               </div>
-              <div data-slot="composer-submit-row" className={cn('ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap', executionOptions && 'mt-1 w-full border-t border-border pt-2')}>
-                {executionOptions ? null : dictationButton}
-                {footerEnd ? (
-                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', executionOptions && 'mr-auto', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
-                    <div className="contents" inert={readOnly || undefined}>{footerEnd}</div>
-                  </div>
-                ) : null}
-                <div className="flex min-w-[100px] items-center justify-end gap-1" data-slot="composer-actions">
-                  {stopControl}
-                  {!primaryStop ? (
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      aria-label={submitLabel}
-                      aria-busy={busy && !stopPending || undefined}
-                      disabled={disabled || busy || stopPending || (!hasContent && !allowEmptySubmit)}
-                      className={cn(
-                        executionOptions ? 'h-11 w-auto gap-1.5 px-3 md:h-8' : 'size-11',
-                        !hasContent && emptySubmitLabel && 'w-auto px-3',
-                        'active:opacity-80',
-                      )}
-                      onClick={submitDraft}
-                    >
-                      {!hasContent && emptySubmitLabel ? <PlayIcon aria-hidden="true" /> : null}
-                      {executionOptions || (!hasContent && emptySubmitLabel) ? submitLabel : null}
-                      {hasContent || !emptySubmitLabel ? <ArrowUpIcon aria-hidden="true" /> : null}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
+              {sessionModel ? <div data-slot="session-model" inert={readOnly || undefined}><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-text" /><span>Model</span>{sessionModel}</div> : null}
+              {executionOptions ? null : submissionControls}
+
             </div>
           )}
-          {executionOptions ? <div inert={readOnly || undefined}>{executionOptions}</div> : null}
-          {retainDraftUntilSuccess || onStop || stopping ? (
-            <div className={cn("overflow-y-auto px-3 pb-2 text-xs leading-5 text-muted-foreground md:px-4", compactFeedback ? "min-h-6" : "h-24 md:h-20")}>
-              <div
-                id={`${textareaId}-submission`}
-                role={submissionError === null ? 'status' : 'alert'}
-                aria-atomic="true"
-                tabIndex={submissionError === null ? undefined : 0}
-                className="break-words"
-              >
-                {stopPending ? 'Stopping execution. Your draft is kept.' : busy ? pendingLabel : submissionError !== null ? (
-                  <>
-                    <p className="font-medium text-foreground">{submissionError}</p>
-                    <p>{failureHint}</p>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
+          {executionOptions ? null : feedback}
+
+          </div>
+          {executionOptions ? <>
+            <div data-slot="composer-agent-options" inert={readOnly || undefined}>{agentOptions}</div>
+            <div data-slot="composer-execution-panel" inert={readOnly || undefined}>{executionOptions}</div>
+            {submissionControls}
+            <div data-slot="composer-feedback">{feedback}</div>
+          </> : null}
         </div>
       </PopoverAnchor>
 

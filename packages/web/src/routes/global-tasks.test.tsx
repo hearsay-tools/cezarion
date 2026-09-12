@@ -357,6 +357,19 @@ describe('global tasks page', () => {
   })
 
   describe('filters live in the URL', () => {
+    it('lets a restored grouped view collapse and reopen its filters', async () => {
+      stubFetch()
+      renderPage(createQueryClient(), '/tasks?group=project')
+      await screen.findByText('Add checkout endpoint')
+      const toggle = screen.getByRole('button', { name: 'Filters' })
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      fireEvent.click(toggle)
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
+      fireEvent.click(toggle)
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      expect(search()).toBe('?group=project')
+    })
+
     it('restores a filtered, grouped view from the query string alone', async () => {
       // The refresh case: a reload re-enters the route with only the URL to go on.
       stubFetch()
@@ -848,6 +861,7 @@ describe('global tasks page', () => {
       renderPage()
       await screen.findByText('Add checkout endpoint')
 
+      fireEvent.click(screen.getByRole('button', { name: 'Show resources for Add checkout endpoint' }))
       expect(screen.getByText('$0.31')).toBeTruthy()
       const cpu = document.querySelector('[data-usage="cpu"]')!
       expect(cpu.textContent).toBe('84%')
@@ -864,10 +878,12 @@ describe('global tasks page', () => {
       renderPage()
       await screen.findByText('Bump the runner')
 
+      fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
       const mem = document.querySelector('[data-usage="mem"]')!
       expect(mem.textContent).toBe('peak 900 MB')
       expect(mem.getAttribute('data-usage-kind')).toBe('peak')
       // CPU has no persisted peak, so it says nothing rather than inventing one.
+      if (screen.queryByRole('button', { name: 'Show resources for Bump the runner' })) fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
       expect(document.querySelector('[data-usage="cpu"]')!.getAttribute('data-usage-kind')).toBe(
         'none',
       )
@@ -886,6 +902,7 @@ describe('global tasks page', () => {
       renderPage()
       await screen.findByText('Bump the runner')
 
+      if (screen.queryByRole('button', { name: 'Show resources for Bump the runner' })) fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
       expect(document.querySelector('[data-usage="cpu"]')!.getAttribute('data-usage-kind')).toBe(
         'none',
       )
@@ -913,7 +930,9 @@ describe('global tasks page', () => {
       await screen.findByText('Bump the runner')
       expect(document.querySelectorAll('[aria-label="unread"]')).toHaveLength(1)
 
-      fireEvent.click(screen.getByRole('button', { name: /Mark Bump the runner read/ }))
+      const markRead = screen.getByRole('button', { name: /Mark Bump the runner read/ })
+      expect(markRead.className).toContain('text-accent-icon')
+      fireEvent.click(markRead)
 
       await waitFor(() =>
         expect(sent.find((request) => request.method === 'POST')?.path).toBe(
@@ -1035,12 +1054,12 @@ describe('global tasks page', () => {
     await waitFor(() => expect(unreadMarkers()).toHaveLength(0))
   })
 
-  it('offers no project filter — a project name is a link to its own page', async () => {
+  it('offers a project filter and keeps project names linked to their own page', async () => {
     stubFetch()
     renderPage()
     await screen.findByText('Add checkout endpoint')
 
-    expect(document.querySelector('[data-slot="facet-project"]')).toBeNull()
+    expect(document.querySelector('[data-slot="facet-project"]')).not.toBeNull()
     expect(screen.getByRole('link', { name: 'API' }).getAttribute('href')).toBe('/p/api/')
 
     // Grouping by project turns each heading into the same door.
@@ -1106,4 +1125,12 @@ it('shows a parked parent human question from the slim workspace index', async (
   const row = document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')
   expect(row?.textContent).toContain('needs you')
   expect(row?.textContent).not.toContain('waiting on workers')
+})
+
+
+it('starts a new task in the boot project from the workspace toolbar', async () => {
+  stubFetch()
+  renderPage()
+  await screen.findByText('Add checkout endpoint')
+  expect(screen.getByRole('link', { name: 'New task' }).getAttribute('href')).toBe('/p/api/new')
 })

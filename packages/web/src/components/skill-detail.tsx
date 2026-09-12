@@ -1,4 +1,5 @@
-import { ArrowRightIcon } from 'lucide-react'
+import '@/routes/skills-workflows.css'
+import { ArrowRightIcon } from '@/components/design-icons'
 import { Link } from '@/lib/project-router'
 
 import type { Skill } from '@open-mercato/cezar-api-client'
@@ -25,12 +26,12 @@ export function SkillSourceTag({ source, className }: { source: Skill['source'];
       data-slot="skill-source"
       data-source={source}
       className={cn(
-        'shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px]',
+        'shrink-0 rounded bg-accent-strong/10 px-2 py-1 text-[10.5px]',
         project ? 'font-semibold text-foreground' : 'text-soft-foreground',
         className,
       )}
     >
-      {source}
+      {source === 'team' ? 'Team' : source}
     </span>
   )
 }
@@ -48,11 +49,13 @@ export function SkillDetailBody({
 }) {
   return (
     <div data-slot="skill-detail" className="min-w-0">
-      <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-        <Heading className="min-w-0 font-mono text-lg font-semibold break-all">{skill.name}</Heading>
-        <SkillSourceTag source={skill.source} />
+      <div className="flex min-w-0 flex-col items-start gap-4">
+        <span className="sw-detail-source"><SkillSourceTag source={skill.source} /> skill</span>
+        <Heading className="min-w-0 text-[19px] font-normal md:text-2xl break-words [overflow-wrap:anywhere]">
+          {skill.name}
+        </Heading>
       </div>
-      <p data-slot="skill-path" className="mt-1 font-mono text-[10.5px] break-all text-soft-foreground">
+      <p data-slot="skill-path" className="mt-4 text-[11px] break-all text-soft-foreground">
         {skill.path}
         {skill.team ? ` · from ${skill.team.repo}` : ''}
       </p>
@@ -64,9 +67,7 @@ export function SkillDetailBody({
 
       {usedBy !== undefined ? (
         <section data-slot="skill-used-by" className="mt-5">
-          <h3 className="text-[11px] font-semibold tracking-[.04em] text-soft-foreground uppercase">
-            Used by
-          </h3>
+          <h3 className="text-[13px] font-semibold">Used by</h3>
           {usedBy.length > 0 ? (
             <ul className="mt-1.5 flex flex-col gap-1">
               {usedBy.map((entry) => (
@@ -78,16 +79,13 @@ export function SkillDetailBody({
             </ul>
           ) : (
             <p className="mt-1.5 text-xs text-soft-foreground">
-              Not referenced by any workflow yet — quick-task picks it up when the task mentions it.
+              Not referenced by a workflow yet. quick-task can use it when the task mentions it.
             </p>
           )}
         </section>
       ) : null}
 
       <section className="mt-5">
-        <h3 className="text-[11px] font-semibold tracking-[.04em] text-soft-foreground uppercase">
-          Content
-        </h3>
         <div data-slot="skill-body" className="mt-2 text-sm">
           <Markdown>{skill.body}</Markdown>
         </div>
@@ -104,10 +102,7 @@ export function SkillDetailBody({
 export function SkillPreviewDialog({ skill, onClose }: { skill: Skill | null; onClose: () => void }) {
   return (
     <Dialog open={skill !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
-      <DialogContent
-        data-slot="skill-preview"
-        className="block max-h-[80dvh] overflow-y-auto sm:max-w-2xl"
-      >
+      <DialogContent data-slot="skill-preview" className="block max-h-[80dvh] overflow-y-auto sm:max-w-2xl">
         {skill ? (
           <>
             {/* The visible title is SkillDetailBody's heading; these two feed the dialog a11y contract. */}
@@ -119,7 +114,7 @@ export function SkillPreviewDialog({ skill, onClose }: { skill: Skill | null; on
                 to={`/skills?skill=${encodeURIComponent(skill.name)}`}
                 data-slot="skill-preview-manage"
                 onClick={onClose}
-                className="text-xs font-semibold text-violet hover:underline"
+                className="text-xs font-semibold text-accent-text hover:underline"
               >
                 Open in the Skills catalog
               </Link>

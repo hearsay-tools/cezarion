@@ -373,10 +373,11 @@ export function useRetryProviderAuth() {
 /** The workspace project registry (`GET /api/projects`): the `/p/:projectId` route gate's
  *  known/unknown answer, the boot slug behind the `/p/default` alias, and the list the
  *  unknown-project screen offers. Step 3.3's sidebar reads it too. */
-export function useProjects() {
+export function useProjects(options: { retryOnMount?: boolean } = {}) {
   return useQuery({
     queryKey: workspaceQueryKeys.projects,
     queryFn: ({ signal }) => getProjects({ signal }),
+    ...options,
   })
 }
 

@@ -1,4 +1,5 @@
-import { ChevronDownIcon } from 'lucide-react'
+import { ChevronDownIcon, FolderIcon, FolderOpenIcon } from '@/components/design-icons'
+
 import * as React from 'react'
 import { useLocation } from 'react-router'
 
@@ -12,7 +13,7 @@ import { QuickListBuckets } from '@/components/task-quick-list'
 import { Link, pathnameProjectId, scopeTo, stripProjectPrefix, useProjectMatch } from '@/lib/project-router'
 import { isProjectCollapsed, readStoredCollapsed, writeStoredCollapsed } from '@/lib/sidebar-collapse'
 import { capBuckets, groupRuns, listCounts, type ListView } from '@/lib/task-groups'
-import { taskReference } from '@/lib/tasks-table'
+import { taskReferences } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
@@ -202,8 +203,7 @@ function ProjectGroup({
     bucket.rows.flatMap((row) => {
       // A collapsed variant group paints its FIRST member's chip, so that is the one to ask
       // about — the others only become visible once the tile is expanded.
-      const reference = taskReference(row.kind === 'run' ? row.run : row.members[0]!)
-      return reference ? [{ projectId: project.id, kind: reference.kind, number: reference.number }] : []
+      return taskReferences(row.kind === 'run' ? row.run : row.members[0]!).map(reference => ({ projectId: project.id, kind: reference.kind, number: reference.number }))
     }),
   )
 
@@ -213,7 +213,7 @@ function ProjectGroup({
   // Global settings → Projects; the row says so instead of growing its own destructive button.
   if (missing) {
     return (
-      <div data-slot="project-group" data-project={project.id} data-status="missing" className="mb-1">
+      <div data-slot="project-group" data-project={project.id} data-status="missing" className="mb-3">
         <div
           data-slot="project-group-header"
           title={`${project.root} is gone — remove it in Global settings → Projects`}
@@ -245,60 +245,35 @@ function ProjectGroup({
       // a fact about the group, and a `hover:bg-muted` in the class list makes the class an
       // unreliable way to ask.
       data-active={active ? '' : undefined}
-      className="mb-1"
+      className="mb-3"
     >
-      <button
-        type="button"
-        onClick={() => onToggle(project.id)}
-        aria-expanded={!collapsed}
-        aria-controls={bodyId}
-        data-slot="project-group-header"
-        className={cn(
-          // 44px touch target in the drawer, the mockup's 34px row on desktop — the same
-          // relaxation the flat nav makes.
-          'flex h-11 w-full items-center gap-[7px] rounded-lg px-2 text-left text-[13px] font-semibold transition-colors hover:bg-muted md:h-[34px]',
-          active && 'bg-muted',
-        )}
-      >
-        <ChevronDownIcon
-          className={cn(
-            'size-3 shrink-0 text-muted-foreground transition-transform',
-            collapsed && '-rotate-90',
-          )}
-          aria-hidden="true"
-        />
-        <span className="truncate">{project.name}</span>
+      <div className="relative flex min-h-10 w-full items-center gap-2 rounded-md bg-muted px-2 py-2 text-left text-[13px] font-semibold">
+        <button type="button" onClick={() => onToggle(project.id)} aria-expanded={!collapsed} aria-controls={bodyId}
+          aria-label={`Toggle ${project.name}`} data-slot="project-group-header" className="absolute inset-0 rounded-md hover:bg-muted/80" />
+        {collapsed ? <FolderIcon className="pointer-events-none relative size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" /> : <FolderOpenIcon className="pointer-events-none relative size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />}
+        <Link to={scopeTo(project.id, '/')} onClick={() => { onNavigate?.(); onToggle(project.id) }} className="pointer-events-auto relative min-w-0 flex-1 truncate" aria-label={`Open ${project.name}`}>{project.name}</Link>
+        {project.branch ? <span data-slot="project-branch" className="pointer-events-none relative max-w-[40%] shrink-0 truncate font-['IBM_Plex_Mono'] text-[10px] leading-[14px] font-normal text-soft-foreground">{project.branch}</span> : null}
         {waiting ? (
           <span
             data-slot="project-attention"
             title={`${waiting} task${waiting === 1 ? '' : 's'} need${waiting === 1 ? 's' : ''} you`}
-            className="shrink-0 rounded-full bg-violet px-1.5 py-px text-[10.5px] font-semibold text-violet-foreground"
+            className="pointer-events-none relative shrink-0 rounded-full bg-pending/15 px-1.5 py-0.5 text-[10px] font-medium text-pending-strong"
           >
             {waiting}
           </span>
         ) : null}
-        {project.branch ? (
-          <span
-            data-slot="project-branch"
-            className="ml-auto max-w-[92px] truncate font-mono text-[10.5px] font-medium text-soft-foreground"
-          >
-            {project.branch}
-          </span>
-        ) : null}
-      </button>
+        <ChevronDownIcon className={cn('pointer-events-none relative size-4 shrink-0 text-muted-foreground transition-transform', collapsed && '-rotate-90')} aria-hidden="true" />
+      </div>
 
       {collapsed ? null : (
         <div
           id={bodyId}
           data-slot="project-group-body"
-          // The gap and the rail are what make the header read as the PARENT of these rows.
-          // Without them the active group's `bg-muted` header sits flush against the active nav
-          // row's `bg-muted` and the two fuse into one block — the project name then reads as
-          // just another menu item. The rail is offset to sit under the chevron, so the whole
-          // body hangs off the same vertical the disclosure control is on.
-          className="mt-1 ml-[14px] border-l border-border pl-2"
+          // The project navigation aligns with the group heading; only owned workers get an
+          // indented relationship rail, inside QuickListBuckets (design.pen frames 17).
+          className="mt-1"
         >
-          <nav aria-label={`${project.name} navigation`}>
+          <nav aria-label={`${project.name} navigation`} className="flex flex-col gap-0.5">
             {/* Forge-gated per PROJECT (#698): the entry's own remote decides whether THIS
                 group offers a GitHub tab — the boot folder's health-level forge answer says
                 nothing about the other projects in the workspace. Whether `gh` itself works
@@ -321,11 +296,11 @@ function ProjectGroup({
                   onClick={onNavigate}
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
-                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
-                    isActive && 'bg-muted font-semibold text-foreground',
+                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-xs md:text-[11px] font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
+                    isActive && 'bg-[var(--task-brand-selected)] text-accent-text',
                   )}
                 >
-                  <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+                  <Icon className="size-[15px] shrink-0 text-soft-foreground" aria-hidden="true" />
                   {item.label}
                   {/* `/api/todos` is fetched for the active scope only, so only the active
                       group has a real count to show — a badge on the others would be the active
@@ -333,14 +308,14 @@ function ProjectGroup({
                   {item.badge === 'inbox-count' && active && inboxCount ? (
                     <span
                       data-slot="nav-badge"
-                      className="ml-auto rounded-full bg-violet px-1.5 py-px text-[10.5px] font-semibold text-violet-foreground"
+                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10.5px] font-semibold text-accent-strong-foreground"
                     >
                       {inboxCount}
                     </span>
                   ) : null}
                   {item.badge === 'skills-update' && active && skillsUpdateAvailable ? (
                     <span data-slot="nav-update-marker" className="ml-auto flex items-center">
-                      <span className="size-1.5 rounded-full bg-violet" aria-hidden="true" />
+                      <span className="size-1.5 rounded-full bg-accent-strong" aria-hidden="true" />
                       <span className="sr-only">Skills update available</span>
                     </span>
                   ) : null}
@@ -376,7 +351,7 @@ function ProjectGroup({
             to={scopeTo(project.id, '/')}
             onClick={onNavigate}
             data-slot="project-group-more"
-            className="flex h-9 items-center rounded-md px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground md:h-7"
+            className="flex min-h-9 items-center rounded-md px-3 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
           >
             More…
           </Link>

@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, within, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -128,10 +128,8 @@ describe('canvas seeding', () => {
 
     await waitFor(() => expect(stepIds()).toEqual(['om-fix', 'om-review']))
     expect(nameInput().value).toBe('ship-it')
-    // Its chip reads active; the compact YAML preview reflects the pure stack.
-    expect(
-      document.querySelector('[data-slot="wb-load-chip"][data-name="ship-it"]')?.getAttribute('aria-pressed'),
-    ).toBe('true')
+    // The selector reflects the loaded file; YAML retains the compact skill stack.
+    expect((screen.getByLabelText('Load an existing workflow') as HTMLSelectElement).value).toBe('ship-it')
     expect(yamlText()).toContain('skills:')
     expect(yamlText()).toContain('- om-fix')
     expect(screen.getByText('2 skills')).toBeTruthy()
@@ -174,18 +172,43 @@ describe('workflow editor presentation', () => {
     expect(confirm.className).toContain('bg-danger')
   })
 
-  it('renders step summaries as wrapping content outside the heading controls', async () => {
-    stubFetch()
+  it('shows the step prompt ahead of the skill catalog description', async () => {
+    stubFetch({}, [{ ...SHIP, steps: [{ ...SHIP.steps[0]!, prompt: 'Implement {{task}} and leave a concise review note after verification.' }, SHIP.steps[1]!] }])
     renderAt('/workflows')
     await waitFor(() => expect(stepCards()).toHaveLength(2))
 
     const first = stepCards()[0]!
     const summary = first.querySelector<HTMLElement>('[data-slot="wb-step-summary"]')!
     expect(summary).toBeTruthy()
-    expect(summary.textContent).toContain('leave a concise review note')
+    expect(summary.textContent).toBe('Implement {{task}} and leave a concise review note after verification.')
     expect(summary.className).toContain('break-words')
     expect(summary.className).not.toContain('truncate')
     expect(first.querySelector('[data-slot="wb-step-heading"]')).toBeTruthy()
+  })
+
+  it('keeps the skill description for the generic task placeholder', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    expect(stepCards()[1]!.querySelector('[data-slot="wb-step-summary"]')?.textContent).toBe('Review it')
+  })
+
+  it('adds a selected skill from the Add step picker without changing the draft on cancel', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Add step' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add step' })
+    fireEvent.change(within(dialog).getByLabelText('Filter skills'), { target: { value: 'om-review' } })
+    fireEvent.click(within(dialog).getByRole('radio', { name: /om-review/ }))
+    expect(stepCards()).toHaveLength(2)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add selected skill' }))
+    expect(stepCards()).toHaveLength(3)
+    expect(stepIds()[2]).toContain('om-review')
+    fireEvent.click(screen.getByRole('button', { name: 'Add step' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Add step' })).getByRole('button', { name: 'Cancel' }))
+    expect(stepCards()).toHaveLength(3)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add step' })))
   })
 
   it('keeps Export available and downloads the current workflow YAML', async () => {
@@ -228,7 +251,8 @@ describe('palette add / remove / the 8-step limit', () => {
     renderAt('/workflows')
     await waitFor(() => expect(stepCards()).toHaveLength(2))
 
-    fireEvent.click(screen.getByLabelText('Remove step 1: om-fix'))
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Step 1 actions: om-fix' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove step 1: om-fix' }))
     expect(stepIds()).toEqual(['om-review'])
     expect(screen.getByText('1 skill')).toBeTruthy()
   })
@@ -460,5 +484,33 @@ describe('delete and “+ new”', () => {
     expect(stepCards()).toHaveLength(0)
     expect(nameInput().value).toBe('my-workflow')
     await screen.findByText('Drop a skill here — or Import a workflow.yaml')
+  })
+})
+
+
+describe('design workflow controls', () => {
+  it('keeps Description beside the name; a loaded file’s description round-trips in YAML', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    const description = screen.getByLabelText('Description') as HTMLTextAreaElement
+    expect(description).not.toBeNull()
+    fireEvent.change(screen.getByLabelText('Load an existing workflow'), { target: { value: 'quick-task' } })
+    expect(nameInput().value).toBe('quick-task')
+    expect(description.value).toBe('One agent run on your task — no ceremony.')
+    expect(yamlText()).toContain('One agent run on your task — no ceremony.')
+    fireEvent.change(description, { target: { value: 'Edited chain' } })
+    expect(yamlText()).toContain('Edited chain')
+  })
+
+  it('reorders without dragging and keeps boundary controls disabled', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    expect((screen.getByLabelText('Move step 1 up') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByLabelText('Move step 1 down'))
+    expect(stepIds()).toEqual(['om-review', 'om-fix'])
+    expect(yamlText().indexOf('- om-review')).toBeLessThan(yamlText().indexOf('- om-fix'))
+    expect((screen.getByLabelText('Move step 2 down') as HTMLButtonElement).disabled).toBe(true)
   })
 })

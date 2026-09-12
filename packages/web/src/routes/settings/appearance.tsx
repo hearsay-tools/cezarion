@@ -16,7 +16,7 @@ import type { Theme } from '@/lib/theme'
  *  - ACCENT + DENSITY persist in `ui-state.json` through the AppearanceProvider (additive
  *    `appearance` key), mirrored to localStorage for pre-paint.
  *
- * Every control is a real one: accent swaps the `--primary` token family, density shrinks
+ * Every control is a real one: accent swaps the action + chrome token family, density shrinks
  * the Tailwind spacing token (see index.css). No dead knobs.
  */
 
@@ -26,11 +26,10 @@ const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: ComponentType<SV
   { value: 'dark', label: 'Dark', icon: MoonIcon },
 ]
 
-/** Swatches point at the STABLE family tokens (`--accent-lime`, `--violet`), not `--primary` —
- *  the whole point of the control is that `--primary` changes under it. */
+/** Keep the option list even while it contains one entry: the field below appears automatically
+ * when a future second accent is added, and the provider stays wired in the meantime. */
 const ACCENT_OPTIONS: Array<{ value: Accent; label: string; swatch: string }> = [
-  { value: 'lime', label: 'Lime', swatch: 'var(--accent-lime)' },
-  { value: 'violet', label: 'Violet', swatch: 'var(--violet)' },
+  { value: 'cezarion', label: 'Cezarion', swatch: 'var(--accent-strong)' },
 ]
 
 const DENSITY_OPTIONS: Array<{ value: Density; label: string }> = [
@@ -76,7 +75,7 @@ function Segmented<V extends string>({
             data-value={option.value}
             onClick={() => onChange(option.value)}
             className={cn(
-              'flex items-center gap-2 rounded-sm px-3 py-1.5 text-[13px] font-medium transition-colors',
+              'flex min-h-11 items-center gap-2 rounded-sm px-3 py-1.5 text-[13px] font-medium transition-colors',
               checked
                 ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:text-foreground',
@@ -117,15 +116,17 @@ export function AppearanceSection() {
   return (
     <div
       data-slot="appearance-section"
-      className="mx-auto flex w-full max-w-2xl flex-col gap-7 p-4 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-6 md:pb-6"
+      className="flex w-full flex-col gap-7 rounded-lg border border-border bg-card p-5"
     >
       <Field title="Theme" hint="System follows your OS preference. Applies to this browser.">
         <Segmented slot="appearance-theme" label="Theme" value={theme} options={THEME_OPTIONS} onChange={setTheme} />
       </Field>
 
-      <Field title="Accent" hint="The primary action color. Saved with this repo's cockpit state.">
-        <Segmented slot="appearance-accent" label="Accent" value={accent} options={ACCENT_OPTIONS} onChange={setAccent} />
-      </Field>
+      {ACCENT_OPTIONS.length > 1 ? (
+        <Field title="Accent" hint="The cockpit brand accent. Saved with your workspace appearance.">
+          <Segmented slot="appearance-accent" label="Accent" value={accent} options={ACCENT_OPTIONS} onChange={setAccent} />
+        </Field>
+      ) : null}
 
       <Field
         title="Density"
@@ -140,6 +141,13 @@ export function AppearanceSection() {
       >
         <Segmented slot="appearance-width" label="Reading width" value={width} options={WIDTH_OPTIONS} onChange={setWidth} />
       </Field>
+      <div className="settings-appearance-preview settings-readout">
+        <span className="text-[10px] text-soft-foreground">PREVIEW</span>
+        <p className="mt-3 text-base">Review finalization retries</p>
+        <p className="mt-3 text-xs text-muted-foreground">Needs you · cezar · Task {'#'}227</p>
+        <span className="mt-3 inline-flex rounded-md border border-accent-strong/30 bg-accent-strong/10 px-4 py-3 text-xs text-accent-text">Open task</span>
+      </div>
+      <p className="text-xs leading-relaxed text-muted-foreground">Changes apply immediately. Theme is browser-local; density and reading width are saved with your workspace.</p>
     </div>
   )
 }

@@ -23,6 +23,12 @@ describe('DiffStatLabel', () => {
     expect(el.title).toBe('+128 −14 across 3 files')
   })
 
+  it('groups expanded counts without abbreviating their values', () => {
+    const el = renderStat({ adds: 14_996, dels: 1_234, files: 37 })
+    expect(el.textContent).toBe('+14,996 −1,234')
+    expect(el.title).toBe('+14996 −1234 across 37 files')
+  })
+
   it('says "file" in the singular for a one-file diff', () => {
     expect(renderStat({ adds: 1, dels: 0, files: 1 }).title).toBe('+1 −0 across 1 file')
   })

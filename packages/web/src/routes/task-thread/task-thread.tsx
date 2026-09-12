@@ -1,3 +1,4 @@
+import './session-layout.css'
 import { deriveAttention } from '@/lib/attention'
 import { MessageSquareTextIcon, SearchXIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -37,6 +38,7 @@ import { SubagentSheet } from './subagent-sheet'
 import { AcceptCelebration, ReviewPanel } from './review-panel'
 import { queuePosition, runActionFlags } from './run-actions'
 import { useStopAction } from './stop-action'
+import { WorkflowSteps } from './step-rail'
 import { RunHeader } from './run-header'
 import { AskCard } from './ask-card'
 import { useRunRecordReconcile } from './run-reconcile'
@@ -299,8 +301,7 @@ export function ThreadView({
     onJumpToLatest: history?.jumpToLatest,
     rowKeys: rows.map(({ key }) => key),
   })
-  // The iOS keyboard lifts the dock via `--kb`; once it settles, a pinned reader re-pins
-  // (research §7: re-run scrollToEnd after the viewport settles).
+  // Re-pin a tail reader after the viewport or document-flow composer changes size.
   useKeyboardInsetVar(scroll.restickIfStuck)
 
   return (
@@ -309,7 +310,7 @@ export function ThreadView({
 
       {/* Row spacing lives on each thread row (pb-2.5, both render modes measure alike);
           this gap only separates the sections — rows, empty state, footer, review panel. */}
-      <div className="mx-auto flex w-full max-w-[var(--measure)] flex-1 flex-col gap-2.5 px-3 py-3 md:gap-3.5 md:px-6 md:py-5">
+      <div data-slot="session-conversation" className="mx-auto flex w-full max-w-[var(--measure)] flex-1 flex-col gap-2.5 px-[18px] py-3 md:gap-3.5 md:px-16 md:py-5">
         {history ? (
           <HistoryBoundary
             hasOlder={history.hasOlder}
@@ -405,20 +406,23 @@ export function ThreadView({
         onClose={() => setOpenAgentId(undefined)}
       />
 
-      {/* The dock region (mockup `.dock`): plan dock, paused hint, then the composer.
-          `bottom: var(--kb)` is the iOS keyboard lift — 0 until the visualViewport watcher
-          publishes an inset. */}
+      {/* Workflow summary, plan, pause hint and composer follow the transcript in document flow. */}
       <div
         data-slot="thread-dock"
-        className="sticky bottom-[var(--kb,0px)] z-10 bg-background px-3 pt-1 pb-2 max-md:border-t max-md:border-border md:px-6 md:pt-1.5 md:pb-4"
+        className="relative z-10 bg-background pt-1 pb-2 md:pt-1.5 md:pb-4"
       >
-        {/* The jump pill floats over the thread, just above the dock, centered. */}
+        {/* Keep Jump reachable while the document-flow composer is below the viewport. */}
         {scroll.pillVisible ? (
-          <div className="pointer-events-none absolute inset-x-0 -top-12 flex justify-center">
+          <div className="pointer-events-none fixed right-6 bottom-[calc(24px+env(safe-area-inset-bottom))] z-30 flex justify-center">
             <JumpToLatestPill onJump={scroll.jumpToLatest} />
           </div>
         ) : null}
-        <div className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-1.5 md:gap-2.5">
+        <div className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-1.5 px-[14px] md:gap-2.5 md:px-16">
+          {run.steps.length > 0 ? (
+            <div data-slot="session-workflow-summary" className="rounded-xl border border-border bg-card px-3 py-2">
+              <WorkflowSteps runId={run.id} steps={run.steps} />
+            </div>
+          ) : null}
           {/* Agents above the plan: the fan-out is the more urgent "what is happening now",
               and it is transient — the plan outlives it. Keyed by run id like the plan dock. */}
           <AgentsDock key={`agents:${run.id}`} runId={run.id} agents={agents} onSelect={setOpenAgentId} />
@@ -464,8 +468,8 @@ export function ThreadView({
             compactFeedback
             pendingLabel={continuable ? 'Continuing…' : 'Sending…'}
             failureHint="Your draft is kept. Check the task status and connection, then retry."
-            mobileCollapsible={!providerBlocked}
-            mobileDisclosureKey={JSON.stringify([projectId, run.id])}
+            sessionControls={continuable ? continueAction.pills : undefined}
+            sessionModel={continuable ? continueAction.modelPicker : undefined}
             onSubmit={
               continuable
                 ? (text, images) => continueAction.continueWith(text, images)
@@ -483,7 +487,7 @@ export function ThreadView({
                 >
                   Configure providers
                 </Link>
-              ) : continuable ? continueAction.pills : undefined
+              ) : undefined
             }
             // Continuing with nothing typed is the legacy one-click Continue.
             allowEmptySubmit={continuable && !needsAnswer}

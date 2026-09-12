@@ -121,16 +121,15 @@ afterAll(() => {
 })
 
 describe('task thread', () => {
-  it('renders the task and the follow-up as right-aligned user bubbles', () => {
+  it('renders the task and follow-up as labeled full-width user messages', () => {
     const bubbles = browser.evaluate(
-      `[...document.querySelectorAll('[data-slot="user-bubble"]')].map((el) => el.textContent)`,
+      `[...document.querySelectorAll('[data-slot="user-bubble"] .thread-markdown')].map((el) => el.textContent)`,
     ) as string[]
     expect(bubbles).toHaveLength(2)
     expect(bubbles[0]).toContain('Summarize what this project does.')
     expect(bubbles[1]).toBe('Thanks — now show the markdown summary. mock:md')
 
-    // Right-aligned: the bubble hugs the column's right content edge (within its padding),
-    // sits entirely right of the midline, while assistant content starts at the left edge.
+    // The revised document layout fills the reading column; the YOU label identifies authorship.
     const geometry = browser.evaluate(`(() => {
       const bubble = document.querySelector('[data-slot="user-bubble"]')
       const message = document.querySelector('[data-slot="assistant-message"]')
@@ -139,7 +138,8 @@ describe('task thread', () => {
       return { rightGap: c.right - b.right, bubbleLeft: b.left, mid: c.left + c.width / 2, messageLeft: m.left - c.left }
     })()`) as { rightGap: number; bubbleLeft: number; mid: number; messageLeft: number }
     expect(geometry.rightGap).toBeLessThan(40) // only the column padding separates them
-    expect(geometry.bubbleLeft).toBeGreaterThan(geometry.mid)
+    expect(geometry.bubbleLeft).toBeLessThan(geometry.mid)
+    expect(browser.evaluate(`document.querySelector('[data-slot="user-bubble"] > p').textContent`)).toBe('YOU')
     expect(geometry.messageLeft).toBeLessThan(40)
   })
 
@@ -370,13 +370,12 @@ describe('task thread', () => {
   })
 
   it('a card is closed by default and expands to its mono output (the #381 behavior)', () => {
-    const bash = '[data-slot="tool-card"][data-kind="execute"]'
-    expect(browser.count(`${bash} [data-slot="tool-output"]`)).toBe(0)
-    browser.click(`${bash} [data-slot="collapsible-trigger"]`)
-    browser.waitForFunction(`document.querySelector('${bash} [data-slot="tool-output"] pre') !== null`)
-    expect(browser.evaluate(`document.querySelector('${bash} [data-slot="tool-output"] pre').textContent`)).toBe(
-      ' M src/example.ts',
-    )
+    const bash = `[...document.querySelectorAll('[data-slot="tool-card"][data-kind="execute"]')]
+      .find((card) => card.textContent.includes('git status --short'))`
+    expect(browser.evaluate(`${bash}.querySelector('[data-slot="tool-output"]') === null`)).toBe(true)
+    browser.evaluate(`${bash}.querySelector('[data-slot="collapsible-trigger"]').click()`)
+    browser.waitForFunction(`${bash}.querySelector('[data-slot="tool-output"] pre') !== null`)
+    expect(browser.evaluate(`${bash}.querySelector('[data-slot="tool-output"] pre').textContent`)).toBe(' M src/example.ts')
   })
 
   it('serves and renders the agent screenshot the transcript persisted', () => {
@@ -426,32 +425,39 @@ describe('task thread', () => {
       { text: 'Files', href: scoped(`/tasks/${RUN_ID}/files`), current: null },
     ])
 
+    browser.click('[aria-label="Run actions"]')
     const actions = browser.evaluate(
-      `[...document.querySelectorAll('[data-slot="run-actions"] button')].map((b) => b.textContent.trim())`,
+      `[...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map((b) => b.textContent.trim())`,
     ) as string[]
-    expect(actions).toEqual(['Open in…', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
+    expect(actions).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive task', 'Delete task…'])
 
-    // The take-over hint, per-backend (the fixture's last agent session, in its worktree).
+    browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent === 'Open in…').click()`)
+    // The take-over command remains in the worktree chooser.
     const hint = browser.evaluate(
-      `document.querySelector('[data-slot="resume-hint"]').textContent`,
+      `document.querySelector('[aria-label="Open task worktree in…"] pre').textContent`,
     ) as string
     expect(hint).toContain('claude --resume 40169e05-629f-4d7c-853c-8a2a197255e4')
     expect(hint).toContain('cd /tmp/cezar-fixture-hg7X')
+    browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') === null`)
+    browser.click('[aria-label="Close worktree chooser"]')
   })
 
   it('opens the Notes panel — an unseeded handoff reads as the honest empty state', () => {
-    browser.evaluate(
-      `[...document.querySelectorAll('[data-slot="run-actions"] button')].find((b) => b.textContent.trim() === 'Notes').click()`,
-    )
+    browser.click('[aria-label="Run actions"]')
+    browser.waitForFunction(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].some(el => el.textContent.trim() === 'Notes / handoff')`)
+    browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent.trim() === 'Notes / handoff').click()`)
     browser.waitForFunction(`document.querySelector('[data-slot="notes-panel"]') !== null`)
     browser.waitForFunction(
       `document.querySelector('[data-slot="notes-panel"]').textContent.includes('No notes yet')`,
     )
     // The 1.4 money shot: full header (title, meta, tabs+actions, rail, hint) + open notes.
-    browser.screenshot(`${artifactsDir}/thread-header-desktop.png`)
-    browser.evaluate(
-      `[...document.querySelectorAll('[data-slot="run-actions"] button')].find((b) => b.textContent.trim() === 'Notes').click()`,
-    )
+    // Full-page capture scroll-stitches the transcript and changes the live header state.
+    // Keep this interaction proof in its viewport, like the other scroll-sensitive shots.
+    browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') === null`)
+    browser.screenshot(`${artifactsDir}/thread-header-desktop.png`, { viewport: true })
+    browser.click('[aria-label="Run actions"]')
+    browser.waitForFunction(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].some(el => el.textContent.trim() === 'Notes / handoff')`)
+    browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent.trim() === 'Notes / handoff').click()`)
     browser.waitForFunction(`document.querySelector('[data-slot="notes-panel"]') === null`)
   })
 
@@ -517,9 +523,9 @@ describe('task thread', () => {
     // The desktop action bar is gone (`md:flex`), the kebab is the mobile surface.
     expect(
       browser.evaluate(
-        `getComputedStyle(document.querySelector('[data-slot="run-actions"]')).display`,
+        `document.querySelector('[data-slot="run-actions"]')`,
       ),
-    ).toBe('none')
+    ).toBe(null)
     expect(
       browser.evaluate(
         `(() => { const el = document.querySelector('[aria-label="Run actions"]'); return el !== null && el.offsetParent !== null })()`,
@@ -553,7 +559,10 @@ describe('task thread', () => {
       browser.evaluate(`document.querySelector('${pin}').focus()`)
       browser.press('Space')
       browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') === null`)
-      browser.waitForFunction(`document.querySelector('[data-slot="run-actions"] [data-slot="pin-run"]').getAttribute('aria-pressed') === '${!wasPinned}'`)
+      browser.click('[aria-label="Run actions"]')
+      browser.waitForFunction(`document.querySelector('${pin}').getAttribute('aria-checked') === '${!wasPinned}'`)
+      browser.press('Escape')
+      browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') === null`)
       expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
       expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     }
@@ -564,10 +573,10 @@ describe('task thread', () => {
     browser.setViewport(1440, 900)
   })
 
-  it('phone disclosures preserve a selected draft and documents and restore desktop access', () => {
+  it('phone actions preserve a selected draft and documents across viewport changes', () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
-    browser.waitForFunction(`document.querySelector('[aria-label="Expand composer"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="session-controls"]') !== null`)
     const input = '[aria-label="Reply to the agent"]'
     browser.fill(input, 'first line\nsecond line\nthird line')
     browser.evaluate(`(() => {
@@ -577,22 +586,19 @@ describe('task thread', () => {
       el.dispatchEvent(new ClipboardEvent('paste', {bubbles:true, clipboardData: files}));
     })()`)
     browser.waitForFunction(`document.querySelectorAll('[data-slot="composer-thumbs"] button').length === 3`)
-    expect(browser.evaluate(`document.querySelector('${input}').getBoundingClientRect().height`)).toBe(44)
-    browser.evaluate(`document.querySelector('[aria-label="Expand composer"]').focus()`)
-    browser.press('Enter')
-    expect(browser.evaluate(`document.querySelector('[aria-label="Collapse composer"]').getAttribute('aria-expanded')`)).toBe('true')
     expect(browser.evaluate(`document.querySelector('${input}').getBoundingClientRect().height`)).toBeGreaterThan(44)
     expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(true)
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="follow-up-engine"] button')].every(el => {const r=el.getBoundingClientRect(); return r.width >=44 && r.height >=44})`)).toBe(true)
-    browser.press('Space')
-    expect(browser.evaluate(`document.querySelector('[aria-label="Expand composer"]').getAttribute('aria-expanded')`)).toBe('false')
+    browser.evaluate(`document.querySelector('[aria-label="Run actions"]').scrollIntoView({block:'center'})`)
+    browser.click('[aria-label="Run actions"]')
+    browser.press('Escape')
     expect(browser.evaluate(`(() => { const el = document.querySelector('${input}'); return [el === window.__phoneTextarea, el.value, el.selectionStart, el.selectionEnd] })()`))
       .toEqual([true, 'first line\nsecond line\nthird line', 2, 8])
     expect(browser.count('[data-slot="composer-thumbs"] button')).toBe(3)
     expect(browser.isVisible('[aria-label="Attach files"]')).toBe(true)
     expect(browser.isVisible('[aria-label="Send"]')).toBe(true)
     expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
-    for (const label of ['Expand composer', 'Show run details', 'Run actions']) {
+    for (const label of ['Show run details', 'Run actions']) {
       expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label="${label}"]').getBoundingClientRect(); return r.width >= 44 && r.height >= 44 })()`)).toBe(true)
     }
     // At the start of the transcript, the header and bottom dock still leave reading space.
@@ -610,10 +616,10 @@ describe('task thread', () => {
     browser.setViewport(1440, 900)
     expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
     expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(true)
-    expect(browser.isVisible('[aria-label="Expand composer"]')).toBe(false)
-    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('sticky')
+    expect(browser.count('[aria-label="Expand composer"]')).toBe(0)
+    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('relative')
     browser.setViewport(360, 640)
-    expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(false)
+    expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(true)
     expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('first line\nsecond line\nthird line')
   })
 
@@ -638,16 +644,17 @@ describe('task thread', () => {
       expect(browser.isVisible('[aria-label="Run actions"]')).toBe(true)
       expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     }
-    browser.click('[aria-label="Expand composer"]')
     // Navigate through the real phone drawer; a full browser.goto would reset module memory.
     for (const [id, label] of [[RUN_ID, 'Show run details'], [LONG_RUN.id, 'Hide run details']]) {
       browser.click('[aria-label="Open menu"]')
       browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().left >= 0`)
-      browser.click(`[data-slot="mobile-nav-drawer"] a[href="${scoped(`/tasks/${id}`)}"]`)
+      browser.evaluate(`document.querySelector('[data-slot="mobile-nav-drawer"] a[href="${scoped(`/tasks/${id}`)}"]').scrollIntoView({ block: 'center' })`)
+      browser.evaluate(`document.querySelector('[data-slot="mobile-nav-drawer"] a[href="${scoped(`/tasks/${id}`)}"]').focus()`)
+      browser.press('Enter')
       browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
       browser.waitForFunction(`document.querySelector('[data-run-id="${id}"] [aria-label="${label}"]') !== null`)
       expect(browser.isVisible('[data-slot="run-details"]')).toBe(id === LONG_RUN.id)
-      expect(browser.isVisible('[aria-label="' + (id === LONG_RUN.id ? 'Collapse composer' : 'Expand composer') + '"]')).toBe(true)
+      expect(browser.isVisible('[data-slot="session-controls"]')).toBe(true)
     }
     expect(browser.evaluate(`(() => { const el = document.querySelector('[data-slot="follow-up-model-pill"]'); return el.scrollHeight <= el.clientHeight })()`)).toBe(true)
     expect(browser.evaluate(`(() => { const el = document.querySelector('[data-slot="main"]'); return el.scrollWidth <= el.clientWidth })()`)).toBe(true)
@@ -669,4 +676,32 @@ describe('task thread', () => {
     browser.setViewport(1440, 900)
   })
 
+})
+
+// Revised session frames 2/3/28: settings stay visible in document flow at every width.
+describe('revised session layout', () => {
+  it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ width, theme }))))('preserves labeled controls and draft at $width / $theme', ({ width, theme }) => {
+    browser.setViewport(width, 1000)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="session-controls"]') !== null`)
+    browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; delete document.documentElement.dataset.density; document.querySelector('[data-slot="composer"]').scrollIntoView({block:'end'})`)
+    const facts = browser.evaluate(`(() => {
+      const box = selector => document.querySelector(selector).getBoundingClientRect();
+      const settings = box('[data-slot="session-controls"]'), model = box('[data-slot="session-model"]');
+      return { stacked: innerWidth >= 768 ? settings.bottom <= model.top + 1 : model.bottom <= settings.top + 1, fits: model.left >= 0 && model.right <= innerWidth, overflow: document.documentElement.scrollWidth > innerWidth, position: getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).position };
+    })()`) as { stacked: boolean; fits: boolean; overflow: boolean; position: string }
+    expect(facts).toEqual({ stacked: true, fits: true, overflow: false, position: 'relative' })
+    expect(browser.evaluate(`document.querySelector('[data-slot="follow-up-model-pill"]').getBoundingClientRect().height`)).toBeGreaterThanOrEqual(44)
+    browser.fill('[data-slot="composer"] textarea', 'Keep these follow-up instructions')
+    expect(browser.text('[data-slot="composer-submit-row"]')).toContain('Send')
+    browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')
+    browser.screenshot(`${artifactsDir}/revised-session-${width}-${theme}.png`, { viewport: true })
+    browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
+    browser.click('[aria-label="Run actions"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') !== null`)
+    expect(browser.text('[data-slot="run-actions-menu"]')).toContain('Notes')
+    browser.screenshot(`${artifactsDir}/revised-session-actions-${width}-${theme}.png`, { viewport: true })
+    browser.press('Escape')
+    expect(browser.evaluate(`document.querySelector('[data-slot="composer"] textarea').value`)).toBe('Keep these follow-up instructions')
+  }, 90_000)
 })

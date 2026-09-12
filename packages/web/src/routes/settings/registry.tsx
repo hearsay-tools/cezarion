@@ -1,17 +1,5 @@
-import {
-  BellIcon,
-  BookmarkIcon,
-  BotIcon,
-  FileCogIcon,
-  FolderGit2Icon,
-  FoldersIcon,
-  GaugeIcon,
-  IdCardIcon,
-  PackageCheckIcon,
-  KeyboardIcon,
-  NotebookPenIcon,
-  PaletteIcon,
-} from 'lucide-react'
+import { BellIcon, BotIcon, FoldersIcon, CpuIcon as GaugeIcon, NotebookPenIcon, PaletteIcon, SparklesIcon as PackageCheckIcon, KeyRoundIcon as IdCardIcon } from '@/components/design-icons'
+import { BookmarkIcon, FileCogIcon, FolderGit2Icon, KeyboardIcon } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
 
 import type { Capabilities } from '@open-mercato/cezar-api-client'

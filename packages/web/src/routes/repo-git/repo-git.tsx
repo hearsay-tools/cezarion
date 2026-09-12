@@ -1,11 +1,11 @@
-import { GitBranchIcon, TriangleAlertIcon } from 'lucide-react'
+import './repo-git.css'
+import { GitBranchIcon, TriangleAlertIcon } from '@/components/design-icons'
 
 import { useRepo } from '@/api/queries'
 import type { RepoInfo, RepoResponse } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { TabLink } from '@/components/tab-link'
 
-import { BranchChip } from '../task-git/diff-controls'
 import { RepoBranchesSection } from './repo-branches'
 import { RepoChangesSection } from './repo-changes'
 import { RepoCommitsSection } from './repo-commits'
@@ -34,7 +34,7 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
     return (
       <div data-route="repo-git" className="flex min-h-full flex-col">
         <CenteredState
-          icon={<TriangleAlertIcon />}
+          icon={<TriangleAlertIcon size={16} />}
           tone="danger"
           title="Could not load the repository"
           subtitle={repo.error.message}
@@ -47,7 +47,7 @@ export function RepoGitRoute({ tab }: { tab: RepoTab }) {
     return (
       <div data-route="repo-git" className="flex min-h-full flex-col">
         <CenteredState
-          icon={<GitBranchIcon />}
+          icon={<GitBranchIcon size={16} />}
           tone="neutral"
           title="Not a git repository"
           subtitle="cezar is running outside a git repository — start it inside one to browse changes, commits and branches."
@@ -63,22 +63,19 @@ function RepoView({ repo, info, tab }: { repo: RepoResponse; info: RepoInfo; tab
     <div data-route="repo-git" className="flex min-h-full flex-col">
       <header
         data-slot="repo-header"
-        className="sticky top-0 z-20 border-b border-border bg-background/95 px-4 pt-3 backdrop-blur md:px-6"
+        className="px-[18px] pt-[18px] md:px-9 md:pt-9"
       >
-        <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start">
-          <div className="flex min-w-0 items-center gap-2.5 md:min-h-11">
-            <h1 className="sr-only text-lg font-semibold md:not-sr-only">Git</h1>
-            <BranchChip branch={info.branch} />
-            {info.remote ? (
-              <span data-slot="repo-remote" className="hidden min-w-0 truncate text-[11px] text-soft-foreground lg:inline">
-                {info.remote}
-              </span>
-            ) : null}
-          </div>
+        <h1 className="text-2xl font-semibold tracking-tight md:text-[30px]">
+          Git · {tab === 'changes' ? 'Changes' : tab === 'commits' ? 'Commits' : 'Branches'}
+        </h1>
+        <p data-slot="repo-remote" className="mt-2 break-all text-[13px] text-muted-foreground">
+          {info.root.split('/').filter(Boolean).at(-1)}{info.remote ? ` · ${info.remote}` : ''} · <span data-slot="branch-chip">{info.branch}</span>
+        </p>
+        <div className="my-[22px] flex min-w-0 items-start gap-2.5">
           <RepoPull repo={repo} info={info} />
         </div>
 
-        <div data-slot="repo-tabs" className="mt-2.5 flex items-end gap-1">
+        <div data-slot="repo-tabs" className="flex items-end gap-6 border-b border-border [&>a]:min-h-11">
           <TabLink to="/git" active={tab === 'changes'}>
             Changes
           </TabLink>

@@ -306,6 +306,15 @@ it('/github/prs/:n/changes renders PR-only file review navigation and completene
   expect(screen.getByLabelText('Next file').hasAttribute('disabled')).toBe(false)
 })
 
+it.each(['/github/prs/137', '/github/prs/137/changes'])('keeps the PR list beside %s, like Issues', async (route) => {
+  stubFetch()
+  renderAt(route)
+  await screen.findByRole('heading', { name: 'GitHub' })
+  expect(document.querySelector('[data-route="github"]')?.hasAttribute('data-pr-detail')).toBe(false)
+  expect(document.querySelector('[data-slot="gh-list"]')).not.toBeNull()
+  expect(rows().length).toBeGreaterThan(0)
+})
+
 /** What the composer PRE-FILLS the box with for issue 142 (#524): the item's reference, and
  *  nothing else — no quoted body. `githubTaskRef`'s own byte-for-byte shape is pinned in
  *  `lib/github-task.test.ts`; here it is the baseline every box assertion measures against. */
@@ -388,7 +397,8 @@ describe('the GitHub tab lists', () => {
     stubFetch()
     renderAt('/github/issues/142')
     await screen.findByRole('heading', { name: 'GitHub' })
-    expect(ghList().className).toContain('hidden')
+    expect(ghList().className).not.toContain('max-md:max-h-64')
+    expect(ghList().className).not.toContain('hidden')
     expect(document.querySelector('[data-slot="gh-detail"]')?.className).toContain('flex')
   })
 
@@ -670,7 +680,7 @@ describe('the GitHub detail pane', () => {
     )
   })
 
-  it('shows authoritative merge state and requires confirmation before mutation', async () => {
+  it.each(['/github/prs/137', '/github/prs/137/changes'])('shows authoritative merge state and confirms the reviewed head on %s', async (route) => {
     const sent = stubFetch({
       'GET /api/v1/github/prs/137/merge-state': () => jsonResponse({
         available: true,
@@ -723,11 +733,11 @@ describe('the GitHub detail pane', () => {
         method: 'squash',
       }),
     })
-    renderAt('/github/prs/137')
+    renderAt(route)
 
     await waitFor(() => expect(document.querySelector('[data-slot="gh-merge-box"]')?.textContent).toContain('Ready to merge'))
     expect(document.querySelectorAll('[data-slot="gh-merge-status-passing"]')).toHaveLength(3)
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    fireEvent.click(within(document.querySelector('[data-slot="gh-merge-box"]')!).getByRole('button', { name: 'Refresh' }))
     await waitFor(() => expect(sent.some((request) => request.path.endsWith('merge-state?refresh=1'))).toBe(true))
     fireEvent.click(screen.getByRole('button', { name: 'Squash and merge' }))
     expect(sent.some((request) => request.method === 'POST')).toBe(false)
@@ -1522,7 +1532,7 @@ describe('the hand-to-agent agent account', () => {
     await openDetail()
 
     await waitFor(() => expect(document.querySelector('[data-slot="runner-pill"]')).not.toBeNull())
-    await pickPill('runner-pill', 'claude · Klaudiusz')
+    fireEvent.change(screen.getByRole('combobox', { name: 'Account' }), { target: { value: 'klaudiusz' } })
     await waitForAgentRunEnabled()
 
     fireEvent.click(screen.getByRole('button', { name: /Run agent on this issue/ }))
@@ -2267,6 +2277,11 @@ describe('the follow-up prompt template menu (#413)', () => {
       if (!option(id)) throw new Error(`template option "${id}" not mounted yet`)
     })
     await selectOption(id)
+    // Insertion restores the textarea caret on the next animation frame. Opening the
+    // next popover before that focus lands lets the old restoration dismiss it; an
+    // unmounted option alone does not prove that the second insertion happened.
+    await waitFor(() => expect(textarea().value).not.toBe(before))
+    await waitFor(() => expect(document.activeElement).toBe(textarea()))
   }
 
   it('an untouched ui-state shows the built-in templates, and inserting one fills the custom prompt', async () => {
@@ -2524,6 +2539,7 @@ describe('issue assignee and board controls', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Assigned to me' }))
     expect(rows().map(r => r.textContent).join()).toContain(ISSUE_142.title)
     expect(rows().map(r => r.textContent).join()).not.toContain(ISSUE_139.title)
+    expect(screen.queryByText('Project board')).toBeNull()
     fireEvent.change(screen.getByRole('combobox', { name: 'Project board' }), { target: { value: 'P1' } })
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search issues' }), { target: { value: 'no match' } })
     expect(rows()).toHaveLength(0)
@@ -2603,7 +2619,7 @@ it.each([[], undefined])('does not restore a stale board selection after refresh
   expect(rows()).toHaveLength(1)
   fireEvent.click(screen.getByTitle('Refresh from GitHub'))
   await waitFor(() => expect(rows()).toHaveLength(2))
-  expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Clear filters' }).hasAttribute('disabled')).toBe(true)
   await waitFor(() => expect((screen.getByTitle('Refresh from GitHub') as HTMLButtonElement).disabled).toBe(false))
   fireEvent.click(screen.getByTitle('Refresh from GitHub'))
   const picker = await screen.findByRole('combobox', { name: 'Project board' })
@@ -3226,4 +3242,42 @@ it('debounces to the settled query and never searches after clearing to a label-
   fireEvent.click(await screen.findByRole('option', { name: 'bug' }))
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)) })
   expect(sent.filter(r => r.path.includes('/github/search'))).toHaveLength(1)
+})
+
+
+it('places the editable handoff prompt before template and execution settings', async () => {
+  stubFetch()
+  await openDetail()
+  const prompt = screen.getByRole('textbox', { name: 'Custom prompt' })
+  const workflow = screen.getByRole('button', { name: 'Choose a workflow' })
+  expect(prompt.compareDocumentPosition(workflow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(screen.getByText('Instructions for the agent')).toBeTruthy()
+})
+
+
+it('keeps passing checks with unknown requirements blocked', async () => {
+  stubFetch({ 'GET /api/v1/github/prs/137/merge-state': () => jsonResponse({ available: true, mergeState: {
+    number: 137, title: PR_137.title, url: PR_137.url, state: 'open', isDraft: false,
+    headRef: 'feature', baseRef: 'main', headSha: '0123456789abcdef0123456789abcdef01234567',
+    mergeable: 'mergeable', reviewDecision: 'unknown', checks: [{ name: 'fixture-check', state: 'passing', required: null }],
+    methods: ['squash'], defaultMethod: 'squash', eligibility: 'unknown', blockers: [], canMerge: false, canOverride: true,
+  } }) })
+  renderAt('/github/prs/137')
+  await screen.findByText('Merge blocked · Requirements unknown')
+  expect(screen.getByRole('button', { name: 'Squash and merge' }).hasAttribute('disabled')).toBe(true)
+  expect((screen.getByRole('checkbox', { name: /Merge without waiting/ }) as HTMLInputElement).checked).toBe(false)
+  expect(screen.getByText(/fixture-check · passing · requiredness unknown/)).toBeTruthy()
+})
+
+
+it('lets a mobile detail preview reveal every issue without losing its selected item', async () => {
+  const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
+  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  renderAt('/github/issues/142')
+  const expand = await screen.findByRole('button', { name: 'View all 3 issues' })
+  expect(expand.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(expand)
+  expect(screen.getByRole('button', { name: 'Show fewer issues' }).getAttribute('aria-expanded')).toBe('true')
+  expect(rows()).toHaveLength(3)
+  expect(rows()[0]?.getAttribute('aria-current')).toBe('page')
 })

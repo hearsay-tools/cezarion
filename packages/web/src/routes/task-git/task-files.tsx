@@ -1,4 +1,7 @@
-import { FolderTreeIcon, TriangleAlertIcon } from 'lucide-react'
+import { FolderTreeIcon } from 'lucide-react'
+import { SearchIcon, TriangleAlertIcon } from '@/components/design-icons'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { useState } from 'react'
 import { useParams } from 'react-router'
 
@@ -36,6 +39,7 @@ function FilesView({ run }: { run: ApiRun }) {
   // server's answer for the whole view, same stance as the Changes tab's /changes 409.
   const root = useRunFile(run.id, '')
   const [selected, setSelected] = useState<string | null>(null)
+  const [filePath, setFilePath] = useState('')
 
   const refused = root.isError && root.error instanceof ApiError && root.error.status === 409
 
@@ -43,33 +47,53 @@ function FilesView({ run }: { run: ApiRun }) {
     <div data-route="task-files" className="flex min-h-full flex-col">
       <RunHeader run={run} tab="files" />
 
+      {root.isSuccess ? (
+        <form
+          className="flex min-w-0 gap-2 px-[18px] pt-[22px] md:px-9"
+          onSubmit={event => { event.preventDefault(); if (filePath.trim()) setSelected(filePath.trim()) }}
+        >
+          <label className="relative min-w-0 flex-1">
+          <SearchIcon size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
+          <Input
+            aria-label="File path in the worktree"
+            placeholder="Open a file by path…"
+            value={filePath}
+            onChange={event => setFilePath(event.target.value)}
+            className="h-11 min-w-0 bg-card pl-10"
+          />
+          </label>
+          <Button type="submit" variant="outline" className="h-11 shrink-0" disabled={!filePath.trim()}>Open file</Button>
+        </form>
+      ) : null}
       {root.isPending ? (
-        <p data-slot="files-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-6">
+        <p data-slot="files-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-9">
           Loading files…
         </p>
       ) : root.isError ? (
         <CenteredState
-          icon={refused ? <FolderTreeIcon /> : <TriangleAlertIcon />}
+          icon={refused ? <FolderTreeIcon /> : <TriangleAlertIcon size={16} />}
           tone={refused ? 'neutral' : 'danger'}
           heading="h2"
           title={refused ? 'No files to browse' : 'Could not load the files'}
           subtitle={root.error.message}
         />
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col items-stretch gap-5 px-4 py-4 [--diff-sticky-top:7rem] md:flex-row md:items-start md:px-6">
+        <div className="flex min-h-0 flex-col items-stretch gap-5 px-[18px] py-[22px] [--diff-sticky-top:1rem] md:flex-row md:items-start md:px-9">
           {/* Sticky beside a long preview on desktop, with its own scroller so a deep tree scrolls
               without dragging the preview along; first in the stack (and no scroller of its own) on
               phones, where the page IS the pane. The cap reads the same var the pin is set from, so
               the two cannot drift when this tab's chrome height changes. */}
           <aside
             data-slot="files-tree-pane"
-            className="w-full shrink-0 md:sticky md:top-[var(--diff-sticky-top)] md:max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)] md:w-60 md:overflow-y-auto md:overscroll-contain lg:w-72"
+            className="w-full shrink-0 rounded-xl border border-border bg-card p-3.5 md:sticky md:top-[var(--diff-sticky-top)] md:max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] md:w-60 md:overflow-y-auto md:overscroll-contain lg:w-72"
           >
+            <h2 className="sr-only">Worktree files</h2>
             <FilesTree runId={run.id} selected={selected} onSelect={setSelected} />
           </aside>
-          <FilePreview runId={run.id} path={selected} className="min-w-0 flex-1" />
+          <FilePreview runId={run.id} path={selected} className="min-h-[200px] min-w-0 flex-1 bg-card md:min-h-[400px]" />
         </div>
       )}
+      <p className="px-[18px] pb-6 text-xs text-muted-foreground md:px-9">Browsing files is read-only. Worktree contents may differ from your main checkout.</p>
     </div>
   )
 }

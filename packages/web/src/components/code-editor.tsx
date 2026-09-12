@@ -113,7 +113,7 @@ export function CodeEditor({ value, onChange, language, readOnly, className, ...
         className={cn(
           SURFACE,
           'relative block resize-none overflow-auto bg-transparent text-transparent caret-foreground outline-none',
-          'selection:bg-primary/30 focus-visible:ring-0',
+          'selection:bg-accent-strong/30 focus-visible:ring-0',
           readOnly && 'cursor-default',
         )}
         {...aria}

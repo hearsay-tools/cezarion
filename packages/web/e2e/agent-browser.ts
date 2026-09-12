@@ -232,6 +232,11 @@ export class AgentBrowser {
     this.run(['mouse', 'up'])
   }
 
+  /** Send trusted wheel input at the current pointer position. */
+  wheel(deltaY: number): void {
+    this.run(['mouse', 'wheel', String(deltaY)])
+  }
+
   /** Move a real pointer without clicking, for hover targets whose bounding-box center is covered. */
   moveTo(x: number, y: number): void {
     this.run(['mouse', 'move', String(Math.round(x)), String(Math.round(y))])

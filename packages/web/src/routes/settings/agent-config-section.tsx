@@ -70,11 +70,12 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
 
   const pickAgent = (id: Runner) => {
     setAgentId(id)
-    setSelectedId(null) // a file selection never survives an agent switch
+    setSelectedId(null)
   }
 
   return (
-    <div data-slot="agent-config" className="flex flex-col gap-4 p-4 md:p-6">
+    <div data-slot="agent-config" className="flex flex-col gap-5 p-4 md:p-6">
+      <p className="text-[13px] text-muted-foreground">Edit agent instructions and MCP configuration for this project.</p>
       {!listing.editable && (
         <div
           data-slot="agent-config-readonly"
@@ -85,7 +86,7 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
         </div>
       )}
 
-      <div data-slot="agent-config-agents" role="tablist" className="flex flex-wrap gap-1 rounded-md bg-muted/40 p-1">
+      <div data-slot="agent-config-agents" role="tablist" className="flex flex-wrap gap-1">
         {AGENT_DESCRIPTORS.map((d) => (
           <button
             key={d.id}
@@ -117,17 +118,11 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-        <nav data-slot="agent-config-nav" className="flex flex-col gap-5">
-          <AgentPane
-            agent={agent}
-            listing={listing}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-          />
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+        <nav data-slot="agent-config-nav" className="flex min-w-0 flex-col gap-5">
+          <AgentPane agent={agent} listing={listing} selectedId={selectedId} onSelect={setSelectedId} />
         </nav>
-
-        <div data-slot="agent-config-editor-pane">
+        <div data-slot="agent-config-editor-pane" className="min-w-0">
           {selected ? (
             <FileEditor key={selected.id} file={selected} />
           ) : (
@@ -174,7 +169,7 @@ function AgentPane({
                     onClick={() => onSelect(file.id)}
                     className={cn(
                       'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
-                      file.id === selectedId ? 'bg-primary/15 text-foreground' : 'hover:bg-muted/60',
+                      file.id === selectedId ? 'bg-accent-strong/15 text-foreground' : 'hover:bg-muted/60',
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{file.label}</span>
@@ -268,8 +263,10 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <div data-slot="settings-config-editor" className="flex flex-col gap-3">
+      <h3 className="text-sm">Configuration file</h3>
+      <p data-slot="agent-config-scope" title={file.path} className="text-[12px] text-muted-foreground break-words">{file.scope.charAt(0).toUpperCase() + file.scope.slice(1)} scope · {file.path}</p>
+      <div className="settings-readout flex flex-wrap items-center gap-2">
         <span className="font-mono text-[13px]">{file.label}</span>
         <Badge variant="outline" className="text-[10px] uppercase">
           {file.format}
@@ -284,13 +281,10 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
         </a>
       </div>
 
-      <p data-slot="agent-config-precedence" className="text-[12px] text-soft-foreground">
-        {file.precedence}
-      </p>
-      <p data-slot="agent-config-effect" className="text-[12px] text-foreground/80">
-        {effectLabel(file)}
-        {file.hotReload ? ` ${file.hotReload}` : ''}
-      </p>
+      <div className="settings-config-content-heading">
+        <h3>{file.kind === 'mcp' || file.holdsMcp ? 'MCP configuration' : 'File contents'}</h3>
+        {(file.kind === 'mcp' || file.holdsMcp) && <p>Review server commands before saving. MCP servers execute locally.</p>}
+      </div>
 
       {fileQuery.isPending ? (
         <p className="text-[13px] text-soft-foreground">Loading file…</p>
@@ -303,7 +297,7 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
           readOnly={!canWrite}
           onChange={setDraft}
           aria-label={`${file.label} contents`}
-          className="h-[26rem]"
+          className="h-[210px]"
         />
       )}
 
@@ -325,21 +319,32 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
       )}
 
       {canWrite && (
-        <div className="flex items-center gap-2">
+        <div className="settings-form-actions">
           <Button size="sm" onClick={save} disabled={!dirty || put.isPending}>
-            {file.exists ? 'Save' : 'Create'}
+            {file.exists ? 'Save file' : 'Create file'}
           </Button>
           <Button
             size="sm"
-            variant="ghost"
+            variant="outline"
             onClick={() => setDraft(null)}
             disabled={!dirty || put.isPending}
           >
-            Revert
+            Reset
           </Button>
           {dirty && <span className="text-[12px] text-soft-foreground">Unsaved changes</span>}
         </div>
       )}
+      <div className="settings-config-save-help">
+      <p data-slot="agent-config-precedence" className="text-[12px] text-soft-foreground">
+        {file.precedence}
+      </p>
+      <p data-slot="agent-config-effect" className="text-[12px] text-foreground/80">
+        {effectLabel(file)}
+        {file.hotReload ? ` ${file.hotReload}` : ''}
+      </p>
+
+        {file.readOnlyReason && <p>{file.readOnlyReason}</p>}
+      </div>
     </div>
   )
 }

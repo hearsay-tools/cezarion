@@ -50,7 +50,6 @@ const scoped = (projectId: string, path: string) => `/p/${projectId}${path}`
 function expectedNavHrefs(projectId: string): string[] {
   return [
     scoped(projectId, '/'),
-    ...(followupsAvailable ? [scoped(projectId, '/inbox')] : []),
     scoped(projectId, '/git'),
     ...(projectId === bootProject && forgeAvailable ? [scoped(projectId, '/github')] : []),
     // #801: the automations opt-in is workspace-wide, the forge gate is per project — the item
@@ -180,7 +179,9 @@ function setGroupExpanded(projectId: string, expanded: boolean): void {
   browser.waitForFunction(`${state} !== null && ${state} !== undefined`)
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (browser.evaluate(state) === String(expanded)) break
-    browser.click(header)
+    // The project name is a separate link over the header center; activate its toggle by keyboard.
+    browser.evaluate(`document.querySelector('${header}').focus()`)
+    browser.press('Enter')
     try {
       browser.waitForFunction(`${state} === '${expanded}'`)
       break
@@ -255,12 +256,18 @@ describe('the grouped multi-project sidebar', () => {
         .map((a) => new URL(a.href).pathname)`)
     ).toEqual([scoped(bootProject, '/git')])
 
-    // Each group's door into its own tasks pane.
-    expect(
-      browser.evaluate(
-        `new URL(document.querySelector('${groupBody(ALPHA.id)} [data-slot="project-group-more"]').href).pathname`
-      )
-    ).toBe(scoped(ALPHA.id, '/'))
+    // The inactive project's name opens its scoped tasks. Entering Alpha lights its Git
+    // row and collapses the boot group (no stored pin), so only Alpha claims the URL.
+    browser.click(`${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/')}"]`)
+    browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/')}'`)
+    browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav') !== null`)
+    expect(hrefs(ALPHA.id)).toEqual(expectedNavHrefs(ALPHA.id))
+    expect(hrefs(bootProject)).toEqual([])
+    browser.click(`${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/git')}"]`)
+    browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/git')}'`)
+    browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/git')}"]')?.getAttribute('aria-current') === 'page'`)
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="project-groups"] a[aria-current="page"]')].map(a => new URL(a.href).pathname)`)).toEqual([scoped(ALPHA.id, '/git')])
+
   })
 
   it('persists a collapse in THIS browser, so a reload keeps it and the workspace file does not', async ({

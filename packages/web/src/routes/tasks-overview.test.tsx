@@ -40,7 +40,7 @@ function LocationProbe() {
   return <output data-testid="location">{pathname}</output>
 }
 
-function renderOverview(props: Partial<ComponentProps<typeof TasksOverview>> = {}) {
+function renderOverview(props: Partial<ComponentProps<typeof TasksOverview>> = {}, detailed = true) {
   const onViewChange = props.onViewChange ?? vi.fn()
   const onArchiveFinished = props.onArchiveFinished ?? vi.fn()
   const onMarkAllRead = props.onMarkAllRead ?? vi.fn()
@@ -70,6 +70,7 @@ function renderOverview(props: Partial<ComponentProps<typeof TasksOverview>> = {
       </Routes>
     </MemoryRouter>
   )
+  if (detailed) { fireEvent.click(screen.getByRole("button", { name: "Columns" })); fireEvent.click(screen.getByRole("button", { name: "Resource columns" })); fireEvent.keyDown(document.activeElement!, { key: "Escape" }) }
   return { ...utils, onViewChange, onArchiveFinished, onMarkAllRead, onRename }
 }
 
@@ -478,7 +479,10 @@ describe('TasksOverview — the table', () => {
     )
     expect(allHeaders.filter((header) => header === 'IN / OUT' || header === 'Cost')).toEqual(headers)
     const rowText = tableRow('visibility')?.textContent ?? ''
-    const cardText = card('visibility')?.textContent ?? ''
+    const mobile = card('visibility') as HTMLElement
+    expect(mobile.textContent).not.toContain('184.7k')
+    fireEvent.click(within(mobile).getByRole('button', { name: 'Show resources' }))
+    const cardText = mobile.textContent ?? ''
     expect(rowText.includes('184.7k / 2.4k')).toBe(tokens)
     expect(cardText.includes('IN 184.7k · OUT 2.4k')).toBe(tokens)
     expect(rowText.includes('$0.31')).toBe(cost)
@@ -805,8 +809,8 @@ describe('TasksOverview — header', () => {
     })
     const active = screen.getByRole('button', { name: /^Active/ })
     const archived = screen.getByRole('button', { name: /^Archived/ })
-    expect(active.textContent).toBe('Active2')
-    expect(archived.textContent).toBe('Archived1')
+    expect(active.textContent).toBe('Active · 2')
+    expect(archived.textContent).toBe('Archived · 1')
     expect(active.getAttribute('aria-pressed')).toBe('true')
 
     fireEvent.click(archived)
@@ -850,7 +854,7 @@ describe('TasksOverview — header', () => {
     const unreadDot = (id: string) =>
       tableRow(id)?.querySelector('[data-slot="status-dot"][aria-label="unread"]')
     expect(unreadDot('unread')).not.toBeNull()
-    expect(unreadDot('unread')?.getAttribute('data-tone')).toBe('violet')
+    expect(unreadDot('unread')?.getAttribute('data-tone')).toBe('accent')
     expect(unreadDot('read')).toBeNull()
     expect(unreadDot('cancelled')).toBeNull()
   })
@@ -899,7 +903,7 @@ describe('TasksOverview — empty and loading states', () => {
     expect(document.querySelector('[data-slot="tasks-empty"]')).toBeNull()
     expect(document.querySelector('[data-slot="tasks-table"]')).toBeNull()
     // The header is still there: the surface exists, only its data is pending.
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Tasks')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Project tasks')
   })
 
   it('celebrates no-tasks-yet: primary tone, the twinkle backdrop, a New-task action', () => {
@@ -952,6 +956,7 @@ describe('TasksOverview — mobile cards and FAB', () => {
     expect(tableRow('folded-mobile')?.querySelector('td[data-column-id="workflow"]')?.textContent).toBe('')
     expect(tableRow('folded-mobile')?.querySelector('td[data-column-id="branch"]')?.textContent).toBe('')
     expect(card('folded-mobile')?.textContent).toContain('autofix')
+    fireEvent.click(within(card('folded-mobile') as HTMLElement).getByRole('button', { name: 'Show resources' }))
     expect(card('folded-mobile')?.textContent).toContain('feat/mobile-stays')
   })
 
@@ -1000,12 +1005,14 @@ describe('TasksOverview — mobile cards and FAB', () => {
       '/tasks/c1'
     )
     expect(c.textContent).toContain('feat')
+    expect(c.textContent).not.toContain('cez/8f31ab02')
+    fireEvent.click(within(c).getByRole('button', { name: 'Show resources' }))
     expect(c.textContent).toContain('cez/8f31ab02')
     // The meta row carries the diff pair, like the mockup card (branch · ± · tokens).
     expect(c.querySelector('[data-slot="diff-stat"]')?.textContent).toBe('+128 −14')
     expect(c.textContent).toContain('IN 184.7k · OUT 2.4k')
     expect(c.textContent).toContain('$0.31')
-    expect(c.textContent).toContain('12m')
+    expect(c.textContent).toContain('40m') // Started age, matching the desktop summary.
     expect(c.querySelector('[data-slot="pr-chip"]')?.getAttribute('href')).toBe('https://github.com/o/r/pull/402')
   })
 
@@ -1023,6 +1030,7 @@ describe('TasksOverview — mobile cards and FAB', () => {
       ],
     })
     const hidden = card('hidden-card') as HTMLElement
+    fireEvent.click(within(hidden).getByRole('button', { name: 'Show resources' }))
     expect(hidden.textContent).not.toContain('184.7k')
     expect(hidden.textContent).toContain('cez/hidden')
     expect(hidden.querySelector('[data-slot="diff-stat"]')?.textContent).toBe('+2 −1')
@@ -1190,6 +1198,9 @@ describe('TasksOverviewRoute — wired to the app', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
+    fireEvent.click(await screen.findByRole('button', { name: 'Columns' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
     const restore = await screen.findByRole('button', { name: 'Expand Branch column', pressed: false })
     restore.focus()
     fireEvent.click(restore)
@@ -1220,6 +1231,9 @@ describe('TasksOverviewRoute — wired to the app', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
+    fireEvent.click(await screen.findByRole('button', { name: 'Columns' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
     expect(await screen.findByRole('button', { name: 'Fold Branch column', pressed: true })).not.toBeNull()
   })
 
@@ -1256,6 +1270,9 @@ describe('TasksOverviewRoute — wired to the app', () => {
     renderApp([run({ id: 'rn1', title: 'Old name', status: 'done' })])
     await waitFor(() => expect(tableRow('rn1')).not.toBeNull())
 
+    fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
     fireEvent.click(within(tableRow('rn1') as HTMLElement).getByRole('button', { name: 'Rename task' }))
     const input = within(tableRow('rn1') as HTMLElement).getByLabelText('Task title')
     fireEvent.change(input, { target: { value: 'New name' } })
@@ -1281,4 +1298,67 @@ it('identifies owned worker rows without nested links or changing ordinary title
     expect(element?.querySelector('a a')).toBeNull()
   }
   expect(screen.getAllByRole('link', { name: /Ordinary/ }).length).toBeGreaterThan(0)
+})
+
+
+describe('design frame 4 task summary', () => {
+  it('starts with five summary columns and reveals live resource facts without navigation', () => {
+    renderOverview({ runs: [run({ id: 'summary', title: 'Review layout', inputTokens: 123, outputTokens: 45, costUsd: 0.2, peakRssBytes: 1024 ** 3 })] }, false)
+    const summary = document.querySelector('[data-slot="tasks-summary"]') as HTMLElement
+    expect([...summary.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Task', 'Workflow', 'Changes', 'Pull request', 'Started'])
+    expect(document.querySelector('[data-slot="tasks-table"]')?.hasAttribute('hidden')).toBe(true)
+    const toggle = within(summary).getByRole('button', { name: 'Show resources for Review layout' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(within(summary).getByText('Tokens in / out')).toBeTruthy()
+    expect(within(summary).getByText('Memory')).toBeTruthy()
+    expect(location()).toBe('/')
+    fireEvent.click(toggle)
+    expect(within(summary).queryByText('Memory')).toBeNull()
+  })
+  it('withholds capability-hidden tokens and cost in expanded resources', () => {
+    renderOverview({ runs: [run({ title: 'Private metrics' })], showTokens: false, showCost: false }, false)
+    fireEvent.click(screen.getByRole('button', { name: 'Show resources for Private metrics' }))
+    const summary = document.querySelector('[data-slot="tasks-summary"]') as HTMLElement
+    expect(within(summary).queryByText('Tokens in / out')).toBeNull()
+    expect(within(summary).queryByText('Cost')).toBeNull()
+    expect(within(summary).getByText('CPU')).toBeTruthy()
+  })
+})
+
+it('opens the full resource table and exposes saved column choices', () => {
+  renderOverview({ runs: [run({ id: 'default-resources' })] })
+  expect(document.querySelector('[data-slot="tasks-table"]')?.hasAttribute('hidden')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+  expect(screen.getByRole('checkbox', { name: 'Branch' })).not.toBeNull()
+})
+it('expands real mobile resource facts without opening a task', () => {
+  renderOverview({ runs: [run({ id: 'mobile-resource', title: 'Mobile resource', peakRssBytes: 1024 ** 3 })] })
+  const mobile = card('mobile-resource') as HTMLElement
+  fireEvent.click(within(mobile).getByRole('button', { name: 'Show resources' }))
+  expect(within(mobile).getByText('Memory')).not.toBeNull()
+  expect(location()).toBe('/')
+})
+
+it('keeps the task header visible and retries a failed task list', () => {
+  const onRetry = vi.fn()
+  renderOverview({ runs: undefined, error: 'Task list unavailable', onRetry })
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Project tasks')
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(onRetry).toHaveBeenCalledOnce()
+})
+
+it('offers explicit save and cancel for an inline table rename', () => {
+  const { onRename } = renderOverview({ runs: [run({ id: 'buttons', title: 'Original' })] })
+  const row = tableRow('buttons') as HTMLElement
+  fireEvent.click(within(row).getByRole('button', { name: 'Rename task' }))
+  fireEvent.change(within(row).getByLabelText('Task title'), { target: { value: 'Discard this' } })
+  fireEvent.mouseDown(within(row).getByRole('button', { name: 'Cancel rename' }))
+  fireEvent.click(within(row).getByRole('button', { name: 'Cancel rename' }))
+  expect(onRename).not.toHaveBeenCalled()
+  fireEvent.click(within(row).getByRole('button', { name: 'Rename task' }))
+  fireEvent.change(within(row).getByLabelText('Task title'), { target: { value: 'Saved title' } })
+  fireEvent.click(within(row).getByRole('button', { name: 'Save title' }))
+  expect(onRename).toHaveBeenCalledWith('buttons', 'Saved title')
 })

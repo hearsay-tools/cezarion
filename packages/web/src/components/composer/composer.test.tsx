@@ -664,6 +664,13 @@ describe('host seams (R4: the /new hero)', () => {
     expect(screen.queryByLabelText('Send')).toBeNull()
   })
 
+  it('waits for a wide desktop before placing execution options beside the editor', () => {
+    renderComposer({ executionOptions: <div>execution settings</div> })
+    const composer = document.querySelector('[data-slot="composer"]') as HTMLElement
+    expect(composer.className).toContain('new-task-composer')
+    expect(composer.className).not.toContain('md:grid-cols-[minmax(0,1fr)_330px]')
+  })
+
   it('autoFocus puts the caret in the textarea on mount (⌘N lands ready to type)', () => {
     const { textarea } = renderComposer({ autoFocus: true })
     expect(document.activeElement).toBe(textarea)
@@ -942,4 +949,24 @@ it('retains an attachment already being read when Stop is requested (#201)', asy
   await act(async () => read(new ArrayBuffer(1)))
   await act(async () => reject(new Error('Stop failed')))
   expect(screen.getByRole('button', { name: 'Remove late.png' })).toBeTruthy()
+})
+
+
+describe('session control layout', () => {
+  it('labels the send action after typing and exposes both session control rows', async () => {
+    const { textarea, onSubmit } = renderComposer({
+      sessionControls: <button>Runner setting</button>,
+      sessionModel: <button>Model setting</button>,
+      allowEmptySubmit: true,
+      emptySubmitLabel: 'Continue',
+    })
+    type(textarea, 'Follow up')
+    const submit = screen.getByRole('button', { name: 'Send' })
+    expect(submit.textContent).toBe('Send')
+    expect(screen.getByRole('button', { name: 'Runner setting' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Model setting' })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Expand composer' })).toBeNull()
+    fireEvent.click(submit)
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('Follow up', []))
+  })
 })

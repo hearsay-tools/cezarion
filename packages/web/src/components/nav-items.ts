@@ -1,12 +1,5 @@
-import {
-  GitBranchIcon,
-  InboxIcon,
-  ListChecksIcon,
-  SettingsIcon,
-  SparklesIcon,
-  WorkflowIcon,
-  ZapIcon,
-} from 'lucide-react'
+import { GitBranchIcon, InboxIcon, SettingsIcon, SparklesIcon, WorkflowIcon, ZapIcon } from '@/components/design-icons'
+import { ListTodoIcon } from '@/components/design-icons'
 import type { ComponentType, SVGProps } from 'react'
 
 import { GithubIcon } from '@/components/icons'
@@ -41,7 +34,7 @@ export type NavItem = {
  *  compare (`/compare/:groupId`) is open.
  */
 export const NAV_ITEMS: NavItem[] = [
-  { to: '/', label: 'Tasks', icon: ListChecksIcon, match: ['/', '/tasks', '/compare'], badge: 'tasks-unread' },
+  { to: '/', label: 'Tasks', icon: ListTodoIcon, match: ['/', '/tasks', '/compare'], badge: 'tasks-unread' },
   { to: '/inbox', label: 'Inbox', icon: InboxIcon, match: ['/inbox'], badge: 'inbox-count', inbox: true },
   { to: '/git', label: 'Git', icon: GitBranchIcon, match: ['/git'] },
   { to: '/github', label: 'GitHub', icon: GithubIcon, match: ['/github'], forge: true },
