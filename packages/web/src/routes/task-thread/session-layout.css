@@ -69,3 +69,11 @@
 [data-route='task-thread'] [data-slot='thread-footer'][data-state='closed'] { margin-top: 0; border-top: 0; padding-top: 0; font-size: 10px; }
 [data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> :is(strong, [data-streamdown="strong"]):only-child) { margin-bottom: calc(var(--spacing) * 1); }
 [data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> :is(strong, [data-streamdown="strong"]):only-child) + p { margin-top: calc(var(--spacing) * 1); }
+
+/* Expanded activity cards, source3A–3D: one surface with10/12px insets. */
+[data-route='task-thread'] [data-slot='tool-card'] { border-radius: 7px; background: var(--task-brand-bg); }
+[data-route='task-thread'] [data-slot='tool-card'] > button { padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3); }
+[data-route='task-thread'] [data-slot='tool-card'] > div { background: transparent; border-top: 0; }
+[data-route='task-thread'] [data-slot='tool-output'] pre,
+[data-route='task-thread'] [data-slot='tool-error'] { padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 2.5); }
+[data-route='task-thread'] [data-slot='tool-output-fade'] { --tw-gradient-to: var(--task-brand-bg); }
