@@ -215,85 +215,6 @@ function AgentsForm({
           placeholder="Extra rules for every agent run — conventions, tone, review requirements…"
           className="min-h-48 w-full"
         />
-
-      </Field>
-
-      <Field
-        toggle
-        title="Live title updates"
-        hint="Refresh a task's short title through the namer model as the run progresses. A manual rename always wins and stops updates for that task."
-      >
-        <label className="flex w-fit items-center gap-3">
-          <Switch
-            aria-label="Live title updates"
-            data-slot="agents-live-title-updates"
-            checked={config.liveTitleUpdates ?? true}
-            disabled={save.isPending}
-            onCheckedChange={(checked) =>
-              save.mutate(
-                { liveTitleUpdates: checked },
-                { onSuccess: () => toast(checked ? 'Live title updates on' : 'Live title updates off') },
-              )
-            }
-          />
-          <span className="text-[13px] text-muted-foreground">
-            {(config.liveTitleUpdates ?? true) ? 'On' : 'Off'}
-            {config.liveTitleUpdates === null && ' (default)'}
-          </span>
-        </label>
-      </Field>
-
-      <Field
-        toggle
-        title="Review changes before finishing"
-        hint="When on, a task with changes pauses so you can Accept, Send back, or open a Draft PR. Autonomous tasks always skip this and finish on their own. Default: off — tasks finish without asking."
-      >
-        <label className="flex w-fit items-center gap-3">
-          <Switch
-            aria-label="Review changes before finishing"
-            data-slot="agents-review-gate"
-            checked={config.reviewGate ?? false}
-            disabled={save.isPending}
-            onCheckedChange={(checked) =>
-              save.mutate(
-                { reviewGate: checked },
-                { onSuccess: () => toast(checked ? 'Review gate on' : 'Review gate off') },
-              )
-            }
-          />
-          <span className="text-[13px] text-muted-foreground">
-            {(config.reviewGate ?? false) ? 'On' : 'Off'}
-            {config.reviewGate === null && ' (default)'}
-          </span>
-        </label>
-      </Field>
-
-      <Field
-        title="Base branch"
-        hint="New task worktrees branch from this and draft PRs target it. Also settable from the Git view."
-      >
-        {repo.data?.info ? (
-          <select
-            aria-label="Base branch"
-            data-slot="agents-base-branch"
-            value={config.baseBranch ?? ''}
-            disabled={save.isPending}
-            onChange={(event) => save.mutate({ baseBranch: event.target.value || null })}
-            className="block w-full max-w-md rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
-          >
-            <option value="">follow checked-out branch (default)</option>
-            {repo.data.branches.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <p data-slot="agents-base-branch-unavailable" className="text-[13px] text-soft-foreground">
-            {repo.isPending ? 'Loading branches…' : 'Not a git repository — tasks run in place, no branching.'}
-          </p>
-        )}
-      </Field>
         <div className="settings-form-actions">
           <Button
             type="button"
@@ -316,6 +237,83 @@ function AgentsForm({
             </p>
           )}
         </div>
+      </Field>
+
+      <section data-slot="agents-task-runs" className="settings-field flex flex-col gap-5">
+        <h2 className="text-sm font-semibold text-foreground">Task runs</h2>
+        <OptionRow
+          title="Live title updates"
+          hint="Refresh a task's short title through the namer model as the run progresses. A manual rename always wins and stops updates for that task."
+        >
+          <label className="flex w-fit items-center gap-3">
+            <Switch
+              aria-label="Live title updates"
+              data-slot="agents-live-title-updates"
+              checked={config.liveTitleUpdates ?? true}
+              disabled={save.isPending}
+              onCheckedChange={(checked) =>
+                save.mutate(
+                  { liveTitleUpdates: checked },
+                  { onSuccess: () => toast(checked ? 'Live title updates on' : 'Live title updates off') },
+                )
+              }
+            />
+            <span className="text-[13px] text-muted-foreground">
+              {(config.liveTitleUpdates ?? true) ? 'On' : 'Off'}
+              {config.liveTitleUpdates === null && ' (default)'}
+            </span>
+          </label>
+        </OptionRow>
+        <OptionRow
+          title="Review changes before finishing"
+          hint="When on, a task with changes pauses so you can Accept, Send back, or open a Draft PR. Autonomous tasks always skip this and finish on their own. Default: off — tasks finish without asking."
+        >
+          <label className="flex w-fit items-center gap-3">
+            <Switch
+              aria-label="Review changes before finishing"
+              data-slot="agents-review-gate"
+              checked={config.reviewGate ?? false}
+              disabled={save.isPending}
+              onCheckedChange={(checked) =>
+                save.mutate(
+                  { reviewGate: checked },
+                  { onSuccess: () => toast(checked ? 'Review gate on' : 'Review gate off') },
+                )
+              }
+            />
+            <span className="text-[13px] text-muted-foreground">
+              {(config.reviewGate ?? false) ? 'On' : 'Off'}
+              {config.reviewGate === null && ' (default)'}
+            </span>
+          </label>
+        </OptionRow>
+        <OptionRow
+          title="Base branch"
+          hint="New task worktrees branch from this and draft PRs target it. Also settable from the Git view."
+        >
+          {repo.data?.info ? (
+            <select
+              aria-label="Base branch"
+              data-slot="agents-base-branch"
+              value={config.baseBranch ?? ''}
+              disabled={save.isPending}
+              onChange={(event) => save.mutate({ baseBranch: event.target.value || null })}
+              className="block rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
+            >
+              <option value="">follow checked-out branch (default)</option>
+              {repo.data.branches.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p data-slot="agents-base-branch-unavailable" className="text-[13px] text-soft-foreground">
+              {repo.isPending ? 'Loading branches…' : 'Not a git repository — tasks run in place, no branching.'}
+            </p>
+          )}
+        </OptionRow>
+      </section>
       <details className="settings-disclosure">
         <summary>Provider connections</summary>
         <ProviderSettings />
@@ -417,12 +415,24 @@ function DefaultAgentField({
 }
 
 /** The Appearance section's field chassis — same rhythm, so Settings reads as one surface. */
-function Field({ title, hint, children, toggle = false }: { title: string; hint: string; children: ReactNode; toggle?: boolean }) {
+function Field({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
   return (
-    <section className={toggle ? "settings-toggle-field" : "settings-field flex flex-col gap-2"}>
+    <section className="settings-field flex flex-col gap-2">
       <div>
-        <h2 className="text-sm font-semibold text-foreground" title={toggle ? hint : undefined}>{title}</h2>
-        {!toggle && <p className="text-[13px] text-muted-foreground">{hint}</p>}
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        <p className="text-[13px] text-muted-foreground">{hint}</p>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function OptionRow({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+  return (
+    <section className="settings-option-row">
+      <div>
+        <h3>{title}</h3>
+        <p>{hint}</p>
       </div>
       {children}
     </section>

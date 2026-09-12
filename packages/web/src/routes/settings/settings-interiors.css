@@ -90,11 +90,15 @@
 .settings-panel [data-slot=agents-section] { gap: 20px; }
 .settings-panel [data-slot=agents-section] .settings-field + .settings-field { padding-top: 20px; }
 .settings-panel [data-slot=agents-system-prompt] { min-height: 192px; }
-.settings-panel .settings-toggle-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
-.settings-panel .settings-toggle-field h2 { font-size: 13px; font-weight: 400; }
-.settings-panel .settings-toggle-field + .settings-toggle-field { margin-top: -8px; }
-.settings-panel .settings-toggle-field label > span { display: none; }
-.settings-panel .settings-toggle-field label { flex-shrink: 0; }
+.settings-panel [data-slot=agents-task-runs] { gap: 20px; }
+.settings-panel [data-slot=agents-task-runs] > h2 { font-size: 14px; font-weight: 400; }
+.settings-panel .settings-option-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.settings-panel .settings-option-row > div:first-child { min-width: 0; flex: 1; }
+.settings-panel .settings-option-row h3 { font-size: 14px; font-weight: 400; }
+.settings-panel .settings-option-row p { margin-top: 8px; line-height: 1.6; }
+.settings-panel .settings-option-row label { flex-shrink: 0; }
+.settings-panel .settings-option-row label > span { display: none; }
+.settings-panel .settings-option-row select { width: auto; min-width: 12rem; max-width: 16rem; }
 .settings-panel .settings-form-actions { display: flex; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--border); padding-top: 20px; }
 .settings-panel [data-slot=accounts-tabs] { gap: 8px; }
 .settings-panel [data-slot=accounts-tabs] button { border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; }

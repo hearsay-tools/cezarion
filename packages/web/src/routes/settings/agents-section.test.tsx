@@ -534,6 +534,24 @@ describe('the agents form', () => {
     expect(puts()).toHaveLength(0)
   })
 
+  it('keeps Save prompt under the textarea and groups the run options with descriptions', async () => {
+    serve()
+    renderAt('/settings/agents')
+    await waitFor(() => expect(form()).not.toBeNull())
+    const prompt = screen.getByLabelText('System prompt')
+    const save = document.querySelector('[data-action="agents-save-prompt"]')!
+    const live = screen.getByLabelText('Live title updates')
+    expect(prompt.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(save.compareDocumentPosition(live) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText(/Refresh a task's short title/)).toBeTruthy()
+    expect(screen.getByText(/a task with changes pauses/)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Task runs' })).toBeTruthy()
+    const group = document.querySelector('[data-slot="agents-task-runs"]')!
+    expect(group.contains(live)).toBe(true)
+    expect(group.contains(screen.getByLabelText('Review changes before finishing'))).toBe(true)
+    expect(group.contains(screen.getByRole('heading', { name: 'Base branch' }))).toBe(true)
+  })
+
   it('base branch round-trips through the same PUT — "" means follow the checked-out branch', async () => {
     serve({ config: { baseBranch: 'develop' } })
     renderAt('/settings/agents')
