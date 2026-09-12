@@ -1,0 +1,40 @@
+{
+  "sourceSha256": "56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8",
+  "source": "cezarion.pen,193 top-level entries; parent commit ac3f4a89",
+  "captureCount": 44,
+  "captures": "captures.json",
+  "browserBehaviorChecks": "behaviors.json",
+  "visualAcceptance": false,
+  "status": "Owned tab accent and measurable conversation/card layout corrections implemented and verified. Existing history/metadata, grouped tools and actual content remain; no full-frame identity claimed.",
+  "codeCommits": [
+    "abb316cf",
+    "34d9d4f6",
+    "ef2841f1",
+    "452c0f58",
+    "37d501a0"
+  ],
+  "builds": {
+    "ee8a9a06b20196b1dbb8b70f1fc1acbb9ed97bf4d72585e7653cc97320e10481": "ef2841f1",
+    "0cb05d96b9259482c90ffe01b62d527618f28cce311d0c16b966215c4ce44027": "37d501a0"
+  },
+  "inspectionDate": "2026-09-12T12:09:34.144655+00:00",
+  "regression": {
+    "trigger": "Jump to latest refreshes paged history and remounts the transcript",
+    "before": "Saved away-from-tail offset wins; browser remains at top",
+    "after": "Tail intent saved before refresh; replacement follows tail",
+    "commit": "824369e0",
+    "red": "New remount test failed120vs600;10 existing tests passed",
+    "green": "39 scroll/history tests;955 focused route/composer tests; actual built-browser jump passes"
+  },
+  "blocker": null,
+  "geometry": "geometry.json",
+  "toolGeometry": "tool-geometry.json",
+  "validation": {
+    "routeHeaderScrollTranscriptTests": 134,
+    "toolItemTests": 36,
+    "actualBrowserChecks": 7,
+    "computedGeometryStates": 12,
+    "webBuild": "pass"
+  },
+  "unchangedStates": "34 new-task and picker states remain in ../final-controls/index.html from37880e87; these route-scoped changes do not affect them."
+}
