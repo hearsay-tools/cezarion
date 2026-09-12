@@ -1,4 +1,4 @@
-import { SettingsIcon } from 'lucide-react'
+import { SettingsIcon } from '@/components/design-icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router'
 
