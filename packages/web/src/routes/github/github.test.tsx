@@ -1678,10 +1678,17 @@ describe('the hand-to-agent pickers (#385)', () => {
     stubFetch()
     await openDetail()
 
-    fireEvent.click(document.querySelector('[data-slot="gh-workflow-trigger"]')!)
+    const trigger = document.querySelector('[data-slot="gh-workflow-trigger"]')!
+    const touch = new Event('pointerdown', { bubbles: true })
+    Object.defineProperty(touch, 'pointerType', { value: 'touch' })
+    fireEvent(trigger, touch)
+    fireEvent.click(trigger)
     await waitFor(() =>
       expect(document.querySelectorAll('[data-slot="gh-workflow-option"]')).toHaveLength(2),
     )
+
+    const search = screen.getByPlaceholderText('search workflows…')
+    expect(document.activeElement).toBe(search.closest('[data-slot="popover-content"]'))
 
     // cmdk filtering: a query narrows the list.
     fireEvent.change(screen.getByPlaceholderText('search workflows…'), { target: { value: 'ship' } })
