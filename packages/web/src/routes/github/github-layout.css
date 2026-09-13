@@ -14,7 +14,7 @@
 .gh-engine-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
 .gh-engine-fields > button { position: relative; height: 44px; width: 100%; margin-top: 21px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 0 12px; color: var(--foreground); font-size: 12px; }
 .gh-engine-fields > button::before { position: absolute; bottom: calc(100% + 6px); left: 0; color: var(--muted-foreground); font-size: 11px; font-weight: normal; }
-.gh-engine-fields [data-slot='model-pill'] { grid-column: 1 / -1; grid-row: 1; border: 0; background: transparent; }
+.gh-engine-fields [data-slot='model-pill'] { grid-column: 1 / -1; grid-row: 1; }
 .gh-engine-fields [data-slot='model-pill']::before { content: 'Model'; }
 .gh-engine-fields [data-slot='runner-pill'] { grid-column: 1; grid-row: 2; margin-top: 0; }
 .gh-engine-fields [data-slot='runner-pill']::before { content: 'Runner'; position: static; margin-right: 4px; }
@@ -77,10 +77,13 @@
 [data-slot='gh-row'] > span:nth-child(2) { font-family: inherit; font-size: 11px; }
 [data-slot='gh-detail-inner'] { padding: 24px; }
 [data-slot='gh-hand'] { border-color: color-mix(in srgb, var(--accent-strong) 24%, var(--border)); }
-.gh-prompt-field { gap: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 16px; }
-.gh-prompt-field [data-slot='gh-custom-prompt'] { min-height: 96px; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
-.gh-engine-fields [data-slot='model-pill'] { margin-top: 0; justify-content: flex-start; padding-left: 0; }
-.gh-engine-fields [data-slot='model-pill']::before { content: none; }
+.gh-prompt-field { gap: 8px; }
+.gh-prompt-field [data-slot='gh-custom-prompt'] { min-height: 96px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.gh-engine-fields [data-slot='model-pill'] { margin-top: 0; justify-content: flex-start; }
+.gh-engine-fields [data-slot='model-pill']::before { content: 'Model'; position: static; margin-right: 4px; }
+@media (min-width: 768px) {
+  .gh-engine-fields [data-slot='model-pill']::before { content: none; }
+}
 .gh-field [data-slot='gh-workflow-trigger'] { font-family: inherit; font-weight: 400; }
 .gh-field [data-slot='gh-workflow-trigger'] > svg:first-child { display: none; }
 .gh-field [data-slot='gh-workflow-trigger'] > svg:last-child { order: -1; margin-left: 0; }
