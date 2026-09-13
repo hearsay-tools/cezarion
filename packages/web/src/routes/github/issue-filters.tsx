@@ -49,7 +49,11 @@ export function IssueFilters({ data, assignees, projectId, onAssigneesChange, on
           <option value="">All boards</option>
           {data.projects.map(board => <option key={board.id} value={board.id}>{board.title}</option>)}
         </select>
-      ) : <p className="w-full text-xs text-muted-foreground">{data.projectsReason ?? (data.projects ? 'No linked project boards.' : 'Project boards unavailable.')}</p>}
+      ) : data.projects ? (
+        <select aria-label="Project board" className={control} disabled value="">
+          <option value="">No boards</option>
+        </select>
+      ) : <p className="w-full text-xs text-muted-foreground">{data.projectsReason ?? 'Project boards unavailable.'}</p>}
     </div>
   )
 }
