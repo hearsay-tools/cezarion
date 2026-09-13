@@ -103,6 +103,12 @@ export class PiRunner implements AgentRunner {
     const toolCalls: AgentToolCallRecord[] = [];
     let sessionId = spec.sessionId;
     let tokensUsed = 0;
+    let latchedProviderError: string | undefined;
+    const emitLatchedProviderError = (): void => {
+      if (!latchedProviderError) return;
+      onEvent?.({ type: 'error', message: latchedProviderError });
+      latchedProviderError = undefined;
+    };
     let spawnError: Error | null = null;
     const stderr: string[] = [];
 
@@ -287,7 +293,9 @@ export class PiRunner implements AgentRunner {
               if (usage.cost > 0) onEvent?.({ type: 'cost', usd: usage.cost });
             }
             if (string(value.message.stopReason) === 'error') {
-              onEvent?.({ type: 'error', message: piProviderErrorMessage(value.message) });
+              latchedProviderError = piProviderErrorMessage(value.message);
+            } else {
+              latchedProviderError = undefined;
             }
           } else if (value.type === 'tool_execution_start') {
             flushText();
@@ -310,6 +318,7 @@ export class PiRunner implements AgentRunner {
             }
           } else if (value.type === 'agent_settled') {
             flushText();
+            emitLatchedProviderError();
             pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
             agentInputReady = true;
             onEvent?.({ type: 'turn-end' });
@@ -327,6 +336,7 @@ export class PiRunner implements AgentRunner {
       }
 
       flushText();
+      emitLatchedProviderError();
       const exitCode = await waitForExit(child);
       if (spawnError) throw spawnError;
       if (timedOut) {
