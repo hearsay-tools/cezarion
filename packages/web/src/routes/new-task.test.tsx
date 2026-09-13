@@ -758,6 +758,80 @@ describe('picker data flows', () => {
   })
 })
 
+// #163: use the actual Radix/cmdk focus path, including a dismissed keyboard whose
+// input still owns DOM focus. jsdom cannot display a software keyboard.
+describe('skill picker touch focus', () => {
+  function pointer(target: Element, type: string, pointerType: string) {
+    const event = new Event(type, { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'pointerType', { value: pointerType })
+    fireEvent(target, event)
+    return event
+  }
+
+  it('opens from touch without focusing search, then allows explicit search focus', async () => {
+    serve()
+    renderNewTask()
+    await pillReady()
+    pointer(sourcePill(), 'pointerdown', 'touch')
+    fireEvent.click(sourcePill())
+    const input = await screen.findByPlaceholderText('search skills & workflows…')
+    expect(document.activeElement).not.toBe(input)
+    expect(document.activeElement).toBe(input.closest('[data-slot="popover-content"]'))
+    act(() => input.focus())
+    expect(document.activeElement).toBe(input)
+    fireEvent.change(input, { target: { value: 'deploy' } })
+    expect(document.querySelectorAll('[data-slot="source-option"]')).toHaveLength(1)
+    expect(document.querySelector('[data-slot="source-option"]')?.getAttribute('data-source-ref')).toBe('deploy')
+  })
+
+  it('touch movement does not refocus search or change the hovered selection', async () => {
+    serve()
+    renderNewTask()
+    await pillReady()
+    fireEvent.click(sourcePill())
+    const input = await screen.findByPlaceholderText('search skills & workflows…')
+    expect(document.activeElement).toBe(input)
+    // iOS can dismiss its keyboard while leaving the input as activeElement.
+    const focus = vi.spyOn(input, 'focus')
+    try {
+      const selected = document.querySelector('[data-slot="source-option"][aria-selected="true"]')
+      const last = document.querySelector('[data-source-ref="deploy"][data-slot="source-option"]')!
+      const event = pointer(last, 'pointermove', 'touch')
+      expect(focus).not.toHaveBeenCalled()
+      expect(last.getAttribute('aria-selected')).toBe('false')
+      expect(selected?.getAttribute('aria-selected')).toBe('true')
+      expect(event.defaultPrevented).toBe(false) // native scrolling remains available
+      expect(screen.queryByPlaceholderText('search skills & workflows…')).toBe(input)
+      fireEvent.click(last)
+      expect(sourcePill().textContent).toContain('deploy')
+    } finally {
+      focus.mockRestore()
+    }
+  })
+
+  it('keeps desktop hover, arrow keys, Enter selection and Escape dismissal', async () => {
+    serve()
+    renderNewTask()
+    await pillReady()
+    fireEvent.click(sourcePill())
+    const input = await screen.findByPlaceholderText('search skills & workflows…')
+    expect(document.activeElement).toBe(input)
+    const last = document.querySelector('[data-source-ref="deploy"][data-slot="source-option"]')!
+    pointer(last, 'pointermove', 'mouse')
+    expect(last.getAttribute('aria-selected')).toBe('true')
+    fireEvent.keyDown(input, { key: 'ArrowUp' })
+    expect(document.querySelector('[data-source-ref="fix-and-verify"][data-slot="source-option"]')?.getAttribute('aria-selected')).toBe('true')
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(sourcePill().textContent).toContain('deploy')
+    await waitFor(() => expect(screen.queryByPlaceholderText('search skills & workflows…')).toBeNull())
+    fireEvent.click(sourcePill())
+    const reopened = await screen.findByPlaceholderText('search skills & workflows…')
+    fireEvent.keyDown(reopened, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByPlaceholderText('search skills & workflows…')).toBeNull())
+  })
+})
+
 // ---- clearing the source (the reported bug: no way to deselect a skill) -----------------------
 
 describe('clearing the picked skill or workflow', () => {

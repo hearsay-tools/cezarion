@@ -72,13 +72,13 @@ function CommandInput({
   return (
     <div
       data-slot="command-input-wrapper"
-      className="flex h-9 items-center gap-2 border-b px-3"
+      className="flex h-9 shrink-0 items-center gap-2 border-b px-3 max-md:h-[44px]"
     >
       <SearchIcon className="size-4 shrink-0 opacity-50" />
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          "flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-10 w-full rounded-md bg-transparent py-3 text-base md:text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
         {...props}
@@ -89,11 +89,19 @@ function CommandInput({
 
 function CommandList({
   className,
+  onPointerMoveCapture,
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.List>) {
   return (
     <CommandPrimitive.List
       data-slot="command-list"
+      onPointerMoveCapture={(event) => {
+        onPointerMoveCapture?.(event)
+        // cmdk hover selects a result and re-focuses its active input. Dismissing
+        // an iOS keyboard can leave that input focused; a swipe must not reopen it.
+        // Do not preventDefault: native touch scrolling remains available.
+        if (event.pointerType === "touch") event.stopPropagation()
+      }}
       className={cn(
         "max-h-[300px] scroll-py-1 overflow-x-hidden overflow-y-auto",
         className
