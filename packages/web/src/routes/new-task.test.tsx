@@ -729,6 +729,23 @@ describe('picker data flows', () => {
     expect(headings).toEqual(['Project skills', 'Workflows', 'Global'])
   })
 
+  it('the empty pill reads "Skill or workflow" when the catalog offers workflows — "Skill" when it has none (#263)', async () => {
+    // The default mock catalog has fix-and-verify beyond the built-in, so the control must
+    // announce BOTH kinds — a label that only says "Skill" hid the workflow picker (#263).
+    serve()
+    renderNewTask()
+    await pillReady('Skill or workflow')
+    expect(sourcePill().textContent).toBe('Skill or workflow')
+
+    cleanup()
+    resetDraft()
+    // A catalog of only the built-in offers no workflow to pick — "Skill" stays the honest label.
+    serve({ workflows: { workflows: [WORKFLOWS.workflows[0]!], issues: [] } })
+    renderNewTask()
+    await pillReady('Skill')
+    expect(sourcePill().textContent).toBe('Skill')
+  })
+
   it('multi-keyword search: "fix issue" matches om-fix via hyphen-split keywords (#411)', async () => {
     serve()
     renderNewTask()
@@ -1176,6 +1193,28 @@ describe('submit', () => {
     await startTask()
 
     expect(postedBody()).toEqual({ task: 'Ship it', workflow: 'fix-and-verify' })
+  })
+
+  it('a workflow PICKED IN THE MENU labels the pill and posts { workflow, task } (#263)', async () => {
+    // The full gesture the report asked for: open the picker, click the workflow row, watch the
+    // pill take its name — and the pick must STICK through Start onto the POST body.
+    serve({ createRun: { id: 'run-wf' } })
+    renderNewTask()
+    await pillReady()
+    fireEvent.click(sourcePill())
+    await screen.findByPlaceholderText('search skills & workflows…')
+    fireEvent.click(
+      document.querySelector<HTMLElement>(
+        '[data-slot="source-option"][data-source-kind="workflow"][data-source-ref="fix-and-verify"]',
+      )!,
+    )
+    await pillReady('fix-and-verify')
+    expect(sourcePill().getAttribute('data-source-kind')).toBe('workflow')
+    fireEvent.change(textarea(), { target: { value: 'Ship it with the workflow' } })
+    await startTask()
+
+    expect(postedBody()).toEqual({ task: 'Ship it with the workflow', workflow: 'fix-and-verify' })
+    await waitFor(() => expect(location()).toBe('/tasks/run-wf'))
   })
 
   it('NO source posts the plain quick-task, records lastTask:null and no recency entry', async () => {
