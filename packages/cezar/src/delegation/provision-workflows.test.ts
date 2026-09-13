@@ -97,6 +97,7 @@ describe('manager session delegation lifecycle', () => {
     } else {
       expect(spec.restrictNativeDelegation).toBe(true);
       expect(spec.systemPrompt).toContain('cezar');
+      expect(spec.systemPrompt).toContain('--effort');
       expect(controller.credentials.authenticate(spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: run.id });
     }
   });

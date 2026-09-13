@@ -46,6 +46,14 @@ describe('bundled worker CLI', () => {
     writeFileSync(file, 'x'.repeat(100_001));
     expect(await runWorkerCommand(args, env)).toBe(1); expect(json().code).toBe('invalid_input');
   });
+  it('pins spawn --effort and refuses unknown values', async () => {
+    expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--effort', 'low', 'work'], env)).toBe(0);
+    expect(f.store.getRun(json().workerId)).toMatchObject({ effort: 'low' });
+    expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--effort', 'auto', 'work'], env)).toBe(0);
+    expect(f.store.getRun(json().workerId)).toMatchObject({ effort: 'high' });
+    expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--effort', 'nope', 'work'], env)).toBe(1);
+    expect(json().code).toBe('invalid_input');
+  });
   it('sends explicit wait modes and cancels a wait by ID using the provisioned transport', async () => {
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), 'work'], env)).toBe(0);
     const { workerId } = json();

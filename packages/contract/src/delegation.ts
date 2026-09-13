@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { conversationAttributionSchema, conversationStateSchema, requestOutcomeSchema } from './conversations.ts';
+import { effortFieldSchema } from './effort.ts';
 
 /** Owned workers (spec 2026-09-06). No import from runs: runs embeds this metadata. */
 export const workerOperationSchema = z.enum(['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait']);
@@ -188,6 +189,7 @@ export const workerSpawnRequestSchema = z.object({
   context: workerContextSchema.optional(),
   backend: workerBackendSchema.optional(),
   model: z.string().trim().min(1).max(512).optional(),
+  effort: effortFieldSchema,
 }).strict().refine(request => request.task.length + (request.context?.text?.length ?? 0) <= 100_000, { message: 'Combined task and context exceed 100000 characters' });
 export type WorkerSpawnRequest = z.infer<typeof workerSpawnRequestSchema>;
 

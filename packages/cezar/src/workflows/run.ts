@@ -61,6 +61,7 @@ import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace, type WorkerNoMaterializationProof } from '../delegation/workspace.ts';
 import { verifyWorkerContext } from '../delegation/context.ts';
 import { enqueueAgentInput, nextAgentInput } from '../delegation/input.ts';
+import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { reconcileConversationState, projectConversationEvents } from '../delegation/conversations.ts';
@@ -1084,13 +1085,14 @@ export class RunManager {
   }
 
   /** Resolve caller selection once, before acceptance; permission grants always come from the parent. */
-  async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId; model?: string }): Promise<DelegationExecutionSettings> {
+  async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId; model?: string; effort?: string }): Promise<DelegationExecutionSettings> {
     const parent = this.delegationExecutionSettings(runId);
     const runner = selection.backend ?? parent.runner;
     const sameBackend = runner === parent.runner;
     try {
+      const effortPin = parseDelegationEffort(selection.effort);
       const locked = agentModelsLocked(this.repoRoot);
-      if (locked && (selection.model !== undefined || (sameBackend && (parent.model !== undefined || parent.effort !== undefined)))) {
+      if (locked && (selection.model !== undefined || effortPin !== undefined || (sameBackend && (parent.model !== undefined || parent.effort !== undefined)))) {
         throw new Error(AGENT_MODELS_LOCKED_ERROR);
       }
       let accountBinding = parent.accountBinding;
@@ -1106,7 +1108,7 @@ export class RunManager {
       const chosen = selection.model ?? (sameBackend ? parent.model : locked ? undefined : native.model);
       if (chosen && modelConflictsWithRunner(chosen, runner)) throw new Error('Model is incompatible with the selected backend');
       const model = normalizeModelForBackend(runner, chosen, { configuredProvider: native.provider })?.backendModel;
-      return { ...parent, runner, model, effort: sameBackend ? parent.effort : undefined,
+      return { ...parent, runner, model, effort: effortPin ?? (sameBackend ? parent.effort : undefined),
         agentProfile: accountBinding.profileId, accountBinding };
     } catch (error) {
       throw new DelegationPolicyError('invalid_input', error instanceof Error ? error.message : 'Worker execution selection is unavailable');

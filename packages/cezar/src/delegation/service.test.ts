@@ -37,7 +37,7 @@ describe('delegation service durable authority', () => {
     expect(f.store.getRun(accepted.workerId)?.task).toContain('Only inspect the parser');
     expect(await f.service.inspect(f.caller, { workerId: accepted.workerId })).toMatchObject({ backend: 'claude', model: 'sonnet' });
     expect(await f.service.spawn(f.caller, { ...request, model: 'sonnet' })).toEqual(accepted);
-    for (const changed of [{ context: { text: 'changed' } }, { backend: 'codex' as const }, { model: 'opus' }]) {
+    for (const changed of [{ context: { text: 'changed' } }, { backend: 'codex' as const }, { model: 'opus' }, { effort: 'low' }]) {
       await expect(f.service.spawn(f.caller, { ...request, ...changed })).rejects.toMatchObject({ code: 'invalid_input' });
     }
     const legacy = input(); await f.service.spawn(f.caller, legacy);
@@ -52,6 +52,21 @@ describe('delegation service durable authority', () => {
     expect(f.store.getRun(workerId)).toMatchObject({ runner: 'codex', agentProfile: 'default' });
     expect(f.store.getRun(workerId)?.model).toBeUndefined(); expect(f.store.getRun(workerId)?.effort).toBeUndefined();
     expect(f.store.readWorkerIdentity(workerId)).toMatchObject({ account: { provider: 'codex', homePath: f.root }, grants: { allowedTools: [], bashAllowlist: [] } });
+  });
+  it('applies explicit spawn effort, hashes the normalized pin, and refuses unknown or locked values', async () => {
+    const same = { ...input(), effort: ' LOW ' };
+    const accepted = await f.service.spawn(f.caller, same);
+    expect(f.store.getRun(accepted.workerId)).toMatchObject({ runner: 'claude', effort: 'low' });
+    expect(await f.service.spawn(f.caller, { ...same, effort: 'low' })).toEqual(accepted);
+    await expect(f.service.spawn(f.caller, { ...same, effort: 'high' })).rejects.toMatchObject({ code: 'invalid_input' });
+    vi.stubEnv('CODEX_HOME', f.root);
+    const mixed = { ...input(), backend: 'codex' as const, effort: 'max' };
+    const pinned = await f.service.spawn(f.caller, mixed);
+    expect(f.store.getRun(pinned.workerId)).toMatchObject({ runner: 'codex', effort: 'max' });
+    await expect(f.service.spawn(f.caller, { ...input(), effort: 'nope' })).rejects.toMatchObject({ code: 'invalid_input' });
+    vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '1');
+    await expect(f.service.spawn(f.caller, { ...input(), backend: 'codex', effort: 'high' })).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(f.store.listRuns().some(run => run.effort === 'nope')).toBe(false);
   });
   it('rejects incompatible selections, unavailable accepted accounts, and model locks before acceptance', async () => {
     vi.stubEnv('CODEX_HOME', f.root);

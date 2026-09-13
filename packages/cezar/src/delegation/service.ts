@@ -17,6 +17,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
+import { parseDelegationEffort } from './effort.ts';
 import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { planOwnedWorkspace, readOwnedDiff, removeOwnedWorkspace, resolveWorkerBaseline } from './workspace.ts';
 
@@ -177,10 +178,12 @@ export class DelegationService {
       authorizeSpawnReplay(caller, parent, project.id);
       if (parent?.delegation?.role !== 'root') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
       if (project.store.containsSessionSecret(JSON.stringify(request))) throw new DelegationPolicyError('invalid_input', 'Credentials cannot be included in delegated input');
+      const effortPin = parseDelegationEffort(request.effort);
       const requestHash = createHash('sha256').update(JSON.stringify({ task: request.task, baseline: request.baseline,
         ...(request.context === undefined ? {} : { context: request.context }),
         ...(request.backend === undefined ? {} : { backend: request.backend }),
         ...(request.model === undefined ? {} : { model: request.model }),
+        ...(effortPin === undefined ? {} : { effort: effortPin }),
       })).digest('hex');
       const receipt = parent.delegation.receipts.find(r => r.requestId === request.requestId);
       if (receipt) {
