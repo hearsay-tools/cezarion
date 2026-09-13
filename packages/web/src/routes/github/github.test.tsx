@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
@@ -1269,6 +1272,65 @@ const waitForAgentRunEnabled = () =>
       screen.getByRole<HTMLButtonElement>('button', { name: /Run agent on this/ }).disabled,
     ).toBe(false),
   )
+
+function cascadeCss(css: string, selectors: readonly string[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const selector of selectors) {
+    const re = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]+)\\}`, 'g')
+    for (const match of css.matchAll(re)) {
+      const body = match[1]
+      if (!body) continue
+      for (const part of body.split(';')) {
+        const i = part.indexOf(':')
+        if (i < 0) continue
+        const prop = part.slice(0, i).trim()
+        const value = part.slice(i + 1).trim()
+        if (prop) out[prop] = value
+      }
+    }
+  }
+  return out
+}
+
+describe('GitHub handoff field chrome (#243)', () => {
+  const rel = path.join('src', 'routes', 'github', 'github-layout.css')
+  const cssPath = [
+    path.join(process.cwd(), 'packages', 'web', rel),
+    path.join(process.cwd(), rel),
+  ].find((file) => existsSync(file))
+  if (!cssPath) throw new Error(`github-layout.css not found from ${process.cwd()}`)
+  const css = readFileSync(cssPath, 'utf8')
+
+  it('gives the model picker the same bordered 44px field as Workflow', () => {
+    const model = cascadeCss(css, [
+      '.gh-engine-fields > button',
+      ".gh-engine-fields [data-slot='model-pill']",
+    ])
+    expect(model.border).toBe('1px solid var(--border)')
+    expect(model.background).toBe('var(--card)')
+    expect(model.height).toBe('44px')
+    expect(model.padding).toBe('0 12px')
+    expect(model['padding-left']).toBeUndefined()
+  })
+
+  it('keeps a Model label on the picker', () => {
+    const before = cascadeCss(css, [
+      '.gh-engine-fields > button::before',
+      ".gh-engine-fields [data-slot='model-pill']::before",
+    ])
+    expect(before.content).toBe("'Model'")
+  })
+
+  it('gives the prompt textarea its own bordered typing area', () => {
+    const prompt = cascadeCss(css, [
+      "[data-slot='gh-custom-prompt']",
+      ".gh-prompt-field [data-slot='gh-custom-prompt']",
+    ])
+    expect(prompt.border).toBe('1px solid var(--border)')
+    expect(prompt.background).toBe('var(--card)')
+    expect(Number.parseInt(prompt['min-height'] ?? '0', 10)).toBeGreaterThanOrEqual(44)
+  })
+})
 
 describe('the hand-to-agent backend pills (#401)', () => {
   it('a single-backend host hides the runner pill but still offers the model', async () => {
