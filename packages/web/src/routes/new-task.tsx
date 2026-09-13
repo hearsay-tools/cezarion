@@ -1104,6 +1104,10 @@ function SourcePill({
   const { mostUsed, project, global, ranked } = searchSkillsForDisplay(skills, search, skillUsage)
   const quickTask = workflows.find((workflow) => workflow.name === QUICK_TASK)
   const matchedWorkflows = searchWorkflows(workflows, search).filter((w) => w.name !== QUICK_TASK)
+  // The empty label must announce what the picker actually offers (#263): "Skill" alone hid the
+  // workflow rows behind it. Query-independent on purpose — the label states the catalog, not the
+  // current filter. No pickable workflow (only the built-in) and the honest label is just "Skill".
+  const offersWorkflows = workflows.some((workflow) => workflow.name !== QUICK_TASK)
   // The empty row answers to what people type when they mean "none of these" — including the
   // built-in's own name, which is no longer a row of its own. Same match signal as every other
   // row, so one query ranks the whole list.
@@ -1199,7 +1203,7 @@ function SourcePill({
         aria-hidden="true"
         className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-accent-icon')}
       />
-      <span className="max-w-44 truncate">{!ready ? '…' : (source?.ref ?? 'Skill')}</span>
+      <span className="max-w-44 truncate">{!ready ? '…' : (source?.ref ?? (offersWorkflows ? 'Skill or workflow' : 'Skill'))}</span>
       {chevron}
     </button>
   )
