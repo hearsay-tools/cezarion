@@ -390,3 +390,55 @@ describe('#519: usage folds into query ranking and the / autocomplete order', ()
     ])
   })
 })
+
+describe('#255: name matches outrank description and weaker name hits', () => {
+  it('an exact skill-name query ranks that skill first even when a weaker name hit is heavily used', () => {
+    // Usage bonus (max 2.5) is larger than the matchScore gap between exact (6) and
+    // word-boundary (4), so folding usage into the same number let `om-code-review` beat
+    // the skill actually named `review`.
+    const skills = [
+      skill({ name: 'om-code-review', source: 'ai' }),
+      skill({ name: 'review', source: 'ai' }),
+    ]
+    const usage = { 'om-code-review': 999 }
+    expect(searchSkills(skills, 'review', usage).map((s) => s.name)).toEqual(['review', 'om-code-review'])
+    expect(filterSkills(skills, 'review', usage).map((s) => s.name)).toEqual(['review', 'om-code-review'])
+  })
+
+  it('description-only hits never outrank any name hit for the same query', () => {
+    const skills = [
+      skill({ name: 'ship', source: 'ai', description: 'How to fix production incidents' }),
+      skill({ name: 'om-fix', source: 'ai' }),
+    ]
+    expect(searchSkills(skills, 'fix', { ship: 999 }).map((s) => s.name)).toEqual(['om-fix', 'ship'])
+    expect(filterSkills(skills, 'fix', { ship: 999 }).map((s) => s.name)).toEqual(['om-fix', 'ship'])
+  })
+
+  it('prefix name hits outrank description-only hits for the same query', () => {
+    const skills = [
+      skill({ name: 'ship', source: 'ai', description: 'deploy the build' }),
+      skill({ name: 'deploy-app', source: 'ai' }),
+    ]
+    expect(searchSkills(skills, 'deploy').map((s) => s.name)).toEqual(['deploy-app', 'ship'])
+    expect(filterSkills(skills, 'deploy').map((s) => s.name)).toEqual(['deploy-app', 'ship'])
+  })
+
+  it('prefix name hits outrank weaker name hits even when the weaker hit is heavily used', () => {
+    const skills = [
+      skill({ name: 'om-auto-deploy', source: 'ai' }),
+      skill({ name: 'deploy-app', source: 'ai' }),
+    ]
+    expect(searchSkills(skills, 'deploy', { 'om-auto-deploy': 999 }).map((s) => s.name)).toEqual([
+      'deploy-app',
+      'om-auto-deploy',
+    ])
+  })
+
+  it('queryScore: a prefix name hit outranks a description-only exact hit', () => {
+    expect(queryScore('deploy-app', null, 'deploy')).toBeGreaterThan(queryScore('ship', 'deploy', 'deploy'))
+  })
+
+  it('queryScore: any name hit outranks a description-only hit', () => {
+    expect(queryScore('om-fix', null, 'fix')).toBeGreaterThan(queryScore('ship', 'fix', 'fix'))
+  })
+})

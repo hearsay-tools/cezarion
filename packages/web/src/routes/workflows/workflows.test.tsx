@@ -211,6 +211,17 @@ describe('workflow editor presentation', () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add step' })))
   })
 
+  it('Add step ranks a name match above a description-only hit', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Add step' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add step' })
+    fireEvent.change(within(dialog).getByLabelText('Filter skills'), { target: { value: 'review' } })
+    const radios = within(dialog).getAllByRole('radio')
+    expect(radios.map((radio) => (radio as HTMLInputElement).value)).toEqual(['om-review', 'om-fix'])
+  })
+
   it('keeps Export available and downloads the current workflow YAML', async () => {
     stubFetch()
     renderAt('/workflows')
