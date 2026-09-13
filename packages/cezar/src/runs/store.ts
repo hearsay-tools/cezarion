@@ -1310,6 +1310,20 @@ export class RunStore extends EventEmitter {
   setArchived(id: string, archived: boolean): RunRecord | undefined {
     const run = this.runs.get(id);
     if (!run) return undefined;
+    this.applyArchived(run, archived);
+    // Owned workers nest under their parent only while both share Active/Archived (#250).
+    // Cascade from the parent only — archiving one worker stays independent.
+    if (run.delegation?.role !== 'worker') {
+      for (const child of this.runs.values()) {
+        if (child.delegation?.role === 'worker' && child.delegation.parentRunId === id) {
+          this.applyArchived(child, archived);
+        }
+      }
+    }
+    return run;
+  }
+
+  private applyArchived(run: RunRecord, archived: boolean): void {
     run.archived = archived;
     run.archivedAt = archived ? new Date().toISOString() : undefined;
     if (archived) {
@@ -1317,7 +1331,6 @@ export class RunStore extends EventEmitter {
       clearPin(run);
     }
     this.touch(run);
-    return run;
   }
 
   /** Pin one run to the top of this project's task list, or unpin it (#935). Mirrors
@@ -1343,15 +1356,16 @@ export class RunStore extends EventEmitter {
   /** Bulk-archive every finished run; returns how many were archived. */
   archiveFinished(): number {
     let count = 0;
-    for (const run of this.runs.values()) {
-      if (!run.archived && ['done', 'failed', 'cancelled'].includes(run.status)) {
-        run.archived = true;
-        run.archivedAt = new Date().toISOString();
-        clearPendingAutoResume(run);
-        clearPin(run);
-        this.touch(run);
-        count++;
-      }
+    // Snapshot ids first: setArchived may cascade to still-live workers, mutating the map view.
+    const finished = [...this.runs.values()]
+      .filter((run) => !run.archived && ['done', 'failed', 'cancelled'].includes(run.status))
+      .map((run) => run.id);
+    for (const id of finished) {
+      // Re-check: a prior cascade may already have archived this id as an owned worker.
+      const run = this.runs.get(id);
+      if (!run || run.archived) continue;
+      this.setArchived(id, true);
+      count++;
     }
     return count;
   }

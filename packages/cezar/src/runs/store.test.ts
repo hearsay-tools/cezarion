@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -2366,5 +2367,111 @@ describe('RunStore — pinned tasks (#935)', () => {
     const store = RunStore.open(dataDir);
     expect(store.getRun('no-pin')?.pinned).toBeUndefined();
     expect(store.getRun('hand-pinned')?.pinned).toBe(true);
+  });
+});
+
+describe('RunStore — archive cascades to owned workers (#250)', () => {
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cez-store-archive-cascade-'));
+  });
+
+  afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  function parentWithWorker(store: RunStore, workerStatus: RunRecord['status'] = 'running') {
+    const parent = store.createRun({
+      title: 'parent', task: 'parent', workflow: 'quick-task',
+      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+    });
+    store.updateRun(parent.id, {
+      status: 'done',
+      finishedAt: '2020-01-01T00:00:00.000Z',
+      delegation: { role: 'root', permissions: ['spawn'], receipts: [] },
+    });
+    const workerId = randomUUID();
+    const worker = store.createOwnedRun(
+      {
+        title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude',
+        steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      },
+      parent.id,
+      randomUUID(),
+      {
+        role: 'worker',
+        permissions: [],
+        parentRunId: parent.id,
+        workspace: {
+          ownerRunId: workerId,
+          resourceId: randomUUID(),
+          kind: 'owned-isolated',
+          path: `/managed/${workerId}`,
+          branch: `cez/${workerId.slice(0, 8)}`,
+          baselineSha: 'a'.repeat(40),
+        },
+      },
+      'a'.repeat(64),
+    );
+    store.updateRun(worker.id, { status: workerStatus });
+    return { parent, worker };
+  }
+
+  it('archiving a parent archives every owned worker and touches both', () => {
+    const store = RunStore.open(dataDir);
+    const { parent, worker } = parentWithWorker(store, 'running');
+    store.setPinned(worker.id, true);
+    store.updateRun(worker.id, {
+      autoResumeAt: '2026-08-03T18:41:48.000Z',
+      autoResumeAttempts: 1,
+    });
+    const touched: string[] = [];
+    store.on('run', (run) => touched.push(run.id));
+
+    expect(store.setArchived(parent.id, true)?.archived).toBe(true);
+
+    expect(store.getRun(parent.id)?.archived).toBe(true);
+    expect(store.getRun(worker.id)?.archived).toBe(true);
+    expect(store.getRun(worker.id)?.archivedAt).toBeDefined();
+    expect(store.getRun(worker.id)?.pinned).toBeUndefined();
+    expect(store.getRun(worker.id)?.autoResumeAt).toBeUndefined();
+    expect(touched).toEqual(expect.arrayContaining([parent.id, worker.id]));
+  });
+
+  it('unarchiving a parent unarchives those workers', () => {
+    const store = RunStore.open(dataDir);
+    const { parent, worker } = parentWithWorker(store, 'done');
+    store.setArchived(parent.id, true);
+    expect(store.getRun(worker.id)?.archived).toBe(true);
+
+    store.setArchived(parent.id, false);
+
+    expect(store.getRun(parent.id)?.archived).toBe(false);
+    expect(store.getRun(parent.id)?.archivedAt).toBeUndefined();
+    expect(store.getRun(worker.id)?.archived).toBe(false);
+    expect(store.getRun(worker.id)?.archivedAt).toBeUndefined();
+  });
+
+  it('archiving one worker does not archive its parent', () => {
+    const store = RunStore.open(dataDir);
+    const { parent, worker } = parentWithWorker(store, 'done');
+
+    store.setArchived(worker.id, true);
+
+    expect(store.getRun(worker.id)?.archived).toBe(true);
+    expect(store.getRun(parent.id)?.archived).toBe(false);
+  });
+
+  it('archiveFinished cascades through setArchived so still-live workers follow a finished parent', () => {
+    const store = RunStore.open(dataDir);
+    const { parent, worker } = parentWithWorker(store, 'running');
+    expect(store.getRun(parent.id)?.status).toBe('done');
+    expect(store.getRun(worker.id)?.status).toBe('running');
+
+    expect(store.archiveFinished()).toBeGreaterThanOrEqual(1);
+
+    expect(store.getRun(parent.id)?.archived).toBe(true);
+    expect(store.getRun(worker.id)?.archived).toBe(true);
   });
 });
