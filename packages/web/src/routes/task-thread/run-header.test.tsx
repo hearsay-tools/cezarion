@@ -719,19 +719,44 @@ describe('dense run details (#765)', () => {
 })
 
 describe('meta line, tabs, pill and resume hint', () => {
-  it('lets the spacious page heading scroll away on both viewport sizes', () => {
+  it('sticks the run header on desktop and lets it scroll away on phones', () => {
     stubFetch()
     renderHeader(run('done'))
 
     const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
     const classes = header.className.split(/\s+/)
+    // Phone: in document flow. Desktop: docks to the shell scroller so Archive stays on screen.
     expect(classes).toContain('relative')
     expect(classes).not.toContain('sticky')
     expect(classes).not.toContain('top-0')
-    expect(classes).not.toContain('md:sticky')
-    expect(classes).not.toContain('md:top-0')
+    expect(classes).toContain('md:sticky')
+    expect(classes).toContain('md:top-0')
+    expect(classes).toContain('bg-background')
+    expect(classes).toContain('z-20')
     expect(classes).toContain('px-[18px]')
     expect(classes).toContain('md:px-9')
+    expect(screen.getByRole('button', { name: 'Run actions' }).className).toContain('size-11')
+  })
+
+  it('leaves the run header in document flow on Git tabs so their sticky chrome stays visible', () => {
+    stubFetch()
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter initialEntries={['/tasks/r1/changes']}>
+          <Routes>
+            <Route
+              path="/tasks/:id/changes"
+              element={<RunHeader run={run('done')} tab="changes" />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
+    const classes = header.className.split(/\s+/)
+    expect(classes).not.toContain('md:sticky')
+    expect(classes).not.toContain('md:top-0')
   })
 
   // The plan mirror hides on phones so the title row keeps its space for the status pill and

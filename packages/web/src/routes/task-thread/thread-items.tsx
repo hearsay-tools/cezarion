@@ -1,6 +1,6 @@
-import { BrainIcon, FileTextIcon, FolderInputIcon, GlobeIcon, LoaderCircleIcon, SquarePenIcon, SquareTerminalIcon } from 'lucide-react'
+import { BrainIcon, FileTextIcon, FolderInputIcon, GlobeIcon, LoaderCircleIcon, MessageSquareIcon, SquarePenIcon, SquareTerminalIcon } from 'lucide-react'
 import { BotIcon, ChevronRightIcon, ListTodoIcon, PaperclipIcon, SearchIcon, Trash2Icon, WrenchIcon } from '@/components/design-icons'
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ZoomableImage } from '@/components/zoomable-image'
@@ -23,6 +23,53 @@ export { isNearBottom }
  * only — everything they show comes from the reducer's output and `groupThreadItems`; nothing
  * is derived here except open/closed UI state.
  */
+
+const MESSAGE_SURFACE = {
+  user: {
+    label: 'YOUR MESSAGE',
+    speaker: 'Your message',
+    classes: 'border-message-user-border bg-message-user-bg',
+    accent: 'text-message-user-accent',
+    body: 'max-md:text-[12px]',
+  },
+  agent: {
+    label: 'AGENT RESPONSE',
+    speaker: 'Agent response',
+    classes: 'border-message-agent-border bg-message-agent-bg',
+    accent: 'text-message-agent-accent',
+    body: 'max-md:text-[13px]',
+  },
+} as const
+
+export type ConversationMessageProps = {
+  role: 'user' | 'agent'
+  children: ReactNode
+  className?: string
+} & Omit<ComponentPropsWithoutRef<'article'>, 'role' | 'children' | 'className'>
+
+/** Shared user/agent transcript surface (#252). Role only changes label, name, and colors. */
+export function ConversationMessage({ role, children, className, ...rest }: ConversationMessageProps) {
+  const surface = MESSAGE_SURFACE[role]
+  return (
+    <article
+      {...rest}
+      data-role={role}
+      aria-label={surface.speaker}
+      className={cn(
+        'flex w-full min-w-0 flex-col gap-2 self-stretch rounded-[8px] border p-3 md:px-4 md:py-[14px]',
+        surface.classes,
+        className,
+      )}
+    >
+      <p className={cn('m-0 flex items-center gap-2 text-[11px] leading-none font-semibold tracking-[0.6px] uppercase', surface.accent)}>
+        <MessageSquareIcon aria-hidden="true" className="size-4 shrink-0" />{surface.label}
+      </p>
+      <div className={cn('min-w-0 break-words text-[14px] leading-[1.6] text-foreground select-text [overflow-wrap:anywhere]', surface.body)}>
+        {children}
+      </div>
+    </article>
+  )
+}
 
 /** Right-aligned muted bubble — a v1 `user-message` line or the run's initial task. Renders any
  *  attached images inline and non-image attachments as download chips (#950); falls back to a
@@ -100,11 +147,7 @@ export function UserBubble({
 
   if (editing) {
     return (
-      <div
-        data-slot="user-bubble"
-        data-editing="true"
-        className="w-full self-stretch rounded-xl bg-muted px-[15px] py-2.5 text-[13.5px] leading-[1.55] md:px-[18px] md:py-4"
-      >
+      <ConversationMessage role="user" data-slot="user-bubble" data-editing="true">
         <textarea
           autoFocus
           aria-label="Edit the message"
@@ -128,7 +171,7 @@ export function UserBubble({
             type="button"
             onClick={() => setEditing(false)}
             disabled={busy}
-            className="rounded-sm px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-sm px-2 text-xs font-medium text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
           >
             Cancel
           </button>
@@ -136,22 +179,18 @@ export function UserBubble({
             type="button"
             onClick={() => void save()}
             disabled={busy}
-            className="rounded-sm bg-action px-2 py-1 text-xs font-semibold text-action-foreground hover:brightness-[0.96] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-sm bg-action px-2 text-xs font-semibold text-action-foreground hover:brightness-[0.96] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
           >
             {busy ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : 'Save'}
           </button>
         </span>
         {actionError ? <p role="alert" className="mt-1.5 text-xs text-danger">{actionError}</p> : null}
-      </div>
+      </ConversationMessage>
     )
   }
 
   return (
-    <div
-      data-slot="user-bubble"
-      className="group w-full min-w-0 self-stretch rounded-xl bg-muted px-[15px] py-2.5 text-[13.5px] leading-[1.55] md:px-[18px] md:py-4"
-    >
-      <p className="mb-2 text-[9px] font-semibold tracking-[0.16em] text-soft-foreground">YOU</p>
+    <ConversationMessage role="user" data-slot="user-bubble" className="group">
       {onEdit || onRemove ? (
         <span
           data-slot="bubble-actions"
@@ -163,7 +202,7 @@ export function UserBubble({
               aria-label={editLabel}
               onClick={startEditing}
               disabled={busy}
-              className="rounded-sm p-1 text-soft-foreground hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+              className="inline-flex size-11 items-center justify-center rounded-sm text-soft-foreground hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
             >
               <SquarePenIcon className="size-3.5" />
             </button>
@@ -174,7 +213,7 @@ export function UserBubble({
               aria-label={removeLabel}
               onClick={() => void remove()}
               disabled={busy}
-              className="rounded-sm p-1 text-soft-foreground hover:bg-background hover:text-danger focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+              className="inline-flex size-11 items-center justify-center rounded-sm text-soft-foreground hover:bg-background hover:text-danger focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
             >
               <Trash2Icon className="size-3.5" />
             </button>
@@ -216,16 +255,16 @@ export function UserBubble({
           {missing} image{missing > 1 ? 's' : ''} attached
         </span>
       ) : null}
-    </div>
+    </ConversationMessage>
   )
 }
 
 /** An assistant message item, as markdown. */
 export function AssistantMessage({ text }: { text: string }) {
   return (
-    <div data-slot="assistant-message" className="min-w-0 text-[15px] leading-[1.65]">
+    <ConversationMessage role="agent" data-slot="assistant-message">
       <Markdown>{text}</Markdown>
-    </div>
+    </ConversationMessage>
   )
 }
 

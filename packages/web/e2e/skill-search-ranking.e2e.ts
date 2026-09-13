@@ -82,6 +82,11 @@ beforeAll(async () => {
     'utf8',
   )
 
+  for (let i = 0; i < 24; i += 1) {
+    const name = `qz163browse-${String(i).padStart(2, '0')}`
+    writeFileSync(join(dataRoot, `.ai/skills/${name}.md`), `---\ndescription: Browse fixture ${i}\n---\n\nTest skill.\n`)
+  }
+
   const port = await freePort()
   baseUrl = `http://localhost:${port}`
   server = spawn(
@@ -166,5 +171,64 @@ describe('#484 skill search ranks the (almost-)exact match first', () => {
     // The literal `review` skill leads; `auto-review-pr` would start with "auto".
     expect(firstLabel).toBe('review')
     browser.screenshot(`${artifactsDir}/skill-search-composer-review.png`)
+  })
+})
+
+// Chrome verifies focus, layout and query retention; actual iPhone keyboard behavior
+// still requires device QA. Resizing this viewport is not a software-keyboard test.
+describe('#163 mobile skill picker', () => {
+  it('browses without autofocus, keeps search through resizing, and selects the last result', () => {
+    browser.setViewport(360, 640)
+    browser.goto(`${baseUrl}/new`)
+    browser.waitForFunction(`document.querySelector('[data-slot="source-pill"]')?.disabled === false`)
+    browser.evaluate(`(() => {
+      const trigger = document.querySelector('[data-slot="source-pill"]');
+      trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+      trigger.click();
+    })()`)
+    browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') !== null`)
+    expect(browser.evaluate(`document.activeElement?.dataset.slot`)).toBe('popover-content')
+    const input = 'input[placeholder="search skills & workflows…"]'
+    browser.click(input)
+    expect(browser.evaluate(`document.activeElement?.dataset.slot`)).toBe('command-input')
+    browser.fill(input, 'qz163browse')
+    browser.waitForFunction(`document.querySelectorAll('[data-slot="source-option"]').length === 24`)
+
+    browser.setViewport(360, 340)
+    browser.setViewport(360, 640)
+    expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('qz163browse')
+    browser.evaluate(`(() => {
+      const input = document.querySelector('[data-slot="command-input"]');
+      input.blur();
+      const list = document.querySelector('[data-slot="source-menu"]');
+      list.lastElementChild.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'touch' }));
+      list.scrollTo(0, list.scrollHeight);
+    })()`)
+    browser.waitForFunction(`(() => {
+      const list = document.querySelector('[data-slot="source-menu"]');
+      return list.scrollTop > 0 && list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
+    })()`)
+    expect(browser.evaluate(`document.activeElement?.dataset.slot === 'command-input'`)).toBe(false)
+    expect(browser.count('[data-slot="source-menu"]')).toBe(1)
+    const geometry = browser.evaluate(`(() => {
+      const popover = document.querySelector('[data-slot="popover-content"]').getBoundingClientRect();
+      const input = document.querySelector('[data-slot="command-input"]');
+      return { left: popover.left, right: popover.right, top: popover.top, bottom: popover.bottom,
+        fontSize: parseFloat(getComputedStyle(input).fontSize),
+        overflow: document.documentElement.scrollWidth > innerWidth };
+    })()`) as { left: number; right: number; top: number; bottom: number; fontSize: number; overflow: boolean }
+    expect(geometry.left).toBeGreaterThanOrEqual(0)
+    expect(geometry.right).toBeLessThanOrEqual(360)
+    expect(geometry.top).toBeGreaterThanOrEqual(0)
+    expect(geometry.bottom).toBeLessThanOrEqual(640)
+    expect(geometry.fontSize).toBeGreaterThanOrEqual(16)
+    expect(geometry.overflow).toBe(false)
+    browser.evaluate(`document.documentElement.classList.add('light')`)
+    browser.screenshot(`${artifactsDir}/skill-picker-mobile-light.png`, { viewport: true })
+    browser.evaluate(`document.documentElement.classList.remove('light')`)
+    browser.screenshot(`${artifactsDir}/skill-picker-mobile-dark.png`, { viewport: true })
+    browser.click('[data-slot="source-option"][data-source-ref="qz163browse-23"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
+    expect(browser.evaluate(`document.querySelector('[data-slot="source-pill"]').textContent`)).toContain('qz163browse-23')
   })
 })
