@@ -416,6 +416,9 @@ function RunRow({
       // `aria-current`.
       data-active={isActive ? 'true' : undefined}
       onClick={(event) => {
+        // The reference-status card is a Radix portal on document.body. React still bubbles
+        // that click through this row; ignore targets that are not DOM descendants.
+        if (!event.currentTarget.contains(event.target as Node)) return
         if ((event.target as Element).closest('a, button, input')) return
         navigate(to)
       }}

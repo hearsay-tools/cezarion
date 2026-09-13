@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -143,6 +143,19 @@ describe('TaskQuickList', () => {
     renderList({ runs: [run({ id: 'pad', title: 'Padded row' })] })
     fireEvent.click(row('pad') as HTMLElement)
     expect(location()).toBe('/tasks/pad')
+  })
+
+  it('does not open the task from a click whose target is outside the row', () => {
+    // The reference-status card is a Radix portal on document.body. React still bubbles that
+    // click through RunRow; the target is not a descendant, so the row must not navigate.
+    renderList({ runs: [run({ id: 'pad', title: 'Padded row' })] })
+    const rowEl = row('pad') as HTMLElement
+    const outside = document.createElement('div')
+    document.body.appendChild(outside)
+    const click = createEvent.click(rowEl)
+    Object.defineProperty(click, 'target', { value: outside })
+    fireEvent(rowEl, click)
+    expect(location()).toBe('/')
   })
 
   it('names a row by its auto-summary once one exists — the title, the tooltip and the PR chip agree', () => {
