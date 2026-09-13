@@ -738,6 +738,27 @@ describe('meta line, tabs, pill and resume hint', () => {
     expect(screen.getByRole('button', { name: 'Run actions' }).className).toContain('size-11')
   })
 
+  it('leaves the run header in document flow on Git tabs so their sticky chrome stays visible', () => {
+    stubFetch()
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter initialEntries={['/tasks/r1/changes']}>
+          <Routes>
+            <Route
+              path="/tasks/:id/changes"
+              element={<RunHeader run={run('done')} tab="changes" />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
+    const classes = header.className.split(/\s+/)
+    expect(classes).not.toContain('md:sticky')
+    expect(classes).not.toContain('md:top-0')
+  })
+
   // The plan mirror hides on phones so the title row keeps its space for the status pill and
   // the kebab. It switches at `md`, the same breakpoint as the sticky header, the tabs, the
   // composer and the dock — an `sm:` here would reveal it between 640-768px in a header that
