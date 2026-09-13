@@ -466,4 +466,12 @@ describe('searchSkillsForDisplay (#255: grouped pickers keep query rank)', () =>
     expect(display.project).toEqual([])
     expect(display.global).toEqual([])
   })
+
+  it('equal name matches keep project before global, even when the server listed global first', () => {
+    const display = searchSkillsForDisplay(
+      [skill({ name: 'g-review', source: 'global' }), skill({ name: 'om-review', source: 'ai' })],
+      'review',
+    )
+    expect(display.ranked?.map((s) => s.name)).toEqual(['om-review', 'g-review'])
+  })
 })

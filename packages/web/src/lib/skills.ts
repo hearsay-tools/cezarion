@@ -302,8 +302,9 @@ export interface SkillPickerDisplay extends SkillTiers {
 
 /** Grouped-picker contract (#668/#255): empty query keeps #519 Most used → project →
  *  global; a typed query returns `ranked` in `searchSkills` order and leaves the tiers
- *  empty. Usage-tier promotion and the locality split both put a weaker used/project hit
- *  above an exact name match, so filtered results are not re-tiered. */
+ *  empty. Usage-tier promotion would put a weaker used hit above an exact name match, so
+ *  filtered results are not re-tiered. The ranked input is project-first so equal name
+ *  matches keep locality order without blocking a stronger global match. */
 export function searchSkillsForDisplay(
   skills: readonly Skill[],
   query: string,
@@ -316,7 +317,7 @@ export function searchSkillsForDisplay(
     mostUsed: [],
     project: [],
     global: [],
-    ranked: searchSkills(skills, query, usage),
+    ranked: searchSkills(orderSkills(skills), query, usage),
   }
 }
 
