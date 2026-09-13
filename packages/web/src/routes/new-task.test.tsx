@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
@@ -2574,4 +2577,24 @@ it('clears the submitted dictation draft after delayed creation succeeds', async
   await act(async () => delayed.release({ id: 'dictated-task' }))
   await waitFor(() => expect(location()).toBe('/tasks/dictated-task'))
   expect(readDraft().text).toBe('')
+})
+
+// ---- field chrome (#267) ---------------------------------------------------------------------
+
+describe('field chrome (#267)', () => {
+  const routeDir = path.dirname(fileURLToPath(import.meta.url))
+  const indexCss = readFileSync(path.resolve(routeDir, '../styles/index.css'), 'utf8')
+  const newTaskCss = readFileSync(path.resolve(routeDir, 'new-task.css'), 'utf8')
+
+  it('keeps the prompt editor a bordered card, not a full-bleed strip, on mobile', () => {
+    expect(indexCss).not.toContain('border: 0; border-radius: 0; background: transparent')
+    expect(indexCss).toMatch(/\.new-task-editor \{[^}]*padding: 12px/)
+  })
+
+  it('keeps the model pill bordered and its Model label visible on mobile', () => {
+    expect(newTaskCss).not.toContain('border-color: transparent')
+    expect(newTaskCss).not.toContain('.new-task-model-label > span > span:first-child')
+    // the all-breakpoint pill geometry the mobile rules must not override away
+    expect(newTaskCss).toContain('border-color: var(--border); border-radius: 9px; min-height: 44px')
+  })
 })
