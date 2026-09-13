@@ -2469,7 +2469,19 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
     expect(store.getRun(parent.id)?.status).toBe('done');
     expect(store.getRun(worker.id)?.status).toBe('running');
 
-    expect(store.archiveFinished()).toBeGreaterThanOrEqual(1);
+    expect(store.archiveFinished()).toBe(2);
+
+    expect(store.getRun(parent.id)?.archived).toBe(true);
+    expect(store.getRun(worker.id)?.archived).toBe(true);
+  });
+
+  it('archiveFinished counts every record the cascade archives, including terminal workers', () => {
+    const store = RunStore.open(dataDir);
+    const { parent, worker } = parentWithWorker(store, 'done');
+    expect(store.getRun(parent.id)?.status).toBe('done');
+    expect(store.getRun(worker.id)?.status).toBe('done');
+
+    expect(store.archiveFinished()).toBe(2);
 
     expect(store.getRun(parent.id)?.archived).toBe(true);
     expect(store.getRun(worker.id)?.archived).toBe(true);

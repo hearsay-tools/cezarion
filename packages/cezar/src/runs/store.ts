@@ -1310,20 +1310,28 @@ export class RunStore extends EventEmitter {
   setArchived(id: string, archived: boolean): RunRecord | undefined {
     const run = this.runs.get(id);
     if (!run) return undefined;
-    this.applyArchived(run, archived);
+    this.applyArchivedCascade(run, archived);
+    return run;
+  }
+
+  /** Parent + owned workers; returns how many records flipped `archived`. */
+  private applyArchivedCascade(run: RunRecord, archived: boolean): number {
+    let changed = 0;
+    if (this.applyArchived(run, archived)) changed++;
     // Owned workers nest under their parent only while both share Active/Archived (#250).
     // Cascade from the parent only — archiving one worker stays independent.
     if (run.delegation?.role !== 'worker') {
       for (const child of this.runs.values()) {
-        if (child.delegation?.role === 'worker' && child.delegation.parentRunId === id) {
-          this.applyArchived(child, archived);
+        if (child.delegation?.role === 'worker' && child.delegation.parentRunId === run.id) {
+          if (this.applyArchived(child, archived)) changed++;
         }
       }
     }
-    return run;
+    return changed;
   }
 
-  private applyArchived(run: RunRecord, archived: boolean): void {
+  private applyArchived(run: RunRecord, archived: boolean): boolean {
+    const changed = run.archived !== archived;
     run.archived = archived;
     run.archivedAt = archived ? new Date().toISOString() : undefined;
     if (archived) {
@@ -1331,6 +1339,7 @@ export class RunStore extends EventEmitter {
       clearPin(run);
     }
     this.touch(run);
+    return changed;
   }
 
   /** Pin one run to the top of this project's task list, or unpin it (#935). Mirrors
@@ -1353,10 +1362,10 @@ export class RunStore extends EventEmitter {
     return run;
   }
 
-  /** Bulk-archive every finished run; returns how many were archived. */
+  /** Bulk-archive every finished run; returns how many records flipped to archived. */
   archiveFinished(): number {
     let count = 0;
-    // Snapshot ids first: setArchived may cascade to still-live workers, mutating the map view.
+    // Snapshot ids first: cascade may archive still-live workers, mutating the map view.
     const finished = [...this.runs.values()]
       .filter((run) => !run.archived && ['done', 'failed', 'cancelled'].includes(run.status))
       .map((run) => run.id);
@@ -1364,8 +1373,7 @@ export class RunStore extends EventEmitter {
       // Re-check: a prior cascade may already have archived this id as an owned worker.
       const run = this.runs.get(id);
       if (!run || run.archived) continue;
-      this.setArchived(id, true);
-      count++;
+      count += this.applyArchivedCascade(run, true);
     }
     return count;
   }
