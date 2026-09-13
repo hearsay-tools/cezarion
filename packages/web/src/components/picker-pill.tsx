@@ -62,7 +62,7 @@ export function PickerPill({
   status?: string
 }) {
   const presentation = icon ? ' h-11 gap-2 rounded-lg border-border px-3 text-foreground' : ''
-  const contents = <>{icon}<span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{fieldLabel ? <span className="hidden md:inline">{ariaLabel} · </span> : null}{label}</span></>
+  const contents = <>{icon}<span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{fieldLabel ? <span className="text-muted-foreground">{ariaLabel} · </span> : null}{label}</span></>
   if (readOnly) {
     return (
       <span

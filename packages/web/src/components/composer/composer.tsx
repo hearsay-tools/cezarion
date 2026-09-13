@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { PlayIcon } from 'lucide-react'
-import { ArrowUpIcon, CheckIcon, ChevronDownIcon, CpuIcon, MicIcon, PaperclipIcon, SquareIcon, TerminalIcon, XIcon } from '@/components/design-icons'
+import { ArrowUpIcon, CheckIcon, ChevronDownIcon, MicIcon, PaperclipIcon, SquareIcon, TerminalIcon, XIcon } from '@/components/design-icons'
 import {
   useCallback,
   useEffect,
@@ -754,7 +754,7 @@ export function Composer({
                 <div className="contents" inert={readOnly || undefined}>{footerStart}</div>
                 {executionOptions || sessionControls ? <div>{dictationButton}</div> : null}
               </div>
-              {sessionModel ? <div data-slot="session-model" inert={readOnly || undefined}><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-text" /><span>Model</span>{sessionModel}</div> : null}
+              {sessionModel ? <div data-slot="session-model" inert={readOnly || undefined}>{sessionModel}</div> : null}
               {executionOptions ? null : submissionControls}
 
             </div>

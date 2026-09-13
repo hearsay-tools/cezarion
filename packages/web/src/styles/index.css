@@ -697,7 +697,6 @@
 }
 .new-task-agent-options button { border-radius: 10px; padding: 10px; background: var(--card); }
 .new-task-agent-options button > svg:last-child { margin-left: auto; }
-.new-task-agent-options [data-slot='runner-pill']::before { content: 'Runner'; font-size: 10px; color: var(--muted-foreground); }
 .new-task-editor [data-slot='prompt-template-trigger'], .new-task-editor [data-slot='source-pill'] { border-radius: 9px; padding-inline: 14px; font-family: inherit; }
 .new-task-submission [data-slot='composer-footer-end'] { flex: 1; margin-right: 0; }
 .new-task-submission [data-slot='composer-footer-end'] > .contents { display: flex; width: 100%; }

@@ -1,6 +1,29 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import { PickerPill } from './picker-pill'
+
+afterEach(cleanup)
+
+describe('PickerPill fieldLabel (#272)', () => {
+  it('always shows the field name beside the value, at every width', () => {
+    render(
+      <PickerPill
+        fieldLabel
+        slot="model-pill"
+        ariaLabel="Model"
+        label="Default"
+        value=""
+        onPick={() => {}}
+        options={[{ value: '', label: 'Default' }]}
+      />,
+    )
+    const button = screen.getByRole('button', { name: 'Model' })
+    expect(button.textContent).toBe('Model · Default')
+    const field = [...button.querySelectorAll('span')].find((node) => node.textContent === 'Model · ')
+    expect(field).toBeTruthy()
+    expect(field!.className).not.toMatch(/\bhidden\b/)
+  })
+})
 
 describe('PickerPill catalog status', () => {
   it('keeps radio options selectable and renders a disabled status row', async () => {

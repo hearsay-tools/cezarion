@@ -1,4 +1,4 @@
-import { GaugeIcon, TerminalIcon } from '@/components/design-icons'
+import { CpuIcon, GaugeIcon, TerminalIcon } from '@/components/design-icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 
@@ -169,11 +169,12 @@ export function useContinueAction(run: ApiRun): ContinueAction {
     providerPending: continuation.providerPending,
     pills: (
       <div data-slot="follow-up-engine" className="session-engine-controls">
-        <div className="session-setting"><TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" /><span data-slot="session-setting-label">Runner</span>
         {/* Shown when there is a choice to make: more than one runner, or more than one login for
             one of them. A host with neither sees no pill, exactly as before. */}
         {runners.length > 1 || runners.some((id) => hasAccountChoice(accounts, id)) ? (
           <RunnerPill
+            icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+            fieldLabel
             runners={runners}
             value={runner}
             accounts={accounts}
@@ -192,10 +193,22 @@ export function useContinueAction(run: ApiRun): ContinueAction {
               }
             }}
           />
-        ) : <span data-slot="session-runner-value">{runner}</span>}
-        </div>
-        <div className="session-setting"><GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" /><span data-slot="session-setting-label">Effort</span>
+        ) : (
+          <PickerPill
+            icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+            fieldLabel
+            readOnly
+            slot="session-runner-value"
+            ariaLabel="Runner"
+            label={runner}
+            value={runner}
+            onPick={() => {}}
+            options={[{ value: runner, label: runner }]}
+          />
+        )}
         <PickerPill
+          icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+          fieldLabel
           slot="follow-up-effort-pill"
           ariaLabel="Effort"
           label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
@@ -209,11 +222,12 @@ export function useContinueAction(run: ApiRun): ContinueAction {
             desc: option.desc,
           }))}
         />
-        </div>
       </div>
     ),
     modelPicker: (
         <PickerPill
+          icon={<CpuIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+          fieldLabel
           slot="follow-up-model-pill"
           ariaLabel="Model"
           label={models.find((m) => m.id === model)?.label ?? 'auto'}

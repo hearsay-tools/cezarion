@@ -444,6 +444,17 @@ describe('picker data flows', () => {
     expect(execution.contains(variants)).toBe(true)
   })
 
+  it('uses one in-pill Field · value grammar for Model, Runner, and Effort (#272)', async () => {
+    serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
+    renderNewTask()
+    await pillReady()
+    expect(screen.getByRole('button', { name: 'Model' }).textContent).toMatch(/^Model \u00b7 /)
+    expect(screen.getByRole('button', { name: 'Runner' }).textContent).toMatch(/^Runner \u00b7 /)
+    expect(screen.getByRole('button', { name: 'Effort' }).textContent).toMatch(/^Effort \u00b7 /)
+    expect(document.querySelector('.new-task-model-label')).toBeNull()
+    expect(document.querySelector('.new-task-runner-control')).toBeNull()
+  })
+
   it('hides the runner pill on a single-backend host (legacy rule)', async () => {
     serve()
     renderNewTask()
@@ -1351,7 +1362,8 @@ describe('submit', () => {
     expect(modelPill.textContent).not.toContain('opus')
     expect(modelPill.tagName).toBe('SPAN')
     // A locked model keeps its identity icon, but offers no dropdown affordance.
-    expect(modelPill.querySelector(':scope > svg')).toBeNull()
+    expect(modelPill.querySelector(':scope > svg[data-design-icon="cpu"]')).not.toBeNull()
+    expect(modelPill.querySelector(':scope > svg[data-design-icon="chevron-down"]')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Model' })).toBeNull()
 
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Runner' }))
@@ -2507,7 +2519,7 @@ describe('the composer runner pill carries the account', () => {
     await pickFrom(runnerPill()!, 'codex')
 
     // Codex has no second login, so the account group goes away and the pill is a runner again…
-    await waitFor(() => expect(runnerPill()?.textContent?.trim()).toBe('codex'))
+    await waitFor(() => expect(runnerPill()?.textContent?.trim()).toBe('Runner · codex'))
     fireEvent.change(textarea(), { target: { value: 'do the thing' } })
     await startTask()
     // …and nothing account-shaped reaches the wire.
@@ -2635,5 +2647,10 @@ describe('field chrome (#267)', () => {
     expect(newTaskCss).not.toContain('.new-task-model-label > span > span:first-child')
     // the all-breakpoint pill geometry the mobile rules must not override away
     expect(newTaskCss).toContain('border-color: var(--border); border-radius: 9px; min-height: 44px')
+  })
+
+  it('does not paint a Runner ::before on agent-option pills (#272)', () => {
+    expect(indexCss).not.toMatch(/\[data-slot='runner-pill'\]::before/)
+    expect(newTaskCss).not.toMatch(/\[data-slot='runner-pill'\]::before/)
   })
 })

@@ -646,7 +646,9 @@ export function NewTaskRoute() {
                 {/* Runner, model and effort stay with the editor in the approved desktop
                     composition. Run isolation and automation choices live in the side panel. */}
                 {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
-                  <span className="new-task-runner-control"><TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" /><RunnerPill
+                  <RunnerPill
+                    icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+                    fieldLabel
                     runners={runners}
                     value={displayRunner}
                     accounts={accountChoices}
@@ -660,12 +662,14 @@ export function NewTaskRoute() {
                       })
                     }
                     disabled={!providersReady}
-                  /></span>
+                  />
                 ) : null}
                 <PickerPill
+                  icon={<CpuIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+                  fieldLabel
                   slot="model-pill"
                   ariaLabel="Model"
-                  label={<span className="new-task-model-label"><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-text" /><span className="flex min-w-0 items-center gap-2 text-left"><span className="text-[10px] font-semibold tracking-[0.05em] text-muted-foreground uppercase">Model</span><span className="truncate text-sm text-foreground">{models.find((m) => m.id === model)?.label ?? 'auto'}</span></span></span>}
+                  label={models.find((m) => m.id === model)?.label ?? 'auto'}
                   value={model}
                   disabled={!providersReady}
                   readOnly={modelsLocked}
@@ -685,9 +689,11 @@ export function NewTaskRoute() {
                   status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
                 />
                 <PickerPill
+                  icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+                  fieldLabel
                   slot="effort-pill"
                   ariaLabel="Effort"
-                  label={<span className="inline-flex items-center gap-2"><GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" /><span className="text-[11px] text-muted-foreground">Effort</span>{effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}</span>}
+                  label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
                   value={effort}
                   disabled={!providersReady}
                   readOnly={modelsLocked}
