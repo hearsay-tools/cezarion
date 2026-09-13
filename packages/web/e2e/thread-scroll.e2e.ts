@@ -262,8 +262,8 @@ describe('thread virtualization on a 1,000-row transcript', () => {
     }
     browser.waitForFunction(nearBottom)
     browser.waitForFunction(`document.querySelector('[data-slot="jump-to-latest"]') === null`)
-    // Let the smooth scroll LAND, not merely enter the near-bottom slack — the next test
-    // parks mid-thread, and a still-running animation would carry its park away.
+    // Let the pin LAND, not merely enter the near-bottom slack — the next test parks
+    // mid-thread, and a still-settling tail write would carry its park away.
     browser.waitForFunction(
       `(() => { const m = ${MAIN}; return Math.abs(m.scrollHeight - m.clientHeight - m.scrollTop) < 2 })()`,
     )

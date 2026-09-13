@@ -49,7 +49,7 @@ export interface ThreadScrollControls {
   virtualizerRef: RefObject<VirtualizerHandle | null>
   /** True while the reader is away from the live tail — the pill's visibility. */
   pillVisible: boolean
-  /** The pill's action: smooth-scroll to the tail and stick again. */
+  /** The pill's action: pin to the live tail and stick again. */
   jumpToLatest: () => void
   /** Load one older page while preserving the current pixel anchor. */
   loadOlder: () => void
@@ -205,13 +205,24 @@ export function useThreadScroll(
     // Refreshing paged history can remount the transcript before this promise settles.
     // Let its replacement restore the user's new tail intent, not the old reading offset.
     saveThreadScroll(viewKey, { top: scroller.scrollHeight - scroller.clientHeight, atBottom: true })
+    const pin = () => {
+      if (stuckRef.current) toBottom()
+    }
     void (onJumpToLatest?.() ?? Promise.resolve()).finally(() => {
+      // Two frames: the history reset often paints the tail after the first rAF, so a single
+      // native smooth scrollTo landed on the newest page's start instead of the live end.
       requestAnimationFrame(() => {
-        const current = scrollElRef.current
-        current?.scrollTo({ top: current.scrollHeight - current.clientHeight, behavior: 'smooth' })
+        pin()
+        requestAnimationFrame(pin)
       })
     })
-  }, [onJumpToLatest, viewKey])
+  }, [onJumpToLatest, viewKey, toBottom])
+
+  const lastRowKey = rowKeys.at(-1)
+  const rowCount = rowKeys.length
+  useLayoutEffect(() => {
+    if (stuckRef.current) toBottom()
+  }, [lastRowKey, rowCount, toBottom])
 
   // Arrival is the route-owned pre-paint write. AppShell deliberately does not reset task
   // routes, so a destination thread never exposes an intermediate top-of-transcript frame.
@@ -515,7 +526,7 @@ export function JumpToLatestPill({ onJump }: { onJump: () => void }) {
       type="button"
       data-slot="jump-to-latest"
       onClick={onJump}
-      className="pointer-events-auto inline-flex min-h-8 items-center gap-1.5 rounded-full border border-border bg-background px-3.5 text-xs font-medium text-muted-foreground shadow-modal hover:text-foreground"
+      className="pointer-events-auto inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-full border border-border bg-background px-3.5 text-xs font-medium text-muted-foreground shadow-modal hover:text-foreground"
     >
       <ArrowDownIcon aria-hidden className="size-3.5" />
       Jump to latest
