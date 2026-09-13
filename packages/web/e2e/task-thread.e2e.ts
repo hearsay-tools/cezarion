@@ -129,7 +129,7 @@ describe('task thread', () => {
     expect(bubbles[0]).toContain('Summarize what this project does.')
     expect(bubbles[1]).toBe('Thanks — now show the markdown summary. mock:md')
 
-    // The revised document layout fills the reading column; the YOU label identifies authorship.
+    // The revised document layout fills the reading column; the role label identifies authorship.
     const geometry = browser.evaluate(`(() => {
       const bubble = document.querySelector('[data-slot="user-bubble"]')
       const message = document.querySelector('[data-slot="assistant-message"]')
@@ -139,7 +139,7 @@ describe('task thread', () => {
     })()`) as { rightGap: number; bubbleLeft: number; mid: number; messageLeft: number }
     expect(geometry.rightGap).toBeLessThan(40) // only the column padding separates them
     expect(geometry.bubbleLeft).toBeLessThan(geometry.mid)
-    expect(browser.evaluate(`document.querySelector('[data-slot="user-bubble"] > p').textContent`)).toBe('YOU')
+    expect(browser.evaluate(`document.querySelector('[data-slot="user-bubble"] > p').textContent`)).toBe('YOUR MESSAGE')
     expect(geometry.messageLeft).toBeLessThan(40)
   })
 

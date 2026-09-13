@@ -95,6 +95,14 @@
   --task-brand-selected: #2c1d46;
   --composer-border: #644393;
 
+  /* Thread conversation surfaces (#252). Yellow is user intent; violet is the agent reply. */
+  --message-user-bg: #1b1912;
+  --message-user-border: #4d4324;
+  --message-user-accent: #f4c542;
+  --message-agent-bg: #111824;
+  --message-agent-border: #343b4e;
+  --message-agent-accent: #a89bff;
+
   /* Existing semantic names remain the compatibility layer for every screen. */
   --background: var(--surface-base);
   --foreground: var(--text-primary);
@@ -198,6 +206,13 @@
   --task-brand-bg: #f8fafc;
   --task-brand-selected: #ede5fc;
   --composer-border: #c4b5fd;
+
+  --message-user-bg: #fff9e8;
+  --message-user-border: #ddc978;
+  --message-user-accent: #805d00;
+  --message-agent-bg: #f7f6fc;
+  --message-agent-border: #d8d4e7;
+  --message-agent-accent: #6049b6;
 
   --background: var(--surface-base);
   --foreground: var(--text-primary);
@@ -385,6 +400,13 @@
   --color-pending-strong: var(--pending-strong);
   --color-info: var(--info);
   --color-conflict: var(--conflict);
+
+  --color-message-user-bg: var(--message-user-bg);
+  --color-message-user-border: var(--message-user-border);
+  --color-message-user-accent: var(--message-user-accent);
+  --color-message-agent-bg: var(--message-agent-bg);
+  --color-message-agent-border: var(--message-agent-border);
+  --color-message-agent-accent: var(--message-agent-accent);
 
   --color-diff-add: var(--diff-add-bg);
   --color-diff-add-strong: var(--diff-add-strong);
