@@ -283,17 +283,41 @@ function rankByQuery<T extends { name: string; description?: string | null }>(
     .map((entry) => entry.item)
 }
 
-/** Rank skills for a grouped picker by match quality, keeping the caller's incoming order
+/** Rank skills for a picker by match quality, keeping the caller's incoming order
  *  (most-used-first / project-first) for ties and the empty query — with the #519 usage
- *  tie-break when `usage` is given. Callers split the result into their own display groups
- *  (`partitionSkillsForDisplay`); each group stays match-ranked. Accepts any name/description
- *  row so the workflow Add-step picker and the skills import panel share this ranker. */
+ *  tie-break when `usage` is given. Grouped pickers go through `searchSkillsForDisplay`
+ *  so a typed query is not re-tiered. Accepts any name/description row so the workflow
+ *  Add-step picker and the skills import panel share this ranker. */
 export function searchSkills<T extends { name: string; description?: string | null }>(
   skills: readonly T[],
   query: string,
   usage?: Readonly<Record<string, number>>,
 ): T[] {
   return rankByQuery(skills, query, usage)
+}
+
+export interface SkillPickerDisplay extends SkillTiers {
+  ranked: Skill[] | null
+}
+
+/** Grouped-picker contract (#668/#255): empty query keeps #519 Most used → project →
+ *  global; a typed query returns `ranked` in `searchSkills` order and leaves the tiers
+ *  empty. Usage-tier promotion and the locality split both put a weaker used/project hit
+ *  above an exact name match, so filtered results are not re-tiered. */
+export function searchSkillsForDisplay(
+  skills: readonly Skill[],
+  query: string,
+  usage?: Readonly<Record<string, number>>,
+): SkillPickerDisplay {
+  if (query.trim() === '') {
+    return { ...partitionSkillsForDisplay(skills, usage), ranked: null }
+  }
+  return {
+    mostUsed: [],
+    project: [],
+    global: [],
+    ranked: searchSkills(skills, query, usage),
+  }
 }
 
 /** Rank workflows for a picker by match quality — the workflow counterpart of `searchSkills`. */

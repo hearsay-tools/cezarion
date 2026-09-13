@@ -16,6 +16,7 @@ import {
   partitionSkillsForDisplay,
   queryScore,
   searchSkills,
+  searchSkillsForDisplay,
   searchWorkflows,
   skillKeywords,
   skillUsedBy,
@@ -440,5 +441,29 @@ describe('#255: name matches outrank description and weaker name hits', () => {
 
   it('queryScore: any name hit outranks a description-only hit', () => {
     expect(queryScore('om-fix', null, 'fix')).toBeGreaterThan(queryScore('ship', 'fix', 'fix'))
+  })
+})
+
+describe('searchSkillsForDisplay (#255: grouped pickers keep query rank)', () => {
+  const skills = [
+    skill({ name: 'om-code-review', source: 'ai' }),
+    skill({ name: 'review', source: 'global' }),
+  ]
+  const usage = { 'om-code-review': 999 }
+
+  it('empty query still promotes Most used, then locality', () => {
+    const display = searchSkillsForDisplay(skills, '', usage)
+    expect(display.ranked).toBeNull()
+    expect(display.mostUsed.map((s) => s.name)).toEqual(['om-code-review'])
+    expect(display.project).toEqual([])
+    expect(display.global.map((s) => s.name)).toEqual(['review'])
+  })
+
+  it('a typed query keeps the exact name first — usage and locality do not re-tier', () => {
+    const display = searchSkillsForDisplay(skills, 'review', usage)
+    expect(display.ranked?.map((s) => s.name)).toEqual(['review', 'om-code-review'])
+    expect(display.mostUsed).toEqual([])
+    expect(display.project).toEqual([])
+    expect(display.global).toEqual([])
   })
 })
