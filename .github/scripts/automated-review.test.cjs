@@ -111,6 +111,9 @@ test('supplies the shared verdict when no findings survive validation', () => {
 });
 
 test('rejects stale, malformed, and unknown-key output', () => {
+  for (const outcome of ['reviewed', 'skipped']) {
+    assert.throws(() => validateReview({ review: { head_sha: null, outcome, summary: 'Review result.', findings: [] }, headSha: sha, changedLines: new Map() }), /requires head_sha/);
+  }
   assert.throws(() => validateReview({ review: { head_sha: 'b'.repeat(40), outcome: 'reviewed', summary: null, findings: [] }, headSha: sha, changedLines: new Map() }), /stale PR head SHA/);
   assert.throws(() => validateReview({ review: { head_sha: sha, outcome: 'reviewed', summary: null, findings: 'no' }, headSha: sha, changedLines: new Map() }), /findings/);
   assert.throws(() => validateReview({ review: { head_sha: sha, outcome: 'reviewed', summary: null, findings: [], extra: true }, headSha: sha, changedLines: new Map() }), /unknown key/);

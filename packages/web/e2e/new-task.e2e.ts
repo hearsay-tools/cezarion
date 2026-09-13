@@ -286,6 +286,42 @@ describe('the full-screen /new against a live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/new-task-hero-iphone.png`, { viewport: true })
     browser.setViewport(1440, 900)
   })
+
+  it('picking a WORKFLOW from the menu labels the pill, and Start posts it (#263)', async () => {
+    // The reported gap, end-to-end: the row under the Workflows group, the pill taking its
+    // name — and the pick surviving Start, proven by the API readback rather than the label.
+    browser.click('[data-slot="source-pill"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') !== null`)
+    browser.click('[data-slot="source-option"][data-source-kind="workflow"][data-source-ref="fix-and-verify"]')
+    browser.waitForFunction(
+      `document.querySelector('[data-slot="source-menu"]') === null
+        && document.querySelector('[data-slot="source-pill"]')?.dataset.sourceKind === 'workflow'
+        && document.querySelector('[data-slot="source-pill"]').textContent.includes('fix-and-verify')`,
+    )
+    browser.screenshot(`${artifactsDir}/new-task-workflow-picked.png`)
+
+    browser.click('[data-slot="composer"] textarea')
+    browser.fill('[data-slot="composer"] textarea', 'Fix the flake, then prove it with the tests.')
+    browser.click('[aria-label="Start task"]')
+    browser.waitForFunction(`location.pathname.startsWith('${scoped('/tasks/')}')`)
+
+    const runId = (browser.evaluate(`location.pathname.split('/').pop()`) as string) ?? ''
+    expect(runId).not.toBe('')
+    const record = await getJson<{
+      task: string
+      workflow?: string
+      workflowDef?: { name?: string; steps?: Array<Record<string, unknown>> }
+    }>(`${baseUrl}/api/v1/runs/${runId}`)
+    expect(record.task).toBe('Fix the flake, then prove it with the tests.')
+    expect(record.workflow).toBe('fix-and-verify')
+    expect(record.workflowDef?.name).toBe('fix-and-verify')
+    // The workflow's OWN chain, not a skill's one-step inline: its first step is its lint-fix skill.
+    expect(record.workflowDef?.steps?.[0]).toEqual(
+      expect.objectContaining({ id: 'lint-fix', name: 'lint-fix', skill: 'lint-fix', prompt: '{{task}}' }),
+    )
+    // The thread really rendered (the run parks at waiting under the dry-run mock).
+    browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea') !== null`)
+  }, 90_000)
 })
 
 describe('the bookmarklet contract on full /new loads (spec 011, Step 1.3)', () => {
