@@ -273,9 +273,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.review-round.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.review-round.outputs.head_sha }}
+          BASE_SHA: ${{ needs.review-round.outputs.base_sha }}
         run: |
           rm -rf -- pull-request/.review-context
           mkdir -- pull-request/.review-context
+          jq -n --argjson pr_number "$PR_NUMBER" --arg head_sha "$HEAD_SHA" --arg base_sha "$BASE_SHA" \
+            '{pr_number: $pr_number, head_sha: $head_sha, base_sha: $base_sha}' \
+            > pull-request/.review-context/pull-request.json
           gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[]' > pull-request/.review-context/prior-review-bodies.jsonl
           gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" --jq '.[]' > pull-request/.review-context/prior-inline-comments.jsonl
 
