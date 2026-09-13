@@ -134,8 +134,12 @@ describe('filterGlobalTasks', () => {
     ])
   })
 
-  it('has no project facet — picking a project is a link to its own page, not a filter', () => {
-    expect(Object.keys(NO_FILTERS)).toEqual(['query', 'tags', 'statuses', 'workflows'])
+  it('filters multiple projects alongside tags and preserves project URLs', () => {
+    const state = urlStateFromSearchParams(new URLSearchParams('project=api&project=infra&tag=storefront&group=status'))
+    expect(ids(filterGlobalTasks(tasks, state.filters, 'active'))).toEqual(['a1'])
+    expect(urlStateToSearchParams(state).getAll('project')).toEqual(['api', 'infra'])
+    expect(resetCount(state)).toBe(4)
+    expect(ids(tasksExcludingFacet(tasks, state.filters, 'active', 'projects'))).toEqual(['a1', 'w1'])
   })
 
   it('ANDs across facets', () => {

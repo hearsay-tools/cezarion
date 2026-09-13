@@ -77,6 +77,8 @@ afterAll(async () => {
 function open(id = parentId, suffix = '') {
   browser.goto(`${base}${route(id)}${suffix}`)
   browser.waitForFunction(`document.querySelector(${JSON.stringify(region)}) !== null`)
+  const disclosure = `${region} > button[aria-expanded="false"]`
+  if (browser.count(disclosure) && browser.isVisible(disclosure)) browser.click(disclosure)
 }
 
 it('retains all 32 scoped links on Session, Changes, Commits and Files, including archived workers', () => {
@@ -117,7 +119,7 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     browser.screenshot(join(artifacts, `workers-${width}-${theme}.png`), { viewport: true })
     browser.press('Enter')
     browser.waitForFunction(`location.pathname === '${route(ids[31]!)}' && document.querySelector('${region} a[aria-label="Parent task ${parentId}"]') !== null`)
-    expect(browser.text(region)).toContain(parentId)
+    expect(browser.evaluate(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]').getAttribute('href')`)).toBe(route(parentId))
   }, 120_000)
 }
 
@@ -125,10 +127,10 @@ it('shows unavailable parent with retry, successful empty state, worker wait and
   browser.setViewport(1440, 900)
   open(orphanId)
   browser.waitForFunction(`document.querySelector('${region}').textContent.includes('Parent record unavailable')`)
-  expect(browser.text(region)).toContain(absentId)
+  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   expect(browser.snapshot()).toContain('Retry parent task')
-  browser.click(`${region} button`)
-  expect(browser.text(region)).toContain(absentId)
+  browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${region} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
+  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   open(emptyId); browser.waitForFunction(`document.querySelector('${region}').textContent.includes('No workers')`)
   open(waitingId); expect(browser.text(region)).toContain('Waiting on workers')
   expect(browser.count('[data-slot="ask-card"]')).toBe(0)
@@ -137,7 +139,7 @@ it('shows unavailable parent with retry, successful empty state, worker wait and
   browser.goto(`${base}/p/${project}/`)
   const projectAsk = `[data-slot="task-row"][data-run-id="${askId}"]`
   browser.waitForFunction(`document.querySelector('${projectAsk} [aria-label="needs you"]') !== null`)
-  expect(browser.count(`[data-bucket="Needs you"] ${projectAsk}`)).toBe(1)
+  expect(browser.count(`${projectAsk} [aria-label="needs you"]`)).toBe(1)
   expect(browser.count(`${projectAsk} [aria-label="waiting on workers"]`)).toBe(0)
   browser.goto(`${base}/tasks`)
   const globalAsk = `[data-slot="global-task-row"][data-run-id="${askId}"]`
@@ -170,20 +172,20 @@ it('retains known IDs during loading, request error and offline pause, then retr
   const navigate = (id: string) => browser.evaluate(`history.pushState({}, '', '${route(id)}'); window.dispatchEvent(new PopStateEvent('popstate')); true`)
   navigate(loadingId)
   browser.waitForFunction(`document.querySelector('${region}')?.textContent.includes('Loading relationships')`)
-  expect(browser.text(region)).toContain(absentId)
+  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   expect(browser.text(region)).not.toContain('No workers')
   browser.evaluate(`window.__relationshipMode = 'error'`)
   navigate(errorId)
   browser.waitForFunction(`document.querySelector('${region}')?.textContent.includes('Could not load relationships')`)
-  expect(browser.text(region)).toContain(absentId)
+  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   expect(browser.snapshot()).toContain('Retry relationships')
   browser.evaluate(`window.__relationshipMode = 'success'`)
   // Pause a retry on an already loaded run: a completely uncached run cannot
   // mount its relationships while its own detail request is offline.
   browser.setOffline(true)
-  browser.click(`${region} button`)
+  browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${region} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
   browser.waitForFunction(`document.querySelector('${region}')?.textContent.includes('Offline')`)
-  expect(browser.text(region)).toContain(absentId)
+  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   browser.screenshot(join(artifacts, 'workers-offline.png'), { viewport: true })
   browser.evaluate(`window.fetch = window.__relationshipFetch; true`)
   browser.setOffline(false)

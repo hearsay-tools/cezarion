@@ -23,10 +23,6 @@ import { runTitle } from '@/lib/task-groups'
  *    work anywhere in storefront or infra". Single-select would force the exact question the
  *    page exists to answer — "how are these two repos doing?" — to be asked twice.
  *
- *    There is deliberately NO project facet. Narrowing this page to one project is that
- *    project's own Tasks page, which is a better version of the same answer (live SSE, the full
- *    column set, the composer). Every project name here is therefore a LINK, not a filter —
- *    picking one leaves for it rather than turning the global view into a worse local one.
  * 3. **Row identity is `projectId/id`.** The index already keys on the pair, and run ids are only
  *    unique within a project's `runs.json`.
  */
@@ -80,11 +76,13 @@ export function toggleGroupBy(current: GroupBy, picked: Exclude<GroupBy, 'none'>
 
 /** Which facets exist. Named as a type so the filter bar can render them from one list and the
  *  toggle helper can name the one it edits without a stringly-typed key. */
-export type FacetId = 'tags' | 'statuses' | 'workflows'
+export type FacetId = 'tags' | 'statuses' | 'workflows' | 'projects'
 
 export interface GlobalTaskFilters {
   /** Free text over what the table shows — title, project, workflow, branch, tags. */
   query: string
+  /** Registry IDs; optional for existing consumers and older bookmarks. */
+  projects?: readonly string[]
   /** Tags, `UNTAGGED` included. Empty = every project, tagged or not. */
   tags: readonly string[]
   /** `RunStatus` values, kept as plain strings so a status from a newer server passes through
@@ -113,7 +111,7 @@ export function toggleFacetValue(
 /** How many facet values are selected — the number the "Clear" affordance and each facet pill's
  *  badge print. The query is not one of them; it has its own visible input. */
 export function activeFacetCount(filters: GlobalTaskFilters): number {
-  return filters.tags.length + filters.statuses.length + filters.workflows.length
+  return (filters.projects?.length ?? 0) + filters.tags.length + filters.statuses.length + filters.workflows.length
 }
 
 /** Are any filters narrowing the list? Drives the empty state's wording — "nothing here" and
@@ -246,6 +244,7 @@ export function filterGlobalTasks(
   const tokens = filters.query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   return tasks.filter((task) => {
     if (view === 'archived' ? !task.run.archived : task.run.archived) return false
+    if (!matchesFacet(filters.projects ?? [], [task.run.projectId])) return false
     if (!matchesFacet(filters.statuses, [task.run.status])) return false
     if (!matchesFacet(filters.workflows, [task.run.workflow])) return false
     if (!matchesTags(task, filters.tags)) return false
@@ -346,6 +345,7 @@ export function truncatedProjectNames(
  */
 export const SEARCH_PARAMS = {
   query: 'q',
+  project: 'project',
   tag: 'tag',
   untagged: 'untagged',
   status: 'status',
@@ -392,6 +392,7 @@ export function urlStateToSearchParams(state: GlobalTasksUrlState): URLSearchPar
     if (tag === UNTAGGED) params.set(SEARCH_PARAMS.untagged, '1')
     else params.append(SEARCH_PARAMS.tag, tag)
   }
+  for (const project of state.filters.projects ?? []) params.append(SEARCH_PARAMS.project, project)
   for (const status of state.filters.statuses) params.append(SEARCH_PARAMS.status, status)
   for (const workflow of state.filters.workflows) params.append(SEARCH_PARAMS.workflow, workflow)
   if (state.groupBy !== 'none') params.set(SEARCH_PARAMS.groupBy, state.groupBy)
@@ -413,6 +414,7 @@ export function urlStateFromSearchParams(params: URLSearchParams): GlobalTasksUr
   return {
     filters: {
       query: params.get(SEARCH_PARAMS.query) ?? '',
+      ...(params.has(SEARCH_PARAMS.project) ? { projects: params.getAll(SEARCH_PARAMS.project).filter(Boolean) } : {}),
       tags,
       statuses: params.getAll(SEARCH_PARAMS.status).filter((status) => status !== ''),
       workflows: params.getAll(SEARCH_PARAMS.workflow).filter((workflow) => workflow !== ''),

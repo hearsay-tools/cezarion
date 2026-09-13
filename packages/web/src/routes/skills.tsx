@@ -1,5 +1,14 @@
+import './skills-workflows.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon, DownloadIcon, RefreshCwIcon, SparklesIcon, TriangleAlertIcon, ZapIcon } from 'lucide-react'
+import {
+  ArrowLeftIcon,
+  DownloadIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  SparklesIcon,
+  TriangleAlertIcon,
+  ZapIcon,
+} from '@/components/design-icons'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 
@@ -43,12 +52,10 @@ const IMPORT = '__import'
 
 export function SkillsRoute() {
   return (
-    <div data-route="skills" className="flex min-h-full flex-col">
-      {/* Desktop header — below `md` the shell's top bar already says "Skills". */}
-      <header className="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-5 md:flex">
-        <h1 className="text-base font-semibold">Skills</h1>
-        <p className="text-[13px] text-muted-foreground">Markdown playbooks agents can follow.</p>
-      </header>
+    <div
+      data-route="skills"
+      className="mx-auto min-h-full w-full px-[18px] py-6 md:p-9"
+    >
       <SkillsCatalog />
     </div>
   )
@@ -105,143 +112,142 @@ function SkillsCatalog() {
   const shown = filterSkills(skills, query)
 
   return (
-    <div data-slot="skills-section" className="flex min-h-full flex-1 items-stretch">
-      {/* List pane. Below md it IS the page until a selection is in the URL — the GitHub
-          tab's two-surfaces-one-URL rule. */}
-      <section
-        data-slot="skills-list"
-        className={cn(
-          'w-full flex-col border-border md:flex md:w-[320px] md:shrink-0 md:border-r',
-          // Pin the pane below the sticky h-14 header so the ROWS scroll inside it (the #384
-          // stable-scroll surface) — `var(--spacing)*14` tracks the density token.
-          'md:sticky md:top-14 md:max-h-[calc(100dvh-(var(--spacing)*14))]',
-          param === null ? 'flex' : 'hidden md:flex',
-        )}
-      >
-        <div className="flex shrink-0 items-center gap-2 p-3 pb-2">
-          <Input
-            data-slot="skills-filter"
-            placeholder="Filter skills…"
-            aria-label="Filter skills"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="h-8 text-[13px]"
-          />
-          <button
-            type="button"
-            data-slot="skills-refresh"
-            title="git fetch the team skills repos"
-            disabled={refresh.isPending}
-            onClick={() => refresh.mutate()}
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-55"
-          >
-            <RefreshCwIcon
-              aria-hidden="true"
-              className={cn('size-3', refresh.isPending && 'motion-safe:animate-spin')}
-            />
-            Refresh
-          </button>
+    <div data-slot="skills-section" className="@container flex min-w-0 flex-col gap-[22px]">
+      <header className="flex flex-col gap-4 @min-[700px]:flex-row @min-[700px]:items-center @min-[700px]:justify-between">
+        <div>
+          <h1 className="text-[25px] font-semibold md:text-[30px]">Skills</h1>
+          <p className="mt-2 text-xs text-muted-foreground md:text-[13px]">Markdown playbooks your agents can follow.</p>
         </div>
-
-        <ul data-slot="skill-rows" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          {skillsQuery.isPending ? (
-            <li className="px-2.5 py-2 text-[13px] text-soft-foreground">Loading…</li>
-          ) : shown.length > 0 ? (
-            shown.map((skill) => <SkillRow key={skill.path} skill={skill} active={selection === skill.name} />)
-          ) : (
-            <li className="px-2.5 py-2 text-xs leading-relaxed text-soft-foreground">
-              {skills.length > 0 ? '(no skills match)' : <SkillEmptyHint />}
-            </li>
-          )}
-        </ul>
-
-        {/* Always visible below the scrollable rows — the pinned panels. */}
-        <div className="shrink-0 border-t border-border p-2">
+        <div className="flex flex-wrap gap-2">
           {canImport ? (
             <Link
               to={`/skills?skill=${IMPORT}`}
               data-slot="import-skills-row"
               aria-current={selection === IMPORT ? 'page' : undefined}
-              className={cn(
-                'selection-row mb-1 flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
-                selection === IMPORT && 'bg-muted',
-              )}
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-medium aria-[current=page]:bg-accent-strong/10 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
             >
-              <span className="flex min-w-0 items-center gap-2">
-                <DownloadIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
-                <span className="min-w-0 truncate text-[13px] font-medium">Manage skills</span>
-                <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-supporting-foreground">
-                  open-mercato
-                </span>
-              </span>
-              <span className="pl-[22px] text-xs text-supporting-foreground">
-                Choose which open-mercato skills appear in your catalog.
-              </span>
+              <DownloadIcon aria-hidden="true" className="size-4 text-link-foreground" />
+              Manage skills
             </Link>
           ) : null}
           <Link
             to={`/skills?skill=${BOOKMARKLETS}`}
             data-slot="bookmarklets-row"
             aria-current={selection === BOOKMARKLETS ? 'page' : undefined}
-            className={cn(
-              'selection-row flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
-              selection === BOOKMARKLETS && 'bg-muted',
-            )}
+            className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-medium aria-[current=page]:bg-accent-strong/10 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
           >
-            <span className="flex min-w-0 items-center gap-2">
-              <ZapIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
-              <span className="min-w-0 truncate text-[13px] font-medium">Run from GitHub</span>
-              <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-supporting-foreground">
-                bookmarklets
-              </span>
-            </span>
-            <span className="pl-[22px] text-xs text-supporting-foreground">
-              One-click skill launch from any GitHub PR or issue.
-            </span>
+            <ZapIcon aria-hidden="true" className="size-4 text-link-foreground" />
+            Run from GitHub
           </Link>
         </div>
-      </section>
+      </header>
+      <div className={cn(
+        'flex-col items-start gap-2 sm:flex-row sm:items-center md:flex',
+        param === null ? 'flex' : 'hidden',
+      )}>
+        <div className="sw-search relative w-full min-w-0 flex-1">
+          <SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
+        <Input
+          data-slot="skills-filter"
+          placeholder="Filter skills…"
+          aria-label="Filter skills"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          className="h-11 min-w-0 bg-card pl-9 text-xs"
+        />
+        </div>
+        <button
+          type="button"
+          data-slot="skills-refresh"
+          title="git fetch the team skills repos"
+          disabled={refresh.isPending}
+          onClick={() => refresh.mutate()}
+          className="flex h-11 shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-55"
+        >
+          <RefreshCwIcon
+            aria-hidden="true"
+            className={cn('size-3', refresh.isPending && 'motion-safe:animate-spin')}
+          />
+          Refresh
+        </button>
+      </div>
 
-      {/* Detail pane. Hidden below md until the URL carries a selection. */}
-      <section
-        data-slot="skills-detail"
-        className={cn('min-w-0 flex-1 flex-col', param === null ? 'hidden md:flex' : 'flex')}
-      >
-        <div className="min-w-0 flex-1 px-4 py-4 md:px-7 md:py-5">
-          <Link
-            to="/skills"
-            data-slot="skills-back"
-            className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden"
-          >
-            <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
-            Back to the list
-          </Link>
-
-          {selection === IMPORT ? (
-            <ImportSkillsPanel projectId={updateProjectId} />
-          ) : selection === BOOKMARKLETS ? (
-            <BookmarkletPanel skills={skills} />
-          ) : selected ? (
-            <SkillDetailBody
-              skill={selected}
-              usedBy={skillUsedBy(workflowsQuery.data?.workflows ?? [], selected.name)}
-            />
-          ) : skillsQuery.isPending ? null : (
-            <CenteredState
-              icon={<SparklesIcon />}
-              tone="neutral"
-              heading="h2"
-              title="No skill selected"
-              subtitle="Pick a skill from the catalog."
-            />
+      <div className="grid min-w-0 items-start gap-[22px] md:grid-cols-[minmax(220px,310px)_minmax(0,1fr)]">
+        <section
+          data-slot="skills-list"
+          className={cn(
+            'min-w-0 flex-col rounded-xl border border-border bg-card p-3 md:flex',
+            param === null ? 'flex' : 'hidden',
           )}
-        </div>
-      </section>
+        >
+          <ul
+            data-slot="skill-rows"
+            className="flex min-h-0 flex-col gap-1 overflow-y-auto md:max-h-[calc(100dvh-280px)]"
+          >
+            {skillsQuery.isPending ? (
+              <li role="status" aria-busy="true" className="min-h-72 p-3 text-[13px] text-soft-foreground">
+                Loading skills…
+              </li>
+            ) : shown.length > 0 ? (
+              shown.map((skill) => (
+                <SkillRow key={skill.path} skill={skill} active={selection === skill.name} highlighted={selection === IMPORT && skill === skills[0]} />
+              ))
+            ) : (
+              <li className="px-2.5 py-2 text-xs leading-relaxed text-soft-foreground">
+                {skills.length > 0 ? '(no skills match)' : <SkillEmptyHint />}
+              </li>
+            )}
+          </ul>
+        </section>
+
+        {/* Detail pane. On narrow containers, the URL switches between catalog and reader. */}
+        <section
+          data-slot="skills-detail"
+          className={cn(
+            'min-w-0 flex-col rounded-xl border border-border bg-card md:flex',
+            param === null ? 'hidden' : 'flex',
+          )}
+        >
+          <div className="min-w-0 p-5">
+            <Link
+              to="/skills"
+              data-slot="skills-back"
+              className="mb-4 inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted md:hidden"
+            >
+              <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
+              Back to skills
+            </Link>
+
+            {selection === IMPORT ? (
+              <ImportSkillsPanel projectId={updateProjectId} />
+            ) : selection === BOOKMARKLETS ? (
+              <BookmarkletPanel skills={skills} />
+            ) : selected ? (
+              <SkillDetailBody
+                skill={selected}
+                usedBy={skillUsedBy(workflowsQuery.data?.workflows ?? [], selected.name)}
+              />
+            ) : skillsQuery.isPending ? (
+              <div role="status" aria-busy="true" className="min-h-72 text-xs text-muted-foreground">
+                Loading skill…
+              </div>
+            ) : (
+              <CenteredState
+                icon={<SparklesIcon />}
+                tone="neutral"
+                heading="h2"
+                title="No skill selected"
+                subtitle="Pick a skill from the catalog."
+              />
+            )}
+          </div>
+        </section>
+      </div>
     </div>
   )
 }
 
-function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
+function SkillRow({ skill, active, highlighted }: { skill: Skill; active: boolean; highlighted: boolean }) {
   const project = isProjectSkill(skill)
   return (
     <li>
@@ -249,32 +255,34 @@ function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
         to={`/skills?skill=${encodeURIComponent(skill.name)}`}
         data-slot="skill-row"
         data-skill={skill.name}
+        data-highlighted={highlighted || undefined}
         data-project={project ? 'true' : undefined}
         aria-current={active ? 'page' : undefined}
         className={cn(
-          'selection-row flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
-          active && 'bg-muted',
+          'selection-row flex min-h-24 flex-col gap-2 rounded-lg border-b border-border p-3 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
+          (active || highlighted) && 'border-transparent bg-accent-strong/10',
         )}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <SparklesIcon
-            aria-hidden="true"
-            className={cn('size-3.5 shrink-0', project ? 'text-violet' : 'text-soft-foreground')}
-          />
           {/* Project skills read bold (#377) — the visual half of the ordering rule. */}
           <span
             className={cn(
-              'min-w-0 truncate font-mono text-[13px]',
-              project ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground',
+              'min-w-0 break-words text-[13px]',
+              project ? 'font-semibold text-foreground' : 'font-normal text-muted-foreground',
             )}
           >
             {skill.name}
           </span>
-          <SkillSourceTag source={skill.source} className="ml-auto" />
         </span>
         {skill.description ? (
-          <span className="line-clamp-2 pl-[22px] text-xs text-supporting-foreground">{skill.description}</span>
+          <span className="line-clamp-2 text-xs leading-relaxed text-supporting-foreground">
+            {skill.description}
+          </span>
         ) : null}
+        <SkillSourceTag
+          source={skill.source}
+          className="self-start border-0 bg-transparent p-0 text-link-foreground"
+        />
       </Link>
     </li>
   )

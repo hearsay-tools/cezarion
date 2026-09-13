@@ -18,7 +18,7 @@ export function SettingsField({
   children: ReactNode
 }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section className="settings-field flex flex-col gap-2">
       <div>
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <p className="text-[13px] text-muted-foreground">{hint}</p>

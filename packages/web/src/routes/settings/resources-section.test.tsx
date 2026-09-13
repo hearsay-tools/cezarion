@@ -154,9 +154,9 @@ describe('Global settings → Resources', () => {
     serve({ monitoringWakeIntervalMinutes: null })
     renderResources()
     await waitFor(() => expect(wakeMode()).not.toBeNull())
-    expect(wakeMode()!.value).toBe('park')
+    expect(wakeMode()!.getAttribute('aria-checked')).toBe('false')
     expect(wakeInterval()).toBeNull()
-    fireEvent.change(wakeMode()!, { target: { value: 'interval' } })
+    fireEvent.click(wakeMode()!)
     expect(wakeInterval()!.value).toBe('5')
     fireEvent.click(saveWake()!)
     await waitFor(() => expect(puts()).toHaveLength(1))
@@ -166,12 +166,12 @@ describe('Global settings → Resources', () => {
   it('shows auto-resume on by default and saves the opt-out', async () => {
     serve()
     renderResources()
-    const select = (await screen.findByLabelText('Auto-resume after a usage limit')) as HTMLSelectElement
+    const select = await screen.findByRole('switch', { name: 'Auto-resume after a usage limit' })
     // The shipped default (spec 2026-08-03-auto-resume-after-usage-limit) — a user who never
     // opens this pane still gets their limited tasks finished.
-    expect(select.value).toBe('on')
+    expect(select.getAttribute('aria-checked')).toBe('true')
 
-    fireEvent.change(select, { target: { value: 'off' } })
+    fireEvent.click(select)
     await waitFor(() => expect(puts()).toHaveLength(1))
     expect(puts()[0]?.body).toEqual({ resources: { autoResumeOnUsageLimit: false } })
   })

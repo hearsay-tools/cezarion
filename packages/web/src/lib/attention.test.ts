@@ -43,8 +43,8 @@ const ALL_STATUSES: readonly RunStatus[] = [
 describe('deriveAttention', () => {
   const cases: ReadonlyArray<[RunStatus, Attention]> = [
     ['waiting', { bucket: 'waiting', tone: 'pending', pulse: true, label: 'needs you' }],
-    ['review', { bucket: 'waiting', tone: 'violet', pulse: true, label: 'needs review' }],
-    ['running', { bucket: 'running', tone: 'violet', pulse: true, label: 'running' }],
+    ['review', { bucket: 'waiting', tone: 'accent', pulse: true, label: 'needs review' }],
+    ['running', { bucket: 'running', tone: 'accent', pulse: true, label: 'running' }],
     ['queued', { bucket: 'none', tone: 'neutral', pulse: false, label: 'queued' }],
     ['done', { bucket: 'none', tone: 'success', pulse: false, label: 'done' }],
     ['failed', { bucket: 'error', tone: 'danger', pulse: false, label: 'failed' }],
@@ -181,7 +181,7 @@ describe("running activity: 'monitoring' (#490)", () => {
   it('is a distinct, non-attention sub-state of running', () => {
     expect(deriveAttention(run({ status: 'running', activity: 'monitoring' }))).toEqual({
       bucket: 'running',
-      tone: 'violet',
+      tone: 'accent',
       pulse: true,
       label: 'monitoring',
     })
@@ -204,13 +204,13 @@ describe('tone vocabulary', () => {
     // assignments are the drift alarm: they only compile while the unions are identical.
     const toDot = (tone: AttentionTone): StatusDotTone => tone
     const fromDot = (tone: StatusDotTone): AttentionTone => tone
-    expect(toDot('violet')).toBe('violet')
+    expect(toDot('accent')).toBe('accent')
     expect(fromDot('neutral')).toBe('neutral')
   })
 
   it('every status yields a tone StatusDot can paint', () => {
     const tones = new Set(ALL_STATUSES.map((status) => deriveAttention(run({ status })).tone))
-    expect([...tones].sort()).toEqual(['danger', 'neutral', 'pending', 'success', 'violet'])
+    expect([...tones].sort()).toEqual(['accent', 'danger', 'neutral', 'pending', 'success'])
   })
 })
 

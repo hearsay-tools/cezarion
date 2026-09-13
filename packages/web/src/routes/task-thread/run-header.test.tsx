@@ -105,7 +105,12 @@ function renderHeader(
   )
 }
 
-const actionBar = () => within(document.querySelector('[data-slot="run-actions"]') as HTMLElement)
+const actionBar = () => {
+  if (!document.querySelector('[data-slot="run-actions-menu"]')) {
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Run actions' }))
+  }
+  return within(document.querySelector('[data-slot="run-actions-menu"]') as HTMLElement)
+}
 
 describe('monitoring schedule', () => {
   it('shows the exact persisted deadline in a time element', () => {
@@ -198,30 +203,29 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
   // Pin (#935) is in every row: unlike every other action here it asks nothing of the engine,
   // so it is offered whatever the run is doing — only archiving takes it away.
   const matrix: Array<{ status: RunStatus; visible: string[] }> = [
-    { status: 'queued', visible: ['Notes', 'Pin'] },
-    { status: 'running', visible: ['Notes', 'Pin'] },
-    { status: 'waiting', visible: ['Finish', 'Notes', 'Pin'] },
+    { status: 'queued', visible: ['Notes / handoff', 'Pin task'] },
+    { status: 'running', visible: ['Notes / handoff', 'Pin task'] },
+    { status: 'waiting', visible: ['Notes / handoff', 'Finish', 'Pin task'] },
     // Terminal folded into the Open in… menu — it shows whenever the session can be resumed.
-    { status: 'review', visible: ['Finish', 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
-    { status: 'done', visible: [ 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
-    { status: 'failed', visible: [ 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
-    { status: 'cancelled', visible: [ 'Open in…', 'Notes', 'Pin', 'Archive', 'Delete'] },
+    { status: 'review', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Finish', 'Pin task', 'Archive task', 'Delete task…'] },
+    { status: 'done', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Archive task', 'Delete task…'] },
+    { status: 'failed', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Archive task', 'Delete task…'] },
+    { status: 'cancelled', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Archive task', 'Delete task…'] },
   ]
 
   it.each(matrix)('$status → $visible', ({ status, visible }) => {
     stubFetch()
     renderHeader(run(status))
-    const names = within(document.querySelector('[data-slot="run-actions"]') as HTMLElement)
-      .getAllByRole('button')
-      .map((el) => el.textContent?.trim())
+    actionBar()
+    const names = [...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map(el => el.textContent?.trim())
     expect(names).toEqual(visible)
   })
 
   it('an archived run offers Unarchive instead of Archive', () => {
     stubFetch()
     renderHeader(run('done', { archived: true }))
-    expect(actionBar().queryByRole('button', { name: 'Archive' })).toBeNull()
-    expect(actionBar().getByRole('button', { name: 'Unarchive' })).not.toBeNull()
+    expect(actionBar().queryByRole('menuitem', { name: 'Archive task' })).toBeNull()
+    expect(actionBar().getByRole('menuitem', { name: 'Unarchive' })).not.toBeNull()
   })
 
   it('VS Code is absent everywhere — the open-in-editor endpoint does not exist yet (R5)', () => {
@@ -247,10 +251,9 @@ describe('Mark unread (#775)', () => {
   it('offers the control for a read, finished run — next to Archive', () => {
     stubFetch()
     renderHeader(readDone())
-    const names = actionBar()
-      .getAllByRole('button')
-      .map((el) => el.textContent?.trim())
-    expect(names).toEqual([ 'Open in…', 'Notes', 'Mark unread', 'Pin', 'Archive', 'Delete'])
+    actionBar()
+    const names = [...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map(el => el.textContent?.trim())
+    expect(names).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive task', 'Delete task…'])
   })
 
   it.each([
@@ -262,13 +265,13 @@ describe('Mark unread (#775)', () => {
   ] as Array<[string, ApiRun]>)('hides the control for %s', (_name, record) => {
     stubFetch()
     renderHeader(record)
-    expect(actionBar().queryByRole('button', { name: 'Mark unread' })).toBeNull()
+    expect(actionBar().queryByRole('menuitem', { name: 'Mark unread' })).toBeNull()
   })
 
   it('Mark unread → POST /unread, bodyless like its read twin', async () => {
     const sent = stubFetch()
     renderHeader(readDone())
-    fireEvent.click(actionBar().getByRole('button', { name: 'Mark unread' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Mark unread' }))
     await waitFor(() => {
       const request = sent.find((r) => r.path === '/api/v1/runs/r1/unread')
       expect(request?.method).toBe('POST')
@@ -285,7 +288,7 @@ describe('Mark unread (#775)', () => {
       expect(sent.some((r) => r.path === '/api/v1/runs/r1/unread')).toBe(false)
     })
     renderHeader(readDone(), onMarkedUnread)
-    fireEvent.click(actionBar().getByRole('button', { name: 'Mark unread' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Mark unread' }))
     expect(onMarkedUnread).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(sent.some((r) => r.path === '/api/v1/runs/r1/unread')).toBe(true))
   })
@@ -298,7 +301,7 @@ describe('Mark unread (#775)', () => {
       '/api/v1/runs/r1/unread': () => jsonResponse({ error: 'not found' }, 404),
     })
     renderHeader(readDone())
-    fireEvent.click(actionBar().getByRole('button', { name: 'Mark unread' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Mark unread' }))
     await waitFor(() => expect(screen.getByText('not found')).not.toBeNull())
   })
 
@@ -315,7 +318,9 @@ describe('actions hit their endpoints', () => {
   it('Finish → POST /finish', async () => {
     const sent = stubFetch()
     renderHeader(run('waiting'))
-    fireEvent.click(actionBar().getByRole('button', { name: 'Finish' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Finish' }))
+    expect(sent.some((r) => r.path.endsWith('/finish'))).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Review and finish' }))
     await waitFor(() => {
       expect(sent.some((r) => r.method === 'POST' && r.path === '/api/v1/runs/r1/finish')).toBe(true)
     })
@@ -324,8 +329,7 @@ describe('actions hit their endpoints', () => {
   it.each(['done', 'running'] as const)('does not duplicate composer execution actions on desktop or mobile (%s)', async (status) => {
     const sent = stubFetch()
     renderHeader(run(status))
-    expect(actionBar().queryByRole('button', { name: /^(Continue|Cancel|Stop)$/ })).toBeNull()
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Run actions' }))
+    expect(actionBar().queryByRole('menuitem', { name: /^(Continue|Cancel|Stop)$/ })).toBeNull()
     await screen.findByRole('menu')
     expect(screen.queryByRole('menuitem', { name: /^(Continue|Cancel|Stop)$/ })).toBeNull()
     expect(sent.some((request) => /\/(continue|cancel)$/.test(request.path))).toBe(false)
@@ -334,7 +338,7 @@ describe('actions hit their endpoints', () => {
   it('Archive → POST /archive with the flipped flag', async () => {
     const sent = stubFetch()
     renderHeader(run('done', { archived: true }))
-    fireEvent.click(actionBar().getByRole('button', { name: 'Unarchive' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Unarchive' }))
     await waitFor(() => {
       expect(sent.find((r) => r.path === '/api/v1/runs/r1/archive')?.body).toEqual({ archived: false })
     })
@@ -343,7 +347,7 @@ describe('actions hit their endpoints', () => {
   it('Pin → POST /pin with the flipped flag, and reads Unpin once pinned (#935)', async () => {
     const sent = stubFetch()
     renderHeader(run('done'))
-    fireEvent.click(actionBar().getByRole('button', { name: 'Pin' }))
+    fireEvent.click(actionBar().getByRole('menuitemcheckbox', { name: 'Pin task' }))
     await waitFor(() => {
       expect(sent.find((r) => r.path === '/api/v1/runs/r1/pin')?.body).toEqual({ pinned: true })
     })
@@ -351,7 +355,7 @@ describe('actions hit their endpoints', () => {
     cleanup()
     const unpinning = stubFetch()
     renderHeader(run('done', { pinned: true, pinnedAt: '2026-08-29T10:00:00.000Z' }))
-    fireEvent.click(actionBar().getByRole('button', { name: 'Unpin' }))
+    fireEvent.click(actionBar().getByRole('menuitemcheckbox', { name: 'Unpin task' }))
     await waitFor(() => {
       expect(unpinning.find((r) => r.path === '/api/v1/runs/r1/pin')?.body).toEqual({ pinned: false })
     })
@@ -360,8 +364,8 @@ describe('actions hit their endpoints', () => {
   it('an archived run offers no pin at all — archiving retires it (#935)', () => {
     stubFetch()
     renderHeader(run('done', { archived: true }))
-    expect(actionBar().queryByRole('button', { name: 'Pin' })).toBeNull()
-    expect(actionBar().queryByRole('button', { name: 'Unpin' })).toBeNull()
+    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Pin task' })).toBeNull()
+    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Unpin task' })).toBeNull()
   })
 
   it('Pin is in the mobile kebab too', async () => {
@@ -369,17 +373,17 @@ describe('actions hit their endpoints', () => {
     renderHeader(run('running'))
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Run actions' }))
     const menu = within(await screen.findByRole('menu'))
-    expect(menu.getByRole('menuitemcheckbox', { name: 'Pin', checked: false })).not.toBeNull()
+    expect(menu.getByRole('menuitemcheckbox', { name: 'Pin task', checked: false })).not.toBeNull()
   })
 
   it('Delete confirms, DELETEs, and navigates home', async () => {
     const sent = stubFetch()
     renderHeader(run('failed'))
-    fireEvent.click(actionBar().getByRole('button', { name: 'Delete' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete task…' }))
 
     expect(sent.some((r) => r.method === 'DELETE')).toBe(false)
     const dialog = await screen.findByRole('alertdialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete task' }))
     await waitFor(() => {
       expect(sent.some((r) => r.method === 'DELETE' && r.path === '/api/v1/runs/r1')).toBe(true)
     })
@@ -389,22 +393,22 @@ describe('actions hit their endpoints', () => {
     })
   })
 
-  it('the delete confirm button stays "Delete" even for a long task name, which appears in the description instead (#403)', async () => {
+  it('the delete confirm button stays "Delete task" even for a long task name, which appears in the description instead (#403)', async () => {
     const longTitle = 'create a github issue for saving unsuccessfully finished tasks automatically'
     renderHeader(run('failed', { titleSummary: longTitle }))
-    fireEvent.click(actionBar().getByRole('button', { name: 'Delete' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete task…' }))
 
     const dialog = await screen.findByRole('alertdialog')
-    expect(within(dialog).getByRole('button', { name: 'Delete' })).not.toBeNull()
+    expect(within(dialog).getByRole('button', { name: 'Delete task' })).not.toBeNull()
     expect(within(dialog).getByText(longTitle)).not.toBeNull()
   })
 
   it('dismissing the confirm keeps the run', async () => {
     const sent = stubFetch()
     renderHeader(run('done'))
-    fireEvent.click(actionBar().getByRole('button', { name: 'Delete' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Delete task…' }))
     const dialog = await screen.findByRole('alertdialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep it' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => {
       expect(screen.queryByRole('alertdialog')).toBeNull()
     })
@@ -416,9 +420,10 @@ describe('actions hit their endpoints', () => {
       '/api/v1/runs/r1/archive': () => jsonResponse({ error: 'run is still active' }, 409),
     })
     renderHeader(run('done'))
-    const button = actionBar().getByRole<HTMLButtonElement>('button', { name: 'Archive' })
-    await waitFor(() => expect(button.disabled).toBe(false))
+    const button = actionBar().getByRole('menuitem', { name: 'Archive task' })
+    await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.click(button)
+    fireEvent.click(screen.getByRole('button', { name: 'Archive task' }))
     const item = await screen.findByRole('status')
     expect(item.textContent).toBe('run is still active')
     expect(item.getAttribute('data-tone')).toBe('danger')
@@ -428,9 +433,9 @@ describe('actions hit their endpoints', () => {
 /** Terminal now lives inside the Open in… menu: open it (Radix opens on pointerdown) and click
  *  the resume item. */
 async function clickTerminalResume(): Promise<void> {
-  fireEvent.pointerDown(actionBar().getByRole('button', { name: 'Open in…' }))
-  const menu = await screen.findByRole('menu')
-  fireEvent.click(within(menu).getByRole('menuitem', { name: /Terminal \(resume session\)/ }))
+  fireEvent.click(actionBar().getByRole('menuitem', { name: 'Open in…' }))
+  const menu = await screen.findByRole('region', { name: 'Open task worktree in…' })
+  fireEvent.click(within(menu).getByRole('button', { name: /Terminal \(resume session\)/ }))
 }
 
 describe('Terminal — the copy-command 409 fallback', () => {
@@ -489,9 +494,9 @@ describe('Open in… menu — agent CLI resume labeling (#402)', () => {
   async function openMenu(): Promise<HTMLElement> {
     // Without a resumable Terminal item, the button itself only appears once the async
     // worktreeTargets query resolves (empty-until-loaded) — findByRole waits it in.
-    const trigger = await actionBar().findByRole('button', { name: 'Open in…' })
-    fireEvent.pointerDown(trigger)
-    return screen.findByRole('menu')
+    const trigger = await actionBar().findByRole('menuitem', { name: 'Open in…' })
+    fireEvent.click(trigger)
+    return screen.findByRole('region', { name: 'Open task worktree in…' })
   }
 
   it('labels the CLI matching the run\'s own runner "(resume)"; a foreign CLI stays plain', async () => {
@@ -509,15 +514,15 @@ describe('Open in… menu — agent CLI resume labeling (#402)', () => {
     const menu = await openMenu()
     // The CLI targets load async (useOpenTargets) — findByRole waits them in, unlike the
     // static Terminal/Copy items already asserted synchronously elsewhere in this file.
-    expect(await within(menu).findByRole('menuitem', { name: 'Claude CLI (resume)' })).not.toBeNull()
-    expect(within(menu).getByRole('menuitem', { name: 'Codex CLI' })).not.toBeNull()
+    expect(await within(menu).findByRole('button', { name: 'Claude CLI (resume)' })).not.toBeNull()
+    expect(within(menu).getByRole('button', { name: 'Codex CLI' })).not.toBeNull()
   })
 
   it('a run with no session yet: not even the matching CLI claims to resume', async () => {
     stubFetch({ '/api/v1/open-targets': () => jsonResponse(openTargets(['cli:claude'])) })
     renderHeader(run('done', { runner: 'claude', worktreePath: '/tmp/wt', steps: [step()] }))
     const menu = await openMenu()
-    expect(await within(menu).findByRole('menuitem', { name: 'Claude CLI' })).not.toBeNull()
+    expect(await within(menu).findByRole('button', { name: 'Claude CLI' })).not.toBeNull()
   })
 
   it('picking a CLI target POSTs /open-in with that target id, resuming or not', async () => {
@@ -534,7 +539,7 @@ describe('Open in… menu — agent CLI resume labeling (#402)', () => {
     renderHeader(run('done', { runner: 'claude', worktreePath: '/tmp/wt' }))
     const menu = await openMenu()
     // Cross-runner (this run is Claude): Codex opens fresh, not "(resume)".
-    fireEvent.click(await within(menu).findByRole('menuitem', { name: 'Codex CLI' }))
+    fireEvent.click(await within(menu).findByRole('button', { name: 'Codex CLI' }))
     await waitFor(() => {
       expect(sent.find((r) => r.path === '/api/v1/runs/r1/open-in')?.body).toEqual({ target: 'cli:codex' })
     })
@@ -562,9 +567,9 @@ describe('Open in… menu — agent CLI resume labeling (#402)', () => {
     renderHeader(run('done', { runner: 'codex', worktreePath: '/tmp/wt' }))
     const menu = await openMenu()
 
-    expect(await within(menu).findByRole('menuitem', { name: 'IntelliJ IDEA' })).not.toBeNull()
-    expect(within(menu).queryByRole('menuitem', { name: /Terminal \(resume session\)/ })).toBeNull()
-    expect(within(menu).queryByRole('menuitem', { name: /Codex CLI/ })).toBeNull()
+    expect(await within(menu).findByRole('button', { name: 'IntelliJ IDEA' })).not.toBeNull()
+    expect(within(menu).queryByRole('button', { name: /Terminal \(resume session\)/ })).toBeNull()
+    expect(within(menu).queryByRole('button', { name: /Codex CLI/ })).toBeNull()
   })
 })
 
@@ -581,15 +586,15 @@ describe('Open in… menu per-target icons (#361)', () => {
         }),
     })
     renderHeader(run('done', { worktreePath: '/tmp/wt' }))
-    fireEvent.pointerDown(actionBar().getByRole('button', { name: 'Open in…' }))
-    const menu = await screen.findByRole('menu')
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Open in…' }))
+    const menu = await screen.findByRole('region', { name: 'Open task worktree in…' })
 
     // The menu opens immediately; the worktree targets only appear once useOpenTargets resolves.
-    const ideaItem = await within(menu).findByRole('menuitem', { name: 'IntelliJ IDEA' })
+    const ideaItem = await within(menu).findByRole('button', { name: 'IntelliJ IDEA' })
     expect(ideaItem.querySelector('svg')).not.toBeNull()
     // Unknown/missing icon keys still render the generic fallback glyph — never bare text only.
-    expect(within(menu).getByRole('menuitem', { name: 'Mystery App' }).querySelector('svg')).not.toBeNull()
-    expect(within(menu).getByRole('menuitem', { name: 'No Icon App' }).querySelector('svg')).not.toBeNull()
+    expect(within(menu).getByRole('button', { name: 'Mystery App' }).querySelector('svg')).not.toBeNull()
+    expect(within(menu).getByRole('button', { name: 'No Icon App' }).querySelector('svg')).not.toBeNull()
 
     fireEvent.click(ideaItem)
     await waitFor(() => {
@@ -609,7 +614,7 @@ describe('notes panel', () => {
     })
     renderHeader(run('done'))
 
-    fireEvent.click(actionBar().getByRole('button', { name: 'Notes' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Notes / handoff' }))
     await waitFor(() => {
       expect(document.querySelector('[data-slot="notes-panel"]')).not.toBeNull()
     })
@@ -617,7 +622,7 @@ describe('notes panel', () => {
     // Rendered markdown, not echoed source.
     expect(document.querySelector('[data-slot="notes-panel"]')?.textContent).not.toContain('#')
 
-    fireEvent.click(actionBar().getByRole('button', { name: 'Notes' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Notes / handoff' }))
     expect(document.querySelector('[data-slot="notes-panel"]')).toBeNull()
   })
 
@@ -626,7 +631,7 @@ describe('notes panel', () => {
       '/api/v1/runs/r1/handoff': () => new Response('', { status: 200 }),
     })
     renderHeader(run('running'))
-    fireEvent.click(actionBar().getByRole('button', { name: 'Notes' }))
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Notes / handoff' }))
     await screen.findByText('No notes yet — the handoff file is seeded when the task starts.')
   })
 })
@@ -714,7 +719,7 @@ describe('dense run details (#765)', () => {
 })
 
 describe('meta line, tabs, pill and resume hint', () => {
-  it('scrolls the run header on phones but restores sticky context on desktop', () => {
+  it('lets the spacious page heading scroll away on both viewport sizes', () => {
     stubFetch()
     renderHeader(run('done'))
 
@@ -723,10 +728,10 @@ describe('meta line, tabs, pill and resume hint', () => {
     expect(classes).toContain('relative')
     expect(classes).not.toContain('sticky')
     expect(classes).not.toContain('top-0')
-    expect(classes).toContain('md:sticky')
-    expect(classes).toContain('md:top-0')
-    expect(classes).toContain('px-3')
-    expect(classes).toContain('md:px-6')
+    expect(classes).not.toContain('md:sticky')
+    expect(classes).not.toContain('md:top-0')
+    expect(classes).toContain('px-[18px]')
+    expect(classes).toContain('md:px-9')
   })
 
   // The plan mirror hides on phones so the title row keeps its space for the status pill and
@@ -1232,15 +1237,14 @@ describe('meta line, tabs, pill and resume hint', () => {
     })
   })
 
-  it('a closed run with a session shows the copyable per-backend resume hint', async () => {
+  it('a closed run keeps its resume command under Open in', async () => {
     stubFetch()
     const writeText = vi.fn(() => Promise.resolve())
     vi.stubGlobal('navigator', { clipboard: { writeText } })
     renderHeader(run('failed', { runner: 'opencode', worktreePath: '/tmp/wt' }))
 
-    const hint = document.querySelector('[data-slot="resume-hint"]') as HTMLElement
-    expect(hint.textContent).toContain('cd /tmp/wt && opencode --session sess-1')
-    fireEvent.click(hint)
+    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Open in…' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy resume command' }))
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('cd /tmp/wt && opencode --session sess-1')
     })
@@ -1273,4 +1277,33 @@ it('isolates details by project and run on a mounted header, and remembers each 
   expect(screen.getByRole('button', { name: 'Show run details' }).getAttribute('aria-expanded')).toBe('false')
   rerender(view('project-a', id))
   expect(screen.getByRole('button', { name: 'Hide run details' }).getAttribute('aria-expanded')).toBe('true')
+})
+
+
+it('uses one actions menu and omits the legacy action and resume rows', () => {
+  stubFetch()
+  renderHeader(run('done'))
+  expect(document.querySelector('[data-slot="run-actions"]')).toBeNull()
+  expect(document.querySelector('[data-slot="resume-hint"]')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Run actions' }).className).not.toContain('md:hidden')
+})
+
+
+it('confirms archive before retiring an active-list task', async () => {
+  const sent = stubFetch()
+  renderHeader(run('done'))
+  fireEvent.click(actionBar().getByRole('menuitem', { name: 'Archive task' }))
+  expect(sent.some(r => r.path.endsWith('/archive'))).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Archive task' }))
+  await waitFor(() => expect(sent.find(r => r.path.endsWith('/archive'))?.body).toEqual({ archived: true }))
+})
+
+
+it('copies the resumable command directly from the task actions menu', async () => {
+  stubFetch()
+  const writeText = vi.fn(() => Promise.resolve())
+  vi.stubGlobal('navigator', { clipboard: { writeText } })
+  renderHeader(run('done'))
+  fireEvent.click(actionBar().getByRole('menuitem', { name: 'Copy resume command' }))
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith('claude --resume sess-1'))
 })

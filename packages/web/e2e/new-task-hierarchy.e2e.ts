@@ -87,16 +87,16 @@ const matrix = [360, 1440].flatMap((width) =>
 function geometry() {
   return browser.evaluate(`(() => {
     const root = document.querySelector('${composer}');
-    const box = (selector) => { const r = document.querySelector(selector).getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; };
+    const box = (selector) => { const r = document.querySelector(selector).getBoundingClientRect(); return { top: r.top, right: r.right, bottom: r.bottom, left: r.left }; };
     const controls = [...root.querySelectorAll('button, summary')].filter(el => el.checkVisibility());
     return {
       prompt: box('${prompt}'), context: box('[data-slot="composer-footer-start"]'),
-      submission: box('[data-slot="composer-submit-row"]'), execution: box('${disclosure}'),
+      submission: box('[data-slot="composer-actions"]'), execution: box('${disclosure}'), agent: box('[data-slot="composer-agent-options"]'), mode: box('[data-slot="mode-seg"]'),
       overflow: document.documentElement.scrollWidth > innerWidth,
       clipped: controls.filter(el => { const r = el.getBoundingClientRect(); return r.left < 0 || r.right > innerWidth; }).map(el => el.getAttribute('aria-label') || el.textContent),
       small: controls.filter(el => { const r = el.getBoundingClientRect(); return r.width < 43.9 || r.height < 43.9; }).map(el => el.getAttribute('aria-label') || el.textContent),
     };
-  })()` ) as { prompt: { bottom: number }; context: { top: number; bottom: number }; submission: { top: number; bottom: number }; execution: { top: number }; overflow: boolean; clipped: string[]; small: string[] }
+  })()` ) as { prompt: { bottom: number }; context: { top: number; bottom: number }; submission: { top: number; right: number; bottom: number }; execution: { top: number; left: number; bottom: number }; agent: { top: number; bottom: number }; mode: { top: number; bottom: number }; overflow: boolean; clipped: string[]; small: string[] }
 }
 
 beforeAll(() => {
@@ -107,10 +107,12 @@ beforeAll(() => {
 describe('New Task hierarchy (#168)', () => {
   it('separates prompt context, submission, and execution options', () => {
     expect(browser.count(`${disclosure} summary`)).toBe(1)
-    expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(false)
+    expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(true)
     expect(browser.isVisible('[data-slot="source-pill"]')).toBe(true)
     expect(browser.isVisible('[aria-label="Start task"]')).toBe(true)
-    expect(browser.evaluate(`document.querySelector('[data-slot="model-pill"]').checkVisibility()`)).toBe(false)
+    expect(browser.evaluate(`document.querySelector('[data-slot="model-pill"]').checkVisibility()`)).toBe(true)
+    expect(browser.evaluate(`document.querySelector('[data-slot="composer-agent-options"]').contains(document.querySelector('[data-slot="model-pill"]'))`)).toBe(true)
+    expect(browser.evaluate(`document.querySelector('${disclosure}').contains(document.querySelector('[data-slot="variants-pill"]'))`)).toBe(true)
   })
 
   for (const reduced of [false, true]) {
@@ -131,20 +133,27 @@ describe('New Task hierarchy (#168)', () => {
         let layout = geometry()
         expect(layout.prompt.bottom).toBeLessThanOrEqual(layout.context.top)
         expect(layout.context.bottom).toBeLessThanOrEqual(layout.submission.top)
-        expect(layout.submission.bottom).toBeLessThanOrEqual(layout.execution.top)
+        if (width === 1440) expect(layout.submission.right).toBeLessThanOrEqual(layout.execution.left)
+        else {
+          expect(layout.context.bottom).toBeLessThanOrEqual(layout.mode.top)
+          expect(layout.mode.bottom).toBeLessThanOrEqual(layout.agent.top)
+          expect(layout.agent.bottom).toBeLessThanOrEqual(layout.execution.top)
+          expect(layout.execution.bottom).toBeLessThanOrEqual(layout.submission.top)
+        }
         expect(layout.overflow).toBe(false)
         expect(layout.clipped).toEqual([])
         if (width === 360) expect(layout.small).toEqual([])
         browser.press('Space')
+        expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(false)
+        expect(browser.evaluate(`document.querySelector('[data-slot="variants-pill"]')?.checkVisibility()`)).toBe(false)
+        browser.press('Enter')
         expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(true)
-        expect(browser.evaluate(`document.querySelector('[data-slot="model-pill"]').checkVisibility()`)).toBe(true)
+        expect(browser.evaluate(`document.querySelector('[data-slot="variants-pill"]').checkVisibility()`)).toBe(true)
         layout = geometry()
         expect(layout.overflow).toBe(false)
         expect(layout.clipped).toEqual([])
         if (width === 360) expect(layout.small).toEqual([])
         browser.screenshot(`${artifactsDir}/hierarchy-${width}-${theme}-${density}-${reduced ? 'reduced' : 'normal'}-open.png`)
-        browser.press('Enter')
-        expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(false)
         browser.click('[data-slot="mode-plan"]')
         expect(browser.evaluate(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked')`)).toBe('true')
         expect(browser.evaluate(`document.querySelector('[aria-label="Plan task"]').disabled`)).toBe(false)
@@ -201,7 +210,6 @@ describe('New Task hierarchy (#168)', () => {
       input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
     })()`)
     browser.waitForFunction(`document.querySelector('[aria-label="Remove notes.txt"]') !== null`)
-    browser.click(summary)
     browser.click('[data-slot="variants-pill"]')
     browser.waitForFunction(`document.querySelectorAll('[role="menuitemradio"]').length === 3`)
     browser.click('[role="menuitemradio"]:nth-child(2)')

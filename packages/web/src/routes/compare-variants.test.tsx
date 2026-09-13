@@ -118,7 +118,7 @@ async function waitForColumns(count: number) {
 // ---- the columns ------------------------------------------------------------------------------
 
 describe('the compare columns', () => {
-  it('renders a column per variant: letter, status pill, spend, --stat text, Progress excerpt', async () => {
+  it('renders a column per variant: letter, status text, spend, --stat text, Progress excerpt', async () => {
     stubFetch(group(variant('A', 'review'), variant('B', 'done')))
     renderCompare()
     await waitForColumns(2)
@@ -130,8 +130,8 @@ describe('the compare columns', () => {
     // The letter badge and the canonical attention grammar: review → "needs review",
     // done → "done" (deriveAttention, not a second hand-rolled mapping).
     expect(a?.querySelector('[data-slot="variant-letter"]')?.textContent).toBe('A')
-    expect(a?.querySelector('[data-slot="pill"]')?.textContent).toContain('needs review')
-    expect(b?.querySelector('[data-slot="pill"]')?.textContent).toContain('done')
+    expect(a?.querySelector('[data-slot="variant-status"]')?.textContent).toContain('needs review')
+    expect(b?.querySelector('[data-slot="variant-status"]')?.textContent).toContain('done')
 
     // Directional tokens and cost per column.
     expect(a?.textContent).toContain('IN 92.0k · OUT 4.2k')
@@ -149,7 +149,8 @@ describe('the compare columns', () => {
     )
 
     // The shared header: the group title without the variant suffix.
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Add autocomplete')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Compare variants')
+    expect(screen.getByText(/Add autocomplete ·/)).not.toBeNull()
     expect(screen.getByRole('heading', { level: 1 }).textContent).not.toContain('(A)')
   })
 
@@ -197,6 +198,19 @@ describe('the compare columns', () => {
     renderCompare()
     await waitForColumns(3)
     expect(document.querySelector('[data-slot="compare-columns"]')?.className).toContain('md:grid-cols-3')
+  })
+
+  it('retries a failed group without losing the comparison URL', async () => {
+    let failed = true
+    stubFetch(group(), { 'GET /api/v1/groups/g1': () => failed
+      ? jsonResponse({ error: 'Temporarily unavailable' }, 503)
+      : jsonResponse(group(variant('A', 'done'), variant('B', 'done'))) })
+    renderCompare()
+    const retry = await screen.findByRole('button', { name: 'Retry' }, { timeout: 4000 })
+    failed = false
+    fireEvent.click(retry)
+    await waitForColumns(2)
+    expect(screen.getAllByRole('link', { name: 'Open task' }).map((link) => link.getAttribute('href'))).toEqual(['/tasks/va', '/tasks/vb'])
   })
 
   it('renders the 404 as a neutral CenteredState with a way home', async () => {
@@ -257,7 +271,7 @@ describe('✔ Pick this one', () => {
     await waitForColumns(2)
 
     fireEvent.click(pickButtons()[0] as HTMLButtonElement)
-    fireEvent.click(screen.getByRole('button', { name: 'Keep comparing' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(sent.filter((r) => r.method === 'POST')).toHaveLength(0)
     expect(screen.queryByTestId('thread-probe')).toBeNull()
   })

@@ -463,13 +463,13 @@ describe('the workspace settings API (step 2.7)', () => {
   // exactly what happened to `width` before it was added. The client-side settings test stubs
   // `fetch` with an echo, so this route-level round-trip is the only place that can catch it.
   it('round-trips every appearance preference — accent, density AND reading width', async () => {
-    const res = await putUiState({ appearance: { accent: 'violet', density: 'compact', width: 'wide' } });
+    const res = await putUiState({ appearance: { accent: 'cezarion', density: 'compact', width: 'wide' } });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      appearance: { accent: 'violet', density: 'compact', width: 'wide' },
+      appearance: { accent: 'cezarion', density: 'compact', width: 'wide' },
     });
     expect(rawUiState()).toEqual({
-      appearance: { accent: 'violet', density: 'compact', width: 'wide' },
+      appearance: { accent: 'cezarion', density: 'compact', width: 'wide' },
     });
   });
 

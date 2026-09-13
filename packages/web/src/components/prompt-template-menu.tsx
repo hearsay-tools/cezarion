@@ -1,4 +1,4 @@
-import { ChevronDownIcon, NotebookPenIcon, SparklesIcon } from 'lucide-react'
+import { ChevronDownIcon, NotebookPenIcon, SparklesIcon } from '@/components/design-icons'
 import { useRef, useState } from 'react'
 import { useNavigate } from '@/lib/project-router'
 
@@ -39,12 +39,14 @@ export function PromptTemplateMenu({
   /** Drop the "templates" label and render just the icon — the /new composer footer, where the
    *  pill row is already full and every one of these competes with the send button for space. */
   iconOnly = false,
+  label = 'Template',
 }: {
   templates: readonly PromptTemplate[]
   onInsert: (text: string) => void
   triggerClassName?: string
   disabled?: boolean
   iconOnly?: boolean
+  label?: string
 }) {
   const [open, setOpen] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
@@ -65,15 +67,15 @@ export function PromptTemplateMenu({
           disabled={disabled}
           className={cn(
             'inline-flex h-[26px] items-center gap-1.5 rounded-full border border-border bg-card text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
-            iconOnly ? 'w-[26px] justify-center px-0' : 'px-2.5',
+            iconOnly ? 'w-[26px] justify-center px-0' : 'h-11 gap-2 rounded-lg px-3 text-foreground',
             triggerClassName,
           )}
         >
-          <NotebookPenIcon aria-hidden="true" className="size-3 shrink-0 text-violet" />
+          <NotebookPenIcon aria-hidden="true" className={iconOnly ? "size-3 shrink-0 text-accent-icon" : "size-[18px] shrink-0 text-muted-foreground"} />
           {iconOnly ? null : (
             <>
-              templates
-              <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
+              {label}
+              <ChevronDownIcon aria-hidden="true" className="size-[13px] shrink-0 text-soft-foreground" />
             </>
           )}
         </button>
@@ -125,7 +127,7 @@ export function PromptTemplateMenu({
                       <span
                         data-slot="prompt-template-assigned"
                         title={`Applied automatically with: ${template.skills.join(', ')}`}
-                        className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-violet"
+                        className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-accent-text"
                       >
                         <SparklesIcon aria-hidden="true" className="size-2.5" />
                         {template.skills.length}

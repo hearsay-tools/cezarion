@@ -29,6 +29,7 @@ describe('Git page headings at the review viewports', () => {
   for (const page of [
     {
       name: 'Git',
+      title: 'Git · Changes',
       path: '/git',
       header: '[data-slot="repo-header"]',
       context: '[data-slot="branch-chip"]',
@@ -36,6 +37,7 @@ describe('Git page headings at the review viewports', () => {
     },
     {
       name: 'GitHub',
+      title: 'GitHub',
       path: '/github',
       header: '[data-slot="gh-header"]',
       context: '[data-slot="gh-repo"]',
@@ -48,6 +50,9 @@ describe('Git page headings at the review viewports', () => {
           browser.setViewport(viewport.width, viewport.height)
           browser.goto(`${baseUrl}${scoped(page.path)}`)
           browser.waitForFunction(`document.querySelector(${JSON.stringify(page.content)}) !== null`)
+          // Repo discovery is independent of route data. Before it resolves, the mobile
+          // bar deliberately shows the route title in place of the project picker.
+          browser.waitForFunction(`document.querySelector('[data-slot="mobile-project-picker"]') !== null`)
           browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
 
           const facts = browser.evaluate(`(() => {
@@ -58,9 +63,10 @@ describe('Git page headings at the review viewports', () => {
             const context = document.querySelector(${JSON.stringify(page.context)})
             const content = document.querySelector(${JSON.stringify(page.content)})
             const painted = (element) => {
+              if (!element) return false
               const rect = element.getBoundingClientRect()
               const style = getComputedStyle(element)
-              return rect.width > 2 && rect.height > 2 && style.display !== 'none' &&
+              return element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) && rect.width > 2 && rect.height > 2 && style.display !== 'none' &&
                 style.visibility !== 'hidden' && Number(style.opacity) > 0
             }
             const headerRect = header.getBoundingClientRect()
@@ -93,7 +99,7 @@ describe('Git page headings at the review viewports', () => {
           }
 
           expect(facts.light).toBe(theme === 'light')
-          expect(facts.routeTitleText).toBe(page.name)
+          expect(facts.routeTitleText).toBe(page.title)
           expect(facts.routeTitleTag).toBe('H1')
           expect(facts.routeTitleAriaHidden).toBeNull()
           expect(browser.snapshot()).toContain(page.name)
@@ -103,14 +109,9 @@ describe('Git page headings at the review viewports', () => {
           expect(facts.firstRowInViewport).toBe(true)
           expect(facts.pageOverflow).toBe(false)
 
-          if (viewport.width === PHONE.width) {
-            expect(Number(facts.routeTitlePainted) + Number(facts.shellTitlePainted)).toBe(1)
-            expect(facts.routeTitlePainted).toBe(false)
-            expect(facts.shellTitlePainted).toBe(true)
-          } else {
-            expect(facts.routeTitlePainted).toBe(true)
-            expect(facts.shellTitlePainted).toBe(false)
-          }
+          // Page headings remain in the route at both widths; the mobile bar is brand/context.
+          expect(facts.routeTitlePainted).toBe(true)
+          expect(facts.shellTitlePainted).toBe(false)
 
           browser.screenshot(
             `${artifactsDir}/page-heading-${page.path.slice(1)}-${viewport.width}-${theme}.png`,

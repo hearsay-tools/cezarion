@@ -365,21 +365,20 @@ const postedBody = () => requests.find((r) => r.method === 'POST' && r.url === '
 // ---- the hero surface -------------------------------------------------------------------------
 
 describe('the hero surface', () => {
-  it('keeps execution options in a disclosure separate from prompt context and submission', async () => {
+  it('keeps run options in a disclosure separate from prompt, agent selection, and submission', async () => {
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()
     await pillReady()
-    const summary = screen.getByText('Execution options')
+    const summary = screen.getByText('Execution settings')
     const disclosure = summary.closest('details')!
     expect(disclosure).not.toBeNull()
-    expect(disclosure.open).toBe(false)
+    expect(disclosure.open).toBe(true)
     expect(disclosure.contains(sourcePill())).toBe(false)
     expect(disclosure.contains(screen.getByRole('radio', { name: 'Plan first' }))).toBe(false)
     expect(disclosure.contains(screen.getByRole('button', { name: 'Start task' }))).toBe(false)
     expect(summary.parentElement?.textContent).toContain('claude')
-    fireEvent.click(summary)
     const model = screen.getByRole('button', { name: 'Model' })
-    expect(disclosure.contains(model)).toBe(true)
+    expect(disclosure.contains(model)).toBe(false)
     fireEvent.pointerDown(model)
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /sonnet/ }))
     expect(summary.parentElement?.textContent).toContain('sonnet')
@@ -395,12 +394,16 @@ describe('the hero surface', () => {
     expect(screen.getByRole('button', { name: 'Model' })).toBe(model)
   })
 
-  it('renders the mockup hero: title, subtitle, twinkles, and focus lands in the textarea', async () => {
+  it('renders the design hero without decorative backdrops and focuses the textarea', async () => {
     serve()
     renderNewTask()
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('What should the agent work on?')
+    expect(document.querySelector('[data-slot="page-eyebrow"]')?.textContent).toBe('NEW TASK')
+    expect(document.querySelector('[data-slot="page-description"]')?.textContent).toBe(
+      'Describe the outcome. Configure the run. Review everything before it lands.',
+    )
     expect(screen.getByText('Runs in an isolated worktree — review everything before it lands.')).toBeTruthy()
-    expect(document.querySelector('[data-route="new"] [data-slot="twinkle-backdrop"]')).not.toBeNull()
+    expect(document.querySelector('[data-route="new"] [data-slot="twinkle-backdrop"]')).toBeNull()
     // Asserted here for the DEFAULT run mode only. #793: this line used to be printed
     // unconditionally, so it also claimed isolation for runs that had opted out of it — the
     // per-state cases live in "the run-mode note" below.
@@ -410,22 +413,34 @@ describe('the hero surface', () => {
     await waitFor(() => expect(document.activeElement).toBe(textarea()))
   })
 
-  it('suggested chips fill the textarea (and only fill — no fetch, no navigation)', async () => {
+  it('does not render suggestion chips — design.pen 1A–1D have none', async () => {
     serve()
     renderNewTask()
     await pillReady()
-    const chips = document.querySelectorAll('[data-slot="suggested-chip"]')
-    expect(chips.length).toBe(3)
-    fireEvent.click(chips[0] as HTMLElement)
-    expect(textarea().value).toContain('failing or flaky test')
-    expect(requests.some((r) => r.method === 'POST')).toBe(false)
-    expect(location()).toBe('/new')
+    expect(document.querySelector('[data-slot="suggested-chip"]')).toBeNull()
+    expect(screen.queryByText('Start with a suggestion')).toBeNull()
   })
 })
 
 // ---- picker data flows ------------------------------------------------------------------------
 
 describe('picker data flows', () => {
+  it('keeps agent selection with the editor and run settings in the open execution panel', async () => {
+    serve()
+    renderNewTask()
+    await pillReady()
+
+    const editor = document.querySelector('[data-slot="composer-editor"]') as HTMLElement
+    const execution = document.querySelector('[data-slot="execution-options"]') as HTMLDetailsElement
+    const model = document.querySelector('[data-slot="model-pill"]') as HTMLElement
+    const variants = document.querySelector('[data-slot="variants-pill"]') as HTMLElement
+    expect(execution.open).toBe(true)
+    expect(editor.contains(model)).toBe(false)
+    expect(document.querySelector('[data-slot="composer-agent-options"]')?.contains(model)).toBe(true)
+    expect(execution.contains(model)).toBe(false)
+    expect(execution.contains(variants)).toBe(true)
+  })
+
   it('hides the runner pill on a single-backend host (legacy rule)', async () => {
     serve()
     renderNewTask()
@@ -646,7 +661,7 @@ describe('picker data flows', () => {
     await pillReady()
     const basePill = () => document.querySelector('[data-slot="base-pill"]') as HTMLElement
     await waitFor(() => expect(basePill()).not.toBeNull())
-    expect(basePill().textContent).toContain('base: develop')
+    expect(basePill().textContent).toContain('develop')
 
     fireEvent.pointerDown(basePill())
     const options = await screen.findAllByRole('menuitemradio')
@@ -1200,7 +1215,8 @@ describe('submit', () => {
     expect(modelPill.textContent).toContain('native-sonnet')
     expect(modelPill.textContent).not.toContain('opus')
     expect(modelPill.tagName).toBe('SPAN')
-    expect(modelPill.querySelector('svg')).toBeNull()
+    // A locked model keeps its identity icon, but offers no dropdown affordance.
+    expect(modelPill.querySelector(':scope > svg')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Model' })).toBeNull()
 
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Runner' }))
@@ -1979,7 +1995,29 @@ describe('the plan flow', () => {
     )
   })
 
-  it('Discard closes the overlay and hands back the draft untouched', async () => {
+  it('embeds plan review in the page and Escape restores focus to the untouched draft', async () => {
+    serve()
+    renderNewTask()
+    await planTask('keep the keyboard draft')
+
+    expect(screen.getByRole('heading', { name: 'New task / Plan first', level: 1 })).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    const review = document.querySelector('[data-slot="plan-review"]')!
+    expect(document.activeElement).toBe(review)
+    fireEvent.click(screen.getByRole('button', { name: 'Save as chain' }))
+    const save = await screen.findByRole('dialog')
+    fireEvent.keyDown(save, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(document.querySelector('[data-slot="plan-review"]')).toBe(review)
+    fireEvent.keyDown(review, { key: 'Escape' })
+
+    await waitFor(() => expect(document.querySelector('[data-slot="plan-review"]')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(textarea()))
+    expect(textarea().value).toBe('keep the keyboard draft')
+    expect(requests.some((r) => r.url === '/api/v1/runs' && r.method === 'POST')).toBe(false)
+  })
+
+  it('Discard closes the review and hands back the draft untouched', async () => {
     serve()
     renderNewTask()
     await planTask('keep this text')
@@ -2000,7 +2038,7 @@ describe('save as chain', () => {
     fireEvent.click(document.querySelector('[data-slot="plan-save"]') as HTMLElement)
     const nameInput = await screen.findByLabelText('Chain name')
     fireEvent.change(nameInput, { target: { value: '  my chain  ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save chain' }))
 
     await waitFor(() =>
       expect(requests.some((r) => r.url === '/api/v1/workflows' && r.method === 'POST')).toBe(true),
@@ -2027,10 +2065,10 @@ describe('save as chain', () => {
 
     fireEvent.click(document.querySelector('[data-slot="plan-save"]') as HTMLElement)
     fireEvent.change(await screen.findByLabelText('Chain name'), { target: { value: 'my chain' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save chain' }))
 
     await screen.findByText('Overwrite “my chain”?')
-    fireEvent.click(screen.getByRole('button', { name: 'Overwrite' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Overwrite chain' }))
 
     await waitFor(() => {
       const saves = requests.filter((r) => r.url === '/api/v1/workflows' && r.method === 'POST')
@@ -2047,7 +2085,7 @@ describe('save as chain', () => {
 
     fireEvent.click(document.querySelector('[data-slot="plan-save"]') as HTMLElement)
     fireEvent.change(await screen.findByLabelText('Chain name'), { target: { value: 'bad' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save chain' }))
 
     await screen.findByText('step 2: needs prompt or command')
     expect(screen.getByLabelText('Chain name')).toBeTruthy()
@@ -2072,13 +2110,13 @@ describe('prompt templates on the new-task composer', () => {
     fireEvent.click(document.querySelector(`[data-slot="source-option"][data-source-ref="${ref}"]`)!)
   }
 
-  it('the trigger is icon-only here — the footer pill row is already full', async () => {
+  it('labels the template picker alongside the skill picker', async () => {
     serve()
     renderNewTask()
     await pillReady()
 
     // No "templates" word next to the icon, unlike the roomier GitHub/Inbox composers.
-    expect(templateTrigger().textContent).toBe('')
+    expect(templateTrigger().textContent).toContain('Template')
     expect(templateTrigger().querySelector('svg')).not.toBeNull()
   })
 
@@ -2355,7 +2393,7 @@ describe('retained task submission (#164)', () => {
     await startTask()
     expect(textarea().value).toBe('  Keep this prompt  ')
     expect(textarea().readOnly).toBe(true)
-    expect(screen.getByText('Execution options').closest('[inert]')).not.toBeNull()
+    expect(screen.getByText('Execution settings').closest('[inert]')).not.toBeNull()
     expect((screen.getByRole('button', { name: 'Remove notes.txt' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('Starting task…').getAttribute('role')).toBe('status')
     for (const keys of [{}, { ctrlKey: true }, { metaKey: true }]) fireEvent.keyDown(textarea(), { key: 'Enter', ...keys })

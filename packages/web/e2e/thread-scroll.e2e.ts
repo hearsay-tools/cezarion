@@ -21,8 +21,8 @@ import record from './fixtures/thread-run.record.json'
  *    flat via `?thread=flat` — the measurement seam in thread-scroll.ts).
  *  - The iOS keyboard cannot be driven headless. The `--kb` adapter math is unit-tested
  *    against stub viewports (lib/keyboard-inset.test.ts); here the test drives the CSS seam
- *    it feeds (`--kb` → the dock's `bottom`) and verifies the composer fits an iPhone
- *    viewport. Real-device keyboard behavior remains a manual checklist item.
+ *    publishes and verifies that document-flow controls remain at the transcript tail
+ *    without becoming a keyboard-lifted overlay. Real-device keyboard behavior remains a manual checklist item.
  */
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -95,6 +95,8 @@ const assistantWidth = () =>
  * `target` is a JS expression evaluated against the scroller (`m`).
  */
 function parkAt(target: string) {
+  // Intent must be sent even if layout already happens to be near the target.
+  browser.evaluate(`${MAIN}.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }))`)
   browser.waitForFunction(`(() => {
     const m = ${MAIN}
     const target = ${target}
@@ -132,6 +134,18 @@ function openThread(query = '') {
   browser.waitForFunction(
     `document.querySelector('[data-slot="thread-rows"]') !== null && document.body.textContent.includes('goal achieved — session closed')`,
   )
+  // Rendering the last message precedes virtua's measurement/arrival-scroll settlement.
+  // Its scrollTo retries measurements until 150 ms idle; start reader interactions only
+  // after the complete replay's geometry has remained stable beyond that window.
+  browser.evaluate(`new Promise(resolve => {
+    let last = '', since = performance.now();
+    const settle = () => {
+      const main = ${MAIN}, next = main.scrollTop + ':' + main.scrollHeight;
+      if (next !== last) { last = next; since = performance.now(); }
+      if (performance.now() - since >= 200) resolve(); else requestAnimationFrame(settle);
+    };
+    settle();
+  })`)
 }
 
 function captureScrollState(name: string) {
@@ -225,6 +239,7 @@ describe('thread virtualization on a 1,000-row transcript', () => {
   }, 90_000)
 
   it('arrives pinned to the live tail (bottom-anchored), with no jump pill', () => {
+    browser.waitForFunction(`${nearBottom} && document.querySelector('[data-slot="jump-to-latest"]') === null`)
     expect(browser.evaluate(nearBottom)).toBe(true)
     expect(browser.count('[data-slot="jump-to-latest"]')).toBe(0)
     browser.screenshot(`${artifactsDir}/thread-long-desktop.png`)
@@ -290,24 +305,25 @@ describe('thread virtualization on a 1,000-row transcript', () => {
 })
 
 describe('iPhone viewport (390×844)', () => {
-  it('keeps the composer visible and wired to the --kb keyboard lift', () => {
+  it('keeps the composer at the document tail without overlaying history when the keyboard inset changes', () => {
     browser.setViewport(390, 844)
     openThread()
 
-    // The composer dock fits the visual viewport (no keyboard yet: --kb is unset ⇒ 0px).
+    // Let measured virtual rows settle. scrollHeight is integer-valued while the dock's
+    // DOMRect retains fractions, so allow the final subpixel rather than calling it clipping.
+    browser.waitForFunction(`document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect().bottom <= innerHeight + 1`)
+    // The composer dock fits the visual viewport in document flow.
     const dock = browser.evaluate(`(() => {
       const dock = document.querySelector('[data-slot="thread-dock"]')
       const rect = dock.getBoundingClientRect()
       return { bottomGap: window.innerHeight - rect.bottom, cssBottom: getComputedStyle(dock).bottom }
     })()`) as { bottomGap: number; cssBottom: string }
-    expect(dock.bottomGap).toBeGreaterThanOrEqual(0)
+    expect(dock.bottomGap).toBeGreaterThanOrEqual(-1)
     expect(dock.cssBottom).toBe('0px')
 
-    // The keyboard seam, driven directly: publishing --kb (what the visualViewport watcher
-    // does on a real device — unit-tested against stubs) lifts the sticky dock by exactly
-    // that inset. The keyboard itself cannot be summoned in a headless browser.
+    // Document-flow controls must not float over history when the viewport inset changes.
     browser.evaluate(`document.documentElement.style.setProperty('--kb', '280px')`)
-    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).bottom`)).toBe('280px')
+    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).bottom`)).toBe('0px')
     browser.evaluate(`document.documentElement.style.removeProperty('--kb')`)
     expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).bottom`)).toBe('0px')
 
@@ -361,15 +377,27 @@ describe('tool cards remain below assistant messages after live appends', () => 
     browser.evaluate(`(() => {
       const dockTop = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect().top;
       window.__overlapCard = [...document.querySelectorAll('[data-slot="tool-card"]')].find(card => {
-        const r = card.getBoundingClientRect(); return r.top > 50 && r.bottom < dockTop;
+        const r = card.getBoundingClientRect(); return card.dataset.state === 'closed' && !card.querySelector('button').disabled && r.top > 50 && r.bottom < Math.min(dockTop, innerHeight);
       });
       if (!window.__overlapCard) throw new Error('no visible tool card to expand');
+      const row = window.__overlapCard.closest('[data-row-key]');
+      window.__overlapKey = row.dataset.rowKey;
+      window.__overlapIndex = [...row.querySelectorAll('[data-slot="tool-card"]')].indexOf(window.__overlapCard);
+      window.__currentOverlapCard = () => document.querySelector('[data-row-key="' + CSS.escape(window.__overlapKey) + '"]')?.querySelectorAll('[data-slot="tool-card"]')[window.__overlapIndex];
+      window.__beforeOverlap = {top: document.querySelector('[data-slot="main"]').scrollTop, height: document.querySelector('[data-slot="main"]').scrollHeight, rowTop: row.getBoundingClientRect().top, rowKey: row.dataset.rowKey};
       window.__overlapCard.querySelector('button').click();
     })()`)
-    browser.waitForFunction(`window.__overlapCard.dataset.state === 'open'`)
+    browser.waitForFunction(`window.__currentOverlapCard()?.dataset.state === 'open'`)
     assertSeparated()
-    browser.evaluate(`window.__overlapCard.querySelector('button').click()`)
-    browser.waitForFunction(`window.__overlapCard.dataset.state === 'closed'`)
+    // Virtua can remount a measured row between interactions; address its stable key,
+    // never dispatch a synthetic click to the detached DOM node from the previous frame.
+    writeFileSync(join(artifactsDir, `overlap-layout-${mode}-${width}.json`), JSON.stringify(browser.evaluate(`({ before: window.__beforeOverlap, top: document.querySelector('[data-slot="main"]').scrollTop, height: document.querySelector('[data-slot="main"]').scrollHeight, rows: [...document.querySelectorAll('[data-row-key]')].map(row => ({ key:row.dataset.rowKey, top:row.getBoundingClientRect().top, bottom:row.getBoundingClientRect().bottom })), connected: window.__overlapCard.isConnected })`), null, 2))
+    browser.waitForFunction(`(() => { const card = window.__currentOverlapCard(); if (!card || card.dataset.state !== 'open') return false; card.querySelector('button').click(); return true })()`)
+    try { browser.waitForFunction(`window.__currentOverlapCard()?.dataset.state === 'closed'`) }
+    catch (error) {
+      writeFileSync(join(artifactsDir, 'overlap-close-debug.json'), JSON.stringify(browser.evaluate(`({ connected: window.__overlapCard.isConnected, state: window.__overlapCard.dataset.state, row: window.__overlapCard.closest('[data-row-key]')?.dataset.rowKey, html: window.__overlapCard.outerHTML, scrollTop: document.querySelector('[data-slot="main"]').scrollTop })`), null, 2))
+      throw error
+    }
     assertSeparated()
     for (const delta of [-80, 80]) {
       browser.evaluate(`(() => {
@@ -381,7 +409,8 @@ describe('tool cards remain below assistant messages after live appends', () => 
     }
     expect(browser.evaluate(`(() => {
       const r = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect();
-      return r.top >= 0 && r.bottom <= innerHeight;
+      const rows = document.querySelector('[data-slot="thread-rows"]').getBoundingClientRect();
+      return r.top >= rows.bottom - 1;
     })()`)).toBe(true)
     browser.screenshot(`${artifactsDir}/tool-overlap-${mode}-${width}-${theme}.png`, { viewport: true })
   }, 90_000)

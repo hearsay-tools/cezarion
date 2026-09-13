@@ -50,6 +50,7 @@ function LocationProbe() {
 const nav = () => screen.getByRole('navigation', { name: 'Main' })
 const sidebar = () => document.querySelector('[data-slot="sidebar"]') as HTMLElement
 const footer = () => document.querySelector('[data-slot="sidebar-footer"]') as HTMLElement
+const allNavLinks = (root = sidebar()) => Array.from(root.querySelectorAll<HTMLAnchorElement>('nav a'))
 
 describe('AppShell', () => {
   it('renders the routed view in the main region', () => {
@@ -57,23 +58,18 @@ describe('AppShell', () => {
     expect(within(screen.getByRole('main')).getByText('route content')).toBeTruthy()
   })
 
-  it('renders the themed Cezarion lockup, not a tile plus a label (#143)', () => {
+  it('renders the Poppins Cezarion wordmark from the approved shared shell', () => {
     renderShell()
-    const lockup = document.querySelector('[data-slot="brand-lockup"]') as HTMLImageElement
-    expect(lockup).toBeTruthy()
-    // Dark is the default palette (the matchMedia stub reports no light preference).
-    expect(lockup.getAttribute('src')).toBe('/cezarion-lockup-dark.svg')
-    // The image carries the accessible name; the decorative `cezar` span is gone so the
-    // name is not spoken twice.
-    expect(lockup.getAttribute('alt')).toBe('Cezarion')
-    expect(within(sidebar()).queryByText(/^cezar$/i)).toBeNull()
+    const wordmark = document.querySelector('[data-slot="brand-wordmark"]') as HTMLElement
+    expect(wordmark.tagName).toBe('SPAN')
+    expect(wordmark.textContent).toBe('Cezarion')
+    expect(wordmark.className).toContain('font-semibold')
   })
 
-  it('swaps the lockup with the resolved theme (#143)', () => {
+  it('uses the same token-driven wordmark in light mode', () => {
     localStorage.setItem('cez-theme', 'light')
     renderShell()
-    const lockup = document.querySelector('[data-slot="brand-lockup"]') as HTMLImageElement
-    expect(lockup.getAttribute('src')).toBe('/cezarion-lockup-light.svg')
+    expect(document.querySelectorAll('[data-slot="brand-wordmark"]')).toHaveLength(1)
   })
 
   it('resets the main scroller to the top on navigation (#mobile-scroll-top)', () => {
@@ -122,7 +118,7 @@ describe('AppShell', () => {
 
   it('renders the whole nav as real router links', () => {
     renderShell()
-    const links = within(nav()).getAllByRole('link')
+    const links = allNavLinks()
     expect(links.map((a) => a.textContent)).toEqual([
       'Tasks',
       'Inbox',
@@ -150,7 +146,7 @@ describe('AppShell', () => {
   // degradation table), it does not render disabled.
   it('drops the GitHub item when the forge is unavailable', () => {
     renderShell('/', { forgeAvailable: false })
-    const links = within(nav()).getAllByRole('link')
+    const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/github')
     expect(links).toHaveLength(NAV_ITEMS.filter((item) => !item.forge).length)
   })
@@ -159,14 +155,14 @@ describe('AppShell', () => {
   // not render disabled. The two gates on that item are independent: a forge alone is not enough.
   it('drops the Automations item when the capability is off', () => {
     renderShell('/', { automationsAvailable: false })
-    const links = within(nav()).getAllByRole('link')
+    const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/automations')
     expect(links).toHaveLength(NAV_ITEMS.filter((item) => !item.automations).length)
   })
 
   it('shows the Automations item once the capability is on', () => {
     renderShell('/', { automationsAvailable: true })
-    expect(within(nav()).getAllByRole('link').map((a) => a.getAttribute('href')))
+    expect(allNavLinks().map((a) => a.getAttribute('href')))
       .toContain('/automations')
   })
 
@@ -227,39 +223,38 @@ describe('AppShell', () => {
     expect(within(footer()).getByRole('button', { name: /^Theme:/ })).toBeTruthy()
   })
 
-  /* The footer used to be one wrapping row that overflowed the 264px column, so the theme toggle
-   * silently fell onto a line of its own (#702). jsdom cannot measure that — but it can pin the
-   * structure that makes the wrap impossible: two rows, by construction, not by luck. */
-  describe('sidebar footer is two intentional rows (#702)', () => {
+  describe('sidebar search and footer chrome', () => {
     const controls = () =>
       document.querySelector('[data-slot="sidebar-footer-controls"]') as HTMLElement
 
-    it('lays the footer out as a column, never a wrapping row', () => {
+    it('keeps the footer controls in one non-wrapping row', () => {
       renderShell()
-      expect(footer().className).toContain('flex-col')
       expect(footer().className).not.toContain('flex-wrap')
     })
 
-    it('has exactly two children: the search bar, then the controls row', () => {
+    it('keeps search near the wordmark and outside the footer', () => {
       renderShell('/', { version: '1.2.3' })
-      const children = Array.from(footer().children) as HTMLElement[]
-      expect(children.map((child) => child.dataset.slot)).toEqual([
-        'command-palette-hint',
-        'sidebar-footer-controls',
-      ])
+      const content = sidebar().querySelector('[data-slot="sidebar-content"]') as HTMLElement
+      const search = content.querySelector('[data-slot="command-palette-hint"]') as HTMLElement
+      expect(search).toBeTruthy()
+      expect(footer().contains(search)).toBe(false)
+      expect(footer().firstElementChild?.getAttribute('data-slot')).toBe('sidebar-footer-controls')
     })
 
-    it('keeps every control a sibling inside the one controls row', () => {
+    it('keeps tools and theme together, with accessible version text and global settings in the same row', () => {
       renderShell('/', { version: '1.2.3', toolsMenu: <button type="button">Tools</button> })
       // The gear and the toggle are the pair that came apart in #702 — assert they share a parent,
       // and that the row is the whole of the footer's chrome rather than a subset of it.
       const row = controls()
-      expect(row.querySelector('[data-slot="global-settings-link"]')).not.toBeNull()
+      expect(footer().querySelector('[data-slot="global-settings-link"]')).not.toBeNull()
       expect(row.querySelector('[data-slot="theme-toggle"]')).not.toBeNull()
       expect(row.querySelector('[data-slot="tools-menu"]')).not.toBeNull()
-      expect(row.querySelector('[data-slot="version-chip"]')).not.toBeNull()
+      const version = footer().querySelector('[data-slot="version-chip"]')!
+      expect(version).not.toBeNull()
+      expect(row.contains(version)).toBe(false)
+      expect(row.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       // The gear pushes itself right; the toggle rides along at the end of the same row.
-      const gear = row.querySelector('[data-slot="global-settings-link"]') as HTMLElement
+      const gear = footer().querySelector('[data-slot="global-settings-link"]') as HTMLElement
       expect(gear.closest('a,button')?.parentElement).toBe(row)
     })
 
@@ -267,7 +262,7 @@ describe('AppShell', () => {
       renderShell()
       // Named by its own visible label, not by an aria-label that would diverge from it
       // (WCAG 2.5.3) — jsdom reports no `navigator.platform`, so the chord reads Ctrl+K.
-      const search = within(footer()).getByRole('button', { name: 'Search…' })
+      const search = within(sidebar()).getByRole('button', { name: 'Search…' })
       expect(search.dataset.slot).toBe('command-palette-hint')
       expect(search.className).toContain('w-full')
       expect(search.textContent).toContain('Search…')
@@ -282,7 +277,7 @@ describe('AppShell', () => {
 
     it('still shows the version chip update affordance (#368) in the narrower row', () => {
       renderShell('/', { version: '1.2.3', latestVersion: '1.3.0' })
-      const chip = controls().querySelector('[data-slot="version-chip"]') as HTMLElement
+      const chip = footer().querySelector('[data-slot="version-chip"]') as HTMLElement
       expect(chip.getAttribute('data-update-available')).toBe('true')
       expect(chip.querySelector('[data-slot="status-dot"]')).not.toBeNull()
     })
@@ -296,7 +291,7 @@ describe('AppShell', () => {
         version: '0.9.2-nightly.20260813.1',
         toolsMenu: <button type="button">Tools</button>,
       })
-      const chip = controls().querySelector('[data-slot="version-chip"]') as HTMLElement
+      const chip = footer().querySelector('[data-slot="version-chip"]') as HTMLElement
       expect(chip.className).not.toContain('shrink-0')
       expect(chip.className).toContain('min-w-0')
       // The text truncates inside the pill rather than widening it past what the row can hold.
@@ -305,11 +300,10 @@ describe('AppShell', () => {
       expect(label.textContent).toBe('v0.9.2-nightly.20260813.1')
       // …and the full string stays legible on hover, since the visible one may be clipped.
       expect(chip.getAttribute('title')).toBe('v0.9.2-nightly.20260813.1')
-      // Everything else in the row still refuses to shrink — that is what keeps them readable.
-      for (const slot of ['tools-menu', 'global-settings-link', 'theme-toggle']) {
-        const el = controls().querySelector(`[data-slot="${slot}"]`) as HTMLElement
-        expect(el.className).toContain('shrink-0')
-      }
+      const theme = controls().querySelector('[data-slot="theme-toggle"]') as HTMLElement
+      expect(theme.className).toContain('shrink-0')
+      expect(controls().contains(chip)).toBe(false)
+      expect(within(controls()).getByRole('button', { name: 'Tools' })).toBeTruthy()
     })
   })
 
@@ -323,7 +317,7 @@ describe('AppShell', () => {
 
     it('renders the repo chip and version chip from props', () => {
       renderShell('/', { repo: { name: 'cezar', branch: 'main' }, version: '1.2.3' })
-      expect(screen.getByText('cezar / main')).toBeTruthy()
+      expect(document.querySelector('[data-slot="repo-chip"]')?.textContent).toBe('cezar')
       // The chip prefixes the raw semver from /api/v1/health — `v1.2.3`, mono, muted.
       expect(within(footer()).getByText('v1.2.3')).toBeTruthy()
     })
@@ -360,7 +354,7 @@ describe('AppShell', () => {
 
     it('renders the Inbox badge only for a non-zero count', () => {
       renderShell('/', { inboxCount: 2 })
-      const inbox = within(nav()).getByRole('link', { name: /Inbox/ })
+      const inbox = within(sidebar()).getByRole('link', { name: /Inbox/ })
       expect(within(inbox).getByText('2')).toBeTruthy()
 
       cleanup()
@@ -399,9 +393,9 @@ describe('AppShell', () => {
   describe('All tasks link (multi-project only)', () => {
     const allTasks = () => document.querySelector('[data-slot="all-tasks-link"]') as HTMLElement | null
 
-    it('is absent without project groups — one project needs no "all projects" door', () => {
+    it('offers the workspace tasks page even with one project', () => {
       renderShell()
-      expect(allTasks()).toBeNull()
+      expect(allTasks()).not.toBeNull()
     })
 
     it('links out of every project scope', () => {
@@ -485,7 +479,8 @@ describe('AppShell', () => {
     it('titles the mobile bar from the active route', () => {
       renderShell('/skills')
       const bar = document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
-      expect(within(bar).getByText('Skills')).toBeTruthy()
+      const title = within(bar).getByText('Skills')
+      expect(title.className).not.toContain('sr-only')
     })
 
   })
@@ -510,7 +505,7 @@ describe('AppShell', () => {
       fireEvent.pointerUp(el, { pointerId: 1, clientX: to })
     }
 
-    it('starts at the shipped 264px when nothing has been stored', () => {
+    it('starts at the approved 264px when nothing has been stored', () => {
       renderShell()
       expect(sidebar().style.width).toBe('264px')
       // No Tailwind width class left behind to fight the inline one.
@@ -607,12 +602,13 @@ describe('AppShell', () => {
       expect(localStorage.getItem('cez-sidebar-width')).toBe('264')
     })
 
-    it('does not follow the drawer: the `<md` overlay keeps its fixed 264px and no handle', () => {
+    it('keeps the drawer independent of desktop resizing and reserves its dismissal strip', () => {
       localStorage.setItem('cez-sidebar-width', '400')
       renderShell('/', { taskQuickList: <p>list</p> })
       fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
       const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
-      expect(drawer.className).toContain('w-[264px]')
+      expect(drawer.className).toContain('w-[calc(100%-68px)]')
+      expect(drawer.className).toContain('max-w-[334px]')
       expect(drawer.style.width).toBe('')
       expect(within(drawer).queryByRole('separator', { name: 'Resize the sidebar' })).toBeNull()
     })
@@ -790,16 +786,15 @@ describe('AppShell', () => {
 
     it('renders the same nav as the desktop sidebar', () => {
       renderShell()
+      const desktopLinks = allNavLinks().map((a) => [a.getAttribute('href'), a.textContent])
       openMenu()
 
-      const inDrawer = within(drawer() as HTMLElement)
-        .getByRole('navigation', { name: 'Main' })
-      const links = within(inDrawer).getAllByRole('link')
+      const links = allNavLinks(drawer() as HTMLElement)
 
       // Asserted against NAV_ITEMS, not a copy of it: the point of this test is that the drawer
       // reuses the sidebar's content, so adding a nav item must not need a second edit here.
-      expect(links.map((a) => a.getAttribute('href'))).toEqual(NAV_ITEMS.map((item) => item.to))
-      expect(links.map((a) => a.textContent)).toEqual(NAV_ITEMS.map((item) => item.label))
+      expect(links.map((a) => [a.getAttribute('href'), a.textContent])).toEqual(desktopLinks)
+      expect(links.map((a) => a.getAttribute('href')).sort()).toEqual(NAV_ITEMS.map((item) => item.to).sort())
 
       // …and the rest of the sidebar came along, not just the nav.
       expect(within(drawer() as HTMLElement).getByRole('link', { name: /New task/ })).toBeTruthy()
@@ -881,4 +876,40 @@ describe('AppShell', () => {
       expect(content.className).toContain('pb-[env(safe-area-inset-bottom)]')
     })
   })
+})
+
+it('keeps project and page context in the desktop breadcrumb', () => {
+  const { container } = renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main' } })
+  const breadcrumb = container.querySelector('[data-slot="desktop-breadcrumb"]')
+  expect(breadcrumb).not.toBeNull()
+  expect(breadcrumb?.textContent).toContain('demo')
+  expect(breadcrumb?.textContent).toContain('Skills')
+  expect(breadcrumb?.textContent).toContain('main')
+})
+
+it('opens project navigation from the mobile project control and restores its focus', async () => {
+  renderShell('/p/demo/skills', { repo: { name: 'demo', branch: 'main' }, projectGroups: <RouterLink to="/p/second/skills">Second project</RouterLink> })
+  const picker = screen.getByRole('button', { name: 'Switch project: demo' })
+  picker.focus()
+  fireEvent.click(picker)
+  const drawer = document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement
+  expect(drawer).not.toBeNull()
+  expect(within(drawer).getByRole('link', { name: 'Second project' })).toBeTruthy()
+  fireEvent.keyDown(drawer, { key: 'Escape' })
+  await waitFor(() => expect(document.activeElement).toBe(picker))
+  fireEvent.click(picker)
+  fireEvent.click(within(document.querySelector('[data-slot="mobile-nav-drawer"]') as HTMLElement).getByRole('link', { name: 'Second project' }))
+  await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/p/second/skills'))
+})
+
+// Current 193-frame source has a taller Start/New task header; page/session frames
+// explicitly retain 64px, including Git panes whose viewport caps deduct it.
+it.each(['/new', '/p/iac/new'])('uses the source 72px Start header at %s', (route) => {
+  const { container } = renderShell(route)
+  expect(container.querySelector('[data-slot="desktop-breadcrumb"]')?.classList.contains('h-[72px]')).toBe(true)
+  expect(container.querySelector('[data-slot="desktop-breadcrumb"]')?.classList.contains('px-11')).toBe(true)
+})
+it.each(['/skills', '/workflows', '/p/iac/runs/123', '/p/iac/git', '/settings/global'])('retains the source 64px page header at %s', (route) => {
+  const { container } = renderShell(route)
+  expect(container.querySelector('[data-slot="desktop-breadcrumb"]')?.classList.contains('h-16')).toBe(true)
 })

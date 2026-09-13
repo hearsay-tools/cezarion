@@ -1,4 +1,5 @@
-import { ChevronDownIcon, CircleCheckIcon, CircleIcon, CircleXIcon, LoaderCircleIcon } from 'lucide-react'
+import { LoaderCircleIcon } from 'lucide-react'
+import { ChevronDownIcon, CircleCheckIcon, CircleIcon, CircleXIcon } from '@/components/design-icons'
 import { useState } from 'react'
 
 import type { StepState, StepStatus } from '@open-mercato/cezar-api-client'

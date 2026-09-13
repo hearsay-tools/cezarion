@@ -75,12 +75,24 @@ function appearance(density: string, theme: string) {
   })()`)
 }
 
+// The mobile menu keeps a 20px icon box with an explicit 44px ::after hit region.
+// Measure that authored region, then region() verifies all eight perimeter points through elementFromPoint.
+const hitRectExpression = `(el) => {
+  const box = el.getBoundingClientRect();
+  if (!el.matches('[aria-label="Open menu"], [data-slot="wb-step-grip"], [data-slot="wb-step-actions"]')) return box;
+  const pseudo = getComputedStyle(el, '::after');
+  if (pseudo.content === 'none' || pseudo.position !== 'absolute') return box;
+  const left = box.left + parseFloat(pseudo.left), top = box.top + parseFloat(pseudo.top);
+  const width = parseFloat(pseudo.width), height = parseFloat(pseudo.height);
+  return { left, top, right: left + width, bottom: top + height, width, height };
+}`
+
 function smallTargets() {
   return browser.evaluate(`(() => {
     return [...document.querySelectorAll(${JSON.stringify(controls)})]
       .filter(el => el.checkVisibility())
       .map(el => {
-        const r = el.getBoundingClientRect();
+        const r = (${hitRectExpression})(el);
         return {name: el.getAttribute('aria-label') || el.textContent.trim().slice(0, 60), width: r.width, height: r.height};
       }).filter(r => r.width < 44 || r.height < 44);
   })()`)
@@ -95,7 +107,7 @@ function overlappingTargets() {
       const a=nodes[i], b=nodes[j];
       // Row navigation contains its own pin; dnd-kit palette contains its Add action.
       if (a.contains(b) || b.contains(a)) continue;
-      const x=a.getBoundingClientRect(), y=b.getBoundingClientRect();
+      const x=(${hitRectExpression})(a), y=(${hitRectExpression})(b);
       if (Math.min(x.right,y.right)-Math.max(x.left,y.left) > 1 &&
           Math.min(x.bottom,y.bottom)-Math.max(x.top,y.top) > 1)
         overlaps.push([a.getAttribute('aria-label') || a.textContent.trim(), b.getAttribute('aria-label') || b.textContent.trim()]);
@@ -104,7 +116,7 @@ function overlappingTargets() {
   })()`)
 }
 
-/** Scroll the actual action into view, then test its edge midpoints and center through the
+/** Scroll the actual action into view, then test its perimeter and center through the
  * browser's hit tester. A 44px CSS box covered/clipped by another element is not a pass. */
 function region(selector: string, mobile: boolean) {
   browser.waitForFunction(`(() => {
@@ -115,17 +127,21 @@ function region(selector: string, mobile: boolean) {
   const result = browser.evaluate(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)});
     el.scrollIntoView({block: 'center', inline: 'center'});
-    const r = el.getBoundingClientRect();
+    const r = (${hitRectExpression})(el);
     const cx=r.left+r.width/2, cy=r.top+r.height/2;
     const points = [[r.left+1,cy], [r.right-1,cy], [cx,r.top+1], [cx,r.bottom-1], [cx,cy]];
+    if (el.matches('[aria-label="Open menu"], [data-slot="wb-step-grip"], [data-slot="wb-step-actions"]'))
+      points.push([r.left+1,r.top+1], [r.right-1,r.top+1], [r.left+1,r.bottom-1], [r.right-1,r.bottom-1]);
     return {width:r.width, height:r.height, x:r.left+2, y:cy,
+      contained:r.left>=0 && r.top>=0 && r.right<=innerWidth && r.bottom<=innerHeight,
       hits: points.map(([x,y]) => el.contains(document.elementFromPoint(x,y)))};
-  })()`) as { width: number; height: number; x: number; y: number; hits: boolean[] }
+  })()`) as { width: number; height: number; x: number; y: number; contained: boolean; hits: boolean[] }
   if (mobile) {
     expect(result.width, selector).toBeGreaterThanOrEqual(44)
     expect(result.height, selector).toBeGreaterThanOrEqual(44)
   }
-  expect(result.hits, selector).toEqual([true, true, true, true, true])
+  expect(result.contained, selector).toBe(true)
+  expect(result.hits, selector).toEqual(Array(result.hits.length).fill(true))
   return result
 }
 
@@ -155,6 +171,7 @@ describe('density-independent mobile action targets (#166)', () => {
         appearance(density, theme)
         for (const accent of ['lime', 'violet']) {
           browser.evaluate(`document.documentElement.dataset.accent = ${JSON.stringify(accent)}`)
+          browser.evaluate(`document.querySelector('.settings-section-picker').open = true`)
           for (const selector of ['[data-slot="settings-nav-mobile"] a:last-child', '[data-slot="appearance-density"] button:nth-child(2)', '[data-slot="mobile-nav-drawer"] nav a:last-child', '[data-slot="mobile-nav-drawer"] a[data-slot="button"]']) {
             if (selector.includes('mobile-nav-drawer') && !browser.count('[data-slot="mobile-nav-drawer"]')) {
               browser.click('[aria-label="Open menu"]')
@@ -190,6 +207,7 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea, [data-slot="appearance-section"], [data-slot="wb-name"]') !== null`)
           appearance(density, theme)
           if (path.endsWith('/new')) browser.click('[data-slot="execution-options"] summary')
+          browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
           expect(smallTargets(), path).toEqual([])
           expect(overlappingTargets(), path).toEqual([])
           expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth'), path).toBe(true)
@@ -243,7 +261,7 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.press('Enter')
           browser.waitForFunction(`document.querySelector('[role="menu"]') === null`)
           const model = browser.text('[data-slot="model-pill"]')
-          if (!mobile) expect(region('[data-slot="model-pill"]', false).height).toBe(26)
+          if (!mobile) expect(region('[data-slot="model-pill"]', false).height).toBe(44)
           appearance('ultra', theme)
           appearance(density, theme)
           expect(browser.text('[data-slot="model-pill"]')).toBe(model)
@@ -272,24 +290,17 @@ describe('density-independent mobile action targets (#166)', () => {
           appearance(density, theme)
           region('[data-slot="composer"] button[aria-label="Continue"]', mobile)
           region('[data-slot="run-tabs"] a', mobile)
-          if (mobile) {
-            tapEdge('[aria-label="Expand composer"]', true)
-            browser.waitForFunction(`document.querySelector('[aria-label="Collapse composer"]') !== null`)
-          }
+          // Session controls keep the follow-up editor expanded in the integrated layout.
+          expect(browser.isVisible(textarea)).toBe(true)
           browser.fill(textarea, 'Follow-up draft')
           appearance('compact', theme)
           appearance(density, theme)
           expect(browser.evaluate(`document.querySelector('${textarea}').value`)).toBe('Follow-up draft')
-          if (mobile) {
-            focus('[aria-label="Collapse composer"]')
-            browser.press('Enter')
-            expect(browser.evaluate(`document.querySelector('${textarea}').value`)).toBe('Follow-up draft')
-          }
           expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true)
           browser.screenshot(`${artifacts}/${width}-${density}-${theme}-follow-up.png`, { viewport: true })
 
           browser.goto(`${baseUrl}/p/${project}/workflows`)
-          browser.waitForFunction(`document.querySelector('[data-slot="wb-step-remove"]') !== null`)
+          browser.waitForFunction(`document.querySelector('[data-slot="wb-step-actions"]') !== null`)
           appearance(density, theme)
           browser.click('[data-slot="wb-name"]')
           browser.press('Control+a')
@@ -298,6 +309,8 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.fill('[data-slot="wb-name"]', 'Kept workflow draft')
           expect(overlappingTargets()).toEqual([])
           region('[data-slot="wb-step-grip"]', mobile)
+          tapEdge('[data-slot="wb-step-actions"]', mobile)
+          browser.waitForFunction(`document.querySelector('[data-slot="wb-step-remove"]') !== null`)
           tapEdge('[data-slot="wb-step-remove"]', mobile)
           expect(browser.count('[data-slot="wb-step"]')).toBe(0)
           tapEdge('[data-slot="wb-skill"][data-skill="touch-check"] [data-slot="wb-skill-add"]', mobile)
@@ -305,6 +318,13 @@ describe('density-independent mobile action targets (#166)', () => {
           appearance('compact', theme)
           appearance(density, theme)
           expect(browser.evaluate(`document.querySelector('[data-slot="wb-name"]').value`)).toBe('Kept workflow draft')
+          tapEdge('[data-slot="wb-yaml-toggle"]', mobile)
+          expect(browser.evaluate(`document.querySelector('[data-slot="wb-yaml-toggle"]').parentElement.open`)).toBe(true)
+          focus('[data-slot="wb-yaml-toggle"]')
+          browser.press('Enter')
+          expect(browser.evaluate(`document.querySelector('[data-slot="wb-yaml-toggle"]').parentElement.open`)).toBe(false)
+          browser.press('Space')
+          expect(browser.evaluate(`document.querySelector('[data-slot="wb-yaml-toggle"]').parentElement.open`)).toBe(true)
           focus('[data-slot="wb-copy"]')
           browser.press('Enter')
           expect(browser.text('[data-slot="wb-copy"]')).toContain('Copied')
@@ -345,7 +365,10 @@ describe('density-independent mobile action targets (#166)', () => {
           tapEdge(choice, mobile)
           expect(browser.evaluate(`document.querySelector(${JSON.stringify(choice)}).getAttribute('aria-checked')`)).toBe('true')
           focus(choice)
-          if (mobile) region('[data-slot="settings-nav-mobile"] a:last-child', true)
+          if (mobile) {
+            browser.click('.settings-section-picker summary')
+            region('[data-slot="settings-nav-mobile"] a:last-child', true)
+          }
           if (mobile) expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="settings-nav-mobile"] a')].every(el => el.scrollWidth <= el.clientWidth)`)).toBe(true)
           expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true)
           browser.screenshot(`${artifacts}/${width}-${density}-${theme}-appearance.png`, { viewport: true })

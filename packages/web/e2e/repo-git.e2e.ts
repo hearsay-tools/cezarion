@@ -169,10 +169,10 @@ describe('the repo view against the live dry-run server', () => {
         browser.waitForFunction(`document.querySelector('[data-slot="diff"]') !== null`)
         // Forced mobile combination, whatever the desktop toggles said.
         expect(browser.evaluate(`document.querySelector('[data-slot="diff"]').dataset.mode`)).toBe('unified')
-        // The tree column yields to the diff on phones.
+        // The integrated mobile design stacks the selectable file tree above the diff.
         expect(
           browser.evaluate(
-            `(() => { const el = document.querySelector('[data-slot="changes-tree"]'); return el === null || el.offsetParent === null })()`,
+            `(() => { const el = document.querySelector('[data-slot="changes-tree"]'); return el !== null && el.checkVisibility() && el.getBoundingClientRect().width <= innerWidth })()`,
           ),
         ).toBe(true)
       } else {

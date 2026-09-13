@@ -107,6 +107,9 @@ export function NotificationsSection() {
           />
         </div>
 
+        {!unsupported ? <p data-slot="notifications-permission" data-permission={permission} className="mt-4 text-[13px] text-muted-foreground">Browser permission · {permission === 'granted' ? 'Allowed' : permission === 'denied' ? 'Blocked' : 'Not requested'}</p> : null}
+        <p className="text-[13px] text-muted-foreground">Permission is requested only when you enable notifications.</p>
+
         {unsupported ? (
           <p data-slot="notifications-unsupported" className="text-[13px] text-muted-foreground">
             This browser does not support notifications, so the toggle is unavailable here.
@@ -114,11 +117,11 @@ export function NotificationsSection() {
         ) : null}
 
         {!unsupported && enabled && permission === 'denied' ? (
-          <p data-slot="notifications-denied" className="text-[13px] text-danger">
-            This browser is blocking notifications for the cockpit. The preference is saved, but
-            nothing will be delivered here until you allow notifications in the browser&apos;s
-            site settings.
-          </p>
+          <div data-slot="notifications-denied" className="mt-5 flex flex-col gap-2">
+            <h3 className="text-sm">Allow notifications in your browser</h3>
+            <p className="text-[13px] text-muted-foreground">This browser is blocking notifications. Your preference is saved. Allow notifications in the browser’s site settings to receive them.</p>
+            <p className="settings-readout">Notifications are blocked for this site.</p>
+          </div>
         ) : null}
       </section>
     </div>

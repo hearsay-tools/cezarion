@@ -67,6 +67,7 @@ describe('automatic Open Mercato skills updates', () => {
       config = await api('/api/v1/workspace/config')
     }
     expect(config.skillsAutoUpdate).toBe(false)
+    browser.click('[data-slot="skills-settings-section"] details summary')
     browser.waitForFunction(`document.querySelector('[data-slot="skills-settings-section"]')?.textContent.includes('explicit workspace override')`)
     expect(browser.text('[data-slot="skills-settings-section"]')).toContain('explicit workspace override')
 
@@ -80,9 +81,9 @@ describe('automatic Open Mercato skills updates', () => {
 
   it('keeps the navigation marker absent for the dry-run current state', () => {
     browser.goto(`${baseUrl}/p/${projectId}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] nav') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]') !== null`)
     expect(browser.count('[data-slot="nav-update-marker"]')).toBe(0)
-    expect(browser.text('[data-slot="sidebar"] nav')).toContain('Skills')
+    expect(browser.text('[data-slot="sidebar"] nav[aria-label="Main"]')).toContain('Skills')
     browser.screenshot(`${artifactsDir}/skills-navigation-current.png`)
   })
 
@@ -111,9 +112,9 @@ describe('automatic Open Mercato skills updates', () => {
     browser.goto(`${baseUrl}/p/${projectId}/`)
     browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
     browser.click('[data-slot="mobile-top-bar"] button[aria-label="Open menu"]')
-    browser.waitForFunction(`document.querySelector('[role="dialog"] nav') !== null`)
+    browser.waitForFunction(`document.querySelector('[role="dialog"] nav[aria-label="Main"]') !== null`)
 
-    expect(browser.text('[role="dialog"] nav')).toContain('Skills')
+    expect(browser.text('[role="dialog"] nav[aria-label="Main"]')).toContain('Skills')
     expect(browser.count('[role="dialog"] [data-slot="nav-update-marker"]')).toBe(0)
     browser.screenshot(`${artifactsDir}/skills-mobile-navigation.png`, { viewport: true })
   })

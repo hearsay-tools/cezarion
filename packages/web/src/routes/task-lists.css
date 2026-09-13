@@ -1,0 +1,167 @@
+/* Revised project resource table (25), workspace cards (26), mobile FAB. */
+[data-route="tasks"], [data-route="global-tasks"] { min-width: 0; }
+[data-slot="tasks-table"] table { min-width: 1040px; }
+[data-slot="tasks-table"] thead { background: var(--muted); }
+[data-slot="tasks-table"] th { height: 48px; }
+[data-slot="tasks-table"] td { height: 50px; }
+[data-slot="global-tasks-table"] { padding: 0; overflow: visible; border: 0; background: transparent; }
+[data-slot="global-task-row"] { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 16px; padding: 22px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+[data-slot="global-task-row"] > div { height: auto; min-width: 0; max-width: none; padding: 0; border: 0; white-space: normal; }
+[data-slot="global-task-row"] > [data-slot="global-task-title"] { grid-column: 1 / -1; }
+[data-slot="global-task-row"] > [data-slot="global-task-title"] > span > a { font-size: 18px; white-space: normal; line-height: 1.5; }
+[data-slot="global-task-row"] > [data-slot="global-task-actions"] { grid-column: 1 / -1; text-align: left; margin-top: 4px; }
+[data-slot="global-task-row"] > [data-slot="global-task-actions"] > span { flex-wrap: wrap; gap: 8px; }
+[data-slot="global-task-row"] [data-action] { width: auto; min-height: 40px; padding: 8px 12px; gap: 6px; border: 1px solid var(--border); color: var(--foreground); font-size: 12px; }
+[data-slot="global-tasks-filters"] { gap: 20px; }
+[data-slot="global-tasks-filters"] button { min-height: 40px; }
+@media (max-width: 767px) {
+  [data-slot="global-task-row"] { padding: 16px; }
+  [data-slot="global-task-row"] > [data-slot="global-task-workflow"] { display: block; }
+  [data-slot="global-task-row"] [data-action] { min-height: 44px; }
+  [data-slot="new-task-fab"] { right: 20px; bottom: calc(24px + env(safe-area-inset-bottom)); }
+  [data-slot="task-card"] { overflow-wrap: anywhere; }
+}
+@media (max-width: 767px) {
+  [data-route="tasks"] h1, [data-route="global-tasks"] h1 { font-size: 24px; }
+  [data-slot="mark-all-read"] { display: inline-flex; }
+  [data-slot="new-task-fab"] { background: var(--accent-strong); color: white; }
+}
+
+/* Frame 5 is the ungrouped summary; frame 26 exposes grouped run-action cards. */
+[data-slot="global-summary-head"] { display: none; }
+@media (min-width: 768px) {
+  [data-presentation="summary"] [data-slot="global-tasks-table"] { border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 20px; }
+  [data-presentation="summary"] [data-slot="global-summary-head"],
+  [data-presentation="summary"] [data-slot="global-task-row"] { display: grid; grid-template-columns: minmax(0, 1fr) 120px 90px 100px 70px; column-gap: 16px; }
+  [data-presentation="summary"] [data-slot="global-summary-head"] { padding-bottom: 16px; color: var(--muted-foreground); font-size: 10px; font-weight: 500; text-transform: uppercase; }
+  [data-presentation="summary"] [data-slot="global-task-row"] { position: relative; align-items: center; margin: 0; padding: 20px 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+  [data-presentation="summary"] [data-slot="global-task-row"] > [data-slot="global-task-title"] { grid-column: 1; grid-row: 1; }
+  [data-presentation="summary"] [data-slot="global-task-title"] > span > a { font-size: 13px; }
+  [data-presentation="summary"] [data-slot="global-task-workflow"] { grid-column: 2; grid-row: 1; }
+  [data-presentation="summary"] [data-slot="global-task-diff"] { grid-column: 3; grid-row: 1; white-space: pre-wrap; }
+  [data-presentation="summary"] [data-slot="global-task-references"] { grid-column: 4; grid-row: 1; }
+  [data-presentation="summary"] [data-slot="global-task-age"] { grid-column: 5; grid-row: 1; text-align: left; }
+  [data-presentation="summary"] [data-slot="global-task-actions"] { margin: 0; }
+  [data-presentation="summary"] [data-slot="global-task-actions"] > span { gap: 8px; }
+  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td { height: 102px; }
+  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child { vertical-align: middle; }
+  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child > div { margin-top: 8px; }
+  [data-slot="tasks-summary"] [aria-controls^="task-resources-"] { min-height: 26px; }
+}
+
+@media (min-width: 768px) {
+  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child { padding-top: 12px; padding-bottom: 12px; }
+}
+
+[data-filter-details="false"] [data-slot="group-controls"],
+[data-filter-details="false"] [data-slot="tag-filters"],
+[data-filter-details="false"] [data-slot="no-tags-hint"] { display: none; }
+[data-slot="global-tasks-filters"] > div:first-child { gap: 10px; }
+[data-slot="global-tasks-filters"] button { border-radius: 8px; }
+[data-presentation="cards"] > header h1 { font-size: 28px; font-weight: 400; }
+[data-slot="global-task-diff"] { display: none; }
+@media (min-width: 768px) {
+  [data-presentation="summary"] [data-slot="global-task-diff"] { display: block; }
+  [data-presentation="summary"] [data-slot="global-task-row"] { min-height: 102px; }
+  [data-presentation="summary"] [data-slot="global-task-row"][data-expanded="false"] [data-slot="global-task-actions"] { display: none; }
+  [data-presentation="summary"] [data-slot="global-task-title"] button { min-height: 26px; }
+  [data-slot="tasks-table"] table { min-width: 1240px; }
+  [data-slot="tasks-table"] col[data-column-id="workflow"][data-expanded="true"] { width: 120px !important; }
+  [data-slot="tasks-table"] col[data-column-id="memory"][data-expanded="true"] { width: 120px !important; }
+}
+
+[data-slot="task-summary-row"][data-status="done"] [data-slot="pill"],
+[data-slot="task-card"][data-status="done"] [data-slot="pill"],
+[data-slot="global-task-row"][data-status="done"] [data-slot="pill"] { border-radius: 4px; background: color-mix(in srgb, var(--accent-strong) 13%, transparent); color: var(--accent-text); font-size: 10px; text-transform: capitalize; padding: 6px 8px; }
+[data-slot="task-summary-row"][data-status="done"] [data-slot="pill"] [data-slot="status-dot"],
+[data-slot="task-card"][data-status="done"] [data-slot="pill"] [data-slot="status-dot"],
+[data-slot="global-task-row"][data-status="done"] [data-slot="pill"] [data-slot="status-dot"] { display: none; }
+@media (max-width: 767px) {
+  [data-route="tasks"] h1, [data-route="global-tasks"] h1 { font-size: 25px; }
+}
+
+@media (max-width: 767px) {
+  [data-slot="tasks-toolbar"] [data-slot="archive-finished"] { min-height: 44px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--foreground); }
+  [data-slot="task-card"] { position: relative; padding-top: 20px; padding-bottom: 30px; }
+  [data-slot="task-card"] > div:first-child { align-items: center; }
+  [data-slot="task-card"] [data-slot="pin-toggle"] { margin-left: auto; }
+  [data-slot="task-card"] [data-slot="mobile-resources-toggle"] { min-height: 26px; border-radius: 4px; padding: 0; }
+  [data-slot="mobile-task-meta"] { font-family: inherit; font-size: 12px; font-weight: 400; }
+}
+/* Grouped runs use a single metadata line, followed by the complete action row (26A). */
+[data-presentation="cards"] [data-slot="global-task-row"] { grid-template-columns: auto auto auto minmax(0, 1fr); gap: 12px; }
+[data-presentation="cards"] [data-slot="global-task-row"] > [data-slot="global-task-title"] { display: contents; }
+[data-presentation="cards"] [data-slot="global-task-title"] > span { grid-column: 1 / -1; grid-row: 1; }
+[data-presentation="cards"] [data-slot="global-task-title"] > div { grid-column: 1; grid-row: 2; margin-top: 0; }
+[data-presentation="cards"] [data-slot="global-task-workflow"] { grid-column: 2; grid-row: 2; align-self: center; }
+[data-presentation="cards"] [data-slot="global-task-references"] { grid-column: 3; grid-row: 2; align-self: center; }
+[data-presentation="cards"] [data-slot="global-task-age"] { grid-column: 4; grid-row: 2; align-self: center; text-align: left; }
+[data-presentation="cards"] [data-slot="global-task-actions"] { grid-column: 1 / -1; grid-row: 3; margin: 0; }
+[data-presentation="cards"] [data-slot="global-task-title"] [data-slot="pill"] { padding: 0; background: transparent; color: var(--muted-foreground); font-size: 12px; font-weight: 400; text-transform: capitalize; }
+[data-presentation="cards"] [data-slot="global-task-title"] [data-slot="status-dot"] { display: none; }
+[data-presentation="cards"] [data-slot="global-task-actions"] [data-slot="button"] { font-weight: 400; }
+@media (max-width: 767px) {
+  [data-presentation="cards"] [data-slot="global-task-row"] { grid-template-columns: auto minmax(0, 1fr); }
+  [data-presentation="cards"] [data-slot="global-task-references"] { grid-column: 1; grid-row: 3; }
+  [data-presentation="cards"] [data-slot="global-task-age"] { grid-column: 2; grid-row: 3; }
+  [data-presentation="cards"] [data-slot="global-task-actions"] { grid-row: 4; }
+}
+
+[data-slot="tasks-summary"] [data-slot="diff-stat"], [data-slot="mobile-task-meta"] [data-slot="diff-stat"] { font-family: inherit; font-weight: 400; white-space: nowrap; }
+[data-slot="tasks-summary"] [data-slot="diff-stat"] > span { color: var(--muted-foreground); }
+[data-slot="mobile-task-meta"] [data-slot="diff-stat"] > span { color: var(--accent-text); }
+[data-slot="tasks-toolbar"] [data-slot="archive-finished"] { min-height: 44px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--foreground); }
+
+@media (max-width: 767px) {
+  [data-presentation="summary"] [data-slot="global-tasks-table"] { border: 1px solid var(--border); border-radius: 12px; padding: 20px; background: var(--card); }
+  [data-presentation="summary"] [data-slot="global-task-row"] { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; margin: 0; padding: 20px 0 30px; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+  [data-presentation="summary"] [data-slot="global-task-title"] { grid-column: 1 / -1; }
+  [data-presentation="summary"] [data-slot="global-task-title"] > span > a { font-size: 13.5px; line-height: 1.5; }
+  [data-presentation="summary"] [data-slot="global-task-workflow"] { grid-column: 1; grid-row: 2; }
+  [data-presentation="summary"] [data-slot="global-task-diff"] { display: block; grid-column: 2; grid-row: 2; }
+  [data-presentation="summary"] [data-slot="global-task-age"] { grid-column: 3; grid-row: 2; }
+  [data-presentation="summary"] [data-slot="global-task-references"] { grid-column: 1 / -1; grid-row: 3; }
+  [data-presentation="summary"] [data-slot="global-task-row"][data-expanded="false"] [data-slot="global-task-actions"] { display: none; }
+  [data-route="global-tasks"][data-presentation="summary"] > header > div:has(input) { align-items: start; flex-direction: column; }
+  [data-slot="other-projects"] a { border: 1px solid var(--border); min-height: 44px; color: var(--foreground); }
+}
+
+[data-route="tasks"] h1, [data-presentation="summary"][data-route="global-tasks"] h1 { line-height: 1.2; letter-spacing: -0.7px; }
+[data-slot="tasks-toolbar"] [data-slot="button"] { font-size: 12px; font-weight: 500; }
+@media (max-width: 767px) {
+  [data-slot="tasks-toolbar"] { align-items: start; }
+  [data-slot="tasks-toolbar"] [data-slot="new-task-inline"] { grid-column: 1; justify-self: start; margin-right: 0; }
+  [data-slot="task-card"] > div:first-child > a { font-size: 13px; line-height: 1.6; }
+  [data-slot="mobile-task-meta"] { margin-top: 10px; }
+}
+
+[data-slot="other-projects"] a { border: 1px solid var(--border); min-height: 44px; color: var(--foreground); }
+[data-slot="other-projects"] > div > div { border: 0; }
+[data-presentation="summary"] [data-slot="global-task-title"] > span > a:not(.font-semibold) { font-weight: 400; color: var(--foreground); }
+@media (max-width: 767px) {
+  [data-route="global-tasks"][data-presentation="summary"] > header > div:has(input) > div { width: 100%; }
+}
+
+@media (min-width: 768px) {
+  [data-route="tasks"][data-presentation="resources"] > header { flex-direction: row; flex-wrap: wrap; gap: 12px; align-items: center; }
+  [data-route="tasks"][data-presentation="resources"] > header > div:first-child { width: 100%; margin-bottom: 10px; }
+  [data-route="tasks"][data-presentation="resources"] h1 { font-size: 28px; font-weight: 400; }
+  [data-route="tasks"][data-presentation="resources"] > header > div:nth-child(2) { border: 0; gap: 8px; }
+  [data-route="tasks"][data-presentation="resources"] > header > div:nth-child(2) > button { min-height: 40px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; background: var(--card); }
+  [data-route="tasks"][data-presentation="resources"] [data-slot="tasks-toolbar"] { flex: 1; }
+}
+
+@media (max-width: 767px) {
+  [data-route="tasks"] [data-slot="tasks-toolbar"] { display: grid; grid-template-columns: max-content minmax(0, 1fr); }
+  [data-route="tasks"] [data-slot="tasks-toolbar"] > div:has(input) { grid-column: 1 / -1; }
+  [data-route="tasks"] [data-slot="archive-finished"] { grid-column: 1; }
+}
+[data-route="tasks"][data-presentation="resources"] [data-slot="new-task-inline"],
+[data-slot="table-title-editor"] button:first-of-type { background: var(--accent-strong); color: white; }
+
+/* Summary references use the design's plain status label. The shared chip still
+   owns navigation, live status, its accessible name and the conflict-action panel. */
+:is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"]) { height: auto; border: 0; border-radius: 0; background: transparent; padding: 0; gap: 0; font-family: inherit; font-size: 12px; font-weight: 400; color: var(--accent-text); white-space: nowrap; }
+:is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"]) > svg { display: none; }
+:is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"])[data-status="merged"]::after { content: ' · Merged'; white-space: pre; }
+:is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"])[data-conflicting="true"]::after { content: ' · Conflicts'; white-space: pre; }

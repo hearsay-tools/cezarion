@@ -1,3 +1,4 @@
+import { CpuIcon, GaugeIcon, TerminalIcon } from '@/components/design-icons'
 import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
 import { useConfig, useProviderStatus, useRunnerModels } from '@/api/queries'
 import type { CreateRunInput, Runner } from '@open-mercato/cezar-api-client'
@@ -198,6 +199,8 @@ export function EnginePills({
     <>
       {showRunnerPill ? (
         <RunnerPill
+          icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+          fieldLabel
           runners={runners}
           value={runner}
           accounts={accountChoices}
@@ -219,11 +222,13 @@ export function EnginePills({
         />
       ) : null}
       <PickerPill
+        icon={<CpuIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+        fieldLabel
         slot="model-pill"
         ariaLabel="Model"
         // `resolveModel` only ever returns a member of `models` ('' is the auto preset), so
         // the lookup cannot miss.
-        label={models.find((m) => m.id === model)!.label}
+        label={model === '' ? 'Default' : models.find((m) => m.id === model)!.label}
         value={model}
         disabled={unavailable}
         readOnly={modelsLocked === true}
@@ -240,6 +245,8 @@ export function EnginePills({
         status={modelCatalogStatus(runner, catalog.data, catalog.isError, catalog.isFetching)}
       />
       <PickerPill
+        icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+        fieldLabel
         slot="effort-pill"
         ariaLabel="Effort"
         label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}

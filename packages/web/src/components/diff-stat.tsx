@@ -65,8 +65,8 @@ export function DiffStatLabel({
         className
       )}
     >
-      <span className="text-success">+{compact ? compactDiffCount(stat.adds) : stat.adds}</span>{' '}
-      <span className="text-danger">−{compact ? compactDiffCount(stat.dels) : stat.dels}</span>
+      <span className="text-success">+{compact ? compactDiffCount(stat.adds) : stat.adds.toLocaleString('en-US')}</span>{' '}
+      <span className="text-danger">−{compact ? compactDiffCount(stat.dels) : stat.dels.toLocaleString('en-US')}</span>
     </span>
   )
 }

@@ -119,7 +119,7 @@ export type SetWorkspaceConfigInput = z.infer<typeof setWorkspaceConfigInputSche
 
 /** Settings → Appearance: accent + density + reading width. ONE shape for both ui-state files. */
 const appearanceSchema = z.object({
-  accent: z.enum(['lime', 'violet']).optional(),
+  accent: z.enum(['cezarion', 'lime', 'violet']).optional(),
   density: z.enum(['comfortable', 'compact', 'ultra']).optional(),
   width: z.enum(['narrow', 'wide']).optional(),
 });

@@ -1044,7 +1044,8 @@ describe('TaskThreadRoute — read receipts', () => {
     )
     visit('r1')
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Mark unread' }))
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'Run actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Mark unread' }))
     await waitFor(() => expect(posted(sent, '/api/v1/runs/r1/unread')).toBe(1))
 
     // Let every settled mutation, cache write and re-render drain before judging.
@@ -1062,7 +1063,8 @@ describe('TaskThreadRoute — read receipts', () => {
     )
     const first = visit('r1')
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Mark unread' }))
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'Run actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Mark unread' }))
     await waitFor(() => expect(currentRecord().seenAt).toBeUndefined())
     expect(posted(sent, '/api/v1/runs/r1/read')).toBe(0)
     first.unmount()
@@ -1080,7 +1082,8 @@ describe('TaskThreadRoute — read receipts', () => {
     const { sent } = stubReceiptServer(run('done', { finishedAt: FINISHED_AT }))
     visit('r1')
     await waitFor(() => expect(posted(sent, '/api/v1/runs/r1/read')).toBe(1))
-    expect(await screen.findByRole('button', { name: 'Mark unread' })).not.toBeNull()
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'Run actions' }))
+    expect(await screen.findByRole('menuitem', { name: 'Mark unread' })).not.toBeNull()
   })
 })
 

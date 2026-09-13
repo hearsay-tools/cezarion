@@ -1,6 +1,8 @@
-import { ChevronDownIcon, ScaleIcon } from 'lucide-react'
+import { ChevronDownIcon } from '@/components/design-icons'
+import { ScaleIcon } from 'lucide-react'
+import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
-import { useHealth, usePinRun, useReferenceProjectId, useRuns } from '@/api/queries'
+import { useHealth, usePinRun, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useProjectMatch } from '@/lib/project-router'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
@@ -23,7 +25,7 @@ import {
   type QuickListBucket,
   type QuickListRow,
 } from '@/lib/task-groups'
-import { formatCost, taskReference } from '@/lib/tasks-table'
+import { formatCost, taskReference, taskReferences } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
@@ -45,6 +47,7 @@ export function TaskQuickList({
   showTokens = true,
   showCost = true,
   onTogglePin,
+  showViewControls = true,
 }: {
   runs: RunRecord[]
   view: ListView
@@ -59,6 +62,7 @@ export function TaskQuickList({
   /** Pin/unpin one row (#935). The container owns the mutation, because WHICH project a row
    *  belongs to is a container's question — this list is painted for other projects too. */
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  showViewControls?: boolean
 }) {
   const counts = listCounts(runs)
   const buckets = groupRuns(runs, view)
@@ -70,7 +74,7 @@ export function TaskQuickList({
     <div data-slot="quick-list">
       {/* Sticky, not scrolled away: the tabs say what you are looking at, and a long Recent list
           must not be able to hide that the view is filtered. */}
-      <div className="sticky top-0 z-10 bg-sidebar pt-2 pb-1">
+      {showViewControls ? <div className="sticky top-0 z-10 bg-sidebar pt-2 pb-1">
         <div className="inline-flex w-full gap-0.5 rounded-md bg-muted p-[3px]">
           <ViewTab view="active" current={view} onSelect={onViewChange} count={counts.active}>
             Active
@@ -83,7 +87,7 @@ export function TaskQuickList({
             Archived
           </ViewTab>
         </div>
-      </div>
+      </div> : null}
 
       {buckets.length === 0 ? (
         <p className="px-3 py-3.5 text-xs text-soft-foreground">
@@ -136,26 +140,37 @@ export function QuickListBuckets({
       return next
     })
 
+  // Sidebar organization is pin-based; the state remains on each row's independent dot.
+  const sidebarBuckets: QuickListBucket[] = []
+  for (const label of ['Pinned', 'Recent', 'Archived'] as const) {
+    const rows = buckets.filter(bucket => label === 'Recent' ? bucket.label !== 'Pinned' && bucket.label !== 'Archived' : bucket.label === label).flatMap(bucket => bucket.rows)
+    if (rows.length) sidebarBuckets.push({ label, rows })
+  }
+  const plainRows = sidebarBuckets.flatMap(bucket => bucket.rows).filter((row): row is Extract<QuickListRow, { kind: 'run' }> => row.kind === 'run')
+  const parents = new Set(plainRows.filter(row => row.run.delegation?.role !== 'worker').map(row => row.run.id))
+  const children = new Map<string, typeof plainRows>()
+  for (const row of plainRows) {
+    const metadata = row.run.delegation
+    if (metadata?.role !== 'worker' || !parents.has(metadata.parentRunId)) continue
+    // An independently pinned worker must stay in Pinned rather than following an unpinned parent.
+    if (row.run.pinned && !plainRows.find(parent => parent.run.id === metadata.parentRunId)?.run.pinned) continue
+    children.set(metadata.parentRunId, [...(children.get(metadata.parentRunId) ?? []), row])
+  }
+  const nested = new Set([...children.values()].flat().map(row => row.run.id))
+  const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} />
+
   return (
     <>
-      {buckets.map((bucket) => (
+      {sidebarBuckets.filter(bucket => bucket.rows.some(row => row.kind !== 'run' || !nested.has(row.run.id))).map((bucket) => (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
-          <h2 className="px-3 pt-2.5 pb-1 text-[11px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
+          <h2 className="pl-9 pt-3 pb-2 text-[9px] font-medium tracking-[0.14em] text-soft-foreground uppercase">
             {bucket.label}
           </h2>
-          {bucket.rows.map((row) => (
-            <Row
-              key={row.kind === 'group' ? row.groupId : row.run.id}
-              row={row}
-              currentRunId={currentRunId}
-              now={now}
-              scope={scope}
-              showTokens={showTokens}
-              showCost={showCost}
-              expanded={row.kind === 'group' && expanded.has(row.groupId)}
-              onToggle={toggleGroup}
-              onTogglePin={onTogglePin}
-            />
+          {bucket.rows.filter(row => row.kind !== 'run' || !nested.has(row.run.id)).map((row) => (
+            <div key={row.kind === 'group' ? row.groupId : row.run.id} data-session-family={row.kind === 'run' ? row.run.id : undefined}>
+              {renderRow(row)}
+              {row.kind === 'run' && children.has(row.run.id) ? <div className="ml-5" data-slot="session-workers">{children.get(row.run.id)!.map(child => <div key={child.run.id}>{renderRow(child)}</div>)}</div> : null}
+            </div>
           ))}
         </div>
       ))}
@@ -187,7 +202,7 @@ function ViewTab({
       aria-pressed={isActive}
       onClick={() => onSelect(view)}
       className={cn(
-        'flex h-7 flex-1 items-center justify-center gap-1.5 rounded-[7px] text-[12.5px] font-medium text-muted-foreground',
+        'flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[7px] text-[11px] font-medium text-muted-foreground md:min-h-[30px]',
         isActive && 'bg-card font-semibold text-foreground shadow-xs'
       )}
     >
@@ -262,7 +277,7 @@ function Row({
           data-slot="group-compare"
           title="Compare the variants"
           aria-label={`Compare the variants of ${row.title}`}
-          className="mr-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-violet/10 hover:text-violet"
+          className="mr-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-accent-strong/10 hover:text-accent-icon"
         >
           <ScaleIcon className="size-3.5" aria-hidden="true" />
         </Link>
@@ -299,7 +314,7 @@ function Row({
  * title rather than a chip wedged in front of the status it is not about.
  *
  * WIDTH-PRIORITY RULE (#788, option C) — read this before adding anything to this row.
- * The column is 264px by default and the title is the ONLY thing here a person scans for, so:
+ * The column is 232px by default and the title is the ONLY thing here a person scans for, so:
  *
  *  1. The title is the only element allowed to GROW (`flex-1`) and it has a floor
  *     (`min-w-[7rem]`, replacing the `min-w-0` that let it be squeezed to nothing) that no other
@@ -322,10 +337,12 @@ function Row({
  *
  * Four things reveal it, and each answers a different way of reaching the row:
  *  - `group-hover` — the pointer.
- *  - `group-focus-within` — the keyboard, on the row's own link.
+ *  - `focus-visible` — the keyboard, on the pin itself. Revealing from the row's link
+ *    (`group-focus-within`) kept the pin up on the current task after a click, because that
+ *    link stays focused.
  *  - `no-hover` — a device that CANNOT hover, where the first two never fire and a
  *    hover-revealed control is simply unreachable. This is the phone and tablet case; the
- *    drawer keeps the sidebar's fixed 264px, so the width rule applies there too and the pin
+ *    drawer keeps the sidebar's fixed 232px, so the width rule applies there too and the pin
  *    still cannot be permanent — it is bigger instead (`size-11`), because a 20px target under a
  *    thumb is not a target. See the variant's definition in `styles/index.css`.
  *  - `data-[pinned=true]` — an already-pinned row, where the pin is a fact about the row rather
@@ -334,8 +351,7 @@ function Row({
 const ROW_PIN_CLASS =
   'w-0 overflow-hidden opacity-0' +
   ' group-hover/task-row:mr-1 group-hover/task-row:w-5 group-hover/task-row:opacity-100' +
-  ' group-focus-within/task-row:mr-1 group-focus-within/task-row:w-5 group-focus-within/task-row:opacity-100' +
-  ' max-md:mr-1 max-md:w-11 max-md:opacity-100' +
+  ' focus-visible:mr-1 focus-visible:w-5 focus-visible:opacity-100' +
   ' no-hover:mr-1 no-hover:size-11 no-hover:opacity-100' +
   ' data-[pinned=true]:mr-1 data-[pinned=true]:w-5 data-[pinned=true]:opacity-100'
 
@@ -369,6 +385,7 @@ function RunRow({
   // it was opened on. It is the row's leading chip AND the reason the title may drop its `NNN: `
   // prefix (#788, option C): the number is painted once, as a link, instead of twice as digits.
   const reference = taskReference(run)
+  const references = taskReferences(run)
   const title = runTitle(run)
   // Only when the two numbers are the same number — see `refPrefixMatches`. A run opened on issue
   // #788 that shipped as PR #790 keeps its prefix, because the chip is no longer saying it.
@@ -396,7 +413,7 @@ function RunRow({
       data-active={isActive ? 'true' : undefined}
       className={cn(
         'selection-row group/task-row flex items-center gap-2 rounded-sm pl-2.5 hover:bg-muted',
-        isActive && 'bg-muted',
+        isActive && 'bg-[var(--task-brand-selected)]',
         // The indent a member row wears under an expanded group tile. One padding declaration,
         // not two: `cn` is tailwind-merge, so this REPLACES the `pl-2.5` above rather than losing
         // to it — 26px = the row's own 10px plus the 16px indent.
@@ -405,17 +422,12 @@ function RunRow({
     >
       {/* Outside the Link so it can lead the reference chip. The dot is a status indicator, not a
           navigation target, and the wrapper still owns the row's hover surface. */}
-      <StatusDot tone={attention.tone} pulse={attention.pulse} aria-label={attention.label} role="img" />
+      <StatusDot tone={attention.tone} pulse={attention.pulse} aria-label={attention.label} title={attention.label} role="img" />
       {/* The reference, ONCE (#788, option C): the number that used to be both a `775: ` title
           prefix and a trailing `PR ↗` chip is now one leading chip that is itself the link. */}
-      {reference ? (
-        <TaskReferenceChip
-          run={run}
-          reference={reference}
-          compact
-          className="h-auto shrink-0 gap-[2px] px-1.5 py-px text-[10.5px]"
-        />
-      ) : null}
+      {references.length ? <div data-slot="session-references" className="flex flex-wrap items-center gap-1">
+        {references.map(ref => <TaskReferenceChip key={`${ref.kind}-${ref.number}-${ref.url}`} run={run} reference={ref} compact className="h-auto shrink-0 gap-[2px] px-1 py-px text-[10px]" />)}
+      </div> : null}
       <Link
         to={scopeTo(scope, `/tasks/${run.id}`)}
         // `title` carries the FULL stored title — including a `NNN: ` prefix the chip let the
@@ -424,9 +436,9 @@ function RunRow({
         aria-current={isActive ? 'page' : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 py-[7px] pr-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground"
       >
-        {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
+
         {variant ? (
-          <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-violet/15 font-mono text-[9.5px] font-semibold text-violet">
+          <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-accent-strong/15 font-mono text-[9.5px] font-semibold text-accent-text">
             {run.variant ?? '?'}
           </span>
         ) : null}
@@ -445,12 +457,12 @@ function RunRow({
             sidebar row has no column to hold an em dash open for.
 
             Droppable metadata, per the width-priority rule: `+59514 −12160` is ~82px, which a
-            264px column cannot spend and still name the task, and its exact numbers stay in the
+            232px column cannot spend and still name the task, and its exact numbers stay in the
             `title` tooltip and in the Tasks table's ± column either way.
 
             23rem is not the width at which the pair merely *fits* — it is the width at which it
-            fits AND the name is still at least as long as it was in the default 264px column
-            (measured: 146px of title at 23rem vs 132px at 264px). Anything narrower buys the
+            fits AND the name is still at least as long as it was in the default 232px column.
+            Anything narrower buys the
             numbers back by making the task names shorter than they were before the drag, which
             is precisely the bargain this issue exists to stop making. */}
         {run.diffStat ? (
@@ -475,7 +487,7 @@ function RunRow({
             different hue from the leading status dot, so the two read as two signals. */}
         {unread ? (
           <StatusDot
-            tone="violet"
+            tone="accent"
             role="img"
             aria-label="unread"
             title="Unread — not opened since it finished"
@@ -483,6 +495,7 @@ function RunRow({
           />
         ) : null}
       </Link>
+      {run.delegation?.role === 'worker' ? <span className="sr-only">Worker · {attention.label}</span> : null}
       {/* The pin (#935), a SIBLING of the Link for the same reason the status dot and the
           reference chip are: a button inside an anchor is invalid, and this one has its own
           target. Reveal rules in `ROW_PIN_CLASS`. */}
@@ -514,7 +527,7 @@ function variantLabel(run: RunRecord, showTokens: boolean, showCost: boolean): s
  * stream, Step 3.2), the router for which row is open, and the sidebar Active/Archived context —
  * independent of the Tasks table's own tabs.
  */
-export function TaskQuickListContainer() {
+export function TaskQuickListContainer({ showViewControls = true }: { showViewControls?: boolean }) {
   const runs = useRuns()
   const pin = usePinRun()
   const health = useHealth()
@@ -532,8 +545,7 @@ export function TaskQuickListContainer() {
       projectId === undefined
         ? []
         : (runs.data ?? []).flatMap((run) => {
-            const reference = taskReference(run)
-            return reference ? [{ projectId, kind: reference.kind, number: reference.number }] : []
+            return taskReferences(run).map(reference => ({ projectId, kind: reference.kind, number: reference.number }))
           }),
     [runs.data, projectId],
   )
@@ -545,6 +557,7 @@ export function TaskQuickListContainer() {
   return (
     <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
       <TaskQuickList
+        showViewControls={showViewControls}
         runs={runs.data}
         view={view}
         onViewChange={setView}
@@ -560,5 +573,38 @@ export function TaskQuickListContainer() {
         }
       />
     </ReferenceStatusProvider>
+  )
+}
+
+/** One scope switcher above the project tree, shared by every sidebar run list. */
+export function SidebarSessionScope() {
+  const [view, setView] = useListView()
+  const runs = useRuns()
+  const registry = useProjects().data
+  const otherLists = useQueries({
+    queries: (registry?.projects ?? [])
+      .filter((project) => project.id !== registry?.bootProject)
+      .map((project) => ({
+        queryKey: [project.id, 'runs', 'list'] as const,
+        queryFn: async () => [] as RunRecord[],
+        enabled: false,
+      })),
+  })
+  const seen = new Set<string>()
+  const combined: RunRecord[] = []
+  for (const run of [...(runs.data ?? []), ...otherLists.flatMap((query) => query.data ?? [])]) {
+    if (seen.has(run.id)) continue
+    seen.add(run.id)
+    combined.push(run)
+  }
+  const counts = listCounts(combined)
+  return (
+    <div data-slot="sidebar-session-scope" role="group" aria-label="Session scope" className="flex w-full gap-1 rounded-lg bg-muted p-[3px]">
+      <ViewTab view="active" current={view} onSelect={setView} count={counts.active}>
+        Active
+        {counts.waiting > 0 && view !== 'active' ? <StatusDot tone="pending" pulse data-slot="waiting-dot" aria-label="needs you" /> : null}
+      </ViewTab>
+      <ViewTab view="archived" current={view} onSelect={setView} count={counts.archived}>Archived</ViewTab>
+    </div>
   )
 }

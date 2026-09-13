@@ -77,14 +77,18 @@ describe('global Resources monitoring controls', () => {
     choose('[data-slot="resources-max-monitoring"]', '3')
     await waitForResources((resources) => resources.maxMonitoringSessions === 3)
 
-    choose('[data-slot="resources-monitoring-wake-mode"]', 'interval')
+    // Setting interval mode is idempotent even when the server already starts with wake-ups on.
+    if (browser.evaluate(`document.querySelector('[data-slot="resources-monitoring-wake-mode"]').getAttribute('aria-checked')`) !== 'true') {
+      browser.click('[data-slot="resources-monitoring-wake-mode"]')
+    }
+    browser.waitForFunction(`document.querySelector('[data-slot="resources-monitoring-wake-interval"]') !== null`)
     browser.fill('[data-slot="resources-monitoring-wake-interval"]', '7')
     browser.click('[data-action="resources-save-monitoring-wake"]')
     await waitForResources((resources) => resources.monitoringWakeIntervalMinutes === 7)
 
     gotoResources()
     expect(String(browser.evaluate(`document.querySelector('[data-slot="resources-max-monitoring"]').value`))).toBe('3')
-    expect(String(browser.evaluate(`document.querySelector('[data-slot="resources-monitoring-wake-mode"]').value`))).toBe('interval')
+    expect(String(browser.evaluate(`document.querySelector('[data-slot="resources-monitoring-wake-mode"]').getAttribute('aria-checked')`))).toBe('true')
     expect(String(browser.evaluate(`document.querySelector('[data-slot="resources-monitoring-wake-interval"]').value`))).toBe('7')
     expect(browser.text('[data-slot="resources-section"]')).toContain('Capacity:')
     expect(browser.text('[data-slot="resources-section"]')).toContain('3 monitoring')

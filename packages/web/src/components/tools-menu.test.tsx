@@ -155,15 +155,17 @@ describe('ToolsMenu', () => {
     expect(document.querySelector('[data-slot="tools-menu-trigger"]')).toBeNull()
   })
 
-  it('shows a green aggregate dot when every check is available', () => {
+  it('shows the reference wrench without a warning when every check is available', () => {
     renderMenu(ALL_GOOD)
-    expect(triggerDot().getAttribute('data-tone')).toBe('success')
+    expect(triggerDot()).toBeNull()
+    expect(trigger().querySelector('[data-design-icon="wrench"]')).not.toBeNull()
     expect(trigger().getAttribute('title')).toBe('cezar v0.1.3')
   })
 
-  it('stays green while the default runner works and only an optional tool is missing', () => {
+  it('stays free of warnings while the default runner works and only an optional tool is missing', () => {
     renderMenu(HEALTH)
-    expect(triggerDot().getAttribute('data-tone')).toBe('success')
+    expect(triggerDot()).toBeNull()
+    expect(trigger().querySelector('[data-design-icon="wrench"]')).not.toBeNull()
     expect(trigger().getAttribute('title')).toBe('cezar v0.1.3 · optional: codex not installed')
   })
 

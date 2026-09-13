@@ -1,0 +1,7 @@
+/* Repository frame geometry; shared primitives remain usable elsewhere. */
+[data-slot='repo-tabs'] > a { padding-inline: 0; font-size: 12px; }
+[data-slot='repo-tabs'] > a[aria-current='page'] { color: var(--accent-text); border-color: var(--accent-strong); }
+[data-slot='repo-branches'] > div { border-radius: 10px; }
+[data-slot='repo-branches'] [data-action='switch-branch'] { font-weight: 500; }
+[data-slot='branch-create'] { padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+[data-slot='repo-branches'] input[aria-label='Filter branches'] { background: var(--card); }

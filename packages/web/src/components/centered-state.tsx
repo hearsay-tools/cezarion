@@ -7,7 +7,7 @@ export type CenteredStateTone = 'neutral' | 'primary' | 'danger'
 /** The tile carries a border + a solid-enough fill so it reads on the twinkle backdrop
  *  (a muted fill with a muted icon all but disappears there) — mercato's exact grammar. */
 const tileTone: Record<CenteredStateTone, string> = {
-  primary: 'border-primary/25 bg-primary/15 text-primary',
+  primary: 'border-accent-strong/25 bg-accent-strong/15 text-link-foreground',
   neutral: 'border-border bg-card text-foreground shadow-xs',
   danger: 'border-danger/20 bg-danger/15 text-danger',
 }
@@ -77,7 +77,7 @@ type Twinkle = {
   top: string
   left: string
   size: 2 | 3
-  tone: 'violet' | 'primary' | 'pending'
+  tone: 'accent' | 'primary' | 'pending'
   opacity: number
 }
 
@@ -85,26 +85,26 @@ type Twinkle = {
  *  positioned squares are indistinguishable from a particle field and cost nothing. Densest at
  *  the top, thinning down — the mask finishes the fade so nothing collides with the content. */
 const TWINKLES: Twinkle[] = [
-  { top: '6%', left: '14%', size: 2, tone: 'violet', opacity: 0.5 },
-  { top: '11%', left: '31%', size: 3, tone: 'violet', opacity: 0.45 },
+  { top: '6%', left: '14%', size: 2, tone: 'accent', opacity: 0.5 },
+  { top: '11%', left: '31%', size: 3, tone: 'accent', opacity: 0.45 },
   { top: '8%', left: '52%', size: 2, tone: 'pending', opacity: 0.4 },
-  { top: '15%', left: '71%', size: 2, tone: 'violet', opacity: 0.5 },
+  { top: '15%', left: '71%', size: 2, tone: 'accent', opacity: 0.5 },
   { top: '9%', left: '86%', size: 3, tone: 'primary', opacity: 0.4 },
   { top: '22%', left: '8%', size: 2, tone: 'pending', opacity: 0.4 },
   { top: '27%', left: '24%', size: 2, tone: 'primary', opacity: 0.35 },
-  { top: '20%', left: '44%', size: 3, tone: 'violet', opacity: 0.35 },
-  { top: '25%', left: '62%', size: 2, tone: 'violet', opacity: 0.4 },
+  { top: '20%', left: '44%', size: 3, tone: 'accent', opacity: 0.35 },
+  { top: '25%', left: '62%', size: 2, tone: 'accent', opacity: 0.4 },
   { top: '30%', left: '79%', size: 2, tone: 'primary', opacity: 0.35 },
-  { top: '36%', left: '12%', size: 3, tone: 'violet', opacity: 0.3 },
+  { top: '36%', left: '12%', size: 3, tone: 'accent', opacity: 0.3 },
   { top: '42%', left: '35%', size: 2, tone: 'pending', opacity: 0.28 },
   { top: '47%', left: '58%', size: 2, tone: 'primary', opacity: 0.28 },
-  { top: '52%', left: '88%', size: 2, tone: 'violet', opacity: 0.25 },
-  { top: '60%', left: '29%', size: 3, tone: 'violet', opacity: 0.22 },
+  { top: '52%', left: '88%', size: 2, tone: 'accent', opacity: 0.25 },
+  { top: '60%', left: '29%', size: 3, tone: 'accent', opacity: 0.22 },
 ]
 
 const twinkleTone: Record<Twinkle['tone'], string> = {
-  violet: 'bg-violet',
-  primary: 'bg-primary',
+  accent: 'bg-accent-strong',
+  primary: 'bg-action',
   pending: 'bg-pending',
 }
 

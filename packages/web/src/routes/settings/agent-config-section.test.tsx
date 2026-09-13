@@ -88,6 +88,28 @@ afterEach(() => {
 })
 
 describe('AgentConfigSection', () => {
+  it('keeps agent tabs beside a file list and editor, not a shortcut row', async () => {
+    serve({ editable: true, userMcp: null, files: [
+      fileOf({ id: 'claude.memory', label: 'CLAUDE.md', kind: 'memory', format: 'markdown' }),
+      fileOf({ id: 'claude.settings', label: '.claude/settings.json' }),
+      fileOf({ id: 'claude.mcp', label: '.mcp.json', kind: 'mcp', holdsMcp: true }),
+      fileOf({ id: 'claude.user', label: '~/.claude/settings.json', scope: 'user' }),
+      fileOf({ id: 'codex.memory', label: 'AGENTS.md', runners: ['codex'], kind: 'memory' }),
+    ] })
+    renderSection()
+    await waitFor(() => expect(agentTab('claude').getAttribute('role')).toBe('tab'))
+    expect(screen.queryByLabelText('Configuration agent')).toBeNull()
+    expect(document.querySelector('[data-slot="agent-config-shortcut"]')).toBeNull()
+    expect(document.querySelector('[data-slot="agent-config-nav"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="agent-config-editor-pane"]')).not.toBeNull()
+    expect(screen.getByText('~/.claude/settings.json')).toBeTruthy()
+    fireEvent.click(screen.getByText('.mcp.json'))
+    await waitFor(() => expect(screen.getByLabelText('.mcp.json contents')).toBeTruthy())
+    fireEvent.click(agentTab('codex'))
+    await waitFor(() => expect(screen.getByText('AGENTS.md')).toBeTruthy())
+    expect(screen.queryByText('.claude/settings.json')).toBeNull()
+  })
+
   it('renders the agent selector with a not-installed badge from health', async () => {
     serve({
       editable: true,
@@ -137,9 +159,9 @@ describe('AgentConfigSection', () => {
     renderSection()
     await waitFor(() => expect(agentTab('codex')).toBeTruthy())
     fireEvent.click(agentTab('codex'))
-    await waitFor(() => expect(screen.getByText('AGENTS.md')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('AGENTS.md')[0]).toBeTruthy())
     fireEvent.click(agentTab('opencode'))
-    await waitFor(() => expect(screen.getByText('AGENTS.md')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('AGENTS.md')[0]).toBeTruthy())
   })
 
   it('Claude’s MCP group lists the user/local scopes read-only', async () => {
@@ -200,7 +222,7 @@ describe('AgentConfigSection', () => {
     await waitFor(() => expect(screen.getByText(/Read-only/)).toBeTruthy())
     fireEvent.click(screen.getByText('.claude/settings.json'))
     await waitFor(() => expect(screen.getByLabelText('.claude/settings.json contents')).toBeTruthy())
-    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save file' })).toBeNull()
   })
 
   it('saves an edited file', async () => {
@@ -214,7 +236,7 @@ describe('AgentConfigSection', () => {
     fireEvent.click(screen.getByText('.claude/settings.json'))
     const editor = (await screen.findByLabelText('.claude/settings.json contents')) as HTMLTextAreaElement
     fireEvent.change(editor, { target: { value: '{"a":2}' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save file' }))
     await waitFor(() => expect(screen.getByText(/Saved/)).toBeTruthy())
   })
 })

@@ -171,7 +171,7 @@ describe('the thread composer against a live waiting session', () => {
       `document.querySelectorAll('[data-slot="user-bubble"]').length === ${bubblesBefore + 1}`,
     )
     expect(
-      browser.evaluate(`[...document.querySelectorAll('[data-slot="user-bubble"]')].at(-1).textContent`),
+      browser.evaluate(`[...document.querySelectorAll('[data-slot="user-bubble"]')].at(-1).querySelector('.thread-markdown').textContent`),
     ).toBe('Please run /lint-fix')
   })
 

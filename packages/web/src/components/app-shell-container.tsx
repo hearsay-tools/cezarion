@@ -8,7 +8,7 @@ import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
 import { ProjectGroups } from '@/components/project-groups'
-import { TaskQuickListContainer } from '@/components/task-quick-list'
+import { SidebarSessionScope, TaskQuickListContainer } from '@/components/task-quick-list'
 import { ToolsMenu } from '@/components/tools-menu'
 import { useDocumentTitle } from '@/lib/use-document-title'
 import { useActiveProjectId } from '@/lib/project-router'
@@ -88,7 +88,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   // Global settings intentionally has no selected project. Everywhere else the URL id selects
   // the authoritative registry entry; health may name only the CONFIRMED boot project while
   // the registry is unavailable, never a non-boot project whose root health does not describe.
-  const globalSettings = pathname === '/settings/global' || pathname.startsWith('/settings/global/')
+  const globalSettings = pathname === '/tools' || pathname === '/settings/global' || pathname.startsWith('/settings/global/')
   const projectName = globalSettings
     ? null
     : (activeProject?.name ??
@@ -100,19 +100,17 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
 
   useDocumentTitle({ projectName, pageLabel })
 
-  // Multi-project sidebar only from the SECOND project on (multi-project spec, "Sidebar").
-  // With one registered project — or with the registry still loading, or unreachable — the
-  // group header would say nothing the repo chip does not already say, so the shell keeps the
-  // flat nav + single quick-list it has always had. That degenerate case is the upgrade path:
-  // an existing user boots the new version in their usual repo and sees no difference.
-  const projects = registry && registry.projects.length > 1 ? registry : null
+  // Registered projects share the same card navigation, including a one-project workspace.
+  // While the registry is absent, the presentational shell still renders its repo fallback.
+  const projects = registry && registry.projects.length > 0 ? registry : null
 
   return (
     // The sidebar's Active/Archived filter. The Tasks table owns a separate copy and is not a
     // consumer.
     <ListViewProvider>
       <AppShell
-        repo={repoChipOf(health.data)}
+        repo={pathname === '/tools' ? repoChipOf(health.data) : globalSettings ? null : activeProject ? { name: activeProject.name, branch: activeProject.id === bootProjectId ? health.data?.repo?.branch ?? '' : '' } : repoChipOf(health.data)}
+        breadcrumb={{ project: pathname === '/tools' ? 'Workspace' : projectName, page: titleRun ? `Tasks / ${pageLabel}` : pageLabel ?? 'Cezarion', branch: titleRun?.worktreePath ? 'Isolated worktree' : undefined }}
         version={health.data?.version ?? null}
         latestVersion={health.data?.latestVersion ?? null}
         // `?? null` rather than `?? 0`: no badge while the inbox is unknown, and no badge when it
@@ -125,7 +123,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         // Hidden until health confirms the forge driver (R6 Step 1.1) — same honesty rule as
         // the chips: the nav must not claim a GitHub tab it cannot back. The Tools menu's
         // forge note says why it is absent.
-        forgeAvailable={health.data?.forge?.available === true}
+        forgeAvailable={activeProject ? activeProject.forge === 'github' : health.data?.forge?.available === true}
         // Hidden unless health reports the opt-in inbox (#471) — same honesty rule as above:
         // the nav must not offer an Inbox this server will never fill.
         inboxAvailable={inboxAvailable}
@@ -133,8 +131,8 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         automationsAvailable={automationsAvailable}
         banner={<ProviderBannerContainer />}
         singleProject={health.data?.capabilities.singleProject === true}
-        taskQuickList={<TaskQuickListContainer />}
-        // Present only in a multi-project workspace; `AppShell` renders the flat nav and the
+        taskQuickList={<TaskQuickListContainer showViewControls={false} />}
+        // Present for every populated registry; `AppShell` renders the fallback nav and the
         // quick-list above whenever this slot is absent.
         projectGroups={
           projects ? (
@@ -151,7 +149,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
             />
           ) : undefined
         }
-        toolsMenu={<ToolsMenu health={health.data} />}
+        toolsMenu={<ToolsMenu health={health.data} sessionScope={<SidebarSessionScope />} />}
       >
         {children}
       </AppShell>

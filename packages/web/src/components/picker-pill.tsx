@@ -1,5 +1,6 @@
-import { ChevronDownIcon } from 'lucide-react'
+import { ChevronDownIcon } from '@/components/design-icons'
 import type { ReactNode } from 'react'
+import { cn } from '@/lib/utils'
 
 import { DEFAULT_AGENT_ACCOUNT_ID, type Runner } from '@open-mercato/cezar-api-client'
 import {
@@ -39,10 +40,15 @@ export function PickerPill({
   hint,
   disabledHint,
   status,
+  icon,
+  fieldLabel = false,
 }: {
   slot: string
   ariaLabel: string
   label: ReactNode
+  /** Optional engine-control presentation; compact composer pills keep their defaults. */
+  icon?: ReactNode
+  fieldLabel?: boolean
   value: string
   options: ReadonlyArray<{ value: string; label: string; desc?: string }>
   onPick: (value: string) => void
@@ -55,15 +61,17 @@ export function PickerPill({
   /** Quiet non-selectable catalog state, kept inside the menu's accessible reading order. */
   status?: string
 }) {
+  const presentation = icon ? ' h-11 gap-2 rounded-lg border-border px-3 text-foreground' : ''
+  const contents = <>{icon}<span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{fieldLabel ? <span className="hidden md:inline">{ariaLabel} · </span> : null}{label}</span></>
   if (readOnly) {
     return (
       <span
         data-slot={slot}
         aria-label={ariaLabel}
         title={disabledHint ?? hint}
-        className={`${chipClass} cursor-default hover:bg-card hover:text-muted-foreground`}
+        className={cn(chipClass, presentation, 'cursor-default hover:bg-card hover:text-muted-foreground')}
       >
-        <span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{label}</span>
+        {contents}
       </span>
     )
   }
@@ -74,10 +82,10 @@ export function PickerPill({
       aria-label={ariaLabel}
       disabled={disabled}
       title={disabled ? disabledHint : hint}
-      className={chipClass}
+      className={cn(chipClass, presentation)}
     >
-      <span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{label}</span>
-      {chevron}
+      {contents}
+      {icon ? <ChevronDownIcon aria-hidden="true" className="size-[13px] shrink-0 text-muted-foreground" /> : chevron}
     </button>
   )
   // Radix never opens a disabled trigger, but `disabled:pointer-events-none` would also kill
@@ -165,8 +173,12 @@ export function RunnerPill({
   accounts = [],
   account = null,
   repoAccount,
+  icon,
+  fieldLabel,
 }: {
   runners: readonly Runner[]
+  icon?: ReactNode
+  fieldLabel?: boolean
   value: Runner
   /** `account` is `null` only while the repo's own choice is still the one in force. */
   onPick: (runner: Runner, account: string | null) => void
@@ -202,6 +214,8 @@ export function RunnerPill({
 
   return (
     <PickerPill
+      icon={icon}
+      fieldLabel={fieldLabel}
       slot="runner-pill"
       ariaLabel="Runner"
       label={options.find((option) => option.value === value_)?.label ?? value}

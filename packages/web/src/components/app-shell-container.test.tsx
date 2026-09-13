@@ -1,5 +1,5 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -168,7 +168,7 @@ describe('sidebar wiring', () => {
 
     await waitFor(() => expect(repoChip()).not.toBeNull())
     // Basename of the root, then the branch — not the whole path.
-    expect(repoChip()?.textContent).toBe('cezar / feat/cockpit')
+    expect(repoChip()?.textContent).toBe('cezar')
     expect(versionChip()?.textContent).toBe('v0.1.3')
   })
 
@@ -275,7 +275,7 @@ describe('sidebar wiring', () => {
   // CEZ_SINGLE_PROJECT pins this response to the boot row even when the saved registry has more.
   // The shell must collapse from that ordinary one-row response, not grow a second capability
   // branch for navigation: flat nav, one quick-list, repo chip, no group headers.
-  it('keeps the sidebar flat when single-project mode pins the registry to the boot project', async () => {
+  it('uses a project card when single-project mode pins the registry to the boot project', async () => {
     serve({
       '/api/v1/health': {
         ...HEALTH,
@@ -287,11 +287,9 @@ describe('sidebar wiring', () => {
     })
     renderShell()
 
-    await waitFor(() => expect(repoChip()).not.toBeNull())
-    expect(document.querySelector('[data-slot="project-groups"]')).toBeNull()
-    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
-    expect(document.querySelector('[data-slot="task-quick-list"]')).not.toBeNull()
-    expect(repoChip()?.textContent).toBe('cezar / feat/cockpit')
+    await waitFor(() => expect(document.querySelector('[data-slot="project-group-header"]')).not.toBeNull())
+    expect(screen.getByRole('navigation', { name: 'cezar navigation' })).toBeTruthy()
+    expect(document.querySelectorAll('[data-slot="project-group"]')).toHaveLength(1)
   })
 
   it('hides add-project chrome when health reports single-project mode', async () => {
@@ -309,7 +307,7 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(versionChip()).not.toBeNull())
     expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
     expect(screen.getByRole('link', { name: /New task/ })).toBeTruthy()
-    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
+    expect(screen.getByRole('navigation', { name: 'cezar navigation' })).toBeTruthy()
   })
 
   it('renders one collapsible group per project once the workspace has two', async () => {
@@ -334,6 +332,104 @@ describe('sidebar wiring', () => {
     expect(document.querySelector('[data-slot="task-quick-list"]')).toBeNull()
     // …and so does the repo chip, which the boot project's own group header now carries.
     expect(repoChip()).toBeNull()
+  })
+
+  it('keeps Inbox and Automations inside the only project card', async () => {
+    serve({
+      '/api/v1/health': {
+        ...HEALTH,
+        capabilities: { ...HEALTH.capabilities, followups: true, automations: true },
+      },
+      '/api/v1/todos': TODOS,
+      '/api/v1/projects': { projects: [{ ...PROJECT, forge: 'github' }], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
+      '/api/v1/runs': [],
+    })
+    renderShell()
+    await waitFor(() => expect(document.querySelector('[data-slot="project-group"][data-project="cezar"]')).not.toBeNull())
+    expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull()
+    const cezar = within(document.querySelector('[data-slot="project-group"][data-project="cezar"]') as HTMLElement)
+    expect(cezar.getByRole('link', { name: 'Inbox' }).getAttribute('href')).toBe('/p/cezar/inbox')
+    expect(cezar.getByRole('link', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
+  })
+
+  it('keeps Inbox and Automations inside project groups, not as workspace links', async () => {
+    serve({
+      '/api/v1/health': {
+        ...HEALTH,
+        capabilities: { ...HEALTH.capabilities, followups: true, automations: true },
+      },
+      '/api/v1/todos': TODOS,
+      '/api/v1/projects': {
+        projects: [
+          { ...PROJECT, forge: 'github' },
+          { ...PROJECT, id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z', forge: 'github' },
+        ],
+        bootProject: 'cezar',
+        projectsDir: '/home/me/cezar/projects',
+      },
+      '/api/v1/workspace/ui-state': {},
+      '/api/v1/p/cezar/runs': [],
+    })
+    renderShell()
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="project-group"]')).toHaveLength(2))
+    expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull()
+    const cezar = within(document.querySelector('[data-slot="project-group"][data-project="cezar"]') as HTMLElement)
+    expect(cezar.getByRole('link', { name: 'Inbox' }).getAttribute('href')).toBe('/p/cezar/inbox')
+    expect(cezar.getByRole('link', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
+  })
+
+  it('keeps the shared archive filter reachable in Tools for a multi-project session tree', async () => {
+    const active = run({ id: 'active-session', titleSummary: 'Current session' })
+    const archived = run({ id: 'archived-session', titleSummary: 'Archived session', status: 'done', archived: true })
+    serve({
+      '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
+      '/api/v1/todos': [],
+      '/api/v1/projects': {
+        projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop' }],
+        bootProject: 'cezar', projectsDir: '/projects',
+      },
+      '/api/v1/runs': [active, archived],
+      '/api/v1/p/cezar/runs': [active, archived],
+      '/api/v1/workspace/ui-state': {},
+    })
+    renderShell('/p/cezar/new')
+    await screen.findByRole('link', { name: /Current session/ })
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Tools' }), { button: 0, ctrlKey: false })
+    const archivedTab = await screen.findByRole('button', { name: /^Archived/ })
+    const tree = document.querySelector('[data-slot="project-groups"]')!
+    expect(tree.contains(archivedTab)).toBe(false)
+    fireEvent.click(archivedTab)
+    await waitFor(() => expect(document.querySelector('[data-run-id="archived-session"]')).not.toBeNull())
+    expect(screen.queryByRole('link', { name: /Current session/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Active/ }))
+    await waitFor(() => expect(document.querySelector('[data-run-id="active-session"]')).not.toBeNull())
+  })
+
+  it('counts Active/Archived in Tools across every expanded project, not only boot', async () => {
+    localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ shop: false }))
+    const bootActive = run({ id: 'boot-active', titleSummary: 'Boot active' })
+    const shopWaiting = run({ id: 'shop-wait', titleSummary: 'Shop waiting', status: 'waiting' })
+    serve({
+      '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
+      '/api/v1/todos': [],
+      '/api/v1/projects': {
+        projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' }],
+        bootProject: 'cezar',
+        projectsDir: '/projects',
+      },
+      '/api/v1/runs': [bootActive],
+      '/api/v1/p/cezar/runs': [bootActive],
+      '/api/v1/p/shop/runs': [shopWaiting],
+      '/api/v1/workspace/ui-state': {},
+    })
+    renderShell('/p/cezar/new')
+    await screen.findByRole('link', { name: /Shop waiting/ })
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Tools' }), { button: 0, ctrlKey: false })
+    const scope = await screen.findByRole('group', { name: 'Session scope' })
+    expect(within(scope).getByRole('button', { name: /^Active/ }).textContent).toContain('2')
+    fireEvent.click(within(scope).getByRole('button', { name: /^Archived/ }))
+    expect(scope.querySelector('[data-slot="waiting-dot"]')).not.toBeNull()
+    localStorage.removeItem('cez-sidebar-collapsed')
   })
 
   it('shows the version chip even outside a git repo', async () => {

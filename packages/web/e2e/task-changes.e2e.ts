@@ -137,11 +137,23 @@ afterAll(async () => {
 describe('the Changes tab against a live dry run', () => {
   it('the Session header tab navigates to /changes: tree, toolbar and the real diff', () => {
     browser.goto(`${baseUrl}${scoped(`/tasks/${runId}`)}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="run-tabs"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="review-panel"] [data-slot="diff-file"]') !== null`)
+    browser.evaluate(`document.fonts.ready.then(() => true)`)
+    // Thread arrival intentionally follows the tail. A real upward navigation key releases it;
+    // click's programmatic scrollIntoView alone is not reader intent and can be re-pinned.
+    browser.evaluate(`document.querySelector('[data-slot="run-tabs"] a').focus()`)
+    browser.press('Control+Home')
+    browser.waitForFunction(`document.querySelector('[data-slot="main"]').scrollTop === 0`)
     browser.click(`[data-slot="run-tabs"] a[href="${scoped(`/tasks/${runId}/changes`)}"]`)
 
     // Client-side navigation into the lazy chunk — wait for the toolbar to exist.
-    browser.waitForFunction(`document.querySelector('[data-slot="git-toolbar"]') !== null`)
+    try {
+      browser.waitForFunction(`document.querySelector('[data-slot="git-toolbar"]') !== null`)
+    } catch (error) {
+      writeFileSync(`${artifactsDir}/changes-navigation-failure.json`, JSON.stringify(browser.evaluate(`({url:location.href, text:document.body.innerText})`), null, 2))
+      browser.screenshot(`${artifactsDir}/changes-navigation-failure.png`, { viewport: true })
+      throw error
+    }
     expect(browser.url()).toBe(`${baseUrl}${scoped(`/tasks/${runId}/changes`)}`)
 
     // The Changes tab is the active one now.
@@ -237,7 +249,7 @@ describe('the Changes tab against a live dry run', () => {
     ).toBe('Files')
   })
 
-  it('task Changes and commit diffs reserve sticky header space only on desktop', () => {
+  it('task Changes and commit diffs keep document-flow run headers and compact diff sticky offsets', () => {
     const sha = execFileSync('git', ['-C', worktreePath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
     for (const tab of ['changes', `commits/${sha}`]) {
       browser.setViewport(360, 640)
@@ -247,8 +259,8 @@ describe('the Changes tab against a live dry run', () => {
       expect(browser.evaluate(stickyTop)).toBe('0px')
       expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('relative')
       browser.setViewport(1440, 900)
-      expect(browser.evaluate(stickyTop)).toBe('160px')
-      expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('sticky')
+      expect(browser.evaluate(stickyTop)).toBe('16px')
+      expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('relative')
     }
   })
 
@@ -265,10 +277,10 @@ describe('the Changes tab against a live dry run', () => {
         `getComputedStyle(document.querySelector('[data-slot="diff-mode-toggle"]').parentElement).display`,
       ),
     ).toBe('none')
-    // The tree column yields to the diff on phones.
+    // The integrated mobile design stacks the selectable file tree above the diff.
     expect(
       browser.evaluate(
-        `(() => { const el = document.querySelector('[data-slot="changes-tree"]'); return el === null || el.offsetParent === null })()`,
+        `(() => { const el = document.querySelector('[data-slot="changes-tree"]'); return el !== null && el.checkVisibility() && el.getBoundingClientRect().width <= innerWidth })()`,
       ),
     ).toBe(true)
     // The tabs remain a tappable segment row and the page does not overflow sideways.

@@ -1,3 +1,5 @@
+import { CopyIcon } from '@/components/design-icons'
+
 import { useMutation } from '@tanstack/react-query'
 
 import { openProjectIn } from '@/api/client'
@@ -55,25 +57,26 @@ export function ProjectFolderField() {
       <div
         data-slot="project-location"
         data-variant="field"
-        className="flex items-start gap-3 rounded-md border border-border bg-card p-3"
+        className="flex flex-col gap-3"
       >
         {/* `break-all`, not `truncate`: a deep checkout path is exactly the case this row exists
             for, and half of it is not an answer. */}
         <span
           data-slot="project-location-path"
-          className="min-w-0 flex-1 font-mono text-xs break-all text-foreground"
+          className="w-full min-w-0 rounded-md border border-border bg-background p-3 text-[13px] break-all text-foreground"
         >
           {root}
         </span>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex w-full flex-wrap items-center gap-2 border-t border-border pt-4">
           <button
             type="button"
             data-action="project-location-copy"
             title="Copy the project folder path"
             onClick={() => copyPath(root)}
-            className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-card px-3 text-xs text-foreground transition-colors hover:bg-muted"
           >
-            Copy
+            <CopyIcon aria-hidden="true" className="size-4" />
+            Copy path
           </button>
           <OpenWithMenu root={root} />
         </div>

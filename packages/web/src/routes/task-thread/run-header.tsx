@@ -1,21 +1,8 @@
+import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  ArchiveIcon,
-  ArchiveRestoreIcon,
-  BotIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  CopyIcon,
-  EllipsisVerticalIcon,
-  FileTextIcon,
-  MailIcon,
-  PencilIcon,
-  PinIcon,
-  PinOffIcon,
-  SquareTerminalIcon,
-  Trash2Icon,
-} from 'lucide-react'
-import { Fragment, useId, useMemo, useReducer, useState, type ReactNode } from 'react'
+import { ArchiveRestoreIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
+import { ArchiveIcon, BotIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
+import { Fragment, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
 
 import { ApiError, archiveRun, deleteRun, openRunIn, openRunInCli } from '@/api/client'
@@ -62,7 +49,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { OpenInMenu, type OpenInChoice } from '@/components/open-in-menu'
+import { openInIcon, type OpenInChoice } from '@/components/open-in-menu'
 import { toast } from '@/components/ui/toaster'
 import { DirectionalUsage } from '@/components/directional-usage'
 import { deriveAttention } from '@/lib/attention'
@@ -80,7 +67,7 @@ import { usageMetricVisibility } from '@/lib/token-metrics'
 import { cn, isHttpUrl } from '@/lib/utils'
 
 import { Markdown } from './markdown'
-import { cliTargetResumes, cliTargetRunner, finishTitle, resumeHint, runActionFlags } from './run-actions'
+import { cliTargetResumes, cliTargetRunner, resumeHint, runActionFlags } from './run-actions'
 import { RunRelationshipsPanel } from './run-relationships'
 import { WorkflowSteps } from './step-rail'
 import { useFinishRun } from './use-finish-run'
@@ -89,8 +76,8 @@ import { useFinishRun } from './use-finish-run'
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
  * the Session | Changes | Files tabs with the action bar, the workflow step rail and the plan
  * mirror — the whole header region above the thread. It scrolls away on phones so the transcript
- * owns the small viewport, and stays sticky from `md` upward where there is room for persistent
- * run context.
+ * owns the small viewport, and scrolls with the document on desktop too: the spacious page heading must not
+ * cover the diff or transcript while reading.
  *
  * Two deliberate omissions, both seams rather than gaps:
  *  - **VS Code** (spec: `POST /api/runs/:id/open-in-editor`) — the endpoint does not exist yet;
@@ -131,9 +118,8 @@ export function RunHeader({
   onMarkedUnread?: () => void
 }) {
   const attention = deriveAttention(run, hasPendingHumanAsk)
-  const flags = runActionFlags(run)
-  const hint = resumeHint(run)
   const [notesOpen, setNotesOpen] = useState(false)
+  const [openChooser, setOpenChooser] = useState(false)
   const actions = useRunActions(run, onMarkedUnread)
 
   // The phone-width meta disclosure (#765). The map is the state — a re-render bump rather than a
@@ -160,11 +146,17 @@ export function RunHeader({
   return (
     <header
       data-slot="run-header"
-      className="relative z-20 border-b border-border bg-background/95 px-3 pt-2 backdrop-blur md:sticky md:top-0 md:px-6 md:pt-3"
+      className="relative z-20 bg-background px-[18px] pt-[18px] md:px-9 md:pt-7"
     >
-      <div className="mx-auto w-full max-w-[var(--measure)]">
-        <div className="flex min-w-0 items-center gap-2">
+      <div className="w-full">
+        <div data-slot="run-title-row" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
+          <p data-slot="session-kind" className="text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase md:hidden">
+            {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
+          </p>
           <EditableTitle run={run} />
+          <Pill dot={attention.tone} pulse={attention.pulse}>
+            {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
+          </Pill>
           <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">
             {planTally ? (
               // The plan dock's compact mirror (spec: "mirrored as a compact progress line in
@@ -174,10 +166,6 @@ export function RunHeader({
                 Plan {planTally.done}/{planTally.total}
               </span>
             ) : null}
-            <Pill dot={attention.tone} pulse={attention.pulse}>
-              {attention.label}
-              {queuePosition !== undefined ? ` #${queuePosition}` : ''}
-            </Pill>
             {/* Phone-width only: above `md` the meta row never collapses, so a control to expand
                 it would be a permanently disabled-looking chevron next to always-visible content.
                 On the Session tab of a run with a plan it lands in the slot #764 freed by hiding
@@ -197,7 +185,7 @@ export function RunHeader({
                 className={cn('transition-transform motion-reduce:transition-none', detailsOpen && 'rotate-180')}
               />
             </Button>
-            <ActionsKebab run={run} actions={actions} onToggleNotes={() => setNotesOpen((open) => !open)} />
+            <ActionsKebab run={run} actions={actions} onOpenChooser={() => setOpenChooser(true)} onToggleNotes={() => setNotesOpen((open) => !open)} />
           </span>
         </div>
 
@@ -222,7 +210,7 @@ export function RunHeader({
             metadata — it belongs with the pill above, not behind a tap with the diff stats. */}
         <MonitoringSchedule run={run} />
 
-        <div data-slot="run-tabs" className="mt-1.5 flex items-end gap-1 md:mt-2.5 max-md:[&>a]:min-h-11">
+        <div data-slot="run-tabs" className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:[&>a]:min-h-11">
           <TabLink to={`/tasks/${run.id}`} active={tab === 'session'}>
             Session
           </TabLink>
@@ -236,80 +224,19 @@ export function RunHeader({
             Files
           </TabLink>
 
-          <div data-slot="run-actions" className="ml-auto hidden items-center gap-1 pb-1 md:flex">
-            {flags.finish ? (
-              <Button variant="outline" size="sm" title={finishTitle(run.status)} onClick={() => actions.finish.mutate()}>
-                <CheckIcon aria-hidden="true" />
-                Finish
-              </Button>
-            ) : null}
-            {/* Terminal is folded into the Open in… menu to save room in the actions row. */}
-            <OpenInMenuForRun run={run} canResume={flags.terminal} onResume={() => actions.terminal.mutate()} />
-            <Button
-              variant="ghost"
-              size="sm"
-              title="Handoff notes — what the agent did and what's left"
-              aria-expanded={notesOpen}
-              onClick={() => setNotesOpen((open) => !open)}
-            >
-              <FileTextIcon aria-hidden="true" />
-              Notes
-            </Button>
-            {flags.markUnread ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                title="Put this task back in the unread list"
-                disabled={actions.markUnread.isPending}
-                onClick={() => actions.markUnread.mutate()}
-              >
-                <MailIcon aria-hidden="true" />
-                Mark unread
-              </Button>
-            ) : null}
-            {flags.pin ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                data-slot="pin-run"
-                aria-pressed={Boolean(run.pinned)}
-                title={
-                  run.pinned
-                    ? 'Unpin from the top of this project’s task list'
-                    : 'Pin to the top of this project’s task list'
-                }
-                disabled={actions.pin.isPending}
-                onClick={() => actions.pin.mutate()}
-              >
-                {run.pinned ? <PinOffIcon aria-hidden="true" /> : <PinIcon aria-hidden="true" />}
-                {run.pinned ? 'Unpin' : 'Pin'}
-              </Button>
-            ) : null}
-            {flags.archive ? (
-              <Button variant="ghost" size="sm" onClick={() => actions.archive.mutate()}>
-                {run.archived ? <ArchiveRestoreIcon aria-hidden="true" /> : <ArchiveIcon aria-hidden="true" />}
-                {run.archived ? 'Unarchive' : 'Archive'}
-              </Button>
-            ) : null}
-            {flags.deleteRun ? (
-              <Button variant="danger-ghost" size="sm" onClick={() => actions.setConfirming('delete')}>
-                <Trash2Icon aria-hidden="true" />
-                Delete
-              </Button>
-            ) : null}
-          </div>
+
         </div>
 
         <RunRelationshipsPanel run={run} />
 
-        {run.steps.length > 0 ? (
+        {tab !== 'session' && run.steps.length > 0 ? (
           <div className="border-t border-border pt-1 pb-0 md:pt-2 md:pb-1">
             <WorkflowSteps runId={run.id} steps={run.steps} />
           </div>
         ) : null}
 
-        {hint ? <ResumeHintLine hint={hint} /> : null}
-        {notesOpen ? <NotesPanel runId={run.id} /> : null}
+        {notesOpen ? <NotesPanel runId={run.id} onClose={() => setNotesOpen(false)} /> : null}
+        {openChooser ? <OpenInMenuForRun run={run} canResume={runActionFlags(run).terminal} onResume={() => actions.terminal.mutate()} onClose={() => setOpenChooser(false)} /> : null}
       </div>
 
       <ConfirmDialog run={run} actions={actions} />
@@ -330,10 +257,14 @@ function OpenInMenuForRun({
   run,
   canResume,
   onResume,
+  onOpen,
+  onClose,
 }: {
   run: ApiRun
   canResume: boolean
   onResume: () => void
+  onOpen?: () => void
+  onClose?: () => void
 }) {
   const targets = useOpenTargets()
   const providers = useProviderStatus()
@@ -377,31 +308,26 @@ function OpenInMenuForRun({
       .catch(() => toast(`Path: ${path}`))
   }
 
+  if (onOpen) return <DropdownMenuItem onSelect={onOpen}>Open in…</DropdownMenuItem>
+  const hint = resumeHint(run)
   return (
-    <OpenInMenu
-      choices={choices}
-      onPick={(target) => open.mutate(target)}
-      title="Resume in a terminal, or open the worktree locally"
-      leading={
-        canResumeHere ? (
-          <DropdownMenuItem data-target="terminal-resume" onSelect={onResume}>
-            <SquareTerminalIcon aria-hidden="true" />
-            Terminal (resume session)
-          </DropdownMenuItem>
-        ) : null
-      }
-      trailing={
-        run.worktreePath ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={copyPath}>
-              <CopyIcon aria-hidden="true" />
-              Copy worktree path
-            </DropdownMenuItem>
-          </>
-        ) : null
-      }
-    />
+    <section aria-label="Open task worktree in…" className="task-action-panel my-5 rounded-xl border border-border bg-card p-6">
+      <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-medium">Open task worktree in…</h2><Button variant="ghost" size="icon" aria-label="Close worktree chooser" onClick={onClose}><XIcon /></Button></div>
+      {run.worktreePath ? <p className="my-4 break-all text-xs text-muted-foreground">{run.worktreePath}</p> : null}
+      <div className="task-open-targets mt-4 flex flex-wrap gap-3">
+        {canResumeHere ? <Button variant="outline" data-target="terminal-resume" onClick={onResume}><SquareTerminalIcon />Terminal (resume session)</Button> : null}
+        {choices.map(({ target, suffix, title }) => {
+          const Icon = openInIcon(target)
+          return <Button variant="outline" key={target.id} data-target={target.id} title={title} disabled={open.isPending} onClick={() => open.mutate(target.id)}><Icon aria-hidden="true" />{target.label}{suffix ?? ''}</Button>
+        })}
+        {run.worktreePath ? <Button variant="outline" onClick={copyPath}><CopyIcon />Copy worktree path</Button> : null}
+      </div>
+      {hint ? <div className="mt-5 border-t border-border pt-5">
+        <h3 className="text-base font-medium">Resume in a terminal</h3>
+        <pre className="my-4 whitespace-pre-wrap break-all rounded-lg border border-border bg-background p-4 text-xs">{hint}</pre>
+        <Button variant="outline" onClick={() => void copyToClipboard(hint, 'Command copied to clipboard.')}><CopyIcon />Copy resume command</Button>
+      </div> : null}
+    </section>
   )
 }
 
@@ -410,7 +336,7 @@ function OpenInMenuForRun({
 function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const [confirming, setConfirming] = useState<'delete' | null>(null)
+  const [confirming, setConfirming] = useState<'delete' | 'finish' | 'archive' | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
   const onError = (error: Error) => toast(error.message, { tone: 'danger' })
@@ -510,7 +436,7 @@ function EditableTitle({ run }: { run: ApiRun }) {
 
   return (
     <span className="group flex min-w-0 items-center gap-1">
-      <h1 className="min-w-0 truncate text-[15px] font-semibold" title={run.task}>
+      <h1 className="line-clamp-2 min-w-0 break-words text-2xl font-semibold tracking-tight" title={run.task}>
         {title}
       </h1>
       <button
@@ -848,39 +774,41 @@ function AgentBadge({ run }: { run: ApiRun }) {
   )
 }
 
-/** The <md action surface: everything the desktop bar offers, folded into a kebab menu next to
- *  the pill (the mockup's mobile pattern — `.tabs-row .actions { display:none }` under 768px). */
+/** One action menu for desktop and mobile, preserving the shared run action policy. */
 function ActionsKebab({
   run,
   actions,
   onToggleNotes,
+  onOpenChooser,
 }: {
   run: ApiRun
   actions: RunActions
   onToggleNotes: () => void
+  onOpenChooser: () => void
 }) {
   const flags = runActionFlags(run)
+  const command = resumeHint(run)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" className="size-11 md:hidden" aria-label="Run actions">
-          <EllipsisVerticalIcon aria-hidden="true" />
+        <Button variant="ghost" size="icon-sm" className="size-11" aria-label="Run actions">
+          <EllipsisIcon aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" data-slot="run-actions-menu">
+      <DropdownMenuContent align="end" data-slot="run-actions-menu" className="w-[270px] max-w-[calc(100vw-2rem)] p-3">
+        <DropdownMenuLabel className="px-2 py-3 text-[10px] font-normal text-muted-foreground">TASK ACTIONS</DropdownMenuLabel>
+        <DropdownMenuItem onSelect={onToggleNotes}>
+          <FileTextIcon aria-hidden="true" /> Notes / handoff
+        </DropdownMenuItem>
+        <OpenInMenuForRun run={run} canResume={flags.terminal} onResume={() => actions.terminal.mutate()} onOpen={onOpenChooser} />
+        {command ? <DropdownMenuItem onSelect={() => void copyToClipboard(command, 'Command copied to clipboard.')}>
+          <CopyIcon aria-hidden="true" /> Copy resume command
+        </DropdownMenuItem> : null}
         {flags.finish ? (
-          <DropdownMenuItem onSelect={() => actions.finish.mutate()}>
+          <DropdownMenuItem disabled={actions.finish.isPending} onSelect={() => actions.setConfirming('finish')}>
             <CheckIcon aria-hidden="true" /> Finish
           </DropdownMenuItem>
         ) : null}
-        {flags.terminal ? (
-          <DropdownMenuItem onSelect={() => actions.terminal.mutate()}>
-            <SquareTerminalIcon aria-hidden="true" /> Terminal
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuItem onSelect={onToggleNotes}>
-          <FileTextIcon aria-hidden="true" /> Notes
-        </DropdownMenuItem>
         {flags.markUnread ? (
           <DropdownMenuItem
             disabled={actions.markUnread.isPending}
@@ -898,19 +826,19 @@ function ActionsKebab({
             onCheckedChange={() => actions.pin.mutate()}
           >
             {run.pinned ? <PinOffIcon aria-hidden="true" /> : <PinIcon aria-hidden="true" />}
-            {run.pinned ? 'Unpin' : 'Pin'}
+            {run.pinned ? 'Unpin task' : 'Pin task'}
           </DropdownMenuCheckboxItem>
         ) : null}
         {flags.archive ? (
-          <DropdownMenuItem onSelect={() => actions.archive.mutate()}>
+          <DropdownMenuItem disabled={actions.archive.isPending} onSelect={() => run.archived ? actions.archive.mutate() : actions.setConfirming('archive')}>
             {run.archived ? <ArchiveRestoreIcon aria-hidden="true" /> : <ArchiveIcon aria-hidden="true" />}
-            {run.archived ? 'Unarchive' : 'Archive'}
+            {run.archived ? 'Unarchive' : 'Archive task'}
           </DropdownMenuItem>
         ) : null}
         {flags.deleteRun ? <DropdownMenuSeparator /> : null}
         {flags.deleteRun ? (
           <DropdownMenuItem variant="destructive" onSelect={() => actions.setConfirming('delete')}>
-            <Trash2Icon aria-hidden="true" /> Delete
+            <Trash2Icon aria-hidden="true" /> Delete task…
           </DropdownMenuItem>
         ) : null}
       </DropdownMenuContent>
@@ -921,31 +849,40 @@ function ActionsKebab({
 /** Deleting history and work still requires confirmation. */
 function ConfirmDialog({ run, actions }: { run: ApiRun; actions: RunActions }) {
   const confirming = actions.confirming
+  const lastKind = useRef(confirming)
+  if (confirming !== null) lastKind.current = confirming
+  const kind = confirming ?? lastKind.current
+  const title = kind === 'finish' ? 'Finish task?' : kind === 'archive' ? 'Archive task?' : 'Delete task permanently?'
+  const label = kind === 'finish' ? 'Review and finish' : kind === 'archive' ? 'Archive task' : 'Delete task'
   return (
     <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && actions.setConfirming(null)}>
-      <AlertDialogContent>
+      <AlertDialogContent data-slot="task-confirmation" className="sm:max-w-[660px]">
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete this task?</AlertDialogTitle>
+          <AlertDialogTitle className={kind === 'delete' ? 'text-danger' : undefined}>{title}</AlertDialogTitle>
           <AlertDialogDescription>
               <>
-                This removes the run, its transcript, its worktree and its branch. There is no
-                undo.
-                <span className="mt-1 block truncate font-medium text-foreground" title={runTitle(run)}>
-                  {runTitle(run)}
-                </span>
+                {kind === 'finish' ? 'Finish “' : kind === 'archive' ? 'Move “' : 'Delete “'}
+                <span className="font-medium text-foreground" title={runTitle(run)}>{runTitle(run)}</span>
+                {kind === 'finish'
+                  ? '”. Continue through the existing change-review gate before finalizing.'
+                  : kind === 'archive'
+                    ? '” out of Active tasks. You can restore it from Archived.'
+                    : '” and its transcript, worktree and branch. This cannot be undone.'}
               </>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Keep it</AlertDialogCancel>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            className="bg-danger text-danger-foreground hover:brightness-[0.96]"
+            className={kind === 'delete' ? 'bg-danger text-danger-foreground hover:brightness-[0.96]' : 'bg-accent-strong text-accent-strong-foreground hover:brightness-[0.96]'}
             onClick={() => {
-              actions.delete.mutate()
+              if (kind === 'finish') actions.finish.mutate()
+              else if (kind === 'archive') actions.archive.mutate()
+              else actions.delete.mutate()
               actions.setConfirming(null)
             }}
           >
-            Delete
+            {label}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -953,32 +890,15 @@ function ConfirmDialog({ run, actions }: { run: ApiRun; actions: RunActions }) {
   )
 }
 
-/** "take over interactively: cd … && claude --resume …" — the legacy `#d-resume` line, now
- *  copyable. Local-machine phrasing; hosted mode (R5, `capabilities.localHandoff`) will swap the
- *  cd-prefix for a bare resume command. */
-function ResumeHintLine({ hint }: { hint: string }) {
-  return (
-    <button
-      type="button"
-      data-slot="resume-hint"
-      title="Copy the command"
-      onClick={() => void copyToClipboard(hint, 'Command copied to clipboard.')}
-      className="mb-2 flex w-full min-w-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left font-mono text-[11px] text-soft-foreground hover:bg-muted hover:text-foreground"
-    >
-      <CopyIcon className="size-3 shrink-0" aria-hidden="true" />
-      <span className="truncate">take over interactively: {hint}</span>
-    </button>
-  )
-}
-
 /** The handoff journal (spec 007) as rendered markdown — fetched only while open. */
-function NotesPanel({ runId }: { runId: string }) {
+function NotesPanel({ runId, onClose }: { runId: string; onClose: () => void }) {
   const handoff = useRunHandoff(runId)
   return (
     <div
       data-slot="notes-panel"
-      className="mb-3 max-h-72 overflow-y-auto rounded-md border border-border bg-card px-4 py-3"
+      className="my-5 rounded-xl border border-border bg-card p-6"
     >
+      <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-lg font-medium">Notes / handoff</h2><Button variant="ghost" size="icon" aria-label="Close notes" onClick={onClose}><XIcon /></Button></div>
       {handoff.isPending ? (
         <p className="text-xs text-soft-foreground">Loading notes…</p>
       ) : handoff.isError ? (
@@ -990,6 +910,7 @@ function NotesPanel({ runId }: { runId: string }) {
           No notes yet — the handoff file is seeded when the task starts.
         </p>
       )}
+      <div className="mt-4 flex gap-3"><Button variant="outline" disabled={!handoff.data?.trim()} onClick={() => void copyToClipboard(handoff.data ?? '', 'Notes copied')}>Copy notes</Button><Button variant="outline" onClick={onClose}>Close</Button></div>
     </div>
   )
 }

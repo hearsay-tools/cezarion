@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router'
 import { PackageCheckIcon } from 'lucide-react'
 
 import { putWorkspaceConfig } from '@/api/client'
@@ -33,14 +34,16 @@ export function SkillsSection() {
       />
     )
   }
-  return <SkillsForm config={config.data} update={update.data} updateError={update.error} />
+  return <SkillsForm projectId={projectId} config={config.data} update={update.data} updateError={update.error} />
 }
 
 function SkillsForm({
+  projectId,
   config,
   update,
   updateError,
 }: {
+  projectId: string
   config: WorkspaceConfigResponse
   update?: ReturnType<typeof useSkillsUpdate>['data']
   updateError: Error | null
@@ -60,7 +63,9 @@ function SkillsForm({
     if (update.scopes.every((scope) => scope.skills.length === 0))
       return 'No tracked Open Mercato installation found.'
     const count = new Set(update.scopes.flatMap((scope) => scope.skills)).size
-    return `${count} tracked Open Mercato skill${count === 1 ? '' : 's'} found.`
+    return update.status === 'current'
+      ? `${count} tracked skill${count === 1 ? '' : 's'} · Up to date`
+      : `${count} tracked Open Mercato skill${count === 1 ? '' : 's'} found.`
   })()
 
   return (
@@ -93,6 +98,17 @@ function SkillsForm({
             </span>
           </div>
         </div>
+        <h3 className="mt-4 text-lg">Installation status</h3>
+        <p
+          data-slot="skills-installation-status"
+          role={updateError || update?.status === 'unavailable' ? 'status' : undefined}
+          className={update?.status === 'current' && update.scopes.some((scope) => scope.skills.length > 0) ? 'text-[13px] text-success' : 'text-[13px] text-soft-foreground'}
+        >
+          {status}
+        </p>
+        <p className="mt-3 text-[13px] text-muted-foreground">Manage installed skills and sources from the Skills catalog.</p>
+        {projectId ? <Button asChild variant="outline" className="mt-2 self-start"><Link to={`/p/${encodeURIComponent(projectId)}/skills`}>Open Skills</Link></Button> : null}
+        <details className="settings-disclosure"><summary>Update preference inheritance</summary>
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
           <span>
             {inherited
@@ -110,13 +126,7 @@ function SkillsForm({
             Use default
           </Button>
         </div>
-        <p
-          data-slot="skills-installation-status"
-          role={updateError || update?.status === 'unavailable' ? 'status' : undefined}
-          className="text-[13px] text-soft-foreground"
-        >
-          {status}
-        </p>
+        </details>
       </section>
     </div>
   )

@@ -1,0 +1,221 @@
+/* Confirmed cezarion.pen 56a71a27: scoped Skills / Workflows geometry. */
+[data-route="skills"] h1, [data-route="workflows"] h1 { line-height: 1.5; }
+[data-route="skills"] :is([data-slot="skills-list"], [data-slot="skills-detail"]),
+[data-route="workflows"] :is([data-slot="wb-main"], [data-slot="wb-aside"], [data-slot="wb-auto-panel"], [data-slot="wb-import-panel"]) { border-radius: 10px; }
+[data-slot="skills-section"] > header a { gap: 8px; }
+[data-slot="skills-refresh"] { gap: 8px; padding-inline: 12px; border-radius: 8px; color: var(--foreground); }
+[data-slot="skills-refresh"] svg { width: 16px; height: 16px; }
+[data-slot="skill-row"] { min-height: 0; gap: 10px; }
+[data-slot="skill-row"] [data-slot="skill-source"] { font-size: 10px; line-height: 1.5; }
+[data-slot="skill-row"] > span:nth-child(2) { font-size: 11px; line-height: 1.65; }
+[data-slot="skill-detail"] { display: flex; flex-direction: column; gap: 16px; }
+[data-slot="skill-detail"] > :is(p, section) { margin-top: 0; }
+.sw-detail-source { display: inline-flex; height: 26px; align-items: center; padding-inline: 8px; border-radius: 5px; background: color-mix(in srgb, var(--accent-strong) 10%, transparent); color: var(--link-foreground); font-size: 10px; font-weight: 500; white-space: pre; }
+.sw-detail-source [data-slot="skill-source"] { padding: 0; background: none; color: inherit; font-size: inherit; font-weight: inherit; }
+[data-slot="skills-detail"] [data-slot="skill-description"] { display: none; }
+[data-slot="skill-used-by"] > p { margin-top: 16px; line-height: 1.6; }
+[data-slot="skill-body"] { margin-top: 0; font-size: 13px; line-height: 1.65; }
+[data-slot="skill-body"] h1 { font-size: 18px; font-weight: 600; }
+[data-slot="skill-body"] h2 { font-size: 18px; font-weight: 600; }
+[data-slot="skill-body"] h3 { font-size: 14px; font-weight: 600; }
+[data-slot="skills-import-panel"] { display: flex; flex-direction: column; gap: 16px; }
+[data-slot="skills-import-panel"] > * { margin-top: 0; margin-bottom: 0; }
+[data-slot="skills-import-panel"] > p:first-child { align-self: start; height: 26px; display: flex; align-items: center; padding: 0 8px; border-radius: 5px; background: color-mix(in srgb, var(--accent-strong) 10%, transparent); font-size: 10px; letter-spacing: 0; }
+[data-slot="skills-import-panel"] > h2 { font-size: 28px; font-weight: 400; }
+[data-slot="skills-import-panel"] > p:nth-of-type(3) { color: var(--link-foreground); }
+[data-slot="skills-update-card"] { background: var(--card); border-radius: 10px; }
+[data-slot="skills-update-card"] > div:first-child { gap: 16px; }
+[data-slot="skills-update-card"] > div > div > p:first-child { font-size: 14px; font-weight: 400; }
+[data-slot="import-all"] { display: inline-flex; align-items: center; gap: 8px; color: var(--foreground); border-radius: 8px; padding-inline: 12px; }
+[data-slot="import-list"] { gap: 16px; }
+[data-slot="import-row"] { border: 0; background: var(--muted); }
+[data-slot="import-row"] input { width: 20px; height: 20px; }
+[data-slot="import-row"] span span { font-weight: 400; }
+[data-slot="wb-metadata"] { gap: 14px; }
+[data-slot="wb-load"] { margin-bottom: -6px; }
+[data-slot="wb-load"] label { font-size: 11px; }
+[data-slot="wb-description"] { padding: 14px; line-height: 1.5; field-sizing: content; }
+[data-slot="wb-name"] { padding-inline: 14px; }
+[data-slot="wb-actions"] button { padding-inline: 12px; gap: 8px; border-radius: 8px; }
+[data-slot="wb-actions"] svg { width: 16px; height: 16px; }
+[data-slot="wb-auto-panel"] { border-color: color-mix(in srgb, var(--accent-strong) 35%, var(--border)); }
+[data-slot="wb-auto-cancel"] { border: 1px solid var(--border); background: var(--card); }
+[data-slot="wb-palette"] { margin-top: 16px; gap: 16px; }
+[data-slot="wb-skill"] { padding: 0; }
+[data-slot="wb-skill-add"] { width: 24px; }
+[data-slot="wb-aside"] h2 { font-size: 16px; }
+[data-slot="wb-aside"] h3 { margin-top: 16px; }
+[data-slot="wb-step-grip"] span { font-family: inherit; padding: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; }
+[data-slot="wb-step-heading"] > div { font-weight: 400; }
+[data-slot="wb-main"] > p:last-of-type { font-size: 11px; }
+[data-slot="wb-import-panel"] > div { flex-direction: row-reverse; justify-content: flex-end; gap: 12px; margin-top: 16px; }
+[data-slot="wb-import-run"], [data-slot="wb-add-dialog"] button[data-variant="primary"] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
+[data-slot="wb-import-cancel"] { border: 1px solid var(--border); }
+[data-slot="wb-import-panel"] { display: flex; flex-direction: column; }
+[data-slot="wb-import-error"] { order: 1; margin-top: 16px; font-size: 12px; }
+@media (max-width: 767px) {
+  [data-route="skills"], [data-route="workflows"] { padding-bottom: 32px; }
+  [data-route="workflows"] > header { align-items: flex-start; flex-direction: column; }
+  [data-slot="skills-section"] > header a { padding-inline: 14px; gap: 10px; }
+  [data-slot="skills-import-panel"] > h2 { font-size: 24px; }
+  .sw-import-controls { flex-direction: column; align-items: flex-start; }
+  .sw-import-controls .sw-search { width: 100%; }
+  [data-slot="wb-import-panel"] { position: fixed; inset: 52px 0 auto; max-height: calc(100dvh - 52px); overflow-y: auto; z-index: 50; }
+}
+@container (max-width: 649px) {
+  [data-slot="skill-row"][aria-current="page"] { background: transparent; border-color: var(--border); }
+  [data-slot="skill-path"] { font-size: 10px; }
+}
+[data-route="skills"] h1, [data-route="workflows"] h1 { line-height: 1.2; letter-spacing: -.7px; }
+[data-route="skills"] header p, [data-route="workflows"] header p { line-height: 1.6; color: var(--soft-foreground); }
+[data-slot="skill-row"] { padding-block: 14px; gap: 8px; }
+[data-slot="skill-row"]::before { display: none; }
+[data-slot="skill-row"]:has([data-source="team"]) > span:first-child > span { font-weight: 500; line-height: 1.6; }
+[data-slot="skill-row"] [data-source="team"] { font-weight: 400; }
+[data-slot="skill-row"][aria-current="page"], [data-slot="skill-row"][data-highlighted], [data-slot="skills-section"] > header a[aria-current="page"] { background: var(--task-brand-selected); }
+[data-slot="skill-detail"] > div:first-child { gap: 16px; }
+[data-slot="skill-detail"] > div:first-child > :is(h2,h3) { line-height: 1.6; }
+[data-slot="skill-path"] { font-size: 10px; line-height: 1.6; }
+[data-slot="skill-body"] .thread-markdown { display: flex; flex-direction: column; gap: 16px; }
+[data-slot="skill-body"] .thread-markdown > * { margin: 0; }
+[data-slot="skill-body"] .thread-markdown :is(p,ul,ol) { color: var(--muted-foreground); }
+[data-slot="skill-body"] .thread-markdown ul { display: flex; flex-direction: column; gap: 16px; padding-left: 12px; font-size: 12px; }
+[data-slot="skill-body"] .thread-markdown li { margin: 0; padding: 0; }
+[data-slot="wb-skill"] > span { font-weight: 400; color: var(--muted-foreground); }
+@container (max-width: 649px) {
+  [data-slot="skill-row"][aria-current="page"] { background: transparent; }
+}
+[data-slot="wb-import-panel"] { gap: 0; }
+.sw-workflow-confirm { padding: 24px; border-radius: 12px; }
+.sw-workflow-confirm [data-slot="alert-dialog-title"] { font-size: 20px; font-weight: 400; }
+.sw-workflow-confirm [data-slot="alert-dialog-footer"] { justify-content: flex-start; }
+.sw-workflow-confirm button { min-height: 44px; }
+@media (max-width: 767px) {
+  [data-slot="dialog-overlay"]:has(+ [data-slot="wb-import-panel"]) { background: transparent; }
+  [data-slot="wb-import-panel"] { width: 100%; max-width: 100%; translate: none; transform: none; top: 52px; left: 0; }
+}
+[data-slot="skills-section"] > header a { font-size: 13px; font-weight: 600; }
+.sw-detail-source, [data-slot="skills-import-panel"] > p:first-child, [data-slot="wb-step-grip"] span { background: var(--task-brand-selected); }
+[data-slot="skills-import-panel"] > h2 { line-height: 1.6; }
+[data-slot="wb-description"] { color: var(--muted-foreground); }
+[data-route="workflows"] button, [data-slot="skills-update-card"] button { font-size: 12px; font-weight: 500; border-radius: 8px; }
+:is([data-slot="wb-import-panel"], [data-slot="wb-add-dialog"], .sw-workflow-confirm) button { font-size: 12px; font-weight: 400; border-radius: 8px; }
+.sw-workflow-confirm [data-slot="alert-dialog-title"] { line-height: 1.6; }
+.sw-workflow-confirm [data-slot="alert-dialog-description"] { font-size: 13px; line-height: 1.6; }
+.sw-workflow-confirm [data-slot="alert-dialog-header"] { gap: 16px; text-align: left; }
+
+[data-slot="wb-step-actions"] svg, [data-slot="wb-skill-add"] svg { width: 18px; height: 18px; }
+[data-slot="wb-save"] svg, [data-slot="wb-auto-run"] svg { width: 16px; height: 16px; }
+[data-slot="skill-row"] [data-slot="skill-source"] { line-height: 1.5; }
+[data-slot="skill-row"] > span:nth-child(2) { line-height: 1.6; }
+:is([data-slot="wb-import-panel"], [data-slot="wb-add-dialog"], .sw-workflow-confirm) { box-shadow: none; }
+[data-slot="wb-import-panel"] [data-slot="dialog-title"] { line-height: 1.6; }
+[data-slot="wb-add-dialog"] [data-slot="dialog-header"] { text-align: left; }
+
+/* Pen strokes overlay the frame; CSS borders consume one pixel of its padding. */
+[data-slot="skills-detail"] > div { padding: 19px; }
+[data-slot="skills-update-card"] { padding: 15px; }
+[data-slot="import-row"] > span:last-child > span:last-child:not(:first-child) { margin-top: 6px; line-height: 1.6; }
+[data-slot="skills-import-panel"] > p:not(:first-child), [data-slot="skills-update-card"] p { line-height: 1.6; }
+[data-slot="skills-update-card"] > div > div > p:nth-child(2) { font-size: 11px; }
+
+/* Match the approved frame's overlay strokes without shrinking its text columns. */
+[data-slot="skills-list"] { padding: 11px; }
+[data-slot="skill-row"] { border-bottom-width: 0; box-shadow: inset 0 -1px var(--border); }
+[data-slot="skill-row"]:is([aria-current="page"], [data-highlighted]) { box-shadow: none; }
+[data-slot="skills-section"] > header a { padding-inline: 11px; }
+[data-slot="skills-back"] { padding-inline: 11px; border-radius: 8px; }
+[data-slot="skills-back"] svg { width: 16px; height: 16px; }
+[data-slot="skill-body"] .thread-markdown :is(h1,h2,h3) { line-height: 1.5; }
+[data-slot="skill-body"] .thread-markdown :is(p,ul,ol) { line-height: 1.6; }
+[data-slot="skill-body"] .thread-markdown ul { padding-left: 0; list-style-position: inside; }
+:is([data-slot="skills-filter"], [data-slot="import-filter"], [data-route="workflows"] :is(input,textarea,select)) { border-color: var(--border); border-radius: 8px; }
+:is([data-slot="skills-filter"], [data-slot="import-filter"], [data-route="workflows"] :is(input,textarea)):focus-visible { border-color: var(--ring); }
+:is([data-slot="import-filter"], [data-slot="wb-filter"]) { background: var(--card); }
+[data-slot="wb-description"] { line-height: 1.6; padding: 13px; }
+[data-slot="wb-metadata"] > label { line-height: 1.5; }
+[data-slot="wb-auto-panel"] { padding: 19px; border-color: var(--composer-border); }
+[data-slot="wb-auto-panel"] > h2 { line-height: 1.6; }
+[data-slot="wb-auto-panel"] > p { line-height: 1.6; }
+[data-slot="wb-auto-panel"] > div { margin-top: 16px; gap: 8px; }
+[data-slot="wb-auto-text"] { padding: 15px; border-radius: 8px; }
+@media (max-width: 767px) {
+  [data-slot="skills-section"] > header a { padding-inline: 13px; }
+}
+[data-slot="skill-body"] .thread-markdown :is(h1,h2) { font-size: 18px; }
+[data-slot="skill-body"] .thread-markdown h3 { font-size: 14px; }
+/* Keep the 26px design row while retaining a 44px touch hit area in its gutters. */
+[data-slot="wb-step-heading"] :is([data-slot="wb-step-grip"], [data-slot="wb-step-actions"]) {
+  position: relative; min-width: 26px; min-height: 26px; width: 26px; height: 26px;
+}
+[data-slot="wb-step-heading"] :is([data-slot="wb-step-grip"], [data-slot="wb-step-actions"])::after {
+  content: ''; position: absolute; inset: -9px;
+}
+@media (max-width: 767px) {
+  [data-slot="wb-import-panel"] { padding: 19px; gap: 18px; }
+  [data-slot="wb-import-panel"] > * { margin: 0; }
+  [data-slot="wb-import-panel"] [data-slot="dialog-title"] { line-height: 1.5; }
+  [data-slot="wb-import-panel"] > p { font-size: 12px; line-height: 1.5; }
+  [data-slot="wb-import-text"] { padding: 15px; line-height: 1.8; border-radius: 12px; }
+  [data-slot="wb-import-panel"] > div { margin-top: 0; }
+  [data-slot="wb-import-panel"] button { min-height: 50px; height: 50px; padding-inline: 15px; }
+}
+
+/* Source frame geometry: inset strokes and explicit text line boxes. */
+[data-slot="wb-step-grip"] span { border-radius: 5px; }
+[data-slot="wb-main"], [data-slot="wb-aside"] { padding: 19px; }
+[data-slot="wb-step"] { padding: 15px; }
+[data-slot="wb-step-heading"] > div { font-size: 15px; line-height: 24px; }
+[data-slot="wb-step-summary"], [data-slot="wb-main"] > p:first-child,
+[data-slot="wb-main"] footer p, [data-slot="wb-aside"] > p { line-height: 19px; }
+[data-slot="wb-main"] > p:last-of-type { line-height: 18px; }
+[data-slot="wb-main"] footer { padding-top: 15px; }
+[data-slot="wb-aside"] > p { margin-top: 16px; }
+[data-slot="wb-aside"] h3 { line-height: 21px; }
+[data-slot="wb-load"] label { line-height: 16px; }
+[data-slot="wb-description"] { font-size: 13px; line-height: 21px; }
+/* Use separate selectors: a mixed :is() would lend the most specific member's
+   weight to every control and prevent the border compensation from winning. */
+[data-slot="wb-new"], [data-slot="wb-save"], [data-slot="wb-auto-run"] { gap: 8px; padding-inline: 12px; }
+[data-slot="wb-actions"] button, [data-slot="wb-main"] > button,
+[data-slot="wb-step"] > div:last-child button, [data-slot="wb-auto-cancel"],
+[data-slot="wb-yaml-toggle"] { gap: 8px; padding-inline: 11px; }
+[data-slot="skills-refresh"] { padding-inline: 11px; }
+[data-slot="skills-section"] > header a { gap: 10px; padding-inline: 13px; min-height: 43px; height: 43px; position: relative; }
+[data-slot="skills-section"] > header a::after { content: ''; position: absolute; inset: -.5px 0; }
+[data-slot="skill-row"] > span:first-child { font-size: 13px; line-height: 21px; }
+[data-slot="skill-row"]:has([data-source="team"]) > span:first-child > span { line-height: 21px; }
+[data-slot="skill-row"] > span:nth-child(2) { line-height: 18px; }
+[data-slot="skill-detail"] > div:first-child > :is(h2,h3) { line-height: 30px; }
+[data-slot="skill-used-by"] > h3 { line-height: 19px; }
+[data-slot="skill-used-by"] > p { line-height: 19px; }
+[data-slot="skill-body"] .thread-markdown p { line-height: 21px; }
+[data-slot="skill-body"] .thread-markdown :is(ul,ol) { line-height: 19px; }
+[data-slot="skill-body"] .thread-markdown ul { list-style: none; }
+[data-slot="skill-body"] .thread-markdown ul > li::before { content: '• '; white-space: pre; }
+@media (max-width: 639px) {
+  [data-slot="wb-main"] footer { gap: 14px; }
+}
+@media (min-width: 768px) {
+  [data-slot="skill-detail"] > div:first-child > :is(h2,h3) { line-height: 38px; }
+}
+
+[data-slot="wb-auto-panel"] > h2 { line-height: 29px; }
+[data-slot="wb-auto-panel"] > p { line-height: 21px; }
+[data-slot="wb-auto-panel"] > p:last-child { font-size: 11px; line-height: 18px; }
+[data-slot="wb-auto-text"] { line-height: 22px; }
+@container (max-width: 649px) {
+  [data-slot="skill-row"][aria-current="page"] { box-shadow: inset 0 -1px var(--border); }
+}
+[data-slot="wb-yaml-toggle"] svg { margin-right: 0; }
+[data-slot="skills-import-panel"] > h2 { line-height: 45px; }
+[data-slot="skills-import-panel"] > p:not(:first-child) { line-height: 19px; }
+[data-slot="skills-import-panel"] > p:nth-of-type(2) { line-height: 21px; }
+[data-slot="skills-update-card"] > div > div > p:first-child { line-height: 22px; }
+[data-slot="skills-update-card"] > div > div > p:nth-child(2) { line-height: 18px; }
+[data-slot="skills-update-card"] button { gap: 8px; padding-inline: 11px; }
+[data-slot="import-row"] > span:last-child > span:first-child { line-height: 21px; }
+[data-slot="import-row"] > span:last-child > span:last-child:not(:first-child) { line-height: 19px; }
+@media (max-width: 767px) {
+  [data-slot="skills-import-panel"] > h2 { line-height: 38px; }
+}

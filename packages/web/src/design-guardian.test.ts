@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -65,6 +65,36 @@ const RULES: Rule[] = [
     // is a different token, not a loophole: `--pending` is amber-400 in both themes, while
     // `--pending-strong` darkens to amber-700 on light. Everything else amber stays banned.
     pattern: /\btext-(?:pending(?!-strong)|amber(?:-\d+)?)\b/g,
+    applies: styleSources,
+  },
+  {
+    name: 'no-color-named-or-ambiguous-brand-utilities',
+    why: 'UI consumes action and accent roles, never the ambiguous primary or color-named violet utilities',
+    pattern: /\b(?:accent|bg|border|text|ring)-(?:primary|violet)(?:-[\w-]+)?(?:\/(?:\[[^\]]+\]|[\w.-]+))?/g,
+    applies: styleSources,
+    // The token sheet's `--text-primary` means primary BODY TEXT, not a brand-color utility.
+    allowed: (rel) => rel === 'src/styles/index.css',
+  },
+  {
+    name: 'no-action-color-as-chrome',
+    why: 'action is reserved for action fills; selection, focus, and other chrome use the accent token family',
+    pattern: /\b(?:border-action(?!-foreground)|(?:selection:)?bg-action(?!-foreground))(?:\/(?:\[[^\]]+\]|[\w.-]+))?/g,
+    applies: styleSources,
+    // These are the deliberate gold surfaces: shared action buttons, the mobile create action,
+    // the inline Save action, the confirmed task-commit View changes link action,
+    // and decorative gold points in the sparse twinkle backdrop.
+    allowed: (rel) =>
+      rel === 'src/components/ui/button.tsx' ||
+      rel === 'src/routes/tasks-overview.tsx' ||
+      rel === 'src/routes/task-thread/thread-items.tsx' ||
+      rel === 'src/routes/task-git/commit-list.tsx' ||
+      rel === 'src/components/centered-state.tsx' ||
+      rel === 'src/styles/index.css',
+  },
+  {
+    name: 'no-fill-accent-as-ink',
+    why: 'accent-strong is a fill and border role; readable labels use accent-text and icons use accent-icon',
+    pattern: /(?:\btext-accent-strong(?!-foreground)\b|\btext-\[var\(--accent-strong\)\]|\[color:\s*var\(--accent-strong\)\]|(?<![-\w])color\s*:\s*['"]?var\(--accent-strong\))/g,
     applies: styleSources,
   },
   {
@@ -231,6 +261,57 @@ describe('design guardian', () => {
     expect(rels.has('src/styles/index.css')).toBe(true)
     expect(rels.has('e2e/smoke.e2e.ts')).toBe(true)
     expect(sources.length).toBeGreaterThan(40)
+  })
+
+  it('binds the approved self-hosted Poppins UI typeface', () => {
+    const css = readFileSync(path.join(APP_ROOT, 'src/styles/index.css'), 'utf8')
+    expect(css).toContain('@import "@fontsource/poppins/400.css"')
+    expect(css).toContain('@import "@fontsource/poppins/500.css"')
+    expect(css).toContain('@import "@fontsource/poppins/600.css"')
+    expect(css).toContain("--sans: 'Poppins'")
+    expect(existsSync(path.resolve(APP_ROOT, '../../node_modules/@fontsource/poppins/LICENSE'))).toBe(true)
+  })
+
+  it('defines the approved purple chrome and gold action token vocabulary', () => {
+    const css = readFileSync(path.join(APP_ROOT, 'src/styles/index.css'), 'utf8')
+    for (const token of [
+      '--action:',
+      '--action-foreground:',
+      '--accent-strong:',
+      '--accent-strong-foreground:',
+      '--accent-text:',
+      '--accent-icon:',
+      '--task-brand-bg:',
+      '--task-brand-selected:',
+      '--pending: var(--action)',
+    ]) {
+      expect(css).toContain(token)
+    }
+  })
+
+  it('builds shared controls on the 44px Cezarion rhythm and composer accent', () => {
+    const button = readFileSync(path.join(APP_ROOT, 'src/components/ui/button.tsx'), 'utf8')
+    const input = readFileSync(path.join(APP_ROOT, 'src/components/ui/input.tsx'), 'utf8')
+    const select = readFileSync(path.join(APP_ROOT, 'src/components/ui/select.tsx'), 'utf8')
+    const composer = readFileSync(path.join(APP_ROOT, 'src/components/composer/composer.tsx'), 'utf8')
+    expect(button).toContain('default: "h-11')
+    expect(input).toContain('h-11 w-full')
+    expect(select).toContain('data-[size=default]:h-11')
+    expect(composer).toContain('border-[var(--composer-border)]')
+  })
+
+  it('recognizes every direct fill-accent ink spelling the cockpit supports', () => {
+    const rule = RULES.find(({ name }) => name === 'no-fill-accent-as-ink')!
+    const pattern = new RegExp(rule.pattern.source)
+    for (const source of [
+      'text-accent-strong',
+      'text-[var(--accent-strong)]',
+      '[color:var(--accent-strong)]',
+      "style={{ color: 'var(--accent-strong)' }}",
+      'color: var(--accent-strong);',
+    ]) {
+      expect(source, source).toMatch(pattern)
+    }
   })
 
   for (const rule of RULES) {

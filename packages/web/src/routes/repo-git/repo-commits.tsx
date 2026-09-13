@@ -1,4 +1,5 @@
-import { ArrowLeftIcon, GitCommitHorizontalIcon, SearchXIcon, TriangleAlertIcon } from 'lucide-react'
+import { SearchXIcon } from 'lucide-react'
+import { ArrowLeftIcon, GitCommitHorizontalIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useState } from 'react'
 import { useParams } from 'react-router'
 
@@ -29,7 +30,7 @@ export function RepoCommitsSection({ log }: { log: LogEntry[] }) {
   if (log.length === 0) {
     return (
       <CenteredState
-        icon={<GitCommitHorizontalIcon />}
+        icon={<GitCommitHorizontalIcon size={16} />}
         tone="neutral"
         heading="h2"
         title="No commits yet"
@@ -38,17 +39,19 @@ export function RepoCommitsSection({ log }: { log: LogEntry[] }) {
     )
   }
   return (
-    <CommitList
-      slot="repo-commits"
-      commits={log.map((commit) => ({
-        sha: commit.hash,
-        shaLabel: commit.hash,
-        subject: commit.subject,
-        author: commit.author,
-        when: commit.when,
-        href: `/git/commits/${commit.hash}`,
-      }))}
-    />
+    <div className="px-[18px] py-[22px] md:px-9">
+      <CommitList
+        slot="repo-commits"
+        commits={log.map((commit) => ({
+          sha: commit.hash,
+          shaLabel: commit.hash,
+          subject: commit.subject,
+          author: commit.author,
+          when: commit.when,
+          href: `/git/commits/${commit.hash}`,
+        }))}
+      />
+    </div>
   )
 }
 
@@ -69,7 +72,7 @@ function CommitDiffView({ sha }: { sha: string }) {
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border px-4 py-2 md:px-6">
         <Button asChild variant="ghost" size="sm" data-slot="commit-back">
           <Link to="/git/commits">
-            <ArrowLeftIcon aria-hidden="true" />
+            <ArrowLeftIcon size={16} aria-hidden="true" />
             All commits
           </Link>
         </Button>
@@ -85,7 +88,7 @@ function CommitDiffView({ sha }: { sha: string }) {
         </p>
       ) : commit.isError ? (
         <CenteredState
-          icon={refused ? <SearchXIcon /> : <TriangleAlertIcon />}
+          icon={refused ? <SearchXIcon /> : <TriangleAlertIcon size={16} />}
           tone={refused ? 'neutral' : 'danger'}
           heading="h2"
           title={refused ? 'Commit not found' : 'Could not load the commit'}
@@ -102,14 +105,14 @@ function CommitDiffView({ sha }: { sha: string }) {
           </div>
           {commit.data.files.length === 0 ? (
             <CenteredState
-              icon={<GitCommitHorizontalIcon />}
+              icon={<GitCommitHorizontalIcon size={16} />}
               tone="neutral"
               heading="h2"
               title="No file changes"
               subtitle="This commit carries no diff of its own — a merge commit's changes live on the commits it merged."
             />
           ) : (
-            <div className="px-4 py-4 [--diff-sticky-top:7rem] md:px-6">
+            <div className="px-4 py-4 [--diff-sticky-top:1rem] md:px-6">
               <Diff files={commit.data.files} mode={effectiveMode} wrap={effectiveWrap} className="min-w-0" />
             </div>
           )}

@@ -191,7 +191,7 @@ describe('the catalog list', () => {
     ).toBe('page')
     // An unreferenced skill says so instead of showing an empty section.
     expect(detail()?.querySelector('[data-slot="skill-used-by"]')?.textContent).toContain(
-      'Not referenced by any workflow yet',
+      'Not referenced by a workflow yet',
     )
   })
 
@@ -294,7 +294,7 @@ describe('the Manage skills panel (opt-out OM skills)', () => {
     expect(card.textContent).toContain('Project installation · 1 tracked')
     expect(card.textContent).not.toContain('/home/')
     expect(document.querySelector('[data-slot="skills-upgrade-notes"]')?.textContent).toContain('/om-apply-upgrade-notes')
-    expect(document.body.textContent).toContain('checkboxes choose what cezar shows')
+    expect(document.body.textContent).toContain('Checkboxes control visibility')
   })
 
   it('keeps the newer apply result when a slower check response arrives afterward', async () => {

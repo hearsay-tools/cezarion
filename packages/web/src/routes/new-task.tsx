@@ -1,16 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  CircleSlashIcon,
-  EyeIcon,
-  FolderOpenIcon,
-  PlusIcon,
-  SparklesIcon,
-  SquareIcon,
-  WorkflowIcon,
-  XIcon,
-} from 'lucide-react'
+import { EyeIcon } from 'lucide-react'
+import { CheckIcon, CircleSlashIcon, CpuIcon, GitBranchIcon, GaugeIcon, TerminalIcon, SlidersHorizontalIcon, FolderOpenIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 
@@ -42,7 +32,6 @@ import type {
 } from '@open-mercato/cezar-api-client'
 import { TwinkleBackdrop } from '@/components/centered-state'
 import { Composer, type ComposerHandle } from '@/components/composer/composer'
-import { GhostCodeBackdrop } from '@/components/ghost-code-backdrop'
 import { PickerPill, RunnerPill, chevron, chipClass } from '@/components/picker-pill'
 import { PromptTemplateMenu } from '@/components/prompt-template-menu'
 import { SkillPreviewDialog } from '@/components/skill-detail'
@@ -108,13 +97,13 @@ import {
 import { parseNewTaskParams } from './new-task-params'
 import { buildPlannedRunBody, pendingPlanOf, type PendingPlan } from './new-task-plan'
 import { PlanReview } from './plan-review'
+import './new-task.css'
 
 /**
- * `/new` — the full-screen new-task hero (spec §"New task (full-screen, #386)"; visual
- * contract docs/mockups/new-task.html): centered composer card on the twinkle surface, the
- * picker pill row inside the card below the textarea, suggested-task ghost chips underneath.
+ * `/new` — Start from design.pen 1A–1D: page intro, editor + model/effort, then the 330px
+ * execution panel on desktop. Mobile keeps those controls in document flow under the draft.
  * In plan-first mode (#383, the `Start | Plan first` segment) submit runs `POST /api/plan`
- * and opens the review overlay (plan-review.tsx) instead of starting a run.
+ * and opens the review page (plan-review.tsx) instead of starting a run.
  *
  * This route also owns the saved-bookmarklet contract (spec 011, BACKWARD_COMPATIBILITY.md):
  * a full document load of `/new?skill=&ref=&auto=1&key=` auto-starts a run unattended when the
@@ -214,6 +203,7 @@ export function NewTaskRoute() {
   // icon trigger inserts one by hand at the caret, and a skill whose templates are assigned to it
   // applies them on selection — but only into a box the user has not typed in (`resolveAutoApply`).
   const composerRef = useRef<ComposerHandle>(null)
+  const draftPanelRef = useRef<HTMLDivElement>(null)
   const templates = useMemo(
     () => normalizePromptTemplates(uiState.data?.promptTemplates),
     [uiState.data?.promptTemplates],
@@ -571,21 +561,22 @@ export function NewTaskRoute() {
   return (
     <div
       data-route="new"
-      className="relative isolate flex min-h-full flex-col items-center overflow-x-clip px-6 pt-[clamp(32px,7vh,84px)] pb-16 max-md:px-3.5 max-md:pt-7"
+      data-plan-review={plan !== null ? 'true' : undefined}
+      className="relative isolate flex min-h-full flex-col overflow-x-clip pb-16"
     >
-      <TwinkleBackdrop />
-      <GhostCodeBackdrop />
 
-      <div className="w-full max-w-[720px]">
-        <header className="mb-6 text-center max-md:mb-4">
-          <h1 className="text-lg font-semibold tracking-tight max-md:text-base">
+
+
+      <div ref={draftPanelRef} style={plan !== null ? { display: 'none' } : undefined} className="relative z-[1] mx-auto w-full max-w-none px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
+        <header className="mb-7 max-md:mb-5">
+          <p data-slot="page-eyebrow" className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
+            NEW TASK
+          </p>
+          <h1 className="text-[30px] leading-[normal] font-semibold tracking-[-0.9px] max-md:text-[22px] max-md:leading-[29px] max-md:tracking-[-0.6px]">
             What should the agent work on?
           </h1>
-          {/* Follows the resolved run mode (#793). Printing the isolation promise
-              unconditionally made this line false for every run the user opted out of — and
-              for a non-git folder, where there is no worktree to opt into. */}
-          <p data-slot="run-mode-note" className="mt-1.5 text-[13.5px] text-muted-foreground max-md:text-xs">
-            {composerRunModeNote({ worktree: worktreeOn, hasGit })}
+          <p data-slot="page-description" className="mt-2 hidden text-[13px] text-muted-foreground md:block">
+            Describe the outcome. Configure the run. Review everything before it lands.
           </p>
         </header>
 
@@ -593,6 +584,12 @@ export function NewTaskRoute() {
           ref={composerRef}
           onSubmit={submit}
           retainDraftUntilSuccess
+          idleFeedback={
+            <div data-slot="new-task-mode-note" className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+              <span>{draft.planFirst ? 'Review the plan before starting the task.' : 'Start immediately with the selected configuration.'}</span>
+              <kbd className="hidden font-sans md:inline">{submitShortcutHint()}</kbd>
+            </div>
+          }
           pendingLabel={draft.planFirst ? 'Planning task…' : 'Starting task…'}
           failureHint={draft.planFirst ? 'Could not create the plan. Your draft is kept. Please retry.' : undefined}
           clearOnSuccess={!draft.planFirst}
@@ -629,6 +626,11 @@ export function NewTaskRoute() {
                   onPick={(next) => navigate(`/p/${encodeURIComponent(next)}/new`, { replace: true })}
                 />
               ) : null}
+              <PromptTemplateMenu
+                label="Template"
+                templates={templates}
+                onInsert={(text) => composerRef.current?.insertAtCaret(text)}
+              />
               <SourcePill
                 source={source}
                 ready={sourcesReady}
@@ -637,94 +639,88 @@ export function NewTaskRoute() {
                 workflows={workflowList}
                 onPick={(next) => update({ source: next })}
               />
-              {/* Templates stay beside prompt context and attachments. */}
-              <PromptTemplateMenu
-                templates={templates}
-                iconOnly
-                onInsert={(text) => composerRef.current?.insertAtCaret(text)}
-              />
+
             </>
           }
+          agentOptions={
+              <div data-slot="agent-options" role="group" aria-label="Agent settings" className="new-task-agent-options">
+                {/* Runner, model and effort stay with the editor in the approved desktop
+                    composition. Run isolation and automation choices live in the side panel. */}
+                {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
+                  <span className="new-task-runner-control"><TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" /><RunnerPill
+                    runners={runners}
+                    value={displayRunner}
+                    accounts={accountChoices}
+                    account={agentProfile}
+                    repoAccount={repoAccount}
+                    onPick={(next, picked) =>
+                      update({
+                        runner: next,
+                        agentProfile: picked,
+                        ...(next === displayRunner ? {} : { model: null }),
+                      })
+                    }
+                    disabled={!providersReady}
+                  /></span>
+                ) : null}
+                <PickerPill
+                  slot="model-pill"
+                  ariaLabel="Model"
+                  label={<span className="new-task-model-label"><CpuIcon aria-hidden="true" className="size-5 shrink-0 text-accent-text" /><span className="flex min-w-0 items-center gap-2 text-left"><span className="text-[10px] font-semibold tracking-[0.05em] text-muted-foreground uppercase">Model</span><span className="truncate text-sm text-foreground">{models.find((m) => m.id === model)?.label ?? 'auto'}</span></span></span>}
+                  value={model}
+                  disabled={!providersReady}
+                  readOnly={modelsLocked}
+                  disabledHint={
+                    modelsLocked
+                      ? 'Model selection is locked to native coding-agent settings.'
+                      : undefined
+                  }
+                  onPick={(next) => {
+                    const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
+                    update({
+                      model: next,
+                      effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
+                    })
+                  }}
+                  options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
+                  status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
+                />
+                <PickerPill
+                  slot="effort-pill"
+                  ariaLabel="Effort"
+                  label={<span className="inline-flex items-center gap-2"><GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" /><span className="text-[11px] text-muted-foreground">Effort</span>{effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}</span>}
+                  value={effort}
+                  disabled={!providersReady}
+                  readOnly={modelsLocked}
+                  disabledHint={
+                    modelsLocked
+                      ? 'Effort selection is locked to native coding-agent settings.'
+                      : undefined
+                  }
+                  onPick={(next) => update({ effort: next })}
+                  options={effortOptions.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                    desc: option.desc,
+                  }))}
+                />
+                  </div>
+          }
           executionOptions={
-            <details data-slot="execution-options" className="group border-t border-border">
+            <div className="flex min-w-0 flex-col gap-4">
+            <details data-slot="execution-options" open className="group rounded-xl border border-border bg-card xl:self-start">
               <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
-                <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
-                <span className="font-medium text-foreground">Execution options</span>
-                <span data-slot="execution-summary" className="min-w-0 basis-full truncate pl-5 md:ml-auto md:basis-auto md:pl-0">
+                <SlidersHorizontalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />
+                <span className="font-medium text-foreground">Execution settings</span>
+                <span data-slot="execution-summary" hidden className="min-w-0 basis-full truncate pl-5 xl:ml-auto xl:basis-auto xl:pl-0">
                   {RUNNERS.find((runner) => runner.id === displayRunner)?.label ?? displayRunner}
                   {' · '}{models.find((item) => item.id === model)?.label ?? 'auto'}
                 </span>
               </summary>
-              <div className="space-y-3 px-3 pb-3">
-                <div role="group" aria-label="Agent settings" className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <span className="basis-full text-xs font-medium text-muted-foreground">Agent</span>
-                  {/* Shown when there is a choice to make: more than one runner, or more than one
-                      login for one of them. A host with neither sees no pill, exactly as before. */}
-                  {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
-                    <RunnerPill
-                      runners={runners}
-                      value={displayRunner}
-                      accounts={accountChoices}
-                      account={agentProfile}
-                      repoAccount={repoAccount}
-                      // Changing the AGENT clears the model pin: presets are per-runner, so a kept
-                      // model would be one the new runner does not have. Changing only the account
-                      // keeps it — the model catalog is the same either way.
-                      onPick={(next, picked) =>
-                        update({
-                          runner: next,
-                          agentProfile: picked,
-                          ...(next === displayRunner ? {} : { model: null }),
-                        })
-                      }
-                      disabled={!providersReady}
-                    />
-                  ) : null}
-                  <PickerPill
-                    slot="model-pill"
-                    ariaLabel="Model"
-                    label={models.find((m) => m.id === model)?.label ?? 'auto'}
-                    value={model}
-                    disabled={!providersReady}
-                    readOnly={modelsLocked}
-                    disabledHint={
-                      modelsLocked
-                        ? 'Model selection is locked to native coding-agent settings.'
-                        : undefined
-                    }
-                    onPick={(next) => {
-                      const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
-                      update({
-                        model: next,
-                        effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
-                      })
-                    }}
-                    options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
-                    status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
-                  />
-                  <PickerPill
-                    slot="effort-pill"
-                    ariaLabel="Effort"
-                    label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
-                    value={effort}
-                    disabled={!providersReady}
-                    readOnly={modelsLocked}
-                    disabledHint={
-                      modelsLocked
-                        ? 'Effort selection is locked to native coding-agent settings.'
-                        : undefined
-                    }
-                    onPick={(next) => update({ effort: next })}
-                    options={effortOptions.map((option) => ({
-                      value: option.value,
-                      label: option.label,
-                      desc: option.desc,
-                    }))}
-                  />
-                </div>
-                <div role="group" aria-label="Run settings" className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <span className="basis-full text-xs font-medium text-muted-foreground">Run</span>
-                  <PickerPill
+              <div className="space-y-3 border-t border-border px-5 pt-3 pb-5">
+                <p className="hidden text-[11px] text-muted-foreground xl:block">Control where and how this task runs.</p>
+                <div role="group" aria-label="Run settings" className="new-task-run-settings">
+                  <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Parallel variants</span><PickerPill
                     slot="variants-pill"
                     ariaLabel="Parallel variants"
                     label={variants > 1 ? `×${variants} variants` : '×1'}
@@ -738,7 +734,7 @@ export function NewTaskRoute() {
                       { value: '2', label: '×2 variants', desc: 'Two competing runs — pick the diff you keep' },
                       { value: '3', label: '×3 variants', desc: 'Three competing runs — pick the diff you keep' },
                     ]}
-                  />
+                  /></div>
                   {worktreeToggleShown ? (
                     <WorktreeToggle
                       on={worktreeOn}
@@ -757,16 +753,15 @@ export function NewTaskRoute() {
                       This skill recommends an interactive run in the current checkout. You can change either setting.
                     </p>
                   ) : null}
-                  {followupsToggleShown ? (
-                    <GenerateFollowupsToggle
-                      on={generateFollowupsOn}
-                      onChange={(on) => update({ generateFollowups: on })}
-                    />
-                  ) : null}
-                  {repo.data ? <BaseBranchPill repo={repo.data} /> : null}
+                  {repo.data ? <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Base branch</span><BaseBranchPill repo={repo.data} /></div> : null}
                 </div>
+                <p data-slot="execution-tip" className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block"><GitBranchIcon aria-hidden="true" className="mb-2 size-[18px] text-accent-text" />{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
               </div>
             </details>
+            {followupsToggleShown ? <section data-slot="followups-options" aria-label="Follow-ups preference" className="rounded-xl border border-border bg-card p-4">
+              <GenerateFollowupsToggle on={generateFollowupsOn} onChange={(on) => update({ generateFollowups: on })} />
+            </section> : null}
+                </div>
           }
           footerEnd={
             <>
@@ -792,8 +787,10 @@ export function NewTaskRoute() {
             </>
           }
         />
+        <p data-slot="run-mode-note" className="mt-2.5 text-[13px] text-muted-foreground">
+          {composerRunModeNote({ worktree: worktreeOn, hasGit })}
+        </p>
 
-        <SuggestedChips onPick={(text) => update({ text })} />
       </div>
 
       {plan !== null ? (
@@ -815,7 +812,10 @@ export function NewTaskRoute() {
           }
           onStepsChange={(steps) => setPlan((current) => (current ? { ...current, steps } : current))}
           onStart={() => void startPlanned()}
-          onDiscard={() => setPlan(null)}
+          onDiscard={() => {
+            setPlan(null)
+            requestAnimationFrame(() => draftPanelRef.current?.querySelector('textarea')?.focus())
+          }}
         />
       ) : null}
     </div>
@@ -841,6 +841,7 @@ function WorktreeToggle({
       role="checkbox"
       aria-checked={on}
       disabled={disabled}
+      aria-label="Worktree"
       data-slot="worktree-toggle"
       onClick={() => onChange(!on)}
       title={
@@ -850,14 +851,10 @@ function WorktreeToggle({
           ? 'Runs in an isolated worktree — uncheck to run in the repo working tree'
           : 'Runs in the repo working tree — check to isolate in a worktree'
       }
-      className={cn(chipClass, on && 'border-primary/60 text-foreground')}
+      className="flex items-center justify-between gap-3 px-0 py-3 text-left"
     >
-      {on ? (
-        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-primary" />
-      ) : (
-        <SquareIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
-      )}
-      Worktree
+      <span><span className="block text-[13px] font-medium">Worktree</span><span className="block text-[10px] text-muted-foreground">Run in an isolated working copy</span></span>
+      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-accent-strong-foreground', on && 'ml-auto')} /></span>
     </button>
   )
 }
@@ -879,6 +876,7 @@ function AutonomousToggle({
       role="checkbox"
       aria-checked={on}
       disabled={disabled}
+      aria-label="Autonomous"
       data-slot="autonomous-toggle"
       onClick={() => onChange(!on)}
       title={
@@ -888,14 +886,10 @@ function AutonomousToggle({
             ? 'Autonomous — the agent runs to completion without pausing for you'
             : 'Runs interactively — check to let the agent finish without pausing for you'
       }
-      className={cn(chipClass, on && !disabled && 'border-primary/60 text-foreground')}
+      className="flex items-center justify-between gap-3 px-0 py-3 text-left disabled:opacity-50"
     >
-      {on ? (
-        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-primary" />
-      ) : (
-        <SquareIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
-      )}
-      Autonomous
+      <span><span className="block text-[13px] font-medium">Autonomous</span><span className="block text-[10px] text-muted-foreground">Let the agent proceed without prompts</span></span>
+      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-accent-strong-foreground', on && 'ml-auto')} /></span>
     </button>
   )
 }
@@ -921,14 +915,11 @@ function GenerateFollowupsToggle({
           ? 'Agents can add newly discovered follow-up work to the task inbox'
           : 'Follow-up generation is off; agents still maintain the handoff journal'
       }
-      className={cn(chipClass, on && 'border-primary/60 text-foreground')}
+      aria-label="Follow-ups"
+      className="flex min-h-11 w-full items-center justify-between gap-4 text-left text-foreground"
     >
-      {on ? (
-        <CheckIcon aria-hidden="true" className="size-3 shrink-0 text-primary" />
-      ) : (
-        <SquareIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
-      )}
-      Follow-ups
+      <span><span className="block text-[15px]">Follow-ups</span><span className="mt-1 block text-xs leading-[1.5] text-muted-foreground">Generate suggestions in Inbox after this task. Enabled by default; your choice is remembered.</span></span>
+      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full bg-accent-strong-foreground', on && 'ml-auto')} /></span>
     </button>
   )
 }
@@ -1050,7 +1041,7 @@ function ProjectPill({
                   </span>
                 ) : null}
                 {project.id === projectId ? (
-                  <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
+                  <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
                 ) : null}
               </CommandItem>
             ))}
@@ -1168,13 +1159,13 @@ function SourcePill({
         >
           <EyeIcon aria-hidden="true" className="size-3.5" />
         </button>
-        {selected ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" /> : null}
+        {selected ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
       </CommandItem>
     )
   }
 
-  const SourceIcon = source === null ? PlusIcon : source.source === 'skill' ? SparklesIcon : WorkflowIcon
-  // The + and generic label distinguish an empty choice. Keep its enabled boundary and ink
+  const SourceIcon = source === null || source.source === 'skill' ? SparklesIcon : WorkflowIcon
+  // The generic label distinguishes an empty choice. Keep its enabled boundary and ink
   // consistent with the other selectors; dashed boundaries mark disabled pills (#171).
   const trigger = (
     <button
@@ -1206,7 +1197,7 @@ function SourcePill({
     >
       <SourceIcon
         aria-hidden="true"
-        className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-violet')}
+        className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-accent-icon')}
       />
       <span className="max-w-44 truncate">{!ready ? '…' : (source?.ref ?? 'Skill')}</span>
       {chevron}
@@ -1280,7 +1271,7 @@ function SourcePill({
                       {quickTask?.description ?? 'One agent run on your task — no ceremony.'}
                     </span>
                     {source === null ? (
-                      <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-primary" />
+                      <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
                     ) : null}
                   </CommandItem>
                 </CommandGroup>
@@ -1318,7 +1309,7 @@ function SourcePill({
                           </span>
                         ) : null}
                         {selected ? (
-                          <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-primary" />
+                          <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
                         ) : null}
                       </CommandItem>
                     )
@@ -1359,7 +1350,7 @@ function BaseBranchPill({ repo }: { repo: RepoResponse }) {
     <PickerPill
       slot="base-pill"
       ariaLabel="Base branch"
-      label={<span className="font-mono text-[11.5px]">base: {current}</span>}
+      label={<span className="text-[11.5px]">{current}</span>}
       value={repo.baseBranch ?? ''}
       onPick={(value) => mutation.mutate(value === '' ? null : value)}
       options={[
@@ -1402,6 +1393,7 @@ function ModeSegment({
             : 'font-medium text-muted-foreground hover:text-foreground',
         )}
       >
+        {!planFirst ? <CheckIcon aria-hidden="true" className="size-3.5" /> : null}
         Start
       </button>
       <button
@@ -1421,33 +1413,6 @@ function ModeSegment({
       >
         {planning ? 'Planning…' : 'Plan first'}
       </button>
-    </div>
-  )
-}
-
-/** Honest static starters (the mockup's ghost chips): they only fill the textarea — the user
- *  still aims and submits. */
-const SUGGESTIONS = [
-  'Fix a failing or flaky test',
-  'Summarize recent commits on this branch',
-  'Update the README for recent changes',
-]
-
-function SuggestedChips({ onPick }: { onPick: (text: string) => void }) {
-  return (
-    <div className="mt-7 flex flex-wrap justify-center gap-2 max-md:justify-start">
-      {SUGGESTIONS.map((suggestion) => (
-        <button
-          key={suggestion}
-          type="button"
-          data-slot="suggested-chip"
-          onClick={() => onPick(suggestion)}
-          className="inline-flex h-[30px] items-center gap-1.5 rounded-full border border-border px-3 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-soft-foreground" />
-          {suggestion}
-        </button>
-      ))}
     </div>
   )
 }

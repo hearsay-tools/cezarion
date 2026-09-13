@@ -1,13 +1,5 @@
-import {
-  FolderIcon,
-  FolderOpenIcon,
-  LayersIcon,
-  MenuIcon,
-  PlusIcon,
-  SearchIcon,
-  SettingsIcon,
-  XIcon,
-} from 'lucide-react'
+import { ChevronDownIcon, FolderIcon, FolderPlusIcon, LayersIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon, Settings2Icon, XIcon } from '@/components/design-icons'
+
 import * as React from 'react'
 import type { ReactNode } from 'react'
 import { Link as RouterLink, matchPath, useLocation } from 'react-router'
@@ -17,10 +9,8 @@ import { CloneProjectDialog } from '@/components/clone-project-dialog'
 import { openCommandPalette } from '@/components/command-palette'
 import { GithubIcon } from '@/components/icons'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
-import type { ResolvedTheme } from '@/lib/theme'
 import { Link, stripProjectPrefix } from '@/lib/project-router'
 import { StatusDot } from '@/components/status-dot'
-import { useTheme } from '@/components/theme-provider'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import {
@@ -42,12 +32,6 @@ import {
   writeStoredSidebarWidth,
 } from '@/lib/sidebar-width'
 import { cn } from '@/lib/utils'
-// The Cezarion wordmark lockup, one file per resolved theme (#143). `public/` assets, not
-// bundled imports: the service serves the same files at these exact paths, so a second, hashed
-// URL for the same picture would be one cache entry too many. Vite serves `public/` at the root
-// in dev and copies it into the build, so the paths hold in both.
-const brandLockupUrl = (resolved: ResolvedTheme) => `/cezarion-lockup-${resolved}.svg`
-
 /** Tailwind's `md`. The drawer is the `<md` affordance, so this must stay in step with the
  *  `md:hidden` / `md:flex` classes below — they are the same breakpoint expressed twice, once
  *  for CSS and once for the state machine. */
@@ -61,6 +45,7 @@ export type RepoChip = {
 export type AppShellProps = {
   /** The routed view. Renders into the one scrolling region. */
   children: ReactNode
+  breadcrumb?: { project: string | null; page: string; branch?: string | null }
   /** Repo + branch for the brand chip. Null until Step 3.1/3.2 wires `/api/health` — the chip
    *  is simply absent rather than showing an invented repo name. */
   repo?: RepoChip | null
@@ -78,6 +63,7 @@ export type AppShellProps = {
   latestVersion?: string | null
   /** Step 3.3's grouped task quick-list. */
   taskQuickList?: ReactNode
+  sessionScope?: ReactNode
   /** Step 4.2's Tools dropdown trigger. */
   toolsMenu?: ReactNode
   /** Forge gating (R6 Step 1.1): `false` drops the GitHub nav item — see `visibleNavItems`.
@@ -147,6 +133,7 @@ export function routeOwnsScrollArrival(pathname: string): boolean {
  */
 export function AppShell({
   children,
+  breadcrumb,
   repo = null,
   inboxCount = null,
   unreadCount = null,
@@ -154,6 +141,7 @@ export function AppShell({
   version = null,
   latestVersion = null,
   taskQuickList,
+  sessionScope,
   toolsMenu,
   forgeAvailable = true,
   inboxAvailable = true,
@@ -166,9 +154,10 @@ export function AppShell({
   // The nav's area rules reason about the flat route map — strip any `/p/:projectId` prefix
   // (multi-project spec, step 3.2) so `/p/cezar/git/commits` still lights Git.
   const areaPathname = stripProjectPrefix(pathname)
-  const activeTo = activeNavPath(areaPathname)
+  const activeTo = areaPathname === '/new' ? '/new' : activeNavPath(areaPathname)
   const current = activeNavItem(areaPathname)
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const mobileNavTrigger = React.useRef<HTMLButtonElement | null>(null)
   const mainRef = React.useRef<HTMLElement>(null)
   const routeOwnsArrival = routeOwnsScrollArrival(pathname)
   // The desktop column's width (#788). Read once, lazily, from `localStorage` — it is a
@@ -226,6 +215,7 @@ export function AppShell({
     version,
     latestVersion,
     taskQuickList,
+    sessionScope,
     toolsMenu,
     projectGroups,
     singleProject,
@@ -240,12 +230,24 @@ export function AppShell({
         className="flex h-dvh overflow-hidden bg-background text-foreground pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
       >
         <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
-        {/* The drawer keeps its fixed 264px: it is a full-height overlay on a phone, where
-            there is no second column to trade width with and no pointer to drag a border. */}
-        <MobileNavDrawer {...nav} onNavigate={() => setMenuOpen(false)} />
+        {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
+        <MobileNavDrawer {...nav} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
+          // Both mobile controls open the same drawer. Restore the actual opener, rather
+          // than Radix's single trigger ref (which otherwise points at the last mount).
+          if (mobileNavTrigger.current?.isConnected) {
+            event.preventDefault()
+            mobileNavTrigger.current.focus()
+          }
+        }} />
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
-          <MobileTopBar title={current?.label ?? 'cezar'} />
+          <MobileTopBar title={current?.label ?? 'cezar'} repo={repo} onTrigger={(button) => { mobileNavTrigger.current = button }} />
+          <header data-slot="desktop-breadcrumb" className={cn("row-start-1 hidden min-w-0 items-center gap-3 border-b border-border text-[13px] text-muted-foreground md:flex", areaPathname === '/new' ? 'h-[72px] px-11' : 'h-16 px-9')}>
+            <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
+            {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
+            <span className="min-w-0 truncate">{breadcrumb?.page ?? current?.label ?? 'Cezarion'}</span>
+            {(breadcrumb?.branch ?? repo?.branch) ? <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]"><ShieldCheckIcon aria-hidden="true" className="size-4 text-accent-text" />{breadcrumb?.branch ?? repo?.branch}</span> : null}
+          </header>
 
           {banner ? (
             <div data-slot="banner-slot" className="row-start-2">
@@ -283,13 +285,14 @@ type NavProps = {
   version: string | null
   latestVersion: string | null
   taskQuickList?: ReactNode
+  sessionScope?: ReactNode
   toolsMenu?: ReactNode
   projectGroups?: ReactNode
   singleProject: boolean
 }
 
 /**
- * The desktop frame, from `md` up — 264px by default and draggable up to 420px (#788).
+ * The desktop frame, from `md` up — 232px by default and draggable up to 420px (#788).
  *
  * The width is the user's, not the layout's: the sidebar is the app's primary navigation and its
  * rows carry task names, so the right column width depends on the screen someone is sitting at.
@@ -298,7 +301,7 @@ type NavProps = {
  *
  * An inline `width` rather than a Tailwind class because the value is a number from state, and
  * the class is left off entirely below `md`, where `hidden` takes the element out of flow and the
- * drawer (a fixed 264px) is the sidebar instead.
+ * drawer (a fixed 232px) is the sidebar instead.
  */
 function Sidebar({ width, onWidthChange, ...props }: NavProps & SidebarResize) {
   return (
@@ -404,7 +407,7 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
       // A 5px grab strip straddling the border, invisible until you reach for it. `touch-none`
       // is load-bearing rather than decorative: without it a touch drag is claimed by the
       // browser's own panning and scrolls the page instead of resizing the column.
-      className="absolute inset-y-0 -right-[2px] z-20 w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-violet/40 focus-visible:bg-violet/60 focus-visible:outline-none"
+      className="absolute inset-y-0 -right-[2px] z-20 w-[5px] cursor-col-resize touch-none bg-transparent transition-colors hover:bg-[var(--composer-border)] focus-visible:bg-[var(--composer-border)] focus-visible:outline-none"
     />
   )
 }
@@ -418,15 +421,17 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
  * dismiss-on-tap, and `aria-hidden` on everything outside the portal — which is how it delivers
  * modality (it does not set `aria-modal`; `hideOthers` is the stronger guarantee).
  */
-function MobileNavDrawer({ onNavigate, ...props }: NavProps & { onNavigate: () => void }) {
+function MobileNavDrawer({ onNavigate, onCloseAutoFocus, ...props }: NavProps & { onNavigate: () => void; onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus'] }) {
   return (
     <SheetContent
       side="left"
       data-slot="mobile-nav-drawer"
+      onCloseAutoFocus={onCloseAutoFocus}
+      overlayClassName="bg-[var(--nav-scrim)]"
       showCloseButton={false}
       // The drawer is the sidebar: same width, same surface token, and no padding of its own —
       // SidebarContent brings its own. `sm:max-w-none` sheds the primitive's sheet width cap.
-      className="w-[264px] gap-0 border-border bg-sidebar p-0 sm:max-w-none md:hidden"
+      className="w-[calc(100%-68px)] max-w-[334px] gap-0 border-border bg-sidebar p-0 sm:max-w-[334px] md:hidden"
       // Nav needs no prose description, and Radix warns when it cannot find the one it links to.
       aria-describedby={undefined}
     >
@@ -438,8 +443,8 @@ function MobileNavDrawer({ onNavigate, ...props }: NavProps & { onNavigate: () =
         headerAction={
           <SheetClose asChild>
             {/* size-11: the ≥44px touch target the spec's mobile rules require. */}
-            <Button variant="ghost" size="icon" aria-label="Close menu" className="-mr-2 size-11">
-              <XIcon className="size-[17px]" aria-hidden="true" />
+            <Button variant="ghost" size="icon" aria-label="Close menu" className="absolute top-5 -right-14 size-11 text-accent-strong-foreground hover:bg-accent-strong-foreground/10 hover:text-accent-strong-foreground">
+              <XIcon className="size-[22px]" aria-hidden="true" />
             </Button>
           </SheetClose>
         }
@@ -466,6 +471,7 @@ function SidebarContent({
   version,
   latestVersion,
   taskQuickList,
+  sessionScope,
   toolsMenu,
   projectGroups,
   singleProject,
@@ -479,9 +485,6 @@ function SidebarContent({
   /** The drawer's close button. Absent on desktop, which has nothing to close. */
   headerAction?: ReactNode
 }) {
-  // The lockup follows the RESOLVED theme (the same value ThemeProvider stamps on <html>), not
-  // the OS preference: ThemeToggle can disagree with the OS, and the swap must not need a reload.
-  const { resolvedTheme } = useTheme()
   return (
     <div
       data-slot="sidebar-content"
@@ -491,75 +494,53 @@ function SidebarContent({
       // an `@min-[…]/sidebar:` query and returns when the user drags the column wider.
       className="@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
-      <div className="flex items-center gap-[9px] px-3.5 pt-3.5 pb-2.5">
-        {/* The wordmark lockup IS the brand (issue #143) — no tile-plus-label pairing beside it.
-            Its cropped canvas removes the kit's presentation whitespace, so 34px gives the word
-            a readable painted height without taking navigation space from the 264px drawer. The
-            intrinsic dimensions reserve identical geometry while resolved-theme assets swap.
-            The alt carries the name the old text label used to, so screen readers say
-            "Cezarion" once. */}
-        <img
-          src={brandLockupUrl(resolvedTheme)}
-          alt="Cezarion"
-          width={103}
-          height={34}
-          data-slot="brand-lockup"
-          className="h-[34px] w-auto shrink-0"
-        />
-        {/* With project groups mounted the boot repo/branch is one group header among many —
-            a chip repeating it up here would just be the first group's header said twice. */}
-        {repo && !projectGroups ? (
-          <span
-            data-slot="repo-chip"
-            className="ml-auto truncate font-mono text-[11px] font-medium text-soft-foreground"
-          >
-            {repo.name} / {repo.branch}
-          </span>
-        ) : null}
+      <div className="flex items-center gap-[9px] px-4 pt-5 pb-2">
+        <span
+          data-slot="brand-wordmark"
+          className="text-[23px] leading-normal font-semibold tracking-[-0.03em] text-foreground"
+        >
+          Cezarion
+        </span>
         {headerAction ? (
           <div className={cn('shrink-0', (!repo || projectGroups) && 'ml-auto')}>{headerAction}</div>
         ) : null}
       </div>
 
-      <div className="flex gap-1.5 px-2.5 pt-1 pb-2">
-        <Button asChild variant="contrast" className="relative min-w-0 flex-1 justify-center">
+      <div className="px-4 pb-2">
+        <CommandPaletteHint />
+      </div>
+
+      <div className="flex gap-1.5 px-4 pb-2">
+        <Button asChild variant="ghost" className={cn("relative h-[42px] min-w-0 flex-1 justify-start gap-2.5 px-2.5 font-medium text-muted-foreground", activeTo === "/new" && "bg-[var(--task-brand-selected)] text-accent-text")}>
           {/* A Router Link since R4 Step 1.1: the React /new composer is real, so deliberate
               New task affordances stay inside the SPA. Full document loads of /new (the
               bookmarklet contract) land on the shell like any route (static-ui.ts) — the
               React composer has owned auto-start parity since R4 Step 1.3. */}
           <Link to="/new" onClick={onNavigate}>
-            <PlusIcon className="size-[15px]" aria-hidden="true" />
+            <PlusIcon className="size-[18px]" aria-hidden="true" />
             New task
             {/* Decorative: the `c`-to-create accelerator is registered in the command palette.
                 (⌘N is also bound there, but only the desktop shell receives it — the browser
                 reserves ⌘N for a new window — so the chip advertises the one that always works.) */}
             <kbd
               aria-hidden="true"
-              className="absolute right-2.5 rounded-[5px] border border-b-2 border-contrast-foreground/25 bg-transparent px-[5px] py-px font-mono text-[10.5px] font-medium text-contrast-foreground/60"
+              className="sr-only"
             >
               C
             </kbd>
           </Link>
         </Button>
-        {singleProject ? null : <AddProjectMenu />}
       </div>
 
+
+      {sessionScope ? <div className="shrink-0 px-4 pb-3">{sessionScope}</div> : null}
       {projectGroups ? (
         <>
-          {/* PINNED above the scroller, not the first row inside it. It is about every group
-              rather than a peer of them, and a workspace with enough projects to want this page
-              is exactly the workspace that scrolls it out of sight. Its own bordered band is
-              what stops it reading as an unusually-worded project. Only in a multi-project
-              workspace: with one project the page would be that project's own Tasks table
-              wearing a second name. */}
-          <div className="shrink-0 border-b border-border px-1.5 pt-0.5 pb-2">
-            <AllTasksLink onNavigate={onNavigate} />
-          </div>
           {/* Step 3.3: one collapsible group per registered project — nav + task list per group.
               The whole area scrolls as one (per the sidebar mockup); collapsed groups are one row. */}
           <div
             data-slot="project-groups"
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 pt-1.5 pb-2"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-0 pb-2"
           >
             <SidebarNavigateContext.Provider value={onNavigate}>
               {projectGroups}
@@ -567,8 +548,9 @@ function SidebarContent({
           </div>
         </>
       ) : (
-        <>
-          <nav aria-label="Main" className="px-2.5 py-1.5">
+        <div data-slot="single-project-navigation" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {repo ? <div className="mx-4 mb-1 flex min-h-[55px] items-center gap-2 rounded-md bg-muted px-2 text-[13px] font-semibold"><FolderIcon aria-hidden="true" className="size-[18px] shrink-0 text-muted-foreground" /><span className="min-w-0"><span data-slot="repo-chip" className="block truncate">{repo.name}</span><span className="block truncate font-['IBM_Plex_Mono'] text-[10px] font-normal text-soft-foreground">{repo.branch}</span></span></div> : null}
+          <nav aria-label="Main" className="flex flex-col gap-0.5 px-4">
             {items.map((item) => {
               const isActive = item.to === activeTo
               const Icon = item.icon
@@ -585,16 +567,16 @@ function SidebarContent({
                   className={cn(
                     // h-[34px] is the mockup's desktop row. In the drawer these are touch targets, so
                     // they relax to 44px — the one place the two framings legitimately differ.
-                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[34px]',
-                    isActive && 'bg-muted font-semibold text-foreground'
+                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-xs md:text-[11px] font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
+                    isActive && 'bg-[var(--task-brand-selected)] text-[var(--accent-text)]'
                   )}
                 >
-                  <Icon className="size-4 shrink-0" aria-hidden="true" />
+                  <Icon className="size-[15px] shrink-0 text-soft-foreground" aria-hidden="true" />
                   {item.label}
                   {item.badge === 'inbox-count' && inboxCount ? (
                     <span
                       data-slot="nav-badge"
-                      className="ml-auto rounded-full bg-violet px-1.5 py-px text-[10.5px] font-semibold text-violet-foreground"
+                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10.5px] font-semibold text-accent-strong-foreground"
                     >
                       {inboxCount}
                     </span>
@@ -605,7 +587,7 @@ function SidebarContent({
                     <span
                       data-slot="nav-unread-badge"
                       title={`${unreadCount} unread finished ${unreadCount === 1 ? 'task' : 'tasks'}`}
-                      className="ml-auto rounded-full bg-violet px-1.5 py-px text-[10.5px] font-semibold text-violet-foreground"
+                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10.5px] font-semibold text-accent-strong-foreground"
                     >
                       {unreadCount}
                     </span>
@@ -615,7 +597,7 @@ function SidebarContent({
                       data-slot="nav-update-marker"
                       className="ml-auto flex items-center"
                     >
-                      <span className="size-1.5 rounded-full bg-violet" aria-hidden="true" />
+                      <span className="size-1.5 rounded-full bg-accent-strong" aria-hidden="true" />
                       <span className="sr-only">Skills update available</span>
                     </span>
                   ) : null}
@@ -627,31 +609,28 @@ function SidebarContent({
           {/* The single-project quick-list (Needs you / Working / Recent). */}
           <div
             data-slot="task-quick-list"
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2"
+            className="px-4 pb-2"
           >
             {taskQuickList}
           </div>
-        </>
+        </div>
       )}
 
-      {/* Two deliberate rows, never a wrap (#702): the search bar owns line 1, the chrome controls
-       *  line 2. `flex-col` rather than `flex-wrap` on purpose — the previous single wrapping row
-       *  overflowed the 264px column and silently stranded the theme toggle on a line of its own,
-       *  and a column cannot regress into that no matter what a future control's width is. */}
       <div
         data-slot="sidebar-footer"
-        className="flex flex-col gap-1.5 border-t border-border px-3.5 py-2.5"
+        className="shrink-0 px-4 pt-2 pb-3"
       >
-        <CommandPaletteHint />
-        <div data-slot="sidebar-footer-controls" className="flex items-center gap-2">
+
+        <div data-slot="sidebar-footer-controls" className="flex items-center justify-between gap-1 border-t border-border pt-3">
+          {!singleProject ? <><AllTasksLink onNavigate={onNavigate} /><AddProjectMenu /></> : null}
+          <GlobalSettingsLink onNavigate={onNavigate} />
           {/* SLOT — Step 4.2 mounts the Tools dropdown (aggregate status dot + tool versions) here. */}
           <div data-slot="tools-menu" className="shrink-0">
             {toolsMenu}
           </div>
-          {version ? <VersionChip version={version} latestVersion={latestVersion} /> : null}
-          <GlobalSettingsLink onNavigate={onNavigate} className="ml-auto" />
           <ThemeToggle />
         </div>
+        {version ? <div className="sr-only"><VersionChip version={version} latestVersion={latestVersion} />{latestVersion && latestVersion !== version ? <span className="min-w-0 text-[10px] text-accent-text">Update available</span> : null}</div> : null}
       </div>
     </div>
   )
@@ -673,6 +652,8 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
     <RouterLink
       to="/tasks"
       data-slot="all-tasks-link"
+      aria-label="All tasks"
+      title="All tasks"
       onClick={onNavigate}
       aria-current={isActive ? 'page' : undefined}
       // Reads at the weight of a section header rather than a nav row: full-strength foreground
@@ -680,15 +661,15 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
       // rows are muted. The violet icon is the one spot of accent — the same hue the tag chips
       // and this page's own selected filters use, so the door and the room match.
       className={cn(
-        'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-semibold text-foreground transition-colors hover:bg-muted md:h-9',
+        'selection-row flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted',
         isActive && 'bg-muted',
       )}
     >
       <LayersIcon
-        className={cn('size-4 shrink-0', isActive ? 'text-violet' : 'text-violet/70')}
+        className={cn('size-4 shrink-0', isActive ? 'text-accent-text' : 'text-muted-foreground')}
         aria-hidden="true"
       />
-      All tasks
+      <span className="sr-only">All tasks</span>
     </RouterLink>
   )
 }
@@ -709,7 +690,7 @@ function GlobalSettingsLink({
   onNavigate?: () => void
 }) {
   return (
-    <Button asChild variant="ghost" size="icon" className={cn('size-7', className)}>
+    <Button asChild variant="ghost" size="icon" className={cn('size-9', className)}>
       <RouterLink
         to="/settings/global"
         data-slot="global-settings-link"
@@ -717,7 +698,8 @@ function GlobalSettingsLink({
         title="Global settings"
         onClick={onNavigate}
       >
-        <SettingsIcon className="size-4" aria-hidden="true" />
+        <Settings2Icon className="size-4" aria-hidden="true" />
+        <span className="sr-only">Global settings</span>
       </RouterLink>
     </Button>
   )
@@ -749,13 +731,13 @@ function AddProjectMenu() {
       <DropdownMenuTrigger asChild>
         {/* size-11 in the drawer (touch target), the CTA's height on desktop. */}
         <Button
-          variant="outline"
-          size="icon"
+          variant="ghost"
           aria-label="Add project"
           title="Add project"
-          className="size-11 shrink-0 md:size-9"
+          className="size-9 p-0 text-muted-foreground"
         >
-          <FolderOpenIcon className="size-4" aria-hidden="true" />
+          <FolderPlusIcon className="size-4" aria-hidden="true" />
+          <span className="sr-only">Add project</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
@@ -779,7 +761,7 @@ function AddProjectMenu() {
  * The ⌘K discoverability affordance (Step 4.3): the footer's first row, shaped like a search
  * input — magnifier, a muted `Search…` label, the chord parked on the right. It was a chip
  * cut from the version chip's cloth until #702, where the footer's five chips overflowed the
- * 264px column; giving search the whole line is what makes the remaining controls fit on one
+ * narrow column; giving search the whole line is what makes the remaining controls fit on one
  * row, and it reads as the launcher it is rather than as a keyboard-shortcut footnote.
  *
  * Still a button, not an input: there is no search *here*: clicking opens the palette through
@@ -797,13 +779,13 @@ function CommandPaletteHint() {
       data-slot="command-palette-hint"
       title="Search — command palette (⌘K / Ctrl+K)"
       onClick={() => openCommandPalette()}
-      className="flex w-full items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2 py-1 text-left text-xs font-medium text-soft-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="flex h-11 w-full items-center gap-2 rounded-lg border border-border bg-[var(--task-brand-bg)] px-2.5 text-left text-xs font-normal text-muted-foreground transition-colors hover:border-[var(--composer-border)] hover:text-foreground md:h-10"
     >
-      <SearchIcon className="size-3.5 shrink-0" aria-hidden="true" />
+      <SearchIcon className="size-4 shrink-0" aria-hidden="true" />
       <span className="truncate">Search…</span>
       <kbd
         aria-hidden="true"
-        className="ml-auto shrink-0 rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[10.5px] font-medium text-muted-foreground"
+        className="ml-auto shrink-0 font-sans text-[10px] font-normal text-soft-foreground"
       >
         {commandShortcutHint('k')}
       </kbd>
@@ -832,7 +814,7 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
       data-slot="version-chip"
       data-update-available={updateAvailable ? 'true' : undefined}
       title={updateAvailable ? `v${version} — update available: v${latestVersion}` : `v${version}`}
-      className="flex min-w-0 items-center gap-1 rounded-full border border-border px-1.5 py-px font-mono text-[10px] font-medium text-soft-foreground"
+      className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
     >
       {updateAvailable ? <StatusDot tone="pending" pulse className="size-[5px] shrink-0" /> : null}
       <span className="truncate">v{version}</span>
@@ -841,13 +823,13 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
 }
 
 /** Mobile chrome (<md): the sidebar's replacement. Its menu button opens `MobileNavDrawer`. */
-function MobileTopBar({ title }: { title: string }) {
+function MobileTopBar({ title, repo, onTrigger }: { title: string; repo: RepoChip | null; onTrigger: (button: HTMLButtonElement) => void }) {
   return (
     <header
       data-slot="mobile-top-bar"
       className="row-start-1 border-b border-border bg-card pt-[env(safe-area-inset-top)] md:hidden"
     >
-      <div className="flex h-[44px] items-center gap-2.5 px-3">
+      <div className="flex h-[52px] items-center gap-3 px-3.5">
         {/* A real SheetTrigger rather than an onClick that flips our state: it is what registers
             the button as the dialog's trigger, which is what Radix restores focus to on close —
             with a bare onClick, closing the drawer drops focus on <body>. It also carries the
@@ -857,13 +839,33 @@ function MobileTopBar({ title }: { title: string }) {
             variant="ghost"
             size="icon"
             aria-label="Open menu"
+            onClick={(event) => onTrigger(event.currentTarget)}
             // 44px: the minimum touch target, overriding the 36px desktop icon-button size.
             className="-ml-1.5 size-11"
           >
             <MenuIcon className="size-[17px]" aria-hidden="true" />
           </Button>
         </SheetTrigger>
-        <span className="truncate text-[14.5px] font-semibold">{title}</span>
+        <span className="shrink-0 text-[19px] font-semibold tracking-[-0.03em]">Cezarion</span>
+        {repo ? (
+          <SheetTrigger asChild>
+            <button type="button" data-slot="mobile-project-picker" aria-label={`Switch project: ${repo.name}`}
+              onClick={(event) => onTrigger(event.currentTarget)}
+              className="ml-auto flex h-11 min-w-0 items-center gap-2 text-[13px] focus-visible:outline-2 focus-visible:outline-ring">
+              <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
+              <span className="max-w-28 truncate">{repo.name}</span>
+              <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          </SheetTrigger>
+        ) : null}
+        {title !== 'cezar' ? (
+          <>
+            <span aria-hidden="true" className={cn("text-soft-foreground", repo && "hidden")}>·</span>
+            <span data-slot="mobile-route-title" className={cn("truncate text-[13px] font-medium text-muted-foreground", repo && "sr-only")}>
+              {title}
+            </span>
+          </>
+        ) : null}
         {/* SLOT — the run status dot / kebab land with the thread view (Step R3). */}
         <div data-slot="mobile-status" className="ml-auto flex items-center gap-2" />
       </div>

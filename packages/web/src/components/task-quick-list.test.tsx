@@ -49,10 +49,17 @@ const bucket = (label: string): HTMLElement => {
 const row = (id: string) => document.querySelector(`[data-run-id="${id}"]`)
 const dotOf = (id: string) => document.querySelector(`[data-run-id="${id}"] [data-slot="status-dot"]`)
 
+/** Existing metadata assertions exclude the separate session role/status line. */
+function metadataText(element: Element | null | undefined): string {
+  const copy = element?.cloneNode(true) as Element | undefined
+  copy?.querySelectorAll('[data-slot="session-role-status"]').forEach(node => node.remove())
+  return copy?.textContent ?? ''
+}
+
 /** The rendered text of each row under one bucket header, in order. */
 const rowsIn = (label: string): string[] =>
   [...bucket(label).querySelectorAll('[data-slot="task-row"], [data-slot="group-tile"]')].map((el) =>
-    (el.textContent ?? '').trim()
+    metadataText(el).trim()
   )
 
 afterEach(cleanup)
@@ -68,10 +75,8 @@ describe('TaskQuickList', () => {
     })
 
     const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
-    expect(headers).toEqual(['Needs you', 'Working', 'Recent'])
-    expect(rowsIn('Needs you')).toEqual(['Structured changes endpoint1m'])
-    expect(rowsIn('Working')).toEqual(['Normalize agent-event protocol1m'])
-    expect(rowsIn('Recent')).toEqual(['README parallel-agents tagline1m'])
+    expect(headers).toEqual(['Recent'])
+    expect(rowsIn('Recent')).toEqual(['Structured changes endpoint1m', 'Normalize agent-event protocol1m', 'README parallel-agents tagline1m'])
   })
 
   it('links every row to its task', () => {
@@ -96,7 +101,7 @@ describe('TaskQuickList', () => {
     const link = row('sum')?.querySelector('a[href="/tasks/sum"]') as HTMLElement
     expect(link.textContent).toContain('Catch AuthError in the login handler')
     expect(link.getAttribute('title')).toBe('Catch AuthError in the login handler')
-    expect(row('sum')?.textContent).not.toContain('fix the login bug plz')
+    expect(metadataText(row('sum'))).not.toContain('fix the login bug plz')
     expect(
       within(row('sum') as HTMLElement).getByRole('link', {
         name: 'Open the pull request for Catch AuthError in the login handler',
@@ -121,7 +126,7 @@ describe('TaskQuickList', () => {
     expect(pair?.querySelector('.text-danger')?.textContent).toBe('−7')
     // A sidebar row has no ± column to hold an em dash open for — absence is just absence.
     expect(row('plain')?.querySelector('[data-slot="diff-stat"]')).toBeNull()
-    expect(row('plain')?.textContent).not.toContain('—')
+    expect(metadataText(row('plain'))).not.toContain('—')
   })
 
   it('flags a repointed-worktree diff so the sidebar number explains itself (#751)', () => {
@@ -163,8 +168,8 @@ describe('TaskQuickList', () => {
         ],
       })
       expect(dotOf('w')?.getAttribute('data-tone')).toBe('pending')
-      expect(dotOf('v')?.getAttribute('data-tone')).toBe('violet')
-      expect(dotOf('r')?.getAttribute('data-tone')).toBe('violet')
+      expect(dotOf('v')?.getAttribute('data-tone')).toBe('accent')
+      expect(dotOf('r')?.getAttribute('data-tone')).toBe('accent')
       expect(dotOf('d')?.getAttribute('data-tone')).toBe('success')
       expect(dotOf('f')?.getAttribute('data-tone')).toBe('danger')
 
@@ -222,7 +227,7 @@ describe('TaskQuickList', () => {
       renderList({ runs: [run({ id: 'x', pullRequestUrl: 'https://github.com/o/r/pull/7' })] })
       const chip = document.querySelector('[data-slot="pr-chip"]') as HTMLElement
       expect(chip.closest('a[href^="/tasks/"]')).toBeNull()
-      expect(chip.parentElement?.getAttribute('data-slot')).toBe('task-row')
+      expect(chip.closest('[data-slot="task-row"]')).toBe(row('x'))
     })
 
     it('leads the row and takes the age slot, spelling the number rather than the word "PR" (#788)', () => {
@@ -231,7 +236,7 @@ describe('TaskQuickList', () => {
       })
       // Chip first, then the name: the number is the row's leading identifier, and the age it
       // displaces was the weaker of the two signals.
-      expect(rowsIn('Needs you')).toEqual(['#7Has a PR'])
+      expect(rowsIn('Recent')).toEqual(['#7Has a PR'])
     })
 
     it('carries the issue when no PR exists yet — the number the title prefix was about', () => {
@@ -336,7 +341,7 @@ describe('TaskQuickList', () => {
       expect(title.textContent).toBe('implementing comment threads across the whole thread view')
 
       const diff = rowEl.querySelector('[data-slot="diff-stat"]') as HTMLElement
-      // Hidden by default at the 264px column, back once the column is dragged past 23rem —
+      // Hidden by default at the 232px column, back once the column is dragged past 23rem —
       // the width at which the pair fits without costing the name any of its default budget.
       expect(diff.className).toContain('hidden')
       expect(diff.className).toContain('@min-[23rem]/sidebar:inline')
@@ -345,7 +350,7 @@ describe('TaskQuickList', () => {
 
       // Everything the row paints, in reading order: reference, name, diff, unread marker. No
       // age — the reference took that slot.
-      expect(rowsIn('Recent')).toEqual(['#775implementing comment threads across the whole thread view+59514 −12160'])
+      expect(rowsIn('Recent')).toEqual(['#775implementing comment threads across the whole thread view+59,514 −12,160'])
     })
 
     it('gives the collapsed variant tile the same floor', () => {
@@ -374,8 +379,9 @@ describe('TaskQuickList', () => {
           run({ id: 'new', title: 'New', status: 'running', createdAt: ago(4 * 60_000) }),
         ],
       })
-      expect(row('old')?.textContent).toBe('Old2h')
-      expect(row('new')?.textContent).toBe('New4m')
+      expect(metadataText(row('old'))).toBe('Old2h')
+      expect(Array.from(row('old')!.querySelectorAll('span')).find(el => el.textContent === '2h')?.classList.contains('sr-only')).toBe(false)
+      expect(metadataText(row('new'))).toBe('New4m')
     })
 
     it('shows the queue position instead of an age for queued runs', () => {
@@ -385,8 +391,8 @@ describe('TaskQuickList', () => {
           run({ id: 'q2', title: 'Second', status: 'queued', createdAt: ago(60_000) }),
         ],
       })
-      expect(row('q1')?.textContent).toBe('First#1')
-      expect(row('q2')?.textContent).toBe('Second#2')
+      expect(metadataText(row('q1'))).toBe('First#1')
+      expect(metadataText(row('q2'))).toBe('Second#2')
     })
 
     it('keeps the queue position even when the row has a reference chip', () => {
@@ -404,7 +410,7 @@ describe('TaskQuickList', () => {
           }),
         ],
       })
-      expect(row('qref')?.textContent).toBe('#788queued on an issue#1')
+      expect(metadataText(row('qref'))).toBe('#788queued on an issue#1')
     })
 
     it('still drops the age for a referenced row that is not queued', () => {
@@ -419,7 +425,7 @@ describe('TaskQuickList', () => {
           }),
         ],
       })
-      expect(row('aged')?.textContent).toBe('#9Finished with a PR')
+      expect(metadataText(row('aged'))).toBe('#9Finished with a PR')
     })
   })
 
@@ -468,9 +474,9 @@ describe('TaskQuickList', () => {
       expect(screen.getByRole('button', { expanded: true })).not.toBeNull()
 
       // The letter chip, its own dot, and what actually differs between the variants.
-      expect(row('va')?.textContent).toBe('Aclaude · IN 92.0k · OUT 4.2k · $0.31')
-      expect(row('vb')?.textContent).toBe('Bcodex · IN 40.0k · OUT 1.8k · $0.12')
-      expect(dotOf('va')?.getAttribute('data-tone')).toBe('violet')
+      expect(metadataText(row('va'))).toBe('Aclaude · IN 92.0k · OUT 4.2k · $0.31')
+      expect(metadataText(row('vb'))).toBe('Bcodex · IN 40.0k · OUT 1.8k · $0.12')
+      expect(dotOf('va')?.getAttribute('data-tone')).toBe('accent')
       // Each variant is still its own deep link.
       expect(row('vb')?.querySelector('a')?.getAttribute('href')).toBe('/tasks/vb')
 
@@ -494,14 +500,14 @@ describe('TaskQuickList', () => {
         ),
       })
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(row('va')?.textContent).toBe('Aclaude · $0.31')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31')
     })
 
     it('gates variant token directions and cost independently', () => {
       renderList({ runs: variants(), showTokens: false, showCost: true })
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(row('va')?.textContent).toBe('Aclaude · $0.31')
-      expect(row('vb')?.textContent).toBe('Bcodex · $0.12')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31')
+      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12')
     })
   })
 
@@ -515,10 +521,10 @@ describe('TaskQuickList', () => {
         onTogglePin: vi.fn(),
       })
       const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
-      expect(headers).toEqual(['Pinned', 'Needs you'])
+      expect(headers).toEqual(['Pinned', 'Recent'])
       expect(rowsIn('Pinned')).toHaveLength(1)
       expect(bucket('Pinned').querySelector('[data-run-id="kept"]')).not.toBeNull()
-      expect(bucket('Needs you').querySelector('[data-run-id="kept"]')).toBeNull()
+      expect(bucket('Recent').querySelector('[data-run-id="kept"]')).toBeNull()
     })
 
     it('offers Pin on an ordinary row and Unpin on a pinned one, reporting the state asked for', () => {
@@ -536,11 +542,26 @@ describe('TaskQuickList', () => {
       expect(onTogglePin.mock.calls[1]?.[0]).toMatchObject({ id: 'kept' })
     })
 
+    it('does not keep the pin visible on the current unpinned task', () => {
+      renderList({
+        runs: [run({ id: 'open', status: 'running' })],
+        currentRunId: 'open',
+        onTogglePin: vi.fn(),
+      })
+      const pin = row('open')!.querySelector('[data-slot="pin-toggle"]') as HTMLElement
+      expect(pin.getAttribute('data-pinned')).toBeNull()
+      expect(pin.className).toContain('w-0')
+      expect(pin.className).toContain('opacity-0')
+      expect(pin.className).not.toContain('group-focus-within')
+      expect(pin.className).toContain('group-hover/task-row:opacity-100')
+      expect(pin.className).toContain('data-[pinned=true]:opacity-100')
+    })
+
     it('stays reachable on a device that cannot hover — the drawer has no pointer', () => {
       // The bug this pins: the control was revealed by `group-hover` and focus alone, so on a
       // phone (where this same list IS the drawer) there was no way to reach it at all. The
       // honest axis is the pointer, not the viewport — the drawer keeps the sidebar's fixed
-      // 264px, so a `md:` rule would have been wrong in both directions.
+      // 232px, so a `md:` rule would have been wrong in both directions.
       renderList({ runs: [run({ id: 'plain', status: 'done' })], onTogglePin: vi.fn() })
       const pin = document.querySelector('[data-slot="pin-toggle"]') as HTMLElement
       expect(pin.className).toContain('no-hover:opacity-100')
@@ -723,4 +744,28 @@ it('identifies owned worker rows without nested links or changing ordinary title
     expect(element?.querySelector('a a')).toBeNull()
   }
   expect(screen.getAllByRole('link', { name: /Ordinary/ }).length).toBeGreaterThan(0)
+})
+
+it('places a worker below its parent even when their statuses put them in different buckets', () => {
+  const child = run({ id: 'child', status: 'running', title: 'Check result', delegation: { role: 'worker', permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'child', resourceId: 'child', kind: 'owned-isolated', path: '/child', branch: 'cez/child', baselineSha: 'a'.repeat(40) } } })
+  renderList({ runs: [child, run({ id: 'parent', title: 'Build feature' })] })
+  const family = document.querySelector('[data-session-family="parent"]')
+  expect(family).not.toBeNull()
+  expect(family?.querySelector('[data-run-id="child"]')).not.toBeNull()
+  expect(document.querySelectorAll('[data-run-id="child"]')).toHaveLength(1)
+})
+
+it('keeps an independently pinned worker in Pinned when its parent is recent', () => {
+  const worker = run({ id: 'child', pinned: true, delegation: { role: 'worker', permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'child', resourceId: 'child', kind: 'owned-isolated', path: '/child', branch: 'cez/child', baselineSha: 'a'.repeat(40) } } })
+  renderList({ runs: [run({ id: 'parent' }), worker] })
+  expect(bucket('Pinned').querySelector('[data-run-id="child"]')).not.toBeNull()
+  expect(row('child')?.closest('[data-slot="session-workers"]')).toBeNull()
+})
+
+it('shows both tracker references on the separate badge line', () => {
+  renderList({ runs: [run({ id: 'both', pullRequestUrl: 'https://github.com/o/r/pull/217', referencedIssueUrl: 'https://github.com/o/r/issues/214' })] })
+  const badges = row('both')?.querySelector('[data-slot="session-references"]')
+  expect(badges?.querySelector('[data-slot="pr-chip"]')?.textContent).toBe('#217')
+  expect(badges?.querySelector('[data-slot="issue-chip"]')?.textContent).toBe('#214')
+  expect(row('both')?.querySelector('a a')).toBeNull()
 })

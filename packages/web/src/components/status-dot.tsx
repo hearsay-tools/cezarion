@@ -12,13 +12,13 @@ const statusDotVariants = cva("inline-block size-[7px] shrink-0 rounded-full", {
   variants: {
     tone: {
       success: "bg-success",
-      pending: "bg-pending",
+      pending: "bg-pending-strong",
       danger: "bg-danger",
-      violet: "bg-violet",
+      accent: "bg-accent-strong",
       neutral: "bg-soft-foreground",
     },
     pulse: {
-      true: "animate-pulse",
+      true: "animate-pulse motion-reduce:animate-none",
       false: "",
     },
   },

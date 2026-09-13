@@ -1,20 +1,14 @@
+import './github-layout.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  EyeIcon,
-  PlayIcon,
-  SparklesIcon,
-  WorkflowIcon,
-  XIcon,
-  ZapIcon,
-} from 'lucide-react'
+import { EyeIcon, PlayIcon,  } from 'lucide-react'
+import { CheckIcon, ChevronDownIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Link } from '@/lib/project-router'
 
 import { createRun, putUiState } from '@/api/client'
 import { queryKeys, useUiState } from '@/api/queries'
 import type { GithubItem, Skill, WorkflowDef } from '@open-mercato/cezar-api-client'
+import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client'
 import { EnginePills, engineRunBody, useResolvedEngine, type EnginePick } from '@/components/engine-pills'
 import { chipClass } from '@/components/picker-pill'
 import { Button } from '@/components/ui/button'
@@ -47,7 +41,7 @@ import {
   skillKeywords,
 } from '@/lib/skills'
 import { isSubmitShortcut, submitShortcutHint } from '@/lib/use-submit-shortcut'
-import { cn } from '@/lib/utils'
+import { cn, isHttpUrl } from '@/lib/utils'
 
 import { readFollowupPrompt, writeFollowupPrompt } from './hand-to-agent-draft'
 
@@ -244,29 +238,72 @@ export function HandToAgent({
     )
 
   return (
+    <>
     <section data-slot="gh-hand" className="mt-7 rounded-lg border border-border bg-card p-4">
-      <h3 className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[.04em] text-soft-foreground uppercase">
-        <ZapIcon aria-hidden="true" className="size-3.5 text-violet" />
+      <h3 className="text-xl font-normal text-foreground">
         Hand this to the agent
       </h3>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <WorkflowPicker workflows={workflows} value={workflow} onChange={onWorkflowChange} />
-        <SkillsPicker
+      <label className="gh-field gh-prompt-field"><span>Instructions for the agent</span>
+      <Textarea
+        ref={promptRef}
+        data-slot="gh-custom-prompt"
+        aria-label="Custom prompt"
+        aria-keyshortcuts="Control+Enter Meta+Enter"
+        value={prompt}
+        onChange={(event) => setPrompt(event.target.value)}
+        onKeyDown={submitShortcut}
+        placeholder={`Instructions for the agent… (#${item.number} and its link are always sent)`}
+        className="mt-3 min-h-20 text-[13px]"
+      />
+      </label>
+      <PromptTemplateMenu templates={templates} onInsert={insertPromptTemplate} />
+
+      <div className="gh-handoff-settings">
+        <div className="gh-field"><span>Workflow</span><WorkflowPicker workflows={workflows} value={workflow} onChange={onWorkflowChange} /></div>
+        <div className="gh-field"><span>Skills · select one or more</span><SkillsPicker
           skills={skills}
           skillUsage={uiState.data?.skillUsage}
           selected={validSkills}
           onToggle={toggleSkill}
-        />
+        /></div>
+      {/* Chips and the trigger's count render from `validSkills`, not `selectedSkills`: the run
+          POSTs `validSkills`, so showing a deleted skill here would promise the run a skill it
+          will not use. What the composer shows and what it sends are the same list. */}
+      {validSkills.length > 0 ? (
+        <div data-slot="gh-skill-chips" className="mt-2.5 flex flex-wrap gap-1.5">
+          {validSkills.map((name) => (
+            <button
+              key={name}
+              type="button"
+              data-slot="gh-skill-chip"
+              data-skill={name}
+              onClick={() => toggleSkill(name)}
+              title="Remove this skill"
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-danger/10 hover:text-danger"
+            >
+              {name}
+              <XIcon size={16} aria-hidden="true" className="size-3" />
+            </button>
+          ))}
+        </div>
+      ) : null}
+
         {/* `accounts`: this hand-off posts to `/api/v1/runs`, which takes `agentProfile` — so
             the runner pill may offer the agent's logins as rows (spec 2026-07-29-agent-profiles).
             The Inbox card deliberately does not; its endpoint has no such field yet. */}
-        <EnginePills
+        <div className="gh-engine-fields"><EnginePills
           pick={engine}
           onChange={onEngineChange}
           disabled={start.isPending || !resolved.canRun}
           accounts
         />
+        {resolved.runners.length <= 1 && !resolved.accounts.some(a => a.provider === resolved.runner && a.id !== DEFAULT_AGENT_ACCOUNT_ID) ? <div className="gh-fixed-runner"><span>Runner</span>{resolved.runner}</div> : null}
+        </div>
+        <label className="gh-field"><span>Account</span><select aria-label="Account" value={resolved.account ?? resolved.repoAccount?.[resolved.runner] ?? DEFAULT_AGENT_ACCOUNT_ID} disabled={start.isPending || !resolved.canRun} onChange={event => onEngineChange({ ...engine, account: event.target.value })}>
+          {!resolved.accounts.some(a => a.provider === resolved.runner && a.id === DEFAULT_AGENT_ACCOUNT_ID) ? <option value={DEFAULT_AGENT_ACCOUNT_ID}>Default</option> : null}
+          {resolved.accounts.filter(a => a.provider === resolved.runner).map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+        </select></label>
         {!resolved.providerPending && !resolved.canRun ? (
           <span
             data-slot="gh-provider-gate"
@@ -283,46 +320,13 @@ export function HandToAgent({
             </Link>
           </span>
         ) : null}
-        <PromptTemplateMenu templates={templates} onInsert={insertPromptTemplate} />
       </div>
-
-      {/* Chips and the trigger's count render from `validSkills`, not `selectedSkills`: the run
-          POSTs `validSkills`, so showing a deleted skill here would promise the run a skill it
-          will not use. What the composer shows and what it sends are the same list. */}
-      {validSkills.length > 0 ? (
-        <div data-slot="gh-skill-chips" className="mt-2.5 flex flex-wrap gap-1.5">
-          {validSkills.map((name) => (
-            <button
-              key={name}
-              type="button"
-              data-slot="gh-skill-chip"
-              data-skill={name}
-              onClick={() => toggleSkill(name)}
-              title="Remove this skill"
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-px font-mono text-[11px] font-medium text-foreground transition-colors hover:bg-danger/10 hover:text-danger"
-            >
-              {name}
-              <XIcon aria-hidden="true" className="size-3" />
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      <Textarea
-        ref={promptRef}
-        data-slot="gh-custom-prompt"
-        aria-label="Custom prompt"
-        aria-keyshortcuts="Control+Enter Meta+Enter"
-        value={prompt}
-        onChange={(event) => setPrompt(event.target.value)}
-        onKeyDown={submitShortcut}
-        placeholder={`Instructions for the agent… (#${item.number} and its link are always sent)`}
-        className="mt-3 min-h-20 text-[13px]"
-      />
-
-      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+      <p className="text-[11px] leading-relaxed text-muted-foreground">{item.kind === 'pr' ? 'PR' : 'Issue'} number and link remain attached to the task. Edit the prompt before starting. Cmd/Ctrl+Enter submits; Enter adds a new line.</p>
+    </section>
+      <div data-slot="gh-handoff-actions" className="mt-[22px] flex flex-wrap items-center gap-2.5">
+        {isHttpUrl(item.url) ? <Button asChild variant="outline"><a href={item.url} target="_blank" rel="noopener noreferrer">Open in GitHub</a></Button> : null}
         <Button
-          variant="contrast"
+          variant="primary"
           data-action="gh-run"
           disabled={start.isPending || !resolved.canRun}
           onClick={() => start.mutate()}
@@ -339,20 +343,20 @@ export function HandToAgent({
         {queuedRunId ? (
           <>
             <span data-slot="gh-queued" className="flex items-center gap-1 text-xs font-medium text-success">
-              <CheckIcon aria-hidden="true" className="size-3.5" />
+              <CheckIcon size={16} aria-hidden="true" className="size-3.5" />
               queued
             </span>
             <Link
               to={`/tasks/${queuedRunId}`}
               data-slot="gh-view-run"
-              className="text-xs font-semibold text-violet hover:underline"
+              className="text-xs font-semibold text-accent-text hover:underline"
             >
               View task →
             </Link>
           </>
         ) : null}
       </div>
-    </section>
+    </>
   )
 }
 
@@ -389,9 +393,9 @@ function WorkflowPicker({
           aria-label="Choose a workflow"
           className={cn(chipClass, value && 'border-foreground/60 font-mono text-[11.5px] font-semibold text-foreground')}
         >
-          <WorkflowIcon aria-hidden="true" className="size-3 shrink-0 text-violet" />
+          <WorkflowIcon size={16} aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
           <span className="max-w-44 truncate">{value ?? 'workflow'}</span>
-          <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
+          <ChevronDownIcon size={16} aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={8} className="w-[320px] max-w-[calc(100vw-2rem)] p-0">
@@ -426,7 +430,7 @@ function WorkflowPicker({
                       </span>
                     ) : null}
                     {selected ? (
-                      <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-primary" />
+                      <CheckIcon size={16} aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
                     ) : null}
                   </CommandItem>
                 )
@@ -496,7 +500,7 @@ function SkillsPicker({
         >
           <EyeIcon aria-hidden="true" className="size-3.5" />
         </button>
-        {isSelected ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" /> : null}
+        {isSelected ? <CheckIcon size={16} aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" /> : null}
       </CommandItem>
     )
   }
@@ -519,9 +523,9 @@ function SkillsPicker({
             aria-label="Choose skills"
             className={cn(chipClass, selected.length > 0 && 'border-foreground/60 font-semibold text-foreground')}
           >
-            <SparklesIcon aria-hidden="true" className="size-3 shrink-0 text-violet" />
+            <SparklesIcon size={16} aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
             skills{selected.length > 0 ? ` · ${selected.length}` : ''}
-            <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
+            <ChevronDownIcon size={16} aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" sideOffset={8} className="w-[336px] max-w-[calc(100vw-2rem)] p-0">

@@ -161,7 +161,7 @@ describe('the repo view Changes segment', () => {
     renderAt('/git')
 
     await waitFor(() => expect(document.querySelector('[data-slot="repo-header"]')).not.toBeNull())
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Git')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Git · Changes')
     expect(document.querySelector('[data-slot="branch-chip"]')?.textContent).toContain('main')
 
     const tabs = [...document.querySelectorAll('[data-slot="repo-tabs"] a')].map((a) => ({
@@ -181,7 +181,7 @@ describe('the repo view Changes segment', () => {
     // …including its own bounded scroller, so a long list never drags the diff down with it.
     await waitFor(() => expect(document.querySelector('[data-slot="changes-tree-pane"]')).not.toBeNull())
     const pane = document.querySelector('[data-slot="changes-tree-pane"]') as HTMLElement
-    expect(pane.className).toContain('max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)]')
+    expect(pane.className).toContain('max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)]')
     expect(pane.className).toContain('overflow-y-auto')
     expect(pane.className).toContain('overscroll-contain')
     await waitFor(() => expect(document.querySelectorAll('[data-slot="diff-file"]')).toHaveLength(2))

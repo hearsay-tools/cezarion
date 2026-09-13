@@ -1,0 +1,193 @@
+/* Revised task flow frames 19–22. Scoped to these pages and the plan review page. */
+.task-flow-page { padding: 36px; gap: 22px; }
+.task-flow-page > header h1 { font-size: 28px; font-weight: 500; }
+.task-flow-page > header h1 > svg { display: none; }
+[data-slot="todo-card"], [data-slot="variant-column"] { padding: 24px; gap: 20px; box-shadow: none; border-radius: 12px; }
+[data-slot="todo-summary"] { font-size: 18px; line-height: 1.55; }
+[data-slot="todo-card"] > div:first-child > svg { display: none; }
+[data-slot="todo-meta"] { margin-top: 16px; font-size: 13px; }
+[data-slot="todo-engine"], [data-slot="todo-instructions"] { padding-left: 0; }
+[data-slot="todo-actions"] { align-self: start; }
+[data-slot="todo-actions"] [data-action="todo-run"] { order: 2; }
+[data-slot="todo-card"] button { min-height: 40px; }
+[data-slot="variant-column"] > div:first-child { flex-wrap: wrap; }
+[data-slot="variant-letter"] { width: auto; height: auto; background: none; font: inherit; font-size: 18px; }
+[data-slot="variant-letter"]::before { content: 'Variant '; white-space: pre; }
+[data-slot="variant-token-metrics"] { flex-basis: 100%; margin-left: 0; }
+[data-slot="variant-diffstat"] { white-space: pre-wrap; overflow-wrap: anywhere; background: transparent; padding: 8px 0; color: var(--success); }
+[data-slot="variant-progress"] { max-height: none; mask-image: none; overflow-wrap: anywhere; font-size: 13px; }
+[data-slot="variant-pick"] { align-self: start; }
+[data-slot="variant-diff"] > button { min-height: 52px; font-size: 13px; font-weight: 400; }
+[data-slot="plan-review"] [data-slot="plan-step"] { display: grid; grid-template-columns: 14px 20px minmax(0, 1fr); align-items: start; padding: 16px; gap: 8px; }
+[data-slot="plan-review"] [data-slot="plan-step"] > div { display: contents; }
+[data-slot="plan-review"] [data-slot="plan-step"] > div > div { flex-wrap: wrap; }
+[data-slot="plan-review"] [data-slot="plan-step"] p { grid-column: 1 / -1; }
+[data-slot="plan-step-actions"] { grid-column: 1 / -1; }
+[data-slot="plan-step-actions"] button { width: auto; min-height: 40px; padding: 8px 14px; border: 1px solid var(--border); background: var(--card); font-size: 12px; }
+[data-slot="plan-review"] [data-slot="dialog-title"] { color: var(--accent-text); }
+.automation-editor fieldset { background: var(--card); padding: 24px; border-radius: 12px; min-width: 0; }
+.automation-editor legend { float: left; width: 100%; padding: 0; font-size: 18px; font-weight: 500; margin-bottom: 8px; }
+.automation-editor input:not([type="checkbox"]), .automation-editor textarea { min-height: 44px; background: var(--background); }
+.automation-editor label { line-height: 1.6; }
+.automation-editor label:has(input[type="checkbox"]) { align-items: start; }
+.automation-editor input[type="checkbox"] { margin-top: 5px; }
+[data-route="automations"] article { padding: 24px; }
+[data-route="automations"] article h2 { font-size: 18px; font-weight: 500; }
+.task-flow-page [data-slot="centered-state"] { border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+@media (max-width: 767px) {
+  .task-flow-page { padding: 22px 20px; gap: 20px; }
+  .task-flow-page > header h1 { font-size: 22px; }
+  [data-slot="todo-card"], [data-slot="variant-column"] { padding: 16px; }
+  [data-slot="todo-actions"] { flex-direction: column; align-items: start; }
+  [data-slot="todo-card"] button, [data-slot="variant-column"] button, [data-slot="variant-column"] a { min-height: 48px; }
+  [data-slot="plan-review"] [data-slot="plan-task"] { white-space: normal; }
+  [data-slot="plan-step-actions"] button { min-height: 48px; padding: 8px 12px; }
+  .automation-editor fieldset { padding: 16px; }
+  .automation-editor button { min-height: 48px; }
+}
+.automation-editor fieldset { display: grid; gap: 16px; }
+.automation-editor fieldset > label { clear: both; }
+[data-slot="todo-summary"] { font-weight: 400; }
+[data-slot="todo-card"] { gap: 16px; }
+[data-slot="todo-prompt"] { line-height: 1.55; }
+[data-slot="todo-card"] [data-slot="todo-instructions-toggle"], [data-slot="todo-card"] [data-slot="todo-instructions-hide"] { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; text-decoration: none; }
+
+/* The supplied flow headings use regular Poppins, unlike the task overview title. */
+.task-flow-page > header h1 { font-weight: 400; line-height: 1.5; }
+.task-flow-page > header { gap: 22px; }
+[data-slot="todo-meta"] { margin-top: 16px; line-height: 1.55; }
+[data-slot="todo-actions"] [data-action="todo-run"] { order: 1; }
+[data-slot="todo-actions"] button { font-weight: 500; padding: 10px 16px; }
+[data-slot="todo-instructions-input"] { background: var(--background); }
+[data-slot="todo-instructions"] > label { font-size: 11px; font-weight: 400; }
+[data-route="automations"] > header > div > div { margin-bottom: 22px; }
+[data-route="automations"] > header p { font-size: 13px; }
+.automation-editor legend { font-weight: 400; }
+.automation-editor label { font-size: 11px; font-weight: 400; }
+.automation-editor label:has(input[type="checkbox"]) { font-size: 14px; }
+.automation-editor > div:last-child { gap: 12px; }
+.automation-editor > div:last-child > button[type="submit"] { order: 1; }
+@media (max-width: 767px) {
+  [data-slot="todo-actions"] { flex-direction: column; align-items: start; }
+}
+
+[data-slot="variant-column"] { gap: 16px; }
+[data-slot="variant-letter"] { color: var(--foreground); font-weight: 400; }
+[data-slot="variant-diffstat"] { font-family: inherit; font-size: 15px; line-height: 1.5; padding: 0; }
+[data-slot="variant-column"] > div:has([data-slot="variant-diffstat"]),
+[data-slot="variant-column"] > div:has([data-slot="variant-progress"]) { gap: 16px; }
+[data-slot="variant-column"] > div:has([data-slot="variant-progress"]) > span { font-size: 12px; font-weight: 400; text-transform: none; color: var(--foreground); }
+[data-slot="variant-column"] > div:has([data-slot="variant-diffstat"]) > span { font-size: 10px; font-weight: 400; letter-spacing: normal; }
+[data-slot="variant-column"] > button, [data-slot="variant-column"] > a { min-height: 40px; font-size: 12px; font-weight: 400; padding: 10px 16px; }
+[data-slot="variant-pick"] > svg { display: none; }
+[data-slot="plan-review"] [data-slot="dialog-header"] { padding: 24px 24px 12px; border: 0; gap: 12px; }
+[data-slot="plan-review"] [data-slot="plan-task"] { font-weight: 400; }
+[data-slot="plan-review"] [data-slot="plan-rationale"] { font-size: 13px; }
+[data-slot="plan-review"] [data-slot="plan-steps"] { padding: 0 24px 12px; }
+[data-slot="plan-review"] [data-slot="plan-step"] { padding: 14px; border-radius: 12px; background: var(--background); }
+[data-slot="plan-review"] [data-slot="dialog-footer"] { padding: 12px 24px 24px; border: 0; }
+
+[data-route="automations"] [data-slot="button"], [data-slot="variant-column"] [data-slot="button"] { font-size: 12px; font-weight: 400; min-height: 40px; height: auto; padding: 10px 16px; }
+[data-route="automations"] [data-variant="primary"], [data-slot="variant-pick"], [data-action="todo-run"] { background: var(--accent-strong); color: white; }
+[data-route="automations"] article h2, [data-slot="automation-inline-log"] h2 { font-weight: 400; }
+[data-slot="automation-inline-log"] ol > li { border: 0; border-radius: 0; padding: 0; }
+[data-slot="automation-inline-log"] ol { gap: 16px; }
+[data-slot="automation-inline-log"] li > div:first-child { justify-content: start; }
+[data-slot="automation-inline-log"] li time { margin-left: auto; }
+
+[data-slot="todo-engine"] { gap: 12px; }
+[data-slot="todo-engine"] > button { border-radius: 8px; border-color: var(--border); padding: 10px 12px; color: var(--foreground); font-size: 12px; font-weight: 500; min-height: 44px; }
+[data-slot="todo-engine"] > button > span { text-transform: capitalize; }
+[data-slot="todo-actions"] [data-slot="prompt-template-trigger"] { border-radius: 8px; }
+[data-slot="todo-meta"] > * + *::before { content: '·'; margin-right: 8px; }
+[data-slot="todo-meta"] { column-gap: 8px; }
+[data-slot="todo-source"] { text-decoration: none; }
+[data-slot="todo-card"][data-runnable="false"] [data-slot="todo-summary"] { font-size: 17px; }
+@media (max-width: 767px) {
+  .task-flow-page { padding-top: 20px; gap: 18px; }
+  .task-flow-page > header { gap: 18px; }
+  [data-slot="todo-card"] { gap: 16px; }
+  [data-slot="todo-engine"] > button { padding: 16px; }
+  [data-slot="todo-actions"] button { padding: 16px; font-weight: 500; }
+}
+
+[data-slot="plan-start"] { background: var(--accent-strong); color: white; }
+[data-slot="plan-start"] > svg { display: none; }
+[data-slot="plan-actions"] > button, [data-slot="plan-step-actions"] > button { font-size: 12px; font-weight: 400; min-height: 40px; padding: 10px 16px; }
+[data-slot="plan-review"] [data-slot="plan-step"] p { font-family: 'IBM Plex Mono', var(--font-mono); font-size: 11px; }
+[data-slot="plan-review"] [data-slot="plan-step-actions"] { gap: 12px; }
+@media (max-width: 767px) {
+  [data-slot="plan-actions"] > button, [data-slot="plan-step-actions"] > button { padding: 16px; min-height: 48px; }
+}
+
+[data-inbox-empty="true"] [data-slot="centered-state"] { min-height: 440px; flex: none; border: 0; border-radius: 0; background: transparent; }
+[data-inbox-empty="true"] [data-slot="centered-state"] h2 { font-size: 22px; font-weight: 500; }
+[data-inbox-empty="true"] [data-slot="centered-state"] p { max-width: 460px; font-size: 13px; }
+
+[data-slot="variant-confirm-dialog"], [data-slot="plan-save-dialog"], [data-slot="plan-overwrite-dialog"] { padding: 24px; gap: 18px; border-radius: 12px; }
+[data-slot="variant-confirm-dialog"] [data-slot="alert-dialog-title"],
+[data-slot="plan-save-dialog"] [data-slot="dialog-title"],
+[data-slot="plan-overwrite-dialog"] [data-slot="alert-dialog-title"] { font-size: 18px; font-weight: 400; }
+[data-slot="variant-confirm-dialog"] button, [data-slot="plan-save-dialog"] button, [data-slot="plan-overwrite-dialog"] button { min-height: 40px; font-size: 12px; font-weight: 400; }
+[data-slot="variant-confirm-dialog"] [data-variant="primary"], [data-slot="plan-save-dialog"] [data-variant="primary"], [data-slot="plan-overwrite-dialog"] [data-variant="primary"] { background: var(--accent-strong); color: white; }
+
+@media (max-width: 767px) {
+  [data-slot="todo-engine"] > button::before { content: none; }
+  [data-slot="todo-card"][data-runnable="false"] [data-slot="todo-summary"] { font-size: 17px; }
+  [data-slot="todo-instructions-input"] { min-height: 72px; padding: 16px; }
+}
+[data-slot="plan-review"] [data-slot="plan-badge-skill"] { background: transparent; border: 0; color: inherit; padding: 0; font-family: inherit; font-size: 13px; font-weight: 500; }
+[data-slot="plan-review"] [data-slot="plan-badge-skill"]::before { content: "· "; }
+
+.automation-editor label { color: var(--muted-foreground); }
+.automation-editor label:has(input[type="checkbox"]) { color: var(--foreground); }
+@media (max-width: 767px) {
+  .automation-editor input:not([type="checkbox"]), .automation-editor textarea { font-size: 13px; line-height: 1.5; min-height: 50px; }
+  .automation-editor textarea { min-height: 72px; }
+}
+
+[data-inbox-empty="true"] [data-slot="centered-state-tile"] { width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); box-shadow: none; }
+[data-inbox-empty="true"] [data-slot="centered-state-tile"] svg { width: 32px; height: 32px; }
+@media (max-width: 767px) {
+  [data-slot="variant-column"] [data-slot="button"] { min-height: 50px; }
+  [data-slot="variant-progress"] { line-height: 1.6; }
+}
+
+[data-slot="plan-review"] [data-slot="dialog-header"] > div:first-child { position: relative; min-height: 14px; }
+[data-slot="plan-review"] [data-slot="dialog-header"] > div:first-child > button { position: absolute; right: 0; top: -8px; }
+@media (max-width: 767px) {
+  [data-slot="plan-review"] [data-slot="dialog-header"] { padding: 20px 20px 12px; }
+  [data-slot="plan-review"] [data-slot="plan-steps"] { padding-left: 20px; padding-right: 20px; }
+  [data-slot="plan-review"] [data-slot="plan-actions"] { padding-left: 20px; padding-right: 20px; }
+}
+
+[data-slot="variant-confirm-dialog"] [data-slot="confirm-pick"],
+[data-slot="plan-overwrite-dialog"] [data-slot="alert-dialog-action"] { background: var(--accent-strong); color: white; }
+[data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"],
+[data-route="automations"] > [data-slot="centered-state"],
+[data-route="compare"] > [data-slot="centered-state"] { min-height: 0; flex: none; align-items: start; justify-content: start; padding: 24px; text-align: left; }
+[data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"] > div,
+[data-route="automations"] > [data-slot="centered-state"] > div,
+[data-route="compare"] > [data-slot="centered-state"] > div { max-width: none; align-items: start; gap: 20px; }
+[data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state-tile"],
+[data-route="automations"] > [data-slot="centered-state"] [data-slot="centered-state-tile"],
+[data-route="compare"] > [data-slot="centered-state"] [data-slot="centered-state-tile"] { display: none; }
+[data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"] :is(h1,h2),
+[data-route="automations"] > [data-slot="centered-state"] :is(h1,h2),
+[data-route="compare"] > [data-slot="centered-state"] :is(h1,h2) { font-size: 20px; font-weight: 400; }
+
+/* Design22 keeps review in the page canvas; only Save/Overwrite are modal dialogs. */
+[data-route="new"][data-plan-review="true"] { padding-bottom: 0; }
+[data-slot="plan-page"] { padding: 36px; }
+[data-slot="plan-page-header"] { margin-bottom: 22px; }
+[data-slot="plan-page-header"] h1 { font-size: 28px; font-weight: 400; line-height: 1.5; }
+[data-slot="plan-page-header"] p { margin-top: 22px; color: var(--muted-foreground); font-size: 13px; }
+[data-slot="plan-canvas"] { padding: 36px; border-radius: 12px; background: var(--card-2); }
+[data-slot="plan-review"] { width: 100%; max-width: 680px; margin-inline: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+[data-slot="plan-review"] [data-slot="plan-steps"] { flex: none; overflow: visible; }
+@media (max-width: 767px) {
+  [data-slot="plan-page"], [data-slot="plan-canvas"] { padding: 0; }
+  [data-slot="plan-page-header"] { display: none; }
+  [data-slot="plan-canvas"] { background: transparent; }
+  [data-slot="plan-review"] { max-width: none; }
+}

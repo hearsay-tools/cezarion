@@ -1,4 +1,4 @@
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router'
 
@@ -112,4 +112,16 @@ describe('CommitList', () => {
 
     expect(document.querySelector('[data-slot="repo-commits"]')!.getAttribute('data-virtualized')).toBe('false')
   })
+})
+
+
+it('filters loaded commits by message and restores the history after clearing the query', () => {
+  renderList(3)
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search commit messages' }), { target: { value: 'commit 1' } })
+  expect(document.querySelectorAll('[data-slot="commit-row"]')).toHaveLength(1)
+  expect(screen.getByRole('link', { name: /commit 1/ }).getAttribute('href')).toBe('/git/commits/sha1')
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search commit messages' }), { target: { value: 'missing' } })
+  expect(screen.getByText('No loaded commits match your search.')).toBeTruthy()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search commit messages' }), { target: { value: '' } })
+  expect(document.querySelectorAll('[data-slot="commit-row"]')).toHaveLength(3)
 })

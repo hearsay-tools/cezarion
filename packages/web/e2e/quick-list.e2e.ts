@@ -218,7 +218,7 @@ describe('task quick-list', () => {
   beforeAll(() => {
     browser.goto(`${baseUrl}${scoped('/')}`)
     // The list is async — it renders once `/api/v1/runs` answers.
-    browser.waitForFunction(`document.querySelector('[data-slot="quick-list"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
   })
 
   it('serves the fixture through the real API', async () => {
@@ -230,28 +230,17 @@ describe('task quick-list', () => {
     )
   })
 
-  it('groups the runs under Needs you / Recent, in that order', () => {
-    expect(
-      browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)`)
-    ).toEqual(['Needs you', 'Recent'])
-
-    // The review runs are what wants you; the terminal ones are history. The variant pair is one
-    // tile, not two rows — so "Needs you" holds two things, not three.
-    // Both are `review`, so the tie breaks on recency: the variant group started 30 minutes ago,
-    // the PR review 40 — newest first. The PR row reads title (the auto-SUMMARY, not the raw
-    // fixture title), with its repository reference chip leading and its diff pair trailing.
-    expect(rowsIn('Needs you')).toEqual([
-      'Add skills autocomplete to composer×2',
-      '#396Structured changes endpoint for the git view+128 −14',
-    ])
-    // fix-done recorded a diff on its last turn; fix-failed predates diffStat and shows none.
-    expect(rowsIn('Recent')).toEqual(['README parallel-agents tagline+9 −22h', 'Bump zod to v43h'])
+  it('groups unpinned runs in Recent while retaining independent status rows', () => {
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map(h => h.textContent)`)).toEqual(['Recent'])
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"] [data-slot="task-row"]')].map(row => row.dataset.runId)`)).toEqual(['fix-review-pr', 'fix-done', 'fix-failed'])
+    expect(browser.count('[data-slot="quick-list-bucket"] [data-slot="group-tile"]')).toBe(1)
+    expect(browser.text('[data-slot="quick-list-bucket"]')).toContain('Structured changes endpoint for the git view')
   })
 
   it('keeps selected and hovered sidebar task metadata AA-readable', () => {
     const selectedRow = '[data-slot="task-row"][data-run-id="fix-done"]'
     const hoveredRow = '[data-slot="task-row"][data-run-id="fix-failed"]'
-    const age = (row: string) => `${row} > a > span.tabular-nums`
+    const age = (row: string) => `${row} span.tabular-nums`
 
     browser.goto(`${baseUrl}${scoped('/tasks/fix-done')}`)
     browser.waitForFunction(`document.querySelector('${selectedRow}[data-active="true"]') !== null`)
@@ -275,7 +264,7 @@ describe('task quick-list', () => {
     } finally {
       restoreContrastQaDefaults(browser)
       browser.goto(`${baseUrl}${scoped('/')}`)
-      browser.waitForFunction(`document.querySelector('[data-slot="quick-list"]') !== null`)
+      browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
     }
   })
 
@@ -305,7 +294,7 @@ describe('task quick-list', () => {
       return { review: of('fix-review-pr'), done: of('fix-done'), failed: of('fix-failed') }
     })()`) as Record<string, { tone: string; pulses: boolean }>
 
-    expect(tones.review).toEqual({ tone: 'violet', pulses: true })
+    expect(tones.review).toEqual({ tone: 'accent', pulses: true })
     // Terminal rows are still — the pulse means "transitioning", and these are not.
     expect(tones.done).toEqual({ tone: 'success', pulses: false })
     expect(tones.failed).toEqual({ tone: 'danger', pulses: false })
@@ -315,7 +304,7 @@ describe('task quick-list', () => {
       browser.evaluate(
         `getComputedStyle(document.querySelector('[data-run-id="fix-done"] [data-slot="status-dot"]')).width`
       )
-    ).toBe('7px')
+    ).toBe('10px')
   })
 
   it('links a row to its task, and the PR chip to the PR', () => {
@@ -370,20 +359,23 @@ describe('task quick-list', () => {
 
   it('switches to the archived view, and back', () => {
     browser.goto(`${baseUrl}${scoped('/')}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="quick-list"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
+    browser.click('[data-slot="sidebar"] [aria-label="Tools"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="sidebar-session-scope"]') !== null`)
     expect(textOf('[data-slot="view-tab"][data-view="active"]')).toBe('Active5')
     expect(textOf('[data-slot="view-tab"][data-view="archived"]')).toBe('Archived1')
 
     browser.click('[data-slot="view-tab"][data-view="archived"]')
     browser.waitForFunction(`document.querySelector('[data-bucket="Archived"]') !== null`)
-    expect(rowsIn('Archived')).toEqual(['Sync merged PR issues1d'])
+    expect(browser.text('[data-slot="quick-list-bucket"][data-bucket="Archived"]')).toContain('Sync merged PR issues')
     // The active runs are gone, not merely restyled.
-    expect(browser.count('[data-run-id="fix-review-pr"]')).toBe(0)
+    expect(browser.count(`${ROW}[data-run-id="fix-review-pr"]`)).toBe(0)
 
     browser.screenshot(`${artifactsDir}/quick-list-archived.png`)
 
     browser.click('[data-slot="view-tab"][data-view="active"]')
     browser.waitForFunction(`document.querySelector('[data-run-id="fix-review-pr"]') !== null`)
+    browser.press('Escape')
   })
 })
 
@@ -397,6 +389,20 @@ describe('task quick-list', () => {
  */
 describe('tasks table overview', () => {
   const TABLE_ROW = '[data-slot="task-table-row"]'
+  function showResourceTable() {
+    if (!browser.count('[data-slot="tasks-table"]')) return
+    const visible = browser.evaluate(`document.querySelector('[data-slot="tasks-table"]').checkVisibility()`)
+    if (visible) return
+    browser.click('[data-slot="task-columns-trigger"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="popover-content"]')?.textContent.includes('Resource columns') === true`)
+    browser.click('[data-slot="popover-content"] button:last-child')
+    browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-table"]').getBoundingClientRect().width > 0`)
+  }
+  beforeEach(() => {
+    if (browser.evaluate('innerWidth >= 768') && browser.count('[data-slot="task-columns-trigger"]')) showResourceTable()
+  })
+
 
   beforeAll(() => {
     browser.setViewport(1440, 900)
@@ -482,8 +488,6 @@ describe('tasks table overview', () => {
             const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
             const referenceLabel = [...referenceChip.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
             referenceLabel.textContent = '#1234'
-            const referenceGlyph = referenceChip.querySelector('svg')
-            referenceChip.insertBefore(referenceGlyph.cloneNode(true), referenceChip.firstChild)
             const diff = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"] td[data-column-id="diff"]')
             const [adds, dels] = diff.querySelectorAll('[data-slot="diff-stat"] > span')
             adds.textContent = '+12k'
@@ -593,7 +597,7 @@ describe('tasks table overview', () => {
           expect(facts.memoryLabel, `${theme}/${density}: persisted memory metric`).toBe('peak 1023 MB')
           expect.soft(facts.metricsBeforeNeighbors, `${theme}/${density}: metrics before neighboring content`).toBe(true)
           expect(facts.secondary.slice(0, -1).every(({ width, contained }) => width > 0 && contained), `${theme}/${density}: ${JSON.stringify(facts.secondary)}`).toBe(true)
-          expect(facts.secondary.filter(({ clipsOverflow }) => clipsOverflow).map(({ id }) => id)).toEqual(['tokens', 'memory'])
+          expect(facts.secondary.filter(({ clipsOverflow }) => clipsOverflow).map(({ id }) => id)).toEqual(['tokens'])
           expect(facts.secondary.slice(0, -1).map(({ id, label, accessible, title }) => ({ id, label, accessible, title }))).toEqual([
             { id: 'tokens', label: '999.9k / 888.8k', accessible: 'Input tokens: 999,900; output tokens: 888,800', title: 'Input tokens: 999,900; output tokens: 888,800' },
             { id: 'cost', label: '$123', accessible: '$123.45', title: '$123.45' },
@@ -643,12 +647,16 @@ describe('tasks table overview', () => {
       browser.evaluate(`localStorage.setItem('cez-sidebar-width', '360')`)
       browser.goto(`${baseUrl}${scoped('/')}`)
       browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+      showResourceTable()
       const resized = browser.evaluate(`({
         preference: localStorage.getItem('cez-sidebar-width'),
         sidebarWidth: document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width,
         taskWidth: document.querySelector('${TABLE_ROW} td[data-column-id="task"]').getBoundingClientRect().width,
       })`) as { preference: string; sidebarWidth: number; taskWidth: number }
-      expect(resized).toEqual({ preference: '360', sidebarWidth: 360, taskWidth: 320 })
+      expect(resized.preference).toBe('360')
+      expect(resized.sidebarWidth).toBe(360)
+      // The fixed table can distribute spare width beyond the task column's 320px minimum.
+      expect(resized.taskWidth).toBeGreaterThanOrEqual(320)
     } finally {
       browser.evaluate(`(() => {
         localStorage.removeItem('cez-sidebar-width')
@@ -688,31 +696,37 @@ describe('tasks table overview', () => {
     ).toBe(scoped('/compare/fix-group-1'))
   })
 
-  it('flips both the table and the sidebar from the header tabs — one shared state', () => {
+  it('keeps the table and sidebar archive filters independent', () => {
     browser.click('[data-slot="overview-tab"][data-view="archived"]')
     browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-archived"]') !== null`)
     expect(browser.count(TABLE_ROW)).toBe(1)
-    // The sidebar followed without being touched.
+    // The sidebar keeps showing live runs while the table browses archived history (#211).
+    browser.click('[data-slot="sidebar"] [aria-label="Tools"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="sidebar-session-scope"]') !== null`)
     expect(
       browser.evaluate(
-        `document.querySelector('[data-slot="view-tab"][data-view="archived"]').getAttribute('aria-pressed')`
+        `document.querySelector('[data-slot="view-tab"][data-view="active"]').getAttribute('aria-pressed')`
       )
     ).toBe('true')
-    expect(browser.count('[data-slot="task-row"][data-run-id="fix-review-pr"]')).toBe(0)
+    expect(browser.count('[data-slot="task-row"][data-run-id="fix-review-pr"]')).toBe(1)
 
-    // And back, this time from the sidebar: the table follows.
-    browser.click('[data-slot="view-tab"][data-view="active"]')
-    browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"]') !== null`)
+    browser.click('[data-slot="view-tab"][data-view="archived"]')
     expect(
       browser.evaluate(
-        `document.querySelector('[data-slot="overview-tab"][data-view="active"]').getAttribute('aria-pressed')`
+        `document.querySelector('[data-slot="overview-tab"][data-view="archived"]').getAttribute('aria-pressed')`
       )
     ).toBe('true')
-    expect(browser.count(`${TABLE_ROW}[data-run-id="fix-archived"]`)).toBe(0)
+    expect(browser.count(`${TABLE_ROW}[data-run-id="fix-archived"]`)).toBe(1)
+
+    // Restore both independent controls so the following row-navigation case starts active.
+    browser.click('[data-slot="view-tab"][data-view="active"]')
+    browser.press('Escape')
+    browser.click('[data-slot="overview-tab"][data-view="active"]')
+    browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"]') !== null`)
   })
 
   it('opens the task from a row click', () => {
-    browser.click(`${TABLE_ROW}[data-run-id="fix-done"]`)
+    browser.click(`${TABLE_ROW}[data-run-id="fix-done"] a[href*='/tasks/']`)
     browser.waitForFunction(`location.pathname === '${scoped('/tasks/fix-done')}'`)
     expect(browser.url()).toContain(scoped('/tasks/fix-done'))
     browser.goto(`${baseUrl}${scoped('/')}`)
@@ -722,6 +736,7 @@ describe('tasks table overview', () => {
   it('keeps task metadata AA-readable on normal and hovered rows with visible title focus', () => {
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    showResourceTable()
     try {
       for (const variant of contrastQaVariants) {
         applyContrastQaVariant(browser, variant)
@@ -730,7 +745,7 @@ describe('tasks table overview', () => {
           ? `[data-slot="task-card"][data-run-id="fix-review-pr"]`
           : `${TABLE_ROW}[data-run-id="fix-review-pr"]`
         const metadata = mobile
-          ? `${row} > div:first-child > span.tabular-nums`
+          ? `${row} [data-slot="mobile-task-meta"] > span:last-child`
           : `${row} [data-column-id="started"]`
         const normal = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
         expect(normal.ratio, `${variant.id} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)
@@ -960,7 +975,7 @@ describe('a row under width contention, in a column the user can widen', () => {
       const row = document.querySelector('${ROW_ID}')
       const title = row.querySelector('[data-slot="task-row-title"]')
       const diff = row.querySelector('[data-slot="diff-stat"]')
-      const scroller = document.querySelector('[data-slot="task-quick-list"]')
+      const scroller = row.closest('[data-slot="sidebar-content"]')
       return {
         titleWidth: title.getBoundingClientRect().width,
         // The real CSS, not the class: this is the container query resolving at 264px.
@@ -1064,7 +1079,7 @@ describe('a row under width contention, in a column the user can widen', () => {
       browser.evaluate(
         `Math.round(document.querySelector('[data-slot="mobile-nav-drawer"]').getBoundingClientRect().width)`
       )
-    ).toBe(264)
+    ).toBe(322)
   })
 })
 
@@ -1095,9 +1110,9 @@ describe('empty quick-list', () => {
 
   it('shows the honest empty state — a fresh cezar has nothing to list', () => {
     browser.goto(`${emptyUrl}/p/${emptyProject}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="quick-list"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="project-group-list"]') !== null`)
 
-    expect(browser.text('[data-slot="quick-list"]')).toContain('No tasks yet — describe one.')
+    expect(browser.text('[data-slot="main"]')).toContain('No tasks')
     expect(browser.count(ROW)).toBe(0)
     expect(browser.count('[data-slot="quick-list-bucket"]')).toBe(0)
 

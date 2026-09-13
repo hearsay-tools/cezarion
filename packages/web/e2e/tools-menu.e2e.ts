@@ -78,11 +78,11 @@ describe('tools menu', () => {
     else if (missing.length > 0) expectedTitle += ` · optional: ${missing.join(', ')} not installed`
     expect(browser.evaluate(`document.querySelector('${TRIGGER}').getAttribute('title')`)).toBe(expectedTitle)
 
-    // Aggregate dot: amber only when something genuinely stops a task from starting — a missing
-    // optional tool leaves it green, which is the whole point of the blocker rule.
+    // The approved icon-only trigger adds a dot only for a task-blocking condition.
+    // Optional-tool details remain available in its tooltip and menu.
     expect(
-      browser.evaluate(`document.querySelector('${TRIGGER} [data-slot="status-dot"]').dataset.tone`)
-    ).toBe(blocker ? 'pending' : 'success')
+      browser.evaluate(`document.querySelector('${TRIGGER} [data-slot="status-dot"]')?.dataset.tone ?? null`)
+    ).toBe(blocker ? 'pending' : null)
   })
 
   it('opens a menu listing exactly the tools /api/v1/health reports', () => {

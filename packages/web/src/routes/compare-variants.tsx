@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckIcon, ChevronRightIcon, ScaleIcon, SearchXIcon } from 'lucide-react'
+import { ScaleIcon, SearchXIcon } from 'lucide-react'
+import { CheckIcon, ChevronRightIcon } from '@/components/design-icons'
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router'
 
@@ -10,7 +11,6 @@ import { queryKeys, useGroup, useHealth, useRuns } from '@/api/queries'
 import type { GroupVariant } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { DirectionalUsage } from '@/components/directional-usage'
-import { Pill } from '@/components/pill'
 import { RunDiff } from '@/components/run-diff'
 import {
   AlertDialog,
@@ -33,6 +33,7 @@ import { cn } from '@/lib/utils'
 
 import { Markdown } from './task-thread/markdown'
 import { CompareLoading } from './compare-loading'
+import './task-flows.css'
 
 /**
  * `/compare/:groupId` — the variants compare view (spec 010, §"Task thread" variants bullet),
@@ -74,20 +75,18 @@ export function CompareVariantsRoute() {
   if (group.isError) {
     const notFound = group.error instanceof ApiError && group.error.status === 404
     return (
-      <div data-route="compare" className="flex min-h-full flex-col">
+      <div data-route="compare" className="task-flow-page flex min-h-full flex-col">
         <CenteredState
           icon={notFound ? <SearchXIcon /> : <ScaleIcon />}
           tone={notFound ? 'neutral' : 'danger'}
-          title={notFound ? 'No such variant group' : 'Could not load the variants'}
+          title={notFound ? 'No such variant group' : 'Could not load variants'}
           subtitle={
             notFound
               ? 'No runs share this group id. The group may have been deleted, or a winner was already picked and the others removed.'
               : group.error.message
           }
           actions={
-            <Button asChild variant="outline">
-              <Link to="/">Back to tasks</Link>
-            </Button>
+            <div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link to="/">Back to tasks</Link></Button>{!notFound ? <Button variant="outline" onClick={() => void group.refetch()}>Retry</Button> : null}</div>
           }
         />
       </div>
@@ -137,20 +136,18 @@ function CompareView({
   })
 
   return (
-    <div data-route="compare" className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-5 md:px-6">
+    <div data-route="compare" className="task-flow-page flex w-full flex-col">
       <header className="flex flex-col gap-1">
         <h1 className="flex items-center gap-2 text-xl font-semibold">
-          <ScaleIcon className="size-5 shrink-0 text-violet" aria-hidden="true" />
-          <span className="min-w-0 truncate" title={title}>
-            {title}
-          </span>
+          <ScaleIcon className="size-5 shrink-0 text-accent-icon" aria-hidden="true" />
+          <span>Compare variants</span>
         </h1>
         <p className="text-[13px] text-muted-foreground">
-          {variants.length} variants of the same task, each in its own worktree — pick the diff you
-          want to keep. The others are cancelled and archived, their worktrees and branches removed.
+          {title} · {variants.length} {allTerminal ? 'completed variants with distinct committed diffs.' : 'variants of the same task, each in its own worktree.'}
         </p>
       </header>
 
+      {!allTerminal ? <section role="status" className="rounded-xl border border-border bg-card p-5"><h2 className="text-lg font-normal">Variants are still running</h2><p className="mt-3 text-[13px] text-muted-foreground">Compare progress now. Picking a result is disabled until every variant finishes.</p></section> : null}
       <div
         data-slot="compare-columns"
         className={cn(
@@ -171,14 +168,14 @@ function CompareView({
         ))}
       </div>
 
-      <section aria-label="Full diffs" className="flex flex-col gap-2">
+      <section aria-label="Full diffs" className="flex flex-col gap-[22px]">
         {variants.map((variant) => (
           <VariantDiff key={variant.id} variant={variant} />
         ))}
       </section>
 
       <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent data-slot="variant-confirm-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>Pick variant {confirming?.variant}?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -189,7 +186,7 @@ function CompareView({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep comparing</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               data-slot="confirm-pick"
               onClick={() => {
@@ -197,7 +194,6 @@ function CompareView({
                 setConfirming(null)
               }}
             >
-              <CheckIcon aria-hidden="true" />
               Pick variant {confirming?.variant}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -237,13 +233,11 @@ function VariantColumn({
         <span
           data-slot="variant-letter"
           aria-label={`Variant ${variant.variant}`}
-          className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-violet/15 font-mono text-xs font-semibold text-violet"
+          className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-strong/15 font-mono text-xs font-semibold text-accent-text"
         >
           {variant.variant}
         </span>
-        <Pill dot={attention.tone} pulse={attention.pulse}>
-          {attention.label}
-        </Pill>
+        <span data-slot="variant-status" className="text-lg font-normal">· <span className="capitalize">{attention.label}</span></span>
         {(showTokens && hasDirectionalUsage) || (showCost && cost) ? (
           <span
             data-slot="variant-token-metrics"
@@ -295,6 +289,7 @@ function VariantColumn({
         )}
       </div>
 
+      <Button asChild variant="outline" className="self-start"><Link to={`/tasks/${variant.id}`}>Open task</Link></Button>
       <Button
         data-slot="variant-pick"
         title={
@@ -306,7 +301,7 @@ function VariantColumn({
         onClick={onPick}
       >
         <CheckIcon aria-hidden="true" />
-        Pick this one
+        Pick variant {variant.variant}
       </Button>
     </article>
   )

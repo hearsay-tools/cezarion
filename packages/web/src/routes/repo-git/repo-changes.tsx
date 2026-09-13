@@ -1,4 +1,4 @@
-import { FileDiffIcon, TriangleAlertIcon } from 'lucide-react'
+import { FileDiffIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useMemo, useRef, useState } from 'react'
 
 import { ApiError } from '@/api/client'
@@ -19,7 +19,7 @@ import { AnimatedDiffStat } from '../task-git/git-toolbar'
  * toggles. No git action bar here: committing on the main tree is the CLI's business; the
  * cockpit's commit/push flows belong to task worktrees (task-changes.tsx).
  *
- * Below `md` the same rule as the task tab applies: unified+wrap forced, tree hidden — the
+ * Below `md` the same rule as the task tab applies: unified+wrap forced, tree stacked above the diff — the
  * per-file sticky headers carry the names.
  */
 export function RepoChangesSection() {
@@ -50,9 +50,9 @@ export function RepoChangesSection() {
     <section data-slot="repo-changes" className="flex min-h-0 flex-1 flex-col">
       <div
         data-slot="repo-changes-toolbar"
-        className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border px-4 py-2 md:px-6"
+        className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 px-[18px] py-[22px] md:px-9"
       >
-        <span className="text-xs text-muted-foreground">Uncommitted changes</span>
+        <span className="text-sm">{changes.data ? `${changes.data.stat.files} files changed ·` : 'Uncommitted changes'}</span>
         {changes.data ? <AnimatedDiffStat stat={changes.data.stat} /> : null}
         {/* Same rule as the task toolbar: toggles exist ≥md only — phones force unified+wrap. */}
         <span className="ml-auto hidden items-center gap-1 md:flex">
@@ -61,12 +61,12 @@ export function RepoChangesSection() {
       </div>
 
       {changes.isPending ? (
-        <p data-slot="changes-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-6">
+        <p data-slot="changes-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-9">
           Loading changes…
         </p>
       ) : changes.isError ? (
         <CenteredState
-          icon={refused ? <FileDiffIcon /> : <TriangleAlertIcon />}
+          icon={refused ? <FileDiffIcon size={16} /> : <TriangleAlertIcon size={16} />}
           tone={refused ? 'neutral' : 'danger'}
           heading="h2"
           title={refused ? 'No changes to show' : 'Could not load the changes'}
@@ -74,20 +74,21 @@ export function RepoChangesSection() {
         />
       ) : files.length === 0 ? (
         <CenteredState
-          icon={<FileDiffIcon />}
+          icon={<FileDiffIcon size={16} />}
           tone="neutral"
           heading="h2"
           title="Working tree clean"
           subtitle="No uncommitted changes in the main working tree. Edits show up here as they happen."
         />
       ) : (
-        <div className="flex min-h-0 flex-1 items-start gap-5 px-4 py-4 [--diff-sticky-top:7rem] md:px-6">
+        <div className="flex min-h-0 flex-1 flex-col items-stretch gap-5 md:flex-row md:items-start px-[18px] pb-9 pt-0 [--diff-sticky-top:1rem] md:px-9">
           {/* Same deal as the task Changes tab: sticky AND its own scroller, so a long file list
               never has to drag the diff to the bottom to show its last row. */}
           <aside
             data-slot="changes-tree-pane"
-            className="sticky top-28 hidden max-h-[calc(100dvh_-_var(--diff-sticky-top)_-_1rem)] w-60 shrink-0 overflow-y-auto overscroll-contain md:block lg:w-72"
+            className="md:sticky md:top-4 md:max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] w-full md:w-60 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-3.5 lg:w-[250px]"
           >
+            <h2 className="mb-3 border-b border-border pb-3 text-xs font-semibold">Changed files</h2>
             <ChangesTree root={tree} selected={selected} onSelect={selectFile} />
           </aside>
           <Diff files={files} viewRef={diffRef} mode={effectiveMode} wrap={effectiveWrap} className="min-w-0 flex-1" />

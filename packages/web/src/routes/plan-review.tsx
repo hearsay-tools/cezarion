@@ -1,12 +1,8 @@
+import './task-flows.css'
 import { useQueryClient } from '@tanstack/react-query'
-import {
-  ArrowDownIcon,
-  ArrowUpIcon,
-  GripVerticalIcon,
-  PlayIcon,
-  XIcon,
-} from 'lucide-react'
-import { useState, type DragEvent, type ReactNode } from 'react'
+import { PlayIcon } from 'lucide-react'
+import { GripVerticalIcon, XIcon } from '@/components/design-icons'
+import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from 'react'
 
 import { ApiError, createWorkflow } from '@/api/client'
 import { queryKeys } from '@/api/queries'
@@ -24,7 +20,6 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -38,10 +33,9 @@ import { cn } from '@/lib/utils'
 import { moveStep, planTaskLine, removeStep, stepHint, type PendingPlan } from './new-task-plan'
 
 /**
- * The plan review overlay (spec 008 parity, Implementation Plan step 14): a FULL-SCREEN surface
- * over the app — the spec moved it out of the legacy sidebar because step names and prompts
- * were truncated to uselessness there. Desktop: a roomy centered panel; mobile: an edge-to-edge
- * sheet. Numbered draggable step cards (grip / name / skill·check badges / prompt-or-command
+ * The plan review page (design22): a centered card inside a desktop page canvas, and an
+ * edge-to-edge card below the mobile shell. The draft stays mounted in NewTask while hidden.
+ * Numbered draggable step cards (grip / name / skill·check badges / prompt-or-command
  * hint / ✕), then ▶ Start · Save as chain · Discard.
  *
  * Reordering: HTML5 drag-and-drop, exactly the legacy mechanism — nothing heavier is installed
@@ -75,6 +69,13 @@ export function PlanReview({
 }: PlanReviewProps) {
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [overIndex, setOverIndex] = useState<number | null>(null)
+  const reviewRef = useRef<HTMLElement>(null)
+  const titleId = useId()
+  useEffect(() => {
+    reviewRef.current?.focus({ preventScroll: true })
+    const main = reviewRef.current?.closest('[data-slot="main"]')
+    if (main) main.scrollTop = 0
+  }, [])
 
   const endDrag = () => {
     setDragIndex(null)
@@ -89,36 +90,48 @@ export function PlanReview({
   const empty = plan.steps.length === 0
 
   return (
-    <Dialog open onOpenChange={(open) => (open ? undefined : onDiscard())}>
-      <DialogContent
+    <div data-slot="plan-page">
+      <header data-slot="plan-page-header">
+        <h1>New task / Plan first</h1>
+        <p>Review the proposed chain before launching.</p>
+      </header>
+      <div data-slot="plan-canvas">
+      <section
+        ref={reviewRef}
+        tabIndex={-1}
+        aria-labelledby={titleId}
         data-slot="plan-review"
-        showCloseButton={false}
-        className={cn(
-          // Mobile: an edge-to-edge full-screen sheet (100dvh grid, only the steps scroll).
-          'top-0 left-0 flex h-dvh w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0',
-          // Desktop: the roomy centered panel.
-          'sm:top-1/2 sm:left-1/2 sm:h-auto sm:max-h-[85dvh] sm:max-w-[680px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl',
-        )}
+        className="flex flex-col outline-none"
+        onKeyDown={(event) => {
+          // Nested Save/Overwrite dialogs own Escape; their portal events must not
+          // discard the reviewed plan when the user only meant to close that dialog.
+          if (event.key !== 'Escape' || event.defaultPrevented ||
+            (event.target as HTMLElement).closest('[role="dialog"], [role="alertdialog"]')) return
+          event.preventDefault()
+          onDiscard()
+        }}
       >
-        <DialogHeader className="gap-1 border-b border-border px-5 pt-4 pb-3.5 text-left sm:text-left">
+        <header data-slot="dialog-header" className="flex flex-col gap-1 px-5 pt-4 pb-3.5 text-left">
           <div className="flex items-start justify-between gap-3">
-            <DialogTitle className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            <h2 id={titleId} data-slot="dialog-title" className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
               Proposed chain
-            </DialogTitle>
-            <DialogClose
+            </h2>
+            <button
+              type="button"
+              onClick={onDiscard}
               aria-label="Discard the plan"
               className="-mt-1 -mr-1 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <XIcon aria-hidden="true" className="size-4" />
-            </DialogClose>
+            </button>
           </div>
-          <DialogDescription
+          <p
             data-slot="plan-task"
             title={plan.task}
-            className="truncate text-[13.5px] font-medium text-foreground"
+            className="text-[18px] font-medium text-foreground"
           >
             {planTaskLine(plan.task)}
-          </DialogDescription>
+          </p>
           {plan.fallback ? (
             <p data-slot="plan-fallback" className="text-xs text-soft-foreground italic">
               planner unavailable — single-step plan
@@ -128,7 +141,7 @@ export function PlanReview({
               {plan.rationale}
             </p>
           ) : null}
-        </DialogHeader>
+        </header>
 
         <ol data-slot="plan-steps" className="flex-1 space-y-2 overflow-y-auto px-5 py-4">
           {empty ? (
@@ -165,14 +178,14 @@ export function PlanReview({
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate text-[13px] font-semibold">
+                    <span className="text-[13px] font-medium">
                       {step.name ?? step.id}
                     </span>
                     {step.skill ? (
                       <span
                         data-slot="plan-badge-skill"
                         title="skill"
-                        className="shrink-0 rounded-full bg-violet/15 px-1.5 py-px font-mono text-[10.5px] font-medium text-violet"
+                        className="shrink-0 rounded-full bg-accent-strong/15 px-1.5 py-px font-mono text-[10.5px] font-medium text-accent-text"
                       >
                         {step.skill}
                       </span>
@@ -186,11 +199,11 @@ export function PlanReview({
                       </span>
                     ) : null}
                   </div>
-                  <p className="truncate font-mono text-[11.5px] text-muted-foreground">
+                  <p className="mt-3 whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">
                     {stepHint(step)}
                   </p>
                 </div>
-                <span className="flex shrink-0 items-center">
+                <span data-slot="plan-step-actions" className="flex flex-wrap items-center gap-2">
                   <Button
                     type="button"
                     variant="ghost"
@@ -201,7 +214,7 @@ export function PlanReview({
                     className="size-7 text-muted-foreground"
                     onClick={() => onStepsChange(moveStep(plan.steps, index, index - 1))}
                   >
-                    <ArrowUpIcon aria-hidden="true" className="size-3.5" />
+                    Move up
                   </Button>
                   <Button
                     type="button"
@@ -213,7 +226,7 @@ export function PlanReview({
                     className="size-7 text-muted-foreground"
                     onClick={() => onStepsChange(moveStep(plan.steps, index, index + 1))}
                   >
-                    <ArrowDownIcon aria-hidden="true" className="size-3.5" />
+                    Move down
                   </Button>
                   <Button
                     type="button"
@@ -224,7 +237,7 @@ export function PlanReview({
                     className="size-7 text-muted-foreground hover:text-danger"
                     onClick={() => onStepsChange(removeStep(plan.steps, index))}
                   >
-                    <XIcon aria-hidden="true" className="size-3.5" />
+                    Remove
                   </Button>
                 </span>
               </li>
@@ -241,7 +254,7 @@ export function PlanReview({
             {startUnavailableAction}
           </p>
         ) : null}
-        <div className="flex items-center gap-2 px-5 py-3.5 pb-[max(14px,env(safe-area-inset-bottom))]">
+        <div data-slot="plan-actions" className="flex flex-wrap items-center gap-3 px-6 pt-3 pb-6">
           <Button
             type="button"
             data-slot="plan-start"
@@ -256,12 +269,16 @@ export function PlanReview({
             {starting ? 'Starting…' : 'Start'}
           </Button>
           <SaveAsChain steps={plan.steps} disabled={empty} />
-          <Button type="button" variant="ghost" className="ml-auto" onClick={onDiscard}>
+          <Button type="button" variant="outline" onClick={onDiscard}>
             Discard
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+        <p className="px-6 pb-6 text-xs text-muted-foreground">
+          No steps left? Start is disabled. A planner failure shows a single-step fallback.
+        </p>
+      </section>
+      </div>
+    </div>
   )
 }
 
@@ -330,7 +347,9 @@ function SaveAsChain({ steps, disabled }: { steps: WorkflowStepDef[]; disabled: 
               void save(false)
             }}
           >
+            <label htmlFor="plan-chain-name" className="mb-2 block text-[11px] text-muted-foreground">Chain name</label>
             <Input
+              id="plan-chain-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
               aria-label="Chain name"
@@ -343,7 +362,7 @@ function SaveAsChain({ steps, disabled }: { steps: WorkflowStepDef[]; disabled: 
                 Cancel
               </Button>
               <Button type="submit" disabled={name.trim() === '' || saving}>
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? 'Saving…' : 'Save chain'}
               </Button>
             </DialogFooter>
           </form>
@@ -363,8 +382,8 @@ function SaveAsChain({ steps, disabled }: { steps: WorkflowStepDef[]; disabled: 
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep the existing chain</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void save(true)}>Overwrite</AlertDialogAction>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void save(true)}>Overwrite chain</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

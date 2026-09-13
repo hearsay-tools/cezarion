@@ -1,19 +1,5 @@
-import {
-  BotIcon,
-  BrainIcon,
-  ChevronRightIcon,
-  FileTextIcon,
-  FolderInputIcon,
-  GlobeIcon,
-  ListTodoIcon,
-  LoaderCircleIcon,
-  PaperclipIcon,
-  SearchIcon,
-  SquarePenIcon,
-  SquareTerminalIcon,
-  Trash2Icon,
-  WrenchIcon,
-} from 'lucide-react'
+import { BrainIcon, FileTextIcon, FolderInputIcon, GlobeIcon, LoaderCircleIcon, SquarePenIcon, SquareTerminalIcon } from 'lucide-react'
+import { BotIcon, ChevronRightIcon, ListTodoIcon, PaperclipIcon, SearchIcon, Trash2Icon, WrenchIcon } from '@/components/design-icons'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -117,7 +103,7 @@ export function UserBubble({
       <div
         data-slot="user-bubble"
         data-editing="true"
-        className="max-w-[78%] self-end rounded-2xl rounded-br-md bg-muted px-[15px] py-2.5 text-[13.5px] leading-[1.55] md:max-w-[70%]"
+        className="w-full self-stretch rounded-xl bg-muted px-[15px] py-2.5 text-[13.5px] leading-[1.55] md:px-[18px] md:py-4"
       >
         <textarea
           autoFocus
@@ -150,7 +136,7 @@ export function UserBubble({
             type="button"
             onClick={() => void save()}
             disabled={busy}
-            className="rounded-sm bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground hover:brightness-[0.96] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+            className="rounded-sm bg-action px-2 py-1 text-xs font-semibold text-action-foreground hover:brightness-[0.96] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
           >
             {busy ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : 'Save'}
           </button>
@@ -163,8 +149,9 @@ export function UserBubble({
   return (
     <div
       data-slot="user-bubble"
-      className="group max-w-[78%] min-w-0 self-end rounded-2xl rounded-br-md bg-muted px-[15px] py-2.5 text-[13.5px] leading-[1.55] md:max-w-[70%]"
+      className="group w-full min-w-0 self-stretch rounded-xl bg-muted px-[15px] py-2.5 text-[13.5px] leading-[1.55] md:px-[18px] md:py-4"
     >
+      <p className="mb-2 text-[9px] font-semibold tracking-[0.16em] text-soft-foreground">YOU</p>
       {onEdit || onRemove ? (
         <span
           data-slot="bubble-actions"

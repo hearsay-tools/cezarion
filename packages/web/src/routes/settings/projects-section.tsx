@@ -1,6 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { FoldersIcon, XIcon } from 'lucide-react'
+import { FoldersIcon, XIcon } from '@/components/design-icons'
+
 import { useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router'
+import { AddProjectDialog } from '@/components/add-project-dialog'
 
 import { putWorkspaceConfig } from '@/api/client'
 import {
@@ -107,6 +110,7 @@ function ProjectsPane({
   config: WorkspaceConfigResponse
   registry: ProjectsResponse
 }) {
+  const [adding, setAdding] = useState(false)
   return (
     <div
       data-slot="projects-section"
@@ -138,6 +142,8 @@ function ProjectsPane({
         refreshProjects
       />
       <RegistryTable registry={registry} workspaceMax={config.resources.maxParallel} />
+      <Button className="self-start" onClick={() => setAdding(true)}>Add project</Button>
+      {adding ? <AddProjectDialog open onOpenChange={setAdding} /> : null}
     </div>
   )
 }
@@ -267,7 +273,7 @@ function RegistryTable({
   return (
     <SettingsField
       title="Registered projects"
-      hint={`Every folder cezar has run in, plus the ones added from the GUI. “Tags” group connected repositories — give the API, the web app and the design system a shared “storefront” tag and the global Tasks page can show all three as one piece of work. “Max parallel” caps how many of that project's tasks run at once; the workspace limit (${workspaceMax}) still applies as an overall ceiling, so a per-project value above it has no extra effect until the workspace limit is raised. Removing a project only unregisters it — no files on disk are deleted.`}
+      hint="Connected repositories. Removing a project only unregisters it — no files on disk are deleted."
     >
       {registry.projects.length === 0 ? (
         <p data-slot="projects-empty" className="text-[13px] text-soft-foreground">
@@ -366,6 +372,7 @@ function ProjectRow({
       </td>
       <td className="px-3 py-2 tabular-nums text-soft-foreground">{shortDate(project.addedAt)}</td>
       <td className="px-3 py-2 text-right">
+        {project.status !== 'missing' ? <Button asChild variant="outline" className="mr-2"><Link to={`/p/${encodeURIComponent(project.id)}`}>Open</Link></Button> : null}
         <Button
           type="button"
           variant="ghost"
@@ -478,7 +485,7 @@ export function ProjectTagsEditor({
           data-slot="project-tag"
           // `whitespace-nowrap`: a hyphenated tag (`open-mercato`) was wrapping mid-word into a
           // two-line chip, which read as two tags.
-          className="inline-flex max-w-full items-center gap-1 rounded-full bg-violet/15 py-px pr-1 pl-2 text-[11px] font-medium whitespace-nowrap text-violet"
+          className="inline-flex max-w-full items-center gap-1 rounded-full bg-accent-strong/15 py-px pr-1 pl-2 text-[11px] font-medium whitespace-nowrap text-accent-text"
         >
           {tag}
           <button
@@ -489,7 +496,7 @@ export function ProjectTagsEditor({
             aria-label={`Remove tag ${tag} from ${project.name}`}
             disabled={update.isPending}
             onClick={() => remove(tag)}
-            className="rounded-full p-0.5 hover:bg-violet/25 disabled:opacity-50"
+            className="rounded-full p-0.5 hover:bg-accent-strong/25 disabled:opacity-50"
           >
             <XIcon className="size-3" aria-hidden="true" />
           </button>
@@ -621,7 +628,7 @@ export function ProjectTagsEditor({
               }}
               onMouseEnter={() => setHighlight(index)}
               className={cn(
-                'flex w-full items-center rounded-sm px-2 py-1 text-left text-[12px] font-medium text-violet',
+                'flex w-full items-center rounded-sm px-2 py-1 text-left text-[12px] font-medium text-accent-text',
                 index === highlight && 'bg-muted',
               )}
             >

@@ -9,6 +9,9 @@
  */
 
 @import "tailwindcss";
+@import "@fontsource/poppins/400.css";
+@import "@fontsource/poppins/500.css";
+@import "@fontsource/poppins/600.css";
 
 /* Enter/exit animation utilities (`animate-in`, `fade-in-0`, `zoom-in-95`, `slide-in-from-*`) that the
  * shadcn primitives reference on their Radix `data-[state]` hooks. Tailwind v4 dropped the v3 plugin,
@@ -20,7 +23,7 @@
 /* `no-hover:` — the device cannot hover, so a hover-revealed control would be UNREACHABLE.
  *
  * The pointer, not the viewport, is the honest axis. `md:` was the obvious spelling and it is
- * wrong twice over: the drawer keeps the sidebar's fixed 264px, so a width rule written for the
+ * wrong twice over: the drawer keeps the sidebar's fixed 232px, so a width rule written for the
  * desktop column applies below `md` too, and a tablet in landscape is ≥md while still having no
  * hover at all. `(hover: none)` asks the actual question, and a desktop machine that merely HAS
  * a touchscreen still reports `hover: hover` for its primary pointer, so it keeps the quiet
@@ -36,31 +39,9 @@
 @source "../../../../node_modules/streamdown/dist/*.js";
 
 /* ---------- self-hosted fonts (no CDN: the cockpit must work offline) ----------
- * Variable woff2 subsets vendored from @fontsource-variable/{inter,jetbrains-mono} v5.2.8
- * (SIL OFL 1.1 — see the LICENSE files next to the binaries). Latin + latin-ext only;
- * the unicode-range split keeps latin-ext off the wire for the common case.
+ * Poppins is bundled from @fontsource/poppins and JetBrains Mono is vendored from
+ * @fontsource-variable/jetbrains-mono. Both carry SIL OFL 1.1 licenses.
  */
-
-@font-face {
-  font-family: 'Inter Variable';
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url('../assets/fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
-    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
-@font-face {
-  font-family: 'Inter Variable';
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url('../assets/fonts/inter-latin-ext-wght-normal.woff2') format('woff2-variations');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
-    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
-    U+2C60-2C7F, U+A720-A7FF;
-}
 
 @font-face {
   font-family: 'JetBrains Mono Variable';
@@ -83,56 +64,67 @@
     U+2C60-2C7F, U+A720-A7FF;
 }
 
+@font-face {
+  font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('../assets/fonts/ibm-plex-mono-regular.ttf') format('truetype');
+}
+
 /* ---------- tokens: dark (default) ---------- */
 
 :root {
   color-scheme: dark;
+  --nav-scrim: #0f172a99;
 
-  /* neutral ramp — elevation comes from surface steps, not shadows */
-  --background: #0d0d0d;
-  --foreground: #ffffff;
-  --card: #171717;
-  --card-2: #1c1c1c;
-  /* The sidebar's surface. Its own token because the two themes disagree about what it is:
-   * dark wants the card step, light wants a tint *below* the white card so the rail reads as
-   * chrome rather than page. See the `.light` block. */
-  --sidebar: var(--card);
-  --muted: #262626;
-  --muted-foreground: #a3a3a3;
-  --soft-foreground: #7b7b7b;
-  /* Semantic ink: brand lime remains the dark-theme link, while supporting copy uses the
-   * already-readable muted step instead of the intentionally faint decorative soft step. */
-  --link-foreground: var(--primary);
-  --supporting-foreground: var(--muted-foreground);
-  --border: #262626;
-  --input: #262626;
-  /* Functional boundaries need more contrast than decorative surface separators. */
-  --control-border: #808080;
-  --selection-indicator: var(--supporting-foreground);
-  --contrast: #ebebeb;
-  --contrast-foreground: #171717;
+  /* Role-named family selected by appearance.accent. Cezarion is the sole family today. */
+  --action: #f4c542;
+  --action-foreground: #0b0f17;
+  --accent-strong: #7c3aed;
+  --accent-strong-foreground: #ffffff;
 
-  /* accents — `--accent-lime` is the stable name for the brand lime; `--primary` points at
-   * whichever accent family is active (Settings → Appearance swaps it via [data-accent]). */
-  --accent-lime: #a8f372;
-  --primary: var(--accent-lime);
-  --primary-foreground: #0d0d0d;
-  --violet: #8f86e8;
-  /* Text/icons printed *on* --violet (the Inbox count badge). White in both themes — the violet
-   * never lightens enough for ink to pass AA against it. */
-  --violet-foreground: #ffffff;
-  --ring: #a8f372;
+  /* Cezarion surfaces from design.pen. Elevation comes from surface steps, not shadows. */
+  --surface-base: #0b0f17;
+  --surface-raised: #121722;
+  --surface-muted: #202535;
+  --border-subtle: #2c3142;
+  --text-primary: #f8fafc;
+  --text-secondary: #afb5c5;
+  --text-muted: #8992a6;
+  --accent-text: #d7bdff;
+  --accent-icon: #8f86e8b3;
+  --task-brand-bg: #080f17;
+  --task-brand-selected: #2c1d46;
+  --composer-border: #644393;
+
+  /* Existing semantic names remain the compatibility layer for every screen. */
+  --background: var(--surface-base);
+  --foreground: var(--text-primary);
+  --card: var(--surface-raised);
+  --card-2: var(--surface-muted);
+  --sidebar: var(--surface-raised);
+  --muted: var(--surface-muted);
+  --muted-foreground: var(--text-secondary);
+  --soft-foreground: var(--text-muted);
+  --link-foreground: var(--accent-text);
+  --supporting-foreground: var(--text-secondary);
+  --border: var(--border-subtle);
+  --input: var(--border-subtle);
+  --control-border: #667084;
+  --selection-indicator: var(--accent-text);
+  --contrast: var(--text-primary);
+  --contrast-foreground: var(--surface-raised);
+
+  --ring: var(--accent-text);
 
   /* status */
   --danger: #ef4444;
   --danger-foreground: #ffffff;
-  --success: #10b981; /* emerald-500 */
-  --pending: #fbbf24; /* amber-400 — dots/spinners only, never text */
+  --success: #74d5a1;
+  --pending: var(--action);
   /* Waiting on a PERSON — a reference that needs a reviewer, as opposed to one that is done
    * (violet), finished well (success) or broken (danger). The palette had no blue outside the
    * syntax theme, which is exactly why this reads as its own thing: nothing else in the cockpit
    * is blue. Ink-only, per theme, AA on both backgrounds (10.9:1 here, 6.7:1 on light). */
-  --info: #93c5fd;
+  --info: #83baff;
 
   /* A pull request that will not merge — the OTHER axis of a reference's state, and the reason it
    * needs a hue of its own. Red is already spoken for by "the checks failed" and "a reviewer asked
@@ -142,25 +134,24 @@
    * AA on both backgrounds (8.6:1 on this one, 7.9:1 on --card; 5.2:1 on light). Distinct from
    * `--pending`'s amber by hue AND by glyph: the pending chip carries the pulsing dot, this one a
    * warning triangle. */
-  --conflict: #fb923c;
+  --conflict: #ffaa70;
 
   /* The INK version of pending. `--pending` is a fill colour: amber-400 as text passes against
    * this theme's near-black and fails badly against the light theme's white, which is why the
    * design guardian bans `text-pending` outright. This token is the sanctioned way to write amber
    * words — same hue, per-theme luminance, AA against each theme's background. */
-  --pending-strong: #fbbf24;
+  --pending-strong: var(--action);
 
   /* diff tints */
-  --diff-add-bg: rgba(16, 185, 129, 0.1);
-  --diff-add-strong: rgba(16, 185, 129, 0.28);
+  --diff-add-bg: #132c24;
+  --diff-add-strong: rgba(116, 213, 161, 0.28);
   --diff-del-bg: rgba(239, 68, 68, 0.1);
   --diff-del-strong: rgba(239, 68, 68, 0.3);
 
-  /* brand gradient: lime → yellow → violet */
-  --grad: linear-gradient(135deg, #b4f372 12%, #eefb63 58%, #bc9aff 100%);
+  --grad: linear-gradient(135deg, var(--accent-strong) 12%, var(--accent-text) 52%, var(--action) 100%);
 
   /* type stacks — the woff2 above, then platform fallbacks */
-  --sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sans: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', monospace;
 
   /* reading measure — the max width of the task view's column (header, thread, changes,
@@ -195,38 +186,55 @@
 .light {
   color-scheme: light;
 
-  --background: #ffffff;
-  --foreground: #171717;
-  --card: #ffffff;
-  --card-2: #fbfbfb;
-  --sidebar: #fafafa;
-  --muted: #f7f7f7;
-  --muted-foreground: #5c5c5c;
-  --soft-foreground: #a3a3a3;
-  /* Lime stays available for fills; olive-800 carries its identity as readable ink on white. */
-  --link-foreground: #3f6212;
-  --supporting-foreground: var(--muted-foreground);
-  --border: #ebebeb;
-  --input: #ebebeb;
-  --contrast: #262626;
-  --contrast-foreground: #ffffff;
+  --surface-base: #f8fafc;
+  --surface-raised: #ffffff;
+  --surface-muted: #eef0f5;
+  --border-subtle: #e2e5ee;
+  --text-primary: #0f172a;
+  --text-secondary: #4b5566;
+  --text-muted: #667084;
+  --accent-text: #6d28d9;
+  --accent-icon: #7c3aedcc;
+  --task-brand-bg: #f8fafc;
+  --task-brand-selected: #ede5fc;
+  --composer-border: #c4b5fd;
 
-  --ring: #171717;
+  --background: var(--surface-base);
+  --foreground: var(--text-primary);
+  --card: var(--surface-raised);
+  --card-2: var(--surface-muted);
+  --sidebar: var(--surface-raised);
+  --muted: var(--surface-muted);
+  --muted-foreground: var(--text-secondary);
+  --soft-foreground: var(--text-muted);
+  --link-foreground: var(--accent-text);
+  --supporting-foreground: var(--text-secondary);
+  --border: var(--border-subtle);
+  --input: var(--border-subtle);
+  --control-border: var(--text-muted);
+  --selection-indicator: var(--accent-text);
+  --contrast: var(--text-primary);
+  --contrast-foreground: var(--surface-raised);
+  --ring: var(--accent-text);
 
   /* blue-700, not blue-300 — the same per-theme darkening the syntax blue already makes. */
-  --info: #1d4ed8;
+  --info: #2366b1;
 
   /* amber-700, not amber-400: the dot keeps `--pending` in both themes, but amber ink on white
    * has to come down this far to stay readable (~4.8:1 against #ffffff). */
-  --pending-strong: #b45309;
+  --pending-strong: #996400;
 
   /* orange-700, for the same reason the amber above darkens: orange-400 as ink on white is ~2:1.
    * Far enough from `--pending-strong` (amber-700) to stay a different colour, not a shade. */
-  --conflict: #c2410c;
+  --conflict: #b4490b;
+
+  --success: #187447;
+  --danger: #dc2626;
 
   --shadow-modal: 0 16px 48px 0 rgba(0, 0, 0, 0.12);
 
-  --diff-add-bg: rgba(16, 185, 129, 0.08);
+  --diff-add-bg: #eaf6ef;
+  --diff-add-strong: rgba(24, 116, 71, 0.18);
   --diff-del-bg: rgba(239, 68, 68, 0.07);
 
   /* shiki syntax highlighting (light) */
@@ -239,27 +247,10 @@
   --syn-var: #111827;
 }
 
-/* ---------- appearance: accent + density (Settings → Appearance, redesign R6) ----------
- * `data-accent` / `data-density` land on <html> before first paint (the index.html pre-paint
- * script reads the localStorage mirror; ui-state.json is the authoritative store — see
- * src/lib/appearance.ts). The default (lime / comfortable) is the ABSENCE of the attribute,
- * so these blocks only name the deviations.
+/* ---------- appearance: density + reading width ----------
+ * The sole Cezarion accent is implicit. appearance.accent remains persisted and normalized so
+ * a future second option only needs a token family plus an ACCENT_OPTIONS entry.
  */
-
-/* Violet accent: the `--primary` family swaps onto the existing violet tokens. An accent is
- * exactly a `--primary` family swap — a new accent = a new block here + one entry in
- * ACCENT_OPTIONS (routes/settings/appearance.tsx). */
-:root[data-accent='violet'] {
-  --primary: var(--violet);
-  --primary-foreground: var(--violet-foreground);
-  --link-foreground: var(--primary);
-  --ring: var(--violet);
-}
-
-/* Violet-700 is the light-theme ink partner for the unchanged violet fill. */
-:root.light[data-accent='violet'] {
-  --link-foreground: #6d28d9;
-}
 
 /* Compact density: Tailwind v4's whole numeric spacing scale keys off ONE token (`--spacing`,
  * default 0.25rem — every `p-4`/`gap-2`/`h-14` is `calc(var(--spacing) * n)`), so shrinking it
@@ -309,18 +300,18 @@
    * transparent border belongs to the button, so even its edges toggle the switch. */
   [role='switch'] {
     box-sizing: content-box;
-    min-width: 32px;
-    min-height: 18px;
-    width: 32px;
-    height: 18px;
-    border-width: 13px 6px;
+    min-width: 40px;
+    min-height: 24px;
+    width: 40px;
+    height: 24px;
+    border-width: 10px 2px;
     border-color: transparent;
     background-clip: padding-box;
     box-shadow: none;
   }
   [data-slot='switch-thumb'] {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
   }
 }
 
@@ -379,10 +370,12 @@
   --color-contrast: var(--contrast);
   --color-contrast-foreground: var(--contrast-foreground);
 
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-violet: var(--violet);
-  --color-violet-foreground: var(--violet-foreground);
+  --color-action: var(--action);
+  --color-action-foreground: var(--action-foreground);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-strong-foreground: var(--accent-strong-foreground);
+  --color-accent-text: var(--accent-text);
+  --color-accent-icon: var(--accent-icon);
   --color-ring: var(--ring);
 
   --color-danger: var(--danger);
@@ -528,11 +521,11 @@
 @keyframes ghost-type {
   from {
     width: 0;
-    border-right-color: var(--primary);
+    border-right-color: var(--action);
   }
   to {
     width: calc(var(--n) * 1ch);
-    border-right-color: var(--primary);
+    border-right-color: var(--action);
   }
 }
 @keyframes ghost-caret-off {
@@ -631,3 +624,120 @@
   background: var(--selection-indicator);
   pointer-events: none;
 }
+
+/* design.pen 1A–1D: prompt, agent choices, execution panel and submission are
+ * separate surfaces. Mobile follows the document order shown in the frame. */
+.new-task-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+.new-task-editor { grid-row: 1; }
+.new-task-editor textarea { min-height: 132px; padding: 16px 20px; font-size: 17px; }
+.new-task-composer [data-slot='composer-agent-options'] { grid-row: 3; }
+.new-task-composer [data-slot='composer-execution-panel'] { grid-row: 4; }
+.new-task-submission { display: contents; }
+.new-task-submission [data-slot='composer-footer-end'] { grid-row: 2; width: 100%; }
+.new-task-submission [data-slot='composer-actions'] { grid-row: 5; width: 100%; }
+.new-task-submission kbd { display: none; }
+.new-task-submission [data-slot='mode-seg'] { display: flex; width: 100%; height: 48px; }
+.new-task-submission [data-slot='mode-seg'] button { flex: 1; height: 42px; }
+.new-task-submission [data-slot='mode-seg'] [aria-checked='true'] {
+  background: var(--task-brand-selected); color: var(--accent-text);
+  border: 1px solid var(--composer-border); box-shadow: none;
+}
+.new-task-agent-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.new-task-agent-options > * { min-width: 0; }
+.new-task-agent-options [data-slot='model-pill'] { grid-column: 1 / -1; grid-row: 1; min-height: 60px; }
+.new-task-agent-options button { width: 100%; justify-content: flex-start; min-height: 44px; }
+.new-task-run-settings { display: flex; flex-direction: column; gap: 0; }
+.new-task-run-settings > * { min-height: 48px; }
+.new-task-run-settings > button { width: 100%; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
+.new-task-run-settings [data-slot='variants-pill'], .new-task-run-settings [data-slot='base-pill'] { border: 0; color: var(--accent-text); }
+.new-task-editor [data-slot='composer-footer-start'] { gap: 8px; padding: 8px 12px 12px; }
+.new-task-editor [data-slot='composer-footer-start'] button { min-height: 44px; }
+@media (min-width: 1280px) {
+  .new-task-composer { grid-template-columns: minmax(0, 1fr) 330px; column-gap: 24px; }
+  .new-task-editor { grid-column: 1; grid-row: 1; }
+  .new-task-editor textarea { min-height: 180px; }
+  .new-task-composer [data-slot='composer-agent-options'] { grid-column: 1; grid-row: 2; }
+  .new-task-composer [data-slot='composer-execution-panel'] { grid-column: 2; grid-row: 1 / 4; }
+  .new-task-submission { display: flex; grid-column: 1; grid-row: 3; gap: 18px; }
+  .new-task-submission [data-slot='composer-actions'] { width: auto; }
+}
+@media (max-width: 767px) {
+  .new-task-editor { border: 0; border-radius: 0; background: transparent; }
+  .new-task-editor textarea { padding-inline: 0; }
+  .new-task-editor [data-slot='composer-footer-start'] { padding-inline: 0; }
+  .new-task-editor > p { padding-inline: 0; }
+  .new-task-composer [data-slot='execution-options'] { border: 0; }
+}
+.new-task-agent-options button { border-radius: 10px; padding: 10px; background: var(--card); }
+.new-task-agent-options button > svg:last-child { margin-left: auto; }
+.new-task-agent-options [data-slot='runner-pill']::before { content: 'Runner'; font-size: 10px; color: var(--muted-foreground); }
+.new-task-editor [data-slot='prompt-template-trigger'], .new-task-editor [data-slot='source-pill'] { border-radius: 9px; padding-inline: 14px; font-family: inherit; }
+.new-task-submission [data-slot='composer-footer-end'] { flex: 1; margin-right: 0; }
+.new-task-submission [data-slot='composer-footer-end'] > .contents { display: flex; width: 100%; }
+.new-task-submission [data-slot='composer-actions'] { min-width: 170px; }
+.new-task-submission { margin-left: 0; width: 100%; }
+.new-task-editor [data-slot='composer-footer-start'] button[aria-label='Start dictation'],
+.new-task-editor [data-slot='composer-footer-start'] button[aria-label='Attach files'] { border: 1px solid var(--border); border-radius: 9px; width: 44px; padding: 0; }
+@media (max-width: 767px) {
+  .new-task-editor:focus-within { box-shadow: none; }
+  .new-task-editor textarea { min-height: 96px; }
+}
+/* Approved current193 sidebar: title-aligned state dot, tracker-only second row. */
+[data-slot='task-row'] { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 4px; align-items: start; padding: 8px; border-radius: 8px; }
+[data-slot='task-row'] > a:not([data-slot]) { grid-column: 2; grid-row: 1; padding: 0; min-height: 17px; }
+[data-slot='task-row'] > [data-slot='status-dot'] { grid-column: 1; grid-row: 1; margin-top: 4px; width: 10px; height: 10px; }
+[data-slot='task-row-title'] { white-space: normal; min-width: 0; font-size: 12px; line-height: 17px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+[data-slot='session-references'] { grid-column: 2; grid-row: 2; }
+[data-slot='task-row'] > button { grid-column: 3; grid-row: 1 / span 2; }
+
+.new-task-composer [data-slot='composer-feedback'] { grid-row: 6; }
+@media (min-width: 1280px) {
+  .new-task-composer [data-slot='composer-feedback'] { grid-row: 4; grid-column: 1; }
+}
+@media (max-width: 767px) {
+  .new-task-composer { gap: 10px; }
+  .new-task-editor textarea { padding-block: 0; }
+  .new-task-editor > div:has([data-slot='composer-footer-start']) { padding: 0; }
+  .new-task-editor [data-slot='composer-footer-start'] { padding-block: 8px; }
+  .new-task-composer [data-slot='execution-options'] > div { padding: 0; }
+  .new-task-composer [data-slot='execution-options'] summary { padding-inline: 0; }
+  .new-task-agent-options button { border-color: var(--border); }
+}
+
+.new-task-editor textarea { color: var(--muted-foreground); }
+
+/* The approved navigation selection uses its surface, while focus remains outlined. */
+[data-slot='sidebar-content'] .selection-row::before { content: none; }
+
+[data-slot='sidebar-footer-controls'] svg { width: 17px; height: 17px; }
+[data-slot='sidebar-footer-controls'] [data-design-icon='chevron-down'] { width: 10px; height: 10px; }
+[data-slot='session-references'] > [data-slot$='chip'] { border-radius: 6px; border-color: currentColor; font-weight: 400; }
+[data-slot='session-references'] svg { width: 12px; height: 12px; }
+
+[data-slot='task-row'][data-active='true'] [data-slot='task-row-title'] { color: var(--accent-text); }
+
+/* Unpinned sessions expose Pin on hover/focus; mobile also has the task action menu. */
+@media (hover: hover) {
+  [data-slot='task-row'] > [data-slot='pin-toggle']:not([data-pinned]) { min-width: 0; min-height: 0; }
+}
+
+/* The mobile design reserves 20px of layout for its menu glyph, with a 44px hit area. */
+[data-slot='mobile-top-bar'] { background: var(--task-brand-bg); }
+[data-slot='mobile-top-bar'] button[aria-label='Open menu'] {
+  position: relative; width: 20px; min-width: 20px; margin-left: 0;
+}
+[data-slot='mobile-top-bar'] button[aria-label='Open menu']::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -12px; right: -12px;
+}
+[data-slot='mobile-top-bar'] > div { height: 51px; }
+/* Leading activity dots use the readable accent; unread completions keep brand purple. */
+[data-slot='task-row'] > [data-slot='status-dot'][data-tone='accent'] { background-color: var(--accent-text); }
+
+[data-slot='mobile-status']:empty { display: none; }
+/* The menu's 44px hit region needs the source's fixed 14px screen gutter even
+   when density scales spacing tokens; ultra's 10.5px gutter clips its left edge. */
+[data-slot='mobile-top-bar'] > div { padding-inline: 14px; }

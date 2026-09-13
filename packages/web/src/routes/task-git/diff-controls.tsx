@@ -1,4 +1,5 @@
-import { GitBranchIcon, WrapTextIcon } from 'lucide-react'
+import { CircleHelpIcon, WrapTextIcon } from 'lucide-react'
+import { GitBranchIcon, Columns2Icon } from '@/components/design-icons'
 
 import type { DiffMode } from '@/components/diff'
 import { Button } from '@/components/ui/button'
@@ -27,7 +28,7 @@ export function DiffViewToggles({
         data-slot="diff-mode-toggle"
         role="group"
         aria-label="Diff layout"
-        className="flex items-center rounded-md border border-border p-0.5"
+        className="flex items-center gap-2"
       >
         <ModeButton current={mode} value="unified" onModeChange={onModeChange} />
         <ModeButton current={mode} value="split" onModeChange={onModeChange} />
@@ -39,7 +40,7 @@ export function DiffViewToggles({
         aria-pressed={wrap}
         aria-label="Wrap long lines"
         title="Wrap long lines"
-        className={cn(wrap && 'bg-muted text-foreground')}
+        className={cn('size-11', wrap && 'bg-muted text-foreground')}
         onClick={() => onWrapChange(!wrap)}
       >
         <WrapTextIcon aria-hidden="true" />
@@ -65,10 +66,11 @@ function ModeButton({
       aria-pressed={active}
       onClick={() => onModeChange(value)}
       className={cn(
-        'rounded-[5px] px-2 py-0.5 text-[11px] font-medium capitalize',
-        active ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+        'inline-flex items-center gap-2 min-h-11 rounded-lg border border-border bg-card px-3 text-xs font-medium capitalize',
+        active ? 'border-accent-text/40 text-accent-text' : 'text-muted-foreground hover:text-foreground',
       )}
     >
+      {value === 'unified' ? <CircleHelpIcon aria-hidden="true" className="size-4" /> : <Columns2Icon size={16} aria-hidden="true" className="size-4" />}
       {value}
     </button>
   )
@@ -81,7 +83,7 @@ export function BranchChip({ branch }: { branch: string }) {
       data-slot="branch-chip"
       className="flex min-w-0 items-center gap-1 rounded-sm border border-border bg-card px-1.5 py-px font-mono text-[11px] font-medium"
     >
-      <GitBranchIcon aria-hidden="true" className="size-3 shrink-0" />
+      <GitBranchIcon size={16} aria-hidden="true" className="size-3 shrink-0" />
       <span className="truncate">{branch}</span>
     </span>
   )
