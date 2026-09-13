@@ -424,6 +424,25 @@ describe('follow-up ContinueAction runner/model selection (#401)', () => {
     expect(screen.queryByRole('button', { name: 'Runner' })).toBeNull()
   })
 
+  it('keeps read-only Runner chrome on a single-backend host (#272)', async () => {
+    serve({
+      ...HEALTH_MULTI,
+      checks: [
+        { name: 'claude', available: true },
+        { name: 'git', available: true },
+      ],
+    })
+    renderAction(makeRun())
+    await screen.findByRole('button', { name: 'Model' })
+    expect(screen.queryByRole('button', { name: 'Runner' })).toBeNull()
+    const runner = document.querySelector('[data-slot="session-runner-value"]') as HTMLElement
+    expect(runner).not.toBeNull()
+    expect(runner.tagName).toBe('SPAN')
+    expect(runner.textContent).toMatch(/^Runner \u00b7 /)
+    expect(runner.querySelector('[data-design-icon="terminal"]')).not.toBeNull()
+    expect(runner.querySelector('[data-design-icon="chevron-down"]')).toBeNull()
+  })
+
   it('preserves session affinity when the current runner remains connected', async () => {
     serve(
       HEALTH_MULTI,

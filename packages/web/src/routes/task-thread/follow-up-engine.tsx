@@ -193,7 +193,19 @@ export function useContinueAction(run: ApiRun): ContinueAction {
               }
             }}
           />
-        ) : <span data-slot="session-runner-value">{runner}</span>}
+        ) : (
+          <PickerPill
+            icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+            fieldLabel
+            readOnly
+            slot="session-runner-value"
+            ariaLabel="Runner"
+            label={runner}
+            value={runner}
+            onPick={() => {}}
+            options={[{ value: runner, label: runner }]}
+          />
+        )}
         <PickerPill
           icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
           fieldLabel
