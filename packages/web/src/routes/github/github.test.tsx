@@ -1314,11 +1314,18 @@ describe('GitHub handoff field chrome (#243)', () => {
   })
 
   it('keeps a Model label on the picker', () => {
-    const before = cascadeCss(css, [
+    const unscoped = css.replace(/@media[^{]+\{(?:[^{}]|\{[^}]*\})*\}/g, '')
+    const before = cascadeCss(unscoped, [
       '.gh-engine-fields > button::before',
       ".gh-engine-fields [data-slot='model-pill']::before",
     ])
     expect(before.content).toBe("'Model'")
+  })
+
+  it('drops the Model ::before on md+ where PickerPill fieldLabel is visible', () => {
+    expect(css).toMatch(
+      /@media \(min-width:\s*768px\)\s*\{[^}]*\[data-slot='model-pill'\]::before\s*\{[^}]*content:\s*none/,
+    )
   })
 
   it('gives the prompt textarea its own bordered typing area', () => {

@@ -81,6 +81,9 @@
 .gh-prompt-field [data-slot='gh-custom-prompt'] { min-height: 96px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
 .gh-engine-fields [data-slot='model-pill'] { margin-top: 0; justify-content: flex-start; }
 .gh-engine-fields [data-slot='model-pill']::before { content: 'Model'; position: static; margin-right: 4px; }
+@media (min-width: 768px) {
+  .gh-engine-fields [data-slot='model-pill']::before { content: none; }
+}
 .gh-field [data-slot='gh-workflow-trigger'] { font-family: inherit; font-weight: 400; }
 .gh-field [data-slot='gh-workflow-trigger'] > svg:first-child { display: none; }
 .gh-field [data-slot='gh-workflow-trigger'] > svg:last-child { order: -1; margin-left: 0; }
