@@ -45,7 +45,8 @@
   [data-route='new'] [data-slot='execution-options'] summary::before { content: ''; width: 8px; height: 8px; margin: 4px; border-top: 1.5px solid currentColor; border-left: 1.5px solid currentColor; transform: rotate(45deg); }
   [data-route='new'] [data-slot='execution-options']:not([open]) summary::before { transform: rotate(225deg); }
   [data-route='new'] [data-slot='execution-options'] summary > span:first-of-type { font-size: 12px; font-weight: 400; color: var(--muted-foreground); }
-  [data-route='new'] .new-task-agent-options [data-slot='model-pill'] { background: var(--background); border-color: transparent; }
+  /* #267: keep the model pill bordered like Runner and Effort; the Model label stays visible. */
+  [data-route='new'] .new-task-agent-options [data-slot='model-pill'] { background: var(--background); }
 }
 
 /* The current source uses a single 44px row for model, runner and effort. */
@@ -62,7 +63,6 @@
 }
 
 @media (max-width: 767px) {
-  [data-route='new'] .new-task-model-label > span > span:first-child,
   [data-route='new'] [data-slot='effort-pill'] > span > span > span { display: none; }
   [data-route='new'] .new-task-agent-options [data-slot='runner-pill']::before { content: none; }
   [data-route='new'] [data-slot='execution-options'] { background: transparent; }
