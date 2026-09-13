@@ -293,8 +293,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   });
   for (const phase of ['registered', 'parked', 'wake-pending'] as const) {
     it(`restart reconciles ${phase} before generic waiting settlement and deduplicates recovery`, async () => {
-      const p = await parent(); const w = await worker(p.id);
+      const p = await parent();
       await until(() => store.getRun(p.id)?.status === 'waiting');
+      const w = await worker(p.id);
       const wait: WorkerWait = { id: randomUUID(), workerIds: [w.id], phase, deadline: new Date().toISOString(), outcomes: [] };
       const delegation = store.getRun(p.id)!.delegation!;
       if (delegation.role !== 'root') throw Error('fixture');
@@ -361,7 +362,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(manager.continueRun(p.id).ok).toBe(false);
     expect(store.readEvents(p.id).filter(e => e.type === 'human-input-delivered')).toEqual([]);
     expect(manager.continueRun(p.id, { text: 'Vitest' }).ok).toBe(true);
-    await until(() => store.getRun(p.id)?.status === 'waiting');
+    await until(() => store.getRun(p.id)?.activity === 'monitoring');
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
     expect(store.readEvents(p.id).filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
   });

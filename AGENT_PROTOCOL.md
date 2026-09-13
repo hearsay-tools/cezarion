@@ -582,7 +582,9 @@ An available `diff.path` names a JSON `{ result, diffSnapshot }` document, **not
 raw patch**. Latest settled collection is required for parent readiness; running
 or obsolete collected output cannot satisfy it. Collection is observation, not
 integration. Automatic completion wakes for inspection/collection without silently
-accepting review; timeout/repeated premature completion retains attention. Human
+accepting review. Live-worker parents park as monitoring after markerless turns or
+timeout/repeated premature completion, using the existing capped monitoring wakes.
+Settled but uncollected results still retain attention on repeated completion. Human
 Finish refuses unmet readiness. Continue a reviewing parent before its worker.
 
 Review and deliberately integrate desired worker commits with Git before cleanup.
