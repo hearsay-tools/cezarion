@@ -756,6 +756,25 @@ describe('picker data flows', () => {
       expect(visible).toHaveLength(0)
     })
   })
+
+  it('typing an exact skill name ranks that skill first even when a weaker hit is Most used (#255)', async () => {
+    serve({
+      skills: [
+        { name: 'om-code-review', description: 'Review a PR', body: '', path: '/p/om-code-review.md', source: 'ai' },
+        { name: 'review', description: 'The review skill', body: '', path: '/g/review.md', source: 'global' },
+      ],
+      uiState: { skillUsage: { 'om-code-review': 999 } },
+    })
+    renderNewTask()
+    await pillReady()
+    fireEvent.click(sourcePill())
+    const input = await screen.findByPlaceholderText('search skills & workflows…')
+    fireEvent.change(input, { target: { value: 'review' } })
+    await waitFor(() => {
+      const skills = [...document.querySelectorAll('[data-slot="source-option"][data-source-kind="skill"]')]
+      expect(skills.map((o) => o.getAttribute('data-source-ref'))).toEqual(['review', 'om-code-review'])
+    })
+  })
 })
 
 // #163: use the actual Radix/cmdk focus path, including a dismissed keyboard whose

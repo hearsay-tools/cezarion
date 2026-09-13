@@ -241,20 +241,28 @@ export function queryScore(name: string, description: string | null | undefined,
   return total
 }
 
-/** A heavily-used skill may win among comparably-scoring matches (#519), but never outrank a
- *  clearly better name match: the bonus is bounded to `MOST_USED_LIMIT * USAGE_BONUS_STEP`,
- *  well under the `NAME_MATCH_BONUS` gap between match tiers. */
-const USAGE_BONUS_STEP = 0.5
+/** Sum of per-word `matchScore`s against the name only — 0 when the query never hits the
+ *  name. Primary rank key (#255): exact > prefix > word-boundary > substring > fuzzy, and
+ *  any name hit above a description-only hit. Usage must not jump these tiers. */
+function nameQueryScore(name: string, query: string): number {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  let total = 0
+  for (const word of words) total += matchScore(name, word)
+  return total
+}
 
-/** Filter a name/description list down to matches and rank them by match quality (#484),
+/** Filter a name/description list down to matches and rank them by match quality (#484/#255),
  *  preserving the incoming order for an empty query and for equally-scored ties — so a
- *  caller's most-used-first or project-first order survives. When `usage` is given (#519), a
- *  bounded usage bonus is folded into the score and the usage count breaks remaining ties, so
- *  a typed query no longer discards frequency entirely. This is the shared ranking engine
- *  behind both the composer `/` autocomplete and the cmdk pickers: the pickers rank in JS
- *  through this rather than trusting cmdk's built-in score-sort, which does not reliably
- *  re-order the list in this app (React re-renders reset cmdk's imperative DOM ordering), so
- *  before #484 an (almost-)exact match could sit below weaker ones. */
+ *  caller's most-used-first or project-first order survives. Rank keys, in order: name-match
+ *  quality, then `queryScore` (description as a fallback, not a peer of name quality), then
+ *  usage count (#519 tie-break), then incoming index. Usage is never folded into the score:
+ *  the old `USAGE_BONUS_STEP` was larger than the matchScore gap between exact and
+ *  word-boundary, so a heavily-used weaker name hit could bury the skill whose name *is*
+ *  the query. This is the shared ranking engine behind both the composer `/` autocomplete
+ *  and the cmdk pickers: the pickers rank in JS through this rather than trusting cmdk's
+ *  built-in score-sort, which does not reliably re-order the list in this app (React
+ *  re-renders reset cmdk's imperative DOM ordering), so before #484 an (almost-)exact match
+ *  could sit below weaker ones. */
 function rankByQuery<T extends { name: string; description?: string | null }>(
   items: readonly T[],
   query: string,
@@ -263,26 +271,54 @@ function rankByQuery<T extends { name: string; description?: string | null }>(
   if (query.trim() === '') return [...items]
   return items
     .map((item, index) => {
-      const base = queryScore(item.name, item.description, query)
+      const score = queryScore(item.name, item.description, query)
       const count = usageCount(usage, item.name)
-      const bonus = Math.min(count, MOST_USED_LIMIT) * USAGE_BONUS_STEP
-      return { item, index, count, score: base > 0 ? base + bonus : 0 }
+      return { item, index, count, nameScore: nameQueryScore(item.name, query), score }
     })
     .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score || b.count - a.count || a.index - b.index)
+    .sort(
+      (a, b) =>
+        b.nameScore - a.nameScore || b.score - a.score || b.count - a.count || a.index - b.index,
+    )
     .map((entry) => entry.item)
 }
 
-/** Rank skills for a grouped picker by match quality, keeping the caller's incoming order
+/** Rank skills for a picker by match quality, keeping the caller's incoming order
  *  (most-used-first / project-first) for ties and the empty query — with the #519 usage
- *  tie-break when `usage` is given. Callers split the result into their own display groups
- *  (`partitionSkillsForDisplay`); each group stays match-ranked. */
-export function searchSkills(
+ *  tie-break when `usage` is given. Grouped pickers go through `searchSkillsForDisplay`
+ *  so a typed query is not re-tiered. Accepts any name/description row so the workflow
+ *  Add-step picker and the skills import panel share this ranker. */
+export function searchSkills<T extends { name: string; description?: string | null }>(
+  skills: readonly T[],
+  query: string,
+  usage?: Readonly<Record<string, number>>,
+): T[] {
+  return rankByQuery(skills, query, usage)
+}
+
+export interface SkillPickerDisplay extends SkillTiers {
+  ranked: Skill[] | null
+}
+
+/** Grouped-picker contract (#668/#255): empty query keeps #519 Most used → project →
+ *  global; a typed query returns `ranked` in `searchSkills` order and leaves the tiers
+ *  empty. Usage-tier promotion would put a weaker used hit above an exact name match, so
+ *  filtered results are not re-tiered. The ranked input is project-first so equal name
+ *  matches keep locality order without blocking a stronger global match. */
+export function searchSkillsForDisplay(
   skills: readonly Skill[],
   query: string,
   usage?: Readonly<Record<string, number>>,
-): Skill[] {
-  return rankByQuery(skills, query, usage)
+): SkillPickerDisplay {
+  if (query.trim() === '') {
+    return { ...partitionSkillsForDisplay(skills, usage), ranked: null }
+  }
+  return {
+    mostUsed: [],
+    project: [],
+    global: [],
+    ranked: searchSkills(orderSkills(skills), query, usage),
+  }
 }
 
 /** Rank workflows for a picker by match quality — the workflow counterpart of `searchSkills`. */

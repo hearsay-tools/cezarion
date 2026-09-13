@@ -35,8 +35,7 @@ import {
 import {
   bumpSkillUsage,
   isProjectSkill,
-  partitionSkillsForDisplay,
-  searchSkills,
+  searchSkillsForDisplay,
   searchWorkflows,
   skillKeywords,
 } from '@/lib/skills'
@@ -464,9 +463,7 @@ function SkillsPicker({
   const [search, setSearch] = useState('')
   const [preview, setPreview] = useState<Skill | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  // #484: rank matches in JS, then split into the #519 tiers (cmdk's own sort is unreliable here).
-  const matched = searchSkills(skills, search, skillUsage)
-  const { mostUsed, project, global } = partitionSkillsForDisplay(matched, skillUsage)
+  const { mostUsed, project, global, ranked } = searchSkillsForDisplay(skills, search, skillUsage)
 
   const skillItem = (skill: Skill, emphasized: boolean) => {
     const isSelected = selected.includes(skill.name)
@@ -537,20 +534,30 @@ function SkillsPicker({
               onInput={() => listRef.current?.scrollTo(0, 0)}
             />
             <CommandList ref={listRef} data-slot="gh-skill-menu" className="max-h-[min(16rem,calc(var(--radix-popover-content-available-height)-3rem))]">
-              {mostUsed.length === 0 && project.length === 0 && global.length === 0 ? (
+              {(ranked ? ranked.length === 0 : mostUsed.length === 0 && project.length === 0 && global.length === 0) ? (
                 <CommandEmpty>Nothing matches.</CommandEmpty>
               ) : null}
-              {mostUsed.length > 0 ? (
-                <CommandGroup heading="Most used">
-                  {mostUsed.map((skill) => skillItem(skill, isProjectSkill(skill)))}
-                </CommandGroup>
-              ) : null}
-              {project.length > 0 ? (
-                <CommandGroup heading="Project skills">{project.map((skill) => skillItem(skill, true))}</CommandGroup>
-              ) : null}
-              {global.length > 0 ? (
-                <CommandGroup heading="Global">{global.map((skill) => skillItem(skill, false))}</CommandGroup>
-              ) : null}
+              {ranked ? (
+                ranked.length > 0 ? (
+                  <CommandGroup>
+                    {ranked.map((skill) => skillItem(skill, isProjectSkill(skill)))}
+                  </CommandGroup>
+                ) : null
+              ) : (
+                <>
+                  {mostUsed.length > 0 ? (
+                    <CommandGroup heading="Most used">
+                      {mostUsed.map((skill) => skillItem(skill, isProjectSkill(skill)))}
+                    </CommandGroup>
+                  ) : null}
+                  {project.length > 0 ? (
+                    <CommandGroup heading="Project skills">{project.map((skill) => skillItem(skill, true))}</CommandGroup>
+                  ) : null}
+                  {global.length > 0 ? (
+                    <CommandGroup heading="Global">{global.map((skill) => skillItem(skill, false))}</CommandGroup>
+                  ) : null}
+                </>
+              )}
             </CommandList>
           </Command>
         </PopoverContent>

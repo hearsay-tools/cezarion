@@ -61,7 +61,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toaster'
-import { isProjectSkill, orderSkillsByUsage } from '@/lib/skills'
+import { isProjectSkill, orderSkillsByUsage, searchSkills } from '@/lib/skills'
 import { cn } from '@/lib/utils'
 import {
   WB_MAX_STEPS,
@@ -161,6 +161,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
   // The palette lists skills the way every other picker does (#519): most-used first, then
   // project, then global — so what you reach for floats to the top.
   const paletteSkills = orderSkillsByUsage(skills, uiStateQuery.data?.skillUsage)
+  const addMatches = searchSkills(paletteSkills, addQuery, uiStateQuery.data?.skillUsage)
 
   // First visit seeds the canvas with the deep-linked workflow when the URL names one, else
   // the repo's first saved workflow — "open the tab, see your flow" (legacy rule). No files
@@ -729,13 +730,13 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
           <Input aria-label="Filter skills" placeholder="Filter skills…" value={addQuery} onChange={(event) => setAddQuery(event.target.value)} />
           {skillsQuery.isError ? <p role="alert" className="text-sm text-danger">Could not load skills: {skillsQuery.error.message}</p> : (
             <div role="radiogroup" aria-label="Available skills" className="grid max-h-80 gap-2 overflow-y-auto">
-              {paletteSkills.filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(addQuery.trim().toLowerCase())).map((skill) => (
+              {addMatches.map((skill) => (
                 <label key={skill.name} className="flex cursor-pointer items-start gap-3 rounded-lg py-2 has-[:checked]:bg-accent-strong/10 has-[:focus-visible]:outline-2">
                   <input type="radio" name="workflow-add-skill" className="sr-only" value={skill.name} checked={selectedSkill === skill.name} onChange={() => setSelectedSkill(skill.name)} />
                   <span className="min-w-0 break-words text-sm"><span className="block">{skill.name}</span><span className="mt-2 block text-xs text-muted-foreground">{skill.description}</span></span>
                 </label>
               ))}
-              {paletteSkills.filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(addQuery.trim().toLowerCase())).length === 0 ? <p className="text-sm text-muted-foreground">{skills.length === 0 ? 'No skills available in this project.' : 'No matching skills.'}</p> : null}
+              {addMatches.length === 0 ? <p className="text-sm text-muted-foreground">{skills.length === 0 ? 'No skills available in this project.' : 'No matching skills.'}</p> : null}
             </div>
           )}
           <div className="flex flex-wrap gap-3">
@@ -1068,15 +1069,7 @@ function Palette({
       </p>
     )
   }
-  const needle = query.trim().toLowerCase()
-  // `skills` arrives already ordered (project-first, then recency — #408/#414); the filter
-  // preserves that order, it never re-sorts.
-  const shown = skills.filter(
-    (skill) =>
-      needle === '' ||
-      skill.name.toLowerCase().includes(needle) ||
-      (skill.description ?? '').toLowerCase().includes(needle),
-  )
+  const shown = searchSkills(skills, query)
   return (
     <div data-slot="wb-palette" className="mt-2.5 flex flex-col gap-1">
       {shown.length > 0 ? (

@@ -25,6 +25,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { useNavigate } from '@/lib/project-router'
+import { searchSkills } from '@/lib/skills'
 import { cn } from '@/lib/utils'
 import { startedRunPath } from '@/routes/new-task-form'
 
@@ -154,14 +155,7 @@ export function ImportSkillsPanel({ projectId }: { projectId: string }) {
     )
   }
 
-  const needle = query.trim().toLowerCase()
-  const shown = needle
-    ? all.filter(
-        (skill) =>
-          skill.name.toLowerCase().includes(needle) ||
-          (skill.description ?? '').toLowerCase().includes(needle),
-      )
-    : all
+  const shown = searchSkills(all, query)
 
   return (
     <div data-slot="skills-import-panel" className="w-full min-w-0 [&_button]:min-h-11">
