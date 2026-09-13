@@ -135,12 +135,12 @@ describe('public delegation completion integration', () => {
     const cancelledWait = await command(p.id, ['cancel-wait', gate.wait.id]);
     expect(cancelledWait).toHaveProperty('wait.reason', 'cancelled');
     await input(p.id, 2); reply(p.id, 2);
-    await until(() => store.getRun(p.id)?.status === 'waiting', 'parent finishes cancellation receipt');
+    await until(() => store.getRun(p.id)?.activity === 'monitoring', 'parent finishes cancellation receipt');
     const wait = await command<WorkerWaitResult>(p.id, ['wait', a, b, '--mode', 'any']);
     expect(wait.wait.mode).toBe('any');
     await finishWorker(p.id, a, 'alpha');
     await input(p.id, 3); reply(p.id, 3);
-    await until(() => store.getRun(p.id)?.status === 'waiting', 'parent observes wait-any wake');
+    await until(() => store.getRun(p.id)?.activity === 'monitoring', 'parent observes wait-any wake');
     expect(store.getRun(p.id)?.agentInputs?.filter(item => item.id === wait.wait.id && item.deliveredAt)).toHaveLength(1);
     expect(store.getRun(b)?.status).toBe('running');
     expect(await collect(p.id, b)).toMatchObject({ backend: 'codex', settled: false, partial: true });
@@ -216,7 +216,7 @@ describe('public delegation completion integration', () => {
     expect(store.getRun(stopped)?.agentInputs).toBeUndefined();
     expect(await command(failed, ['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), 'Unauthorized nested worker'], 1)).toMatchObject({ code: 'denied_scope' });
     expect(store.listRuns()).toHaveLength(3);
-    reply(p.id, 1); await until(() => store.getRun(p.id)?.status === 'waiting', 'parent idle');
+    reply(p.id, 1); await until(() => store.getRun(p.id)?.activity === 'monitoring', 'parent idle');
     const wait = await command<WorkerWaitResult>(p.id, ['wait', failed, stopped, '--mode', 'all']);
     reply(failed, 1, { error: 'integration provider unavailable' }); await settled(failed, 'failed');
     expect(store.getRun(p.id)?.agentInputs?.some(item => item.id === wait.wait.id && item.deliveredAt)).not.toBe(true);

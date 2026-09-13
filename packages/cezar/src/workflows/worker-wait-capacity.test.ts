@@ -275,8 +275,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   });
 
   it('restart preserves an ordinary parked root without a wait or ask, including after children finish', async () => {
-    const p = await parent(); const w = await worker(p.id);
+    const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id);
     await restart();
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(store.getRun(w.id)?.status).not.toBe('cancelled');
@@ -290,8 +291,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   for (const review of [false, true]) {
     it(`inactive ready root Finish persists intent before async settlement and restart keeps review=${review}`, async () => {
-      const p = await parent(); const w = await worker(p.id);
+      const p = await parent();
       await until(() => store.getRun(p.id)?.status === 'waiting');
+      const w = await worker(p.id);
       manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
       await restart();
       process.env.CEZ_REVIEW_GATE = review ? '1' : '0';
@@ -314,8 +316,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   }
 
   it('inactive Finish write failure leaves the root recoverable and children untouched', async () => {
-    const p = await parent(); const w = await worker(p.id);
-    await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
+    const p = await parent();
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id); await restart();
     await until(() => store.getRun(w.id)?.status === 'waiting');
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
     await Promise.all(bookkeeping.splice(0)); store.flush();
@@ -393,8 +396,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   for (const failure of ['diff', 'checkpoint'] as const) {
     it(`inactive Finish retains retryable intent after ${failure} failure and checkpoints successful publication`, async () => {
-      const p = await parent(); const w = await worker(p.id);
-      await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
+      const p = await parent();
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      const w = await worker(p.id); await restart();
       await until(() => store.getRun(w.id)?.status === 'waiting');
       manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
       await Promise.all(bookkeeping.splice(0));
