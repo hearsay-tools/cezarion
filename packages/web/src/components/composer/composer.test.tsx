@@ -969,4 +969,15 @@ describe('session control layout', () => {
     fireEvent.click(submit)
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('Follow up', []))
   })
+
+  it('does not wrap sessionModel with an extra Model field word (#272)', () => {
+    renderComposer({
+      sessionControls: <button>Runner setting</button>,
+      sessionModel: <button aria-label="Model">sonnet</button>,
+    })
+    const slot = document.querySelector('[data-slot="session-model"]')
+    expect(slot).not.toBeNull()
+    expect(slot!.textContent).toBe('sonnet')
+    expect(slot!.querySelector('[data-design-icon="cpu"]')).toBeNull()
+  })
 })

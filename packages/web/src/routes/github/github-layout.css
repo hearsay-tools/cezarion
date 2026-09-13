@@ -12,14 +12,10 @@
 .gh-field > button > svg:last-child { margin-left: auto; }
 [data-slot='gh-custom-prompt'] { margin-top: 0; min-height: 150px; padding: 16px; font-size: 14px; }
 .gh-engine-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
-.gh-engine-fields > button { position: relative; height: 44px; width: 100%; margin-top: 21px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 0 12px; color: var(--foreground); font-size: 12px; }
-.gh-engine-fields > button::before { position: absolute; bottom: calc(100% + 6px); left: 0; color: var(--muted-foreground); font-size: 11px; font-weight: normal; }
+.gh-engine-fields > button { position: relative; height: 44px; width: 100%; margin-top: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 0 12px; color: var(--foreground); font-size: 12px; }
 .gh-engine-fields [data-slot='model-pill'] { grid-column: 1 / -1; grid-row: 1; }
-.gh-engine-fields [data-slot='model-pill']::before { content: 'Model'; }
-.gh-engine-fields [data-slot='runner-pill'] { grid-column: 1; grid-row: 2; margin-top: 0; }
-.gh-engine-fields [data-slot='runner-pill']::before { content: 'Runner'; position: static; margin-right: 4px; }
-.gh-engine-fields [data-slot='effort-pill'] { grid-column: 2; grid-row: 2; margin-top: 0; }
-.gh-engine-fields [data-slot='effort-pill']::before { content: 'Effort'; position: static; margin-right: 4px; }
+.gh-engine-fields [data-slot='runner-pill'] { grid-column: 1; grid-row: 2; }
+.gh-engine-fields [data-slot='effort-pill'] { grid-column: 2; grid-row: 2; }
 .gh-engine-fields > button > svg:last-child { margin-left: auto; }
 .gh-fixed-runner { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; justify-content: space-between; min-height: 65px; font-size: 12px; }
 .gh-fixed-runner > span { color: var(--muted-foreground); font-size: 11px; }
@@ -79,11 +75,7 @@
 [data-slot='gh-hand'] { border-color: color-mix(in srgb, var(--accent-strong) 24%, var(--border)); }
 .gh-prompt-field { gap: 8px; }
 .gh-prompt-field [data-slot='gh-custom-prompt'] { min-height: 96px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
-.gh-engine-fields [data-slot='model-pill'] { margin-top: 0; justify-content: flex-start; }
-.gh-engine-fields [data-slot='model-pill']::before { content: 'Model'; position: static; margin-right: 4px; }
-@media (min-width: 768px) {
-  .gh-engine-fields [data-slot='model-pill']::before { content: none; }
-}
+.gh-engine-fields [data-slot='model-pill'] { justify-content: flex-start; }
 .gh-field [data-slot='gh-workflow-trigger'] { font-family: inherit; font-weight: 400; }
 .gh-field [data-slot='gh-workflow-trigger'] > svg:first-child { display: none; }
 .gh-field [data-slot='gh-workflow-trigger'] > svg:last-child { order: -1; margin-left: 0; }

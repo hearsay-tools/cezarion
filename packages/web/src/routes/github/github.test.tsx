@@ -1313,19 +1313,10 @@ describe('GitHub handoff field chrome (#243)', () => {
     expect(model['padding-left']).toBeUndefined()
   })
 
-  it('keeps a Model label on the picker', () => {
-    const unscoped = css.replace(/@media[^{]+\{(?:[^{}]|\{[^}]*\})*\}/g, '')
-    const before = cascadeCss(unscoped, [
-      '.gh-engine-fields > button::before',
-      ".gh-engine-fields [data-slot='model-pill']::before",
-    ])
-    expect(before.content).toBe("'Model'")
-  })
-
-  it('drops the Model ::before on md+ where PickerPill fieldLabel is visible', () => {
-    expect(css).toMatch(
-      /@media \(min-width:\s*768px\)\s*\{[^}]*\[data-slot='model-pill'\]::before\s*\{[^}]*content:\s*none/,
-    )
+  it('does not paint in-button Model/Runner/Effort ::before labels — PickerPill fieldLabel owns the name (#272)', () => {
+    expect(css).not.toMatch(/\[data-slot='model-pill'\]::before\s*\{[^}]*content:\s*'Model'/)
+    expect(css).not.toMatch(/\[data-slot='runner-pill'\]::before\s*\{[^}]*content:\s*'Runner'/)
+    expect(css).not.toMatch(/\[data-slot='effort-pill'\]::before\s*\{[^}]*content:\s*'Effort'/)
   })
 
   it('gives the prompt textarea its own bordered typing area', () => {

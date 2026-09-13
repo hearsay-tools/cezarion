@@ -194,6 +194,15 @@ const continueBody = () =>
   requests.find((r) => r.url.endsWith('/continue') && r.method === 'POST')?.body
 
 describe('follow-up ContinueAction runner/model selection (#401)', () => {
+  it('uses one in-pill Field · value grammar for Model, Runner, and Effort (#272)', async () => {
+    serve()
+    renderAction(makeRun())
+    expect((await screen.findByRole('button', { name: 'Model' })).textContent).toMatch(/^Model \u00b7 /)
+    expect(screen.getByRole('button', { name: 'Runner' }).textContent).toMatch(/^Runner \u00b7 /)
+    expect(screen.getByRole('button', { name: 'Effort' }).textContent).toMatch(/^Effort \u00b7 /)
+    expect(document.querySelector('[data-slot="session-setting-label"]')).toBeNull()
+  })
+
   it('defaults the effort pill to the run pin and omits it when untouched (#45)', async () => {
     serve()
     renderAction(makeRun({ effort: 'high' }))
@@ -660,7 +669,7 @@ describe('the follow-up runner pill carries the account', () => {
     await pickFrom(runnerPill()!, 'Klaudiusz')
     await waitFor(() => expect(runnerPill()?.textContent).toContain('Klaudiusz'))
     await pickFrom(runnerPill()!, 'codex')
-    await waitFor(() => expect(runnerPill()?.textContent?.trim()).toBe('codex'))
+    await waitFor(() => expect(runnerPill()?.textContent?.trim()).toBe('Runner · codex'))
 
     fireEvent.click(screen.getByRole('button', { name: /continue/i }))
     // A Claude login means nothing to codex, so it must not ride along.
