@@ -618,6 +618,56 @@ describe('pi provider failures on assistant message_end (#54)', () => {
     );
   });
 
+  it('does not fail the turn when pi retries past a provider error before agent_settled (#256)', async () => {
+    const mockPath = writePiRpcMock(
+      cwd,
+      'mock-pi-retry-recover.mjs',
+      `    send({ type: 'message_end', message: {
+      role: 'assistant', content: [], provider: 'xai', model: 'grok-4.6',
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
+      stopReason: 'error', errorMessage: 'Error Code null: Internal error during token generation',
+    } });
+    send({ type: 'auto_retry_start', attempt: 1, maxAttempts: 3, delayMs: 2000,
+      errorMessage: 'Error Code null: Internal error during token generation' });
+    send({ type: 'message_end', message: {
+      role: 'assistant', content: [{ type: 'text', text: 'recovered' }],
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
+    } });`,
+    );
+    const { events } = await runPiMock(cwd, mockPath);
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    expect(events.some((e) => e.type === 'turn-end')).toBe(true);
+  });
+
+  it('still reports a provider error when the RPC stream ends before agent_settled (#256)', async () => {
+    const mockPath = join(cwd, 'mock-pi-error-no-settle.mjs');
+    writeFileSync(
+      mockPath,
+      `#!/usr/bin/env node
+import readline from 'node:readline';
+const send = (v) => process.stdout.write(JSON.stringify(v) + '\\n');
+const exitAfter = (v) => process.stdout.write(JSON.stringify(v) + '\\n', () => process.exit(0));
+for await (const line of readline.createInterface({ input: process.stdin })) {
+  const command = JSON.parse(line);
+  if (command.type === 'get_state') {
+    send({ id: command.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'pi-err' } });
+  } else if (command.type === 'prompt') {
+    send({ type: 'response', command: 'prompt', success: true });
+    exitAfter({ type: 'message_end', message: {
+      role: 'assistant', content: [], provider: 'xai', model: 'grok-4.6',
+      stopReason: 'error', errorMessage: 'Error Code null: Internal error during token generation',
+    } });
+  }
+}
+`,
+      { mode: 0o755 },
+    );
+    const { events } = await runPiMock(cwd, mockPath);
+    expect(events.find((e) => e.type === 'error')?.message).toBe(
+      'pi: xai/grok-4.6 request failed: Error Code null: Internal error during token generation',
+    );
+  });
+
   it('does not fail a successful empty assistant turn', async () => {
     const mockPath = writePiRpcMock(
       cwd,
