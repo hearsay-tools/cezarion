@@ -31,9 +31,13 @@ finding. Invalid pushback stays unresolved and names why the reply fails,
 not only that the code did not change; re-file the finding when the defect
 is still real. Never resolve review threads.
 
-Read `$GITHUB_EVENT_PATH` and set `head_sha` to the exact
-`pull_request.head.sha` value from that event, quoted as a JSON string. Do not
-use the checked-out merge commit SHA for `head_sha`.
+Read `.review-context/pull-request.json` for the resolved `pr_number`,
+`head_sha`, and `base_sha`. Set the output `head_sha` to that exact `head_sha`
+string and use those refs for the merge-base diff. This context works for both
+PR events and manual dispatches, whose event payload has no `pull_request`.
+Do not derive review metadata from `$GITHUB_EVENT_PATH` or use the checked-out
+merge commit SHA. If the context is missing or its SHAs are invalid, return
+`outcome: "failed"` with no findings and explain the missing metadata.
 
 Emit only one JSON object that conforms to the supplied output schema. Set
 `outcome` to `reviewed` only after you inspected the complete merge-base diff.
