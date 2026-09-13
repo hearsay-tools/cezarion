@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, renderHook } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { clearThreadScrollCaches, saveThreadScroll } from './thread-scroll'
-import { ThreadRows, useThreadScroll, type ThreadRow } from './thread-scroller'
+import { JumpToLatestPill, ThreadRows, useThreadScroll, type ThreadRow } from './thread-scroller'
 
 beforeEach(() => {
   // virtua measures with a ResizeObserver; jsdom has none and never lays anything out.
@@ -214,6 +214,108 @@ describe('useThreadScroll — outside a shell scroller (jsdom, tests, storybook-
     act(() => resize?.())
 
     expect(scroller.scrollTop).toBe(0)
+  })
+})
+
+describe('useThreadScroll — jump to latest', () => {
+  function attachScroller(options: Parameters<typeof useThreadScroll>[1] = {}) {
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, {
+      clientHeight: { value: 400, configurable: true },
+      scrollHeight: { value: 1_000, configurable: true },
+    })
+    const scrollTo = vi.fn()
+    scroller.scrollTo = scrollTo
+    const content = document.createElement('div')
+    scroller.append(content)
+    const hook = renderHook(() => useThreadScroll('jump-run', options))
+    act(() => hook.result.current.attachContent(content))
+    scroller.scrollTop = 80
+    return { scroller, scrollTo, hook }
+  }
+
+  it('pins the viewport through the programmatic offset path, not native smooth scroll', async () => {
+    const { scroller, scrollTo, hook } = attachScroller()
+
+    await act(async () => {
+      hook.result.current.jumpToLatest()
+      await Promise.resolve()
+    })
+
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(scroller.scrollTop).toBe(600)
+    hook.unmount()
+    scroller.remove()
+  })
+
+  it('re-pins after the refreshed tail grows past the first animation frame', async () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const { scroller, hook } = attachScroller({ onJumpToLatest: () => Promise.resolve() })
+
+    act(() => { hook.result.current.jumpToLatest() })
+    await act(async () => { await Promise.resolve() })
+    expect(frames).toHaveLength(1)
+
+    act(() => { frames.shift()?.(0) })
+    expect(scroller.scrollTop).toBe(600)
+
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 2_400 })
+    expect(frames).toHaveLength(1)
+    act(() => { frames.shift()?.(0) })
+    expect(scroller.scrollTop).toBe(2_000)
+
+    hook.unmount()
+    scroller.remove()
+  })
+
+  it('does not steal a restored offset when the row list changes', () => {
+    saveThreadScroll('jump-run', { top: 220, atBottom: false })
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, {
+      clientHeight: { value: 400, configurable: true },
+      scrollHeight: { value: 1_000, configurable: true },
+    })
+    const content = document.createElement('div')
+    scroller.append(content)
+    const hook = renderHook(
+      ({ rowKeys }: { rowKeys: string[] }) => useThreadScroll('jump-run', { rowKeys }),
+      { initialProps: { rowKeys: ['older', 'mid'] } },
+    )
+    act(() => hook.result.current.attachContent(content))
+    expect(scroller.scrollTop).toBe(220)
+
+    act(() => hook.rerender({ rowKeys: ['older', 'mid', 'live'] }))
+    expect(scroller.scrollTop).toBe(220)
+    hook.unmount()
+  })
+
+  it('pins through virtua\'s handle when the thread is virtualized', async () => {
+    const { scroller, scrollTo, hook } = attachScroller()
+    const handle = { scrollTo: vi.fn() }
+    hook.result.current.virtualizerRef.current = handle as never
+
+    await act(async () => {
+      hook.result.current.jumpToLatest()
+      await Promise.resolve()
+    })
+
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(handle.scrollTo).toHaveBeenCalledWith(600)
+    hook.unmount()
+    scroller.remove()
+  })
+})
+
+describe('JumpToLatestPill', () => {
+  it('keeps a ≥44px target', () => {
+    render(<JumpToLatestPill onJump={() => {}} />)
+    expect(document.querySelector('[data-slot="jump-to-latest"]')!.className).toContain('min-h-11')
   })
 })
 

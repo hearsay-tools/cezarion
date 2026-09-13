@@ -335,6 +335,11 @@ describe('progressive long-session history', () => {
     browser.waitForFunction(
       `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '1'`,
     )
+    browser.waitForFunction(
+      `(() => { const m = document.querySelector('[data-slot="main"]'); return Math.abs(m.scrollHeight - m.clientHeight - m.scrollTop) < 2 })()`,
+    )
+    browser.waitForFunction(`document.querySelector('[data-slot="jump-to-latest"]') === null`)
+    expect(browser.evaluate(`document.body.textContent.includes('goal achieved — session closed')`)).toBe(true)
   })
 
   it('switches between cached and live-tail threads without a near-zero destination frame', () => {
