@@ -54,9 +54,8 @@ import {
   bumpSkillUsage,
   isProjectSkill,
   orderSkillsByUsage,
-  partitionSkillsForDisplay,
   queryScore,
-  searchSkills,
+  searchSkillsForDisplay,
   searchWorkflows,
   skillKeywords,
 } from '@/lib/skills'
@@ -1096,10 +1095,7 @@ function SourcePill({
   const [search, setSearch] = useState('')
   const [preview, setPreview] = useState<Skill | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  // #484: rank in JS (cmdk's own score-sort does not re-order reliably here), then split the
-  // ranked matches into the #519 display tiers so each group stays match-ordered.
-  const matched = searchSkills(skills, search, skillUsage)
-  const { mostUsed, project, global } = partitionSkillsForDisplay(matched, skillUsage)
+  const { mostUsed, project, global, ranked } = searchSkillsForDisplay(skills, search, skillUsage)
   const quickTask = workflows.find((workflow) => workflow.name === QUICK_TASK)
   const matchedWorkflows = searchWorkflows(workflows, search).filter((w) => w.name !== QUICK_TASK)
   // The empty row answers to what people type when they mean "none of these" — including the
@@ -1109,9 +1105,7 @@ function SourcePill({
     queryScore('no skill', `none plain ${QUICK_TASK} ${quickTask?.description ?? ''}`, search) > 0
   const nothingMatches =
     !noneMatches
-    && mostUsed.length === 0
-    && project.length === 0
-    && global.length === 0
+    && (ranked ? ranked.length === 0 : mostUsed.length === 0 && project.length === 0 && global.length === 0)
     && matchedWorkflows.length === 0
   const pick = (next: TaskSource | null) => {
     onPick(next)
@@ -1276,18 +1270,26 @@ function SourcePill({
                   </CommandItem>
                 </CommandGroup>
               ) : null}
-              {/* Most used leads (#519), then Project skills before Global — the closer a
-                  skill lives to the repo, the more likely it's the one being picked. */}
-              {mostUsed.length > 0 ? (
-                <CommandGroup heading="Most used">
-                  {mostUsed.map((skill) => skillItem(skill, isProjectSkill(skill)))}
-                </CommandGroup>
-              ) : null}
-              {project.length > 0 ? (
-                <CommandGroup heading="Project skills">
-                  {project.map((skill) => skillItem(skill, true))}
-                </CommandGroup>
-              ) : null}
+              {ranked ? (
+                ranked.length > 0 ? (
+                  <CommandGroup>
+                    {ranked.map((skill) => skillItem(skill, isProjectSkill(skill)))}
+                  </CommandGroup>
+                ) : null
+              ) : (
+                <>
+                  {mostUsed.length > 0 ? (
+                    <CommandGroup heading="Most used">
+                      {mostUsed.map((skill) => skillItem(skill, isProjectSkill(skill)))}
+                    </CommandGroup>
+                  ) : null}
+                  {project.length > 0 ? (
+                    <CommandGroup heading="Project skills">
+                      {project.map((skill) => skillItem(skill, true))}
+                    </CommandGroup>
+                  ) : null}
+                </>
+              )}
               {matchedWorkflows.length > 0 ? (
                 <CommandGroup heading="Workflows">
                   {matchedWorkflows.map((workflow) => {

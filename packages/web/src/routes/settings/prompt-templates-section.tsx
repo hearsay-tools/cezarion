@@ -26,7 +26,7 @@ import {
   normalizePromptTemplates,
   type PromptTemplate,
 } from '@/lib/prompt-templates'
-import { isProjectSkill, partitionSkillsForDisplay, searchSkills, skillKeywords } from '@/lib/skills'
+import { isProjectSkill, searchSkillsForDisplay, skillKeywords } from '@/lib/skills'
 import { cn } from '@/lib/utils'
 
 /**
@@ -305,11 +305,7 @@ function TemplateSkillsPicker({
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
-  // #668: rank the full catalog in JS first, then split into the #519 tiers — otherwise the
-  // Most used tier is built from the unfiltered set and survives a query (cmdk's own sort is
-  // unreliable here, so we drive the filter ourselves like the other pickers).
-  const matched = searchSkills(skills, search, skillUsage)
-  const { mostUsed, project, global } = partitionSkillsForDisplay(matched, skillUsage)
+  const { mostUsed, project, global, ranked } = searchSkillsForDisplay(skills, search, skillUsage)
 
   const skillItem = (skill: Skill, emphasized: boolean) => {
     const isSelected = selected.includes(skill.name)
@@ -377,22 +373,32 @@ function TemplateSkillsPicker({
             data-slot="prompt-template-skill-menu"
             className="max-h-[min(16rem,calc(var(--radix-popover-content-available-height)-3rem))]"
           >
-            {mostUsed.length === 0 && project.length === 0 && global.length === 0 ? (
+            {(ranked ? ranked.length === 0 : mostUsed.length === 0 && project.length === 0 && global.length === 0) ? (
               <CommandEmpty>Nothing matches.</CommandEmpty>
             ) : null}
-            {mostUsed.length > 0 ? (
-              <CommandGroup heading="Most used">
-                {mostUsed.map((skill) => skillItem(skill, isProjectSkill(skill)))}
-              </CommandGroup>
-            ) : null}
-            {project.length > 0 ? (
-              <CommandGroup heading="Project skills">
-                {project.map((skill) => skillItem(skill, true))}
-              </CommandGroup>
-            ) : null}
-            {global.length > 0 ? (
-              <CommandGroup heading="Global">{global.map((skill) => skillItem(skill, false))}</CommandGroup>
-            ) : null}
+            {ranked ? (
+              ranked.length > 0 ? (
+                <CommandGroup>
+                  {ranked.map((skill) => skillItem(skill, isProjectSkill(skill)))}
+                </CommandGroup>
+              ) : null
+            ) : (
+              <>
+                {mostUsed.length > 0 ? (
+                  <CommandGroup heading="Most used">
+                    {mostUsed.map((skill) => skillItem(skill, isProjectSkill(skill)))}
+                  </CommandGroup>
+                ) : null}
+                {project.length > 0 ? (
+                  <CommandGroup heading="Project skills">
+                    {project.map((skill) => skillItem(skill, true))}
+                  </CommandGroup>
+                ) : null}
+                {global.length > 0 ? (
+                  <CommandGroup heading="Global">{global.map((skill) => skillItem(skill, false))}</CommandGroup>
+                ) : null}
+              </>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>
