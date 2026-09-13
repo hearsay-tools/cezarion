@@ -76,8 +76,11 @@ import { useFinishRun } from './use-finish-run'
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
  * the Session | Changes | Files tabs with the action bar, the workflow step rail and the plan
  * mirror — the whole header region above the thread. It scrolls away on phones so the transcript
- * owns the small viewport, and scrolls with the document on desktop too: the spacious page heading must not
- * cover the diff or transcript while reading.
+ * owns the small viewport. On desktop Session it docks (`md:sticky md:top-0`) so Archive and sibling
+ * actions stay on screen while the transcript scrolls. Git tabs stay in document flow — their own
+ * sticky chrome (`top-4` / `--diff-sticky-top`) already parks under the viewport top. Opaque
+ * `bg-background` so thread text does not show through; `z-20` parks it below any shell top bar
+ * and above the transcript.
  *
  * Two deliberate omissions, both seams rather than gaps:
  *  - **VS Code** (spec: `POST /api/runs/:id/open-in-editor`) — the endpoint does not exist yet;
@@ -146,7 +149,10 @@ export function RunHeader({
   return (
     <header
       data-slot="run-header"
-      className="relative z-20 bg-background px-[18px] pt-[18px] md:px-9 md:pt-7"
+      className={cn(
+        'relative z-20 bg-background px-[18px] pt-[18px] md:px-9 md:pt-7',
+        tab === 'session' && 'md:sticky md:top-0',
+      )}
     >
       <div className="w-full">
         <div data-slot="run-title-row" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">

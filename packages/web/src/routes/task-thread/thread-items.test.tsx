@@ -1,4 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -16,6 +20,7 @@ import {
   ContextGroup,
   isNearBottom,
   OUTPUT_CLAMP_LINES,
+  AssistantMessage,
   ProviderAuthRequiredCard,
   ReasoningItem,
   ToolCard,
@@ -313,6 +318,102 @@ describe('sub-agent nesting (golden subagent-task fixture, end to end through th
  * apart by the persisted NAME. Rendering a `.pdf` in an `<img>` is what the user would see as a
  * broken attachment, on the one screen that is supposed to show them their own message back.
  */
+describe('conversation message surfaces', () => {
+  it('labels user and agent messages with the shared role surface', () => {
+    render(
+      <MemoryRouter>
+        <UserBubble text="Summarize what this project does." />
+        <AssistantMessage text="The answer is 42." />
+      </MemoryRouter>,
+    )
+
+    const user = document.querySelector('[data-slot="user-bubble"]')
+    const agent = document.querySelector('[data-slot="assistant-message"]')
+    expect(user?.getAttribute('data-role')).toBe('user')
+    expect(agent?.getAttribute('data-role')).toBe('agent')
+    expect(user?.querySelector(':scope > p')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('YOUR MESSAGE')
+    expect(agent?.querySelector(':scope > p')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('AGENT RESPONSE')
+    expect(document.querySelector('[data-slot="note-line"]')).toBeNull()
+    expect(document.querySelector('[data-slot="tool-card"]')).toBeNull()
+    expect(document.querySelector('[data-slot="reasoning"]')).toBeNull()
+  })
+
+  it('does not infer badges, CTAs, or success styling from message contents', async () => {
+    render(
+      <MemoryRouter>
+        <AssistantMessage text="CI and review passed on https://github.com/hearsay-tools/cezarion/pull/244" />
+        <AssistantMessage text="Pre-flight passed. Creating the branch, assigning the issue, and adding it to the board." />
+        <AssistantMessage text="The answer is 42." />
+      </MemoryRouter>,
+    )
+
+    const surfaces = [...document.querySelectorAll('[data-slot="assistant-message"]')]
+    await waitFor(() => {
+      expect(surfaces[0]?.textContent).toContain('CI and review passed')
+    })
+    for (const surface of surfaces) {
+      expect(surface.getAttribute('data-role')).toBe('agent')
+      expect(surface.querySelector('[role="status"]')).toBeNull()
+      expect(surface.querySelector('[data-slot="badge"]')).toBeNull()
+      expect(surface.className).not.toMatch(/\bsuccess\b/)
+    }
+    expect(surfaces[2]?.textContent).toContain('The answer is 42.')
+    expect(surfaces[0]?.textContent).toContain('https://github.com/hearsay-tools/cezarion/pull/244')
+    expect(screen.queryByRole('button', { name: /passed|success|view pull request/i })).toBeNull()
+  })
+
+  it('keeps thinking, tool calls, and lifecycle notes off the role surface', () => {
+    render(
+      <MemoryRouter>
+        <SessionTranscript
+          runId="r1"
+          viewId="main"
+          sections={[{
+            id: 'turn-1',
+            entries: [
+              { kind: 'reasoning', id: 'r', text: 'Considering the layout…' },
+              { kind: 'note', id: 'n', text: 'worktree ready', tone: 'dim' },
+            ],
+          }]}
+          mode="document"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(document.querySelector('[data-slot="reasoning"]')?.textContent).toContain('Considering the layout')
+    expect(document.querySelector('[data-slot="note-line"]')?.textContent).toContain('worktree ready')
+    expect(document.querySelector('[data-slot="user-bubble"]')).toBeNull()
+    expect(document.querySelector('[data-slot="assistant-message"]')).toBeNull()
+    expect(document.body.textContent).not.toContain('YOUR MESSAGE')
+    expect(document.body.textContent).not.toContain('AGENT RESPONSE')
+  })
+})
+
+const MESSAGE_COLOR_TOKENS = [
+  'message-user-bg',
+  'message-user-border',
+  'message-user-accent',
+  'message-agent-bg',
+  'message-agent-border',
+  'message-agent-accent',
+] as const
+
+describe('message color tokens', () => {
+  it('defines six message color tokens for light and dark', () => {
+    const css = readFileSync(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../styles/index.css'),
+      'utf8',
+    )
+    const rootBlock = css.slice(css.indexOf(':root {'), css.indexOf('.light {'))
+    const lightBlock = css.slice(css.indexOf('.light {'), css.indexOf('@theme'))
+    for (const token of MESSAGE_COLOR_TOKENS) {
+      expect(rootBlock).toContain(`--${token}:`)
+      expect(lightBlock).toContain(`--${token}:`)
+      expect(css).toContain(`--color-${token}: var(--${token})`)
+    }
+  })
+})
+
 describe('UserBubble attachments', () => {
   it.each(['pdf', 'txt', 'md'])('scopes a %s download to the active non-boot project', (extension) => {
     setApiScope('second-project')
