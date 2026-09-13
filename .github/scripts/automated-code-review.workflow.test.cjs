@@ -9,6 +9,48 @@ const schemaPath = path.join(__dirname, '..', 'schemas', 'review-findings.schema
 const promptPath = path.join(__dirname, '..', 'codex', 'prompts', 'review.md');
 const agentsPath = path.join(__dirname, '..', '..', 'AGENTS.md');
 
+test('Codex receives resolved review metadata for PR and manual triggers', async (t) => {
+  const { parse } = await import('yaml');
+  const { execFileSync } = require('node:child_process');
+  const { tmpdir } = require('node:os');
+  const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const round = workflow.jobs['review-round'].steps.find((step) => step.id === 'review-round');
+  const context = workflow.jobs['codex-review'].steps.find((step) => step.name === 'Fetch prior automated review context');
+  const head = 'a'.repeat(40);
+  const base = 'b'.repeat(40);
+  for (const event of ['pull_request_target', 'workflow_dispatch']) {
+    await t.test(event, () => {
+      const cwd = fs.mkdtempSync(path.join(tmpdir(), 'review-metadata-'));
+      try {
+        fs.mkdirSync(path.join(cwd, 'pull-request'));
+        const output = path.join(cwd, 'outputs');
+        const env = { ...process.env, BASH_ENV: '/dev/null', GITHUB_OUTPUT: output, GITHUB_REPOSITORY: 'owner/repo',
+          PR_NUMBER: '220', EVENT_NAME: event, AUTOMATED_REVIEW_ROUNDS: '3',
+          EVENT_HEAD_SHA: event === 'workflow_dispatch' ? '' : head,
+          EVENT_BASE_SHA: event === 'workflow_dispatch' ? '' : base };
+        // Only the GitHub transport is stubbed; execute the workflow's real resolution and writer.
+        execFileSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c',
+          `gh() { case "$*" in *'.head.sha'*) echo '${head}';; *'.base.sha'*) echo '${base}';; esac; }\n${round.run}`], { cwd, env });
+        const outputs = Object.fromEntries(fs.readFileSync(output, 'utf8').trim().split('\n').map((line) => line.split('=')));
+        const contextEnv = { ...process.env, BASH_ENV: '/dev/null', GITHUB_REPOSITORY: 'owner/repo' };
+        for (const [key, value] of Object.entries(context.env)) {
+          const match = value.match(/^\$\{\{ needs\.review-round\.outputs\.(\w+) \}\}$/);
+          if (match) contextEnv[key] = outputs[match[1]];
+        }
+        execFileSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', `gh() { :; }\n${context.run}`], { cwd, env: contextEnv });
+        const metadataPath = path.join(cwd, 'pull-request/.review-context/pull-request.json');
+        assert.ok(fs.existsSync(metadataPath), 'review must receive resolved metadata independently of the event payload');
+        assert.deepEqual(JSON.parse(fs.readFileSync(metadataPath, 'utf8')), { pr_number: 220, head_sha: head, base_sha: base });
+      } finally {
+        fs.rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+  }
+  const prompt = fs.readFileSync(promptPath, 'utf8');
+  assert.match(prompt, /\.review-context\/pull-request\.json/);
+  assert.doesNotMatch(prompt, /Read `\$GITHUB_EVENT_PATH`/);
+});
+
 function assertCodexEnvironment(prompt) {
   assert.match(prompt, /read-only sandbox/i);
   assert.match(prompt, /`\/tmp`/);
