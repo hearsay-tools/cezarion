@@ -48,7 +48,7 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
   try {
     const operation = argv[0] === 'collect' ? 'collect' : argv[0] === 'cancel-wait' ? 'cancel-wait' : z.union([workerOperationSchema, conversationOperationSchema]).parse(argv[0]);
     const { values, positionals } = parseArgs({ args: argv.slice(1), allowPositionals: true, strict: true, options: {
-      ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const }, backend: { type: 'string' as const }, model: { type: 'string' as const }, context: { type: 'string' as const }, 'context-file': { type: 'string' as const } } : {}),
+      ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const }, backend: { type: 'string' as const }, model: { type: 'string' as const }, effort: { type: 'string' as const }, context: { type: 'string' as const }, 'context-file': { type: 'string' as const } } : {}),
       ...(['send', 'progress', 'reply', 'follow-up'].includes(operation) ? { id: { type: 'string' as const }, kind: { type: 'string' as const }, 'request-id': { type: 'string' as const }, 'timeout-seconds': { type: 'string' as const } } : {}),
       ...(operation === 'wait' || operation === 'wait-requests' ? { request: { type: 'string' as const, multiple: true }, 'timeout-seconds': { type: 'string' as const }, mode: { type: 'string' as const } } : {}),
     } });
@@ -71,6 +71,7 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
         : new TextDecoder('utf-8', { fatal: true }).decode(await readBoundedContextFile(String(values['context-file']), 400_000));
       body = workerSpawnRequestSchema.parse({ task: positionals[0], baseline: values.baseline, requestId: values['request-id'],
         ...(values.backend === undefined ? {} : { backend: values.backend }), ...(values.model === undefined ? {} : { model: values.model }),
+        ...(values.effort === undefined ? {} : { effort: values.effort }),
         ...(contextText === undefined ? {} : { context: { text: contextText } }),
       });
     } else if (operation === 'wait' || operation === 'wait-requests') {

@@ -58,6 +58,8 @@ describe('delegation schemas', () => {
       { path: '/tmp' }, { permissions: ['spawn'] }, { worktree: false }, { runner: 'codex' },
     ]) expect(workerSpawnRequestSchema.safeParse({ ...spawn, ...patch }).success).toBe(false);
     expect(workerSpawnRequestSchema.safeParse({ ...spawn, task: 'x'.repeat(100000) }).success).toBe(true);
+    expect(workerSpawnRequestSchema.parse({ ...spawn, effort: 'high' })).toEqual({ ...spawn, effort: 'high' });
+    expect(workerSpawnRequestSchema.safeParse({ ...spawn, effort: 'x'.repeat(33) }).success).toBe(false);
   });
 
   it('accepts only nonempty bounded steering, not human answers or attachments', () => {
