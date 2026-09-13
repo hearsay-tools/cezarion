@@ -2465,9 +2465,11 @@ export class RunManager {
     return delegation?.role === 'root' && !!delegation.completion;
   }
 
+  /** The durable attention phase records a spent completion wait. It only
+   * becomes human attention once no owned worker remains live. */
   private parentCompletionAttention(runId: string): boolean {
     const delegation = this.store.getRun(runId)?.delegation;
-    return delegation?.role === 'root' && delegation.completion?.phase === 'attention';
+    return delegation?.role === 'root' && delegation.completion?.phase === 'attention' && !this.hasLiveWorkers(runId);
   }
 
   private resetParentCompletion(runId: string): void {
@@ -2488,6 +2490,15 @@ export class RunManager {
     })));
   }
 
+  /** A settled-but-uncollected result is work for the parent, not a live worker.
+   * Keep the private termination proof: a public terminal status can precede exit. */
+  private hasLiveWorkers(runId: string): boolean {
+    return this.parentCompletionBlockers(runId).some(blocker => {
+      const worker = this.store.getRun(blocker.workerId)?.delegation;
+      return blocker.reason === 'outstanding' && worker?.role === 'worker' && worker.parentRunId === runId;
+    });
+  }
+
   finishBlockedReason(runId: string): string | undefined {
     const parent = this.store.getRun(runId);
     if (parent?.delegation?.role !== 'root') return undefined;
@@ -2496,9 +2507,9 @@ export class RunManager {
     return blockers.length ? `Workers must finish or be stopped, prove termination, and have their latest results collected before finishing: ${blockers.map(b => `${b.workerId} (${b.reason})`).join(', ')}` : undefined;
   }
 
-  /** One durable bounded automatic wait per cycle; every further premature DONE
-   * stays in attention. Explicit human input starts a fresh cycle. No volatile
-   * ActiveRun gate fields: fresh, continuation and recovered sessions read this. */
+  /** One durable automatic worker wait per cycle. Further premature DONEs with
+   * live workers use the existing capped monitoring wakes; settled uncollected
+   * results retain attention. Human input starts a fresh completion cycle. */
   private deferParentCompletion(runId: string): boolean {
     let parent = this.store.getRun(runId);
     if (parent?.delegation?.role !== 'root') return false;
@@ -2535,13 +2546,18 @@ export class RunManager {
       if (state?.session?.open) this.parkWorkerWait(runId, state);
       else this.reconcileWorkerWaits();
     } else {
+      const monitoring = !pendingAsk && !!state?.session?.open && this.hasLiveWorkers(runId);
       this.store.commitDelegation([{ id: runId, delegation: { ...parent.delegation, completion: { ...parent.delegation.completion, phase: 'attention' } } }]);
-      this.store.updateRun(runId, { status: 'waiting', activity: undefined, finishedAt: undefined });
+      this.store.updateRun(runId, { status: monitoring ? 'running' : 'waiting', activity: monitoring ? 'monitoring' : undefined, finishedAt: undefined });
       this.store.flush();
       if (state) {
         this.clearIdleTimer(state); this.clearMonitoringWakeTimer(state, runId);
         this.monitoring.delete(runId); this.workerWaiting.delete(runId); this.waiting.add(runId);
-        if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+        if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: monitoring ? 'running' : 'waiting' });
+        if (monitoring) {
+          this.monitoring.add(runId);
+          this.armMonitoringWakeTimer(runId, state);
+        }
         this.releaseSlot();
       }
     }
@@ -2789,8 +2805,8 @@ export class RunManager {
           !parent.agentInputs?.some(input => input.id === next.wakeId)) {
           next = { ...next, wakeId: pendingInputs.at(-1)!.id };
         }
-        // The one automatic completion timeout spends its wake budget before
-        // delivery. A MONITORING reply must not start another autonomous loop.
+        // Spend the automatic worker-wait budget before delivery. Live workers
+        // can still use capped monitoring wakes; settled results cannot loop.
         const rootCompletion = parent.delegation.role === 'root' ? parent.delegation.completion : undefined;
         const completion = rootCompletion?.waitId === next.id && next.reason === 'timeout'
           ? { ...rootCompletion, phase: 'attention' as const } : rootCompletion;
@@ -3005,8 +3021,9 @@ export class RunManager {
       } else if (state.parkAfterAck?.session === session && !this.waiting.has(runId) && !this.monitoring.has(runId)) {
         // A wake turn can finish before its HTTP/RPC acknowledgement. Retiring
         // that wait must release its completed turn, not invent another turn.
-        if (state.parkAfterAck.monitoring && !this.parentCompletionAttention(runId)) {
+        if ((state.parkAfterAck.monitoring || this.hasLiveWorkers(runId)) && !this.parentCompletionAttention(runId)) {
           this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
+          if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'running' });
           this.monitoring.add(runId);
           this.clearIdleTimer(state);
           this.armMonitoringWakeTimer(runId, state);
@@ -3648,7 +3665,8 @@ export class RunManager {
           sessionOpen &&
           !done &&
           !ask &&
-          (MONITORING_MARKER_RE.test(turnText.trimEnd()) || sawClaudeScheduleWakeup);
+          !state.pendingHumanAsk &&
+          (MONITORING_MARKER_RE.test(turnText.trimEnd()) || sawClaudeScheduleWakeup || this.hasLiveWorkers(runId));
         turnText = '';
         completedAssistantText = '';
         sawClaudeScheduleWakeup = false;
@@ -4427,7 +4445,8 @@ export class RunManager {
           sessionOpen &&
           !done &&
           !ask &&
-          (MONITORING_MARKER_RE.test(turnText.trimEnd()) || sawClaudeScheduleWakeup);
+          !state.pendingHumanAsk &&
+          (MONITORING_MARKER_RE.test(turnText.trimEnd()) || sawClaudeScheduleWakeup || this.hasLiveWorkers(runId));
         turnText = '';
         completedAssistantText = '';
         sawClaudeScheduleWakeup = false;
@@ -5131,7 +5150,8 @@ export class RunManager {
     this.store.updateRun(runId, { monitoringWakeAt: new Date(deadline).toISOString() });
     state.monitoringWakeTimer = setTimeout(() => {
       state.monitoringWakeTimer = undefined;
-      if (this.parentCompletionAttention(runId)) { this.clearMonitoringWakeTimer(state, runId); return; }
+      // A wake armed while workers were live must still deliver their settled
+      // results for collection. The next turn rechecks the spent completion budget.
       const run = this.store.getRun(runId);
       if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
       this.store.updateRun(runId, { monitoringWakeAt: undefined });
