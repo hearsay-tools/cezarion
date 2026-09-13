@@ -688,7 +688,8 @@
   .new-task-submission [data-slot='composer-actions'] { width: auto; }
 }
 @media (max-width: 767px) {
-  .new-task-editor { border: 0; border-radius: 0; background: transparent; }
+  /* #267: keep the prompt editor a bordered card (shell border/bg from composer.tsx), not a full-bleed strip. */
+  .new-task-editor { padding: 12px; }
   .new-task-editor textarea { padding-inline: 0; }
   .new-task-editor [data-slot='composer-footer-start'] { padding-inline: 0; }
   .new-task-editor > p { padding-inline: 0; }
