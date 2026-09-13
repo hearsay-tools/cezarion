@@ -2681,6 +2681,18 @@ it('keeps legacy metadata usable with disabled personal filtering and no board p
   expect(rows()).toHaveLength(2)
 })
 
+it('renders a disabled No boards picker on the filter row when projects is empty', async () => {
+  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, viewerLogin: 'alice', projects: [] }) })
+  renderAt('/github')
+  const picker = await screen.findByRole('combobox', { name: 'Project board' }) as HTMLSelectElement
+  expect(picker.disabled).toBe(true)
+  expect([...picker.options].map(option => option.textContent)).toEqual(['No boards'])
+  expect(screen.queryByText('No linked project boards.')).toBeNull()
+  expect(picker.className).toMatch(/min-h-11/)
+  expect(picker.className).toMatch(/border-input/)
+  expect(document.querySelector('[data-slot="gh-issue-filters"]')?.contains(picker)).toBe(true)
+})
+
 it.each([[], undefined])('does not restore a stale board selection after refresh returns projects=%j', async projects => {
   const boardData = { ...GITHUB, projects: [{ id: 'P1', title: 'Delivery', url: 'https://github.com/users/acme/projects/1' }], issues: [
     { ...ISSUE_142, projectIds: ['P1'] }, { ...ISSUE_139, projectIds: [] },
