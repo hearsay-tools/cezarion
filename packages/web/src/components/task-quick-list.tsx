@@ -3,7 +3,7 @@ import { ScaleIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
 import { useHealth, usePinRun, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
-import { Link, scopeTo, useProjectMatch } from '@/lib/project-router'
+import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { useListView } from '@/components/list-view'
@@ -308,9 +308,11 @@ function Row({
 /**
  * One run.
  *
- * The row is a `<Link>` and the reference chip is its flex *sibling*, not its child: an anchor
- * inside an anchor is invalid, and both targets are real — the row opens the task, the chip opens
- * the PR or issue. The status dot is a sibling too, so the reading order can be dot → chip →
+ * The whole row opens `/tasks/:id` — empty space and the status dot included — but a click that
+ * lands on any nested anchor or button (the PR/issue chip, the title's real `<Link>`, the pin)
+ * belongs to that control. The title stays a true `<Link>` so keyboards and middle-clicks work.
+ * The chip and pin are flex *siblings* of that link, not its children: an anchor inside an
+ * anchor is invalid. The status dot is a sibling too, so the reading order can be dot → chip →
  * title rather than a chip wedged in front of the status it is not about.
  *
  * WIDTH-PRIORITY RULE (#788, option C) — read this before adding anything to this row.
@@ -379,6 +381,8 @@ function RunRow({
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
 }) {
+  const navigate = useNavigate()
+  const to = scopeTo(scope, `/tasks/${run.id}`)
   const attention = deriveAttention(run)
   const isActive = run.id === currentRunId
   // The strongest tracker reference the run knows about — the PR once one exists, else the issue
@@ -411,8 +415,12 @@ function RunRow({
       // Link), so the active state has to be readable here rather than only from the Link's
       // `aria-current`.
       data-active={isActive ? 'true' : undefined}
+      onClick={(event) => {
+        if ((event.target as Element).closest('a, button, input')) return
+        navigate(to)
+      }}
       className={cn(
-        'selection-row group/task-row flex items-center gap-2 rounded-sm pl-2.5 hover:bg-muted',
+        'selection-row group/task-row flex cursor-pointer items-center gap-2 rounded-sm pl-2.5 hover:bg-muted',
         isActive && 'bg-[var(--task-brand-selected)]',
         // The indent a member row wears under an expanded group tile. One padding declaration,
         // not two: `cn` is tailwind-merge, so this REPLACES the `pl-2.5` above rather than losing
@@ -420,16 +428,16 @@ function RunRow({
         variant && 'pl-[26px]'
       )}
     >
-      {/* Outside the Link so it can lead the reference chip. The dot is a status indicator, not a
-          navigation target, and the wrapper still owns the row's hover surface. */}
+      {/* Outside the Link so it can lead the reference chip. The dot is not its own control — a
+          click on it is a row click, and the wrapper still owns the row's hover surface. */}
       <StatusDot tone={attention.tone} pulse={attention.pulse} aria-label={attention.label} title={attention.label} role="img" />
       {/* The reference, ONCE (#788, option C): the number that used to be both a `775: ` title
           prefix and a trailing `PR ↗` chip is now one leading chip that is itself the link. */}
       {references.length ? <div data-slot="session-references" className="flex flex-wrap items-center gap-1">
-        {references.map(ref => <TaskReferenceChip key={`${ref.kind}-${ref.number}-${ref.url}`} run={run} reference={ref} compact className="h-auto shrink-0 gap-[2px] px-1 py-px text-[10px]" />)}
+        {references.map(ref => <TaskReferenceChip key={`${ref.kind}-${ref.number}-${ref.url}`} run={run} reference={ref} compact className="h-auto shrink-0 gap-[2px] px-1 py-px text-[10px] no-hover:min-h-11 no-hover:min-w-11" />)}
       </div> : null}
       <Link
-        to={scopeTo(scope, `/tasks/${run.id}`)}
+        to={to}
         // `title` carries the FULL stored title — including a `NNN: ` prefix the chip let the
         // visible text drop — so hover always gives back everything the column could not show.
         title={title}
