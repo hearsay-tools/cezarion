@@ -13,7 +13,7 @@ import type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
-import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS } from './claude-cli-runner.ts';
+import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
 import { formatModelIdentity, parseModelIdentity } from './model-identity.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import {
