@@ -231,6 +231,14 @@ export class PiRunner implements AgentRunner {
             onEvent?.({ type: 'note', message: `pi: skipped unparseable RPC line: ${truncate(line)}` });
             continue;
           }
+          if (
+            isRecord(value) &&
+            value.type === 'message_end' &&
+            isRecord(value.message) &&
+            typeof value.message.errorMessage === 'string'
+          ) {
+            value.message.errorMessage = restorePiDegradedServiceError(value.message.errorMessage);
+          }
           // Flush before real message/tool/turn boundaries so v2 UI events
           // never overtake a pending block. Do NOT flush on prompt/response
           // acks — mid-turn `steer` can land between text_deltas and would
@@ -387,7 +395,7 @@ export class PiRunner implements AgentRunner {
 }
 
 export function buildPiArgs(spec: AgentRunSpec): string[] {
-  const args = ['--mode', 'rpc'];
+  const args = ['--mode', 'rpc', '--extension', piDegradedServiceRetryExtensionPath()];
   if (spec.sessionId) args.push(spec.resume ? '--session' : '--session-id', spec.sessionId);
   if (spec.systemPrompt) args.push('--append-system-prompt', spec.systemPrompt);
   if (spec.model) args.push('--model', spec.model);
@@ -399,6 +407,15 @@ export function buildPiArgs(spec: AgentRunSpec): string[] {
   const tools = piTools(spec.allowedTools ?? [], spec.bashAllowlist);
   if (tools.length > 0) args.push('--tools', tools.join(','));
   return args;
+}
+
+function piDegradedServiceRetryExtensionPath(): string {
+  return fileURLToPath(new URL('../../scripts/pi-retry-degraded-service.mjs', import.meta.url));
+}
+
+function restorePiDegradedServiceError(errorMessage: string): string {
+  const retryHint = 'Service unavailable: ';
+  return errorMessage.startsWith(retryHint) ? errorMessage.slice(retryHint.length) : errorMessage;
 }
 
 function piTools(tools: string[], bashAllowlist?: string[]): string[] {
