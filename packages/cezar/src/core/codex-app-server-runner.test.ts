@@ -4,7 +4,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from './agent-runner.js';
-import { KILL_GRACE_MS } from './claude-cli-runner.js';
+import { KILL_GRACE_MS } from './runner-runtime.js';
 import { CodexAppServerRunner, codexTurnStartExtras } from './codex-app-server-runner.js';
 
 /** Only the escalation tests below swap the child out; every other test in this
