@@ -18,10 +18,7 @@ import { buildChildEnv } from './agent-env.js';
 import { readNdjson } from './ndjson.js';
 import { createPiUiState, mapPiRpcMessage, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
 import { V1TextCoalescer } from './v1-text-coalescer.js';
-
-const DEFAULT_TIMEOUT_MS = 30 * 60_000;
-const KILL_GRACE_MS = 10_000;
-const AUTO_END_DELAY_MS = 250;
+import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
 
 export interface PiRunnerOptions {
   /** Override the binary name/path; defaults to `pi` on PATH (`CEZ_PI_BIN`). */
@@ -44,7 +41,7 @@ export class PiRunner implements AgentRunner {
 
   constructor(opts: PiRunnerOptions = {}) {
     this.bin = opts.bin ?? process.env.CEZ_PI_BIN ?? (process.env.CEZ_DRY_RUN === '1' ? mockPiPath() : 'pi');
-    this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
   }
 
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
