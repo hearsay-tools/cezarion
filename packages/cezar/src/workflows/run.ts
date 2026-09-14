@@ -285,6 +285,8 @@ interface ActiveRun {
   atTurnBoundary?: AgentSession;
   currentStepId?: string;
   idleTimer?: NodeJS.Timeout;
+  /** The inactivity timer closed the wire; resource teardown must not imply task success. */
+  idleClosed?: boolean;
   monitoringWakeTimer?: NodeJS.Timeout;
   monitoringWakeIntervalMinutes?: number;
   monitoringWakeups?: number;
@@ -3919,7 +3921,7 @@ export class RunManager {
         this.store.updateRun(runId, { status: 'cancelled', finishedAt: finishedAt(), currentStepId: undefined });
         this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
         appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=cancelled`);
-      } else {
+      } else if (!state.idleClosed) {
         this.store.updateStep(runId, stepId, { status: 'done', finishedAt: finishedAt() });
         this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
         await this.settleSuccess(runId);
@@ -4233,6 +4235,7 @@ export class RunManager {
           runError = `step "${step.id}" failed: ${failure}`;
           break;
         }
+        if (state.idleClosed) break;
         this.finishStep(runId, step.id, 'done', undefined, emit);
         i++;
         continue;
@@ -4277,6 +4280,10 @@ export class RunManager {
 
     if (this.preserveRunAfterDisposal(runId, state)) {
       this.clearIdleTimer(state);
+      this.dropActive(runId);
+      return;
+    }
+    if (state.idleClosed) {
       this.dropActive(runId);
       return;
     }
@@ -5100,8 +5107,10 @@ export class RunManager {
 
   private armIdleTimer(runId: string, state: ActiveRun): void {
     this.clearIdleTimer(state);
+    state.idleClosed = false;
     state.idleTimer = setTimeout(() => {
       if (state.session?.open && !state.cancelled) {
+        state.idleClosed = true;
         this.store.appendEvent(runId, {
           type: 'lifecycle',
           message: `session closed after ${Math.round(IDLE_TIMEOUT_MS / 60_000)}m of inactivity`,

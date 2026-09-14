@@ -18,6 +18,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AgentRunResult, AgentRunner, AgentSession, ContentBlock, SessionOptions } from '../core/agent-runner.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import { createWorktree } from '../git-worktree.ts';
+import { agentTmpDir } from '../runs/agent-tmpdir.ts';
 import { RunStore, type RunRecord, type StepState } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { parseTaskMarkers } from '../runs/task-markers.ts';
@@ -1465,6 +1466,56 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     }).active.get(record.id);
     expect(state?.idleTimer).toBeDefined(); // genuine user waits still expire after IDLE_TIMEOUT_MS
     expect(state?.monitoringWakeTimer).toBeUndefined();
+  }, 30_000);
+
+  it.each(['fresh', 'continuation'].flatMap(mode => [
+    { mode, name: 'markerless wait', task: 'just do the thing' },
+    { mode, name: 'CEZ:ASK wait', task: 'mock:ask choose' },
+  ]))('idle-closes a $mode $name without completing it, matching restart recovery (#280)', async ({ mode, task }) => {
+    const record = manager.startRun(SINGLE_STEP, {
+      task: mode === 'fresh' ? task : 'just do the thing',
+      worktree: false,
+    });
+    currentId = record.id;
+    await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
+    if (mode === 'continuation') {
+      expect(manager.finish(record.id)).toBe(true);
+      await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
+      expect(manager.continueRun(record.id, { text: task })).toEqual({ ok: true });
+      await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
+    }
+
+    const internals = manager as unknown as {
+      active: Map<string, { idleTimer?: NodeJS.Timeout; session?: AgentSession }>;
+    };
+    const state = internals.active.get(record.id);
+    const session = state?.session;
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!session?.open || !idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+
+    const scratch = agentTmpDir(join(repoRoot, '.ai/cezar'), record.id);
+    expect(existsSync(scratch)).toBe(true);
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !internals.active.has(record.id));
+
+    const idleClosed = store.getRun(record.id);
+    expect(session.open).toBe(false); // the runner CLI is still terminated
+    expect(idleClosed?.status).toBe('waiting');
+    expect(idleClosed?.finishedAt).toBeUndefined();
+    const waitingStep = idleClosed?.steps.find((step) => step.id === idleClosed.currentStepId);
+    expect(waitingStep?.status).toBe('waiting');
+    expect(waitingStep?.finishedAt).toBeUndefined();
+    expect(existsSync(scratch)).toBe(false); // terminal resources are released even though status is not terminal
+
+    manager.dispose();
+    manager = new RunManager(store, repoRoot);
+    await manager.recover();
+    expect(store.getRun(record.id)).toEqual(idleClosed);
+
+    // The idle-closed run no longer owns the in-place checkout lease.
+    const successor = manager.startRun(SINGLE_STEP, { task: 'mock:done successor', worktree: false });
+    currentId = successor.id;
+    await waitFor(successor.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
   }, 30_000);
 
   it('strips the CEZ:MONITORING marker from server-emitted v1 text events', async () => {
