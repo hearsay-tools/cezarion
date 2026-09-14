@@ -39,7 +39,7 @@ const WORKER_USAGE = { operations: [
   { name: 'wait', positionals: 1, optional: ['--mode', '--timeout-seconds'] },
   { name: 'wait', positionals: 0, required: ['--request'], optional: ['--mode', '--timeout-seconds'] },
   { name: 'cancel-wait', positionals: 1 },
-  { name: 'send', positionals: 2, required: ['--id', '--kind'], optional: ['--request-id', '--timeout-seconds'] },
+  { name: 'send', positionals: 2, required: ['--id', '--kind'], optional: ['--timeout-seconds'] },
   { name: 'progress', positionals: 2, required: ['--id'], optional: ['--timeout-seconds'] },
   { name: 'follow-up', positionals: 2, required: ['--id', '--request-id'], optional: ['--timeout-seconds'] },
   { name: 'reply', positionals: 2, required: ['--id', '--request-id'], optional: ['--timeout-seconds'] },

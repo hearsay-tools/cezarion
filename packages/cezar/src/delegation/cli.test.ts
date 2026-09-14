@@ -29,6 +29,10 @@ describe('bundled worker CLI', () => {
       expect.objectContaining({ name: 'wait' }),
       expect.objectContaining({ name: 'destroy', positionals: 1 }),
     ]));
+    const send = help.usage.operations.find((op: { name: string }) => op.name === 'send');
+    expect(send.required).toEqual(expect.arrayContaining(['--id', '--kind']));
+    expect(send.optional ?? []).not.toContain('--request-id');
+    expect(help.usage.operations.find((op: { name: string }) => op.name === 'reply').required).toEqual(expect.arrayContaining(['--request-id']));
     for (const argv of [['-h'], ['--help']]) {
       expect(await runWorkerCommand(argv, env)).toBe(1);
       expect(json()).toEqual(help);
