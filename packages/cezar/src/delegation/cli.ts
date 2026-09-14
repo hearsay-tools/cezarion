@@ -67,9 +67,9 @@ function formatWorkerCliError(error: unknown, argv0: string | undefined): string
     const first = error.issues[0];
     return first ? `${operation} has invalid ${cliName(first.path)}` : 'Invalid worker command arguments';
   }
-  if (error instanceof Error) {
-    const unknown = error.message.match(/Unknown option '([^']+)'/);
-    if (unknown) return `${argv0 ?? 'worker'} has extra argument ${unknown[1]}`;
+  if (error instanceof Error && 'code' in error && error.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
+    const unknown = error.message.match(/Unknown option ['"]([^'"]+)['"]/);
+    return `${argv0 ?? 'worker'} has extra argument ${unknown?.[1] ?? 'flag'}`;
   }
   return 'Invalid worker command arguments';
 }

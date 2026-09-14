@@ -40,6 +40,12 @@ describe('bundled worker CLI', () => {
     expect(json().error).toMatch(/spawn/);
     expect(json().error).toMatch(/--request-id/);
   });
+  it('names an unknown extra flag instead of a generic parse error', async () => {
+    expect(await runWorkerCommand(['inspect', randomUUID(), '--origin', 'http://evil'], env)).toBe(1);
+    expect(json()).toMatchObject({ code: 'invalid_input' });
+    expect(json().error).toMatch(/inspect/);
+    expect(json().error).toMatch(/--origin/);
+  });
   it('uses only provisioned transport, emits JSON, and reports incomplete operations as nonzero', async () => {
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), 'work'], env)).toBe(0);
     const { workerId } = json(); expect(workerId).toBeTypeOf('string');
