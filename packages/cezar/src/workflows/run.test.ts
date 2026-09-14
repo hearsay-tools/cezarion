@@ -1468,14 +1468,20 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     expect(state?.monitoringWakeTimer).toBeUndefined();
   }, 30_000);
 
-  it.each(['fresh', 'continuation'].flatMap(mode => [
-    { mode, name: 'markerless wait', task: 'just do the thing' },
-    { mode, name: 'CEZ:ASK wait', task: 'mock:ask choose' },
-  ]))('idle-closes a $mode $name without completing it, matching restart recovery (#280)', async ({ mode, task }) => {
+  it.each(['fresh', 'continuation'].flatMap(mode => ['zero-config', 'delegated root'].flatMap(delegation => [
+    { mode, delegation, name: 'markerless wait', task: 'just do the thing' },
+    { mode, delegation, name: 'CEZ:ASK wait', task: 'mock:ask choose' },
+  ])))('idle-closes a $mode $delegation $name without completing it, matching restart recovery (#280)', async ({ mode, delegation, task }) => {
     const record = manager.startRun(SINGLE_STEP, {
       task: mode === 'fresh' ? task : 'just do the thing',
       worktree: false,
     });
+    if (delegation === 'delegated root') {
+      store.commitDelegation([{
+        id: record.id,
+        delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] },
+      }]);
+    }
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
     if (mode === 'continuation') {
@@ -1498,7 +1504,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     idleTimer._onTimeout();
     await waitFor(record.id, () => !internals.active.has(record.id));
 
-    const idleClosed = store.getRun(record.id);
+    const idleClosed = structuredClone(store.getRun(record.id));
     expect(session.open).toBe(false); // the runner CLI is still terminated
     expect(idleClosed?.status).toBe('waiting');
     expect(idleClosed?.finishedAt).toBeUndefined();
@@ -1507,15 +1513,24 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     expect(waitingStep?.finishedAt).toBeUndefined();
     expect(existsSync(scratch)).toBe(false); // terminal resources are released even though status is not terminal
 
-    manager.dispose();
-    manager = new RunManager(store, repoRoot);
-    await manager.recover();
-    expect(store.getRun(record.id)).toEqual(idleClosed);
-
     // The idle-closed run no longer owns the in-place checkout lease.
     const successor = manager.startRun(SINGLE_STEP, { task: 'mock:done successor', worktree: false });
     currentId = successor.id;
     await waitFor(successor.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
+
+    manager.dispose();
+    mkdirSync(scratch, { recursive: true }); // simulate scratch left by a process crash
+    manager = new RunManager(store, repoRoot);
+    await manager.recover();
+    expect(store.getRun(record.id)).toEqual(idleClosed);
+    expect(existsSync(scratch)).toBe(false);
+    if (mode === 'fresh' && delegation === 'zero-config' && task === 'just do the thing') {
+      expect(manager.finish(record.id)).toBe(true);
+    } else {
+      expect(manager.continueRun(record.id, { text: 'mock:done resume after idle close' })).toEqual({ ok: true });
+    }
+    currentId = record.id;
+    await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
   }, 30_000);
 
   it('strips the CEZ:MONITORING marker from server-emitted v1 text events', async () => {

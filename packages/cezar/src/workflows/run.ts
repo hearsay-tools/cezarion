@@ -1541,8 +1541,8 @@ export class RunManager {
    * cezar process exited (requires the store opened with `keepLive`):
    *  - `queued`  → back into the queue (FIFO by createdAt), from the persisted
    *    workflowDef (or the catalog by name for older records);
-   *  - `waiting` → the turn was over and the ball was in the user's court —
-   *    settle exactly like a closed session (review/done, Continue still works);
+   *  - `waiting` → preserve the durable attention state, while reaping the
+   *    dead session's temporary resources (Continue or Finish still works);
    *  - `running` → mark interrupted, then immediately resume the last agent
    *    session via the Continue path, pointing the agent at its handoff file.
    * Call once, before the server starts taking requests.
@@ -1563,7 +1563,11 @@ export class RunManager {
     // public status. Unknown private termination retains that process's scratch.
     const retained = this.store.listRuns().filter(run => run.delegation?.role === 'worker' &&
       this.store.readWorkerExecution(run.id)?.phase !== 'complete');
-    sweepAgentTmpDirs(this.dataDir, [...live, ...retained].map(run => run.id));
+    // A waiting record is live user attention, not a live agent process. Its
+    // scratch is therefore stale unless an owned worker execution says it can
+    // still be running; `retained` adds precisely those workers back.
+    const processOwners = live.filter(run => run.status !== 'waiting');
+    sweepAgentTmpDirs(this.dataDir, [...processOwners, ...retained].map(run => run.id));
     for (const run of live) {
       if (this.isActive(run.id)) continue;
       if (this.workerExecutionStopped(run.id)) continue;
@@ -1600,20 +1604,11 @@ export class RunManager {
         this.store.updateRun(run.id, { status: 'waiting', activity: undefined });
         continue;
       }
-      if (run.status === 'waiting' && run.delegation?.role === 'root') continue;
-      if (run.status === 'waiting') {
-        for (const step of run.steps) {
-          if (step.status === 'waiting' || step.status === 'running') {
-            this.store.updateStep(run.id, step.id, { status: 'done', finishedAt: new Date().toISOString() });
-          }
-        }
-        this.store.appendEvent(run.id, {
-          type: 'lifecycle',
-          message: 'cezar restarted — the open session was settled',
-        });
-        await this.settleSuccess(run.id);
-        continue;
-      }
+      // Waiting is durable human attention, with or without delegation enabled.
+      // A missing CLI after restart is the same resource-only closure as the
+      // inactivity timer: it does not prove that the task or its current step
+      // succeeded. Continue and explicit Finish remain available on the record.
+      if (run.status === 'waiting') continue;
       // `running`: the process died mid-turn. Mark it interrupted (the state
       // continueRun expects), then pick the work back up from the last session.
       const finishedAt = new Date().toISOString();
@@ -3209,6 +3204,16 @@ export class RunManager {
       void this.settleRequestedRootFinish(runId);
       return true;
     }
+    if (run?.status === 'waiting' && run.delegation === undefined && !this.isActive(runId)) {
+      const finishedAt = new Date().toISOString();
+      for (const step of run.steps) {
+        if (step.status === 'waiting' || step.status === 'running') {
+          this.store.updateStep(runId, step.id, { status: 'done', finishedAt });
+        }
+      }
+      void this.settleSuccess(runId);
+      return true;
+    }
     if (run?.status === 'review' && !this.isActive(runId)) {
       this.store.updateRun(runId, { status: 'done' });
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'review accepted — finished without a PR' });
@@ -3263,17 +3268,17 @@ export class RunManager {
       }
     } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
     if (run.delegation?.role === 'root' && this.isActive(runId)) return { ok: false, error: 'run is still active' };
-    const pendingOwnedAsk = !!run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(runId);
+    const pendingHumanAsk = run.delegation?.role !== 'invalid' && this.hasPendingHumanAsk(runId);
     if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && run.delegation.destroy)) return { ok: false, error: 'worker cannot continue' };
     if (this.executionBlockedByRootFinish(run)) return { ok: false, error: 'parent finish is pending' };
     const answers = deferForCapacity ? [run.continuationMessage, ...(run.queuedMessages ?? [])] : [opts];
-    if (pendingOwnedAsk && ((deferForCapacity && run.continuationMessage?.origin !== 'human') ||
+    if (pendingHumanAsk && ((deferForCapacity && run.continuationMessage?.origin !== 'human') ||
       !answers.some(answer => answer?.text?.trim() || answer?.images?.length))) {
       return { ok: false, error: 'pending human question requires an explicit answer' };
     }
     // `review` is continuable too — that's the "Send back" path (spec 009).
-    if (!['done', 'failed', 'cancelled', 'review'].includes(run.status) && !(pendingOwnedAsk && run.status === 'waiting') &&
-      !(run.status === 'waiting' && !this.isActive(runId) && (run.delegation?.role === 'root' ||
+    if (!['done', 'failed', 'cancelled', 'review'].includes(run.status) && !(pendingHumanAsk && run.status === 'waiting') &&
+      !(run.status === 'waiting' && !this.isActive(runId) && (run.delegation === undefined || run.delegation.role === 'root' ||
         (deferForCapacity && run.delegation?.role === 'worker' && !!this.workerWait(runId))))) {
       return { ok: false, error: `cannot continue a ${run.status} run` };
     }
