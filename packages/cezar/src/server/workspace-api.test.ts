@@ -174,6 +174,30 @@ describe('the workspace settings API (step 2.7)', () => {
     expect(semaphore.memoryLimitMb()).toBe(2048);
   });
 
+  it('PUT monitoring capacity and interval survive a cold app boot from the same home', async () => {
+    const res = await putConfig({
+      resources: { maxMonitoringSessions: 3, monitoringWakeIntervalMinutes: 7 },
+    });
+    expect(res.status).toBe(200);
+
+    const coldSemaphore = new WorkspaceSemaphore();
+    await coldSemaphore.refresh();
+    const coldApp = createApp({
+      repoRoot,
+      store,
+      manager: {} as RunManager,
+      version: '0.0.0-test',
+      semaphore: coldSemaphore,
+    });
+    const body = (await (await apiRequest(coldApp, '/api/v1/workspace/config')).json()) as WorkspaceConfigResponse;
+    expect(body.resources.maxMonitoringSessions).toBe(3);
+    expect(body.resources.monitoringWakeIntervalMinutes).toBe(7);
+    expect(coldSemaphore.maxMonitoringSessions()).toBe(3);
+    expect(coldSemaphore.monitoringWakeIntervalMinutes()).toBe(7);
+    expect((rawConfig().resources as Record<string, unknown>).maxMonitoringSessions).toBe(3);
+    expect((rawConfig().resources as Record<string, unknown>).monitoringWakeIntervalMinutes).toBe(7);
+  });
+
   /** #810 — the cadence now ships ON, so the write worth pinning is the one that turns it
    *  OFF. `null` must survive the round-trip and reach the semaphore as `null`; re-defaulting
    *  it to 5 would silently overrule an operator who chose "Park until resumed". */
