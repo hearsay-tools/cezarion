@@ -1563,11 +1563,12 @@ export class RunManager {
     // public status. Unknown private termination retains that process's scratch.
     const retained = this.store.listRuns().filter(run => run.delegation?.role === 'worker' &&
       this.store.readWorkerExecution(run.id)?.phase !== 'complete');
-    // A waiting record is live user attention, not a live agent process. Its
-    // scratch is therefore stale unless an owned worker execution says it can
-    // still be running; `retained` adds precisely those workers back.
-    const processOwners = live.filter(run => run.status !== 'waiting');
-    sweepAgentTmpDirs(this.dataDir, [...processOwners, ...retained].map(run => run.id));
+    // `dispose()` deliberately does not terminate live sessions, so a waiting
+    // record may still own a process even while this manager is recovering.
+    // Idle-close reaps its own scratch through `dropActive`; recovery must keep
+    // every otherwise-live directory unless private worker evidence proves it
+    // finished.
+    sweepAgentTmpDirs(this.dataDir, [...live, ...retained].map(run => run.id));
     for (const run of live) {
       if (this.isActive(run.id)) continue;
       if (this.workerExecutionStopped(run.id)) continue;

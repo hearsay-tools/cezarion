@@ -1519,11 +1519,9 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(successor.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
 
     manager.dispose();
-    mkdirSync(scratch, { recursive: true }); // simulate scratch left by a process crash
     manager = new RunManager(store, repoRoot);
     await manager.recover();
     expect(store.getRun(record.id)).toEqual(idleClosed);
-    expect(existsSync(scratch)).toBe(false);
     if (mode === 'fresh' && delegation === 'zero-config' && task === 'just do the thing') {
       expect(manager.finish(record.id)).toBe(true);
     } else {
