@@ -5,6 +5,8 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { workspaceQueryKeys } from '@/api/queries'
+import { setApiScope } from '@open-mercato/cezar-api-client'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { ListViewProvider } from '@/components/list-view'
 import { SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
@@ -822,6 +824,7 @@ describe('SidebarSessionScope', () => {
     cleanup()
     fetchMock.mockReset()
     vi.unstubAllGlobals()
+    setApiScope(null)
   })
 
   it('keeps colliding run ids from different projects in combined counts and the waiting indicator', async () => {
@@ -877,6 +880,47 @@ describe('SidebarSessionScope', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: /Archived/ }))
     expect(document.querySelector('[data-slot="waiting-dot"]')).not.toBeNull()
+  })
+
+  it('does not double-count a scoped run list that also sits in that project cache', async () => {
+    setApiScope('shop')
+    const shopRun = run({ id: 'shop-only', status: 'waiting' })
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ error: 'not found' }), { status: 404 }))
+    const client = createQueryClient()
+    client.setQueryData(workspaceQueryKeys.projects, {
+      projects: [
+        {
+          id: 'cezar',
+          name: 'cezar',
+          root: '/cezar',
+          addedAt: '2026-07-01T00:00:00.000Z',
+          lastOpenedAt: '2026-07-20T12:00:00.000Z',
+          source: 'local',
+          status: 'ok',
+        },
+        {
+          id: 'shop',
+          name: 'shop',
+          root: '/shop',
+          addedAt: '2026-07-01T00:00:00.000Z',
+          lastOpenedAt: '2026-07-19T00:00:00.000Z',
+          source: 'local',
+          status: 'ok',
+        },
+      ],
+      bootProject: 'cezar',
+      projectsDir: '/projects',
+    })
+    client.setQueryData(['shop', 'runs', 'list'], [shopRun])
+    render(
+      <QueryClientProvider client={client}>
+        <ListViewProvider>
+          <SidebarSessionScope />
+        </ListViewProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: /Active/ }).textContent).toBe('Active1')
   })
 })
 

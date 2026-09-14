@@ -2,6 +2,7 @@ import { ChevronDownIcon } from '@/components/design-icons'
 import { ScaleIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
+import { queryScope } from '@open-mercato/cezar-api-client'
 import { useHealth, usePinRun, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
@@ -592,7 +593,7 @@ export function SidebarSessionScope() {
   const [view, setView] = useListView()
   const runs = useRuns()
   const registry = useProjects().data
-  const activeProjectId = useReferenceProjectId() ?? registry?.bootProject ?? 'default'
+  const runsProjectId = queryScope()
   const otherProjects = (registry?.projects ?? []).filter((project) => project.id !== registry?.bootProject)
   const otherLists = useQueries({
     queries: otherProjects.map((project) => ({
@@ -609,7 +610,7 @@ export function SidebarSessionScope() {
     seen.add(key)
     combined.push(run)
   }
-  for (const run of runs.data ?? []) add(activeProjectId, run)
+  for (const run of runs.data ?? []) add(runsProjectId, run)
   otherProjects.forEach((project, index) => {
     for (const run of otherLists[index]?.data ?? []) add(project.id, run)
   })
