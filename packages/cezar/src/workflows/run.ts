@@ -807,7 +807,7 @@ export class RunManager {
     if (this.disposed || this.recovering || this.reconcilingWorkers) return;
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.reconcileWorkerWaits();
   };
-  private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput }>();
+  private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number }>();
   /** Interrupted agent turns recovered after a process restart. Unlike an
    *  explicit user Continue, these are bulk scheduler work and must re-enter
    *  through `pump()` so both workspace and per-project caps are honored. */
@@ -1415,7 +1415,7 @@ export class RunManager {
           // handler can observe a half-dequeued run.
           void (async () => {
             const input = this.hydrateQueuedInput(runId, job.input);
-            await this.execute(runId, job.workflow, input);
+            await this.execute(runId, job.workflow, input, job.startAt);
           })().catch((err: unknown) => {
             const message = err instanceof Error ? err.message : String(err);
             this.store.updateRun(runId, {
@@ -1513,6 +1513,11 @@ export class RunManager {
     }
     this.pendingJobs.set(run.id, {
       workflow,
+      // A continuation can durably queue the untouched remainder before the
+      // process gets as far as rebuilding this in-memory job. Resume at the
+      // first persisted pending step instead of replaying completed agents.
+      startAt: Math.max(0, workflow.steps.findIndex(definition =>
+        run.steps.find(step => step.id === definition.id)?.status === 'pending')),
       // Folded through the same helper `pump()` uses (#472) so a restart carries the stack.
       // Idempotent: hydration always composes from `run.task` + the stack, never from an
       // already-folded `input.task`, so re-hydrating at dequeue yields the same string.
@@ -3250,6 +3255,17 @@ export class RunManager {
     return current < 0 || current < steps.length - 1;
   }
 
+  /** Locate the original workflow step whose closed session a synthetic Continue is resuming. */
+  private waitingWorkflowStepIndex(run: RunRecord): number {
+    const steps = run.workflowDef?.steps;
+    if (!steps?.length) return -1;
+    for (let index = steps.length - 1; index >= 0; index--) {
+      const persisted = run.steps.find((step) => step.id === steps[index]!.id);
+      if (persisted?.status === 'waiting' || persisted?.status === 'running') return index;
+    }
+    return -1;
+  }
+
   /**
    * "Continue" (spec 003): reopen a finished run's claude session in-process
    * (`claude --resume <sessionId>`) as a new synthetic step. The session then
@@ -3297,8 +3313,7 @@ export class RunManager {
     } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
     if (run.delegation?.role === 'root' && this.isActive(runId)) return { ok: false, error: 'run is still active' };
     if (run.status === 'waiting' && (run.delegation === undefined || run.delegation.role === 'root') && !this.isActive(runId) &&
-      this.waitingBeforeFinalWorkflowStep(run) &&
-      !(deferForCapacity && run.continuationMessage?.origin === 'human')) {
+      this.waitingBeforeFinalWorkflowStep(run) && this.waitingWorkflowStepIndex(run) < 0) {
       return { ok: false, error: 'cannot continue a waiting run before its final workflow step' };
     }
     const pendingHumanAsk = run.delegation?.role !== 'invalid' && this.hasPendingHumanAsk(runId);
@@ -3818,6 +3833,7 @@ export class RunManager {
     // in the un-normalised wire form the first step already converted away (`anthropic/opus`
     // instead of `opus`). Fail loud here too rather than let the backend pick a default.
     let continueModel: string | undefined;
+    let resumeWorkflow: { workflow: WorkflowDef; input: StartRunInput; startAt: number } | undefined;
     try {
       const normalized = normalizeModelForBackend(
         continueBackend,
@@ -3962,8 +3978,33 @@ export class RunManager {
       } else if (!state.idleClosed) {
         this.store.updateStep(runId, stepId, { status: 'done', finishedAt: finishedAt() });
         this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
-        await this.settleSuccess(runId);
-        appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
+        const completed = this.store.getRun(runId);
+        const waitingIndex = completed ? this.waitingWorkflowStepIndex(completed) : -1;
+        if (completed?.workflowDef && waitingIndex >= 0 && waitingIndex < completed.workflowDef.steps.length - 1) {
+          const waitingStep = completed.workflowDef.steps[waitingIndex]!;
+          this.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: finishedAt() });
+          this.store.appendEvent(runId, { type: 'step-end', stepId: waitingStep.id, status: 'done' });
+          resumeWorkflow = {
+            workflow: completed.workflowDef,
+            startAt: waitingIndex + 1,
+            input: {
+              task: completed.task,
+              runner: completed.runner,
+              model: completed.model,
+              effort: completed.effort,
+              agentProfile: completed.agentProfile,
+              systemPrompt: completed.systemPrompt,
+              autonomous: completed.autonomous,
+              generateFollowups: completed.generateFollowups,
+              worktree: completed.worktree,
+            },
+          };
+          this.store.updateRun(runId, { status: 'queued', currentStepId: undefined });
+          appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — remaining workflow queued`);
+        } else {
+          await this.settleSuccess(runId);
+          appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
+        }
       }
     } catch (err) {
       if (!setupComplete) {
@@ -3990,12 +4031,17 @@ export class RunManager {
       this.clearAutosaveTimer(state);
       if (state.cwd !== this.repoRoot) await autosaveCommit(state.cwd, 'turn end');
       this.dropActive(runId);
+      if (resumeWorkflow) {
+        this.pendingJobs.set(runId, resumeWorkflow);
+        this.queue.push(runId);
+        void this.pump();
+      }
     }
   }
 
   // ---- execution -----------------------------------------------------------
 
-  private async execute(runId: string, workflow: WorkflowDef, input: StartRunInput): Promise<void> {
+  private async execute(runId: string, workflow: WorkflowDef, input: StartRunInput, startAt = 0): Promise<void> {
     if (this.workerExecutionStopped(runId)) { this.starting.delete(runId); return; }
     this.workerIdentity(runId);
     const state: ActiveRun = {
@@ -4191,7 +4237,7 @@ export class RunManager {
     // note that covered the initial prompt alone would hand it a task about a file it was never
     // told the path of (#950).
     const startRecord = this.store.getRun(runId);
-    let startAttachments: PersistedAttachment[] = [
+    let startAttachments: PersistedAttachment[] = startAt > 0 ? [] : [
       ...(startRecord?.taskImages ?? []),
       ...(startRecord?.queuedMessages ?? []).flatMap((m) => m.images ?? []),
     ]
@@ -4217,12 +4263,12 @@ export class RunManager {
     // File blocks are dropped here — a session only ever sees viewable blocks (#950). An empty
     // result stays `undefined` rather than `[]`, so a task carrying only files hands the runner
     // seam exactly the shape a task carrying nothing always did.
-    const startBlocks = contentBlocksOf([...(input.images ?? []), ...(input.stackedImages ?? [])]);
+    const startBlocks = startAt > 0 ? [] : contentBlocksOf([...(input.images ?? []), ...(input.stackedImages ?? [])]);
     let startImages: ContentBlock[] | undefined = startBlocks.length ? startBlocks : undefined;
 
     const lastAgentIdx = findLastAgentStepIndex(workflow);
 
-    let i = 0;
+    let i = startAt;
     while (i < workflow.steps.length) {
       if (state.cancelled || this.workerExecutionStopped(runId)) { state.cancelled = true; break; }
       const step = workflow.steps[i] as WorkflowStepDef;

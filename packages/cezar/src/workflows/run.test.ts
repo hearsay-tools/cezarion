@@ -1533,7 +1533,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
 
   it.each(['workflow definition', 'legacy persisted steps'].flatMap(shape =>
     ['zero-config', 'delegated root'].map(delegation => ({ shape, delegation }))))(
-  'does not let an inactive $delegation Continue or Finish skip later workflow steps using $shape', async ({ shape, delegation }) => {
+  'does not let an inactive $delegation skip later workflow steps using $shape', async ({ shape, delegation }) => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
     if (delegation === 'delegated root') {
       store.commitDelegation([{
@@ -1564,11 +1564,20 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     manager.dispose();
     manager = new RunManager(store, repoRoot);
     await manager.recover();
+    expect(manager.finish(record.id)).toBe(false);
+    if (shape === 'workflow definition') {
+      expect(manager.continueRun(record.id, { text: 'mock:done answer' })).toEqual({ ok: true });
+      await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
+      expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'task', status: 'done' }),
+        expect.objectContaining({ id: 'later', status: 'done' }),
+      ]));
+      return;
+    }
     expect(manager.continueRun(record.id, { text: 'answer' })).toEqual({
       ok: false,
       error: 'cannot continue a waiting run before its final workflow step',
     });
-    expect(manager.finish(record.id)).toBe(false);
     expect(store.getRun(record.id)).toMatchObject({
       status: 'waiting',
       currentStepId: 'task',
@@ -1577,6 +1586,77 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
         expect.objectContaining({ id: 'later', status: 'pending' }),
       ],
     });
+  }, 30_000);
+
+  it('resumes the remaining workflow after an inactive delegated root answers a non-final ask', async () => {
+    const workflow: WorkflowDef = {
+      name: 'ask-then-later',
+      source: 'file',
+      steps: [
+        { id: 'task', name: 'Task', prompt: '{{task}}' },
+        { id: 'later', name: 'Later', prompt: 'mock:done later' },
+      ],
+    };
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
+    store.commitDelegation([{
+      id: record.id,
+      delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] },
+    }]);
+    currentId = record.id;
+    await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'agent' });
+    store.updateRun(record.id, { workflowDef: workflow });
+    const state = (manager as unknown as {
+      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
+    }).active.get(record.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+
+    manager.dispose();
+    manager = new RunManager(store, repoRoot);
+    await manager.recover();
+    expect(manager.continueRun(record.id, { text: 'mock:done answer' })).toEqual({ ok: true });
+    await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
+    expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'task', status: 'done' }),
+      expect.objectContaining({ id: 'later', status: 'done' }),
+    ]));
+  }, 30_000);
+
+  it('restart resumes a durably queued workflow after its completed waiting step', async () => {
+    const workflow: WorkflowDef = {
+      name: 'ask-then-later',
+      source: 'file',
+      steps: [
+        { id: 'task', name: 'Task', prompt: '{{task}}' },
+        { id: 'later', name: 'Later', command: 'node -e "process.exit(0)"' },
+      ],
+    };
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
+    const state = (manager as unknown as {
+      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
+    }).active.get(record.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    manager.dispose();
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
+    store.updateStep(record.id, 'task', { status: 'done', finishedAt: new Date().toISOString() });
+    store.updateRun(record.id, { status: 'queued', currentStepId: undefined, workflowDef: workflow });
+    store.flush();
+
+    manager = new RunManager(store, repoRoot);
+    await manager.recover();
+    await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
+    expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'task', status: 'done', iterations: 1 }),
+      expect.objectContaining({ id: 'later', status: 'done', iterations: 1 }),
+    ]));
   }, 30_000);
 
   it('strips the CEZ:MONITORING marker from server-emitted v1 text events', async () => {
