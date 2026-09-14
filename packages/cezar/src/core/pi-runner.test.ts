@@ -668,6 +668,40 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     );
   });
 
+  it('reports the original xAI wording after degraded-service retries are exhausted (#276)', async () => {
+    const original = "Error Code null: Service temporarily unavailable. The model's availability is currently degraded.";
+    const mockPath = writePiRpcMock(
+      cwd,
+      'mock-pi-degraded-exhausted.mjs',
+      `    send({ type: 'message_end', message: {
+      role: 'assistant', content: [], provider: 'xai', model: 'grok-4.6',
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
+      stopReason: 'error', errorMessage: ${JSON.stringify(`[cezar:retry-xai-degraded] Service unavailable: ${original}`)},
+    } });`,
+    );
+    const { events } = await runPiMock(cwd, mockPath);
+    expect(events.find((event) => event.type === 'error')?.message).toBe(
+      `pi: xai/grok-4.6 request failed: ${original}`,
+    );
+  });
+
+  it('preserves an unrelated provider error that naturally starts with the retryable wording', async () => {
+    const original = 'Service unavailable: upstream certificate rejected';
+    const mockPath = writePiRpcMock(
+      cwd,
+      'mock-pi-natural-service-unavailable.mjs',
+      `    send({ type: 'message_end', message: {
+      role: 'assistant', content: [], provider: 'openai', model: 'gpt-test',
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
+      stopReason: 'error', errorMessage: ${JSON.stringify(original)},
+    } });`,
+    );
+    const { events } = await runPiMock(cwd, mockPath);
+    expect(events.find((event) => event.type === 'error')?.message).toBe(
+      `pi: openai/gpt-test request failed: ${original}`,
+    );
+  });
+
   it('does not fail a successful empty assistant turn', async () => {
     const mockPath = writePiRpcMock(
       cwd,
@@ -688,6 +722,8 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
 });
 
 describe('pi RPC argv', () => {
+  const retryExtensionArgs = ['--extension', expect.stringMatching(/scripts\/pi-retry-degraded-service\.mjs$/)];
+
   it('uses pi RPC mode, exact session selection, provider/model, and pi tool names', () => {
     expect(
       buildPiArgs({
@@ -702,6 +738,7 @@ describe('pi RPC argv', () => {
     ).toEqual([
       '--mode',
       'rpc',
+      ...retryExtensionArgs,
       '--session',
       'session-1',
       '--append-system-prompt',
@@ -717,6 +754,7 @@ describe('pi RPC argv', () => {
     expect(buildPiArgs({ cwd: '/repo', userPrompt: 'task', sessionId: 'session-1' })).toEqual([
       '--mode',
       'rpc',
+      ...retryExtensionArgs,
       '--session-id',
       'session-1',
     ]);
@@ -730,7 +768,7 @@ describe('pi RPC argv', () => {
         allowedTools: ['Read', 'Bash'],
         bashAllowlist: ['npm test'],
       }),
-    ).toEqual(['--mode', 'rpc', '--tools', 'read']);
+    ).toEqual(['--mode', 'rpc', ...retryExtensionArgs, '--tools', 'read']);
   });
 
   it('maps the complete subagent trio onto pi --tools so the default extras list is representable', () => {
@@ -740,7 +778,7 @@ describe('pi RPC argv', () => {
         userPrompt: 'task',
         allowedTools: ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'Bash', 'Subagent', 'SubagentSupervisor', 'SubagentWait'],
       }),
-    ).toEqual(['--mode', 'rpc', '--tools', 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait']);
+    ).toEqual(['--mode', 'rpc', ...retryExtensionArgs, '--tools', 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait']);
   });
 
   it('does not inject Subagent when allowedTools is an explicit subset', () => {
@@ -750,13 +788,13 @@ describe('pi RPC argv', () => {
         userPrompt: 'task',
         allowedTools: ['Read', 'Bash'],
       }),
-    ).toEqual(['--mode', 'rpc', '--tools', 'read,bash']);
+    ).toEqual(['--mode', 'rpc', ...retryExtensionArgs, '--tools', 'read,bash']);
   });
 
   it('maps a canonical effort pin onto --thinking and omits it when unset', () => {
     expect(
       buildPiArgs({ cwd: '/repo', userPrompt: 'task', effort: 'high' }),
-    ).toEqual(['--mode', 'rpc', '--thinking', 'high']);
+    ).toEqual(['--mode', 'rpc', ...retryExtensionArgs, '--thinking', 'high']);
     expect(buildPiArgs({ cwd: '/repo', userPrompt: 'task' })).not.toContain('--thinking');
     expect(
       buildPiArgs({ cwd: '/repo', userPrompt: 'task', effort: 'auto' }),
