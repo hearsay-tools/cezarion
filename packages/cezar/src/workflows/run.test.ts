@@ -1659,6 +1659,34 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     ]));
   }, 30_000);
 
+  it('does not let Finish skip a remaining workflow after an idle-closed synthetic continuation', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'agent' });
+    store.updateRun(record.id, { workflowDef: {
+      name: 'ask-then-later', source: 'file',
+      steps: [SINGLE_STEP.steps[0]!, { id: 'later', name: 'Later', prompt: 'mock:done later' }],
+    } });
+    let state = (manager as unknown as {
+      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
+    }).active.get(record.id);
+    let idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    expect(manager.continueRun(record.id, { text: 'mock:ask choose again' })).toEqual({ ok: true });
+    await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
+    state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
+    idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting continuation did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+
+    expect(manager.finish(record.id)).toBe(false);
+    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting', currentStepId: 'continue-1' });
+  }, 30_000);
+
   it('strips the CEZ:MONITORING marker from server-emitted v1 text events', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
     currentId = record.id;

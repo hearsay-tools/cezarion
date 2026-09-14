@@ -1912,6 +1912,7 @@ export class RunManager {
     input: StartRunInput,
     runner: RunnerId,
     state?: ActiveRun,
+    startAt?: number,
   ): boolean {
     const run = this.store.getRun(runId);
     if (!run || run.status === 'cancelled' || state?.cancelled) return false;
@@ -1925,7 +1926,7 @@ export class RunManager {
       !accountHeldFor({ ...run, runner }, this.semaphore.accountHolds(), runner))) return false;
     state?.releaseRepoRoot?.();
     if (state) { state.releaseRepoRoot = undefined; this.clearAutosaveTimer(state); }
-    this.pendingJobs.set(runId, { workflow, input });
+    this.pendingJobs.set(runId, { workflow, input, startAt });
     this.queue.push(runId);
     this.store.updateRun(runId, { status: 'queued', startedAt: undefined, currentStepId: undefined });
     this.store.appendEvent(runId, {
@@ -3248,17 +3249,20 @@ export class RunManager {
    * original workflow still has steps after the waiting one, that would skip
    * those steps rather than resume the workflow engine. */
   private waitingBeforeFinalWorkflowStep(run: RunRecord): boolean {
-    if (run.currentStepId?.startsWith('continue-')) return false;
-    const steps = run.workflowDef?.steps ?? run.steps;
+    const steps = run.workflowDef?.steps ?? run.steps.filter(step => !step.id.startsWith('continue-'));
     if (!steps.length || !run.currentStepId) return true;
+    if (run.currentStepId.startsWith('continue-')) {
+      const waiting = this.waitingWorkflowStepIndex(run);
+      return waiting >= 0 && waiting < steps.length - 1;
+    }
     const current = steps.findIndex((step) => step.id === run.currentStepId);
     return current < 0 || current < steps.length - 1;
   }
 
   /** Locate the original workflow step whose closed session a synthetic Continue is resuming. */
   private waitingWorkflowStepIndex(run: RunRecord): number {
-    const steps = run.workflowDef?.steps;
-    if (!steps?.length) return -1;
+    const steps = run.workflowDef?.steps ?? run.steps.filter(step => !step.id.startsWith('continue-'));
+    if (!steps.length) return -1;
     for (let index = steps.length - 1; index >= 0; index--) {
       const persisted = run.steps.find((step) => step.id === steps[index]!.id);
       if (persisted?.status === 'waiting' || persisted?.status === 'running') return index;
@@ -3313,7 +3317,7 @@ export class RunManager {
     } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
     if (run.delegation?.role === 'root' && this.isActive(runId)) return { ok: false, error: 'run is still active' };
     if (run.status === 'waiting' && (run.delegation === undefined || run.delegation.role === 'root') && !this.isActive(runId) &&
-      this.waitingBeforeFinalWorkflowStep(run) && this.waitingWorkflowStepIndex(run) < 0) {
+      this.waitingBeforeFinalWorkflowStep(run) && (!run.workflowDef || this.waitingWorkflowStepIndex(run) < 0)) {
       return { ok: false, error: 'cannot continue a waiting run before its final workflow step' };
     }
     const pendingHumanAsk = run.delegation?.role !== 'invalid' && this.hasPendingHumanAsk(runId);
@@ -4071,7 +4075,7 @@ export class RunManager {
     // gate cannot be the only one, because dequeue is not the moment of no return. Nothing has
     // happened yet here, so the run goes back to the queue untouched (spec
     // 2026-08-03-auto-resume-after-usage-limit).
-    if (this.requeueWhileHeld(runId, workflow, input, taskBackend)) return;
+    if (this.requeueWhileHeld(runId, workflow, input, taskBackend, undefined, startAt)) return;
     // Extra system prompt (R2 2.3): POST override > config default; echoed on
     // the record so the UI/API can show what the run actually used.
     const extraSystemPrompt = this.store.getRun(runId)?.delegation?.role === 'worker'
@@ -4213,7 +4217,7 @@ export class RunManager {
       // is a spawn, and hand the run back to the queue if the account closed meanwhile. This
       // check also covers the explicit lock-bypass path, where the account may close while the
       // run is preparing its first step.
-      if (this.requeueWhileHeld(runId, workflow, input, taskBackend, state)) return;
+      if (this.requeueWhileHeld(runId, workflow, input, taskBackend, state, startAt)) return;
     }
 
     // Handoff journal (spec 007) — seeded after the worktree exists so the
@@ -4311,7 +4315,7 @@ export class RunManager {
         const current = this.store.getRun(runId);
         if (current && this.executionBlockedByRootFinish(current) && !state.sessionEverOpened) {
           this.store.updateStep(runId, step.id, { status: 'pending' });
-          this.requeueWhileHeld(runId, workflow, input, taskBackend, state);
+          this.requeueWhileHeld(runId, workflow, input, taskBackend, state, i);
           return;
         }
         if (failure) {
