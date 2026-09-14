@@ -1,6 +1,11 @@
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import {
+  formatGitHubNavFailure,
+  GITHUB_TAB_MARKUP_JS,
+  githubSurfaceReadyJs,
+} from '../src/lib/github-nav-contract'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 
 /**
@@ -50,12 +55,79 @@ let bootProject: string
  *  every cockpit link is scoped, and every legacy flat URL redirects onto its scoped twin. */
 const scoped = (path: string) => `/p/${bootProject}${path}`
 
+async function rememberGithubView(githubView: 'issues' | 'prs'): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/v1/ui-state`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ githubView }),
+  })
+  if (!response.ok) throw new Error(`cezar e2e: PUT /api/v1/ui-state answered ${response.status}`)
+}
+
+function githubNavFailure(target: AgentBrowser, cause: unknown): Error {
+  let url = '(url unavailable)'
+  let tabMarkup = ''
+  try {
+    url = target.url()
+  } catch {
+    /* session may be dead */
+  }
+  try {
+    tabMarkup = String(target.evaluate(GITHUB_TAB_MARKUP_JS) ?? '')
+  } catch {
+    /* no document */
+  }
+  return new Error(
+    formatGitHubNavFailure({
+      url,
+      tabMarkup,
+      message: cause instanceof Error ? cause.message : String(cause),
+    }),
+    { cause },
+  )
+}
+
+function waitForGitHubSurface(pathname: string, target: AgentBrowser = browser): void {
+  try {
+    target.waitForFunction(
+      githubSurfaceReadyJs({
+        pathname,
+        issuesHref: scoped('/github'),
+        prsHref: scoped('/github/prs'),
+      }),
+    )
+  } catch (cause) {
+    throw githubNavFailure(target, cause)
+  }
+}
+
+function openGitHub(path: string, target: AgentBrowser = browser): void {
+  target.goto(`${baseUrl}${scoped(path)}`)
+  waitForGitHubSurface(scoped(path), target)
+}
+
+function clickGitHubTab(path: '/github' | '/github/prs', target: AgentBrowser = browser): void {
+  const href = scoped(path)
+  try {
+    target.click(`[data-slot="gh-tabs"] a[href="${href}"]`)
+  } catch (cause) {
+    throw githubNavFailure(target, cause)
+  }
+  waitForGitHubSurface(href, target)
+}
+
 beforeAll(async () => {
   baseUrl = readTestEnv().baseUrl
   forgeAvailable = (await api<HealthPayload>('/api/v1/health')).forge?.available === true
   bootProject = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(DESKTOP.width, DESKTOP.height)
+})
+
+beforeEach(async () => {
+  await rememberGithubView('issues')
+  browser.setViewport(DESKTOP.width, DESKTOP.height)
+  browser.goto('about:blank')
 })
 
 afterAll(() => {
@@ -81,12 +153,8 @@ describe('the GitHub tab against the live dry-run server', () => {
     const gh = await api<GithubPayload>('/api/v1/github')
     expect(gh.available).toBe(true)
 
-    browser.goto(`${baseUrl}${scoped('/github')}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="gh-header"]') !== null`)
-    // The bare `/github` restores the LAST-selected tab (#417), which a previous suite run may
-    // have left on PRs — so ask for Issues explicitly rather than assuming the stored default.
-    browser.waitForFunction(`document.querySelector('[data-slot="gh-tabs"] a[href="${scoped('/github')}"]') !== null`)
-    browser.click(`[data-slot="gh-tabs"] a[href="${scoped('/github')}"]`)
+    openGitHub('/github')
+    clickGitHubTab('/github')
     browser.waitForFunction(
       `document.querySelectorAll('[data-slot="gh-row"]').length === ${gh.issues.length}`,
     )
@@ -95,8 +163,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     expect(browser.text('[data-slot="gh-tabs"]')).toContain(`Pull requests · ${gh.prs.length}`)
     if (gh.repo) expect(browser.text('[data-slot="gh-repo"]')).toBe(gh.repo)
 
-    // The PR tab is a URL of its own.
-    browser.click(`[data-slot="gh-tabs"] a[href="${scoped('/github/prs')}"]`)
+    clickGitHubTab('/github/prs')
     browser.waitForFunction(
       `document.querySelectorAll('[data-slot="gh-row"]').length === ${gh.prs.length}`,
     )
@@ -115,10 +182,8 @@ describe('the GitHub tab against the live dry-run server', () => {
     expect(first).toBeDefined()
     if (!first) return
 
-    browser.goto(`${baseUrl}${scoped('/github/prs')}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="gh-tabs"] a[href="${scoped('/github')}"]') !== null`)
-    // Start on an explicit tab so the remembered bare-route redirect cannot race the click.
-    browser.click(`[data-slot="gh-tabs"] a[href="${scoped('/github')}"]`)
+    openGitHub('/github')
+    clickGitHubTab('/github')
     browser.waitForFunction(
       `document.querySelector('[data-slot="gh-row"][data-number="${first.number}"]') !== null`,
     )
@@ -164,7 +229,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     const pr = gh.prs[0]
     if (!pr) return
 
-    browser.goto(`${baseUrl}${scoped(`/github/prs/${pr.number}`)}`)
+    openGitHub(`/github/prs/${pr.number}`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-thread"]') !== null`)
 
     // The section is "Activity", not "Comments" — a twenty-row list headed `Comments · 2` would
@@ -214,7 +279,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     const pr = gh.prs[0]
     if (!pr) return
 
-    browser.goto(`${baseUrl}${scoped(`/github/prs/${pr.number}`)}`)
+    openGitHub(`/github/prs/${pr.number}`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-merge-box"]') !== null`)
     expect(browser.text('[data-slot="gh-merge-box"]')).toContain('Ready to merge')
     expect(browser.text('[data-slot="gh-merge-box"]')).toContain('→ main')
@@ -235,7 +300,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     const pr = gh.prs[0]
     if (!pr) return
 
-    browser.goto(`${baseUrl}${scoped(`/github/prs/${pr.number}/changes`)}`)
+    openGitHub(`/github/prs/${pr.number}/changes`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-pr-changes"]') !== null`)
     expect(browser.evaluate(`document.querySelector('[data-slot="gh-pr-changes"]').textContent`)).toContain('changed files')
     expect(browser.count('[aria-label="Select changed file"]')).toBe(1)
@@ -254,7 +319,7 @@ describe('the GitHub tab against the live dry-run server', () => {
 
     browser.setViewport(IPHONE.width, IPHONE.height)
     try {
-      browser.goto(`${baseUrl}${scoped('/github')}`)
+      openGitHub('/github')
       browser.waitForFunction(`document.querySelector('[data-slot="gh-row"]') !== null`)
       // List visible, detail pane hidden below md.
       browser.waitForFunction(
@@ -262,7 +327,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       )
       expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
-      browser.goto(`${baseUrl}${scoped(`/github/issues/${first.number}`)}`)
+      openGitHub(`/github/issues/${first.number}`)
       browser.waitForFunction(`document.querySelector('[data-slot="gh-detail-inner"]') !== null`)
       // The revised mobile layout keeps the list above the detail; the back link remains.
       browser.waitForFunction(
@@ -298,16 +363,15 @@ describe('the GitHub tab against the live dry-run server', () => {
       for (const theme of ['light', 'dark'] as const) {
         for (const density of ['comfortable', 'ultra'] as const) {
           browser.setViewport(viewport.width, viewport.height)
-          browser.goto(`${baseUrl}${scoped('/github')}`)
-          browser.waitForFunction(`document.querySelector('[data-slot="gh-row"]') !== null`)
+          openGitHub('/github')
           browser.evaluate(`(() => {
             document.documentElement.classList.toggle('light', ${theme === 'light'})
             document.documentElement.dataset.density = ${JSON.stringify(density)}
           })()`)
 
           for (const view of ['issues', 'prs'] as const) {
-            const path = view === 'issues' ? '/github' : '/github/prs'
-            browser.click(`[data-slot="gh-tabs"] a[href="${scoped(path)}"]`)
+            const path: '/github' | '/github/prs' = view === 'issues' ? '/github' : '/github/prs'
+            clickGitHubTab(path)
             browser.waitForFunction(
               `document.querySelector('[data-slot="gh-row"]')?.getAttribute('href')?.includes(${JSON.stringify(view === 'issues' ? '/issues/' : '/prs/')}) === true`,
             )
@@ -396,7 +460,7 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
   const gh = await api<GithubPayload>('/api/v1/github')
   const first = gh.issues[0]!
   browser.setViewport(width, 1000)
-  browser.goto(`${baseUrl}${scoped(`/github/issues/${first.number}`)}`)
+  openGitHub(`/github/issues/${first.number}`)
   browser.waitForFunction(`document.querySelector('[data-slot="gh-hand"]') !== null`)
   browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; delete document.documentElement.dataset.density; document.querySelector('[data-slot="gh-hand"]').scrollIntoView({block:'start'})`)
   const facts = browser.evaluate(`(() => {
@@ -424,16 +488,10 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
 it.each(['loading', 'empty', 'error'].flatMap(state => ['light', 'dark'].map(theme => ({ state, theme }))))('renders GitHub $state in $theme without losing navigation', async ({ state, theme }) => {
   const stateBrowser = AgentBrowser.open(`${sessionId}-${state}-${theme}`)
   const previous = await api<{ githubView?: 'issues' | 'prs' }>('/api/v1/ui-state')
-  const remember = async (githubView: 'issues' | 'prs') => {
-    const response = await fetch(`${baseUrl}/api/v1/ui-state`, {
-      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ githubView }),
-    })
-    expect(response.ok).toBe(true)
-  }
   try {
     // The bare Issues list restores the last tab (#417); set a deterministic fixture
     // before this fresh browser loads its UI-state cache, and restore it below.
-    await remember('issues')
+    await rememberGithubView('issues')
     stateBrowser.setViewport(402, 900)
     stateBrowser.goto(`${baseUrl}${scoped('/')}`)
     stateBrowser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
@@ -453,7 +511,7 @@ it.each(['loading', 'empty', 'error'].flatMap(state => ['light', 'dark'].map(the
     stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; new Promise(resolve => setTimeout(resolve, 250))`)
     expect(stateBrowser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     stateBrowser.screenshot(`${artifactsDir}/revised-github-${state}-${theme}.png`, { viewport: true })
-  } finally { stateBrowser.close(); await remember(previous.githubView ?? 'issues') }
+  } finally { stateBrowser.close(); await rememberGithubView(previous.githubView ?? 'issues') }
 }, 90_000)
 
 it.each(['ready', 'unknown', 'conflicting'].flatMap(state => [1440, 402].flatMap(width => ['light', 'dark'].map(theme => ({ state, width, theme })))))('preserves PR $state review at $width / $theme', async ({ state, width, theme }) => {
