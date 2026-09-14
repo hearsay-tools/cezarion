@@ -20,9 +20,10 @@ import record from './fixtures/thread-run.record.json'
  *    row count and total element count, compared against the SAME transcript force-rendered
  *    flat via `?thread=flat` — the measurement seam in thread-scroll.ts).
  *  - The iOS keyboard cannot be driven headless. The `--kb` adapter math is unit-tested
- *    against stub viewports (lib/keyboard-inset.test.ts); here the test drives the CSS seam
- *    publishes and verifies that document-flow controls remain at the transcript tail
- *    without becoming a keyboard-lifted overlay. Real-device keyboard behavior remains a manual checklist item.
+ *    against stub viewports (lib/keyboard-inset.test.ts); here the test drives the CSS seam it
+ *    publishes and verifies that reserved viewport space keeps document-flow controls above
+ *    the keyboard without turning them into an overlay. Real-device keyboard behavior remains
+ *    a manual checklist item.
  */
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -304,7 +305,7 @@ describe('thread virtualization on a 1,000-row transcript', () => {
   }, 90_000)
 })
 
-describe('iPhone viewport (390×844)', () => {
+describe('phone viewports', () => {
   it('keeps the composer at the document tail without overlaying history when the keyboard inset changes', () => {
     browser.setViewport(390, 844)
     openThread()
@@ -328,6 +329,76 @@ describe('iPhone viewport (390×844)', () => {
     expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).bottom`)).toBe('0px')
 
     browser.screenshot(`${artifactsDir}/thread-iphone.png`, { viewport: true })
+    browser.setViewport(1440, 900)
+  }, 90_000)
+
+  it('holds the dock still while a live line arrives and the textarea grows upward', () => {
+    browser.setViewport(360, 640)
+    openThread()
+    browser.waitForFunction(`Math.abs(${MAIN}.scrollHeight - ${MAIN}.clientHeight - ${MAIN}.scrollTop) < 2`)
+
+    const append = browser.evaluate(`new Promise((resolve, reject) => {
+      const dock = document.querySelector('[data-slot="thread-dock"]');
+      const conversation = document.querySelector('[data-slot="session-conversation"]');
+      const before = dock.getBoundingClientRect();
+      const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('live append did not render')); }, 5000);
+      const observer = new MutationObserver(() => {
+        if (!document.body.textContent.includes('mobile dock append probe')) return;
+        const after = dock.getBoundingClientRect();
+        clearTimeout(timeout); observer.disconnect();
+        resolve({ beforeTop: before.top, beforeBottom: before.bottom, afterTop: after.top, afterBottom: after.bottom });
+      });
+      observer.observe(conversation, { childList: true, subtree: true, characterData: true });
+      const source = window.__threadSources.findLast(s => s.url.includes('/runs/') && s.url.includes('/events'));
+      if (!source) { clearTimeout(timeout); observer.disconnect(); reject(new Error('missing run EventSource')); return; }
+      source.dispatchEvent(new MessageEvent('ui-event', { data: JSON.stringify({
+        type: 'item.completed', seq: 100001, ts: new Date().toISOString(), stepId: 'task',
+        item: { kind: 'message', id: 'mobile-dock-append', role: 'assistant', text: 'mobile dock append probe' },
+      }) }));
+    })`) as { beforeTop: number; beforeBottom: number; afterTop: number; afterBottom: number }
+    expect(Math.abs(append.afterBottom - append.beforeBottom)).toBeLessThanOrEqual(1)
+
+    const growth = browser.evaluate(`new Promise((resolve, reject) => {
+      const dock = document.querySelector('[data-slot="thread-dock"]');
+      const textarea = dock.querySelector('textarea');
+      const before = dock.getBoundingClientRect();
+      const beforeHeight = textarea.getBoundingClientRect().height;
+      const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('textarea did not grow')); }, 5000);
+      const observer = new MutationObserver(() => {
+        const afterHeight = textarea.getBoundingClientRect().height;
+        if (afterHeight <= beforeHeight) return;
+        const after = dock.getBoundingClientRect();
+        clearTimeout(timeout); observer.disconnect();
+        resolve({ beforeTop: before.top, beforeBottom: before.bottom, beforeHeight,
+          afterTop: after.top, afterBottom: after.bottom, afterHeight });
+      });
+      observer.observe(textarea, { attributes: true, attributeFilter: ['style'] });
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(textarea, 'first line\\nsecond line\\nthird line');
+      textarea.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '\\n' }));
+    })`) as { beforeTop: number; beforeBottom: number; beforeHeight: number; afterTop: number; afterBottom: number; afterHeight: number }
+    expect(growth.afterHeight).toBeGreaterThan(growth.beforeHeight)
+    expect(growth.afterTop).toBeLessThan(growth.beforeTop)
+    expect(Math.abs(growth.afterBottom - growth.beforeBottom)).toBeLessThanOrEqual(1)
+
+    browser.screenshot(`${artifactsDir}/thread-mobile-stable-dock.png`, { viewport: true })
+    browser.setViewport(1440, 900)
+  }, 90_000)
+
+  it('reserves the published keyboard inset below the document-flow thread', () => {
+    browser.setViewport(360, 640)
+    openThread()
+    browser.evaluate(`document.documentElement.style.setProperty('--kb', '280px')`)
+    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+    const reserved = browser.evaluate(`(() => {
+      const main = ${MAIN}.getBoundingClientRect();
+      const shellComposer = document.querySelector('[data-slot="main"] + [data-slot="composer"]');
+      const reserve = shellComposer.getBoundingClientRect();
+      return { mainBottom: main.bottom, reserveHeight: reserve.height, viewportHeight: innerHeight };
+    })()`) as { mainBottom: number; reserveHeight: number; viewportHeight: number }
+    expect(reserved.reserveHeight).toBeGreaterThanOrEqual(280)
+    expect(reserved.mainBottom).toBeLessThanOrEqual(reserved.viewportHeight - 280)
+    browser.evaluate(`document.documentElement.style.removeProperty('--kb')`)
     browser.setViewport(1440, 900)
   }, 90_000)
 })
