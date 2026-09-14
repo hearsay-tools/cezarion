@@ -286,23 +286,71 @@ function Row({
       {/* No pin on the TILE (#935): a pin is per task, and the tile is a stand-in for two or
           three of them. Expanding it pins the variant you mean, and the tile rises to `Pinned`
           with it — the same best-ranked-member rule that already moves it between buckets. */}
-      {expanded
-        ? row.members.map((member) => (
-            <RunRow
-              key={member.id}
-              run={member}
-              queuePosition={null}
-              currentRunId={currentRunId}
-              now={now}
-              scope={scope}
-              variant
-              showTokens={showTokens}
-              showCost={showCost}
-              onTogglePin={onTogglePin}
-            />
-          ))
-        : null}
+      {expanded ? (
+        <ExpandedVariantMembers
+          members={row.members}
+          currentRunId={currentRunId}
+          now={now}
+          scope={scope}
+          showTokens={showTokens}
+          showCost={showCost}
+          onTogglePin={onTogglePin}
+        />
+      ) : null}
     </>
+  )
+}
+
+/**
+ * Member rows under an open variant tile. The parent surface asks only about the painted first
+ * member (the cheaper collapsed path); expanding is what makes the later chips visible, so this
+ * is the moment to register their references.
+ */
+function ExpandedVariantMembers({
+  members,
+  currentRunId,
+  now,
+  scope,
+  showTokens,
+  showCost,
+  onTogglePin,
+}: {
+  members: RunRecord[]
+  currentRunId: string | null
+  now: number
+  scope: string | null
+  showTokens: boolean
+  showCost: boolean
+  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+}) {
+  const rows = members.map((member) => (
+    <RunRow
+      key={member.id}
+      run={member}
+      queuePosition={null}
+      currentRunId={currentRunId}
+      now={now}
+      scope={scope}
+      variant
+      showTokens={showTokens}
+      showCost={showCost}
+      onTogglePin={onTogglePin}
+    />
+  ))
+  if (!scope) return <>{rows}</>
+  return (
+    <ReferenceStatusProvider
+      projectId={scope}
+      requests={members.flatMap((member) =>
+        taskReferences(member).map((reference) => ({
+          projectId: scope,
+          kind: reference.kind,
+          number: reference.number,
+        })),
+      )}
+    >
+      {rows}
+    </ReferenceStatusProvider>
   )
 }
 
