@@ -3204,7 +3204,8 @@ export class RunManager {
       void this.settleRequestedRootFinish(runId);
       return true;
     }
-    if (run?.status === 'waiting' && run.delegation === undefined && !this.isActive(runId)) {
+    if (run?.status === 'waiting' && run.delegation === undefined && !this.isActive(runId) &&
+      !this.waitingBeforeFinalWorkflowStep(run)) {
       const finishedAt = new Date().toISOString();
       for (const step of run.steps) {
         if (step.status === 'waiting' || step.status === 'running') {
@@ -3220,6 +3221,16 @@ export class RunManager {
       return true;
     }
     return false;
+  }
+
+  /** A synthetic continuation can settle only the resumed agent turn. If the
+   * original workflow still has steps after the waiting one, that would skip
+   * those steps rather than resume the workflow engine. */
+  private waitingBeforeFinalWorkflowStep(run: RunRecord): boolean {
+    const steps = run.workflowDef?.steps;
+    if (!steps?.length || !run.currentStepId) return false;
+    const current = steps.findIndex((step) => step.id === run.currentStepId);
+    return current >= 0 && current < steps.length - 1;
   }
 
   /**
@@ -3268,6 +3279,10 @@ export class RunManager {
       }
     } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
     if (run.delegation?.role === 'root' && this.isActive(runId)) return { ok: false, error: 'run is still active' };
+    if (run.status === 'waiting' && run.delegation === undefined && !this.isActive(runId) &&
+      this.waitingBeforeFinalWorkflowStep(run)) {
+      return { ok: false, error: 'cannot continue a waiting run before its final workflow step' };
+    }
     const pendingHumanAsk = run.delegation?.role !== 'invalid' && this.hasPendingHumanAsk(runId);
     if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && run.delegation.destroy)) return { ok: false, error: 'worker cannot continue' };
     if (this.executionBlockedByRootFinish(run)) return { ok: false, error: 'parent finish is pending' };
