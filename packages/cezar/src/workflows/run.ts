@@ -1604,11 +1604,25 @@ export class RunManager {
         this.store.updateRun(run.id, { status: 'waiting', activity: undefined });
         continue;
       }
-      // Waiting is durable human attention, with or without delegation enabled.
-      // A missing CLI after restart is the same resource-only closure as the
-      // inactivity timer: it does not prove that the task or its current step
-      // succeeded. Continue and explicit Finish remain available on the record.
-      if (run.status === 'waiting') continue;
+      // Waiting is durable human attention for roots and ordinary top-level
+      // runs. A worker reaches here only when it has neither a recoverable ask
+      // nor a worker wait; preserving that record would strand both it and its
+      // parent because workers cannot accept an ordinary inactive Continue.
+      if (run.status === 'waiting' && run.delegation?.role !== 'worker') continue;
+      if (run.status === 'waiting') {
+        const finishedAt = new Date().toISOString();
+        for (const step of run.steps) {
+          if (step.status === 'waiting' || step.status === 'running') {
+            this.store.updateStep(run.id, step.id, { status: 'done', finishedAt });
+          }
+        }
+        this.store.appendEvent(run.id, {
+          type: 'lifecycle',
+          message: 'cezar restarted — the open worker session was settled',
+        });
+        await this.settleSuccess(run.id);
+        continue;
+      }
       // `running`: the process died mid-turn. Mark it interrupted (the state
       // continueRun expects), then pick the work back up from the last session.
       const finishedAt = new Date().toISOString();
