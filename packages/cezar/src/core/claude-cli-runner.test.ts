@@ -8,13 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from './agent-runner.ts';
 import { isSignalTerminationExit, prependSystemPrompt } from './agent-runner.ts';
-import {
-  buildClaudeArgs,
-  ClaudeCliRunner,
-  EOF_KILL_GRACE_MS,
-  EOF_TERM_GRACE_MS,
-  KILL_GRACE_MS,
-} from './claude-cli-runner.ts';
+import { buildClaudeArgs, ClaudeCliRunner } from './claude-cli-runner.ts';
+import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, KILL_GRACE_MS } from './runner-runtime.ts';
 import type { UiEvent } from './ui-events.ts';
 
 /** Only the escalation tests below swap the child out; every other test in this

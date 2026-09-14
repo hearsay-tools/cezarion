@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from './agent-runner.ts';
-import { AUTO_END_DELAY_MS } from './claude-cli-runner.ts';
+import { AUTO_END_DELAY_MS } from './runner-runtime.ts';
 import { KILL_GRACE_MS, OpencodeServerRunner } from './opencode-server-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 
