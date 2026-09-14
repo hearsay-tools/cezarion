@@ -3213,7 +3213,8 @@ export class RunManager {
       return true;
     }
     const run = this.store.getRun(runId);
-    if (run?.status === 'waiting' && run.delegation?.role === 'root' && !this.isActive(runId)) {
+    if (run?.status === 'waiting' && run.delegation?.role === 'root' && !this.isActive(runId) &&
+      !this.waitingBeforeFinalWorkflowStep(run)) {
       try { this.store.commitRootFinishIntent(runId); }
       catch { return false; }
       void this.settleRequestedRootFinish(runId);
@@ -3295,7 +3296,7 @@ export class RunManager {
       }
     } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
     if (run.delegation?.role === 'root' && this.isActive(runId)) return { ok: false, error: 'run is still active' };
-    if (run.status === 'waiting' && run.delegation === undefined && !this.isActive(runId) &&
+    if (run.status === 'waiting' && (run.delegation === undefined || run.delegation.role === 'root') && !this.isActive(runId) &&
       this.waitingBeforeFinalWorkflowStep(run)) {
       return { ok: false, error: 'cannot continue a waiting run before its final workflow step' };
     }
