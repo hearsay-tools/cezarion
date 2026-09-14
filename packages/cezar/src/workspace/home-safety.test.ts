@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assertCezarHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.ts';
@@ -112,7 +113,8 @@ describe('cezar home write safety', () => {
     // not touch the user's registry. The per-layer cases above are what fail if
     // any single defence is removed.
     const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
-    const vitestBin = join(packageRoot, '..', '..', 'node_modules', '.bin', 'vitest');
+    const vitestPkg = createRequire(import.meta.url).resolve('vitest/package.json');
+    const vitestCli = join(dirname(vitestPkg), 'vitest.mjs');
     const summary = join(pinned, 'github-step-summary.md');
     writeFileSync(summary, 'outer suite report\n');
     const env: NodeJS.ProcessEnv = {
@@ -129,8 +131,8 @@ describe('cezar home write safety', () => {
     delete env.VITEST;
 
     const run = spawnSync(
-      vitestBin,
-      ['run', 'src/workspace/projects-cli.test.ts', '--testTimeout=15', '-t', 'remove'],
+      process.execPath,
+      [vitestCli, 'run', 'src/workspace/projects-cli.test.ts', '--testTimeout=15', '-t', 'remove'],
       { cwd: packageRoot, env, encoding: 'utf8' },
     );
 
