@@ -42,8 +42,9 @@ lokalnych z `.ai/skills/`.
 5. **Seed do kontekstu agenta**: body skilla nadal idzie w
    `--append-system-prompt` (jak dziś). Dla skilli katalogowych (`SKILL.md` +
    references) — materializacja katalogu do `<cwd>/.claude/skills/<name>/`
-   z wpisem do `.git/info/exclude` (wzorzec janitora), żeby claude widział
-   references na dysku.
+   ORAZ `<cwd>/.agents/skills/<name>/` (claude vs codex/pi, #286), z wpisem
+   każdego z obu do `.git/info/exclude` (wzorzec janitora), żeby każdy backend
+   widział references na dysku.
 6. **API/GUI**: `GET /api/skills` zwraca też `source: 'team'`;
    `POST /api/skills/refresh` robi fetch; etykiety i przycisk w zakładce.
 

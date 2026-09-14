@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -10,6 +10,7 @@ import {
   isPinnedSha,
   isSafeRef,
   listRemoteSkills,
+  materializeSkillDir,
   refreshTeamSkills,
   safeRemoteFor,
 } from '../../src/skills-remote.js';
@@ -149,6 +150,71 @@ test('listRemoteSkills clones a local repo, pins the SHA, and refuses a bad ref'
   // An injection ref is refused outright.
   const evil = await listRemoteSkills({ repo: srcDir, ref: '--output=/tmp/pwn' });
   assert.deepEqual(evil, []);
+});
+
+// ---- materialization: both agent skill dirs get the directory skill (#286) ----
+
+test('materializeSkillDir seeds .claude/skills AND .agents/skills, excluding both from git', async (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'cez-home-'));
+  const srcDir = mkdtempSync(join(tmpdir(), 'cez-src-'));
+  const repoRoot = mkdtempSync(join(tmpdir(), 'cez-root-'));
+  const prevHome = process.env.HOME;
+  process.env.HOME = home; // redirect the ~/.cache/cez skills cache into temp
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    for (const d of [home, srcDir, repoRoot]) rmSync(d, { recursive: true, force: true });
+  });
+
+  const g = (args: string[], cwd: string) =>
+    execFileSync('git', args, { cwd, encoding: 'utf8' }).toString().trim();
+
+  // Source skills repo: one directory skill with a companion references file.
+  g(['-c', 'init.defaultBranch=main', 'init'], srcDir);
+  g(['config', 'user.email', 'test@example.com'], srcDir);
+  g(['config', 'user.name', 'Test'], srcDir);
+  mkdirSync(join(srcDir, 'greeter', 'references'), { recursive: true });
+  const skillMd = '---\ndescription: hi\n---\nsay hi\n';
+  const notesMd = 'companion notes\n';
+  writeFileSync(join(srcDir, 'greeter', 'SKILL.md'), skillMd);
+  writeFileSync(join(srcDir, 'greeter', 'references', 'notes.md'), notesMd);
+  g(['add', '-A'], srcDir);
+  g(['commit', '-m', 'init'], srcDir);
+
+  await ensureBareClone(srcDir);
+  const skills = await listRemoteSkills({ repo: srcDir, ref: 'main' });
+  const greeter = skills.find((s) => s.name === 'greeter');
+  assert.ok(greeter, 'expected the directory skill to be listed');
+
+  // Target project root: a git repo so the shared info/exclude exists.
+  g(['-c', 'init.defaultBranch=main', 'init'], repoRoot);
+
+  const ok = await materializeSkillDir(repoRoot, greeter);
+  assert.equal(ok, true, 'materializeSkillDir should have seeded the directory skill');
+
+  // BOTH destinations get the full directory (SKILL.md + references/) — claude
+  // reads .claude/skills, codex/pi read .agents/skills. Dropping either one is
+  // the #286 regression: the other backend loses the companion files on disk.
+  for (const agentDir of ['.claude', '.agents']) {
+    const destSkill = join(repoRoot, agentDir, 'skills', 'greeter');
+    assert.ok(
+      existsSync(join(destSkill, 'SKILL.md')),
+      `${agentDir}/skills/greeter/SKILL.md must be materialized`,
+    );
+    assert.equal(readFileSync(join(destSkill, 'SKILL.md'), 'utf8'), skillMd);
+    assert.equal(
+      readFileSync(join(destSkill, 'references', 'notes.md'), 'utf8'),
+      notesMd,
+    );
+  }
+
+  // BOTH paths stay out of the user's git via the shared info/exclude.
+  const exclude = readFileSync(join(repoRoot, '.git', 'info', 'exclude'), 'utf8');
+  assert.ok(exclude.split('\n').includes('.claude/skills/greeter/'));
+  assert.ok(
+    exclude.split('\n').includes('.agents/skills/greeter/'),
+    'exclude must contain .agents/skills/greeter/',
+  );
 });
 
 // ---- per-project team-skills cache isolation (multi-project workspace, 2.6) --
