@@ -3297,7 +3297,8 @@ export class RunManager {
     } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
     if (run.delegation?.role === 'root' && this.isActive(runId)) return { ok: false, error: 'run is still active' };
     if (run.status === 'waiting' && (run.delegation === undefined || run.delegation.role === 'root') && !this.isActive(runId) &&
-      this.waitingBeforeFinalWorkflowStep(run)) {
+      this.waitingBeforeFinalWorkflowStep(run) &&
+      !(deferForCapacity && run.continuationMessage?.origin === 'human')) {
       return { ok: false, error: 'cannot continue a waiting run before its final workflow step' };
     }
     const pendingHumanAsk = run.delegation?.role !== 'invalid' && this.hasPendingHumanAsk(runId);
