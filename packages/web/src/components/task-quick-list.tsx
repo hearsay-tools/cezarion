@@ -592,22 +592,27 @@ export function SidebarSessionScope() {
   const [view, setView] = useListView()
   const runs = useRuns()
   const registry = useProjects().data
+  const activeProjectId = useReferenceProjectId() ?? registry?.bootProject ?? 'default'
+  const otherProjects = (registry?.projects ?? []).filter((project) => project.id !== registry?.bootProject)
   const otherLists = useQueries({
-    queries: (registry?.projects ?? [])
-      .filter((project) => project.id !== registry?.bootProject)
-      .map((project) => ({
-        queryKey: [project.id, 'runs', 'list'] as const,
-        queryFn: async () => [] as RunRecord[],
-        enabled: false,
-      })),
+    queries: otherProjects.map((project) => ({
+      queryKey: [project.id, 'runs', 'list'] as const,
+      queryFn: async () => [] as RunRecord[],
+      enabled: false,
+    })),
   })
   const seen = new Set<string>()
   const combined: RunRecord[] = []
-  for (const run of [...(runs.data ?? []), ...otherLists.flatMap((query) => query.data ?? [])]) {
-    if (seen.has(run.id)) continue
-    seen.add(run.id)
+  const add = (projectId: string, run: RunRecord) => {
+    const key = `${projectId}:${run.id}`
+    if (seen.has(key)) return
+    seen.add(key)
     combined.push(run)
   }
+  for (const run of runs.data ?? []) add(activeProjectId, run)
+  otherProjects.forEach((project, index) => {
+    for (const run of otherLists[index]?.data ?? []) add(project.id, run)
+  })
   const counts = listCounts(combined)
   return (
     <div data-slot="sidebar-session-scope" role="group" aria-label="Session scope" className="flex w-full gap-1 rounded-lg bg-muted p-[3px]">
