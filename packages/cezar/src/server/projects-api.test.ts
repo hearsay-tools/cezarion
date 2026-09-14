@@ -61,6 +61,7 @@ describe('workspace projects API', () => {
   const savedRemote = process.env.CEZ_REMOTE;
   const savedFollowups = process.env.CEZ_FOLLOWUPS;
   const savedSingleProject = process.env.CEZ_SINGLE_PROJECT;
+  const savedAutomations = process.env.CEZ_AUTOMATIONS;
   const savedDryRun = process.env.CEZ_DRY_RUN;
   let home: string;
   let repoRoot: string;
@@ -76,6 +77,7 @@ describe('workspace projects API', () => {
     delete process.env.CEZ_REMOTE;
     delete process.env.CEZ_FOLLOWUPS;
     delete process.env.CEZ_SINGLE_PROJECT;
+    delete process.env.CEZ_AUTOMATIONS;
     // Deterministic on any machine: no network, no real agent CLIs.
     process.env.CEZ_DRY_RUN = '1';
     clearProjectProbeCache();
@@ -92,6 +94,8 @@ describe('workspace projects API', () => {
     else process.env.CEZ_FOLLOWUPS = savedFollowups;
     if (savedSingleProject === undefined) delete process.env.CEZ_SINGLE_PROJECT;
     else process.env.CEZ_SINGLE_PROJECT = savedSingleProject;
+    if (savedAutomations === undefined) delete process.env.CEZ_AUTOMATIONS;
+    else process.env.CEZ_AUTOMATIONS = savedAutomations;
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
   });

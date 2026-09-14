@@ -263,11 +263,12 @@ export function AppShell({
             {children}
           </main>
 
-          {/* Row 4: the composer dock (thread reply, Step R3). Empty today, but it still carries
-              the bottom safe-area gutter so the scroller never runs under the home indicator. */}
+          {/* Row 4 reserves whichever obstruction is taller: the home indicator or the visual
+              keyboard inset published as --kb. The real thread composer remains in document
+              flow inside main; shrinking that viewport keeps it reachable without an overlay. */}
           <div
             data-slot="composer"
-            className="row-start-4 pb-[env(safe-area-inset-bottom)]"
+            className="row-start-4 pb-[max(env(safe-area-inset-bottom),var(--kb,0px))]"
           />
         </div>
       </div>
