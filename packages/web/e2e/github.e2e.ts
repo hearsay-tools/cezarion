@@ -101,7 +101,8 @@ function waitForGitHubSurface(pathname: string, target: AgentBrowser = browser):
   }
 }
 
-function openGitHub(path: string, target: AgentBrowser = browser): void {
+async function openGitHub(path: string, target: AgentBrowser = browser): Promise<void> {
+  if (path === '/github') await rememberGithubView('issues')
   target.goto(`${baseUrl}${scoped(path)}`)
   waitForGitHubSurface(scoped(path), target)
 }
@@ -153,7 +154,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     const gh = await api<GithubPayload>('/api/v1/github')
     expect(gh.available).toBe(true)
 
-    openGitHub('/github')
+    await openGitHub('/github')
     clickGitHubTab('/github')
     browser.waitForFunction(
       `document.querySelectorAll('[data-slot="gh-row"]').length === ${gh.issues.length}`,
@@ -182,7 +183,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     expect(first).toBeDefined()
     if (!first) return
 
-    openGitHub('/github')
+    await openGitHub('/github')
     clickGitHubTab('/github')
     browser.waitForFunction(
       `document.querySelector('[data-slot="gh-row"][data-number="${first.number}"]') !== null`,
@@ -229,7 +230,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     const pr = gh.prs[0]
     if (!pr) return
 
-    openGitHub(`/github/prs/${pr.number}`)
+    await openGitHub(`/github/prs/${pr.number}`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-thread"]') !== null`)
 
     // The section is "Activity", not "Comments" — a twenty-row list headed `Comments · 2` would
@@ -279,7 +280,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     const pr = gh.prs[0]
     if (!pr) return
 
-    openGitHub(`/github/prs/${pr.number}`)
+    await openGitHub(`/github/prs/${pr.number}`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-merge-box"]') !== null`)
     expect(browser.text('[data-slot="gh-merge-box"]')).toContain('Ready to merge')
     expect(browser.text('[data-slot="gh-merge-box"]')).toContain('→ main')
@@ -300,7 +301,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     const pr = gh.prs[0]
     if (!pr) return
 
-    openGitHub(`/github/prs/${pr.number}/changes`)
+    await openGitHub(`/github/prs/${pr.number}/changes`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-pr-changes"]') !== null`)
     expect(browser.evaluate(`document.querySelector('[data-slot="gh-pr-changes"]').textContent`)).toContain('changed files')
     expect(browser.count('[aria-label="Select changed file"]')).toBe(1)
@@ -319,7 +320,7 @@ describe('the GitHub tab against the live dry-run server', () => {
 
     browser.setViewport(IPHONE.width, IPHONE.height)
     try {
-      openGitHub('/github')
+      await openGitHub('/github')
       browser.waitForFunction(`document.querySelector('[data-slot="gh-row"]') !== null`)
       // List visible, detail pane hidden below md.
       browser.waitForFunction(
@@ -327,7 +328,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       )
       expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
 
-      openGitHub(`/github/issues/${first.number}`)
+      await openGitHub(`/github/issues/${first.number}`)
       browser.waitForFunction(`document.querySelector('[data-slot="gh-detail-inner"]') !== null`)
       // The revised mobile layout keeps the list above the detail; the back link remains.
       browser.waitForFunction(
@@ -363,7 +364,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       for (const theme of ['light', 'dark'] as const) {
         for (const density of ['comfortable', 'ultra'] as const) {
           browser.setViewport(viewport.width, viewport.height)
-          openGitHub('/github')
+          await openGitHub('/github')
           browser.evaluate(`(() => {
             document.documentElement.classList.toggle('light', ${theme === 'light'})
             document.documentElement.dataset.density = ${JSON.stringify(density)}
@@ -460,7 +461,7 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
   const gh = await api<GithubPayload>('/api/v1/github')
   const first = gh.issues[0]!
   browser.setViewport(width, 1000)
-  openGitHub(`/github/issues/${first.number}`)
+  await openGitHub(`/github/issues/${first.number}`)
   browser.waitForFunction(`document.querySelector('[data-slot="gh-hand"]') !== null`)
   browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; delete document.documentElement.dataset.density; document.querySelector('[data-slot="gh-hand"]').scrollIntoView({block:'start'})`)
   const facts = browser.evaluate(`(() => {
