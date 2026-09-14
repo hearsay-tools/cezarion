@@ -1533,18 +1533,21 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
   }, 30_000);
 
-  it('does not let an inactive Continue or Finish skip later workflow steps', async () => {
+  it.each(['workflow definition', 'legacy persisted steps'])(
+  'does not let an inactive Continue or Finish skip later workflow steps using %s', async (shape) => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
     store.addStep(record.id, { id: 'later', name: 'Later', kind: 'agent' });
-    store.updateRun(record.id, {
-      workflowDef: {
+    if (shape === 'workflow definition') {
+      store.updateRun(record.id, { workflowDef: {
         name: 'ask-then-later',
         source: 'file',
         steps: [SINGLE_STEP.steps[0]!, { id: 'later', name: 'Later', prompt: 'mock:done later' }],
-      },
-    });
+      } });
+    } else {
+      store.updateRun(record.id, { workflowDef: undefined });
+    }
     const state = (manager as unknown as {
       active: Map<string, { idleTimer?: NodeJS.Timeout }>;
     }).active.get(record.id);

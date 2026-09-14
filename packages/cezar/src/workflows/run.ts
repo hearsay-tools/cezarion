@@ -3241,10 +3241,10 @@ export class RunManager {
    * original workflow still has steps after the waiting one, that would skip
    * those steps rather than resume the workflow engine. */
   private waitingBeforeFinalWorkflowStep(run: RunRecord): boolean {
-    const steps = run.workflowDef?.steps;
-    if (!steps?.length || !run.currentStepId) return false;
+    const steps = run.workflowDef?.steps ?? run.steps;
+    if (!steps.length || !run.currentStepId) return true;
     const current = steps.findIndex((step) => step.id === run.currentStepId);
-    return current >= 0 && current < steps.length - 1;
+    return current < 0 || current < steps.length - 1;
   }
 
   /**
