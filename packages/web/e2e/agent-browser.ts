@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, statSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 
 /**
@@ -67,6 +68,11 @@ export function fixtureServeEnv(
   // and the child; otherwise a safe preflight can precede an unsafe CLI boot.
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra }
   for (const key of Object.keys(env)) if (key.toUpperCase().startsWith('GIT_')) delete env[key]
+  // Cezar pins TMPDIR inside the ambient checkout. Without a ceiling, discovery
+  // climbs into that checkout and a non-Git fixture looks nested and unsafe.
+  // Bound both discovery and the child at tmpdir so nested repos inside temp
+  // still fail the safety check, while the host worktree cannot be inherited.
+  env.GIT_CEILING_DIRECTORIES = realpathSync(tmpdir())
   const discovery = spawnSync('git', ['rev-parse', '--show-toplevel'], {
     cwd: fixtureRoot, env: { ...env, LC_ALL: 'C' }, encoding: 'utf8', timeout: 5_000,
   })
