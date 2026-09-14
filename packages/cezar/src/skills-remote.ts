@@ -335,9 +335,12 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
 
 /**
  * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
- * `<repoRoot>/.claude/skills/<name>/` so claude sees the references on disk,
- * and keep it out of the user's git via `.git/info/exclude`. Returns false
- * when there is nothing to materialize (not a directory skill, no clone…).
+ * BOTH `<repoRoot>/.claude/skills/<name>/` (claude) and
+ * `<repoRoot>/.agents/skills/<name>/` (codex/pi — the canonical dir SKILL_DIRS
+ * scans first), and keep both out of the user's git via `.git/info/exclude`.
+ * Returns false when there is nothing to materialize (not a directory skill,
+ * no clone…). (#286 — writing only the claude dir left codex/pi without the
+ * companion files on disk.)
  */
 export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<boolean> {
   if (!skill.team?.dir || !skill.team.path.endsWith('SKILL.md')) return false;
@@ -349,7 +352,10 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
   const ls = await git(['ls-tree', '-r', '--name-only', ref, '--', srcDir], LIST_TIMEOUT_MS, bareDir);
   if (!ls.ok) return false;
 
-  const destDir = join(repoRoot, '.claude', 'skills', skill.name);
+  const destDirs = [
+    join(repoRoot, '.claude', 'skills', skill.name),
+    join(repoRoot, '.agents', 'skills', skill.name),
+  ];
   let wrote = 0;
   for (const file of ls.stdout.split('\n').filter(Boolean)) {
     const rel = file.slice(srcDir.length + 1);
@@ -357,13 +363,16 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
     if (!rel || rel.split('/').includes('..')) continue;
     const show = await git(['show', `${ref}:${file}`], LIST_TIMEOUT_MS, bareDir);
     if (!show.ok) continue;
-    const target = join(destDir, rel);
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, show.stdout, 'utf8');
+    for (const destDir of destDirs) {
+      const target = join(destDir, rel);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, show.stdout, 'utf8');
+    }
     wrote++;
   }
   if (wrote === 0) return false;
   await excludeFromGit(repoRoot, `.claude/skills/${skill.name}/`);
+  await excludeFromGit(repoRoot, `.agents/skills/${skill.name}/`);
   return true;
 }
 
