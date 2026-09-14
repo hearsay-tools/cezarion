@@ -414,7 +414,7 @@ function piDegradedServiceRetryExtensionPath(): string {
 }
 
 function restorePiDegradedServiceError(errorMessage: string): string {
-  const retryHint = 'Service unavailable: ';
+  const retryHint = '[cezar:retry-xai-degraded] Service unavailable: ';
   return errorMessage.startsWith(retryHint) ? errorMessage.slice(retryHint.length) : errorMessage;
 }
 

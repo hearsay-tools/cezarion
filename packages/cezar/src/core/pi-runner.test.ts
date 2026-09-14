@@ -676,12 +676,29 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
       `    send({ type: 'message_end', message: {
       role: 'assistant', content: [], provider: 'xai', model: 'grok-4.6',
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
-      stopReason: 'error', errorMessage: ${JSON.stringify(`Service unavailable: ${original}`)},
+      stopReason: 'error', errorMessage: ${JSON.stringify(`[cezar:retry-xai-degraded] Service unavailable: ${original}`)},
     } });`,
     );
     const { events } = await runPiMock(cwd, mockPath);
     expect(events.find((event) => event.type === 'error')?.message).toBe(
       `pi: xai/grok-4.6 request failed: ${original}`,
+    );
+  });
+
+  it('preserves an unrelated provider error that naturally starts with the retryable wording', async () => {
+    const original = 'Service unavailable: upstream certificate rejected';
+    const mockPath = writePiRpcMock(
+      cwd,
+      'mock-pi-natural-service-unavailable.mjs',
+      `    send({ type: 'message_end', message: {
+      role: 'assistant', content: [], provider: 'openai', model: 'gpt-test',
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
+      stopReason: 'error', errorMessage: ${JSON.stringify(original)},
+    } });`,
+    );
+    const { events } = await runPiMock(cwd, mockPath);
+    expect(events.find((event) => event.type === 'error')?.message).toBe(
+      `pi: openai/gpt-test request failed: ${original}`,
     );
   });
 

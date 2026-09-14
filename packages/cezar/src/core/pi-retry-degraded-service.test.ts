@@ -20,7 +20,7 @@ describe('pi degraded-service retry adapter (#276)', () => {
     "The model's availability is currently degraded.",
   ])('makes the xAI degraded-service wording match pi-ai retry classification: %s', (errorMessage) => {
     expect(adapt({ role: 'assistant', provider: 'xai', stopReason: 'error', errorMessage })).toMatchObject({
-      errorMessage: `Service unavailable: ${errorMessage}`,
+      errorMessage: `[cezar:retry-xai-degraded] Service unavailable: ${errorMessage}`,
     });
   });
 

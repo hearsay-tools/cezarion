@@ -1,4 +1,4 @@
-const RETRY_HINT = 'Service unavailable: ';
+const RETRY_HINT = '[cezar:retry-xai-degraded] Service unavailable: ';
 const DEGRADED_XAI_SERVICE = /service temporarily unavailable|availability is currently degraded/i;
 
 export default function registerPiDegradedServiceRetry(pi) {
