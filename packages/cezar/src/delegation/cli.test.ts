@@ -18,6 +18,38 @@ describe('bundled worker CLI', () => {
   });
   afterEach(async () => { await transport?.close(); f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const json = () => JSON.parse(String(output.mock.calls.at(-1)?.[0]));
+  it('prints the same JSON usage for no args, -h, and --help', async () => {
+    expect(await runWorkerCommand([], env)).toBe(1);
+    const help = json();
+    expect(help.code).toBe('invalid_input');
+    expect(help.usage.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'spawn', positionals: 1, required: expect.arrayContaining(['--baseline', '--request-id']) }),
+      expect.objectContaining({ name: 'inspect', positionals: 1 }),
+      expect.objectContaining({ name: 'collect', positionals: 1 }),
+      expect.objectContaining({ name: 'wait' }),
+      expect.objectContaining({ name: 'destroy', positionals: 1 }),
+    ]));
+    const send = help.usage.operations.find((op: { name: string }) => op.name === 'send');
+    expect(send.required).toEqual(expect.arrayContaining(['--id', '--kind']));
+    expect(send.optional ?? []).not.toContain('--request-id');
+    expect(help.usage.operations.find((op: { name: string }) => op.name === 'reply').required).toEqual(expect.arrayContaining(['--request-id']));
+    for (const argv of [['-h'], ['--help']]) {
+      expect(await runWorkerCommand(argv, env)).toBe(1);
+      expect(json()).toEqual(help);
+    }
+  });
+  it('names a missing spawn --request-id instead of a generic parse error', async () => {
+    expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', 'work'], env)).toBe(1);
+    expect(json()).toMatchObject({ code: 'invalid_input' });
+    expect(json().error).toMatch(/spawn/);
+    expect(json().error).toMatch(/--request-id/);
+  });
+  it('names an unknown extra flag instead of a generic parse error', async () => {
+    expect(await runWorkerCommand(['inspect', randomUUID(), '--origin', 'http://evil'], env)).toBe(1);
+    expect(json()).toMatchObject({ code: 'invalid_input' });
+    expect(json().error).toMatch(/inspect/);
+    expect(json().error).toMatch(/--origin/);
+  });
   it('uses only provisioned transport, emits JSON, and reports incomplete operations as nonzero', async () => {
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), 'work'], env)).toBe(0);
     const { workerId } = json(); expect(workerId).toBeTypeOf('string');
