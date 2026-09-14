@@ -202,7 +202,7 @@ function ProjectGroup({
   const referenceRequests = buckets.flatMap((bucket) =>
     bucket.rows.flatMap((row) => {
       // A collapsed variant group paints its FIRST member's chip, so that is the one to ask
-      // about — the others only become visible once the tile is expanded.
+      // about. Later members register themselves from the expanded tile, where the open set lives.
       return taskReferences(row.kind === 'run' ? row.run : row.members[0]!).map(reference => ({ projectId: project.id, kind: reference.kind, number: reference.number }))
     }),
   )
