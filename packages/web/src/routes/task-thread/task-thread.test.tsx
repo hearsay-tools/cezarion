@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ProjectScopeProvider } from '@/api/project-scope-context'
-import { queryKeys } from '@/api/queries'
+import { queryKeys, workspaceQueryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
 import type {
   ApiRun,
@@ -1164,4 +1164,95 @@ describe('composer execution actions (#201)', () => {
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(stops).toBe(1)
   })
+})
+
+
+describe('composer replies after idle close (#315)', () => {
+  async function setup(messageStatus = 409, hasSession = true) {
+    const fixture = run('waiting', {
+      runner: 'claude',
+      hasPendingHumanAsk: true,
+      steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'waiting', iterations: 1, tokensUsed: 0,
+        ...(hasSession ? { sessionId: 'session-1' } : {}) }],
+    })
+    const thread = reduceThread([line(1, 'ask.requested', {
+      requestId: 'pending-choice',
+      questions: [{ header: 'Checks', question: 'Where should checks run?', options: [{ label: 'Main' }, { label: 'Every branch' }] }],
+    })])
+    const { queryClient } = renderView(<ThreadView run={fixture} thread={thread} />)
+    await waitFor(() => expect(queryClient.getQueryData(workspaceQueryKeys.providerStatus)).toBeDefined())
+    const originalFetch = globalThis.fetch
+    const posts: { path: string; body: unknown }[] = []
+    let settleResume: (response: Response) => void = () => {}
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (init?.method !== 'POST') return originalFetch(input, init)
+      posts.push({ path, body: JSON.parse(String(init.body)) })
+      if (path.endsWith('/continue')) return new Promise<Response>(resolve => { settleResume = resolve })
+      return Promise.resolve(new Response(JSON.stringify(
+        messageStatus === 200 ? { delivered: true } : { error: messageStatus === 409 ? 'session closed' : 'cannot reach the server' },
+      ), { status: messageStatus }))
+    })
+    const textarea = screen.getByRole('textbox', { name: 'Reply to the agent' }) as HTMLTextAreaElement
+    return { posts, textarea, settle: (status = 200) => settleResume(new Response(JSON.stringify(
+      status === 200 ? { continued: true } : { error: 'resume unavailable' },
+    ), { status })) }
+  }
+
+  async function submit(textarea: HTMLTextAreaElement) {
+    fireEvent.change(textarea, { target: { value: 'Use CI on main only' } })
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+  }
+
+  it('resumes an idle-closed waiting reply and keeps its draft until continuation succeeds', async () => {
+    const { posts, textarea, settle } = await setup()
+    const file = new File([new Uint8Array([9, 9])], 'shot.png', { type: 'image/png' })
+    fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: file.type, getAsFile: () => file }] } })
+    await screen.findByLabelText('Remove shot.png')
+    await submit(textarea)
+    await waitFor(() => expect(posts.map(post => post.path)).toEqual(['/api/v1/runs/r1/messages', '/api/v1/runs/r1/continue']))
+    expect(posts[1]!.body).toEqual({ text: 'Use CI on main only', images: [{ mediaType: 'image/png', data: 'CQk=' }] })
+    expect(screen.getByLabelText('Remove shot.png')).toBeTruthy()
+    expect(textarea.value).toBe('Use CI on main only')
+    expect(textarea.readOnly).toBe(true)
+    expect(screen.getByText(/Sending…|Continuing…/)).toBeTruthy()
+    settle()
+    await waitFor(() => expect(textarea.value).toBe(''))
+    expect(posts).toHaveLength(2)
+    expect(screen.queryByLabelText('Remove shot.png')).toBeNull()
+  })
+
+  it('keeps a failed resume draft and explains that retry reopens the session', async () => {
+    const { posts, textarea, settle } = await setup()
+    await submit(textarea)
+    await waitFor(() => expect(posts).toHaveLength(2))
+    settle(503)
+    await waitFor(() => expect(textarea.readOnly).toBe(false))
+    expect(textarea.value).toBe('Use CI on main only')
+    expect(screen.getByRole('alert').textContent).toMatch(/session closed/i)
+    expect(screen.getByRole('alert').textContent).toMatch(/retry.*reopen/i)
+    expect(screen.getByRole('alert').textContent).toContain('resume unavailable')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(posts).toHaveLength(4))
+    settle()
+    await waitFor(() => expect(textarea.value).toBe(''))
+  })
+
+  it('sends a live waiting reply through messages only', async () => {
+    const { posts, textarea } = await setup(200)
+    await submit(textarea)
+    await waitFor(() => expect(textarea.value).toBe(''))
+    expect(posts).toEqual([{ path: '/api/v1/runs/r1/messages', body: { text: 'Use CI on main only', images: [] } }])
+  })
+
+  it.each([{ status: 409, session: false }, { status: 503, session: true }])(
+    'keeps the draft without resuming for status $status, session $session', async ({ status, session }) => {
+      const { posts, textarea } = await setup(status, session)
+      await submit(textarea)
+      await screen.findByRole('alert')
+      expect(textarea.value).toBe('Use CI on main only')
+      expect(posts.map(post => post.path)).toEqual(['/api/v1/runs/r1/messages'])
+    },
+  )
 })
