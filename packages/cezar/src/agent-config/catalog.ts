@@ -319,7 +319,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     modelProviderKey: 'defaultProvider',
     modelPriority: 2,
     precedence:
-      'Overrides global settings (merged recursively). Loaded only once the project folder is trusted; non-interactive modes such as --mode rpc fall back to defaultProjectTrust in the global settings and ignore it under "ask" or "never". Runs read the committed copy.',
+      'Overrides global settings (merged recursively). Loaded only once the project folder is trusted; non-interactive modes such as --mode rpc fall back to defaultProjectTrust in the global settings and ignore it under "ask" or "never" — cezar reads a native default model from it only when that value is "always". Runs read the committed copy.',
     docsUrl: PI_SETTINGS_DOCS,
   },
   {

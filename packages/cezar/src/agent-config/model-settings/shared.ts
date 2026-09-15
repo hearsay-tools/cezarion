@@ -81,6 +81,11 @@ export async function readNativeSettingsFiles(
   return files;
 }
 
+/** One string-valued key out of a native settings file, or undefined when absent, blank, or unparsable. */
+export function configuredString(file: NativeSettingsFile, path: string): string | undefined {
+  return stringAtPath(file.content, file.def.format, path);
+}
+
 export function firstConfiguredModel(files: readonly NativeSettingsFile[]): string | undefined {
   for (const { def, content } of files) {
     for (const key of def.modelKeys ?? [def.modelKey!]) {

@@ -112,12 +112,47 @@ describe('readAgentModelDefaults', () => {
     roots.push(repo, home);
     mkdirSync(join(home, 'pi-dir'), { recursive: true });
     mkdirSync(join(repo, '.pi'), { recursive: true });
-    writeFileSync(join(home, 'pi-dir', 'settings.json'), JSON.stringify({ defaultProvider: 'openai', defaultModel: 'gpt-5' }));
+    writeFileSync(
+      join(home, 'pi-dir', 'settings.json'),
+      JSON.stringify({ defaultProvider: 'openai', defaultModel: 'gpt-5', defaultProjectTrust: 'always' }),
+    );
     writeFileSync(join(repo, '.pi', 'settings.json'), JSON.stringify({ defaultModel: 'gpt-5-mini' }));
 
     await expect(
       readAgentModelDefaults(repo, { HOME: home, PI_CODING_AGENT_DIR: join(home, 'pi-dir') }),
     ).resolves.toEqual({ pi: 'openai/gpt-5-mini' });
+  });
+
+  // cezar runs Pi in `--mode rpc`, which never prompts for project trust: without a saved
+  // decision Pi falls back to the global `defaultProjectTrust`, and `ask` (the default) or
+  // `never` ignore `.pi/settings.json` outright. Reading a model from a file Pi would ignore, then
+  // passing it as `--model`, would force a model Pi itself would not choose.
+  it('ignores Pi’s project settings for the native default unless the global defaultProjectTrust is "always"', async () => {
+    for (const trust of [undefined, 'ask', 'never']) {
+      const repo = mkdtempSync(join(tmpdir(), 'cez-native-models-repo-'));
+      const home = mkdtempSync(join(tmpdir(), 'cez-native-models-home-'));
+      roots.push(repo, home);
+      mkdirSync(join(home, '.pi', 'agent'), { recursive: true });
+      mkdirSync(join(repo, '.pi'), { recursive: true });
+      writeFileSync(
+        join(home, '.pi', 'agent', 'settings.json'),
+        JSON.stringify({ defaultProvider: 'openai', defaultModel: 'gpt-5', ...(trust ? { defaultProjectTrust: trust } : {}) }),
+      );
+      writeFileSync(join(repo, '.pi', 'settings.json'), JSON.stringify({ defaultProvider: 'anthropic', defaultModel: 'claude-sonnet-5' }));
+
+      await expect(readAgentModelDefaults(repo, { HOME: home }), `defaultProjectTrust=${trust}`).resolves.toEqual({ pi: 'openai/gpt-5' });
+      await expect(readAgentModelProvider('pi', repo, { HOME: home }), `defaultProjectTrust=${trust}`).resolves.toBe('openai');
+    }
+  });
+
+  it('reports no Pi default from a project file alone — no global file means no trust decision', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'cez-native-models-repo-'));
+    const home = mkdtempSync(join(tmpdir(), 'cez-native-models-home-'));
+    roots.push(repo, home);
+    mkdirSync(join(repo, '.pi'), { recursive: true });
+    writeFileSync(join(repo, '.pi', 'settings.json'), JSON.stringify({ defaultProvider: 'anthropic', defaultModel: 'claude-sonnet-5' }));
+
+    await expect(readAgentModelDefaults(repo, { HOME: home })).resolves.toEqual({});
   });
 
   it('reports no Pi default when settings.json is absent', async () => {
