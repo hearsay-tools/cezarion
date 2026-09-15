@@ -194,7 +194,12 @@ describe('the full-screen /new against a live dry-run server', () => {
     ])
     browser.screenshot(`${artifactsDir}/new-task-source-menu.png`)
 
-    browser.click('[data-slot="source-option"][data-source-ref="spec-writer"]')
+    browser.evaluate(`{
+      const item = document.querySelector('[data-slot="source-option"][data-source-ref="spec-writer"]')
+      const label = item.querySelector('span')
+      label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+      label.click()
+    }`)
     browser.waitForFunction(
       `document.querySelector('[data-slot="source-pill"]').textContent.includes('spec-writer')`,
     )
@@ -215,7 +220,12 @@ describe('the full-screen /new against a live dry-run server', () => {
     const pickSpecWriter = () => {
       browser.click('[data-slot="source-pill"]')
       browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') !== null`)
-      browser.click('[data-slot="source-option"][data-source-ref="spec-writer"]')
+      browser.evaluate(`{
+        const item = document.querySelector('[data-slot="source-option"][data-source-ref="spec-writer"]')
+        const label = item.querySelector('span')
+        label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+        label.click()
+      }`)
     }
     pickSpecWriter()
     browser.waitForFunction(
@@ -292,7 +302,12 @@ describe('the full-screen /new against a live dry-run server', () => {
     // name — and the pick surviving Start, proven by the API readback rather than the label.
     browser.click('[data-slot="source-pill"]')
     browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') !== null`)
-    browser.click('[data-slot="source-option"][data-source-kind="workflow"][data-source-ref="fix-and-verify"]')
+    browser.evaluate(`{
+      const item = document.querySelector('[data-slot="source-option"][data-source-kind="workflow"][data-source-ref="fix-and-verify"]')
+      const label = item.querySelector('span')
+      label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+      label.click()
+    }`)
     browser.waitForFunction(
       `document.querySelector('[data-slot="source-menu"]') === null
         && document.querySelector('[data-slot="source-pill"]')?.dataset.sourceKind === 'workflow'

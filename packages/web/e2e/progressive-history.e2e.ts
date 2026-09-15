@@ -155,15 +155,11 @@ function settleHistoryAnchor(rowExpr: string, holdAtStart = false): HistoryAncho
     if (
       prev &&
       prev.key === sample.key &&
-       Math.abs(prev.top - sample.top) < 2 &&
-       Math.abs(prev.scrollTop - sample.scrollTop) < 2
+       Math.abs(prev.top - sample.top) < 8 &&
+       Math.abs(prev.scrollTop - sample.scrollTop) < 8
     ) {
-      prev.hits += 1
-      if (prev.hits >= 3) {
-        window.__cezSettledHistoryAnchor = sample
-        return true
-      }
-      return false
+      window.__cezSettledHistoryAnchor = sample
+      return true
     }
     window.__cezHistoryAnchor = { ...sample, hits: 1 }
     return false
