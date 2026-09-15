@@ -97,3 +97,5 @@ from GitHub and durable issue markers; missing state does not block startup.
 See [failure reporting](../failure-reporting.md#daily-sweep-across-ci-workflows)
 for exact thresholds, creation-window limitations, permissions, retention,
 positive/negative examples and manual recovery.
+
+Node-side browser-test API requests send `Connection: close`. The synchronous agent-browser commands can block the test process long enough for a fixture server to expire an idle connection before Node handles its close event. CI diagnostics captured reused sockets after 6–23 seconds without an event-loop tick, followed by `UND_ERR_SOCKET`. Fresh connections avoid that stale pool; the real browser and application server keep their normal connection policies. No request retries are added.

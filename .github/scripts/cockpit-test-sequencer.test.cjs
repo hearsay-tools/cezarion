@@ -25,6 +25,7 @@ test('cockpit config separates heavy suites and covers every discovered spec det
     // Only allocation changes: local and within-shard execution keep Vitest's sort.
     assert.equal(Sequencer.prototype.sort, BaseSequencer.prototype.sort);
     assert.equal(ctx.config.fileParallelism, false);
+    assert.ok(ctx.config.setupFiles.some((file) => path.basename(file) === 'fetch-setup.mjs'));
 
     const added = { ...specs[0], moduleId: path.join(ctx.config.root, 'brand-new.e2e.ts') };
     const reduced = [specs[0], added];

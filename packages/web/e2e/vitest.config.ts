@@ -14,6 +14,7 @@ export default defineConfig({
     name: 'e2e',
     root: import.meta.dirname,
     environment: 'node',
+    setupFiles: ['./fetch-setup.mjs'],
     include: ['**/*.e2e.ts'],
     // One browser session, one server: parallel specs would fight over both.
     fileParallelism: false,
