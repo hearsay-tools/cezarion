@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
 import { RunStore, type RunRecord } from '../runs/store.ts';
+import { agentTmpDir } from '../runs/agent-tmpdir.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
@@ -69,6 +70,24 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
     await until(() => !waitOf(store.getRun(p.id)));
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
+  });
+
+  it('readiness restart finalizes an abandoned waiting worker before waking its parent', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    const generation = store.commitWorkerExecutionStart(w.id);
+    store.updateRun(w.id, { status: 'waiting' });
+    store.updateStep(w.id, 'task', { status: 'waiting' });
+    const scratch = agentTmpDir(join(root, '.ai/cezar'), w.id);
+    mkdirSync(scratch, { recursive: true });
+    const wait = register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+
+    await restart();
+
+    expect(store.readWorkerExecution(w.id)).toMatchObject({ generation, phase: 'complete' });
+    expect(existsSync(scratch)).toBe(false);
+    await until(() => !waitOf(store.getRun(p.id)));
+    expect(store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt)).toBe(true);
   });
 
   it('readiness real stopped process wakes its parent only after actual exit and finalization', async () => {
