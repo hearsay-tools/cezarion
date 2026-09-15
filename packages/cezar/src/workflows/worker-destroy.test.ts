@@ -255,7 +255,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(false);
   });
 
-  it.each(['running', 'queued', 'failed', 'cancelled'] as const)('refuses %s recovery and Continue over a surviving prior process, then refuses real destroy', async status => {
+  it.each(['running', 'waiting', 'queued', 'failed', 'cancelled'] as const)('refuses %s recovery and Continue over a surviving prior process, then refuses real destroy', async status => {
     const w = await worker(); let child: ReturnType<typeof spawn> | undefined; let ready = false; let launches = 0;
     vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', interrupt: async () => undefined,
       run: async () => { throw Error('unused'); }, startSession: () => {

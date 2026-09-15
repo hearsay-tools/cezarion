@@ -67,6 +67,8 @@ export const stepStateSchema = z.object({
   kind: z.enum(['agent', 'check']),
   status: stepStatusSchema,
   iterations: z.number(),
+  /** Durable count of onFail retry loops consumed by this check. */
+  retriesUsed: z.number().int().nonnegative().optional(),
   tokensUsed: z.number(),
   inputTokens: usageCounterSchema.optional(),
   outputTokens: usageCounterSchema.optional(),
@@ -88,6 +90,8 @@ export const stepStateSchema = z.object({
    *  selection. Absent on records written before accounts existed. */
   profileId: z.string().optional(),
   costUsd: z.number().optional(),
+  /** Explicit provenance for engine-generated continuation steps. */
+  synthetic: z.literal('continuation').optional(),
 });
 export type StepState = z.infer<typeof stepStateSchema>;
 
@@ -155,6 +159,8 @@ export const runRecordSchema = z.object({
   stopping: z.boolean().optional(),
   /** Opening Continue message, retained until its first completed turn for crash recovery. */
   continuationMessage: continuationMessageSchema.optional(),
+  /** The last turn carried a malformed explicit structured question. */
+  invalidAsk: z.boolean().optional(),
   /** Owned-run authority; absence is legacy, invalid is explicitly quarantined. */
   delegation: delegationStateSchema.optional(),
   /** Durable non-human input, kept separate from human prompt/answer queues. */

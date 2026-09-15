@@ -74,6 +74,8 @@ const stepStateSchema = z.object({
   kind: z.enum(['agent', 'check']),
   status: z.enum(['pending', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled', 'skipped']),
   iterations: z.number(),
+  /** Durable count of onFail retry loops consumed by this check. */
+  retriesUsed: z.number().int().nonnegative().optional(),
   tokensUsed: z.number(),
   inputTokens: usageCounterSchema.optional(),
   outputTokens: usageCounterSchema.optional(),
@@ -98,6 +100,8 @@ const stepStateSchema = z.object({
   profileId: z.string().optional(),
   /** Dollar cost reported by the claude CLI for this step's turns. */
   costUsd: z.number().optional(),
+  /** Explicit provenance for engine-generated continuation steps. */
+  synthetic: z.literal('continuation').optional(),
 });
 
 /** One prompt message stacked onto a run while it waits for a free agent slot
@@ -146,6 +150,8 @@ export const runRecordSchema = z.object({
   queuedMessages: z.array(queuedMessageSchema).optional(),
   /** Durable Continue opening message; id is its synthetic step id. No base64 in the index. */
   continuationMessage: continuationMessageSchema.optional(),
+  /** A malformed explicit ASK must never be collected as worker success. */
+  invalidAsk: z.boolean().optional(),
   delegation: storedDelegationStateSchema,
   /** Non-human input must retain attribution through restart, separately from human answers. */
   agentInputs: z.array(agentInputSchema).optional(),
@@ -997,7 +1003,7 @@ export class RunStore extends EventEmitter {
   }
 
   /** Accepted execution revision is public lifecycle identity, separate from process generations. */
-  commitWorkerContinuation(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps' | 'delegation'>>, step?: Pick<StepState, 'id' | 'name' | 'kind'>): void {
+  commitWorkerContinuation(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps' | 'delegation'>>, step?: Pick<StepState, 'id' | 'name' | 'kind' | 'synthetic'>): void {
     const run = this.runs.get(id);
     if (run?.delegation?.role !== 'worker') throw new Error('missing worker continuation target');
     const delegation = delegationStateSchema.parse({ ...run.delegation,
@@ -1267,7 +1273,7 @@ export class RunStore extends EventEmitter {
   }
 
   /** Append a step to an existing run (used by "Continue" — spec 003). */
-  addStep(runId: string, step: Pick<StepState, 'id' | 'name' | 'kind'>): void {
+  addStep(runId: string, step: Pick<StepState, 'id' | 'name' | 'kind' | 'synthetic'>): void {
     const run = this.runs.get(runId);
     if (!run || run.steps.some((s) => s.id === step.id)) return;
     run.steps.push({ ...step, status: 'pending', iterations: 0, tokensUsed: 0 });
