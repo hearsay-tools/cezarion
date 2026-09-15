@@ -441,8 +441,22 @@ describe('progressive long-session history', () => {
       main.dispatchEvent(new Event('scroll', { bubbles: true }))
     })()`)
     const before = settleHistoryAnchor(`main.querySelector('[data-slot="thread-row"][data-row-key]:not([data-row-key="task"])')`)
-    // Invoke without moving focus: keyboard focus would scroll the boundary into view.
-    browser.evaluate(`document.querySelector('[data-slot="history-boundary"] button').click()`)
+    // Invoke without moving focus: HTMLElement.click() focuses, and at 360px the wrapped
+    // task prefix has already scrolled the boundary out of view, so that focus jumps the
+    // scroller to the top and loadOlder captures the wrong anchor.
+    const invoked = browser.evaluate(`(() => {
+      const main = ${MAIN}
+      const button = document.querySelector('[data-slot="history-boundary"] button')
+      const scrollTop = main.scrollTop
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      return {
+        before: scrollTop,
+        after: main.scrollTop,
+        focused: document.activeElement === button,
+      }
+    })()`) as { before: number; after: number; focused: boolean }
+    expect(invoked.focused, JSON.stringify(invoked)).toBe(false)
+    expect(Math.abs(invoked.after - invoked.before), JSON.stringify(invoked)).toBeLessThan(2)
     browser.waitForFunction(
       `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '2'`,
     )
