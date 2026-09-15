@@ -1,0 +1,65 @@
+name: GitHub runner comparison
+
+on:
+  push:
+    branches:
+      - experiment/github-runner-comparison
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-package:
+    name: GitHub build and package (${{ matrix.repetition }})
+    strategy:
+      fail-fast: false
+      matrix:
+        repetition: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Run unit tests
+        run: npm run test:unit
+      - name: Build application
+        run: npm run build
+      - name: Run packaged CLI E2E tests
+        run: npm run test:package
+      - name: Verify release packages
+        run: |
+          npm pack --dry-run --ignore-scripts -w @wjarka/cezarion
+          (cd alias-cezarion && npm pack --dry-run --ignore-scripts)
+
+  vitest:
+    name: GitHub Vitest shard ${{ matrix.shard }}/2 (${{ matrix.repetition }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+        repetition: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build server dependencies
+        run: npm run build:server
+      - name: Run server and cockpit unit suites
+        run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4
