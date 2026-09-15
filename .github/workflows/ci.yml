@@ -120,7 +120,7 @@ jobs:
       - name: Run cockpit browser E2E
         run: |
           set -o pipefail
-          npm run test:e2e -- --shard=${{ matrix.shard }}/4 2>&1 | tee e2e.log
+          NODE_OPTIONS="--require=$PWD/.github/scripts/e2e-network-diagnostics.cjs" npm run test:e2e -- --shard=${{ matrix.shard }}/4 2>&1 | tee e2e.log
           node .github/scripts/require-e2e-passed.cjs < e2e.log
 
   # Keep this aggregate job's name stable: branch protection uses it as the
