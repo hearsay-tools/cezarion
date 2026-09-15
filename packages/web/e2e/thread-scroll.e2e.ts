@@ -379,6 +379,7 @@ describe('phone viewports', () => {
     })`) as { beforeTop: number; beforeBottom: number; beforeHeight: number; afterTop: number; afterBottom: number; afterHeight: number }
     expect(growth.afterHeight).toBeGreaterThan(growth.beforeHeight)
     expect(growth.afterTop).toBeLessThanOrEqual(growth.beforeTop + 1)
+    expect(Math.abs(growth.afterBottom - growth.beforeBottom)).toBeLessThanOrEqual(1)
 
     browser.screenshot(`${artifactsDir}/thread-mobile-stable-dock.png`, { viewport: true })
     browser.setViewport(1440, 900)
