@@ -49,15 +49,16 @@ beforeAll(async () => {
 })
 
 /** The nav the shell renders — GitHub, Inbox and Automations all gate on live health
- *  capabilities, so the expectation must too. Automations carries BOTH gates (#801): it needs a
- *  forge to poll AND the operator's opt-in to exist at all. */
+ *  capabilities, so the expectation must too. Order matches `NAV_ITEMS`: Tasks, Inbox, Git,
+ *  GitHub, Automations, Skills, Workflows, Settings. Automations carries BOTH gates (#801):
+ *  it needs a forge to poll AND the operator's opt-in to exist at all. */
 function expectedNavLabels(): string[] {
   return [
-    ...(followupsAvailable ? ['Inbox'] : []),
-    ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
     'Tasks',
+    ...(followupsAvailable ? ['Inbox'] : []),
     'Git',
     ...(forgeAvailable ? ['GitHub'] : []),
+    ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
     'Skills',
     'Workflows',
     'Settings',

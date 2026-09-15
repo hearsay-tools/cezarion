@@ -74,7 +74,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
       else process.env[key] = value;
     }
     store.flush();
-    rmSync(repoRoot, { recursive: true, force: true });
+    rmSync(repoRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
 
   it('schedules the resume for the provider\'s reset instant plus the grace', async () => {
