@@ -113,8 +113,13 @@ export class RunnerModelCatalog {
   }
 }
 
+const RUNNER_DISPLAY_NAME: Record<RunnerId, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  pi: 'Pi',
+};
+
 function unavailableReason(runner: RunnerId): string {
-  const name =
-    runner === 'codex' ? 'Codex' : runner === 'claude' ? 'Claude' : runner === 'pi' ? 'Pi' : 'OpenCode';
-  return `${name} model discovery is temporarily unavailable`;
+  return `${RUNNER_DISPLAY_NAME[runner]} model discovery is temporarily unavailable`;
 }
