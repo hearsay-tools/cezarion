@@ -151,7 +151,8 @@ export function serverLockPath(instance: string = DEFAULT_SERVER_INSTANCE): stri
  * Where each coding agent keeps its per-user config, honouring the env vars the
  * vendors document: `$CLAUDE_CONFIG_DIR` relocates Claude Code's home;
  * `$CODEX_HOME` relocates Codex's; `$XDG_CONFIG_HOME` relocates OpenCode's config
- * dir (falling back to `~/.config`). Read per call so tests and ops can set env live.
+ * dir (falling back to `~/.config`); `$PI_CODING_AGENT_DIR` relocates Pi's agent dir
+ * (default `~/.pi/agent`). Read per call so tests and ops can set env live.
  *
  * These are the DEFAULT profile's dirs. A second login of the same CLI is an
  * agent profile (`src/core/agent-profiles.ts`) and resolves through
@@ -165,6 +166,7 @@ export function agentHomePaths(env: NodeJS.ProcessEnv = process.env): AgentHomeP
     claude: env.CLAUDE_CONFIG_DIR?.trim() || join(home, '.claude'),
     codex: env.CODEX_HOME?.trim() || join(home, '.codex'),
     opencodeConfig: join(xdgConfig, 'opencode'),
+    pi: env.PI_CODING_AGENT_DIR?.trim() || join(home, '.pi', 'agent'),
   };
 }
 

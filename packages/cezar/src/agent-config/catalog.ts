@@ -12,7 +12,8 @@ import type { RunnerId } from '../core/agent-runner.ts';
  * and what the docs say; an unknown file is not shown rather than guessed at.
  * A raw editor cannot drift on a vendor's *schema*; it can drift on *paths and
  * precedence strings*, so every entry carries a `docsUrl` and this table is the
- * single maintenance surface. Facts verified against primary docs 2026-07-16.
+ * single maintenance surface. Facts verified against primary docs 2026-07-16;
+ * the Pi entries against Pi's README and docs/settings.md on 2026-09-15 (#322).
  */
 
 export type ConfigFormat = 'json' | 'jsonc' | 'toml' | 'markdown';
@@ -33,6 +34,8 @@ export interface AgentHomePaths {
   codex: string;
   /** `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode` */
   opencodeConfig: string;
+  /** `$PI_CODING_AGENT_DIR` or `~/.pi/agent` */
+  pi: string;
 }
 
 export interface ConfigFileDef {
@@ -74,6 +77,8 @@ const CODEX_CONFIG_DOCS = 'https://developers.openai.com/codex/config-reference'
 const CODEX_AGENTS_DOCS = 'https://developers.openai.com/codex/guides/agents-md';
 const OPENCODE_CONFIG_DOCS = 'https://opencode.ai/docs/config/';
 const OPENCODE_RULES_DOCS = 'https://opencode.ai/docs/rules/';
+const PI_SETTINGS_DOCS = 'https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/settings.md';
+const PI_CONTEXT_FILES_DOCS = 'https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md#context-files';
 
 /**
  * The table. Order is presentation order: per runner, then user → project →
@@ -282,10 +287,59 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     docsUrl: OPENCODE_RULES_DOCS,
   },
 
-  // ---- Shared: <repo>/AGENTS.md is read by BOTH Codex and OpenCode ----
+  // ---- Pi ----
+  // Pi has no MCP file of its own: its README says "No MCP." — servers arrive only through a Pi
+  // extension, so nothing here carries `holdsMcp` and the cockpit's MCP group states that instead.
+  {
+    id: 'pi.user.settings',
+    runners: ['pi'],
+    kind: 'settings',
+    scope: 'user',
+    resolve: (_repo, home) => join(home.pi, 'settings.json'),
+    label: '~/.pi/agent/settings.json',
+    format: 'json',
+    tracked: 'outside-repo',
+    modelKey: 'defaultModel',
+    modelProviderKey: 'defaultProvider',
+    modelPriority: 1,
+    precedence:
+      'Global (all projects). Project settings override global settings — the two merge recursively, so nested objects combine rather than replace. Startup model: defaultProvider + defaultModel.',
+    docsUrl: PI_SETTINGS_DOCS,
+  },
+  {
+    id: 'pi.project.settings',
+    runners: ['pi'],
+    kind: 'settings',
+    scope: 'project',
+    resolve: (repo) => join(repo, '.pi', 'settings.json'),
+    label: '.pi/settings.json',
+    format: 'json',
+    tracked: 'tracked',
+    modelKey: 'defaultModel',
+    modelProviderKey: 'defaultProvider',
+    modelPriority: 2,
+    precedence:
+      'Overrides global settings (merged recursively). Loaded only once the project folder is trusted; non-interactive modes such as --mode rpc fall back to defaultProjectTrust in the global settings and ignore it under "ask" or "never" — cezar reads a native default model from it only when that value is "always". Runs read the committed copy.',
+    docsUrl: PI_SETTINGS_DOCS,
+  },
+  {
+    id: 'pi.user.memory',
+    runners: ['pi'],
+    kind: 'memory',
+    scope: 'user',
+    resolve: (_repo, home) => join(home.pi, 'AGENTS.md'),
+    label: '~/.pi/agent/AGENTS.md',
+    format: 'markdown',
+    tracked: 'outside-repo',
+    precedence:
+      'Global context file, loaded first. Every AGENTS.md (or CLAUDE.md) from the parent directories down to the current one is concatenated after it; an AGENTS.override.md replaces that directory’s file only.',
+    docsUrl: PI_CONTEXT_FILES_DOCS,
+  },
+
+  // ---- Shared: <repo>/AGENTS.md is read by Codex, OpenCode AND Pi ----
   {
     id: 'project.agents',
-    runners: ['codex', 'opencode'],
+    runners: ['codex', 'opencode', 'pi'],
     kind: 'memory',
     scope: 'project',
     resolve: (repo) => join(repo, 'AGENTS.md'),
@@ -293,7 +347,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     format: 'markdown',
     tracked: 'tracked',
     precedence:
-      'Read by Codex and OpenCode (Claude ignores it). Codex concatenates it root-down; OpenCode uses the first match and prefers it over CLAUDE.md. Runs read the committed copy.',
+      'Read by Codex, OpenCode and Pi (Claude ignores it). Codex concatenates it root-down; OpenCode uses the first match and prefers it over CLAUDE.md; Pi concatenates every AGENTS.md (or CLAUDE.md) from the parent directories down, after its global file. Runs read the committed copy.',
     docsUrl: OPENCODE_RULES_DOCS,
   },
 ];

@@ -9,10 +9,12 @@ import type { AgentConfigFile, Runner } from '@open-mercato/cezar-api-client'
  * #405: one table entry per agent, extension by design). A new agent is one entry
  * here plus its catalog files — no layout or route work.
  *
- * `pi` (#387) is deliberately absent, not forgotten: nothing in `src/agent-config`'s
- * catalog names a pi-owned config file yet, so a pi entry would render three empty
- * groups. It gets a descriptor together with its catalog files. The tab list only
- * ever offers ids from this table, so `descriptorFor` cannot be reached with `pi`.
+ * Every `RUNNER_IDS` member has an entry here — the descriptor and the runner's catalog
+ * files ship together (AGENT_PROTOCOL.md §10 item 9), and `agent-descriptors.test.ts`
+ * fails on a runner without one. A runner the vendor gives no editable file for still
+ * gets its tab: the group carries `empty` copy saying why there is nothing to list and
+ * what to try instead, rather than the agent being hidden (#322 — Pi's MCP group is the
+ * worked example: Pi's README says "No MCP.").
  *
  * Group membership derives from the flat `/api/agent-config` listing: a file
  * belongs to an agent when `runners` INCLUDES it (not `runners[0]` — the shared
@@ -26,6 +28,12 @@ export interface AgentGroup {
   label: string
   /** Group-level caveat — e.g. where this agent keeps its MCP servers. */
   note?: string
+  /**
+   * Shown instead of the file list when the group has nothing to list — why it is empty and
+   * what to try. A group without it renders nothing when empty (Claude's MCP group, absent
+   * `.mcp.json` aside, has always behaved that way).
+   */
+  empty?: string
   files: (f: AgentConfigFile) => boolean
 }
 
@@ -49,6 +57,7 @@ function group(
   id: AgentGroup['id'],
   label: string,
   note?: string,
+  empty?: string,
 ): AgentGroup {
   const owned = ownedBy(agent)
   // `holdsMcp` files appear in the MCP group AND their own kind group — both
@@ -57,7 +66,7 @@ function group(
     id === 'mcp'
       ? (f: AgentConfigFile) => owned(f) && (f.holdsMcp === true || f.kind === 'mcp')
       : (f: AgentConfigFile) => owned(f) && f.kind === id
-  return { id, label, note, files: member }
+  return { id, label, note, ...(empty ? { empty } : {}), files: member }
 }
 
 export const AGENT_DESCRIPTORS: AgentDescriptor[] = [
@@ -103,6 +112,22 @@ export const AGENT_DESCRIPTORS: AgentDescriptor[] = [
         'Under the "mcp" key in opencode.json — the same file as OpenCode’s settings.',
       ),
       group('opencode', 'memory', 'Memory & instructions'),
+    ],
+  },
+  {
+    id: 'pi',
+    label: 'Pi',
+    note: EDITOR_PLUS_COMMIT,
+    groups: [
+      group('pi', 'settings', 'Settings'),
+      group(
+        'pi',
+        'mcp',
+        'MCP',
+        'Pi ships no MCP client, so it has no MCP file to edit.',
+        'Nothing to list: Pi’s README says "No MCP." Give Pi tools as CLI programs with a README (Pi skills), or install a Pi extension that adds MCP support and configure servers there.',
+      ),
+      group('pi', 'memory', 'Memory & instructions'),
     ],
   },
 ]
