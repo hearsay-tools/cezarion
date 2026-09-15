@@ -151,21 +151,21 @@ function settleHistoryAnchor(rowExpr: string, holdAtStart = false): HistoryAncho
     ${holdStart}
     const sample = ${historyAnchorSample(rowExpr)}
     if (!sample) return false
-    const prev = window.__cezHistoryAnchor
+    const origin = window.__cezHistoryOrigin
     if (
-      prev &&
-      prev.key === sample.key &&
-       Math.abs(prev.top - sample.top) < 8 &&
-       Math.abs(prev.scrollTop - sample.scrollTop) < 8
+      origin &&
+      origin.key === sample.key &&
+      Math.abs(origin.top - sample.top) < 2 &&
+      Math.abs(origin.scrollTop - sample.scrollTop) < 2
     ) {
-      prev.hits += 1
-      if (prev.hits >= 3) {
+      origin.hits += 1
+      if (origin.hits >= 3) {
         window.__cezSettledHistoryAnchor = sample
         return true
       }
       return false
     }
-    window.__cezHistoryAnchor = { ...sample, hits: 1 }
+    window.__cezHistoryOrigin = { ...sample, hits: 1 }
     return false
   })()`)
   return browser.evaluate(`window.__cezSettledHistoryAnchor`) as HistoryAnchor
