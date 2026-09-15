@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config'
+import CockpitTestSequencer from '../../../.github/scripts/cockpit-test-sequencer.mjs'
 
 /**
  * The e2e suite is deliberately NOT a project in the root vitest.config.ts: `npm test` is the
@@ -13,9 +14,11 @@ export default defineConfig({
     name: 'e2e',
     root: import.meta.dirname,
     environment: 'node',
+    setupFiles: ['./fetch-setup.mjs'],
     include: ['**/*.e2e.ts'],
     // One browser session, one server: parallel specs would fight over both.
     fileParallelism: false,
+    sequence: { sequencer: CockpitTestSequencer },
     // Pins the shared env's workspace registry to the single-project shape before any spec runs,
     // and restores it afterwards — otherwise whatever the operator last registered in the
     // gitignored `.ai/qa/cez-home` decides whether the sidebar renders its flat or its grouped

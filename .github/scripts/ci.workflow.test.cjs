@@ -18,9 +18,15 @@ function stepsText(job) {
 test('pull request CI runs npm run test:e2e as a Cockpit browser E2E job', () => {
   const job = workflow().jobs['cockpit-browser'];
   assert.ok(job, 'expected a cockpit-browser job');
-  assert.equal(job.name, 'Cockpit browser E2E');
+  assert.equal(job.name, 'Cockpit browser E2E shard ${{ matrix.shard }}/4');
+  assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3, 4]);
+  assert.equal(job.strategy['fail-fast'], false);
+  assert.equal(job['runs-on'], 'ubuntu-latest');
+  const setup = job.steps.find((step) => step.name === 'Set up Node.js');
+  assert.equal(setup.with['node-version'], 'lts/*');
+  assert.equal(setup.with['check-latest'], true);
   const steps = stepsText(job);
-  assert.match(steps, /npm run test:e2e/);
+  assert.ok(steps.includes('npm run test:e2e -- --shard=${{ matrix.shard }}/4'));
   assert.match(steps, /require-e2e-passed\.cjs/);
 });
 
@@ -31,7 +37,7 @@ test('packaged CLI E2E and cockpit browser E2E stay separate named checks', () =
   assert.match(stepsText(packaged), /Run packaged CLI E2E tests/);
   assert.match(stepsText(packaged), /npm run test:package/);
   assert.doesNotMatch(stepsText(packaged), /npm run test:e2e/);
-  assert.equal(cockpit.name, 'Cockpit browser E2E');
+  assert.match(cockpit.name, /^Cockpit browser E2E shard/);
   assert.notEqual(packaged.name, cockpit.name);
   assert.notEqual(cockpit.name, 'Run packaged CLI E2E tests');
 });

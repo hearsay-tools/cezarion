@@ -46,3 +46,7 @@ WORKER-STATUS.md
 
 # mock-agent output from dry-run e2e (scripts/mock-claude.mjs appends here)
 /notes.md
+
+docs/superpowers/specs/
+
+docs/superpowers/plans/

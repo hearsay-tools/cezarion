@@ -358,6 +358,8 @@ describe('phone viewports', () => {
     })`) as { beforeTop: number; beforeBottom: number; afterTop: number; afterBottom: number }
     expect(Math.abs(append.afterBottom - append.beforeBottom)).toBeLessThanOrEqual(1)
 
+    // Let the append's resize/scroll observers finish before measuring a separate input.
+    browser.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
     const growth = browser.evaluate(`new Promise((resolve, reject) => {
       const dock = document.querySelector('[data-slot="thread-dock"]');
       const textarea = dock.querySelector('textarea');
@@ -367,10 +369,15 @@ describe('phone viewports', () => {
       const observer = new MutationObserver(() => {
         const afterHeight = textarea.getBoundingClientRect().height;
         if (afterHeight <= beforeHeight) return;
-        const after = dock.getBoundingClientRect();
-        clearTimeout(timeout); observer.disconnect();
-        resolve({ beforeTop: before.top, beforeBottom: before.bottom, beforeHeight,
-          afterTop: after.top, afterBottom: after.bottom, afterHeight });
+        observer.disconnect();
+        // Style mutation precedes ResizeObserver's tail anchoring. Measure after that layout,
+        // not whichever side of its callback this machine happens to reach first.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const after = dock.getBoundingClientRect();
+          clearTimeout(timeout);
+          resolve({ beforeTop: before.top, beforeBottom: before.bottom, beforeHeight,
+            afterTop: after.top, afterBottom: after.bottom, afterHeight });
+        }));
       });
       observer.observe(textarea, { attributes: true, attributeFilter: ['style'] });
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
@@ -378,7 +385,8 @@ describe('phone viewports', () => {
       textarea.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '\\n' }));
     })`) as { beforeTop: number; beforeBottom: number; beforeHeight: number; afterTop: number; afterBottom: number; afterHeight: number }
     expect(growth.afterHeight).toBeGreaterThan(growth.beforeHeight)
-    expect(Math.abs(growth.afterTop - growth.beforeTop)).toBeLessThanOrEqual(1)
+    expect(Math.abs(growth.afterBottom - growth.beforeBottom)).toBeLessThanOrEqual(1)
+    expect(growth.afterTop).toBeLessThan(growth.beforeTop)
 
     browser.screenshot(`${artifactsDir}/thread-mobile-stable-dock.png`, { viewport: true })
     browser.setViewport(1440, 900)

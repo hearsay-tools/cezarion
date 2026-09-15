@@ -33,6 +33,23 @@ EOF
   exit 0
 }
 
+# Keep the optional CI shard separate from the existing bootstrap flags.
+# With no shard, the local command still runs the entire sequential suite.
+SHARD=
+FORCE=
+FORCE_REBUILD=
+for arg in "$@"; do
+  case "$arg" in
+    --shard=*) SHARD="$arg" ;;
+    --force) FORCE=--force ;;
+    --force-rebuild) FORCE_REBUILD=--force-rebuild ;;
+    *) echo "unknown flag: $arg" >&2; echo "TEST_E2E_STATUS=failed" >&2; exit 2 ;;
+  esac
+done
+set --
+if [ -n "$FORCE" ]; then set -- "$@" "$FORCE"; fi
+if [ -n "$FORCE_REBUILD" ]; then set -- "$@" "$FORCE_REBUILD"; fi
+
 # ---- 1. boot or reuse the environment ---------------------------------------
 # The up script is the single source of truth for how this app boots; it also runs the
 # provider's ensure-installed operation and records the result in the descriptor.
@@ -75,7 +92,9 @@ fi
 
 # ---- 3. run the specs -------------------------------------------------------
 cd "$REPO_ROOT"
-if npx vitest run --config packages/web/e2e/vitest.config.ts; then
+set --
+if [ -n "$SHARD" ]; then set -- "$SHARD"; fi
+if npm test -- --config packages/web/e2e/vitest.config.ts "$@"; then
   echo "TEST_E2E_STATUS=passed"
   exit 0
 fi

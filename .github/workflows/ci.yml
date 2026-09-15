@@ -97,7 +97,11 @@ jobs:
   # green the required aggregate. Local `npm run test:e2e` keeps its skip-exit-0
   # contract; this job pipes the log through require-e2e-passed.cjs.
   cockpit-browser:
-    name: Cockpit browser E2E
+    name: Cockpit browser E2E shard ${{ matrix.shard }}/4
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -109,12 +113,14 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
+          # Runner images can cache different LTS patch versions.
+          check-latest: true
           cache: npm
 
       - name: Run cockpit browser E2E
         run: |
           set -o pipefail
-          npm run test:e2e 2>&1 | tee e2e.log
+          npm run test:e2e -- --shard=${{ matrix.shard }}/4 2>&1 | tee e2e.log
           node .github/scripts/require-e2e-passed.cjs < e2e.log
 
   # Keep this aggregate job's name stable: branch protection uses it as the
