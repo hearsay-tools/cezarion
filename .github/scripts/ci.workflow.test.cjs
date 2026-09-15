@@ -21,7 +21,7 @@ test('pull request CI runs npm run test:e2e as a Cockpit browser E2E job', () =>
   assert.equal(job.name, 'Cockpit browser E2E shard ${{ matrix.shard }}/4');
   assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3, 4]);
   assert.equal(job.strategy['fail-fast'], false);
-  assert.equal(job['runs-on'], 'ubuntu-latest');
+  assert.equal(job['runs-on'], 'blacksmith-4vcpu-ubuntu-2404');
   const steps = stepsText(job);
   assert.ok(steps.includes('npm run test:e2e -- --shard=${{ matrix.shard }}/4'));
   assert.match(steps, /require-e2e-passed\.cjs/);
