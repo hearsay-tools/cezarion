@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 
 import { ApiError } from '@/api/client'
 import { useContinueRun, useSendMessage } from '@/api/queries'
-import type { ApiRun, RunRecord } from '@open-mercato/cezar-api-client'
+import type { ApiRun, MessageInput, RunRecord } from '@open-mercato/cezar-api-client'
 
 import {
   useActiveProviderAvailability,
@@ -84,9 +84,10 @@ export interface AskAnswerDelivery {
    * which is one fact offered two ways because two kinds of caller need it differently. The ask
    * card renders `error` inline and ignores the return; a one-shot caller (the header's "Resolve
    * conflicts" button) has closed its panel by then and needs the answer where it acted, to
-   * toast. `undefined` is success.
+   * toast. The composer rethrows a returned failure to retain its draft and attachments.
+   * `undefined` is success.
    */
-  send: (text: string) => Promise<string | undefined>
+  send: (text: string, images?: MessageInput['images']) => Promise<string | undefined>
 }
 
 /**
@@ -137,16 +138,16 @@ export function useAskAnswer(run: ApiRun, projectId?: string): AskAnswerDelivery
         ? (mode === 'resume' ? existingProvider.reason : activeProvider.reason)
         : undefined
 
-  const resumeWith = (text: string) => {
+  const resumeWith = (text: string, images?: MessageInput['images']) => {
     if (!existingProvider.usable) {
       return Promise.reject(new Error(existingProvider.reason ?? 'The run provider is unavailable.'))
     }
     // No runner override: the server keeps the run's own backend and model, so answering a
     // question cannot silently switch engines when another provider happens to be connected.
-    return resume.mutateAsync({ text })
+    return resume.mutateAsync({ text, ...(images === undefined ? {} : { images }) })
   }
 
-  const send = async (text: string): Promise<string | undefined> => {
+  const send = async (text: string, images?: MessageInput['images']): Promise<string | undefined> => {
     // Defense in depth — every entry point is already disabled while blocked, and the card
     // renders `reason` on its own, so repeating it as an error would say the same thing twice.
     // The REASON still comes back, for the caller that has no `reason` on screen to repeat.
@@ -156,11 +157,11 @@ export function useAskAnswer(run: ApiRun, projectId?: string): AskAnswerDelivery
     setError(undefined)
     try {
       if (mode === 'resume') {
-        await resumeAfterIdleTeardown(() => resumeWith(text))
+        await resumeAfterIdleTeardown(() => resumeWith(text, images))
         return undefined
       }
       try {
-        await sendMessage.mutateAsync({ text })
+        await sendMessage.mutateAsync({ text, ...(images === undefined ? {} : { images }) })
       } catch (sendError) {
         // The cached record said "live" but the session had already closed — resume instead
         // of dropping the answer the user just gave. The old session can still be settling
@@ -170,7 +171,12 @@ export function useAskAnswer(run: ApiRun, projectId?: string): AskAnswerDelivery
           sendError.status === 409 &&
           lastSessionId(run) !== undefined
         ) {
-          await resumeAfterIdleTeardown(() => resumeWith(text))
+          try {
+            await resumeAfterIdleTeardown(() => resumeWith(text, images))
+          } catch (resumeError) {
+            const detail = resumeError instanceof Error ? resumeError.message : String(resumeError)
+            throw new Error(`Session closed. Retry to reopen the session. ${detail}`)
+          }
           return undefined
         }
         throw sendError

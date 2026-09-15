@@ -41,6 +41,7 @@ import { useStopAction } from './stop-action'
 import { WorkflowSteps } from './step-rail'
 import { RunHeader } from './run-header'
 import { AskCard } from './ask-card'
+import { useAskAnswer } from './ask-answer'
 import { useRunRecordReconcile } from './run-reconcile'
 import { useActiveProviderAvailability } from './active-provider'
 import { ThreadLoading } from './thread-loading'
@@ -243,6 +244,7 @@ export function ThreadView({
     [currentThread.turns, openAgentId],
   )
   const sendMessage = useSendMessage(run.id)
+  const reply = useAskAnswer(run)
   const activeProvider = useActiveProviderAvailability(run)
   // A queued send only amends the persisted prompt; it invokes no provider and therefore
   // remains available even when provider discovery cannot authorize a live session. Once the
@@ -473,7 +475,13 @@ export function ThreadView({
             onSubmit={
               continuable
                 ? (text, images) => continueAction.continueWith(text, images)
-                : (text, images) => sendMessage.mutateAsync({ text, images })
+                : queued ? (text, images) => sendMessage.mutateAsync({ text, images })
+                : async (text, images) => {
+                    // Share the ask card's idle-close recovery. The composer clears its draft
+                    // only on success, so convert the hook's returned failure to a rejection.
+                    const error = await reply.send(text, images)
+                    if (error !== undefined) throw new Error(error)
+                  }
             }
             disabled={providerBlocked || (!sessionOpen && !queued && !continuable)}
             disabledReason={providerBlocked ? providerReason : 'Session closed — no session to resume.'}

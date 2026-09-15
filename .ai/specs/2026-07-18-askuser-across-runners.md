@@ -243,7 +243,10 @@ are real buttons (keyboard/enter, focus ring `--ring`), the card has
   keeps the answer single-flight and retries only the exact transient
   `409 run is still active` continuation refusal with bounded, capped exponential
   backoff for roughly five seconds. Other
-  continuation failures surface immediately on the card. The original design
+  continuation failures surface immediately on the card. Typed composer replies share
+  this delivery hook, including attachments; the composer retains its draft until
+  continuation succeeds and explains that retry reopens the closed session on failure.
+  The original design
   ("the card renders resolved/closed") left a card whose chips silently failed —
   every tap posted to `POST /messages` and died on its `409 session closed`.
 - **Reload / resume of a run parked on an ask** → the card is reconstructed from
