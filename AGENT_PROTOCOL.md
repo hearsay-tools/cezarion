@@ -737,8 +737,8 @@ To be first-class:
    precedence, `docsUrl`; a home variable goes in `AgentHomePaths` /
    `agentHomePaths()` only when the vendor documents one). The guard in
    `agent-descriptors.test.ts` fails the suite for any `RUNNER_IDS` member
-   without a descriptor, the way §10 item 10 fails one without a catalog
-   adapter (#321). A vendor that documents no editable file still gets its
+   without a descriptor, the way item 11's guard fails one without a
+   model-discovery adapter (#321). A vendor that documents no editable file still gets its
    tab — give the group `empty` copy that says why and what to try, never omit
    the agent (#322, Pi's MCP group: "No MCP.").
 10. **Model selection** — accept `provider/model` where relevant; #387 documents
