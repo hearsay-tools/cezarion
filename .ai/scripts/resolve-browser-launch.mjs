@@ -46,7 +46,7 @@ export function resolveBrowserLaunch(input = {}) {
   const launchArgs = inContainer ? ['--no-sandbox'] : [];
   const currentTmp = env.TMPDIR || env.TMP || env.TEMP || '';
   const runtimeEnv = {};
-  if (platform !== 'win32' && currentTmp && currentTmp.length + CHROME_SINGLETON_OVERHEAD > unixSocketMax) {
+  if (platform !== 'win32' && currentTmp && Buffer.byteLength(currentTmp) + CHROME_SINGLETON_OVERHEAD > unixSocketMax) {
     runtimeEnv.TMPDIR = fallbackTmp;
     runtimeEnv.TMP = fallbackTmp;
     runtimeEnv.TEMP = fallbackTmp;

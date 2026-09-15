@@ -330,8 +330,9 @@ browser_json_success() {
 }
 
 probe_browser() {
-  out=$(run_browser --session cez-boot-probe open about:blank --json 2>/dev/null || true)
-  run_browser --session cez-boot-probe close --json >/dev/null 2>&1 || true
+  session="cez-boot-probe-$$"
+  out=$(run_browser --session "$session" open about:blank --json 2>/dev/null || true)
+  run_browser --session "$session" close --json >/dev/null 2>&1 || true
   printf '%s' "$out" | browser_json_success
 }
 

@@ -306,6 +306,10 @@ exit 1
   assert.doesNotMatch(desc.browser.notes, /unavailable|missing/i);
   const argvLog = readFileSync(join(fixture.root, 'bin/agent-browser.argv'), 'utf8');
   assert.match(argvLog, /--args --no-sandbox.*open about:blank/s);
+  const probeSessions = [...argvLog.matchAll(/--session (cez-boot-probe-\d+)/g)].map((m) => m[1]);
+  assert.ok(probeSessions.length >= 2);
+  assert.equal(new Set(probeSessions).size, 1);
+  assert.notEqual(probeSessions[0], 'cez-boot-probe');
   spawnSync('/bin/sh', [down], { encoding: 'utf8', env, timeout: 20_000 });
   launchedPids.delete(descriptor(fixture.root).app.pid);
 });

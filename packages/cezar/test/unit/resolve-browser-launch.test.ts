@@ -91,6 +91,22 @@ test('doctor and test invocations share namespace, session and launch args', () 
   );
 });
 
+test('socket budget uses byte length so a non-ASCII TMPDIR is rewritten', () => {
+  const ascii = 'x'.repeat(107 - CHROME_SINGLETON_OVERHEAD);
+  assert.equal(ascii.length + CHROME_SINGLETON_OVERHEAD, 107);
+  const over = `${ascii.slice(0, -1)}é`;
+  assert.equal(over.length + CHROME_SINGLETON_OVERHEAD, 107);
+  assert.ok(Buffer.byteLength(over) + CHROME_SINGLETON_OVERHEAD > 107);
+  const resolved = resolveBrowserLaunch({
+    env: { TMPDIR: over, TMP: over, TEMP: over },
+    host: desktopHost,
+    platform: 'linux',
+    unixSocketMax: 107,
+    fallbackTmp: '/tmp',
+  });
+  assert.deepEqual(resolved.runtimeEnv, { TMPDIR: '/tmp', TMP: '/tmp', TEMP: '/tmp' });
+});
+
 test('Darwin rewrites a TMPDIR whose SingletonSocket would fill sun_path including NUL', () => {
   const socketPathLen = 104;
   const tmpdir = 'x'.repeat(socketPathLen - CHROME_SINGLETON_OVERHEAD);
