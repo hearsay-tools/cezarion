@@ -663,7 +663,8 @@ describe('task thread', () => {
     expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)
     expect(browser.evaluate(`(() => { const r = document.querySelector('[data-slot="dropdown-menu-content"]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth })()`)).toBe(true)
     expect(browser.text('[data-slot="dropdown-menu-content"]')).toContain('effort: high')
-    expect(browser.text('[data-slot="dropdown-menu-content"]')).toContain('account: default')
+    // #251: one defined account is not a choice — the lone login never joins the badge menu.
+    expect(browser.text('[data-slot="dropdown-menu-content"]')).not.toContain('account:')
     browser.press('Escape')
     browser.waitForFunction(`document.querySelector('[data-slot="dropdown-menu-content"]') === null`)
     browser.setReducedMotion()
