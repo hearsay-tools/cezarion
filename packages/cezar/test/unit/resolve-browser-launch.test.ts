@@ -91,6 +91,28 @@ test('doctor and test invocations share namespace, session and launch args', () 
   );
 });
 
+test('Darwin rewrites a TMPDIR whose SingletonSocket would fill sun_path including NUL', () => {
+  const socketPathLen = 104;
+  const tmpdir = 'x'.repeat(socketPathLen - CHROME_SINGLETON_OVERHEAD);
+  assert.equal(tmpdir.length + CHROME_SINGLETON_OVERHEAD, 104);
+  const over = resolveBrowserLaunch({
+    env: { TMPDIR: tmpdir, TMP: tmpdir, TEMP: tmpdir },
+    host: desktopHost,
+    platform: 'darwin',
+    fallbackTmp: '/tmp',
+  });
+  assert.deepEqual(over.runtimeEnv, { TMPDIR: '/tmp', TMP: '/tmp', TEMP: '/tmp' });
+  const safe = 'x'.repeat(103 - CHROME_SINGLETON_OVERHEAD);
+  assert.equal(safe.length + CHROME_SINGLETON_OVERHEAD, 103);
+  const under = resolveBrowserLaunch({
+    env: { TMPDIR: safe },
+    host: desktopHost,
+    platform: 'darwin',
+    fallbackTmp: '/tmp',
+  });
+  assert.deepEqual(under.runtimeEnv, {});
+});
+
 test('Windows and already-short POSIX paths are not rewritten', () => {
   const win = resolveBrowserLaunch({
     env: { TMP: 'C:\\Users\\me\\AppData\\Local\\Temp' },

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 export const CHROME_SINGLETON_OVERHEAD = '/org.chromium.Chromium.XXXXXX/SingletonSocket'.length;
 export const UNIX_SOCKET_MAX = 107;
+export const DARWIN_UNIX_SOCKET_MAX = 103;
 
 const CONTAINER_CGROUP = /docker|lxc|kubepods|containerd|podman|libpod|nspawn/i;
 
@@ -37,7 +38,7 @@ export function resolveBrowserLaunch(input = {}) {
   const env = input.env ?? process.env;
   const platform = input.platform ?? process.platform;
   const host = input.host ?? readHostSignals();
-  const unixSocketMax = input.unixSocketMax ?? (platform === 'darwin' ? 104 : UNIX_SOCKET_MAX);
+  const unixSocketMax = input.unixSocketMax ?? (platform === 'darwin' ? DARWIN_UNIX_SOCKET_MAX : UNIX_SOCKET_MAX);
   const fallbackTmp = input.fallbackTmp ?? (
     platform === 'win32' ? (env.TEMP || env.TMP || env.TMPDIR || 'C:\\Windows\\Temp') : '/tmp'
   );
