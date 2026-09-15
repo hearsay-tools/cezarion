@@ -135,6 +135,7 @@ function historyAnchorSample(rowExpr: string): string {
 function settleHistoryAnchor(rowExpr: string, holdAtStart = false): HistoryAnchor {
   browser.evaluate(`(() => {
     window.__cezHistoryAnchor = null
+    window.__cezHistoryOrigin = null
     window.__cezSettledHistoryAnchor = null
   })()`)
   const holdStart = holdAtStart
@@ -142,6 +143,7 @@ function settleHistoryAnchor(rowExpr: string, holdAtStart = false): HistoryAncho
       main.scrollTop = 0
       main.dispatchEvent(new Event('scroll', { bubbles: true }))
       window.__cezHistoryAnchor = null
+      window.__cezHistoryOrigin = null
       return false
     }`
     : ''
