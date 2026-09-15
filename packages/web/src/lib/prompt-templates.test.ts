@@ -237,6 +237,30 @@ describe('resolveInsertCaret', () => {
       }),
     ).toBe(edited.length)
   })
+
+  it('an unfocused edited box with caret 0 and no remembered caret appends', () => {
+    expect(
+      resolveInsertCaret({
+        prompt: edited,
+        base,
+        selectionStart: 0,
+        focused: false,
+        remembered: null,
+      }),
+    ).toBe(edited.length)
+  })
+
+  it('a remembered caret of 0 is honoured as an intentional start insert', () => {
+    expect(
+      resolveInsertCaret({
+        prompt: edited,
+        base,
+        selectionStart: 0,
+        focused: false,
+        remembered: 0,
+      }),
+    ).toBe(0)
+  })
 })
 
 // ---- skill assignment + auto-apply (#413 follow-up) ---------------------------------------------

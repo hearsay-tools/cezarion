@@ -250,5 +250,5 @@ export function resolveInsertCaret({
   if (focused && selectionStart != null) return selectionStart
   if (selectionStart != null && selectionStart > 0) return selectionStart
   if (remembered != null) return remembered
-  return selectionStart ?? prompt.length
+  return prompt.length
 }
