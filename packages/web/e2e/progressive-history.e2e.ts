@@ -132,11 +132,35 @@ function historyAnchorSample(rowExpr: string): string {
   })()`
 }
 
+function historyAnchorDiagnostics(): string {
+  return JSON.stringify(
+    browser.evaluate(`(() => {
+      const main = ${MAIN}
+      const samples = window.__cezHistoryDiag ?? []
+      return {
+        origin: window.__cezHistoryOrigin,
+        settled: window.__cezSettledHistoryAnchor,
+        sampleCount: samples.length,
+        samples,
+        mountedKeys: [...document.querySelectorAll('[data-slot="thread-row"][data-row-key]')].map(
+          (row) => row.dataset.rowKey,
+        ),
+        scrollTop: main?.scrollTop ?? null,
+        scrollHeight: main?.scrollHeight ?? null,
+        clientHeight: main?.clientHeight ?? null,
+        retainedPages: document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages ?? null,
+        virtualized: document.querySelector('[data-slot="thread-rows"]')?.dataset.virtualized ?? null,
+      }
+    })()`),
+  )
+}
+
 function settleHistoryAnchor(rowExpr: string, holdAtStart = false): HistoryAnchor {
   browser.evaluate(`(() => {
     window.__cezHistoryAnchor = null
     window.__cezHistoryOrigin = null
     window.__cezSettledHistoryAnchor = null
+    window.__cezHistoryDiag = []
   })()`)
   const holdStart = holdAtStart
     ? `if (main.scrollTop > 2) {
@@ -147,11 +171,25 @@ function settleHistoryAnchor(rowExpr: string, holdAtStart = false): HistoryAncho
       return false
     }`
     : ''
-  browser.waitForFunction(`(() => {
+  try {
+    browser.waitForFunction(`(() => {
     const main = ${MAIN}
     if (!main) return false
     ${holdStart}
     const sample = ${historyAnchorSample(rowExpr)}
+    const diag = window.__cezHistoryDiag
+    const prev = diag.at(-1)
+    if (!prev || JSON.stringify(prev.sample) !== JSON.stringify(sample)) {
+      diag.push({
+        ts: performance.now(),
+        sample,
+        scrollTop: main.scrollTop,
+        mountedKeys: [...main.querySelectorAll('[data-slot="thread-row"][data-row-key]')].map(
+          (row) => row.dataset.rowKey,
+        ),
+      })
+      if (diag.length > 32) diag.shift()
+    }
     if (!sample) return false
     const origin = window.__cezHistoryOrigin
     if (
@@ -170,6 +208,10 @@ function settleHistoryAnchor(rowExpr: string, holdAtStart = false): HistoryAncho
     window.__cezHistoryOrigin = { ...sample, hits: 1 }
     return false
   })()`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`${message}\n${historyAnchorDiagnostics()}`)
+  }
   return browser.evaluate(`window.__cezSettledHistoryAnchor`) as HistoryAnchor
 }
 

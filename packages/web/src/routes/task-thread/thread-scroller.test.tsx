@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { act, cleanup, fireEvent, render, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -64,6 +67,21 @@ describe('ThreadRows — the threshold-switched renderer', () => {
     render(<ThreadRows runId="r1" rows={rows(3)} mode="flat" controls={controls()} />)
     const texts = [...document.querySelectorAll('[data-slot="thread-row"]')].map((el) => el.textContent)
     expect(texts).toEqual(['row 0', 'row 1', 'row 2'])
+  })
+
+  it.each(['flat', 'virtual'] as const)(
+    '%s rows disable native overflow anchoring so a prepend cannot fight restoration',
+    (mode) => {
+      render(<ThreadRows runId="r1" rows={rows(mode === 'flat' ? 5 : 400)} mode={mode} controls={controls()} />)
+      const region = document.querySelector('[data-slot="thread-rows"]')!
+      expect(region.className).toContain('[overflow-anchor:none]')
+    },
+  )
+
+  it('disables conversation overflow anchoring outside the phone-only media query', () => {
+    const css = readFileSync(resolve(import.meta.dirname, 'session-layout.css'), 'utf8')
+    const ungated = css.replace(/@media[^{]+\{[\s\S]*?\n\}/g, '')
+    expect(ungated).toMatch(/\[data-slot='session-conversation'\][^\{]*\{[^}]*overflow-anchor:\s*none/)
   })
 })
 

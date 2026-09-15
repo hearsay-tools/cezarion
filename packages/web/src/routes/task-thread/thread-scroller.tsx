@@ -405,7 +405,7 @@ export function ThreadRows({
 }) {
   if (mode === 'virtual') return <VirtualRows runId={runId} rows={rows} controls={controls} />
   return (
-    <div ref={controls.attachContent} data-slot="thread-rows" data-virtualized="false">
+    <div ref={controls.attachContent} data-slot="thread-rows" data-virtualized="false" className="[overflow-anchor:none]">
       {rows.map((row) => (
         // content-visibility skips render work for off-screen rows; the intrinsic-size hint
         // keeps the scrollbar stable before a skipped row is first measured.
@@ -515,6 +515,7 @@ function VirtualRowsSession({
       }}
       data-slot="thread-rows"
       data-virtualized="true"
+      className="[overflow-anchor:none]"
     >
       {/* Older history prepends rows. `shift` keeps the existing viewport anchored while virtua
           measures the new start, and the thread scroll owner applies the stable-row correction. */}
