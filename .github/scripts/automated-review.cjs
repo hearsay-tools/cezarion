@@ -81,7 +81,31 @@ function countAutomatedReviews(reviews, author = 'github-actions[bot]') {
   if (!Array.isArray(reviews)) return 0;
   return reviews.filter((review) => review?.user?.login === author && review?.submitted_at != null).length;
 }
-async function postReview({ github, owner, repo, pullNumber, eventHeadSha, reviewedHeadSha, comments, body, maxRounds = 3, ignoreCap = false }) {
+function formatReviewPatchIdMarker(patchId) {
+  if (typeof patchId !== 'string' || !SHA.test(patchId)) return null;
+  return `<!-- cez-review-patch-id: ${patchId.toLowerCase()} -->`;
+}
+function extractReviewPatchId(body) {
+  if (typeof body !== 'string') return null;
+  const match = body.match(/<!-- cez-review-patch-id: ([0-9a-f]{40}) -->/);
+  return match ? match[1] : null;
+}
+function latestAutomatedReviewPatchId(reviews, author = 'github-actions[bot]') {
+  if (!Array.isArray(reviews)) return null;
+  const dated = reviews
+    .filter((review) => review?.user?.login === author && review?.submitted_at != null)
+    .sort((a, b) => String(a.submitted_at).localeCompare(String(b.submitted_at)));
+  let latest = null;
+  for (const review of dated) {
+    const id = extractReviewPatchId(review.body);
+    if (id) latest = id;
+  }
+  return latest;
+}
+function shouldSkipUnchangedPatch(currentPatchId, lastPatchId) {
+  return typeof currentPatchId === 'string' && currentPatchId.length > 0 && currentPatchId === lastPatchId;
+}
+async function postReview({ github, owner, repo, pullNumber, eventHeadSha, reviewedHeadSha, comments, body, maxRounds = 3, ignoreCap = false, patchId }) {
   if (comments.length === 0 && !body) return;
   if (!Number.isInteger(maxRounds) || maxRounds < 1) {
     throw new Error('AUTOMATED_REVIEW_ROUNDS must be a positive integer.');
@@ -91,6 +115,18 @@ async function postReview({ github, owner, repo, pullNumber, eventHeadSha, revie
   const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: pullNumber, per_page: 100 });
   if (!ignoreCap && countAutomatedReviews(reviews) >= maxRounds) return;
   if (reviews.some((review) => review?.user?.login === 'github-actions[bot]' && review.commit_id === reviewedHeadSha)) return;
-  await github.rest.pulls.createReview({ owner, repo, pull_number: pullNumber, commit_id: reviewedHeadSha, event: 'COMMENT', body: body || '', comments: comments.map(({ path, line, body: commentBody }) => ({ path, line, side: 'RIGHT', body: commentBody })) });
+  const marker = formatReviewPatchIdMarker(patchId);
+  const postedBody = marker ? (body ? `${body}\n\n${marker}` : marker) : (body || '');
+  await github.rest.pulls.createReview({ owner, repo, pull_number: pullNumber, commit_id: reviewedHeadSha, event: 'COMMENT', body: postedBody, comments: comments.map(({ path, line, body: commentBody }) => ({ path, line, side: 'RIGHT', body: commentBody })) });
 }
-module.exports = { validateReview, loadReview, changedLinesFromFiles, countAutomatedReviews, postReview };
+module.exports = {
+  validateReview,
+  loadReview,
+  changedLinesFromFiles,
+  countAutomatedReviews,
+  postReview,
+  formatReviewPatchIdMarker,
+  extractReviewPatchId,
+  latestAutomatedReviewPatchId,
+  shouldSkipUnchangedPatch,
+};

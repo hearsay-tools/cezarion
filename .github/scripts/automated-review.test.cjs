@@ -6,6 +6,10 @@ const {
   changedLinesFromFiles,
   countAutomatedReviews,
   postReview,
+  formatReviewPatchIdMarker,
+  extractReviewPatchId,
+  latestAutomatedReviewPatchId,
+  shouldSkipUnchangedPatch,
 } = require('./automated-review.cjs');
 
 const sha = 'a'.repeat(40);
@@ -376,4 +380,77 @@ test('does not post a summary-only review after validation filters findings with
   });
   const github = { rest: { pulls: { createReview: async () => assert.fail('must not post') } } };
   await postReview({ github, owner: 'o', repo: 'r', pullNumber: 7, eventHeadSha: sha, reviewedHeadSha: sha, ...result });
+});
+
+const patchId = 'c'.repeat(40);
+const otherPatchId = 'd'.repeat(40);
+
+test('formats and extracts a 40-hex patch-id marker', () => {
+  const marker = formatReviewPatchIdMarker(patchId);
+  assert.equal(marker, `<!-- cez-review-patch-id: ${patchId} -->`);
+  assert.equal(extractReviewPatchId(`summary\n\n${marker}`), patchId);
+  assert.equal(extractReviewPatchId(marker), patchId);
+});
+
+test('extracts no patch-id when the marker is absent or malformed', () => {
+  assert.equal(extractReviewPatchId('No issues found'), null);
+  assert.equal(extractReviewPatchId('<!-- cez-review-patch-id: not-a-sha -->'), null);
+  assert.equal(extractReviewPatchId('<!-- cez-review-patch-id: ' + 'c'.repeat(39) + ' -->'), null);
+  assert.equal(extractReviewPatchId(null), null);
+  assert.equal(formatReviewPatchIdMarker('nope'), null);
+  assert.equal(formatReviewPatchIdMarker(''), null);
+});
+
+test('skips only when the current three-dot patch-id matches the last posted marker', () => {
+  assert.equal(shouldSkipUnchangedPatch(patchId, patchId), true);
+  assert.equal(shouldSkipUnchangedPatch(patchId, otherPatchId), false);
+  assert.equal(shouldSkipUnchangedPatch(patchId, null), false);
+  assert.equal(shouldSkipUnchangedPatch('', patchId), false);
+  assert.equal(shouldSkipUnchangedPatch(null, patchId), false);
+});
+
+test('skip decision leaves the automated-review cap count untouched', () => {
+  const reviews = [
+    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-09-15T10:00:00Z', body: formatReviewPatchIdMarker(patchId) },
+  ];
+  assert.equal(countAutomatedReviews(reviews), 1);
+  assert.equal(latestAutomatedReviewPatchId(reviews), patchId);
+  assert.equal(shouldSkipUnchangedPatch(patchId, latestAutomatedReviewPatchId(reviews)), true);
+  assert.equal(countAutomatedReviews(reviews), 1);
+});
+
+test('treats a missing marker on prior bot reviews as no match', () => {
+  const reviews = [
+    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-09-15T10:00:00Z', body: 'No issues found' },
+    { user: { login: 'octocat' }, submitted_at: '2026-09-15T10:01:00Z', body: formatReviewPatchIdMarker(patchId) },
+  ];
+  assert.equal(latestAutomatedReviewPatchId(reviews), null);
+  assert.equal(shouldSkipUnchangedPatch(patchId, latestAutomatedReviewPatchId(reviews)), false);
+});
+
+test('uses the most recent bot review that carries a patch-id marker', () => {
+  const reviews = [
+    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-09-15T10:00:00Z', body: formatReviewPatchIdMarker(patchId) },
+    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-09-15T10:02:00Z', body: formatReviewPatchIdMarker(otherPatchId) },
+    { user: { login: 'github-actions[bot]' }, submitted_at: '2026-09-15T10:01:00Z', body: 'unmarked' },
+  ];
+  assert.equal(latestAutomatedReviewPatchId(reviews), otherPatchId);
+});
+
+test('appends the patch-id marker to summary and findings-only review bodies', async () => {
+  const calls = [];
+  const github = { paginate: async () => [], rest: { pulls: {
+    get: async () => ({ data: { head: { sha } } }),
+    createReview: async (input) => calls.push(input),
+  } } };
+  await postReview({
+    github, owner: 'o', repo: 'r', pullNumber: 7, eventHeadSha: sha, reviewedHeadSha: sha,
+    comments: [{ path: 'a', line: 2, body: 'Fix it' }], body: null, patchId,
+  });
+  await postReview({
+    github, owner: 'o', repo: 'r', pullNumber: 7, eventHeadSha: sha, reviewedHeadSha: sha,
+    comments: [], body: 'summary', patchId,
+  });
+  assert.equal(calls[0].body, formatReviewPatchIdMarker(patchId));
+  assert.equal(calls[1].body, `summary\n\n${formatReviewPatchIdMarker(patchId)}`);
 });

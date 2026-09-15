@@ -378,6 +378,97 @@ test('review schema requires every object property and models optional values as
 });
 
 
+test('review-round skips when the three-dot patch-id matches the last posted marker', async (t) => {
+  const { parse } = await import('yaml');
+  const { execFileSync } = require('node:child_process');
+  const { tmpdir } = require('node:os');
+  const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const roundJob = workflow.jobs['review-round'];
+  const checkout = roundJob.steps.find((step) => step.uses?.includes('actions/checkout'));
+  assert.equal(checkout?.with?.['persist-credentials'], false);
+  assert.match(checkout?.with?.ref || '', /refs\/pull\/.*\/merge/);
+  const round = roundJob.steps.find((step) => step.id === 'review-round');
+  assert.match(round.run, /git diff --full-index/);
+  assert.match(round.run, /git patch-id --stable/);
+  assert.match(round.run, /cez-review-patch-id/);
+  assert.match(roundJob.outputs.patch_id, /steps\.review-round\.outputs\.patch_id/);
+
+  const head = 'a'.repeat(40);
+  const base = 'b'.repeat(40);
+  const patchId = 'c'.repeat(40);
+  const marker = `<!-- cez-review-patch-id: ${patchId} -->`;
+
+  async function runRound({ event, gitOk, reviewsOut }) {
+    const cwd = fs.mkdtempSync(path.join(tmpdir(), 'review-patch-id-'));
+    const output = path.join(cwd, 'outputs');
+    const env = {
+      ...process.env,
+      BASH_ENV: '/dev/null',
+      GITHUB_OUTPUT: output,
+      GITHUB_REPOSITORY: 'owner/repo',
+      PR_NUMBER: '220',
+      EVENT_NAME: event,
+      AUTOMATED_REVIEW_ROUNDS: '3',
+      EVENT_HEAD_SHA: event === 'workflow_dispatch' ? '' : head,
+      EVENT_BASE_SHA: event === 'workflow_dispatch' ? '' : base,
+    };
+    const gitStub = gitOk
+      ? `git() { printf '%s ignored\\n' '${patchId}'; }`
+      : `git() { echo 'missing objects' >&2; return 128; }`;
+    const script = [
+      `gh() { case "$*" in *'.head.sha'*) echo '${head}';; *'.base.sha'*) echo '${base}';; *'/reviews'*) printf '%s\\n' '${reviewsOut}';; esac; }`,
+      gitStub,
+      round.run,
+    ].join('\n');
+    try {
+      execFileSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', script], { cwd, env });
+      return Object.fromEntries(fs.readFileSync(output, 'utf8').trim().split('\n').filter(Boolean).map((line) => {
+        const idx = line.indexOf('=');
+        return [line.slice(0, idx), line.slice(idx + 1)];
+      }));
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  await t.test('matching marker skips without consuming a round', async () => {
+    const outputs = await runRound({ event: 'pull_request_target', gitOk: true, reviewsOut: marker });
+    assert.equal(outputs.can_review, 'false');
+    assert.equal(outputs.patch_id, patchId);
+  });
+
+  await t.test('missing marker still reviews', async () => {
+    const outputs = await runRound({ event: 'pull_request_target', gitOk: true, reviewsOut: 'No issues found' });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('mismatch still reviews', async () => {
+    const outputs = await runRound({
+      event: 'pull_request_target',
+      gitOk: true,
+      reviewsOut: `<!-- cez-review-patch-id: ${'d'.repeat(40)} -->`,
+    });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('compute failure reviews instead of skipping', async () => {
+    const outputs = await runRound({ event: 'pull_request_target', gitOk: false, reviewsOut: marker });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('workflow_dispatch still reviews past the patch-id skip', async () => {
+    const outputs = await runRound({ event: 'workflow_dispatch', gitOk: true, reviewsOut: marker });
+    assert.equal(outputs.can_review, 'true');
+  });
+});
+
+test('post-review stamps the computed patch-id onto posted reviews', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const poster = job(workflow, 'post-review');
+  assert.match(poster, /PATCH_ID: \$\{\{ needs\.review-round\.outputs\.patch_id \}\}/);
+  assert.match(poster, /patchId: process\.env\.PATCH_ID/);
+});
+
 test('both model jobs require successful verification and trusted context rechecks', async () => {
   const { parse } = await import('yaml');
   const { runInNewContext } = require('node:vm');

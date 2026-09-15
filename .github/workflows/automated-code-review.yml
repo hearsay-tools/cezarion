@@ -46,12 +46,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
+      contents: read
     outputs:
       can_review: ${{ steps.review-round.outputs.can_review }}
       pr_number: ${{ steps.review-round.outputs.pr_number }}
       head_sha: ${{ steps.review-round.outputs.head_sha }}
       base_sha: ${{ steps.review-round.outputs.base_sha }}
+      patch_id: ${{ steps.review-round.outputs.patch_id }}
     steps:
+      - name: Checkout pull request merge for patch-id
+        if: github.event_name != 'workflow_dispatch'
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number || inputs.pr_number }}/merge
+          fetch-depth: 0
+          persist-credentials: false
       - id: review-round
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,23 +81,44 @@ jobs:
             echo "AUTOMATED_REVIEW_ROUNDS must be a positive integer, got: $AUTOMATED_REVIEW_ROUNDS" >&2
             exit 1
           fi
+          patch_id=""
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
             head_sha="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
             base_sha="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .base.sha)"
-            echo 'can_review=true' >> "$GITHUB_OUTPUT"
+            can_review=true
           else
             head_sha="$EVENT_HEAD_SHA"
             base_sha="$EVENT_BASE_SHA"
             review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | .id' | wc -l)"
             if [ "$review_count" -lt "$AUTOMATED_REVIEW_ROUNDS" ]; then
-              echo 'can_review=true' >> "$GITHUB_OUTPUT"
+              can_review=true
             else
-              echo 'can_review=false' >> "$GITHUB_OUTPUT"
+              can_review=false
             fi
           fi
+          if [ "$EVENT_NAME" != workflow_dispatch ] && [ "$can_review" = true ]; then
+            if patch_id="$(git diff --full-index "$base_sha...$head_sha" | git patch-id --stable | awk '{print $1}')" \
+              && [[ "$patch_id" =~ ^[0-9a-f]{40}$ ]]; then
+              last_patch_id=""
+              patch_id_marker_re='<!-- cez-review-patch-id: ([0-9a-f]{40}) -->'
+              review_bodies="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | .body // empty' || true)"
+              while IFS= read -r review_body; do
+                if [[ "$review_body" =~ $patch_id_marker_re ]]; then
+                  last_patch_id="${BASH_REMATCH[1]}"
+                fi
+              done <<< "$review_bodies"
+              if [ -n "$last_patch_id" ] && [ "$patch_id" = "$last_patch_id" ]; then
+                can_review=false
+              fi
+            else
+              patch_id=""
+            fi
+          fi
+          echo "can_review=$can_review" >> "$GITHUB_OUTPUT"
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "patch_id=$patch_id" >> "$GITHUB_OUTPUT"
 
   claude-review:
     needs: [validate-provider, review-round, wait-for-ci]
@@ -377,6 +408,7 @@ jobs:
           HEAD_SHA: ${{ needs.review-round.outputs.head_sha }}
           AUTOMATED_REVIEW_ROUNDS: ${{ vars.AUTOMATED_REVIEW_ROUNDS }}
           IGNORE_CAP: ${{ github.event_name == 'workflow_dispatch' }}
+          PATCH_ID: ${{ needs.review-round.outputs.patch_id }}
         with:
           script: |
             const fs = require('node:fs');
@@ -414,6 +446,7 @@ jobs:
               ...result,
               maxRounds,
               ignoreCap: process.env.IGNORE_CAP === 'true',
+              patchId: process.env.PATCH_ID,
             });
 
   review-complete:
