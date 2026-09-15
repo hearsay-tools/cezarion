@@ -6,6 +6,7 @@ import type { UiEvent, UiMessageItem } from './ui-events.js';
 import {
   createPiUiState,
   mapPiRpcMessage,
+  piFlushProviderError,
   piTurnStarted,
   type PiUiMapperState,
   type PiUiMapping,
@@ -281,7 +282,7 @@ describe('pi assistant message_end provider failures (#54)', () => {
     ]);
   });
 
-  it('clears stopReason after a later successful assistant message_end in the same turn (#277)', () => {
+  it('drops the latched error when a later successful assistant message_end recovers (#316)', () => {
     const events = feed([
       assistantEnd({
         provider: 'openai-completions',
@@ -292,13 +293,7 @@ describe('pi assistant message_end provider failures (#54)', () => {
       assistantEnd(),
       { type: 'agent_settled' },
     ]);
-    expect(events.filter((e) => e.type === 'session.error')).toEqual([
-      {
-        type: 'session.error',
-        message: 'pi: openai-completions/grok-4 request failed: Internal error during token generation',
-        fatal: false,
-      },
-    ]);
+    expect(events.some((e) => e.type === 'session.error')).toBe(false);
     expect(events.filter((e) => e.type === 'turn.completed')).toEqual([
       { type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' },
     ]);
@@ -316,6 +311,78 @@ describe('pi assistant message_end provider failures (#54)', () => {
       {
         type: 'session.error',
         message: 'pi: provider request failed: Internal error during token generation',
+        fatal: false,
+      },
+    ]);
+    const settleAt = events.findIndex((e) => e.type === 'turn.completed');
+    expect(events[settleAt - 1]).toMatchObject({ type: 'session.error' });
+    expect(events.filter((e) => e.type === 'turn.completed')).toEqual([
+      { type: 'turn.completed', turnId: 'turn_1', stopReason: 'error' },
+    ]);
+  });
+
+  it('holds a failed attempt when the stream ends before agent_settled, releasing it on flush (#316)', () => {
+    let mapped = piTurnStarted(createPiUiState());
+    const events = [...mapped.events];
+    let state = mapped.state;
+    mapped = mapPiRpcMessage(
+      assistantEnd({
+        provider: 'xai',
+        model: 'grok-4.6',
+        stopReason: 'error',
+        errorMessage: 'Error Code null: Internal error during token generation',
+      }),
+      state,
+    );
+    events.push(...mapped.events);
+    state = mapped.state;
+    expect(events.some((e) => e.type === 'session.error')).toBe(false);
+    const flushed = piFlushProviderError(state);
+    expect(flushed.events).toEqual([
+      {
+        type: 'session.error',
+        message: 'pi: xai/grok-4.6 request failed: Error Code null: Internal error during token generation',
+        fatal: false,
+      },
+    ]);
+    expect(piFlushProviderError(flushed.state).events).toEqual([]);
+  });
+
+  it('latches a stream error update and drops it when the attempt recovers (#316)', () => {
+    const events = feed([
+      {
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'error',
+          reason: 'error',
+          error: { errorMessage: 'Internal error during token generation' },
+        },
+      },
+      assistantEnd(),
+      { type: 'agent_settled' },
+    ]);
+    expect(events.some((e) => e.type === 'session.error')).toBe(false);
+    expect(events.filter((e) => e.type === 'turn.completed')).toEqual([
+      { type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' },
+    ]);
+  });
+
+  it('emits a latched stream error update when the turn settles on the failed attempt (#316)', () => {
+    const events = feed([
+      {
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'error',
+          reason: 'error',
+          error: { errorMessage: 'Internal error during token generation' },
+        },
+      },
+      { type: 'agent_settled' },
+    ]);
+    expect(events.filter((e) => e.type === 'session.error')).toEqual([
+      {
+        type: 'session.error',
+        message: 'Internal error during token generation',
         fatal: false,
       },
     ]);

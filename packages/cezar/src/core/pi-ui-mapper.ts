@@ -31,6 +31,15 @@ export interface PiUiMapperState {
    */
   readonly turnUsage: TokenUsage | null;
   readonly turnCostUsd: number | null;
+  /**
+   * Provider failure of the attempt currently in flight, held until the turn settles
+   * (`agent_settled`) or the RPC stream ends — never emitted on the attempt itself.
+   *
+   * pi retries past provider flakes (#256); emitting `session.error` per failed attempt
+   * rendered every recovered retry as a danger note (#316). Cleared when a later
+   * assistant `message_end` succeeds, mirroring the v1 latch in `pi-runner.ts`.
+   */
+  readonly latchedProviderError: string | null;
   readonly startedItems: ReadonlySet<string>;
   readonly endedItems: ReadonlySet<string>;
   readonly textBlock: number;
@@ -52,6 +61,7 @@ export function createPiUiState(): PiUiMapperState {
     stopReason: 'end_turn',
     turnUsage: null,
     turnCostUsd: null,
+    latchedProviderError: null,
     startedItems: new Set(),
     endedItems: new Set(),
     textBlock: 0,
@@ -164,8 +174,8 @@ function mapMessageUpdate(value: Record<string, unknown>, state: PiUiMapperState
     const reason: StopReason = string(update.reason) === 'aborted' ? 'cancelled' : 'error';
     const error = isRecord(update.error) ? string(update.error.errorMessage) : undefined;
     return {
-      events: [{ type: 'session.error', message: error ?? `pi model ${reason}`, fatal: false }],
-      state: { ...state, stopReason: reason },
+      events: [],
+      state: { ...state, stopReason: reason, latchedProviderError: error ?? `pi model ${reason}` },
     };
   }
 
@@ -283,6 +293,8 @@ function completeTurn(reason: StopReason, state: PiUiMapperState): PiUiMapping {
   const turnId = state.turnId;
   const closed = closeOpenPiText(state);
   state = closed.state;
+  const flushed = piFlushProviderError(state);
+  state = flushed.state;
   const event: Extract<UiEvent, { type: 'turn.completed' }> = {
     type: 'turn.completed',
     turnId,
@@ -292,7 +304,23 @@ function completeTurn(reason: StopReason, state: PiUiMapperState): PiUiMapping {
   if (state.turnCostUsd !== null) event.costUsd = state.turnCostUsd;
   // Cleared with the turn id: the next turn's counts are its own, and a turn pi ends without
   // reporting usage must not inherit the previous turn's numbers.
-  return { events: [...closed.events, event], state: { ...state, turnId: null, turnUsage: null, turnCostUsd: null } };
+  return {
+    events: [...closed.events, ...flushed.events, event],
+    state: { ...state, turnId: null, turnUsage: null, turnCostUsd: null },
+  };
+}
+
+/**
+ * Release the latched provider failure as `session.error` when the turn it belonged to
+ * still ended on it — the mapper's counterpart of the runner's `emitLatchedProviderError`
+ * for the stream-end-without-`agent_settled` path (#256). A no-op on an empty latch.
+ */
+export function piFlushProviderError(state: PiUiMapperState): PiUiMapping {
+  if (!state.latchedProviderError) return { events: [], state };
+  return {
+    events: [{ type: 'session.error', message: state.latchedProviderError, fatal: false }],
+    state: { ...state, latchedProviderError: null },
+  };
 }
 
 function mapMessageEnd(value: Record<string, unknown>, state: PiUiMapperState): PiUiMapping {
@@ -306,8 +334,13 @@ function mapMessageEnd(value: Record<string, unknown>, state: PiUiMapperState): 
     events.push(usage);
     state = { ...state, turnUsage: usage.usage, turnCostUsd: usage.costUsd ?? null };
   }
+  // Latch the failed attempt, clear on a successful one (#316): pi retries past provider
+  // flakes, and a recovered retry must not surface as `session.error`. A later
+  // `agent_settled` or `piFlushProviderError` emits the latch if the failure held.
   if (string(message.stopReason) === 'error') {
-    events.push({ type: 'session.error', message: piProviderErrorMessage(message), fatal: false });
+    state = { ...state, latchedProviderError: piProviderErrorMessage(message) };
+  } else {
+    state = { ...state, latchedProviderError: null };
   }
   state = { ...state, stopReason: mapPiMessageStopReason(string(message.stopReason)) };
   return { events, state };
