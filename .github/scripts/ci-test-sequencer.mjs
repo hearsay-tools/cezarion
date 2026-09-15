@@ -57,6 +57,8 @@ function repoRelative(root, moduleId) {
 }
 
 export default class CiTestSequencer extends BaseSequencer {
+  durations = durations;
+
   async shard(specifications) {
     const { index, count } = this.ctx.config.shard;
     if (!Number.isInteger(index) || index < 1 || index > count) {
@@ -72,7 +74,7 @@ export default class CiTestSequencer extends BaseSequencer {
       let duplicate = 1;
       while (byKey.has(key)) key = `${baseKey}\0${duplicate++}`;
       byKey.set(key, specification);
-      keyedDurations[key] = durations[file];
+      keyedDurations[key] = this.durations[file];
     });
     const assigned = assignShards([...byKey.keys()], keyedDurations, count);
     return assigned[index - 1].map((key) => byKey.get(key));
