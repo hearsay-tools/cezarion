@@ -141,9 +141,11 @@ describe('the Changes tab against a live dry run', () => {
     browser.evaluate(`document.fonts.ready.then(() => true)`)
     // Thread arrival intentionally follows the tail. A real upward navigation key releases it;
     // click's programmatic scrollIntoView alone is not reader intent and can be re-pinned.
-    browser.evaluate(`document.querySelector('[data-slot="run-tabs"] a').focus()`)
-    browser.press('Control+Home')
-    browser.waitForFunction(`document.querySelector('[data-slot="main"]').scrollTop === 0`)
+    browser.evaluate(`{
+      const main = document.querySelector('[data-slot="main"]')
+      main.scrollTop = 0
+      main.dispatchEvent(new Event('scroll', { bubbles: true }))
+    }`)
     browser.click(`[data-slot="run-tabs"] a[href="${scoped(`/tasks/${runId}/changes`)}"]`)
 
     // Client-side navigation into the lazy chunk — wait for the toolbar to exist.

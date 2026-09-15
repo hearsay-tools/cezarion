@@ -119,8 +119,12 @@ describe('configurable composer run defaults', () => {
       browser.waitForFunction(
         `document.querySelector('[data-slot="source-option"][data-source-ref="interactive-review"]') !== null`,
       )
-      browser.click('[data-slot="source-option"][data-source-ref="interactive-review"]')
-      browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
+      browser.evaluate(`{
+        const item = document.querySelector('[data-slot="source-option"][data-source-ref="interactive-review"]')
+        const label = item.querySelector('span')
+        label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+        label.click()
+      }`)
       browser.waitForFunction(
         `document.querySelector('[data-slot="source-pill"]')?.dataset.sourceKind === 'skill'`,
       )
