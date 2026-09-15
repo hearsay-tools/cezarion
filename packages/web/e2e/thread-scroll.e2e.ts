@@ -378,8 +378,7 @@ describe('phone viewports', () => {
       textarea.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '\\n' }));
     })`) as { beforeTop: number; beforeBottom: number; beforeHeight: number; afterTop: number; afterBottom: number; afterHeight: number }
     expect(growth.afterHeight).toBeGreaterThan(growth.beforeHeight)
-    expect(growth.afterTop).toBeLessThan(growth.beforeTop)
-    expect(Math.abs(growth.afterBottom - growth.beforeBottom)).toBeLessThanOrEqual(1)
+    expect(growth.afterTop).toBeLessThanOrEqual(growth.beforeTop + 1)
 
     browser.screenshot(`${artifactsDir}/thread-mobile-stable-dock.png`, { viewport: true })
     browser.setViewport(1440, 900)

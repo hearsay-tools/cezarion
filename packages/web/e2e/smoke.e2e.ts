@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { readSharedProjects, writeSharedProjects } from './workspace-registry'
 
 /**
  * R1 smoke test — the real app, a real Chrome, through the agent-browser provider.
@@ -44,6 +45,7 @@ beforeAll(async () => {
   followupsAvailable = health.capabilities.followups
   automationsAvailable = health.capabilities.automations
   bootProject = await bootProjectId(baseUrl)
+  writeSharedProjects(readSharedProjects().filter((project) => project.id === bootProject))
 })
 
 /** The nav the shell renders — GitHub, Inbox and Automations all gate on live health
@@ -147,6 +149,7 @@ describe('cockpit app shell', () => {
 
     expect(browser.isVisible('[data-slot="sidebar"]')).toBe(true)
     expect(browser.isVisible('[data-slot="brand-wordmark"]')).toBe(true)
+    browser.waitForFunction(`document.querySelector('[data-slot="single-project-navigation"] nav[aria-label="Main"]') !== null`)
     expect(browser.text('[data-slot="sidebar"] nav[aria-label="Main"]')).toContain('Tasks')
 
     // The GitHub item waits on the health answer — settle it before sampling the nav.
@@ -265,6 +268,7 @@ describe('cockpit app shell', () => {
     expect(health.repo).not.toBeNull()
 
     browser.goto(baseUrl + scoped('/'))
+    browser.waitForFunction(`document.querySelector('[data-slot="single-project-navigation"]') !== null`)
     // The chips are async — they appear only once the health query answers.
     browser.waitForFunction(`document.querySelector('[data-slot="repo-chip"]') !== null`)
 
