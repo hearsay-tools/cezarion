@@ -37,6 +37,7 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
   mkdirSync(join(root, 'bin'), { recursive: true });
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-up.sh'), join(root, '.ai/scripts/test-env-up.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-down.sh'), join(root, '.ai/scripts/test-env-down.sh'));
+  copyFileSync(join(repoRoot, '.ai/scripts/resolve-browser-launch.mjs'), join(root, '.ai/scripts/resolve-browser-launch.mjs'));
   writeFileSync(join(root, '.ai/browsers/agent-browser.md'), '# test provider\n');
   writeFileSync(join(root, 'package.json'), '{"private":true}\n');
   writeFileSync(join(root, 'package-lock.json'), '{}\n');
@@ -75,22 +76,49 @@ printf '<!doctype html>' > packages/cezar/web/dist/index.html
   writeFileSync(
     join(root, 'bin/agent-browser'),
     `#!/bin/sh
-case "\${1:-}" in
-  doctor) printf '{"ok":true}\\n' ;;
-  --version) printf 'test-browser 1\\n' ;;
-  *) : ;;
-esac
+log="$0.argv"
+printf '%s\\n' "$*" >> "$log"
+printf 'TMPDIR=%s\\n' "\${TMPDIR-}" >> "$0.env"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --args|--namespace|--session) shift 2 ;;
+    --json|--offline|--quick) shift ;;
+    doctor) printf '{"success":true,"checks":[{"id":"chrome.installed","status":"pass"}]}\\n'; exit 0 ;;
+    --version) printf 'test-browser 1\\n'; exit 0 ;;
+    open) printf '{"success":true,"data":{}}\\n'; exit 0 ;;
+    close) printf '{"success":true,"data":{}}\\n'; exit 0 ;;
+    *) shift ;;
+  esac
+done
 `,
     { mode: 0o755 },
   );
   return { root, path: join(root, 'bin') };
 }
 
-function descriptor(root: string): { baseUrl: string; app: { pid: number }; startedAt: string } {
+function descriptor(root: string): {
+  baseUrl: string;
+  app: { pid: number };
+  startedAt: string;
+  browser: {
+    installed: boolean;
+    notes: string;
+    launchArgs?: string[];
+    runtimeEnv?: Record<string, string>;
+    namespace?: string;
+  };
+} {
   return JSON.parse(readFileSync(join(root, '.ai/qa/test-env.json'), 'utf8')) as {
     baseUrl: string;
     app: { pid: number };
     startedAt: string;
+    browser: {
+      installed: boolean;
+      notes: string;
+      launchArgs?: string[];
+      runtimeEnv?: Record<string, string>;
+      namespace?: string;
+    };
   };
 }
 
@@ -198,3 +226,140 @@ test('a tracked file inside the boot second is reused; a later edit still refuse
   assert.match(stopped.stdout, /TEST_ENV_STATUS=stopped/);
   launchedPids.delete(descriptor(fixture.root).app.pid);
 });
+
+test('browser doctor receives the resolver’s container args and short runtime path', () => {
+  const fixture = makeFixture(false);
+  writeFileSync(
+    join(fixture.root, '.ai/scripts/resolve-browser-launch.mjs'),
+    `console.log(JSON.stringify({
+      inContainer: true,
+      launchArgs: ['--no-sandbox'],
+      runtimeEnv: { TMPDIR: '/tmp', TMP: '/tmp', TEMP: '/tmp' },
+      namespace: 'cez-e2e',
+    }))
+`,
+  );
+  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
+  const cold = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(cold.status, 0, cold.stderr);
+  const argvLog = readFileSync(join(fixture.root, 'bin/agent-browser.argv'), 'utf8');
+  assert.match(argvLog, /--namespace cez-e2e/);
+  assert.match(argvLog, /--args --no-sandbox/);
+  assert.match(argvLog, /doctor --json --offline/);
+  const envLog = readFileSync(join(fixture.root, 'bin/agent-browser.env'), 'utf8');
+  assert.match(envLog, /^TMPDIR=\/tmp$/m);
+  const desc = descriptor(fixture.root);
+  launchedPids.add(desc.app.pid);
+  assert.deepEqual(desc.browser.launchArgs, ['--no-sandbox']);
+  assert.equal(desc.browser.runtimeEnv?.TMPDIR, '/tmp');
+  assert.equal(desc.browser.namespace, 'cez-e2e');
+  assert.equal(desc.browser.installed, true);
+  spawnSync('/bin/sh', [down], { encoding: 'utf8', env, timeout: 20_000 });
+  launchedPids.delete(descriptor(fixture.root).app.pid);
+});
+
+test('doctor launch failure is not a missing browser when a live launch works', () => {
+  const fixture = makeFixture(false);
+  writeFileSync(
+    join(fixture.root, '.ai/scripts/resolve-browser-launch.mjs'),
+    `console.log(JSON.stringify({
+      inContainer: true,
+      launchArgs: ['--no-sandbox'],
+      runtimeEnv: { TMPDIR: '/tmp', TMP: '/tmp', TEMP: '/tmp' },
+      namespace: 'cez-e2e',
+    }))
+`,
+  );
+  writeFileSync(
+    join(fixture.root, 'bin/agent-browser'),
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$0.argv"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --args|--namespace|--session) shift 2 ;;
+    --json|--offline|--quick) shift ;;
+    doctor)
+      printf '{"success":false,"checks":[{"id":"chrome.installed","status":"pass"},{"id":"launch.launch","status":"fail","message":"No usable sandbox"}]}\\n'
+      exit 1
+      ;;
+    --version) printf 'test-browser 1\\n'; exit 0 ;;
+    open) printf '{"success":true,"data":{}}\\n'; exit 0 ;;
+    close) printf '{"success":true,"data":{}}\\n'; exit 0 ;;
+    *) shift ;;
+  esac
+done
+exit 1
+`,
+    { mode: 0o755 },
+  );
+  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
+  const cold = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(cold.status, 0, cold.stderr);
+  const desc = descriptor(fixture.root);
+  launchedPids.add(desc.app.pid);
+  assert.equal(desc.browser.installed, true);
+  assert.match(desc.browser.notes, /live launch succeeded/i);
+  assert.doesNotMatch(desc.browser.notes, /unavailable|missing/i);
+  const argvLog = readFileSync(join(fixture.root, 'bin/agent-browser.argv'), 'utf8');
+  assert.match(argvLog, /--args --no-sandbox.*open about:blank/s);
+  const probeSessions = [...argvLog.matchAll(/--session (cez-boot-probe-\d+)/g)].map((m) => m[1]);
+  assert.ok(probeSessions.length >= 2);
+  assert.equal(new Set(probeSessions).size, 1);
+  assert.notEqual(probeSessions[0], 'cez-boot-probe');
+  spawnSync('/bin/sh', [down], { encoding: 'utf8', env, timeout: 20_000 });
+  launchedPids.delete(descriptor(fixture.root).app.pid);
+});
+
+test('installed Chrome that still cannot launch with resolved settings is not treated as missing', () => {
+  const fixture = makeFixture(false);
+  writeFileSync(
+    join(fixture.root, '.ai/scripts/resolve-browser-launch.mjs'),
+    `console.log(JSON.stringify({
+      inContainer: true,
+      launchArgs: ['--no-sandbox'],
+      runtimeEnv: { TMPDIR: '/tmp', TMP: '/tmp', TEMP: '/tmp' },
+      namespace: 'cez-e2e',
+    }))
+`,
+  );
+  writeFileSync(
+    join(fixture.root, 'bin/agent-browser'),
+    `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --args|--namespace|--session) shift 2 ;;
+    --json|--offline|--quick) shift ;;
+    doctor)
+      printf '{"success":false,"checks":[{"id":"chrome.installed","status":"pass"},{"id":"launch.launch","status":"fail","message":"Socket path too long"}]}\\n'
+      exit 1
+      ;;
+    --version) printf 'test-browser 1\\n'; exit 0 ;;
+    open)
+      printf '{"success":false,"error":"Socket path too long"}\\n'
+      exit 1
+      ;;
+    close) printf '{"success":true}\\n'; exit 0 ;;
+    *) shift ;;
+  esac
+done
+exit 1
+`,
+    { mode: 0o755 },
+  );
+  const env = { ...process.env, PATH: fixture.path, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  const down = join(fixture.root, '.ai/scripts/test-env-down.sh');
+  const cold = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(cold.status, 0, cold.stderr);
+  const desc = descriptor(fixture.root);
+  launchedPids.add(desc.app.pid);
+  assert.equal(desc.browser.installed, false);
+  assert.match(desc.browser.notes, /failed to launch with resolved settings/i);
+  spawnSync('/bin/sh', [down], { encoding: 'utf8', env, timeout: 20_000 });
+  launchedPids.delete(descriptor(fixture.root).app.pid);
+});
+

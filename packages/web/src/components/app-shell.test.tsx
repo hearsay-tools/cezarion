@@ -642,7 +642,7 @@ describe('AppShell', () => {
       expect(main.className).toContain('overscroll-contain')
     })
 
-    it('pads for the safe-area insets', () => {
+    it('pads for safe areas and lets the keyboard reserve the composer row', () => {
       renderShell()
       const shell = document.querySelector('[data-slot="app-shell"]') as HTMLElement
       expect(shell.className).toContain('pl-[env(safe-area-inset-left)]')
@@ -650,9 +650,12 @@ describe('AppShell', () => {
       const bar = document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
       expect(bar.className).toContain('pt-[env(safe-area-inset-top)]')
 
-      // The composer row keeps the home-indicator gutter even while it is empty.
+      // The composer row keeps the home-indicator gutter while empty, and yields to the
+      // published keyboard inset when that obstruction is taller.
       const composer = document.querySelector('[data-slot="composer"]') as HTMLElement
-      expect(composer.className).toContain('pb-[env(safe-area-inset-bottom)]')
+      expect(composer.className).toContain(
+        'pb-[max(env(safe-area-inset-bottom),var(--kb,0px))]',
+      )
     })
   })
 

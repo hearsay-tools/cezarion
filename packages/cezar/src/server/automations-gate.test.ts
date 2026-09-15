@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationStore } from '../automations/store.ts';
 import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { RunStore } from '../runs/store.ts';
+import { SkillsUpdateCoordinator } from '../skills-update.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp, startServer, type ServerDeps } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -195,18 +196,38 @@ describe('automations gate (#801)', () => {
       vi.restoreAllMocks();
     });
 
-    /** Boot on an ephemeral port, wait for `listening` to have run its warm-up, then close. */
-    const boot = async (): Promise<void> => {
+    const WARMUP_MS = 15_000;
+
+    /** Boot on an ephemeral port, wait until warmup has started or skipped the scheduler, then close. */
+    const boot = async (warmupHoldMs = 0): Promise<void> => {
       const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
+      const originalWarmup = SkillsUpdateCoordinator.prototype.start;
+      vi.spyOn(SkillsUpdateCoordinator.prototype, 'start').mockImplementation(function (
+        this: SkillsUpdateCoordinator,
+        projects,
+      ) {
+        if (warmupHoldMs > 0) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, warmupHoldMs);
+        }
+        originalWarmup.call(this, projects);
+      });
       const server = startServer(
         { repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' },
         0,
       );
       try {
         await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-        // The warm-up chain is `listProjects().then(…)`; a macrotask turn is enough for it to run
-        // to the point where it either starts the scheduler or returns early.
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (process.env.CEZ_AUTOMATIONS === '1') {
+          await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), {
+            timeout: WARMUP_MS,
+            interval: 10,
+          });
+        } else {
+          await vi.waitFor(() => expect(SkillsUpdateCoordinator.prototype.start).toHaveBeenCalled(), {
+            timeout: WARMUP_MS,
+            interval: 10,
+          });
+        }
       } finally {
         server.close();
       }
@@ -215,11 +236,16 @@ describe('automations gate (#801)', () => {
 
     it('never starts polling while the flag is off', async () => {
       await boot();
-    });
+    }, WARMUP_MS + 5_000);
 
     it('starts once the flag is on, so the gate is the only thing holding it back', async () => {
       process.env.CEZ_AUTOMATIONS = '1';
       await boot();
-    });
+    }, WARMUP_MS + 5_000);
+
+    it('starts even when the post-listen chain outlasts a 50ms guess', async () => {
+      process.env.CEZ_AUTOMATIONS = '1';
+      await boot(80);
+    }, WARMUP_MS + 5_000);
   });
 });

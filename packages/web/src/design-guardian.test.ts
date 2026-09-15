@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -269,7 +270,9 @@ describe('design guardian', () => {
     expect(css).toContain('@import "@fontsource/poppins/500.css"')
     expect(css).toContain('@import "@fontsource/poppins/600.css"')
     expect(css).toContain("--sans: 'Poppins'")
-    expect(existsSync(path.resolve(APP_ROOT, '../../node_modules/@fontsource/poppins/LICENSE'))).toBe(true)
+    const requireFromWeb = createRequire(path.join(APP_ROOT, 'package.json'))
+    const poppinsRoot = path.dirname(requireFromWeb.resolve('@fontsource/poppins/package.json'))
+    expect(existsSync(path.join(poppinsRoot, 'LICENSE'))).toBe(true)
   })
 
   it('defines the approved purple chrome and gold action token vocabulary', () => {

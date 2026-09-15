@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { readSharedProjects, writeSharedProjects } from './workspace-registry'
 
 /**
  * Automatic Open Mercato skill updates against the real CEZ_DRY_RUN cockpit.
@@ -38,6 +39,7 @@ beforeAll(async () => {
   baseUrl = readTestEnv().baseUrl
   projectId = await bootProjectId(baseUrl)
   previousConfig = existsSync(workspaceConfig) ? readFileSync(workspaceConfig, 'utf8') : null
+  writeSharedProjects(readSharedProjects().filter((project) => project.id === projectId))
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(DESKTOP.width, DESKTOP.height)
 })
@@ -81,9 +83,9 @@ describe('automatic Open Mercato skills updates', () => {
 
   it('keeps the navigation marker absent for the dry-run current state', () => {
     browser.goto(`${baseUrl}/p/${projectId}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="project-group-body"] nav, [data-slot="single-project-navigation"] nav[aria-label="Main"]') !== null`)
     expect(browser.count('[data-slot="nav-update-marker"]')).toBe(0)
-    expect(browser.text('[data-slot="sidebar"] nav[aria-label="Main"]')).toContain('Skills')
+    expect(browser.evaluate(`(document.querySelector('[data-slot="project-group-body"] nav') || document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]')).textContent`)).toContain('Skills')
     browser.screenshot(`${artifactsDir}/skills-navigation-current.png`)
   })
 
@@ -112,9 +114,9 @@ describe('automatic Open Mercato skills updates', () => {
     browser.goto(`${baseUrl}/p/${projectId}/`)
     browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
     browser.click('[data-slot="mobile-top-bar"] button[aria-label="Open menu"]')
-    browser.waitForFunction(`document.querySelector('[role="dialog"] nav[aria-label="Main"]') !== null`)
+    browser.waitForFunction(`Boolean([...document.querySelectorAll('[role="dialog"] nav')].some((nav) => nav.textContent.includes('Skills')))`)
 
-    expect(browser.text('[role="dialog"] nav[aria-label="Main"]')).toContain('Skills')
+    expect(browser.evaluate(`[...document.querySelectorAll('[role="dialog"] nav')].map((nav) => nav.textContent).join(' ')`)).toContain('Skills')
     expect(browser.count('[role="dialog"] [data-slot="nav-update-marker"]')).toBe(0)
     browser.screenshot(`${artifactsDir}/skills-mobile-navigation.png`, { viewport: true })
   })

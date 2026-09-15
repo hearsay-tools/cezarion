@@ -61,7 +61,7 @@ else
 fi
 
 "$AGENT_BROWSER_BIN" install
-if ! "$AGENT_BROWSER_BIN" doctor --json >/dev/null 2>&1; then
+if ! "$AGENT_BROWSER_BIN" doctor --json --offline >/dev/null 2>&1; then
   if [ "$(uname -s 2>/dev/null || true)" = Linux ]; then
     if [ "$(id -u)" = 0 ]; then
       "$AGENT_BROWSER_BIN" install --with-deps
@@ -70,7 +70,7 @@ if ! "$AGENT_BROWSER_BIN" doctor --json >/dev/null 2>&1; then
     fi
   fi
 fi
-if "$AGENT_BROWSER_BIN" doctor --json >/dev/null; then
+if "$AGENT_BROWSER_BIN" doctor --json --offline >/dev/null; then
   printf 'BROWSER_PROVIDER=agent-browser\nBROWSER_INSTALLED=1\nBROWSER_COMMAND=%s\nBROWSER_VERSION=%s\nBROWSER_NOTES=\n' \
     "$AGENT_BROWSER_BIN" "$("$AGENT_BROWSER_BIN" --version 2>/dev/null || echo unknown)"
 else
@@ -113,8 +113,13 @@ $version = (& $AgentBrowser --version 2>$null)
 
 ### doctor
 
+Cockpit e2e applies `.ai/scripts/resolve-browser-launch.mjs` in
+`.ai/scripts/test-env-up.sh` (doctor) and `packages/web/e2e/agent-browser.ts`
+(every later invocation). Those two sites share the resolved namespace, Chrome
+args, and socket-safe TMPDIR. The recipes in this file install and probe only.
+
 ```bash
-"$AGENT_BROWSER_BIN" doctor --json
+"$AGENT_BROWSER_BIN" doctor --json --offline
 ```
 
 PowerShell: `& $AgentBrowser doctor --json`.
