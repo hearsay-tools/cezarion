@@ -90,7 +90,11 @@ beforeAll(async () => {
 afterAll(() => {
   browser?.close()
   server?.kill()
-  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
+  try {
+    if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
+  } catch {
+    // The killed fixture may still be releasing files; the OS reaps the temp dir.
+  }
 })
 
 describe('configurable composer run defaults', () => {
