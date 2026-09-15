@@ -61,7 +61,10 @@ else
 fi
 
 "$AGENT_BROWSER_BIN" install
-if ! "$AGENT_BROWSER_BIN" doctor --json >/dev/null 2>&1; then
+# Launch flags and runtime paths come from `.ai/scripts/resolve-browser-launch.mjs`
+# (container `--no-sandbox`, socket-safe TMPDIR). Doctor and every later invocation
+# must receive the same resolved `--namespace` / `--args` / TMPDIR.
+if ! "$AGENT_BROWSER_BIN" --namespace cez-e2e doctor --json --offline >/dev/null 2>&1; then
   if [ "$(uname -s 2>/dev/null || true)" = Linux ]; then
     if [ "$(id -u)" = 0 ]; then
       "$AGENT_BROWSER_BIN" install --with-deps
@@ -70,7 +73,7 @@ if ! "$AGENT_BROWSER_BIN" doctor --json >/dev/null 2>&1; then
     fi
   fi
 fi
-if "$AGENT_BROWSER_BIN" doctor --json >/dev/null; then
+if "$AGENT_BROWSER_BIN" --namespace cez-e2e doctor --json --offline >/dev/null; then
   printf 'BROWSER_PROVIDER=agent-browser\nBROWSER_INSTALLED=1\nBROWSER_COMMAND=%s\nBROWSER_VERSION=%s\nBROWSER_NOTES=\n' \
     "$AGENT_BROWSER_BIN" "$("$AGENT_BROWSER_BIN" --version 2>/dev/null || echo unknown)"
 else
@@ -114,7 +117,7 @@ $version = (& $AgentBrowser --version 2>$null)
 ### doctor
 
 ```bash
-"$AGENT_BROWSER_BIN" doctor --json
+"$AGENT_BROWSER_BIN" --namespace cez-e2e doctor --json --offline
 ```
 
 PowerShell: `& $AgentBrowser doctor --json`.

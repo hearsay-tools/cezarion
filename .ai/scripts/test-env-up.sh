@@ -35,6 +35,8 @@ LOCK_DIR="$QA_DIR/test-env.lock"
 CACHE_FILE="$QA_DIR/.build-cache"
 APP_LOG="$QA_DIR/test-env-app.log"
 BROWSER_DESCRIPTOR=".ai/browsers/agent-browser.md"
+BROWSER_LAUNCH_JSON="$QA_DIR/browser-launch.json"
+BROWSER_DOCTOR_JSON="$QA_DIR/browser-doctor.json"
 
 PREFERRED_PORT=4321
 HEALTH_PATH="/api/v1/health"
@@ -257,8 +259,84 @@ BROWSER_INSTALLED=0
 BROWSER_COMMAND=""
 BROWSER_VERSION=unknown
 BROWSER_NOTES=""
+BROWSER_NAMESPACE=cez-e2e
+BROWSER_LAUNCH_ARGS_CSV=""
+BROWSER_RUNTIME_TMPDIR=""
+
+# Container Chrome needs `--no-sandbox`; Cezar worktree TMPDIR makes SingletonSocket
+# exceed sockaddr_un. Resolve once, pass the same flags/env to doctor and every later
+# invocation. Doctor's own launch test ignores `--args`, so a live `open` probe is what
+# decides installed vs "Chrome is present but bootstrap settings were unusable".
+resolve_browser_launch() {
+  if ! node "$SCRIPT_DIR/resolve-browser-launch.mjs" > "$BROWSER_LAUNCH_JSON" 2>/dev/null; then
+    printf '%s\n' '{"inContainer":false,"launchArgs":[],"runtimeEnv":{},"namespace":"cez-e2e"}' > "$BROWSER_LAUNCH_JSON"
+  fi
+  BROWSER_NAMESPACE=$(json_get "$BROWSER_LAUNCH_JSON" namespace)
+  [ -n "$BROWSER_NAMESPACE" ] || BROWSER_NAMESPACE=cez-e2e
+  BROWSER_LAUNCH_ARGS_CSV=$(json_get "$BROWSER_LAUNCH_JSON" launchArgs)
+  BROWSER_RUNTIME_TMPDIR=$(json_get "$BROWSER_LAUNCH_JSON" runtimeEnv.TMPDIR)
+}
+
+persist_browser_launch() {
+  node -e '
+    const fs = require("fs");
+    const [path, csv, tmp, ns] = process.argv.slice(1);
+    let j = {};
+    try { j = JSON.parse(fs.readFileSync(path, "utf8")); } catch { /* start from empty */ }
+    j.launchArgs = csv ? csv.split(",").filter(Boolean) : [];
+    j.namespace = ns || j.namespace || "cez-e2e";
+    if (tmp) j.runtimeEnv = { TMPDIR: tmp, TMP: tmp, TEMP: tmp };
+    fs.writeFileSync(path, JSON.stringify(j) + "\n");
+  ' "$BROWSER_LAUNCH_JSON" "$BROWSER_LAUNCH_ARGS_CSV" "$BROWSER_RUNTIME_TMPDIR" "$BROWSER_NAMESPACE"
+}
+
+run_browser() {
+  if [ -n "$BROWSER_LAUNCH_ARGS_CSV" ]; then
+    set -- --args "$BROWSER_LAUNCH_ARGS_CSV" "$@"
+  fi
+  if [ -n "$BROWSER_NAMESPACE" ]; then
+    set -- --namespace "$BROWSER_NAMESPACE" "$@"
+  fi
+  if [ -n "$BROWSER_RUNTIME_TMPDIR" ]; then
+    TMPDIR="$BROWSER_RUNTIME_TMPDIR" TMP="$BROWSER_RUNTIME_TMPDIR" TEMP="$BROWSER_RUNTIME_TMPDIR" \
+      "$BROWSER_COMMAND" "$@"
+  else
+    "$BROWSER_COMMAND" "$@"
+  fi
+}
+
+chrome_installed_from_doctor() {
+  node -e '
+    const fs = require("fs");
+    try {
+      const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const chrome = (j.checks || []).find((c) => c.id === "chrome.installed");
+      process.exit(chrome && chrome.status === "pass" ? 0 : 1);
+    } catch { process.exit(1); }
+  ' "$1"
+}
+
+browser_json_success() {
+  node -e '
+    let s = "";
+    process.stdin.on("data", (d) => { s += d; });
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        process.exit(j && j.success === true ? 0 : 1);
+      } catch { process.exit(1); }
+    });
+  '
+}
+
+probe_browser() {
+  out=$(run_browser --session cez-boot-probe open about:blank --json 2>/dev/null || true)
+  run_browser --session cez-boot-probe close --json >/dev/null 2>&1 || true
+  printf '%s' "$out" | browser_json_success
+}
 
 ensure_browser() {
+  resolve_browser_launch
   if command -v agent-browser >/dev/null 2>&1; then
     BROWSER_COMMAND=$(command -v agent-browser)
   else
@@ -281,6 +359,7 @@ ensure_browser() {
     case "$ASSET" in
       *unsupported*)
         BROWSER_NOTES="unsupported agent-browser target: $OS/$ARCH"
+        persist_browser_launch
         return 0 ;;
     esac
     BROWSER_COMMAND="$TOOL_DIR/$ASSET"
@@ -290,11 +369,11 @@ ensure_browser() {
       log "installing agent-browser ($ASSET)"
       if command -v curl >/dev/null 2>&1; then
         curl -fL --retry 3 --connect-timeout 30 --max-time 600 -o "$TMP" "$URL" || {
-          BROWSER_NOTES="download failed: $URL"; rm -f "$TMP"; return 0; }
+          BROWSER_NOTES="download failed: $URL"; rm -f "$TMP"; persist_browser_launch; return 0; }
       elif command -v wget >/dev/null 2>&1; then
-        wget -T 30 -t 3 -O "$TMP" "$URL" || { BROWSER_NOTES="download failed: $URL"; rm -f "$TMP"; return 0; }
+        wget -T 30 -t 3 -O "$TMP" "$URL" || { BROWSER_NOTES="download failed: $URL"; rm -f "$TMP"; persist_browser_launch; return 0; }
       else
-        BROWSER_NOTES="no built-in HTTP downloader is available"; return 0
+        BROWSER_NOTES="no built-in HTTP downloader is available"; persist_browser_launch; return 0
       fi
       chmod 755 "$TMP"
       mv "$TMP" "$BROWSER_COMMAND"
@@ -302,7 +381,10 @@ ensure_browser() {
   fi
 
   "$BROWSER_COMMAND" install >/dev/null 2>&1 || true
-  if ! "$BROWSER_COMMAND" doctor --json >/dev/null 2>&1; then
+  doctor_ok=0
+  if run_browser doctor --json --offline >"$BROWSER_DOCTOR_JSON" 2>/dev/null; then
+    doctor_ok=1
+  else
     # Linux Chrome libraries may need root; only try when it costs no prompt.
     if [ "$(uname -s 2>/dev/null || true)" = Linux ]; then
       if [ "$(id -u)" = 0 ]; then
@@ -311,13 +393,45 @@ ensure_browser() {
         sudo -n "$BROWSER_COMMAND" install --with-deps >/dev/null 2>&1 || true
       fi
     fi
+    if run_browser doctor --json --offline >"$BROWSER_DOCTOR_JSON" 2>/dev/null; then
+      doctor_ok=1
+    fi
   fi
-  if "$BROWSER_COMMAND" doctor --json >/dev/null 2>&1; then
+  if [ "$doctor_ok" = 1 ]; then
     BROWSER_INSTALLED=1
-    BROWSER_VERSION=$("$BROWSER_COMMAND" --version 2>/dev/null || echo unknown)
+    BROWSER_VERSION=$(run_browser --version 2>/dev/null || echo unknown)
+  elif probe_browser; then
+    BROWSER_INSTALLED=1
+    BROWSER_VERSION=$(run_browser --version 2>/dev/null || echo unknown)
+    BROWSER_NOTES="doctor launch test failed; live launch succeeded"
   else
-    BROWSER_NOTES="live browser launch failed after autonomous install"
+    case ",$BROWSER_LAUNCH_ARGS_CSV," in
+      *,--no-sandbox,*) ;;
+      *)
+        prior_args=$BROWSER_LAUNCH_ARGS_CSV
+        if [ -n "$BROWSER_LAUNCH_ARGS_CSV" ]; then
+          BROWSER_LAUNCH_ARGS_CSV="$BROWSER_LAUNCH_ARGS_CSV,--no-sandbox"
+        else
+          BROWSER_LAUNCH_ARGS_CSV=--no-sandbox
+        fi
+        if probe_browser; then
+          BROWSER_INSTALLED=1
+          BROWSER_VERSION=$(run_browser --version 2>/dev/null || echo unknown)
+          BROWSER_NOTES="doctor launch test failed; live launch succeeded"
+        else
+          BROWSER_LAUNCH_ARGS_CSV=$prior_args
+        fi
+        ;;
+    esac
+    if [ "$BROWSER_INSTALLED" != 1 ]; then
+      if chrome_installed_from_doctor "$BROWSER_DOCTOR_JSON"; then
+        BROWSER_NOTES="installed Chrome failed to launch with resolved settings"
+      else
+        BROWSER_NOTES="live browser launch failed after autonomous install"
+      fi
+    fi
   fi
+  persist_browser_launch
 }
 
 # ---- 6. app start + health wait ---------------------------------------------
@@ -362,7 +476,20 @@ write_descriptor() {
   [ "${CEZ_SINGLE_PROJECT:-}" = 1 ] && SINGLE_PROJECT=true
   node -e '
     const fs = require("fs");
-    const [out, baseUrl, port, pid, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform] = process.argv.slice(1);
+    const [out, baseUrl, port, pid, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath] = process.argv.slice(1);
+    let launch = {};
+    try { launch = JSON.parse(fs.readFileSync(launchPath, "utf8")); } catch { /* resolver absent */ }
+    const browser = {
+      provider: "agent-browser",
+      installed: bInstalled === "1",
+      command: bCmd,
+      version: bVer,
+      descriptor: desc,
+      notes: bNotes,
+      launchArgs: Array.isArray(launch.launchArgs) ? launch.launchArgs : [],
+      namespace: launch.namespace || "cez-e2e",
+    };
+    if (launch.runtimeEnv && Object.keys(launch.runtimeEnv).length) browser.runtimeEnv = launch.runtimeEnv;
     fs.writeFileSync(out, JSON.stringify({
       version: 1,
       runId: "cezar-" + new Date().toISOString().slice(0, 10) + "-" + pid,
@@ -376,14 +503,7 @@ write_descriptor() {
       services: [],
       credentials: [],
       environment: { singleProject: singleProject === "true" },
-      browser: {
-        provider: "agent-browser",
-        installed: bInstalled === "1",
-        command: bCmd,
-        version: bVer,
-        descriptor: desc,
-        notes: bNotes,
-      },
+      browser,
       testRunner: { name: "other", config: "packages/web/e2e/vitest.config.ts" },
       platform,
       startedAt: new Date().toISOString(),
@@ -392,7 +512,8 @@ write_descriptor() {
   ' "$ENV_DESCRIPTOR" "$BASE_URL" "$PORT" "$APP_PID" \
     "CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home node packages/cezar/dist/index.js --port $PORT --no-open" \
     "$BROWSER_INSTALLED" "$BROWSER_COMMAND" "$BROWSER_VERSION" "$BROWSER_NOTES" "$BROWSER_DESCRIPTOR" \
-    "$SINGLE_PROJECT" "$(uname -s 2>/dev/null | grep -qi Linux && { grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && echo wsl2 || echo linux; } || echo darwin)"
+    "$SINGLE_PROJECT" "$(uname -s 2>/dev/null | grep -qi Linux && { grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && echo wsl2 || echo linux; } || echo darwin)" \
+    "$BROWSER_LAUNCH_JSON"
 }
 
 # ---- main -------------------------------------------------------------------
