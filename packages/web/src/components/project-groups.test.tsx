@@ -181,6 +181,42 @@ describe('ProjectGroups', () => {
     expect(within(nav).getByRole('link', { current: 'page' }).textContent).toBe('Tasks')
   })
 
+  it('collapses an unpinned previous project when another project is selected', async () => {
+    serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
+    renderGroups(
+      [project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })],
+      '/p/cezar/git',
+    )
+    await waitFor(() => expect(header('cezar').getAttribute('aria-expanded')).toBe('true'))
+    fireEvent.click(header('shop'))
+    expect(storedCollapsed()).toEqual({ shop: false })
+    fireEvent.click(within(group('shop')).getByRole('link', { name: 'Tasks' }))
+    await waitFor(() => expect(header('cezar').getAttribute('aria-expanded')).toBe('false'))
+    expect(header('shop').getAttribute('aria-expanded')).toBe('true')
+    expect(within(group('cezar')).queryByRole('navigation')).toBeNull()
+    expect(within(group('shop')).getByRole('link', { current: 'page' }).textContent).toBe('Tasks')
+    expect(screen.queryAllByRole('link', { current: 'page' })).toHaveLength(1)
+  })
+
+  it('keeps an explicitly pinned project open across navigation', async () => {
+    storeCollapsed({ cezar: false })
+    serve({ '/api/v1/p/cezar/runs': [], '/api/v1/p/shop/runs': [] })
+    renderGroups(
+      [project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })],
+      '/p/cezar/git',
+    )
+    await waitFor(() => expect(header('cezar').getAttribute('aria-expanded')).toBe('true'))
+    fireEvent.click(header('shop'))
+    fireEvent.click(within(group('shop')).getByRole('link', { name: 'Git' }))
+    await waitFor(() =>
+      expect(within(group('shop')).getByRole('link', { current: 'page' }).textContent).toBe('Git'),
+    )
+    expect(header('cezar').getAttribute('aria-expanded')).toBe('true')
+    expect(within(group('cezar')).getByRole('navigation')).toBeTruthy()
+    expect(within(group('cezar')).queryByRole('link', { current: 'page' })).toBeNull()
+    expect(screen.queryAllByRole('link', { current: 'page' })).toHaveLength(1)
+  })
+
   it('folds an expanded group when its project name is clicked again', async () => {
     serve({ '/api/v1/p/cezar/runs': [] })
     renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])

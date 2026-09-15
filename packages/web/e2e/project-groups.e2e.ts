@@ -140,9 +140,20 @@ afterAll(() => {
 
 /** Load the cockpit and wait for the registry query to have produced the seeded groups. Waits on
  *  the three ids rather than on a count, so a slow render and a wrong registry fail differently:
- *  this settles, and the assertions below say what the sidebar actually holds. */
-function gotoGrouped(path: string): void {
+ *  this settles, and the assertions below say what the sidebar actually holds.
+ *
+ *  `persistCollapse` is for the reload round-trip: the default path drops leftover
+ *  `cez-sidebar-collapsed` pins so a shared Chrome origin (one browser across cases, and across
+ *  files that reuse the profile) cannot keep a previous test's explicit `false` open. */
+function gotoGrouped(path: string, { persistCollapse = false } = {}): void {
   browser.goto(baseUrl + path)
+  if (!persistCollapse) {
+    const leftover = browser.evaluate(`localStorage.getItem('cez-sidebar-collapsed')`)
+    if (typeof leftover === 'string') {
+      browser.evaluate(`localStorage.removeItem('cez-sidebar-collapsed')`)
+      browser.goto(baseUrl + path)
+    }
+  }
   browser.waitForFunction(
     [bootProject, ALPHA.id, BETA.id]
       // `!== null`, not a bare querySelector: the CLI serializes whatever the expression
@@ -256,10 +267,14 @@ describe('the grouped multi-project sidebar', () => {
         .map((a) => new URL(a.href).pathname)`)
     ).toEqual([scoped(bootProject, '/git')])
 
-    // The inactive project's name opens its scoped tasks. Entering Alpha lights its Git
-    // row and collapses the boot group (no stored pin), so only Alpha claims the URL.
+    // The inactive project's Tasks link opens its scoped tasks. History updates before
+    // React reapplies collapse defaults, and Alpha's nav is already mounted from the expand
+    // above, so waiting on pathname + Alpha's nav does not mean the boot group has folded.
+    // The boot group has no stored pin — once the new URL is the collapse anchor it must
+    // unmount (the assertion that failed when this wait was missing).
     browser.click(`${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/')}"]`)
     browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/')}'`)
+    browser.waitForFunction(`document.querySelector('${groupBody(bootProject)}') === null`)
     browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav') !== null`)
     expect(hrefs(ALPHA.id)).toEqual(expectedNavHrefs(ALPHA.id))
     expect(hrefs(bootProject)).toEqual([])
@@ -268,6 +283,30 @@ describe('the grouped multi-project sidebar', () => {
     browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/git')}"]')?.getAttribute('aria-current') === 'page'`)
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="project-groups"] a[aria-current="page"]')].map(a => new URL(a.href).pathname)`)).toEqual([scoped(ALPHA.id, '/git')])
 
+  })
+
+  it('keeps an explicitly pinned project open across scoped navigation', ({ skip }) => {
+    if (singleProject) skip()
+    gotoGrouped(scoped(bootProject, '/git'))
+    // Default expand is not a pin. Collapse then re-open so storage holds `false`.
+    setGroupExpanded(bootProject, false)
+    setGroupExpanded(bootProject, true)
+    expect(storedCollapse()[bootProject]).toBe(false)
+    setGroupExpanded(ALPHA.id, true)
+    browser.click(`${groupBody(ALPHA.id)} nav a[href="${scoped(ALPHA.id, '/')}"]`)
+    browser.waitForFunction(`location.pathname === '${scoped(ALPHA.id, '/')}'`)
+    browser.waitForFunction(`document.querySelector('${groupBody(ALPHA.id)} nav') !== null`)
+    browser.waitForFunction(`document.querySelector('${groupBody(bootProject)} nav') !== null`)
+    const hrefs = (projectId: string) =>
+      browser.evaluate(
+        `Array.from(document.querySelectorAll('${groupBody(projectId)} nav a')).map((a) => new URL(a.href).pathname)`
+      )
+    expect(hrefs(bootProject)).toEqual(expectedNavHrefs(bootProject))
+    expect(hrefs(ALPHA.id)).toEqual(expectedNavHrefs(ALPHA.id))
+    expect(
+      browser.evaluate(`Array.from(document.querySelectorAll('[data-slot="project-groups"] a[aria-current="page"]'))
+        .map((a) => new URL(a.href).pathname)`),
+    ).toEqual([scoped(ALPHA.id, '/')])
   })
 
   it('persists a collapse in THIS browser, so a reload keeps it and the workspace file does not', async ({
@@ -287,7 +326,7 @@ describe('the grouped multi-project sidebar', () => {
     // value is already there when the chevron has turned.
     expect(storedCollapse()[bootProject]).toBe(true)
 
-    gotoGrouped(scoped(bootProject, '/'))
+    gotoGrouped(scoped(bootProject, '/'), { persistCollapse: true })
     expect(browser.count(groupBody(bootProject))).toBe(0)
     expect(
       browser.evaluate(`document.querySelector('${groupHeader(bootProject)}').getAttribute('aria-expanded')`)
