@@ -579,10 +579,10 @@ export function GithubRoute({
 
   return (
     // The list and detail stay in document flow; the shell remains the only page scroller.
-    <div data-route="github" className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
-        <header data-slot="gh-header" className="flex shrink-0 flex-col gap-[22px]">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <h1 className="w-full text-[30px] font-semibold tracking-tight">GitHub</h1>
+    <div data-route="github" className="flex min-h-full flex-col gap-3 px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))] md:gap-[22px] md:p-9">
+        <header data-slot="gh-header" className="flex shrink-0 flex-col gap-3 md:gap-[22px]">
+          <div className="flex min-w-0 flex-col gap-1">
+            <h1 className="text-2xl font-semibold tracking-tight md:text-[30px]">GitHub</h1>
             {gh.repo ? (
               <span className="min-w-0 truncate text-[13px] text-muted-foreground">
                 <span data-slot="gh-repo">{gh.repo}</span>
@@ -645,7 +645,7 @@ export function GithubRoute({
             />
           {view === 'issues' ? <IssueFilters data={{ ...gh, issues: [...gh.issues, ...(searchPayload?.items ?? [])] }} assignees={assigneeFilter} projectId={activeProject}
             onAssigneesChange={setAssigneeFilter} onProjectChange={setProjectFilter} /> : null}
-            <button type="button" disabled={!filtering} className="min-h-11 rounded-md border border-border bg-card px-4 text-xs disabled:opacity-50" onClick={clearFilters}>Clear filters</button>
+            <button type="button" disabled={!filtering} className="min-h-11 min-w-11 rounded-md border border-border bg-card px-4 text-xs disabled:opacity-50" onClick={clearFilters}>Clear filters</button>
           </div>
         </header>
       <div data-slot="gh-panes" className="flex min-h-0 min-w-0 flex-1 flex-col items-start gap-[22px] md:flex-row">

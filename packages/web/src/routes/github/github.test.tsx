@@ -405,6 +405,32 @@ describe('the GitHub tab lists', () => {
     expect(document.querySelector('[data-slot="gh-detail"]')?.className).toContain('flex')
   })
 
+  it('compacts the phone header so the first result can share the 360×640 viewport (#325)', async () => {
+    stubFetch()
+    renderAt('/github')
+    const title = await screen.findByRole('heading', { name: 'GitHub' })
+    const route = document.querySelector('[data-route="github"]')
+    const header = document.querySelector('[data-slot="gh-header"]')
+    expect(route?.className).toMatch(/gap-3/)
+    expect(route?.className).toMatch(/md:gap-\[22px\]/)
+    expect(header?.className).toMatch(/gap-3/)
+    expect(header?.className).toMatch(/md:gap-\[22px\]/)
+    expect(title.className).toMatch(/text-2xl/)
+    expect(title.className).toMatch(/md:text-\[30px\]/)
+    expect(document.querySelector('[data-slot="gh-repo"]')?.textContent).toBe('acme/demo')
+    for (const control of [
+      document.querySelector('[data-slot="gh-search"]'),
+      document.querySelector('[data-slot="gh-label-filter"]'),
+      document.querySelector('[data-slot="gh-refresh"]'),
+      screen.getByRole('button', { name: 'Clear filters' }),
+      screen.getByRole('button', { name: 'Assignees' }),
+      screen.getByRole('button', { name: 'Assigned to me' }),
+    ]) {
+      expect(control?.className).toMatch(/min-h-11|gh-utility/)
+      expect(control?.className).toMatch(/min-w-11|w-full|gh-utility/)
+    }
+  })
+
   it('/github renders the header, both count tabs, the issue rows, and the first issue’s detail', async () => {
     stubFetch()
     renderAt('/github')
@@ -1300,6 +1326,11 @@ describe('GitHub handoff field chrome (#243)', () => {
   ].find((file) => existsSync(file))
   if (!cssPath) throw new Error(`github-layout.css not found from ${process.cwd()}`)
   const css = readFileSync(cssPath, 'utf8')
+
+  it('keeps phone filters wrapping instead of stacking a column that hides the first row (#325)', () => {
+    expect(css).not.toMatch(/\[data-slot='gh-issue-filters'\]\s*\{[^}]*flex-direction:\s*column/)
+    expect(css).not.toMatch(/\[data-slot='gh-filter-toolbar'\]\s*\{[^}]*flex-direction:\s*column/)
+  })
 
   it('gives the model picker the same bordered 44px field as Workflow', () => {
     const model = cascadeCss(css, [
