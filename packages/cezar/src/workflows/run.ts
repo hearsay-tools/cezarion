@@ -1616,7 +1616,6 @@ export class RunManager {
       // parent because workers cannot accept an ordinary inactive Continue.
       if (run.status === 'waiting' && run.delegation?.role !== 'worker') continue;
       if (run.status === 'waiting') {
-        const execution = this.store.readWorkerExecution(run.id);
         const finishedAt = new Date().toISOString();
         for (const step of run.steps) {
           if (step.status === 'waiting' || step.status === 'running') {
@@ -1628,11 +1627,6 @@ export class RunManager {
           message: 'cezar restarted — the open worker session was settled',
         });
         await this.settleSuccess(run.id);
-        // The previous manager died before its execution wrapper could publish
-        // the private termination boundary. Public terminal status alone must
-        // not wake a parent; finish the recovered generation now that recovery
-        // has settled every remaining filesystem and workflow side effect.
-        if (execution) this.persistWorkerCompletion(run.id, execution.generation);
         continue;
       }
       // `running`: the process died mid-turn. Mark it interrupted (the state
