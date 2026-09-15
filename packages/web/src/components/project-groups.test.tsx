@@ -118,6 +118,10 @@ function taskLinks(id: string): HTMLAnchorElement[] {
   ) as HTMLAnchorElement[]
 }
 
+function refStatusUrls(): string[] {
+  return fetchMock.mock.calls.map((call) => String(call[0])).filter((url) => url.includes('/github/ref-status'))
+}
+
 describe('ProjectGroups', () => {
   it('caps an expanded group at 10 rows and links More… at that project’s tasks pane', async () => {
     const runs = Array.from({ length: 15 }, () => run())
@@ -417,5 +421,59 @@ describe('ProjectGroups', () => {
     // …and the nav row for the URL's own area is the current page inside that group only.
     expect(group('shop').querySelector('[aria-current="page"]')?.textContent).toBe('Git')
     expect(group('cezar').querySelector('[aria-current="page"]')).toBeNull()
+  })
+
+  it('fetches a later variant member’s unique PR once the tile expands', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+    const variants = [
+      run({
+        id: 'va',
+        groupId: 'g1',
+        variant: 'A',
+        title: 'Ship the feature (A)',
+        prNumber: 10,
+      }),
+      run({
+        id: 'vb',
+        groupId: 'g1',
+        variant: 'B',
+        title: 'Ship the feature (B)',
+        prNumber: 99,
+      }),
+    ]
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input)
+      if (path === '/api/v1/p/cezar/runs') return json(variants)
+      if (path.includes('/github/ref-status')) {
+        return json({
+          available: true,
+          prs: { 10: 'open', 99: 'draft' },
+          issues: {},
+          recheckAfterMs: null,
+        })
+      }
+      return json({ error: 'not found' }, 404)
+    })
+    renderGroups([project()])
+
+    const tile = await screen.findByRole('button', { expanded: false })
+    await waitFor(() => {
+      expect(refStatusUrls().some((url) => url.includes('prs=10'))).toBe(true)
+    })
+    expect(refStatusUrls().some((url) => url.includes('99'))).toBe(false)
+
+    fireEvent.click(tile)
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-run-id="vb"] [data-slot="pr-chip"]')?.getAttribute('data-status'),
+      ).toBe('draft')
+    })
   })
 })
