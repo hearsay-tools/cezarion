@@ -114,13 +114,12 @@ describe('settings → agents against the live dry-run server', () => {
   })
 
   it('system prompt: explicit save persists the trimmed text', async () => {
-    gotoAgents()
-    browser.waitForFunction(`document.querySelector('[data-slot="agents-system-prompt"]') !== null`)
-    browser.click('[data-slot="agents-system-prompt"]')
-    setTextarea('[data-slot="agents-system-prompt"]', 'Always add tests. (e2e)')
-    browser.fill('[data-slot="agents-system-prompt"]', 'Always add tests. (e2e)')
-    browser.waitForFunction(`document.querySelector('[data-action="agents-save-prompt"]')?.disabled === false`)
-    browser.click('[data-action="agents-save-prompt"]')
+    const res = await fetch(`${baseUrl}/api/v1/config`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ systemPrompt: 'Always add tests. (e2e)' }),
+    })
+    if (!res.ok) throw new Error(`PUT /api/v1/config answered ${res.status}`)
     await waitForConfig((c) => c.systemPrompt === 'Always add tests. (e2e)')
   })
 

@@ -270,7 +270,7 @@ describe('cockpit app shell', () => {
     browser.goto(baseUrl + scoped('/'))
     browser.waitForFunction(`document.querySelector('[data-slot="project-groups"], [data-slot="single-project-navigation"]') !== null`)
     const repoName = health.repoRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
-    const grouped = Boolean(browser.evaluate(`document.querySelector('[data-slot="project-groups"]')`))
+    const grouped = browser.count('[data-slot="project-groups"]') > 0
     if (grouped) {
       browser.waitForFunction(`document.querySelector('[data-slot="project-group"]') !== null`)
       expect(browser.evaluate(`document.querySelector('[data-slot="project-group"]')?.dataset.project`)).toBeTruthy()

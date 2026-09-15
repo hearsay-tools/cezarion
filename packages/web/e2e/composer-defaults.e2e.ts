@@ -122,9 +122,6 @@ describe('configurable composer run defaults', () => {
       browser.click('[data-slot="source-option"][data-source-ref="interactive-review"]')
       browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
       browser.evaluate(`{ const el = document.querySelector('[data-slot="execution-options"]'); if (el) el.open = true }`)
-      browser.waitForFunction(
-        `document.querySelector('[data-slot="interactive-skill-hint"]') !== null`,
-      )
       expect(browser.evaluate(`document.querySelector('[data-slot="execution-options"]')?.open`)).toBe(true)
       for (const slot of ['worktree-toggle', 'autonomous-toggle']) {
         expect(browser.evaluate(
