@@ -1634,7 +1634,11 @@ export class RunManager {
       const finishedAt = new Date().toISOString();
       for (const step of run.steps) {
         if (step.status === 'running' || step.status === 'waiting') {
-          this.store.updateStep(run.id, step.id, { status: 'failed', finishedAt });
+          this.store.updateStep(run.id, step.id, {
+            status: 'failed',
+            error: 'interrupted — cezar process exited during the run',
+            finishedAt,
+          });
         }
       }
       this.store.updateRun(run.id, {
@@ -3249,9 +3253,9 @@ export class RunManager {
    * original workflow still has steps after the waiting one, that would skip
    * those steps rather than resume the workflow engine. */
   private waitingBeforeFinalWorkflowStep(run: RunRecord): boolean {
-    const steps = run.workflowDef?.steps ?? run.steps.filter(step => !step.id.startsWith('continue-'));
+    const steps = run.workflowDef?.steps ?? run.steps.filter(step => !/^continue-\d+$/.test(step.id));
     if (!steps.length || !run.currentStepId) return true;
-    if (run.currentStepId.startsWith('continue-')) {
+    if (/^continue-\d+$/.test(run.currentStepId)) {
       const waiting = this.waitingWorkflowStepIndex(run);
       return waiting >= 0 && waiting < steps.length - 1;
     }
@@ -3261,8 +3265,13 @@ export class RunManager {
 
   /** Locate the original workflow step whose closed session a synthetic Continue is resuming. */
   private waitingWorkflowStepIndex(run: RunRecord): number {
-    const steps = run.workflowDef?.steps ?? run.steps.filter(step => !step.id.startsWith('continue-'));
+    const steps = run.workflowDef?.steps ?? run.steps.filter(step => !/^continue-\d+$/.test(step.id));
     if (!steps.length) return -1;
+    const interrupted = steps.findIndex((step) => {
+      const persisted = run.steps.find((candidate) => candidate.id === step.id);
+      return persisted?.status === 'failed' && persisted.error === 'interrupted — cezar process exited during the run';
+    });
+    if (interrupted >= 0) return interrupted;
     for (let index = steps.length - 1; index >= 0; index--) {
       const persisted = run.steps.find((step) => step.id === steps[index]!.id);
       // Startup recovery records an interrupted live step as failed before it

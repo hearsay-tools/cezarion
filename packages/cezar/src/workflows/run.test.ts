@@ -1664,6 +1664,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
       name: 'interrupted-then-later', source: 'file',
       steps: [
         { id: 'task', name: 'Task', prompt: '{{task}}' },
+        { id: 'previously-failed', name: 'Previously failed', command: 'node -e "process.exit(0)"' },
         { id: 'later', name: 'Later', command: 'node -e "process.exit(0)"' },
       ],
     };
@@ -1678,6 +1679,8 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     idleTimer._onTimeout();
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
     manager.dispose();
+    store.addStep(record.id, { id: 'previously-failed', name: 'Previously failed', kind: 'check' });
+    store.updateStep(record.id, 'previously-failed', { status: 'failed', finishedAt: new Date().toISOString() });
     store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
     store.updateStep(record.id, 'task', { status: 'running', finishedAt: undefined });
     store.updateRun(record.id, {
@@ -1693,8 +1696,30 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'task', status: 'done' }),
+      expect.objectContaining({ id: 'previously-failed', status: 'done', iterations: 1 }),
       expect.objectContaining({ id: 'later', status: 'done', iterations: 1 }),
     ]));
+  }, 30_000);
+
+  it('does not mistake a legacy workflow step named continue-foo for a synthetic continuation', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
+    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    const persisted = store.getRun(record.id)!;
+    persisted.steps[0]!.id = 'continue-foo';
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
+    store.updateRun(record.id, { currentStepId: 'continue-foo', workflowDef: undefined });
+
+    expect(manager.finish(record.id)).toBe(false);
+    expect(manager.continueRun(record.id, { text: 'answer' })).toEqual({
+      ok: false,
+      error: 'cannot continue a waiting run before its final workflow step',
+    });
   }, 30_000);
 
   it('does not let Finish skip a remaining workflow after an idle-closed synthetic continuation', async () => {
