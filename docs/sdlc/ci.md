@@ -2,13 +2,19 @@
 
 `.github/workflows/ci.yml` runs on pull requests to `main` or `develop`, pushes to those branches, and manual dispatch.
 
-Verification runs in four parallel jobs with the current Node LTS:
+Verification runs in seven parallel jobs with the current Node LTS:
 
 - Two Vitest shards on `blacksmith-4vcpu-ubuntu-2404` each install dependencies, build the server, and run `npm test -- --shard=N/2 --maxWorkers=4`.
 - The build/package job on `blacksmith-4vcpu-ubuntu-2404` runs typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing.
-- The cockpit browser E2E job on GitHub-hosted Ubuntu provisions the `agent-browser` provider, builds and starts the test environment, runs `npm run test:e2e`, and fails when `TEST_E2E_STATUS` is skipped or failed.
+- Four cockpit browser E2E shards on GitHub-hosted Ubuntu each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
-The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, both Vitest shards, and the cockpit browser job succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. The snapshot job still waits for this aggregate check and retains its existing publication conditions.
+The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, both Vitest shards, and all four cockpit browser shards succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. The snapshot job still waits for this aggregate check and retains its existing publication conditions.
+
+Cockpit shards run on separate VMs, each owning its server, `CEZ_HOME`, test-env descriptor and browser namespace. Vitest's built-in file sharding selects each slice; `fileParallelism: false` keeps tests sequential within each shard. The matrix uses `fail-fast: false` so a failure does not cancel evidence from the other shards. The aggregate waits on the entire matrix and requires its result to be `success`.
+
+Local `npm run test:e2e` still runs the full sequential suite, with the existing environment reuse and skip-exit-0 behavior. Optional `--force` and `--force-rebuild` still go to environment bootstrap; `--shard=N/M` goes only to Vitest.
+
+The [sequential baseline](https://github.com/hearsay-tools/cezarion/actions/runs/34973823399/job/104396396906) took 13m16s: browser provision took about 6s, dependency install/build 15s, server startup 1s, and Vitest 764.16s (757.50s of tests across 43 files). Four shards target a roughly 3–4 minute test path with another setup per shard; actual wall time depends on file balance and runner queueing.
 
 The Vitest sequencer assigns discovered tests to shards by measured duration using `.github/test-durations.json`. New files receive the median known duration and are always included; deleted files are ignored. The manifest affects balancing only, never discovery. Refreshing its durations can improve balance as the suite changes. Ordinary `npm test` still runs every suite without sharding.
 
