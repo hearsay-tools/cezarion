@@ -51,6 +51,10 @@ jobs:
         if: matrix.suite == 'vitest'
         run: npm run build:server
 
+      - name: Prepare cockpit E2E environment
+        if: matrix.suite == 'e2e'
+        run: sh .ai/scripts/test-env-up.sh
+
       - name: Benchmark Vitest
         if: matrix.suite == 'vitest'
         env:
