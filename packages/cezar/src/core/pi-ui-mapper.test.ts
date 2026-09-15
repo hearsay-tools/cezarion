@@ -280,4 +280,47 @@ describe('pi assistant message_end provider failures (#54)', () => {
       { type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' },
     ]);
   });
+
+  it('clears stopReason after a later successful assistant message_end in the same turn (#277)', () => {
+    const events = feed([
+      assistantEnd({
+        provider: 'openai-completions',
+        model: 'grok-4',
+        stopReason: 'error',
+        errorMessage: 'Internal error during token generation',
+      }),
+      assistantEnd(),
+      { type: 'agent_settled' },
+    ]);
+    expect(events.filter((e) => e.type === 'session.error')).toEqual([
+      {
+        type: 'session.error',
+        message: 'pi: openai-completions/grok-4 request failed: Internal error during token generation',
+        fatal: false,
+      },
+    ]);
+    expect(events.filter((e) => e.type === 'turn.completed')).toEqual([
+      { type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' },
+    ]);
+  });
+
+  it('keeps stopReason error when the turn settles on the failed attempt (#277)', () => {
+    const events = feed([
+      assistantEnd({
+        stopReason: 'error',
+        errorMessage: 'Internal error during token generation',
+      }),
+      { type: 'agent_settled' },
+    ]);
+    expect(events.filter((e) => e.type === 'session.error')).toEqual([
+      {
+        type: 'session.error',
+        message: 'pi: provider request failed: Internal error during token generation',
+        fatal: false,
+      },
+    ]);
+    expect(events.filter((e) => e.type === 'turn.completed')).toEqual([
+      { type: 'turn.completed', turnId: 'turn_1', stopReason: 'error' },
+    ]);
+  });
 });

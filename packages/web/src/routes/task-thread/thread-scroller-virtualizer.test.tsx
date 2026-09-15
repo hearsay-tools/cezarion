@@ -29,8 +29,15 @@ vi.mock('virtua', async () => {
 })
 
 import { ThreadRows, useThreadScroll, type ThreadRow } from './thread-scroller'
+import {
+  clearThreadScrollCaches,
+  saveThreadMeasurements,
+} from './thread-scroll'
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  clearThreadScrollCaches()
+})
 
 const rows = (count: number): ThreadRow[] =>
   Array.from({ length: count }, (_, index) => ({ key: `row-${index}`, node: <p>row {index}</p> }))
@@ -68,5 +75,24 @@ describe('virtualized history prepend', () => {
     expect(virtualizerProbe.props?.shift).toBe(false)
     view.rerender(tree([{ key: 'replacement', node: <p>different transcript</p> }]))
     expect(virtualizerProbe.props?.shift).toBe(false)
+  })
+
+  it('changes virtualizer ownership before rendering a cached destination thread', () => {
+    const firstCache = { sizes: [48] } as never
+    const destinationCache = { sizes: [72] } as never
+    saveThreadMeasurements('run-a', { rows: 400, cache: firstCache })
+    saveThreadMeasurements('run-b', { rows: 400, cache: destinationCache })
+    const controls = renderHook(() => useThreadScroll('run-b')).result.current
+    const tree = (runId: string) => (
+      <main data-slot="main">
+        <ThreadRows runId={runId} rows={rows(400)} mode="virtual" controls={controls} />
+      </main>
+    )
+    const view = render(tree('run-a'))
+    expect(virtualizerProbe.props?.cache).toBe(firstCache)
+
+    view.rerender(tree('run-b'))
+
+    expect(virtualizerProbe.props?.cache).toBe(destinationCache)
   })
 })
