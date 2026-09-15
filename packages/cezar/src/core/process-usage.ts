@@ -124,6 +124,12 @@ export function registerRunProcess(runId: string, pid: number): void {
   }
 }
 
+/** Same-process ownership proof used when rebuilding a manager/context: a
+ * disposed manager may still have a live backend registered for this run. */
+export function hasRegisteredRunProcess(runId: string): boolean {
+  return entries.has(runId);
+}
+
 /** Stop tracking; returns the session's peaks (undefined when no sample ever
  *  landed — `ps` unavailable, or the process died before the first tick). */
 export function unregisterRunProcess(

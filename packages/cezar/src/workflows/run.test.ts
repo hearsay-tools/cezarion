@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunResult, AgentRunner, AgentSession, ContentBlock, SessionOptions } from '../core/agent-runner.ts';
+import { registerRunProcess, unregisterRunProcess } from '../core/process-usage.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
@@ -1019,6 +1020,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   });
 
   afterEach(() => {
+    runnerHook.runner = undefined;
     if (currentId) manager.cancel(currentId); // release the session + repo lock
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key];
@@ -1468,6 +1470,178 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     expect(state?.monitoringWakeTimer).toBeUndefined();
   }, 30_000);
 
+  it('does not Continue or Finish an inactive wait without durable idle-close proof', async () => {
+    process.env.CEZ_DRY_RUN = '0';
+    process.env.CEZ_CODEX_BIN = join(import.meta.dirname, '../core/__fixtures__/codex/mock-codex-app-server.mjs');
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', runner: 'codex', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    const surviving = (manager as unknown as { active: Map<string, { session?: AgentSession }> }).active.get(record.id)?.session;
+    manager.dispose();
+    manager = new RunManager(store, repoRoot);
+    await manager.recover();
+    expect(manager.finish(record.id)).toBe(false);
+    expect(manager.continueRun(record.id, { text: 'resume' })).toEqual({ ok: false, error: 'cannot continue a waiting run' });
+    surviving?.end();
+  }, 30_000);
+
+  it('does not answer an inactive pending ask while its disposed session process is still registered', async () => {
+    process.env.CEZ_DRY_RUN = '0';
+    process.env.CEZ_CODEX_BIN = join(import.meta.dirname, '../core/__fixtures__/codex/mock-codex-app-server.mjs');
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', runner: 'codex', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    store.appendEvent(record.id, {
+      type: 'ask.requested',
+      requestId: 'persisted-question',
+      questions: [{
+        header: 'Choice',
+        question: 'Which implementation?',
+        options: [{ label: 'First' }, { label: 'Second' }],
+      }],
+    });
+    const surviving = (manager as unknown as { active: Map<string, { session?: AgentSession }> }).active.get(record.id)?.session;
+    manager.dispose();
+    manager = new RunManager(store, repoRoot);
+    await manager.recover();
+    registerRunProcess(record.id, process.pid);
+
+    expect(manager.continueRun(record.id, { text: 'answer' })).toEqual({
+      ok: false,
+      error: 'cannot continue a waiting run',
+    });
+    unregisterRunProcess(record.id);
+    surviving?.end();
+  }, 30_000);
+
+  it('honors cancellation that races an idle-close callback', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+
+    idleTimer._onTimeout();
+    expect(manager.cancel(record.id)).toBe(true);
+    await waitFor(record.id, candidate => candidate?.status === 'cancelled');
+    expect(store.getRun(record.id)).toMatchObject({ status: 'cancelled' });
+    expect(store.getRun(record.id)?.finishedAt).toBeDefined();
+    expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'task', status: 'cancelled' }),
+    ]));
+  }, 30_000);
+
+  it('publishes a runner failure that occurs during idle shutdown', async () => {
+    runnerHook.runner = {
+      backend: 'claude',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
+      interrupt: async () => undefined,
+      startSession: (_spec, onEvent) => {
+        let rejectResult: (error: Error) => void = () => undefined;
+        const result = new Promise<AgentRunResult>((_resolve, reject) => { rejectResult = reject; });
+        let open = true;
+        queueMicrotask(() => onEvent?.({ type: 'turn-end' }));
+        return {
+          result,
+          sendMessage: () => false,
+          sendAgentMessage: () => false,
+          discardQueuedMessages: () => undefined,
+          end: () => {
+            open = false;
+            rejectResult(new Error('provider failed during shutdown'));
+          },
+          interrupt: () => { open = false; },
+          get open() { return open; },
+        };
+      },
+    };
+    const record = manager.startRun(SINGLE_STEP, { task: 'wait then fail', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+
+    idleTimer._onTimeout();
+    await waitFor(record.id, candidate => candidate?.status === 'failed');
+    expect(store.getRun(record.id)).toMatchObject({
+      status: 'failed', error: expect.stringContaining('provider failed during shutdown'),
+    });
+  }, 30_000);
+
+  it('preserves startedAt when a resumed workflow remainder is held and requeued', () => {
+    const startedAt = '2026-09-01T00:00:00.000Z';
+    const workflow: WorkflowDef = { name: 'held-remainder', source: 'file', steps: [
+      { id: 'task', name: 'Task', prompt: '{{task}}' },
+      { id: 'later', name: 'Later', command: 'true' },
+    ] };
+    const record = store.createRun({
+      title: 'held remainder', task: 'task', workflow: workflow.name,
+      steps: [
+        { id: 'task', name: 'Task', kind: 'agent' },
+        { id: 'later', name: 'Later', kind: 'check' },
+      ],
+    });
+    currentId = record.id;
+    store.updateRun(record.id, { startedAt });
+    const semaphore = (manager as unknown as { semaphore: WorkspaceSemaphore }).semaphore;
+    vi.spyOn(semaphore, 'accountHolds').mockReturnValue({
+      deadline: new Set(['claude:default']),
+      inFlight: new Set(),
+    });
+    const held = (manager as unknown as {
+      requeueWhileHeld(id: string, definition: WorkflowDef, input: { task: string }, runner: 'claude', state: undefined, startAt: number): boolean;
+    }).requeueWhileHeld(record.id, workflow, { task: record.task }, 'claude', undefined, 1);
+
+    expect(held).toBe(true);
+    expect(store.getRun(record.id)).toMatchObject({ status: 'queued', startedAt });
+  });
+
+  it('delivers opening images when recovery resumes after checks but before the first agent', async () => {
+    const openingImage: ContentBlock = {
+      type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' },
+    };
+    let receivedImages: ContentBlock[] | undefined;
+    runnerHook.runner = {
+      backend: 'claude',
+      run: async () => ({ text: 'done', toolCalls: [], tokensUsed: 0 }),
+      interrupt: async () => undefined,
+      startSession: (spec) => {
+        receivedImages = spec.images;
+        return {
+          result: Promise.resolve({ text: 'done', toolCalls: [], tokensUsed: 0 }),
+          sendMessage: () => false,
+          sendAgentMessage: () => false,
+          discardQueuedMessages: () => undefined,
+          end: () => undefined,
+          interrupt: () => undefined,
+          open: false,
+        };
+      },
+    };
+    const workflow: WorkflowDef = { name: 'checks-before-agent', source: 'file', steps: [
+      { id: 'preflight', name: 'Preflight', command: 'true' },
+      { id: 'task', name: 'Task', prompt: '{{task}}' },
+      { id: 'verify', name: 'Verify', command: 'true' },
+    ] };
+    const record = store.createRun({
+      title: 'resume before agent', task: 'task', workflow: workflow.name,
+      steps: [
+        { id: 'preflight', name: 'Preflight', kind: 'check' },
+        { id: 'task', name: 'Task', kind: 'agent' },
+        { id: 'verify', name: 'Verify', kind: 'check' },
+      ],
+    });
+    currentId = record.id;
+    store.updateStep(record.id, 'preflight', { status: 'done', iterations: 1 });
+    await (manager as unknown as {
+      execute(id: string, definition: WorkflowDef, input: { task: string; worktree: boolean; images: ContentBlock[] }, startAt: number): Promise<void>;
+    }).execute(record.id, workflow, { task: record.task, worktree: false, images: [openingImage] }, 1);
+
+    expect(receivedImages).toEqual([openingImage]);
+  }, 30_000);
+
   it.each(['fresh', 'continuation'].flatMap(mode => ['zero-config', 'delegated root'].flatMap(delegation => [
     { mode, delegation, name: 'markerless wait', task: 'just do the thing' },
     { mode, delegation, name: 'CEZ:ASK wait', task: 'mock:ask choose' },
@@ -1529,6 +1703,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     }
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
+    expect(store.getRun(record.id)?.steps.find(step => step.id === 'task')?.status).toBe('done');
   }, 30_000);
 
   it.each(['workflow definition', 'legacy persisted steps'].flatMap(shape =>
@@ -1617,6 +1792,9 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     manager.dispose();
     manager = new RunManager(store, repoRoot);
     await manager.recover();
+    const originalStartedAt = '2026-09-01T00:00:00.000Z';
+    const originalBaseBranch = 'original-diff-baseline';
+    store.updateRun(record.id, { startedAt: originalStartedAt, baseBranch: originalBaseBranch });
     const flushed: RunRecord[] = [];
     const originalFlush = store.flush.bind(store);
     vi.spyOn(store, 'flush').mockImplementation(() => {
@@ -1638,6 +1816,43 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
       expect.objectContaining({ id: 'task', status: 'done' }),
       expect.objectContaining({ id: 'later', status: 'done' }),
     ]));
+    expect(store.getRun(record.id)).toMatchObject({
+      startedAt: originalStartedAt,
+      baseBranch: originalBaseBranch,
+    });
+  }, 30_000);
+
+  it('does not launch a prepared workflow remainder when cancellation wins during continuation teardown', async () => {
+    const workflow: WorkflowDef = { name: 'cancel-remainder', source: 'file', steps: [
+      { id: 'task', name: 'Task', prompt: '{{task}}' },
+      { id: 'later', name: 'Later', command: 'true' },
+    ] };
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
+    store.updateRun(record.id, { workflowDef: workflow });
+    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+
+    let cancelled = false;
+    let cancelAttempted = false;
+    store.on('run', candidate => {
+      if (!cancelAttempted && candidate.id === record.id && candidate.status === 'queued') {
+        cancelAttempted = true;
+        cancelled = manager.cancel(record.id);
+      }
+    });
+    expect(manager.continueRun(record.id, { text: 'mock:done answer' })).toEqual({ ok: true });
+    await waitFor(record.id, candidate => candidate?.status === 'cancelled');
+
+    expect(cancelled).toBe(true);
+    expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'later', status: 'pending', iterations: 0 }),
+    ]));
   }, 30_000);
 
   it('restart resumes a durably queued workflow after its completed waiting step', async () => {
@@ -1646,7 +1861,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
       source: 'file',
       steps: [
         { id: 'task', name: 'Task', prompt: '{{task}}' },
-        { id: 'continue-foo', name: 'Real prefixed step', command: 'node -e "process.exit(0)"' },
+        { id: 'continue-1', name: 'Real numeric step', command: 'node -e "process.exit(0)"' },
         { id: 'later', name: 'Later', command: 'node -e "process.exit(0)"' },
       ],
     };
@@ -1661,7 +1876,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     idleTimer._onTimeout();
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
     manager.dispose();
-    store.addStep(record.id, { id: 'continue-foo', name: 'Real prefixed step', kind: 'check' });
+    store.addStep(record.id, { id: 'continue-1', name: 'Real numeric step', kind: 'check' });
     store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
     store.updateStep(record.id, 'task', { status: 'done', finishedAt: new Date().toISOString() });
     store.updateRun(record.id, { status: 'queued', currentStepId: undefined, workflowDef: workflow });
@@ -1672,7 +1887,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'task', status: 'done', iterations: 1 }),
-      expect.objectContaining({ id: 'continue-foo', status: 'done', iterations: 1 }),
+      expect.objectContaining({ id: 'continue-1', status: 'done', iterations: 1 }),
       expect.objectContaining({ id: 'later', status: 'done', iterations: 1 }),
     ]));
   }, 30_000);
@@ -1719,7 +1934,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     ]));
   }, 30_000);
 
-  it('does not mistake a legacy workflow step named continue-foo for a synthetic continuation', async () => {
+  it('does not mistake a legacy workflow step named continue-1 for a synthetic continuation', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
@@ -1729,15 +1944,149 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     idleTimer._onTimeout();
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
     const persisted = store.getRun(record.id)!;
-    persisted.steps[0]!.id = 'continue-foo';
+    persisted.steps[0]!.id = 'continue-1';
     store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
-    store.updateRun(record.id, { currentStepId: 'continue-foo', workflowDef: undefined });
+    store.updateRun(record.id, { currentStepId: 'continue-1', workflowDef: undefined });
 
     expect(manager.finish(record.id)).toBe(false);
     expect(manager.continueRun(record.id, { text: 'answer' })).toEqual({
       ok: false,
       error: 'cannot continue a waiting run before its final workflow step',
     });
+  }, 30_000);
+
+  it('keeps a check retry budget bounded across a recovered workflow remainder', async () => {
+    const workflow: WorkflowDef = {
+      name: 'bounded-retry', source: 'file',
+      steps: [
+        { id: 'task', name: 'Task', prompt: '{{task}}' },
+        { id: 'verify', name: 'Verify', command: 'node -e "process.exit(1)"', onFail: { retry: 'task', max: 1 } },
+      ],
+    };
+    const record = store.createRun({
+      title: 'bounded retry', task: 'mock:done', workflow: workflow.name,
+      steps: [
+        { id: 'task', name: 'Task', kind: 'agent' },
+        { id: 'verify', name: 'Verify', kind: 'check' },
+      ],
+    });
+    currentId = record.id;
+    store.updateStep(record.id, 'task', { status: 'done', iterations: 1 });
+    store.updateStep(record.id, 'verify', { status: 'failed', iterations: 1, retriesUsed: 1 });
+    store.updateRun(record.id, { status: 'queued', workflowDef: workflow });
+
+    await (manager as unknown as {
+      execute(id: string, workflow: WorkflowDef, input: { task: string; worktree: boolean }, startAt: number): Promise<void>;
+    }).execute(record.id, workflow, { task: 'mock:done', worktree: false }, 1);
+
+    expect(store.getRun(record.id)).toMatchObject({ status: 'failed' });
+    expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'task', status: 'done', iterations: 1 }),
+      expect.objectContaining({ id: 'verify', status: 'failed', iterations: 2 }),
+    ]));
+  }, 30_000);
+
+  it('does not spend a check retry merely because another loop executed it before', async () => {
+    const workflow: WorkflowDef = {
+      name: 'distinct-retry-budget', source: 'file',
+      steps: [
+        { id: 'task', name: 'Task', prompt: '{{task}}' },
+        { id: 'gate', name: 'Gate', command: 'node -e "process.exit(1)"', onFail: { retry: 'task', max: 1 } },
+      ],
+    };
+    const record = store.createRun({
+      title: 'distinct retry', task: 'mock:done', workflow: workflow.name,
+      steps: [
+        { id: 'task', name: 'Task', kind: 'agent' },
+        { id: 'gate', name: 'Gate', kind: 'check' },
+      ],
+    });
+    currentId = record.id;
+    store.updateStep(record.id, 'task', { status: 'done', iterations: 1 });
+    store.updateStep(record.id, 'gate', { status: 'done', iterations: 1 });
+    store.updateRun(record.id, { status: 'queued', workflowDef: workflow });
+
+    const flushes: RunRecord[] = [];
+    const originalFlush = store.flush.bind(store);
+    vi.spyOn(store, 'flush').mockImplementation(() => {
+      flushes.push(structuredClone(store.getRun(record.id)!));
+      originalFlush();
+    });
+    await (manager as unknown as {
+      execute(id: string, workflow: WorkflowDef, input: { task: string; worktree: boolean }, startAt: number): Promise<void>;
+    }).execute(record.id, workflow, { task: 'mock:done', worktree: false }, 1);
+
+    expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'task', iterations: 2 }),
+      expect.objectContaining({ id: 'gate', status: 'failed', iterations: 3, retriesUsed: 1 }),
+    ]));
+    expect(flushes.some(snapshot =>
+      snapshot.status === 'queued' && snapshot.currentStepId === undefined &&
+      snapshot.steps.some(step => step.id === 'task' && step.status === 'pending') &&
+      snapshot.steps.some(step => step.id === 'gate' && step.status === 'pending' && step.retriesUsed === 1),
+    )).toBe(true);
+  }, 30_000);
+
+  it('does not treat an unrelated failed check as a continuation workflow source', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
+    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    const workflow: WorkflowDef = {
+      name: 'failed-check', source: 'file',
+      steps: [
+        SINGLE_STEP.steps[0]!,
+        { id: 'verify', name: 'Verify', command: 'false' },
+        { id: 'later', name: 'Later', command: 'true' },
+      ],
+    };
+    store.updateStep(record.id, 'task', { status: 'done' });
+    store.addStep(record.id, { id: 'verify', name: 'Verify', kind: 'check' });
+    store.updateStep(record.id, 'verify', { status: 'failed', iterations: 1 });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
+    store.updateRun(record.id, { status: 'failed', currentStepId: undefined, workflowDef: workflow });
+
+    expect(manager.continueRun(record.id, { text: 'mock:done inspect failure' })).toEqual({ ok: true });
+    await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
+    expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'verify', status: 'failed', iterations: 1 }),
+      expect.objectContaining({ id: 'later', status: 'pending', iterations: 0 }),
+    ]));
+  }, 30_000);
+
+  it('restart reruns an interrupted check instead of completing it as a continuation source', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    manager.dispose();
+    const workflow: WorkflowDef = { name: 'interrupted-check', source: 'file', steps: [
+      SINGLE_STEP.steps[0]!,
+      { id: 'verify', name: 'Verify', command: 'true' },
+      { id: 'later', name: 'Later', command: 'true' },
+    ] };
+    store.updateStep(record.id, 'task', { status: 'done' });
+    store.addStep(record.id, { id: 'verify', name: 'Verify', kind: 'check' });
+    store.updateStep(record.id, 'verify', { status: 'running', iterations: 1 });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
+    store.updateRun(record.id, { status: 'running', currentStepId: 'verify', workflowDef: workflow });
+    store.flush();
+
+    manager = new RunManager(store, repoRoot);
+    await manager.recover();
+    await waitFor(record.id, candidate => candidate?.status === 'done' || candidate?.status === 'review');
+    expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'verify', status: 'done', iterations: 2 }),
+      expect.objectContaining({ id: 'later', status: 'done', iterations: 1 }),
+    ]));
   }, 30_000);
 
   it('does not let Finish skip a remaining workflow after an idle-closed synthetic continuation', async () => {
@@ -1766,6 +2115,31 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
 
     expect(manager.finish(record.id)).toBe(false);
     expect(store.getRun(record.id)).toMatchObject({ status: 'waiting', currentStepId: 'continue-1' });
+  }, 30_000);
+
+  it('recognizes a legacy final continuation from workflow membership after restart', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    let state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
+    let idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    expect(manager.continueRun(record.id, { text: 'plain markerless continuation' })).toEqual({ ok: true });
+    await waitFor(record.id, candidate => candidate?.status === 'waiting');
+    state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
+    idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting continuation did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    store.getRun(record.id)!.steps.find(step => step.id === 'continue-1')!.synthetic = undefined;
+    store.updateRun(record.id, { continuationMessage: undefined, workflowDef: SINGLE_STEP });
+    store.flush();
+    manager.dispose();
+    manager = new RunManager(store, repoRoot);
+    await manager.recover();
+    expect(manager.finish(record.id)).toBe(true);
   }, 30_000);
 
   it('strips the CEZ:MONITORING marker from server-emitted v1 text events', async () => {
