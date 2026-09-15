@@ -228,6 +228,37 @@ Notable fields (full doc-comments in the source):
 - `sessionId?` / `resume?` — stable session id for interactive takeover and for
   `--resume` ("Continue" after a run ends).
 
+**Per-runner support declarations (#284).** Not every field crosses every wire,
+and the seam says so in code rather than only in the caveat above: every runner
+carries `specSupport: AgentRunSpecSupport` — one entry per `AgentRunSpec` field,
+either `{ honored: true, via }` naming the flag, request field or process option
+the field becomes, or `{ honored: false, reason }` naming the wire limitation or
+the product decision that left it unmapped ("not implemented yet" is never a
+reason). `AGENT_RUN_SPEC_FIELDS` is the same field list at runtime, typed as a
+full `Record` over `keyof AgentRunSpec`, so adding a field to the spec is a
+compile error until every runner declares it, and a new runner class without a
+declaration does not compile at all. The constants (`CLAUDE_SPEC_SUPPORT`,
+`CODEX_SPEC_SUPPORT`, `OPENCODE_SPEC_SUPPORT`, `PI_SPEC_SUPPORT`, each next to its
+class) are the source; §7's spec-support rows hold each one against the runner's
+real boundary in both directions. As declared at #284, a reading aid only:
+
+| Field | claude | codex | opencode | pi |
+| --- | --- | --- | --- | --- |
+| `systemPrompt` | `--append-system-prompt` | prepended to the opening input | prepended to the opening prompt | `--append-system-prompt` |
+| `userPrompt` | first stdin message | `turn/start` input | `prompt_async` text part | RPC `prompt` message |
+| `images` | first stdin message | **dropped** | **dropped** | RPC `prompt` images |
+| `cwd` | spawn cwd | spawn cwd, `thread/start` cwd | spawn cwd | spawn cwd |
+| `allowedTools` | `--allowedTools` | **dropped** | **dropped** | `--tools`, mapped names |
+| `bashAllowlist` | `Bash(<prefix>:*)` | **dropped** | **dropped** | drops `bash` (fail closed) |
+| `additionalDirectories` | `--add-dir` | **dropped** | **dropped** | **dropped** |
+| `restrictNativeDelegation` | D1 | D1 | D1 | D1 |
+| `env` | child env | child env | child env | child env |
+| `model` | `--model` | `thread/start` model | `prompt_async` model | `--model` |
+| `effort` | `--effort` | `turn/start` effort | `prompt_async` variant | `--thinking` |
+| `timeoutMs` | kill switch | kill switch | kill switch | kill switch |
+| `sessionId` | `--session-id` / `--resume` | `thread/resume` threadId | **dropped** | `--session-id` / `--session` |
+| `resume` | `--resume` | `thread/resume` | **dropped** | `--session` |
+
 **System prompt channel** — a backend without a dedicated system-prompt input
 must deliver `spec.systemPrompt` as a leading block of the opening user message.
 Use the shared helper so the mapping is uniform:
@@ -526,6 +557,23 @@ exemption, that a kind agrees with whether a prompt is declared, and that the
 file contains no skipped cell. A new id in `RUNNER_IDS` therefore fails the suite
 until every row is addressed.
 
+**Spec-support rows (#284).** The same file holds every runner's `specSupport`
+declaration (§1) against its recorded boundary. Each `AgentRunSpec` field has
+one probe. A `boundary` probe drives the runner twice against its mock, the two
+specs differing in that field only, and compares what the mock recorded — argv
+for claude and pi, JSON-RPC for codex, HTTP for opencode (`CEZ_MOCK_ARGS_FILE`),
+plus the first user message where the mock records its stdin
+(`CEZ_MOCK_STDIN_FILE`, claude and pi): the field is honored iff the recording
+changed. `cwd` and `env` are proven by that recording landing under a RELATIVE
+path, which only a child spawned in `cwd` with the env applied can produce.
+`timeoutMs` is proven by a `hold` turn ending in the runner's own timeout error.
+The assertion runs in both directions, so a runner that declares a field
+dropped and starts mapping it fails too — Codex and OpenCode ignoring
+`allowedTools` is pinned exactly as long as they declare it. A new `RUNNER_IDS`
+entry fails typecheck without a declaration, and fails these rows when its
+`createRunner` case is missing (the factory's fallback is claude, whose
+`backend` is not the new id).
+
 **The matrix is a debugging tool, not only a gate.** Every row names the issue
 whose failure mode it pins, and each was verified red by reintroducing that
 defect. A red row is first evidence of a real bug, not of a bad assertion:
@@ -647,7 +695,9 @@ To be first-class:
 1. **Runner** — `packages/cezar/src/core/pi-runner.ts` implementing `AgentRunner` /
     `AgentSession` (persistent process; `pid`; `sendMessage`/`discardQueuedMessages`/`end`/`interrupt`;
    `result`). Honor `AgentRunSpec` uniformly — use `prependSystemPrompt` if the
-   backend has no native system-prompt channel.
+   backend has no native system-prompt channel — and declare `specSupport` (§1):
+   every field, honored with its channel or dropped with the wire reason. The §7
+   spec-support rows hold the declaration against the mock's recording.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and
    a `case` in `createRunner` (`runner-factory.ts`). Add `UiBackend` in
    `ui-events.ts` **and its mirror** `packages/api-client/src/protocol/ui-events.ts` (the

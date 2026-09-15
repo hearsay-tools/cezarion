@@ -19,14 +19,23 @@
  * above the seam.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentInputEventSchema, type AgentInput } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { RUNNER_IDS, type AgentEvent, type RunnerId } from './agent-runner.ts';
+import {
+  AGENT_RUN_SPEC_FIELDS,
+  RUNNER_IDS,
+  type AgentEvent,
+  type AgentRunSpec,
+  type AgentRunSpecField,
+  type ContentBlock,
+  type RunnerId,
+} from './agent-runner.ts';
+import { createRunner } from './runner-factory.ts';
 import { appendTurnText } from '../workflows/run.ts';
 import {
   withOwnedInputRun,
@@ -38,6 +47,7 @@ import {
   exemptionFor,
   HARNESS_ADAPTERS,
   PARITY_EXEMPTIONS,
+  PINNED_SESSION_ID,
   type RunObservation,
   type ScenarioName,
   type SeamObservation,
@@ -886,5 +896,164 @@ describe('harness parity — D1 governed native delegation', () => {
         } finally { rmSync(dir, { recursive: true, force: true }); }
       }, 45000);
     }
+  }
+});
+
+// ---- AgentRunSpec support declarations (#284) ------------------------------
+//
+// Every runner declares, per `AgentRunSpec` field, whether it honors the field
+// and how (`AgentRunner.specSupport`). These rows hold each declaration against
+// the runner's real boundary — the same argv / JSON-RPC / HTTP recordings D1
+// reads, plus the first user message where a mock records its stdin — so a
+// runner cannot say it maps a field it drops, and cannot quietly start mapping
+// one it declared dropped. Codex and OpenCode ignoring `allowedTools` stays
+// pinned exactly as long as they declare it (the product decision the
+// `AgentRunSpec` caveat in AGENT_PROTOCOL.md records).
+
+/**
+ * How one field is observed. `boundary` probes set the field and nothing else
+ * between `without` and `with`, so any difference in the recording is that
+ * field's own footprint. `process` fields shape the child rather than its
+ * input, proven by the recording landing where only an honored `cwd` and `env`
+ * could put it. `deadline` is cezar-side, proven by a held turn ending in the
+ * runner's own timeout error.
+ */
+type SpecFieldProbe =
+  | { readonly kind: 'boundary'; readonly without: Partial<AgentRunSpec>; readonly with: Partial<AgentRunSpec> }
+  | { readonly kind: 'process' }
+  | { readonly kind: 'deadline' };
+
+const PROBE_IMAGE: ContentBlock = {
+  type: 'image',
+  source: { type: 'base64', media_type: 'image/png', data: 'cGFyaXR5' },
+};
+
+/** One probe per field — the `Record` fails to compile when `AgentRunSpec` grows. */
+const SPEC_FIELD_PROBES: Readonly<Record<AgentRunSpecField, SpecFieldProbe>> = {
+  systemPrompt: { kind: 'boundary', without: {}, with: { systemPrompt: 'parity probe system prompt' } },
+  // Markerless on purpose, so every mock still answers with its default turn.
+  userPrompt: { kind: 'boundary', without: {}, with: { userPrompt: 'inspect the working tree, then report' } },
+  images: { kind: 'boundary', without: {}, with: { images: [PROBE_IMAGE] } },
+  cwd: { kind: 'process' },
+  allowedTools: { kind: 'boundary', without: {}, with: { allowedTools: ['Read', 'Grep'] } },
+  restrictNativeDelegation: { kind: 'boundary', without: {}, with: { restrictNativeDelegation: true } },
+  // Only meaningful next to an allowed `Bash`, so both sides carry it.
+  bashAllowlist: {
+    kind: 'boundary',
+    without: { allowedTools: ['Bash'] },
+    with: { allowedTools: ['Bash'], bashAllowlist: ['git status'] },
+  },
+  additionalDirectories: { kind: 'boundary', without: {}, with: { additionalDirectories: ['/tmp/parity-probe-extra'] } },
+  env: { kind: 'process' },
+  model: { kind: 'boundary', without: {}, with: { model: 'parity-probe/model-sentinel' } },
+  effort: { kind: 'boundary', without: {}, with: { effort: 'xhigh' } },
+  timeoutMs: { kind: 'deadline' },
+  // A session id is a resume handle on codex, so both sides resume; `resume`
+  // alone is a no-op on every runner, which keeps `without` a clean base.
+  sessionId: { kind: 'boundary', without: { resume: true }, with: { resume: true, sessionId: PINNED_SESSION_ID } },
+  resume: {
+    kind: 'boundary',
+    without: { sessionId: PINNED_SESSION_ID },
+    with: { sessionId: PINNED_SESSION_ID, resume: true },
+  },
+};
+
+const variantKey = (spec: Partial<AgentRunSpec>): string => JSON.stringify(spec);
+
+/** The mock's own record of what reached it: argv or requests, then stdin where hooked. */
+function readRecording(dir: string, name: string): string[] {
+  return [`${name}.args.ndjson`, `${name}.stdin.ndjson`].flatMap((file) => {
+    const path = join(dir, file);
+    return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean) : [];
+  });
+}
+
+/** Env for a probe drive. The recording paths are RELATIVE on purpose: the mock
+ *  resolves them against ITS cwd, so a recording that lands in `dir` is
+ *  evidence for `cwd` and `env` in one stroke (the `process` probes). */
+const probeEnv = (name: string) => ({
+  CEZ_MOCK_ARGS_FILE: `${name}.args.ndjson`,
+  CEZ_MOCK_STDIN_FILE: `${name}.stdin.ndjson`,
+  CEZ_HANDOFF_FILE: '',
+  CEZ_TODOS_FILE: '',
+});
+
+describe('harness parity — AgentRunSpec support declarations', () => {
+  it('every runner id builds its own runner, declaring every AgentRunSpec field with a reason', () => {
+    for (const backend of RUNNER_IDS) {
+      const runner = createRunner(backend);
+      // A fifth id with no factory case falls through to claude; that is not a declaration.
+      expect(runner.backend).toBe(backend);
+      expect(Object.keys(runner.specSupport).sort()).toEqual([...AGENT_RUN_SPEC_FIELDS].sort());
+      for (const field of AGENT_RUN_SPEC_FIELDS) {
+        const support = runner.specSupport[field];
+        expect(`${backend}/${field}: ${support.honored ? support.via : support.reason}`.trim()).not.toMatch(/: $/);
+      }
+    }
+  });
+
+  it('every AgentRunSpec field has a probe', () => {
+    expect(Object.keys(SPEC_FIELD_PROBES).sort()).toEqual([...AGENT_RUN_SPEC_FIELDS].sort());
+  });
+
+  for (const backend of RUNNER_IDS) {
+    describe(`${backend} declarations against its boundary`, () => {
+      let dir = '';
+      const recordings = new Map<string, string[]>();
+      let deadlineErrors: string[] = [];
+
+      beforeAll(async () => {
+        dir = mkdtempSync(join(tmpdir(), `cez-spec-support-${backend}-`));
+        const variants = new Map<string, Partial<AgentRunSpec>>();
+        for (const probe of Object.values(SPEC_FIELD_PROBES)) {
+          if (probe.kind !== 'boundary') continue;
+          variants.set(variantKey(probe.without), probe.without);
+          variants.set(variantKey(probe.with), probe.with);
+        }
+        let n = 0;
+        for (const [key, spec] of variants) {
+          const name = `probe-${n++}`;
+          const obs = await driveSeam(backend, 'baseline', {
+            spec: { cwd: dir, sessionId: undefined, env: probeEnv(name), ...spec },
+          });
+          expect(obs.v1.filter((e) => e.type === 'error')).toEqual([]);
+          recordings.set(key, readRecording(dir, name));
+        }
+        // `hold` keeps content ≥250ms behind the prompt, so a 150ms deadline
+        // fires first on every wire and the runner reports its own timeout.
+        const held = await driveSeam(backend, 'hold', {
+          spec: { cwd: dir, timeoutMs: 150, env: probeEnv('deadline') },
+        });
+        deadlineErrors = held.v1
+          .filter((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error')
+          .map((e) => e.message);
+      }, 120_000);
+
+      afterAll(() => {
+        rmSync(dir, { recursive: true, force: true });
+      });
+
+      for (const field of AGENT_RUN_SPEC_FIELDS) {
+        it(`${backend} does with ${field} what it declares`, () => {
+          const declared = createRunner(backend).specSupport[field].honored;
+          const probe = SPEC_FIELD_PROBES[field];
+          let observed: boolean;
+          if (probe.kind === 'boundary') {
+            const without = recordings.get(variantKey(probe.without));
+            const withField = recordings.get(variantKey(probe.with));
+            expect(without?.length ?? 0).toBeGreaterThan(0);
+            observed = JSON.stringify(without) !== JSON.stringify(withField);
+          } else if (probe.kind === 'process') {
+            observed = (recordings.get(variantKey({}))?.length ?? 0) > 0;
+          } else {
+            observed = deadlineErrors.some((message) => /timed out/.test(message));
+          }
+          // Both directions: an honored field must leave a footprint, and a
+          // declared-dropped field must leave none — that inversion is what
+          // keeps codex/opencode `allowedTools` pinned as ignored (AC #3).
+          expect({ backend, field, honored: observed }).toEqual({ backend, field, honored: declared });
+        });
+      }
+    });
   }
 });

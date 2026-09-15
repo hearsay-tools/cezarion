@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunResult, AgentRunner, AgentSession, ContentBlock, SessionOptions } from '../core/agent-runner.ts';
+import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { registerRunProcess, unregisterRunProcess } from '../core/process-usage.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import { createWorktree } from '../git-worktree.ts';
@@ -1535,6 +1536,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
   it('publishes a runner failure that occurs during idle shutdown', async () => {
     runnerHook.runner = {
       backend: 'claude',
+      specSupport: CLAUDE_SPEC_SUPPORT,
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
       interrupt: async () => undefined,
       startSession: (_spec, onEvent) => {
@@ -1605,6 +1607,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     let receivedImages: ContentBlock[] | undefined;
     runnerHook.runner = {
       backend: 'claude',
+      specSupport: CLAUDE_SPEC_SUPPORT,
       run: async () => ({ text: 'done', toolCalls: [], tokensUsed: 0 }),
       interrupt: async () => undefined,
       startSession: (spec) => {
@@ -2229,6 +2232,7 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
 
   const v2OnlyAskRunner = (marker: string, parentItemId?: string): AgentRunner => ({
     backend: 'claude',
+    specSupport: CLAUDE_SPEC_SUPPORT,
     run: async () => ({ text: 'Choose an option.', toolCalls: [], tokensUsed: 0 }),
     interrupt: async () => undefined,
     startSession(_spec, onEvent, opts: SessionOptions = {}): AgentSession {

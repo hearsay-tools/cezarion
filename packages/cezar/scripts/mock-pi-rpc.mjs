@@ -33,6 +33,16 @@ function sendTurnEnd(usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0
 
 for await (const line of readline.createInterface({ input: process.stdin })) {
   const command = JSON.parse(line);
+  // Testability hook, mirroring mock-claude: CEZ_MOCK_STDIN_FILE=<path> appends
+  // each inbound prompt's text and image count, so tests can assert what the
+  // runner actually wrote onto the RPC (harness parity's AgentRunSpec probes).
+  if (command.type === 'prompt' && process.env.CEZ_MOCK_STDIN_FILE) {
+    try {
+      appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: (command.images ?? []).length })}\n`);
+    } catch {
+      // best effort — never break the mock over the hook
+    }
+  }
   if (command.type === 'get_state') {
     send({
       id: command.id,
