@@ -90,6 +90,26 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt)).toBe(true);
   });
 
+  it('readiness restart rotates an abandoned running worker execution before resuming it', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    const abandonedGeneration = store.commitWorkerExecutionStart(w.id);
+    store.updateStep(w.id, 'task', { status: 'running', sessionId: randomUUID(), backend: 'claude' });
+    store.updateRun(w.id, { status: 'running', currentStepId: 'task' });
+    const wait = register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+
+    await restart();
+
+    expect(store.readEvents(w.id).at(-1)).toMatchObject({
+      type: 'lifecycle',
+      message: 'cezar restarted — resuming the interrupted task from its last session',
+    });
+    await until(() => manager.isActive(w.id));
+    expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'starting' });
+    expect(store.readWorkerExecution(w.id)?.generation).not.toBe(abandonedGeneration);
+    expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
+  });
+
   it('readiness real stopped process wakes its parent only after actual exit and finalization', async () => {
     const p = await parent(); const w = await worker(p.id);
     let child: ReturnType<typeof spawn> | undefined; let ready = false;

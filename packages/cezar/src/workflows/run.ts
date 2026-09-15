@@ -1649,6 +1649,15 @@ export class RunManager {
         finishedAt,
         currentStepId: undefined,
       });
+      // The crashed manager cannot finish its wrapper, but recovery has now
+      // accounted for the interrupted turn. Publish that old generation's
+      // termination before Continue admits a fresh worker generation. Worker
+      // readiness reconciliation stays suppressed until recovery completes,
+      // so the transient failed state cannot wake the parent between them.
+      if (run.delegation?.role === 'worker') {
+        const execution = this.store.readWorkerExecution(run.id);
+        if (execution) this.persistWorkerCompletion(run.id, execution.generation);
+      }
       const resumed = this.continueRun(
         run.id,
         {
