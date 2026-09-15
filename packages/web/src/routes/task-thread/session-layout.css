@@ -34,12 +34,13 @@
 }
 [data-route='task-thread'] .session-composer [data-slot='composer-editor'] { border-color: var(--composer-border); }
 
-/* The shell main is the only scroller. At phone widths its anchor must be the stable pixel after
- * the dock, never a streamed row or the autosizing composer itself. Native anchoring runs with
- * layout, before ResizeObserver's imperative tail-pin fallback, so neither growth path paints a
- * displaced dock. Desktop keeps the existing scroll owner unchanged. */
+/* The shell main is the only scroller. Native overflow anchoring runs with layout, before
+ * virtua's shift and the thread owner's rAF restore, so a prepended page can keep moving a
+ * named row past the two-pixel settle window (desktop 1440px history e2e). Disable it on the
+ * conversation at every width. At phone widths the dock is also excluded so the stable pixel
+ * after it — never a streamed row or the autosizing composer — remains the only anchor. */
+[data-route='task-thread'] [data-slot='session-conversation'] { overflow-anchor: none; }
 @media (max-width: 767px) {
-  [data-route='task-thread'] [data-slot='session-conversation'],
   [data-route='task-thread'] [data-slot='thread-dock'] { overflow-anchor: none; }
   [data-route='task-thread'] [data-slot='thread-tail-anchor'] { overflow-anchor: auto; }
 }
