@@ -9,6 +9,7 @@ import {
   makeTemplateId,
   normalizePromptTemplates,
   resolveAutoApply,
+  resolveInsertCaret,
   templatesForSkills,
   type PromptTemplate,
 } from './prompt-templates'
@@ -182,6 +183,83 @@ describe('insertTemplate', () => {
 
   it('a tail of nothing but spaces leaves no trailing whitespace behind', () => {
     expect(insertTemplate('Fix.   ', 4, 'SNIP').text).toBe('Fix.\n\nSNIP')
+  })
+})
+
+describe('resolveInsertCaret', () => {
+  const base = 'Fix GitHub issue #1'
+  const edited = `${base}\n\nAlso add tests.`
+
+  it('an untouched pre-filled box appends, even when the textarea reports caret 0', () => {
+    expect(
+      resolveInsertCaret({
+        prompt: base,
+        base,
+        selectionStart: 0,
+        focused: false,
+        remembered: null,
+      }),
+    ).toBe(base.length)
+  })
+
+  it('a focused box uses the live caret', () => {
+    expect(
+      resolveInsertCaret({
+        prompt: edited,
+        base,
+        selectionStart: 5,
+        focused: true,
+        remembered: edited.length,
+      }),
+    ).toBe(5)
+  })
+
+  it('an unfocused box with a mid-text live caret keeps it (#524)', () => {
+    expect(
+      resolveInsertCaret({
+        prompt: 'ALPHA OMEGA',
+        base,
+        selectionStart: 5,
+        focused: false,
+        remembered: null,
+      }),
+    ).toBe(5)
+  })
+
+  it('an unfocused box that reports caret 0 uses the caret remembered from the last insert (#221)', () => {
+    expect(
+      resolveInsertCaret({
+        prompt: edited,
+        base,
+        selectionStart: 0,
+        focused: false,
+        remembered: edited.length,
+      }),
+    ).toBe(edited.length)
+  })
+
+  it('an unfocused edited box with caret 0 and no remembered caret appends', () => {
+    expect(
+      resolveInsertCaret({
+        prompt: edited,
+        base,
+        selectionStart: 0,
+        focused: false,
+        remembered: null,
+      }),
+    ).toBe(edited.length)
+  })
+
+  it('a remembered caret of 0 is honoured as an intentional start insert', () => {
+    expect(
+      resolveInsertCaret({
+        prompt: edited,
+        base,
+        selectionStart: 0,
+        focused: false,
+        remembered: 0,
+      }),
+    ).toBe(0)
   })
 })
 

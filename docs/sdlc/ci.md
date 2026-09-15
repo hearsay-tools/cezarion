@@ -2,12 +2,13 @@
 
 `.github/workflows/ci.yml` runs on pull requests to `main` or `develop`, pushes to those branches, and manual dispatch.
 
-Verification runs in three parallel jobs on `blacksmith-4vcpu-ubuntu-2404` with the current Node LTS:
+Verification runs in four parallel jobs with the current Node LTS:
 
-- Two Vitest shards each install dependencies, build the server, and run `npm test -- --shard=N/2 --maxWorkers=4`.
-- The build/package job runs typechecking, Node unit tests, the full application build, packaged CLI tests, and release-package dry-run packing.
+- Two Vitest shards on `blacksmith-4vcpu-ubuntu-2404` each install dependencies, build the server, and run `npm test -- --shard=N/2 --maxWorkers=4`.
+- The build/package job on `blacksmith-4vcpu-ubuntu-2404` runs typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing.
+- The cockpit browser E2E job on GitHub-hosted Ubuntu provisions the `agent-browser` provider, builds and starts the test environment, runs `npm run test:e2e`, and fails when `TEST_E2E_STATUS` is skipped or failed.
 
-The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job and both Vitest shards succeed. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. The snapshot job still waits for this aggregate check and retains its existing publication conditions. The separate browser `test:e2e` suite is not part of this workflow.
+The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, both Vitest shards, and the cockpit browser job succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. The snapshot job still waits for this aggregate check and retains its existing publication conditions.
 
 The Vitest sequencer assigns discovered tests to shards by measured duration using `.github/test-durations.json`. New files receive the median known duration and are always included; deleted files are ignored. The manifest affects balancing only, never discovery. Refreshing its durations can improve balance as the suite changes. Ordinary `npm test` still runs every suite without sharding.
 

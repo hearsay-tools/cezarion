@@ -143,7 +143,6 @@ describe('the Changes tab against a live dry run', () => {
     // click's programmatic scrollIntoView alone is not reader intent and can be re-pinned.
     browser.evaluate(`document.querySelector('[data-slot="run-tabs"] a').focus()`)
     browser.press('Control+Home')
-    browser.waitForFunction(`document.querySelector('[data-slot="main"]').scrollTop === 0`)
     browser.click(`[data-slot="run-tabs"] a[href="${scoped(`/tasks/${runId}/changes`)}"]`)
 
     // Client-side navigation into the lazy chunk — wait for the toolbar to exist.

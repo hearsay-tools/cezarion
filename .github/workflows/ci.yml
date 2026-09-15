@@ -91,11 +91,37 @@ jobs:
       - name: Run server and cockpit unit suites
         run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4
 
+  # Own GitHub check, separate from the packaged CLI E2E step in build-and-package.
+  # Skip is a failure here: a machine that cannot drive the cockpit must not
+  # green the required aggregate. Local `npm run test:e2e` keeps its skip-exit-0
+  # contract; this job pipes the log through require-e2e-passed.cjs.
+  cockpit-browser:
+    name: Cockpit browser E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Run cockpit browser E2E
+        run: |
+          set -o pipefail
+          npm run test:e2e 2>&1 | tee e2e.log
+          node .github/scripts/require-e2e-passed.cjs < e2e.log
+
   # Keep this aggregate job's name stable: branch protection uses it as the
-  # required-check identity while the work runs in the build and Vitest jobs.
+  # required-check identity while the work runs in the build, Vitest, and
+  # cockpit browser jobs.
   verify:
     name: Unit, build, E2E, and package
-    needs: [build-and-package, vitest]
+    needs: [build-and-package, vitest, cockpit-browser]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -105,9 +131,11 @@ jobs:
         env:
           BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
           VITEST_RESULT: ${{ needs.vitest.result }}
+          COCKPIT_BROWSER_RESULT: ${{ needs['cockpit-browser'].result }}
         run: |
           test "$BUILD_AND_PACKAGE_RESULT" = success
           test "$VITEST_RESULT" = success
+          test "$COCKPIT_BROWSER_RESULT" = success
 
   # npm preview publishing (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482).
   # Publishes a snapshot of both packages after a fully green verify run:

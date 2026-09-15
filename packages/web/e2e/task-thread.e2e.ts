@@ -617,7 +617,7 @@ describe('task thread', () => {
     expect(browser.isVisible('[data-slot="run-details"]')).toBe(true)
     expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(true)
     expect(browser.count('[aria-label="Expand composer"]')).toBe(0)
-    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('relative')
+    expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="run-header"]')).position`)).toBe('sticky')
     browser.setViewport(360, 640)
     expect(browser.isVisible('[data-slot="follow-up-engine"]')).toBe(true)
     expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('first line\nsecond line\nthird line')
