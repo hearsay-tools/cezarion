@@ -1176,6 +1176,62 @@ describe('meta line, tabs, pill and resume hint', () => {
       const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
       await within(meta).findByRole('button', { name: /account deleted-one \(removed\)/ })
     })
+
+    // One login is not a choice (#251): the badge counts DEFINED accounts for the CHOSEN runner
+    // the same way the composer pill does (`hasAccountChoice`), so a lone `default` login stops
+    // crowding the truncating summary.
+    const withOneAccount = (extra: Record<string, () => Response> = {}) => stubFetch({
+      '/api/v1/workspace/agent-profiles': () => jsonResponse({
+        editable: true,
+        profileCapableProviders: ['claude'],
+        selections: {},
+        defaults: {},
+        profiles: [
+          { id: 'default', provider: 'claude', label: 'Default', configDir: '~/.claude', path: '/home/u/.claude', exists: true, looksValid: true, isDefault: true, files: [] },
+        ],
+      }),
+      ...extra,
+    })
+
+    it('omits a lone account from the summary, accessible name and menu (#251)', async () => {
+      withOneAccount()
+      renderHeader(run('done', {
+        runner: 'claude',
+        model: 'opus',
+        effort: 'high',
+        steps: [step({ sessionId: 'sess-1', profileId: 'default' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      const badge = await within(meta).findByRole('button', { name: 'Agent: claude, model opus, effort high' })
+      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · opus · high')
+
+      fireEvent.pointerDown(badge, { button: 0, ctrlKey: false, pointerType: 'mouse' })
+      const menu = await screen.findByRole('menu')
+      expect(menu.querySelector('[data-slot="agent-badge-account"]')).toBeNull()
+      expect(menu.textContent).not.toContain('account:')
+      // The effort pin and the single-account rule are independent — both hold at once.
+      expect(menu.querySelector('[data-slot="agent-badge-effort"]')?.textContent).toBe('effort: high')
+    })
+
+    it('keeps the account out of the badge while profiles are still loading — fail closed (#251)', async () => {
+      // A fail-open gate would paint the raw id first and drop it once the count arrived — the
+      // flash the issue names. A never-resolving profiles query is that pending state, held.
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === '/api/v1/workspace/agent-profiles') {
+          return new Promise<Response>(() => {})
+        }
+        return jsonResponse({})
+      }))
+      renderHeader(run('done', {
+        runner: 'claude',
+        model: 'opus',
+        steps: [step({ sessionId: 'sess-1', profileId: 'default' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      const badge = within(meta).getByRole('button', { name: 'Agent: claude, model opus' })
+      expect(badge.getAttribute('aria-label')).not.toContain('account')
+      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · opus')
+    })
   })
 
   describe('the canonical model identity (#546)', () => {
