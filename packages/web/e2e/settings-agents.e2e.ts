@@ -74,12 +74,15 @@ function setSelect(selector: string, value: string) {
 function setTextarea(selector: string, value: string) {
   browser.evaluate(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)})
-    const last = el.value
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, ${JSON.stringify(value)})
-    const tracker = el._valueTracker
-    if (tracker) tracker.setValue(last)
-    el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertFromPaste', data: ${JSON.stringify(value)} }))
-    el.dispatchEvent(new Event('change', { bubbles: true }))
+    el.focus()
+    el.select()
+    if (!document.execCommand('insertText', false, ${JSON.stringify(value)})) {
+      const last = el.value
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, ${JSON.stringify(value)})
+      const tracker = el._valueTracker
+      if (tracker) tracker.setValue(last)
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertFromPaste', data: ${JSON.stringify(value)} }))
+    }
   })()`)
 }
 
@@ -122,8 +125,9 @@ describe('settings → agents against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="agents-system-prompt"]') !== null`)
     browser.click('[data-slot="agents-system-prompt"]')
     setTextarea('[data-slot="agents-system-prompt"]', 'Always add tests. (e2e)')
+    browser.waitForFunction(`document.querySelector('[data-slot="agents-system-prompt"]')?.value === 'Always add tests. (e2e)'`)
     browser.waitForFunction(`document.querySelector('[data-action="agents-save-prompt"]')?.disabled === false`)
-    browser.click('[data-action="agents-save-prompt"]')
+    browser.evaluate(`document.querySelector('[data-action="agents-save-prompt"]').click()`)
     await waitForConfig((c) => c.systemPrompt === 'Always add tests. (e2e)')
   })
 
