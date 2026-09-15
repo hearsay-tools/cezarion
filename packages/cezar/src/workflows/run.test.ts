@@ -1659,6 +1659,44 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     ]));
   }, 30_000);
 
+  it('restart resumes the remaining workflow after interrupting a non-final agent step', async () => {
+    const workflow: WorkflowDef = {
+      name: 'interrupted-then-later', source: 'file',
+      steps: [
+        { id: 'task', name: 'Task', prompt: '{{task}}' },
+        { id: 'later', name: 'Later', command: 'node -e "process.exit(0)"' },
+      ],
+    };
+    const record = manager.startRun(SINGLE_STEP, { task: 'just do the thing', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
+    const state = (manager as unknown as {
+      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
+    }).active.get(record.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+    idleTimer._onTimeout();
+    await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    manager.dispose();
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
+    store.updateStep(record.id, 'task', { status: 'running', finishedAt: undefined });
+    store.updateRun(record.id, {
+      status: 'running', currentStepId: 'task', workflowDef: workflow,
+      continuationMessage: {
+        id: 'restart-task', text: 'mock:done recover', origin: 'lifecycle', createdAt: new Date().toISOString(),
+      },
+    });
+    store.flush();
+
+    manager = new RunManager(store, repoRoot);
+    await manager.recover();
+    await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
+    expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'task', status: 'done' }),
+      expect.objectContaining({ id: 'later', status: 'done', iterations: 1 }),
+    ]));
+  }, 30_000);
+
   it('does not let Finish skip a remaining workflow after an idle-closed synthetic continuation', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
     currentId = record.id;

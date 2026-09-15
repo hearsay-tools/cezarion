@@ -3265,7 +3265,10 @@ export class RunManager {
     if (!steps.length) return -1;
     for (let index = steps.length - 1; index >= 0; index--) {
       const persisted = run.steps.find((step) => step.id === steps[index]!.id);
-      if (persisted?.status === 'waiting' || persisted?.status === 'running') return index;
+      // Startup recovery records an interrupted live step as failed before it
+      // constructs the synthetic continuation. Later workflow steps are still
+      // pending, so that failed step remains the continuation's source.
+      if (persisted?.status === 'waiting' || persisted?.status === 'running' || persisted?.status === 'failed') return index;
     }
     return -1;
   }
