@@ -51,6 +51,17 @@ installed=$(node -e '
   } catch { process.stdout.write("0"); }
 ' "$DESCRIPTOR" 2>/dev/null || echo 0)
 
+eval "$(node -e '
+  const fs = require("fs");
+  try {
+    const d = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const env = (d.browser && d.browser.runtimeEnv) || {};
+    for (const key of ["TMPDIR", "TMP", "TEMP"]) {
+      if (typeof env[key] === "string" && env[key]) process.stdout.write("export " + key + "=" + JSON.stringify(env[key]) + "\n");
+    }
+  } catch { /* keep the caller environment */ }
+' "$DESCRIPTOR" 2>/dev/null || true)"
+
 if [ "$installed" != 1 ]; then
   notes=$(node -e '
     const fs = require("fs");

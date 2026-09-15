@@ -28,7 +28,35 @@ export const cezarCli = resolve(repoRoot, 'packages/cezar/dist/index.js')
 
 type EnvDescriptor = {
   baseUrl: string
-  browser: { installed: boolean; command: string; version: string; notes: string }
+  browser: {
+    installed: boolean
+    command: string
+    version: string
+    notes: string
+    launchArgs?: string[]
+    runtimeEnv?: Record<string, string>
+    namespace?: string
+  }
+}
+
+export function browserSpawnPlan(
+  browser: EnvDescriptor['browser'],
+  session: string,
+  command: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): { argv: string[]; env: NodeJS.ProcessEnv } {
+  const argv: string[] = []
+  if (browser.namespace) argv.push('--namespace', browser.namespace)
+  const extra = (env.AGENT_BROWSER_ARGS ?? '')
+    .split(/[,\n]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const launchArgs = [...(browser.launchArgs ?? [])]
+  for (const arg of extra) if (!launchArgs.includes(arg)) launchArgs.push(arg)
+  if (launchArgs.length) argv.push('--args', launchArgs.join(','))
+  argv.push('--session', session, ...command)
+  if (!command.includes('--json')) argv.push('--json')
+  return { argv, env: { ...env, ...browser.runtimeEnv } }
 }
 
 /** The shared descriptor written by .ai/scripts/test-env-up.sh — QA and e2e attach to the
@@ -139,6 +167,7 @@ export class AgentBrowser {
   private constructor(
     private readonly bin: string,
     private readonly session: string,
+    private readonly browser: EnvDescriptor['browser'],
   ) {}
 
   static open(session: string): AgentBrowser {
@@ -146,18 +175,20 @@ export class AgentBrowser {
     if (!env.browser.installed) {
       throw new Error(`cezar e2e: the agent-browser provider is not installed (${env.browser.notes})`)
     }
-    return new AgentBrowser(env.browser.command, session)
+    return new AgentBrowser(env.browser.command, session, env.browser)
   }
 
   /** One agent-browser invocation. `--json` on every call so results are parsed, not scraped. */
   private run(args: string[]): Record<string, unknown> {
+    const plan = browserSpawnPlan(this.browser, this.session, args)
     let stdout: string
     try {
-      stdout = execFileSync(this.bin, ['--session', this.session, ...args, '--json'], {
+      stdout = execFileSync(this.bin, plan.argv, {
         encoding: 'utf8',
         // A hung browser must fail the spec, not the whole suite's wall clock.
         timeout: 60_000,
         maxBuffer: 32 * 1024 * 1024,
+        env: plan.env,
       })
     } catch (cause) {
       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} failed`, { cause })
