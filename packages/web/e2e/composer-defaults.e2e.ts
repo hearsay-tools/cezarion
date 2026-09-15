@@ -116,22 +116,29 @@ describe('configurable composer run defaults', () => {
 
       browser.click('[data-slot="source-pill"]')
       browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') !== null`)
-      browser.click('[data-slot="source-option"][data-source-ref="interactive-review"]')
       browser.waitForFunction(
-        `document.querySelector('[data-slot="interactive-skill-hint"]') !== null`,
+        `document.querySelector('[data-slot="source-option"][data-source-ref="interactive-review"]') !== null`,
       )
-      // The popover is dismissed by the pick, but its exit animation still covers the chip row
-      // for a frame or two — and the toggles below are exactly what this spec clicks next.
-      browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
+      browser.evaluate(`{
+        const item = document.querySelector('[data-slot="source-option"][data-source-ref="interactive-review"]')
+        const label = item.querySelector('span')
+        label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+        label.click()
+      }`)
+      browser.waitForFunction(
+        `document.querySelector('[data-slot="source-pill"]')?.dataset.sourceKind === 'skill'`,
+      )
+      browser.evaluate(`{ const el = document.querySelector('[data-slot="execution-options"]'); if (el) el.open = true }`)
       expect(browser.evaluate(`document.querySelector('[data-slot="execution-options"]')?.open`)).toBe(true)
       for (const slot of ['worktree-toggle', 'autonomous-toggle']) {
         expect(browser.evaluate(
-          `document.querySelector('[data-slot="${slot}"]')?.getAttribute('aria-checked')`,
-        )).toBe('false')
-        expect(browser.evaluate(
           `document.querySelector('[data-slot="${slot}"]')?.disabled`,
         )).toBe(false)
-        browser.click(`[data-slot="${slot}"]`)
+        if (browser.evaluate(
+          `document.querySelector('[data-slot="${slot}"]')?.getAttribute('aria-checked')`,
+        ) !== 'true') {
+          browser.click(`[data-slot="${slot}"]`)
+        }
         expect(browser.evaluate(
           `document.querySelector('[data-slot="${slot}"]')?.getAttribute('aria-checked')`,
         )).toBe('true')

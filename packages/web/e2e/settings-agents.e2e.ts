@@ -71,6 +71,21 @@ function setSelect(selector: string, value: string) {
   })()`)
 }
 
+function setTextarea(selector: string, value: string) {
+  browser.evaluate(`(() => {
+    const el = document.querySelector(${JSON.stringify(selector)})
+    el.focus()
+    el.select()
+    if (!document.execCommand('insertText', false, ${JSON.stringify(value)})) {
+      const last = el.value
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, ${JSON.stringify(value)})
+      const tracker = el._valueTracker
+      if (tracker) tracker.setValue(last)
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertFromPaste', data: ${JSON.stringify(value)} }))
+    }
+  })()`)
+}
+
 const gotoAgents = () => {
   browser.goto(`${baseUrl}/settings/agents`)
   browser.waitForFunction(`document.querySelector('[data-slot="agents-section"]') !== null`)
@@ -106,8 +121,13 @@ describe('settings → agents against the live dry-run server', () => {
   })
 
   it('system prompt: explicit save persists the trimmed text', async () => {
-    browser.fill('[data-slot="agents-system-prompt"]', 'Always add tests. (e2e)')
-    browser.click('[data-action="agents-save-prompt"]')
+    gotoAgents()
+    browser.waitForFunction(`document.querySelector('[data-slot="agents-system-prompt"]') !== null`)
+    browser.click('[data-slot="agents-system-prompt"]')
+    setTextarea('[data-slot="agents-system-prompt"]', 'Always add tests. (e2e)')
+    browser.waitForFunction(`document.querySelector('[data-slot="agents-system-prompt"]')?.value === 'Always add tests. (e2e)'`)
+    browser.waitForFunction(`document.querySelector('[data-action="agents-save-prompt"]')?.disabled === false`)
+    browser.evaluate(`document.querySelector('[data-action="agents-save-prompt"]').click()`)
     await waitForConfig((c) => c.systemPrompt === 'Always add tests. (e2e)')
   })
 

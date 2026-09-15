@@ -67,13 +67,14 @@ describe('tools menu', () => {
     browser.waitForFunction(`document.querySelector('${TRIGGER}') !== null`)
   })
 
-  it('summarizes the health answer on the closed trigger', () => {
-    // The server really probed something — otherwise every assertion below is vacuous.
-    expect(health.checks.length).toBeGreaterThan(0)
+  it('summarizes the health answer on the closed trigger', async () => {
+    // Read health at assertion time: an earlier spec may have mutated defaultRunner in memory.
+    const live = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as Health
+    expect(live.checks.length).toBeGreaterThan(0)
 
-    const blocker = blockerFor(health)
-    const missing = health.checks.filter((c) => !c.available).map((c) => c.name)
-    let expectedTitle = `cezar v${health.version}`
+    const blocker = blockerFor(live)
+    const missing = live.checks.filter((c) => !c.available).map((c) => c.name)
+    let expectedTitle = `cezar v${live.version}`
     if (blocker) expectedTitle += ` · ${blocker}`
     else if (missing.length > 0) expectedTitle += ` · optional: ${missing.join(', ')} not installed`
     expect(browser.evaluate(`document.querySelector('${TRIGGER}').getAttribute('title')`)).toBe(expectedTitle)

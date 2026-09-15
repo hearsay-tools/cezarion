@@ -15,7 +15,7 @@ import {
   AUTO_END_DELAY_MS,
   DEFAULT_RUN_TIMEOUT_MS,
   KILL_GRACE_MS,
-} from './claude-cli-runner.ts';
+} from './runner-runtime.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';

@@ -504,6 +504,11 @@ export function ThreadView({
           />
         </div>
       </div>
+
+      {/* The sole mobile scroll anchor sits after every region whose height can change. Keeping
+          this tail pixel in place makes streamed rows and composer growth settle in the same
+          layout pass: the textarea grows upward while the dock's bottom stays put. */}
+      <div data-slot="thread-tail-anchor" aria-hidden="true" className="h-px shrink-0 md:hidden" />
     </div>
   )
 }

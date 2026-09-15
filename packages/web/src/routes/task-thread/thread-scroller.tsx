@@ -431,6 +431,22 @@ function VirtualRows({
   rows: ThreadRow[]
   controls: ThreadScrollControls
 }) {
+  // Route params reuse the task-thread component. Give virtua a run-owned lifetime so the
+  // destination commit cannot inherit the departing thread's offset and measurement state.
+  // The keyed mount also makes attachContent claim the destination before that transcript
+  // paints, while the per-run cache below supplies its already measured geometry.
+  return <VirtualRowsSession key={runId} runId={runId} rows={rows} controls={controls} />
+}
+
+function VirtualRowsSession({
+  runId,
+  rows,
+  controls,
+}: {
+  runId: string
+  rows: ThreadRow[]
+  controls: ThreadScrollControls
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const previousRows = useRef(rows)
   const firstKey = rows[0]?.key

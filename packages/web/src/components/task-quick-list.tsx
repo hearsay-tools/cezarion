@@ -2,6 +2,7 @@ import { ChevronDownIcon } from '@/components/design-icons'
 import { ScaleIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
+import { queryScope } from '@open-mercato/cezar-api-client'
 import { useHealth, usePinRun, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
@@ -285,23 +286,71 @@ function Row({
       {/* No pin on the TILE (#935): a pin is per task, and the tile is a stand-in for two or
           three of them. Expanding it pins the variant you mean, and the tile rises to `Pinned`
           with it — the same best-ranked-member rule that already moves it between buckets. */}
-      {expanded
-        ? row.members.map((member) => (
-            <RunRow
-              key={member.id}
-              run={member}
-              queuePosition={null}
-              currentRunId={currentRunId}
-              now={now}
-              scope={scope}
-              variant
-              showTokens={showTokens}
-              showCost={showCost}
-              onTogglePin={onTogglePin}
-            />
-          ))
-        : null}
+      {expanded ? (
+        <ExpandedVariantMembers
+          members={row.members}
+          currentRunId={currentRunId}
+          now={now}
+          scope={scope}
+          showTokens={showTokens}
+          showCost={showCost}
+          onTogglePin={onTogglePin}
+        />
+      ) : null}
     </>
+  )
+}
+
+/**
+ * Member rows under an open variant tile. The parent surface asks only about the painted first
+ * member (the cheaper collapsed path); expanding is what makes the later chips visible, so this
+ * is the moment to register their references.
+ */
+function ExpandedVariantMembers({
+  members,
+  currentRunId,
+  now,
+  scope,
+  showTokens,
+  showCost,
+  onTogglePin,
+}: {
+  members: RunRecord[]
+  currentRunId: string | null
+  now: number
+  scope: string | null
+  showTokens: boolean
+  showCost: boolean
+  onTogglePin?: (run: RunRecord, pinned: boolean) => void
+}) {
+  const rows = members.map((member) => (
+    <RunRow
+      key={member.id}
+      run={member}
+      queuePosition={null}
+      currentRunId={currentRunId}
+      now={now}
+      scope={scope}
+      variant
+      showTokens={showTokens}
+      showCost={showCost}
+      onTogglePin={onTogglePin}
+    />
+  ))
+  if (!scope) return <>{rows}</>
+  return (
+    <ReferenceStatusProvider
+      projectId={scope}
+      requests={members.flatMap((member) =>
+        taskReferences(member).map((reference) => ({
+          projectId: scope,
+          kind: reference.kind,
+          number: reference.number,
+        })),
+      )}
+    >
+      {rows}
+    </ReferenceStatusProvider>
   )
 }
 
@@ -592,22 +641,27 @@ export function SidebarSessionScope() {
   const [view, setView] = useListView()
   const runs = useRuns()
   const registry = useProjects().data
+  const runsProjectId = queryScope()
+  const otherProjects = (registry?.projects ?? []).filter((project) => project.id !== registry?.bootProject)
   const otherLists = useQueries({
-    queries: (registry?.projects ?? [])
-      .filter((project) => project.id !== registry?.bootProject)
-      .map((project) => ({
-        queryKey: [project.id, 'runs', 'list'] as const,
-        queryFn: async () => [] as RunRecord[],
-        enabled: false,
-      })),
+    queries: otherProjects.map((project) => ({
+      queryKey: [project.id, 'runs', 'list'] as const,
+      queryFn: async () => [] as RunRecord[],
+      enabled: false,
+    })),
   })
   const seen = new Set<string>()
   const combined: RunRecord[] = []
-  for (const run of [...(runs.data ?? []), ...otherLists.flatMap((query) => query.data ?? [])]) {
-    if (seen.has(run.id)) continue
-    seen.add(run.id)
+  const add = (projectId: string, run: RunRecord) => {
+    const key = `${projectId}:${run.id}`
+    if (seen.has(key)) return
+    seen.add(key)
     combined.push(run)
   }
+  for (const run of runs.data ?? []) add(runsProjectId, run)
+  otherProjects.forEach((project, index) => {
+    for (const run of otherLists[index]?.data ?? []) add(project.id, run)
+  })
   const counts = listCounts(combined)
   return (
     <div data-slot="sidebar-session-scope" role="group" aria-label="Session scope" className="flex w-full gap-1 rounded-lg bg-muted p-[3px]">

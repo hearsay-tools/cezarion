@@ -1,6 +1,6 @@
 # Code review rules
 
-How to review a diff in this repository. Applies to humans and to the `om-code-review` skill alike. The full validation gate in `.ai/agentic.config.json` must be green before a review verdict is meaningful: typecheck, the vitest unit/component suites (`npm test`), the node:test core-module suite (`npm run test:unit`), build (which includes the `check:pack` tarball gate), and the packaged CLI E2E (`npm run test:package`). The unit/component suites are the fast correctness gate; real-browser E2E (`npm run test:e2e`) remains the QA layer for user-facing changes.
+How to review a diff in this repository. Applies to humans and to the `om-code-review` skill alike. The full validation gate in `.ai/agentic.config.json` must be green before a review verdict is meaningful: typecheck, the vitest unit/component suites (`npm test`), the node:test core-module suite (`npm run test:unit`), build (which includes the `check:pack` tarball gate), the packaged CLI E2E (`npm run test:package`), and the cockpit browser E2E (`npm run test:e2e`). The unit/component suites are the fast correctness gate. Packaged CLI E2E and cockpit browser E2E are separate checks; pull request CI rejects a skipped or failed cockpit suite.
 
 ## Review priorities (in order)
 

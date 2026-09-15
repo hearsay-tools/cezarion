@@ -157,7 +157,7 @@ function mapMessageUpdate(value: Record<string, unknown>, state: PiUiMapperState
   if (updateType === 'done') {
     return {
       events: [],
-      state: { ...state, stopReason: string(update.reason) === 'length' ? 'max_tokens' : 'end_turn' },
+      state: { ...state, stopReason: mapPiMessageStopReason(string(update.reason)) },
     };
   }
   if (updateType === 'error') {
@@ -308,9 +308,16 @@ function mapMessageEnd(value: Record<string, unknown>, state: PiUiMapperState): 
   }
   if (string(message.stopReason) === 'error') {
     events.push({ type: 'session.error', message: piProviderErrorMessage(message), fatal: false });
-    state = { ...state, stopReason: 'error' };
   }
+  state = { ...state, stopReason: mapPiMessageStopReason(string(message.stopReason)) };
   return { events, state };
+}
+
+function mapPiMessageStopReason(reason: string | undefined): StopReason {
+  if (reason === 'error') return 'error';
+  if (reason === 'aborted') return 'cancelled';
+  if (reason === 'length') return 'max_tokens';
+  return 'end_turn';
 }
 
 export function piProviderErrorMessage(message: Record<string, unknown>): string {

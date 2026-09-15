@@ -721,6 +721,7 @@ describe('tasks table overview', () => {
     // Restore both independent controls so the following row-navigation case starts active.
     browser.click('[data-slot="view-tab"][data-view="active"]')
     browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[data-slot="sidebar-session-scope"]') === null`)
     browser.click('[data-slot="overview-tab"][data-view="active"]')
     browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"]') !== null`)
   })
