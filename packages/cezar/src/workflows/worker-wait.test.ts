@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'v
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
+import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -108,7 +109,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('readiness real stopped process wakes its parent only after actual exit and finalization', async () => {
     const p = await parent(); const w = await worker(p.id);
     let child: ReturnType<typeof spawn> | undefined; let ready = false;
-    const runner = vi.spyOn(runnerFactory, 'createRunner').mockReturnValue({ backend: 'claude', interrupt: async () => undefined,
+    const runner = vi.spyOn(runnerFactory, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, interrupt: async () => undefined,
       run: async () => { throw Error('unused'); }, startSession: () => {
         child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"], { stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout!.once('data', () => { ready = true; });

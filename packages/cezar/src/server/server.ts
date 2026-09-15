@@ -55,10 +55,7 @@ import { detectEnvironment } from '../core/backend-detect.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
-import { discoverClaudeModels } from '../core/claude-model-catalog.ts';
-import { discoverCodexModels } from '../core/codex-model-catalog.ts';
-import { discoverOpencodeModels } from '../core/opencode-model-catalog.ts';
-import { discoverPiModels } from '../core/pi-model-catalog.ts';
+import { hostModelCatalogAdapters } from '../core/host-model-catalog.ts';
 import {
   PROVIDER_IDS,
   ProviderAuthService,
@@ -1056,14 +1053,9 @@ export function createApp(deps: ServerDeps) {
   // turns into a compile error instead.
   const bootRoot = deps.repoRoot;
   const bootDataDir = join(bootRoot, '.ai/cezar');
-  const modelCatalog = deps.modelCatalog ?? new RunnerModelCatalog({
-    adapters: {
-      claude: { discover: () => discoverClaudeModels({ cwd: bootRoot }) },
-      codex: { discover: () => discoverCodexModels({ cwd: bootRoot }) },
-      opencode: { discover: () => discoverOpencodeModels({ cwd: bootRoot }) },
-      pi: { discover: () => discoverPiModels({ cwd: bootRoot }) },
-    },
-  });
+  // One adapter per contract-advertised runner; the map is typed over `modelDiscoveryRunnerSchema`
+  // so a runner added to the contract without an adapter fails typecheck (AGENT_PROTOCOL.md §10).
+  const modelCatalog = deps.modelCatalog ?? new RunnerModelCatalog({ adapters: hostModelCatalogAdapters(bootRoot) });
   const invalidateHostModels = (provider: ProviderId): void => {
     if (runnerDiscoversModels(provider)) modelCatalog.invalidate(provider);
   };
