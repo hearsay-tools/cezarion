@@ -1457,7 +1457,7 @@ export class RunManager {
     if (this.isActive(run.id) || this.workerExecutionStopped(run.id)) return;
     const queuedContinuation = [...run.steps]
       .reverse()
-      .find((step) => step.status === 'pending' && step.id.startsWith('continue-'));
+      .find((step) => step.status === 'pending' && /^continue-\d+$/.test(step.id));
     const sessionStep = queuedContinuation
       ? [...run.steps].reverse().find((step) => step.id !== queuedContinuation.id && step.sessionId)
       : undefined;
@@ -3463,7 +3463,7 @@ export class RunManager {
     this.clearAutoResume(runId);
     if (!deferForCapacity) { this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); }
 
-    const continuations = run.steps.filter((s) => s.id.startsWith('continue-')).length;
+    const continuations = run.steps.filter((s) => /^continue-\d+$/.test(s.id)).length;
     const stepId = `continue-${continuations + 1}`;
     if (run.delegation?.role !== 'worker') this.store.addStep(runId, { id: stepId, name: 'Continue', kind: 'agent' });
     const recovered = deferForCapacity ? run.continuationMessage : undefined;
@@ -4016,11 +4016,16 @@ export class RunManager {
             },
           };
           this.store.updateRun(runId, { status: 'queued', currentStepId: undefined });
+          // The workflow remainder is a crash boundary. Persist it before the
+          // finally block awaits worktree autosave and installs its in-memory job.
+          this.store.flush();
           appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — remaining workflow queued`);
         } else {
           await this.settleSuccess(runId);
           appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
         }
+      } else {
+        await this.settleIdleClosedWorker(runId);
       }
     } catch (err) {
       if (!setupComplete) {
@@ -4384,6 +4389,7 @@ export class RunManager {
       return;
     }
     if (state.idleClosed) {
+      await this.settleIdleClosedWorker(runId);
       this.dropActive(runId);
       return;
     }
@@ -5117,6 +5123,23 @@ export class RunManager {
         ? 'changes ready for review — send feedback, open a draft PR, or finish'
         : 'run finished',
     });
+  }
+
+  /** An ordinary owned worker cannot accept an inactive Continue. Once its
+   * idle-closed process has ended, publish the same terminal outcome recovery
+   * would produce so its parent can collect it. Explicit asks and worker waits
+   * remain durable attention states. */
+  private async settleIdleClosedWorker(runId: string): Promise<boolean> {
+    const run = this.store.getRun(runId);
+    if (run?.delegation?.role !== 'worker' || this.hasPendingHumanAsk(runId) || this.workerWait(runId)) return false;
+    const finishedAt = new Date().toISOString();
+    for (const step of run.steps) {
+      if (step.status === 'waiting' || step.status === 'running') {
+        this.store.updateStep(runId, step.id, { status: 'done', finishedAt });
+      }
+    }
+    await this.settleSuccess(runId);
+    return true;
   }
 
   /**

@@ -1617,8 +1617,23 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     manager.dispose();
     manager = new RunManager(store, repoRoot);
     await manager.recover();
+    const flushed: RunRecord[] = [];
+    const originalFlush = store.flush.bind(store);
+    vi.spyOn(store, 'flush').mockImplementation(() => {
+      flushed.push(structuredClone(store.getRun(record.id)!));
+      originalFlush();
+    });
     expect(manager.continueRun(record.id, { text: 'mock:done answer' })).toEqual({ ok: true });
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
+    expect(flushed).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        status: 'queued',
+        steps: expect.arrayContaining([
+          expect.objectContaining({ id: 'task', status: 'done' }),
+          expect.objectContaining({ id: 'later', status: 'pending' }),
+        ]),
+      }),
+    ]));
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'task', status: 'done' }),
       expect.objectContaining({ id: 'later', status: 'done' }),
@@ -1631,6 +1646,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
       source: 'file',
       steps: [
         { id: 'task', name: 'Task', prompt: '{{task}}' },
+        { id: 'continue-foo', name: 'Real prefixed step', command: 'node -e "process.exit(0)"' },
         { id: 'later', name: 'Later', command: 'node -e "process.exit(0)"' },
       ],
     };
@@ -1645,6 +1661,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     idleTimer._onTimeout();
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
     manager.dispose();
+    store.addStep(record.id, { id: 'continue-foo', name: 'Real prefixed step', kind: 'check' });
     store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
     store.updateStep(record.id, 'task', { status: 'done', finishedAt: new Date().toISOString() });
     store.updateRun(record.id, { status: 'queued', currentStepId: undefined, workflowDef: workflow });
@@ -1655,6 +1672,7 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'task', status: 'done', iterations: 1 }),
+      expect.objectContaining({ id: 'continue-foo', status: 'done', iterations: 1 }),
       expect.objectContaining({ id: 'later', status: 'done', iterations: 1 }),
     ]));
   }, 30_000);

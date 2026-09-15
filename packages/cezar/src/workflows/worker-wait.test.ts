@@ -58,6 +58,23 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.getRun(w.id)?.status).toBe('queued');
   });
 
+  it('readiness collects a markerless worker after its idle timer closes the session', async () => {
+    const p = await parent();
+    const w = await worker(p.id);
+    const wait = register(p.id, [w.id]);
+    manager.enqueueOwnedRun(w.id);
+    await until(() => store.getRun(w.id)?.status === 'waiting');
+    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(w.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting worker did not arm an idle timer');
+    idleTimer._onTimeout();
+
+    await until(() => store.getRun(w.id)?.status === 'done');
+    await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);
+    expect(store.readWorkerExecution(w.id)?.phase).toBe('complete');
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+  });
+
   it('readiness public cancellation does not wake until private completion is durable', async () => {
     const p = await parent(); const w = await worker(p.id);
     const generation = store.commitWorkerExecutionStart(w.id);
