@@ -8,6 +8,7 @@ import type {
   AgentRunner,
   AgentToolCallRecord,
   ContentBlock,
+  AgentRunSpecSupport,
 } from './agent-runner.ts';
 import type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
@@ -56,8 +57,33 @@ export const KILL_GRACE_MS = 4_000;
  * Governed delegation adds only a supported session-level task deny rule.
  * `spec.model` is `provider/model`.
  */
+/**
+ * What `opencode serve` receives from each `AgentRunSpec` field (#284). The
+ * server auto-approves permissions and this adapter maps no per-tool
+ * allowlist, so `allowedTools`/`bashAllowlist` are declared dropped rather than
+ * mapped (spec 2026-07-17-permission-modes); every start opens a fresh session,
+ * so `sessionId`/`resume` never reach the wire. Held against the recorded HTTP
+ * requests by the harness parity matrix.
+ */
+export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
+  systemPrompt: { honored: true, via: 'prepended to the opening prompt_async text through prependSystemPrompt' },
+  userPrompt: { honored: true, via: 'prompt_async text part' },
+  images: { honored: false, reason: 'the adapter posts text parts only; image blocks are dropped' },
+  cwd: { honored: true, via: 'opencode serve spawn cwd; the session is bound to it' },
+  allowedTools: { honored: false, reason: 'permissions are auto-approved server-side and no per-tool allowlist is mapped' },
+  restrictNativeDelegation: { honored: true, via: 'POST /session permission rule denying task (D1)' },
+  bashAllowlist: { honored: false, reason: 'no per-tool allowlist is mapped, so no command-prefix restriction either' },
+  additionalDirectories: { honored: false, reason: 'the server works from cwd; no extra-root mapping' },
+  env: { honored: true, via: 'merged over the child env through buildChildEnv' },
+  model: { honored: true, via: 'prompt_async model { providerID, modelID }, split from provider/model' },
+  effort: { honored: true, via: 'prompt_async variant, canonical level' },
+  timeoutMs: { honored: true, via: 'wall-clock kill switch on the child process' },
+  sessionId: { honored: false, reason: 'every start opens a fresh server session; the id is only reported back on the result' },
+  resume: { honored: false, reason: 'Continue opens a fresh session carrying the continuation prompt' },
+};
 export class OpencodeServerRunner implements AgentRunner {
   readonly backend = 'opencode' as const;
+  readonly specSupport = OPENCODE_SPEC_SUPPORT;
 
   private readonly bin: string;
   private readonly timeoutMs: number;

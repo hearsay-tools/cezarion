@@ -19,6 +19,7 @@ import type {
   AgentToolCallRecord,
   ContentBlock,
   SessionOptions,
+  AgentRunSpecSupport,
 } from './agent-runner.ts';
 
 // Re-exported for backends and the run manager that still import them from here.
@@ -61,8 +62,31 @@ export function resolveClaudeExecutable(override?: string): string {
  * github-janitor's `claudeRunner.ts`; the original single-turn adaptation
  * came from @cezar/core's `ClaudeCodeCliRunner`.
  */
+/**
+ * What the claude CLI receives from each `AgentRunSpec` field (#284). Every
+ * field has a native flag or a stdin/spawn channel — this is the runner the
+ * spec was shaped around. Held against `--allowedTools`/stdin recordings by
+ * the harness parity matrix; change a row only with the mapping in `buildArgs`.
+ */
+export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
+  systemPrompt: { honored: true, via: '--append-system-prompt' },
+  userPrompt: { honored: true, via: 'text block of the first stream-json user message on stdin' },
+  images: { honored: true, via: 'image blocks ahead of the text in the first stdin message' },
+  cwd: { honored: true, via: 'spawn cwd' },
+  allowedTools: { honored: true, via: '--allowedTools, through buildAllowedTools' },
+  restrictNativeDelegation: { honored: true, via: '--disallowedTools Agent,Task (D1)' },
+  bashAllowlist: { honored: true, via: 'Bash(<prefix>:*) entries in --allowedTools, one per prefix' },
+  additionalDirectories: { honored: true, via: '--add-dir, once per directory' },
+  env: { honored: true, via: 'merged over the child env through buildChildEnv' },
+  model: { honored: true, via: '--model' },
+  effort: { honored: true, via: '--effort, canonical level' },
+  timeoutMs: { honored: true, via: 'wall-clock kill switch on the child process' },
+  sessionId: { honored: true, via: '--session-id, or --resume when resume is set' },
+  resume: { honored: true, via: '--resume <sessionId> in place of --session-id' },
+};
 export class ClaudeCliRunner implements AgentRunner {
   readonly backend = 'claude' as const;
+  readonly specSupport = CLAUDE_SPEC_SUPPORT;
 
   private readonly bin: string;
   private readonly timeoutMs: number;

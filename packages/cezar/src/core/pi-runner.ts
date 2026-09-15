@@ -7,6 +7,7 @@ import type {
   AgentEvent,
   AgentRunResult,
   AgentRunSpec,
+  AgentRunSpecSupport,
   AgentRunner,
   AgentSession,
   AgentToolCallRecord,
@@ -33,8 +34,32 @@ export interface PiRunnerOptions {
  * Contract: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md
  * Pi has its own command/event vocabulary; it is not Claude stream-json.
  */
+/**
+ * What the pi CLI receives from each `AgentRunSpec` field (#284). Tool names
+ * are mapped onto pi's own through `piTools`; pi has no command-prefix
+ * equivalent for `bashAllowlist`, so a request for one drops `bash` from
+ * `--tools` (fail closed) rather than widening. Held against the recorded argv
+ * and RPC prompt by the harness parity matrix.
+ */
+export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
+  systemPrompt: { honored: true, via: '--append-system-prompt' },
+  userPrompt: { honored: true, via: 'RPC prompt message' },
+  images: { honored: true, via: 'RPC prompt images' },
+  cwd: { honored: true, via: 'spawn cwd' },
+  allowedTools: { honored: true, via: '--tools, mapped onto pi tool names through piTools' },
+  restrictNativeDelegation: { honored: true, via: '--exclude-tools subagent (D1)' },
+  bashAllowlist: { honored: true, via: 'no prefix equivalent: bash is dropped from --tools when an allowlist is set (fail closed)' },
+  additionalDirectories: { honored: false, reason: 'pi has no extra-root flag' },
+  env: { honored: true, via: 'merged over the child env through buildChildEnv' },
+  model: { honored: true, via: '--model provider/model' },
+  effort: { honored: true, via: '--thinking, canonical level' },
+  timeoutMs: { honored: true, via: 'wall-clock kill switch on the child process' },
+  sessionId: { honored: true, via: '--session-id, or --session when resume is set' },
+  resume: { honored: true, via: '--session <sessionId> in place of --session-id' },
+};
 export class PiRunner implements AgentRunner {
   readonly backend = 'pi' as const;
+  readonly specSupport = PI_SPEC_SUPPORT;
   private readonly bin: string;
   private readonly timeoutMs: number;
   private lastSession: AgentSession | null = null;

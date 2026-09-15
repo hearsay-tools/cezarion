@@ -9,6 +9,7 @@ import type {
   AgentToolCallRecord,
   ContentBlock,
   SessionOptions,
+  AgentRunSpecSupport,
 } from './agent-runner.ts';
 import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import {
@@ -59,8 +60,33 @@ export interface CodexRunnerOptions {
  * `spec.allowedTools` is ignored. `CEZ_CODEX_NETWORK=0` retains the previous
  * network-blocked `workspace-write` sandbox as an explicit restriction.
  */
+/**
+ * What the codex app-server receives from each `AgentRunSpec` field (#284).
+ * Tool access does not cross this wire: the `auto` preset runs
+ * `danger-full-access` with `approvalPolicy: never` and the app-server has no
+ * per-tool allowlist, so `allowedTools`/`bashAllowlist` are declared dropped
+ * rather than mapped (spec 2026-07-17-permission-modes). Held against the
+ * recorded JSON-RPC by the harness parity matrix.
+ */
+export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
+  systemPrompt: { honored: true, via: 'prepended to the opening turn/start input through prependSystemPrompt' },
+  userPrompt: { honored: true, via: 'turn/start input text' },
+  images: { honored: false, reason: 'the adapter sends text input items only; image blocks are dropped' },
+  cwd: { honored: true, via: 'spawn cwd, and the thread/start / thread/resume cwd' },
+  allowedTools: { honored: false, reason: 'no per-tool allowlist on the app-server; the auto preset is danger-full-access with approvalPolicy never' },
+  restrictNativeDelegation: { honored: true, via: 'thread/start and thread/resume config features.multi_agent=false, features.multi_agent_v2=false (D1)' },
+  bashAllowlist: { honored: false, reason: 'no per-tool allowlist, so no command-prefix restriction either' },
+  additionalDirectories: { honored: false, reason: 'the sandbox is danger-full-access, or workspace-write on cwd; no extra-root mapping' },
+  env: { honored: true, via: 'merged over the child env through buildCodexAppServerEnv' },
+  model: { honored: true, via: 'thread/start and thread/resume model' },
+  effort: { honored: true, via: 'turn/start effort, canonical level' },
+  timeoutMs: { honored: true, via: 'wall-clock kill switch on the child process' },
+  sessionId: { honored: true, via: 'thread/resume threadId when resume is set; a fresh thread/start mints its own thread id' },
+  resume: { honored: true, via: 'thread/resume in place of thread/start' },
+};
 export class CodexAppServerRunner implements AgentRunner {
   readonly backend = 'codex' as const;
+  readonly specSupport = CODEX_SPEC_SUPPORT;
 
   private readonly bin: string;
   private readonly timeoutMs: number;

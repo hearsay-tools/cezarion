@@ -80,6 +80,50 @@ export interface AgentRunSpec {
 }
 
 /**
+ * Every `AgentRunSpec` field, as a runtime list. Typed as a full `Record` over
+ * `keyof AgentRunSpec`, so the interface gaining or losing a field is a compile
+ * error here — and, through `AgentRunSpecSupport`, in every runner (#284).
+ */
+const AGENT_RUN_SPEC_FIELD_SET: Readonly<Record<keyof AgentRunSpec, true>> = {
+  systemPrompt: true,
+  userPrompt: true,
+  images: true,
+  cwd: true,
+  allowedTools: true,
+  restrictNativeDelegation: true,
+  bashAllowlist: true,
+  additionalDirectories: true,
+  env: true,
+  model: true,
+  effort: true,
+  timeoutMs: true,
+  sessionId: true,
+  resume: true,
+};
+export type AgentRunSpecField = keyof AgentRunSpec;
+export const AGENT_RUN_SPEC_FIELDS = Object.keys(AGENT_RUN_SPEC_FIELD_SET) as readonly AgentRunSpecField[];
+
+/**
+ * What one runner does with one `AgentRunSpec` field. `honored` means setting
+ * the field changes what reaches the backend, and `via` names the flag, request
+ * field or process option it becomes. Not honored means the runner drops it,
+ * and `reason` says why the wire cannot carry it or which product decision left
+ * it unmapped — never "not implemented yet".
+ */
+export type SpecFieldSupport =
+  | { readonly honored: true; readonly via: string }
+  | { readonly honored: false; readonly reason: string };
+
+/**
+ * A runner's declaration, one entry per `AgentRunSpec` field. The harness
+ * parity matrix drives each runner against its offline mock and fails any
+ * declaration the recorded boundary contradicts, in either direction
+ * (`harness-parity.test.ts`, #284) — so a caller reading `specSupport` reads
+ * what the backend actually receives, not what the adapter meant to send.
+ */
+export type AgentRunSpecSupport = Readonly<Record<AgentRunSpecField, SpecFieldSupport>>;
+
+/**
  * Backends without a dedicated system-prompt channel (codex app-server,
  * opencode serve) deliver `spec.systemPrompt` as a leading block of the
  * opening user message — the documented per-backend mapping (spec §protocol
@@ -226,6 +270,8 @@ export interface AgentSession {
 
 export interface AgentRunner {
   readonly backend: AgentBackend;
+  /** Which `AgentRunSpec` fields this runner honors, and how — see `AgentRunSpecSupport`. */
+  readonly specSupport: AgentRunSpecSupport;
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult>;
   startSession(
     spec: AgentRunSpec,
