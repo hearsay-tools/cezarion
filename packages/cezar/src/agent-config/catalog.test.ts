@@ -5,6 +5,7 @@ const HOME: AgentHomePaths = {
   claude: '/home/u/.claude',
   codex: '/home/u/.codex',
   opencodeConfig: '/home/u/.config/opencode',
+  pi: '/home/u/.pi/agent',
 };
 
 describe('agent-config catalog', () => {
@@ -21,10 +22,29 @@ describe('agent-config catalog', () => {
     }
   });
 
-  it('<repo>/AGENTS.md is ONE entry read by two runners', () => {
+  it('<repo>/AGENTS.md is ONE entry read by every runner that loads it (Codex, OpenCode, Pi)', () => {
     const agents = CONFIG_FILES.filter((f) => f.label === 'AGENTS.md' && f.scope === 'project');
     expect(agents).toHaveLength(1);
-    expect(agents[0]!.runners).toEqual(['codex', 'opencode']);
+    expect(agents[0]!.runners).toEqual(['codex', 'opencode', 'pi']);
+  });
+
+  it('lists Pi’s documented files: settings at both scopes and the global AGENTS.md — and no MCP file', () => {
+    const pi = CONFIG_FILES.filter((f) => f.runners.includes('pi'));
+    expect(pi.map((f) => f.id)).toEqual(['pi.user.settings', 'pi.project.settings', 'pi.user.memory', 'project.agents']);
+    expect(pi.some((f) => f.holdsMcp || f.kind === 'mcp')).toBe(false);
+    expect(findConfigFile('pi.user.settings')!.resolve('/repo', HOME)).toBe('/home/u/.pi/agent/settings.json');
+    expect(findConfigFile('pi.project.settings')!.resolve('/repo', HOME)).toBe('/repo/.pi/settings.json');
+    expect(findConfigFile('pi.user.memory')!.resolve('/repo', HOME)).toBe('/home/u/.pi/agent/AGENTS.md');
+  });
+
+  it('Pi’s settings expose defaultModel + defaultProvider, project over user', () => {
+    const user = findConfigFile('pi.user.settings')!;
+    const project = findConfigFile('pi.project.settings')!;
+    for (const f of [user, project]) {
+      expect(f.modelKey).toBe('defaultModel');
+      expect(f.modelProviderKey).toBe('defaultProvider');
+    }
+    expect(project.modelPriority!).toBeGreaterThan(user.modelPriority!);
   });
 
   it('resolves repo-relative paths under the repo root', () => {
