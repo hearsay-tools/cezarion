@@ -232,3 +232,23 @@ export function insertTemplate(
     caret: before.length + leading.length + snippet.length,
   }
 }
+
+export function resolveInsertCaret({
+  prompt,
+  base,
+  selectionStart,
+  focused,
+  remembered,
+}: {
+  prompt: string
+  base: string
+  selectionStart: number | null
+  focused: boolean
+  remembered: number | null
+}): number {
+  if (prompt === base) return prompt.length
+  if (focused && selectionStart != null) return selectionStart
+  if (selectionStart != null && selectionStart > 0) return selectionStart
+  if (remembered != null) return remembered
+  return selectionStart ?? prompt.length
+}
