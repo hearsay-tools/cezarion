@@ -119,10 +119,57 @@ describe('AgentConfigSection', () => {
     renderSection()
     await waitFor(() => expect(agentTab('claude')).toBeTruthy())
     expect(agentTab('claude').getAttribute('data-selected')).toBe('true')
-    // health only reports claude available — the other two carry the badge
+    // health only reports claude available — the other three carry the badge
     await waitFor(() => expect(agentTab('codex').textContent).toContain('not installed'))
     expect(agentTab('opencode').textContent).toContain('not installed')
+    expect(agentTab('pi').textContent).toContain('not installed')
     expect(agentTab('claude').textContent).not.toContain('not installed')
+  })
+
+  it('every agent tab carries a 44px minimum width — a two-letter "Pi" label must still be a full target', async () => {
+    // Height is the settings stylesheet's job (44px at the mobile breakpoint); jsdom measures
+    // nothing, so the real 360×640 box is pinned in e2e/settings-agent-config.e2e.ts.
+    serve({ editable: true, files: [], userMcp: null })
+    renderSection()
+    await waitFor(() => expect(agentTab('pi')).toBeTruthy())
+    for (const tab of document.querySelectorAll('[data-slot="agent-config-agent"]')) {
+      expect(tab.className).toMatch(/\bmin-w-11\b/)
+    }
+  })
+
+  it('Pi’s pane lists its files and states why the MCP group is empty and what to try', async () => {
+    serve({
+      editable: true,
+      files: [
+        fileOf({ id: 'pi.user.settings', label: '~/.pi/agent/settings.json', runners: ['pi'], scope: 'user', tracked: 'outside-repo' }),
+        fileOf({ id: 'pi.project.settings', label: '.pi/settings.json', runners: ['pi'] }),
+        fileOf({ id: 'project.agents', label: 'AGENTS.md', runners: ['codex', 'opencode', 'pi'], kind: 'memory', format: 'markdown' }),
+      ],
+      userMcp: null,
+    })
+    renderSection()
+    await waitFor(() => expect(agentTab('pi')).toBeTruthy())
+    fireEvent.click(agentTab('pi'))
+    await waitFor(() => expect(screen.getByText('.pi/settings.json')).toBeTruthy())
+    expect(screen.getByText('~/.pi/agent/settings.json')).toBeTruthy()
+    expect(screen.getByText('AGENTS.md')).toBeTruthy()
+    const mcpGroup = document.querySelector('[data-slot="agent-config-group"][data-group="mcp"][data-agent="pi"]')!
+    expect(mcpGroup).toBeTruthy()
+    const empty = mcpGroup.querySelector('[data-slot="agent-config-group-empty"]')!
+    expect(empty.textContent).toMatch(/No MCP/)
+    expect(empty.textContent).toMatch(/extension/i)
+    expect(mcpGroup.querySelectorAll('[data-slot="agent-config-file"]').length).toBe(0)
+  })
+
+  it('an empty group without empty-state copy still renders nothing (Claude’s MCP stays as it was)', async () => {
+    serve({
+      editable: true,
+      files: [fileOf({ id: 'claude.project.settings', label: '.claude/settings.json' })],
+      userMcp: null,
+    })
+    renderSection()
+    await waitFor(() => expect(screen.getByText('.claude/settings.json')).toBeTruthy())
+    expect(document.querySelector('[data-slot="agent-config-group"][data-group="mcp"][data-agent="claude"]')).toBeNull()
   })
 
   it('shows only the selected agent’s files and swaps panes on switch', async () => {
