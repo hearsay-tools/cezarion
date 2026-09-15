@@ -1,7 +1,7 @@
 import './github-layout.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { EyeIcon, PlayIcon,  } from 'lucide-react'
-import { CheckIcon, ChevronDownIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
+import { CheckIcon, ChevronDownIcon, SparklesIcon, UserRoundIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Link } from '@/lib/project-router'
 
@@ -9,8 +9,8 @@ import { createRun, putUiState } from '@/api/client'
 import { queryKeys, useUiState } from '@/api/queries'
 import type { GithubItem, Skill, WorkflowDef } from '@open-mercato/cezar-api-client'
 import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client'
-import { EnginePills, engineRunBody, useResolvedEngine, type EnginePick } from '@/components/engine-pills'
-import { chipClass } from '@/components/picker-pill'
+import { EnginePills, engineRunBody, useResolvedEngine, type EnginePick, type ResolvedEngine } from '@/components/engine-pills'
+import { PickerPill, chipClass } from '@/components/picker-pill'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -307,10 +307,11 @@ export function HandToAgent({
         />
         {resolved.runners.length <= 1 && !resolved.accounts.some(a => a.provider === resolved.runner && a.id !== DEFAULT_AGENT_ACCOUNT_ID) ? <div className="gh-fixed-runner"><span>Runner</span>{resolved.runner}</div> : null}
         </div>
-        <label className="gh-field"><span>Account</span><select aria-label="Account" value={resolved.account ?? resolved.repoAccount?.[resolved.runner] ?? DEFAULT_AGENT_ACCOUNT_ID} disabled={start.isPending || !resolved.canRun} onChange={event => onEngineChange({ ...engine, account: event.target.value })}>
-          {!resolved.accounts.some(a => a.provider === resolved.runner && a.id === DEFAULT_AGENT_ACCOUNT_ID) ? <option value={DEFAULT_AGENT_ACCOUNT_ID}>Default</option> : null}
-          {resolved.accounts.filter(a => a.provider === resolved.runner).map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
-        </select></label>
+        <div className="gh-field"><span>Account</span><AccountPicker
+          resolved={resolved}
+          disabled={start.isPending || !resolved.canRun}
+          onPick={(account) => onEngineChange({ ...engine, account })}
+        /></div>
         {!resolved.providerPending && !resolved.canRun ? (
           <span
             data-slot="gh-provider-gate"
@@ -401,7 +402,7 @@ function WorkflowPicker({
           className={cn(chipClass, value && 'border-foreground/60 font-mono text-[11.5px] font-semibold text-foreground')}
         >
           <WorkflowIcon size={16} aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
-          <span className="max-w-44 truncate">{value ?? 'workflow'}</span>
+          <span className="min-w-0 max-w-44 truncate">{value ?? 'workflow'}</span>
           <ChevronDownIcon size={16} aria-hidden="true" className="size-2.5 shrink-0 text-soft-foreground" />
         </button>
       </PopoverTrigger>
@@ -447,6 +448,49 @@ function WorkflowPicker({
         </Command>
       </PopoverContent>
     </Popover>
+  )
+}
+
+/**
+ * The per-task agent account (#262): the panel's pill grammar — icon, value, right-side
+ * chevron, the Model/Runner/Effort chrome — replacing the bare native select. The display
+ * follows the repo's selection until overridden (the old select's resolution, verbatim) and
+ * the run body still carries the override as `agentProfile` via `engineRunBody`.
+ */
+function AccountPicker({
+  resolved,
+  disabled,
+  onPick,
+}: {
+  resolved: ResolvedEngine
+  disabled: boolean
+  onPick: (account: string) => void
+}) {
+  const logins = resolved.accounts.filter((a) => a.provider === resolved.runner)
+  // The explicit Default row exists only when the discovered account is not among the logins —
+  // otherwise "Default" IS a login row, and naming it twice would be two ways to say one thing.
+  const options = [
+    ...(logins.some((a) => a.id === DEFAULT_AGENT_ACCOUNT_ID)
+      ? []
+      : [{ value: DEFAULT_AGENT_ACCOUNT_ID, label: 'Default' }]),
+    ...logins.map((a) => ({ value: a.id, label: a.label, desc: a.configDir })),
+  ]
+  // What is in force right now: the override, else the repo's selection, else the discovered
+  // account. A value matching no row (the repo names a since-deleted login) displays as
+  // Default — also what the server resolves such a selection to — while the wire keeps the
+  // override rules of `useResolvedEngine`.
+  const value = resolved.account ?? resolved.repoAccount?.[resolved.runner] ?? DEFAULT_AGENT_ACCOUNT_ID
+  return (
+    <PickerPill
+      icon={<UserRoundIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+      slot="account-pill"
+      ariaLabel="Account"
+      label={options.find((option) => option.value === value)?.label ?? 'Default'}
+      value={value}
+      options={options}
+      disabled={disabled}
+      onPick={onPick}
+    />
   )
 }
 
