@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { RunnerModelCatalog, type ModelOption } from './runner-model-catalog.ts';
+
+const UNAVAILABLE_REASON_NAME: Record<RunnerId, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  pi: 'Pi',
+};
 
 const models: ModelOption[] = [
   {
@@ -97,6 +105,19 @@ describe('RunnerModelCatalog', () => {
       source: 'unavailable',
       stale: false,
       reason: 'Pi model discovery is temporarily unavailable',
+    });
+  });
+
+  it.each(RUNNER_IDS)('names %s when its discovery is unavailable', async (runner) => {
+    const catalog = new RunnerModelCatalog({
+      adapters: { [runner]: { discover: async () => { throw new Error('secret'); } } },
+    });
+    await expect(catalog.get(runner)).resolves.toEqual({
+      runner,
+      models: [],
+      source: 'unavailable',
+      stale: false,
+      reason: `${UNAVAILABLE_REASON_NAME[runner]} model discovery is temporarily unavailable`,
     });
   });
 
