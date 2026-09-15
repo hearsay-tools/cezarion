@@ -31,6 +31,7 @@ import {
   insertTemplate,
   normalizePromptTemplates,
   resolveAutoApply,
+  resolveInsertCaret,
 } from '@/lib/prompt-templates'
 import {
   bumpSkillUsage,
@@ -116,6 +117,7 @@ export function HandToAgent({
   const [prompt, setPrompt] = useState(() => readFollowupPrompt(item.url) || base)
   const resolved = useResolvedEngine(engine)
   const promptRef = useRef<HTMLTextAreaElement>(null)
+  const caretRef = useRef<number | null>(null)
   useEffect(() => {
     // An untouched box stores NOTHING — persisting the pre-fill would leave a draft behind for
     // every GitHub item ever opened, which is exactly what the store's "no trace" rule avoids.
@@ -130,13 +132,16 @@ export function HandToAgent({
   )
   const insertPromptTemplate = (snippet: string) => {
     const el = promptRef.current
-    // An UNTOUCHED box reports `selectionStart === 0`, which since #524's pre-fill would splice
-    // the template ABOVE the item reference — so an untouched box appends instead. Once the user
-    // has edited it the caret is theirs and is honoured as before (it survives the blur onto the
-    // template menu), keeping `insertTemplate`'s mid-text case alive.
-    const caret = prompt === base ? prompt.length : (el?.selectionStart ?? prompt.length)
+    const caret = resolveInsertCaret({
+      prompt,
+      base,
+      selectionStart: el?.selectionStart ?? null,
+      focused: document.activeElement === el,
+      remembered: caretRef.current,
+    })
     const result = insertTemplate(prompt, caret, snippet)
     setPrompt(result.text)
+    caretRef.current = result.caret
     // Restore focus + caret after the state update repaints the textarea. The menu's Popover
     // suppresses its own focus-return (`onCloseAutoFocus`), so this is the last word on focus.
     requestAnimationFrame(() => {
@@ -251,6 +256,9 @@ export function HandToAgent({
         aria-keyshortcuts="Control+Enter Meta+Enter"
         value={prompt}
         onChange={(event) => setPrompt(event.target.value)}
+        onSelect={(event) => {
+          caretRef.current = event.currentTarget.selectionStart
+        }}
         onKeyDown={submitShortcut}
         placeholder={`Instructions for the agent… (#${item.number} and its link are always sent)`}
         className="mt-3 min-h-20 text-[13px]"

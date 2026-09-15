@@ -2412,6 +2412,30 @@ describe('the follow-up prompt template menu (#413)', () => {
     )
   })
 
+  it('a second insert still stacks when the menu blur reports selectionStart 0 (#221)', async () => {
+    stubFetch()
+    await openDetail()
+
+    await chooseTemplate('add-tests')
+    await waitFor(() =>
+      expect(promptValue()).toBe(baseWith('Also add or update tests covering this change.')),
+    )
+
+    const field = promptField()
+    field.blur()
+    field.setSelectionRange(0, 0)
+    expect(field.selectionStart).toBe(0)
+
+    await chooseTemplate('update-docs')
+    await waitFor(() =>
+      expect(promptValue()).toBe(
+        baseWith(
+          'Also add or update tests covering this change.\n\nAlso update any relevant documentation or comments.',
+        ),
+      ),
+    )
+  })
+
   it('an EDITED box honours the caret — a template lands mid-text, not appended (#524)', async () => {
     // The pre-fill (#524) means an untouched box must append rather than splice above the
     // reference, but that must not cost `insertTemplate`'s documented mid-text case: the user
