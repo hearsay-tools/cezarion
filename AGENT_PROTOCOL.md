@@ -734,7 +734,51 @@ To be first-class:
    the existing inconsistencies (opencode drops a bare model silently) — do not
    reproduce a silent-drop. A backend with no default provider gets no entry in
    `BACKEND_MODEL_MAP`'s default column, so a bare id fails loud.
-11. **Credentials** — one entry in `BACKEND_ALLOW_PREFIXES` (`agent-env.ts`):
+11. **Host model discovery** — the picker lists the models the user's own CLI can run
+   today, never a preset table. Discovery landed one runner at a time after each had
+   shipped without it (#1 pi, #18 invalidation after login, #74 codex failure reasons,
+   #89 claude), which is why it is a checklist step and not a follow-up. Nothing derives
+   it from `RUNNER_IDS`: `modelDiscoveryRunnerSchema` is a hand-kept enum and
+   `RunnerModelCatalog` takes a `Partial` adapter map, so a runner that skips this step
+   fails nowhere — `GET /models` answers `unavailable` and the picker shows presets
+   again. Seven pieces, in the same PR as the runner:
+   - **Adapter** — a bounded `packages/cezar/src/core/<runner>-model-catalog.ts`
+     exporting `discover<Runner>Models({ cwd })`. Spawn the CLI's own model-listing
+     surface under the runner's sanitized child env (`pi --list-models`, codex
+     `model/list`, claude stream-json `list_models`, opencode `models`), cap it (the pi
+     precedent is 10 s, 512 KB of stdout, 500 models), and **throw on every failure** —
+     absent CLI, too old, not logged in, malformed, timeout — so the catalog degrades to
+     `unavailable` and boot never fails. Never read the CLI's config or cache files, and
+     never run a model turn to discover.
+   - **Contract enum** — add the id to `modelDiscoveryRunnerSchema`
+     (`packages/contract/src/workspace.ts`); `runnerDiscoversModels` and the `/models`
+     query validator both read it.
+   - **Catalog registration** — add the adapter to `hostModelCatalogAdapters`
+     (`packages/cezar/src/core/host-model-catalog.ts`), the map `server.ts` hands to
+     `RunnerModelCatalog`. It is a full `Record` over the contract enum, so the previous
+     bullet without this one is a typecheck error, not a silent `unavailable`.
+   - **`GET /api/v1/models?runner=<id>`** — answers `{ runner, models, source:
+     live | cache | unavailable, stale, reason? }` with no route change once the two
+     bullets above are in; add the runner to `models-api.test.ts`.
+   - **Picker** — `packages/web/src/routes/new-task-form.ts`: `mergeModels` lists the
+     live catalog and keeps only the first preset as the fallback alias when
+     `runnerDiscoversModels` holds, and `DISCOVERY_RUNNER_LABEL` needs the runner's
+     display name for the "cached" / "unavailable" hint.
+   - **Sanitized `unavailableReason`** — a `reason` is a stable one-line category
+     (spec `.ai/specs/2026-07-21-codex-latest-model-discovery.md`, #74): never raw
+     stderr, a command line, env or config content. A stale cache is served with the
+     reason attached, not dropped.
+   - **Invalidation** — `RunnerModelCatalog.invalidate(runner)` after provider
+     Connect / Check / refresh (`invalidateHostModels` in `server.ts`, #18), so an
+     `unavailable` answer is never cached across a login. Retry is the same call.
+
+   The pin is `packages/cezar/src/core/model-discovery-guard.test.ts`: every `RUNNER_IDS`
+   member must be in the contract enum, ship the adapter module and be registered on the
+   host catalog, unless `MODEL_DISCOVERY_EXEMPTIONS` names it with the wire reason (a CLI
+   with no model-listing surface at all) — never "not implemented yet". Adapter behaviour
+   stays covered by `<runner>-model-catalog.test.ts` and `models-api.test.ts`; the §6/§7
+   parity matrices deliberately carry no discovery row.
+12. **Credentials** — one entry in `BACKEND_ALLOW_PREFIXES` (`agent-env.ts`):
    `buildChildEnv` is least-privilege per backend, so a multi-provider runner
    must receive credentials for every provider its own model ids can name
    without widening other backends.
