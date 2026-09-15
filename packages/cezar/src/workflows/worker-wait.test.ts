@@ -75,6 +75,23 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
   });
 
+  it('readiness fails rather than collects success for a worker with a rejected ASK marker', async () => {
+    const p = await parent();
+    const w = await worker(p.id);
+    const wait = register(p.id, [w.id]);
+    manager.enqueueOwnedRun(w.id);
+    await until(() => store.getRun(w.id)?.status === 'waiting');
+    store.updateRun(w.id, { invalidAsk: true });
+    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(w.id);
+    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
+    if (!idleTimer?._onTimeout) throw new Error('waiting worker did not arm an idle timer');
+    idleTimer._onTimeout();
+
+    await until(() => store.getRun(w.id)?.status === 'failed');
+    await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);
+    expect(store.getRun(w.id)?.error).toBe('invalid structured question');
+  });
+
   it('readiness public cancellation does not wake until private completion is durable', async () => {
     const p = await parent(); const w = await worker(p.id);
     const generation = store.commitWorkerExecutionStart(w.id);
