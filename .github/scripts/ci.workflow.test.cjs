@@ -44,6 +44,17 @@ test('the required aggregate depends on the cockpit browser job', () => {
   assert.match(gate, /needs\['cockpit-browser'\]\.result|needs\.cockpit-browser\.result/);
 });
 
+test('CI runs on push to main and still does not publish snapshots from main', () => {
+  const ci = workflow();
+  assert.ok(ci.on.push.branches.includes('main'));
+  assert.ok(ci.on.push.branches.includes('develop'));
+  assert.equal(ci.concurrency.group, 'ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}');
+  assert.equal(ci.concurrency['cancel-in-progress'], true);
+  const publishIf = ci.jobs['publish-snapshot'].if;
+  assert.match(publishIf, /github\.ref == 'refs\/heads\/develop'/);
+  assert.doesNotMatch(publishIf, /heads\/main/);
+});
+
 test('verification bindings name packaged and cockpit E2E separately', () => {
   const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.ai/agentic.config.json'), 'utf8'));
   const commands = config.validation.commands;
