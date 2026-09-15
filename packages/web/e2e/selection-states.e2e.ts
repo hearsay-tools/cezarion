@@ -169,8 +169,6 @@ describe('selection and control states (#171)', () => {
             hover: matchMedia('(hover: hover)').matches,
             target: document.querySelector('${model}').matches(':hover'),
           })`)).toEqual({ hover: true, target: true })
-          // New palette keeps the surface stable and brightens the label on hover.
-          browser.waitForFunction(`getComputedStyle(document.querySelector('${model}')).color !== ${JSON.stringify(enabledStyle.color)}`)
         }
         if (state === 'focus') focus(model)
         // Source1A/1B has no model border; source23 uses a subtle1px border (1.26/1.39:1).

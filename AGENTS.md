@@ -151,9 +151,10 @@ npm test            # vitest — server + cockpit unit suites
 npm run test:unit   # node:test — fast core-module coverage (packages/cezar/test/unit/)
 npm run build       # tsc → dist/, vite → packages/cezar/web/dist/, then the check:pack tarball gate
 npm run test:package # pack/install the release tarball and exercise the built CLI (packages/cezar/test/e2e/)
+npm run test:e2e    # real-browser cockpit suite (agent-browser); CI rejects skipped
 ```
 
-`npm test` and `npm run test:unit` are the fast unit gate: no server, no browser. They must stay that way. `npm run test:package` needs a completed `npm run build` (it packs the tarball).
+`npm test` and `npm run test:unit` are the fast unit gate: no server, no browser. They must stay that way. `npm run test:package` needs a completed `npm run build` (it packs the tarball). Pull request CI runs packaged CLI E2E and cockpit browser E2E as separate checks; the required aggregate fails if the cockpit suite is skipped or failed.
 
 **Run vitest through npm, never `npx vitest`.** It is a devDependency of this repo, so `npm test`
 uses the installed, version-pinned binary; `npx` will happily reach past it and fetch a different
@@ -166,8 +167,8 @@ npm test -- --testTimeout=30000 path/to/one.test.ts
 npm test -- -t "the name of one test"
 ```
 
-The UI smoke suite is a **separate** command — it boots the real app and drives it in a real
-Chrome through the `agent-browser` provider (`.ai/browsers/agent-browser.md`):
+Cockpit browser E2E is a separate command from packaged CLI E2E — it boots the real app and
+drives it in a real Chrome through the `agent-browser` provider (`.ai/browsers/agent-browser.md`):
 
 ```bash
 npm run test:e2e    # .ai/scripts/e2e.sh → test-env-up.sh + vitest (packages/web/e2e/)
@@ -176,13 +177,16 @@ npm run test:e2e    # .ai/scripts/e2e.sh → test-env-up.sh + vitest (packages/w
 It boots the app on a free port with `CEZ_DRY_RUN=1` (agent CLIs mocked — no login, no
 network), reuses an already-healthy instance instead of double-booting, and writes
 `.ai/qa/test-env.json` so QA skills attach to the same instance. Stop it with
-`.ai/scripts/test-env-down.sh`. Exit contract:
+`.ai/scripts/test-env-down.sh`. Local exit contract:
 
 | Exit     | Marker                    | Meaning                                                                                                           |
 | -------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | 0        | `TEST_E2E_STATUS=passed`  | every spec passed                                                                                                 |
 | 0        | `TEST_E2E_STATUS=skipped` | agent-browser could not be provisioned (no network / unsupported platform); prints a loud banner — **not** a pass |
 | non-zero | `TEST_E2E_STATUS=failed`  | a spec failed, or the env could not boot                                                                          |
+
+Pull request CI pipes that log through `.github/scripts/require-e2e-passed.cjs` and fails
+on skipped or failed.
 
 `CEZ_DRY_RUN=1 npm run dev` still exercises the whole cockpit offline for manual verification.
 
@@ -208,7 +212,7 @@ row's value when the thing it names changes, rather than its label.
 | CI provider | GitHub Actions |
 | Issue tracker | GitHub Issues |
 | Stack | TypeScript (Node ≥20), npm workspaces; Hono + Zod server; React 19 + Vite + Tailwind v4 cockpit |
-| Verification | `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package` |
+| Verification | `npm run typecheck`, `npm test`, `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e` |
 | Automated reviewer | `AUTOMATED_REVIEWER=codex` |
 | Automated review rounds | `AUTOMATED_REVIEW_ROUNDS` (default 3) |
 | Commit convention | Conventional Commits |

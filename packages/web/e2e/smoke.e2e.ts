@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { readSharedProjects, writeSharedProjects } from './workspace-registry'
 
 /**
  * R1 smoke test — the real app, a real Chrome, through the agent-browser provider.
@@ -44,6 +45,7 @@ beforeAll(async () => {
   followupsAvailable = health.capabilities.followups
   automationsAvailable = health.capabilities.automations
   bootProject = await bootProjectId(baseUrl)
+  writeSharedProjects(readSharedProjects().filter((project) => project.id === bootProject))
 })
 
 /** The nav the shell renders — GitHub, Inbox and Automations all gate on live health
@@ -147,7 +149,8 @@ describe('cockpit app shell', () => {
 
     expect(browser.isVisible('[data-slot="sidebar"]')).toBe(true)
     expect(browser.isVisible('[data-slot="brand-wordmark"]')).toBe(true)
-    expect(browser.text('[data-slot="sidebar"] nav[aria-label="Main"]')).toContain('Tasks')
+    browser.waitForFunction(`document.querySelector('[data-slot="project-group-body"] nav, [data-slot="single-project-navigation"] nav[aria-label="Main"]') !== null`)
+    expect(browser.evaluate(`(document.querySelector('[data-slot="project-group-body"] nav') || document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]')).textContent`)).toContain('Tasks')
 
     // The GitHub item waits on the health answer — settle it before sampling the nav.
     if (forgeAvailable) {
@@ -156,7 +159,7 @@ describe('cockpit app shell', () => {
     // Read the label without the inbox badge — a populated shared env legitimately has todos,
     // and the badge digit must not leak into the nav-label assertion.
     const labels = browser.evaluate(
-      `Array.from(document.querySelectorAll('[data-slot="sidebar"] nav a')).map(a => {
+      `Array.from((document.querySelector('[data-slot="project-group-body"] nav') || document.querySelector('[data-slot="sidebar"] nav[aria-label="Main"]')).querySelectorAll('a')).map(a => {
         const clone = a.cloneNode(true)
         clone.querySelector('[data-slot="nav-badge"], [data-slot="nav-unread-badge"]')?.remove()
         return clone.textContent.trim()
@@ -265,15 +268,17 @@ describe('cockpit app shell', () => {
     expect(health.repo).not.toBeNull()
 
     browser.goto(baseUrl + scoped('/'))
-    // The chips are async — they appear only once the health query answers.
-    browser.waitForFunction(`document.querySelector('[data-slot="repo-chip"]') !== null`)
-
-    // Compared against what the server says right now, not a hardcoded repo name: this asserts
-    // the client → query → chip path really carries live API data, and stays true wherever the
-    // suite runs (any checkout, any branch).
+    browser.waitForFunction(`document.querySelector('[data-slot="project-groups"], [data-slot="single-project-navigation"]') !== null`)
     const repoName = health.repoRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
-    expect(browser.text('[data-slot="repo-chip"]')).toBe(repoName)
-    expect(browser.evaluate(`document.querySelector('[data-slot="repo-chip"]').nextElementSibling.textContent`)).toBe(health.repo?.branch)
+    const grouped = browser.count('[data-slot="project-groups"]') > 0
+    if (grouped) {
+      browser.waitForFunction(`document.querySelector('[data-slot="project-group"]') !== null`)
+      expect(browser.evaluate(`document.querySelector('[data-slot="project-group"]')?.dataset.project`)).toBeTruthy()
+    } else {
+      browser.waitForFunction(`document.querySelector('[data-slot="repo-chip"]') !== null`)
+      expect(browser.text('[data-slot="repo-chip"]')).toBe(repoName)
+      expect(browser.evaluate(`document.querySelector('[data-slot="repo-chip"]').nextElementSibling.textContent`)).toBe(health.repo?.branch)
+    }
     expect(browser.text('[data-slot="version-chip"]')).toBe(`v${health.version}`)
 
     // Real values, not a placeholder that happens to match itself.
