@@ -83,12 +83,14 @@ test('duplicate completion events skip an in-flight and then completed review', 
 test('docs-only review with a skipped wait gate is not recovered', async () => {
   const h = harness();
   Object.assign(h.state.review, { status: 'completed', conclusion: 'failure' });
-  Object.assign(h.state.reviewJobs.find(j => j.name === 'wait-for-ci'), { status: 'completed', conclusion: 'skipped' });
+  const waitGate = h.state.reviewJobs.find(j => j.name === 'wait-for-ci');
+  Object.assign(waitGate, { status: 'completed', conclusion: 'skipped' });
   Object.assign(h.state.reviewJobs.find(j => j.name === 'Automated Code Review'), { status: 'completed', conclusion: 'success' });
   const result = await recover(h);
   assert.equal(result.recovered, false);
   assert.equal(h.writes.length, 0);
   assert.ok(h.calls.some(([route, args]) => route.endsWith('/attempts/{attempt_number}/jobs') && args.run_id === 50));
+  assert.equal(waitGate.conclusion, 'skipped');
   assert.match(h.logs.join('\n'), /not blocked solely at wait-for-ci/);
 });
 
@@ -101,11 +103,14 @@ test('completed successful review is not recovered', async () => {
   Object.assign(h.state.reviewJobs.find(j => j.name === 'claude-review'), { status: 'completed', conclusion: 'skipped' });
   Object.assign(h.state.reviewJobs.find(j => j.name === 'codex-review'), { status: 'completed', conclusion: 'skipped' });
   Object.assign(h.state.reviewJobs.find(j => j.name === 'post-review'), { status: 'completed', conclusion: 'skipped' });
+  const waitGate = h.state.reviewJobs.find(j => j.name === 'wait-for-ci');
+  assert.equal(waitGate.conclusion, 'skipped');
   Object.assign(h.state.reviewJobs.find(j => j.name === 'Automated Code Review'), { status: 'completed', conclusion: 'success' });
   h.options.event = { workflow_run: structuredClone(h.state.review) };
   const result = await recover(h);
   assert.equal(result.recovered, false);
   assert.equal(h.writes.length, 0);
+  assert.equal(h.calls.filter(([route, args]) => route.endsWith('/attempts/{attempt_number}/jobs') && args.run_id === 50).length, 0);
   assert.match(h.logs.join('\n'), /review already completed on this head/);
 });
 
