@@ -25,10 +25,11 @@ function runShell(command, env = {}) {
   });
 }
 
-function runClassification({ apiOutput, apiFails = false, classifierFails = false }) {
+function runClassification({ apiOutput, apiFails = false, classifierFails = false, eventName = 'pull_request' }) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cezar-ci-workflow-'));
   const outputPath = path.join(tempDir, 'github-output');
   const ghPath = path.join(tempDir, 'gh');
+  const apiCallMarker = path.join(tempDir, 'gh-called');
   const classifierPath = path.join(tempDir, '.github', 'scripts', 'change-surface.cjs');
   fs.mkdirSync(path.dirname(classifierPath), { recursive: true });
   fs.writeFileSync(classifierPath, classifierFails
@@ -36,22 +37,23 @@ function runClassification({ apiOutput, apiFails = false, classifierFails = fals
     : fs.readFileSync(path.join(repoRoot, '.github', 'scripts', 'change-surface.cjs')));
   fs.writeFileSync(ghPath, apiFails
     ? '#!/bin/sh\nexit 1\n'
-    : `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(apiOutput)}\n`);
+    : `#!/bin/sh\ntouch "$GH_CALL_MARKER"\nprintf '%s\\n' ${(Array.isArray(apiOutput) ? apiOutput : [apiOutput]).map((record) => JSON.stringify(record)).join(' ')}\n`);
   fs.chmodSync(ghPath, 0o755);
 
   try {
     const step = workflow().jobs['change-surface'].steps.find((item) => item.id === 'classify');
     assert.ok(step, 'expected a change-surface classification step');
     const result = runShell(step.run, {
-      EVENT_NAME: 'pull_request',
+      EVENT_NAME: eventName,
       GITHUB_OUTPUT: outputPath,
       GITHUB_REPOSITORY: 'wjarka/cezar',
       GITHUB_WORKSPACE: tempDir,
+      GH_CALL_MARKER: apiCallMarker,
       PATH: `${tempDir}:${process.env.PATH}`,
       PR_NUMBER: '42',
     });
     const output = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '';
-    return { result, output };
+    return { result, output, apiCalled: fs.existsSync(apiCallMarker) };
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -117,7 +119,7 @@ test('change-surface fails closed when the API or classifier fails', () => {
   assert.equal(docsOnly.result.status, 0, docsOnly.result.stderr);
   assert.equal(docsOnly.output, 'surface=docs-only\n');
 
-  const mixed = runClassification({ apiOutput: '"README.md"\n"src/app.js"' });
+  const mixed = runClassification({ apiOutput: ['"README.md"', '"src/app.js"'] });
   assert.equal(mixed.result.status, 0, mixed.result.stderr);
   assert.equal(mixed.output, 'surface=full-matrix\n');
 
@@ -128,6 +130,11 @@ test('change-surface fails closed when the API or classifier fails', () => {
   const classifierFailure = runClassification({ apiOutput: '"README.md"', classifierFails: true });
   assert.equal(classifierFailure.result.status, 0, classifierFailure.result.stderr);
   assert.equal(classifierFailure.output, 'surface=full-matrix\n');
+
+  const push = runClassification({ apiOutput: ['"README.md"'], eventName: 'push' });
+  assert.equal(push.result.status, 0, push.result.stderr);
+  assert.equal(push.output, 'surface=full-matrix\n');
+  assert.equal(push.apiCalled, false);
 });
 
 test('classification is not a path filter and build-and-package stays unconditional', () => {
