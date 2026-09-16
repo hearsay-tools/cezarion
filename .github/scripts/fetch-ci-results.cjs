@@ -8,8 +8,10 @@ const VERIFICATION_JOB = 'Unit, build, E2E, and package';
 
 function pickPullRequestRun(runs, headSha) {
   const candidates = (runs || []).filter((run) => ['pull_request', 'pull_request_target'].includes(run.event) &&
-    (headSha === undefined || run.headSha === headSha) &&
-    run.conclusion !== 'cancelled');
+    (headSha === undefined || run.headSha === headSha))
+    .sort((a, b) => b.databaseId - a.databaseId);
+  // Once target CI exists it remains authoritative, including failure/cancellation.
+  // Legacy fallback supports bases not yet migrated; never fall back past a target.
   return candidates.find((run) => run.event === 'pull_request_target') || candidates[0] || null;
 }
 
@@ -214,6 +216,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  pickPullRequestRun,
   parseArgs,
   resolveCiResults,
   renderCiResults,

@@ -30,10 +30,14 @@ two authentication methods (#33):
   single green summary (#62). The publish job authenticates with **npm trusted
   publishing** (OIDC): no `NPM_TOKEN` in the job, provenance attached
   automatically.
-- **Previews** are **CI-driven**: the `publish-snapshot` job in
-  [`ci.yml`](../.github/workflows/ci.yml) publishes a snapshot of every package
-  after a fully green `verify` run — on `develop` pushes and same-repo PRs only.
-  Authenticated with `NPM_TOKEN`.
+- **Previews** are **CI-driven**: `develop` pushes publish through the
+  `publish-snapshot` job in [`ci.yml`](../.github/workflows/ci.yml).
+  Same-repository PRs prepare archives after verification, without credentials.
+  [`publish-pr-snapshot.yml`](../.github/workflows/publish-pr-snapshot.yml)
+  then validates the current PR head, successful CI attempt, artifact identity,
+  package names, versions, and exact sibling pins before publishing with
+  `NPM_TOKEN`. Its trusted publisher never builds or executes PR code; validated archive files are repacked
+  before npm receives them with lifecycle scripts disabled. Forks never publish.
 - **Nightlies** are **clock-driven**: [`nightly.yml`](../.github/workflows/nightly.yml)
   cuts `main`'s tip every night under the `nightly` dist-tag, so `npx cezarion@nightly`
   is always the trunk. Also runnable on demand from the Actions tab.
@@ -42,7 +46,8 @@ two authentication methods (#33):
 | Channel | Workflow | Authentication | Provenance |
 |---|---|---|---|
 | `latest` (stable) | `release.yml` (`production`) | OIDC trusted publisher — no npm credential in the job | automatic (do not pass `--provenance`) |
-| `pr-<N>`, `develop` | `ci.yml` `publish-snapshot` | `NPM_TOKEN` | `--provenance` |
+| `pr-<N>` | `publish-pr-snapshot.yml` | `NPM_TOKEN` | `--provenance` |
+| `develop` | `ci.yml` `publish-snapshot` | `NPM_TOKEN` | `--provenance` |
 | `nightly` | `nightly.yml` | `NPM_TOKEN` | `--provenance` |
 | drop `pr-<N>` dist-tag | `npm-preview-cleanup.yml` | `NPM_TOKEN` (`npm dist-tag rm`; OIDC does not cover this command) | n/a |
 
@@ -229,7 +234,9 @@ prereleases are inert).
 | `packages/cezar/src/release/manifests.ts` | the shared stamper: which manifests exist, and how each pins the next (unit-tested) |
 | `scripts/release.mjs` | stable orchestrator: stamps manifests, `npm publish --tag latest` via OIDC, no `--provenance` (e2e-tested) |
 | `scripts/release-snapshot.mjs` | snapshot orchestrator: stamps manifests, `npm publish --tag <channel> --provenance` with `NPM_TOKEN`, emits result JSON (`--dry-run` supported; e2e-tested) |
-| `ci.yml` → `publish-snapshot` | gate (`needs: verify`), same-repo guard, provenance permissions, sticky PR comment, step summary |
+| `ci.yml` → `publish-snapshot` | develop push gate (`needs: verify`) and provenance permissions |
+| `ci.yml` → `prepare-pr-snapshot` | same-repo PR archives after verification, without publishing credentials |
+| `publish-pr-snapshot.yml` + `.github/scripts/pr-snapshot.cjs` | trusted artifact validation and publishing, current-head/attempt checks, sticky PR comment and summary |
 | `nightly.yml` | the 03:17 UTC cron + manual dispatch: main-only guard, "did main move?" check, full verify, then the same orchestrator with `CEZ_RELEASE_CHANNEL=nightly` |
 | `npm-preview-cleanup.yml` | dist-tag removal on PR close |
 

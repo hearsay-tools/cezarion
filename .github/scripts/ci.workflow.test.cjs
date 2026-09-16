@@ -18,7 +18,7 @@ function stepsText(job) {
 }
 
 function runShell(command, env = {}) {
-  return spawnSync('bash', ['-c', command], {
+  return spawnSync('bash', ['-e', '-c', command], {
     cwd: repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...env },
@@ -101,11 +101,7 @@ test('the required aggregate depends on the cockpit browser job', () => {
 test('CI classifies pull request changes from a trusted base checkout', () => {
   const ci = workflow();
   assert.ok(ci.on.pull_request_target, 'CI must use the trusted pull_request_target trigger');
-  assert.ok(
-    ci.on.pull_request,
-    'GitHub matches pull_request against the PR workflow and pull_request_target against the base; dropping pull_request before the base has pull_request_target launches no CI',
-  );
-  assert.deepEqual(ci.on.pull_request.branches, ['main', 'develop']);
+  assert.equal(ci.on.pull_request, undefined, 'one authoritative PR event, including during migration');
   assert.deepEqual(ci.on.pull_request_target.branches, ['main', 'develop']);
   const job = ci.jobs['change-surface'];
   assert.ok(job, 'expected a change-surface job');
@@ -169,7 +165,6 @@ test('change-surface fails closed when the API or classifier fails', () => {
 
 test('classification is not a path filter and build-and-package stays unconditional', () => {
   const ci = workflow();
-  assert.equal(ci.on.pull_request.paths, undefined);
   assert.equal(ci.on.pull_request_target.paths, undefined);
   assert.equal(ci.on.push.paths, undefined);
   assert.equal(ci.jobs['build-and-package'].if, undefined);
@@ -256,7 +251,7 @@ test('CI runs on push to main and still does not publish snapshots from main', (
   assert.equal(ci.concurrency['cancel-in-progress'], true);
   const publishIf = ci.jobs['publish-snapshot'].if;
   assert.match(publishIf, /github\.ref == 'refs\/heads\/develop'/);
-  assert.match(publishIf, /github\.event_name == 'pull_request'/);
+  assert.doesNotMatch(publishIf, /pull_request/);
   assert.doesNotMatch(publishIf, /pull_request_target/);
   assert.doesNotMatch(publishIf, /heads\/main/);
 });
@@ -271,4 +266,58 @@ test('verification bindings name packaged and cockpit E2E separately', () => {
   assert.ok(row, 'expected a Verification bindings row');
   assert.match(row[1], /npm run test:package/);
   assert.match(row[1], /npm run test:e2e/);
+});
+
+ test('PR snapshot preparation has no publishing credentials and follows verification', () => {
+  const ci = workflow();
+  const prepare = ci.jobs['prepare-pr-snapshot'];
+  assert.ok(prepare, 'same-repository PR snapshots must remain reachable');
+  assert.equal(prepare.needs, 'verify');
+  assert.deepEqual(prepare.permissions, { contents: 'read' });
+  assert.match(prepare.if, /pull_request_target/);
+  assert.match(prepare.if, /head.repo.full_name == github.repository/);
+  assert.doesNotMatch(JSON.stringify(prepare), /secrets\.|id-token|pull-requests: write/);
+  assert.match(stepsText(prepare), /--pack-only/);
+  assert.ok(prepare.steps.some(s => s.uses?.startsWith('actions/upload-artifact@')));
+});
+
+test('genuine failure and cancellation never green the aggregate', () => {
+  const gate = workflow().jobs.verify.steps.find(s => s.name === 'Require every verification job');
+  for (const result of ['failure', 'cancelled', 'timed_out']) {
+    for (const key of ['BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT']) {
+      const env = { BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false', [key]: result };
+      assert.notEqual(runShell(gate.run, env).status, 0, `${key}=${result}`);
+    }
+  }
+});
+
+test('event routing keeps one PR verifier and preserves push/manual publication policy', () => {
+  const { runInNewContext } = require('node:vm');
+  const ci = workflow();
+  for (const base of ['main', 'develop']) {
+    // The introducing head supplies legacy-event routing; the installed base
+    // already supplies target routing. Both supported bases have the same filter.
+    const authoritative = ['pull_request', 'pull_request_target'].filter(event => ci.on[event]?.branches.includes(base));
+    assert.deepEqual(authoritative, ['pull_request_target']);
+    assert.ok(ci.on.push.branches.includes(base));
+  }
+  assert.ok(Object.hasOwn(ci.on, 'workflow_dispatch'));
+  for (const [event, ref, fork, prepare, publish] of [
+    ['pull_request_target', 'refs/heads/main', false, true, false],
+    ['pull_request_target', 'refs/heads/develop', false, true, false],
+    ['pull_request_target', 'refs/heads/main', true, false, false],
+    ['push', 'refs/heads/main', false, false, false],
+    ['push', 'refs/heads/develop', false, false, true],
+    ['workflow_dispatch', 'refs/heads/develop', false, false, false],
+  ]) {
+    const github = { event_name: event, ref, repository: 'o/n', event: { pull_request: { head: { repo: { full_name: fork ? 'fork/n' : 'o/n' } } } } };
+    assert.equal(runInNewContext(ci.jobs['prepare-pr-snapshot'].if, { github }), prepare);
+    assert.equal(runInNewContext(ci.jobs['publish-snapshot'].if, { github }), publish);
+  }
+  const group = (pr, sha) => ci.concurrency.group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => runInNewContext(expression, {
+    github: { workflow: 'CI', sha, ref: 'refs/heads/main', event: { pull_request: { number: pr } } },
+  }));
+  assert.equal(group(7, 'old'), group(7, 'new'), 'superseded heads must compete');
+  assert.notEqual(group(7, 'new'), group(8, 'new'), 'different PRs must not compete');
+  assert.equal(ci.concurrency['cancel-in-progress'], true);
 });

@@ -32,10 +32,11 @@
 // green (and visibly unconfigured) until the admin adds the secret.
 //
 // Flags: --dry-run (stamp + npm publish --dry-run, no registry writes).
+// --pack-only stamps and writes snapshot-artifacts/<key>.tgz without publishing.
 // Env override for tests: CEZ_SNAPSHOT_ROOT (defaults to the repo root).
 
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isPublishable, RELEASE_MANIFEST_DIRS } from '../packages/cezar/dist/release/manifests.js';
@@ -95,9 +96,10 @@ if (!plan) {
   process.exit(0);
 }
 
+const packOnly = process.argv.includes('--pack-only');
 let dryRun = process.argv.includes('--dry-run');
 const token = process.env.NODE_AUTH_TOKEN ?? '';
-if (!dryRun && !token) {
+if (!packOnly && !dryRun && !token) {
   console.log('release-snapshot: NPM_TOKEN is not configured — forcing --dry-run.');
   console.log('release-snapshot: see docs/publishing.md for the one-time admin setup.');
   dryRun = true;
@@ -144,7 +146,18 @@ for (const key of order) {
     console.log(`release-snapshot: ${stamped[key].name} is private — stamped, not published.`);
     continue;
   }
-  publish(dirs[key], stamped[key].name);
+  if (packOnly) {
+    const destination = path.join(repoRoot, 'snapshot-artifacts');
+    mkdirSync(destination, { recursive: true });
+    const args = ['pack', '--ignore-scripts', '--json', '--pack-destination', destination];
+    const output = npmExecpath
+      ? execFileSync(process.execPath, [npmExecpath, ...args], { cwd: dirs[key], encoding: 'utf8' })
+      : execFileSync('npm', args, { cwd: dirs[key], encoding: 'utf8' });
+    const [packed] = JSON.parse(output);
+    renameSync(path.join(destination, packed.filename), path.join(destination, `${key}.tgz`));
+  } else {
+    publish(dirs[key], stamped[key].name);
+  }
   published.push(stamped[key].name);
 }
 

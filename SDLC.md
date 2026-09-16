@@ -105,6 +105,26 @@ Any non-zero exit fails the gate and blocks the PR. `npm test` is the fast serve
 
 ### PR change surface
 
+`pull_request_target` is the sole PR verification trigger for `main` and
+`develop`. One concurrency group per PR cancels superseded runs; the required
+aggregate still rejects failed or cancelled verification jobs. Review polling
+and recovery select the newest target run for the current head, including a
+failed or cancelled run; legacy PR runs are a fallback only when no target run
+exists. Push and manual CI remain available.
+
+PR snapshots are prepared without publishing credentials after verification.
+The separate `Publish PR Snapshot` completion workflow validates the source
+run, current same-repository PR head, attempt artifact, and package metadata.
+It publishes archives from trusted code with lifecycle scripts disabled.
+
+Migration: the introducing PR removes its `pull_request` trigger while the
+installed target workflow continues verifying it. The new artifact publisher
+starts after the workflows land on the default branch; old attempts lacking
+snapshot archives are ineligible. A base branch must contain the target trigger
+before PRs drop the legacy event. At the #371 migration, `main` already did;
+`develop` did not exist remotely. Any future `develop` branch must be created
+from a revision with these workflows before accepting PRs.
+
 Pull-request CI runs from the trusted `pull_request_target` workflow definition, checks out the PR merge ref only inside the jobs that execute PR code, and classifies the changed paths before selecting checks:
 
 | Surface | Paths | Checks and review |
