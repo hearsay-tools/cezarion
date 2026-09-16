@@ -105,7 +105,7 @@ Any non-zero exit fails the gate and blocks the PR. `npm test` is the fast serve
 
 ### PR change surface
 
-Pull-request CI classifies the changed paths before selecting checks:
+Pull-request CI runs from the trusted `pull_request_target` workflow definition, checks out the PR merge ref only inside the jobs that execute PR code, and classifies the changed paths before selecting checks:
 
 | Surface | Paths | Checks and review |
 |---|---|---|

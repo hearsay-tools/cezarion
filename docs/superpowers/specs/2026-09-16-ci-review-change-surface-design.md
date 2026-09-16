@@ -45,11 +45,16 @@ small pure classifier plus a line-oriented command interface for workflows.
 The command interface consumes one JSON-encoded filename per line, so a
 malformed API response fails closed instead of becoming an empty docs list.
 
-The CI workflow adds a trusted classification job for pull requests. It checks
-out the base revision of the workflow support files, reads the PR file list
-through the GitHub API, and publishes the classification as a job output.
+The CI workflow uses `pull_request_target`, so the workflow definition and
+classification invocation come from the trusted base rather than the PR.
+PR jobs explicitly check out the PR merge ref before running untrusted code.
+The trusted classification job checks out the base revision of the workflow
+support files, reads the PR file list through the GitHub API, verifies that the
+listed file-record count equals the PR metadata's `changed_files` count, and
+publishes the classification as a job output. Rename source paths are included
+in the classifier input. An unverified or truncated list is full-matrix.
 `vitest` and `cockpit-browser` use job-level conditions based on that output
-and the existing bump predicate. `build-and-package` remains unconditional.
+and the existing bump predicate; `build-and-package` remains unconditional.
 The workflow does not use a top-level `paths` filter.
 
 `verify` remains unconditional with `if: always()`. It always requires

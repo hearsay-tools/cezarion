@@ -25,7 +25,7 @@ function runShell(command, env = {}) {
   });
 }
 
-function runClassification({ apiOutput, apiFails = false, classifierFails = false, eventName = 'pull_request' }) {
+function runClassification({ apiOutput, fileObjects, changedFiles, apiFails = false, classifierFails = false, eventName = 'pull_request_target' }) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cezar-ci-workflow-'));
   const outputPath = path.join(tempDir, 'github-output');
   const ghPath = path.join(tempDir, 'gh');
@@ -35,9 +35,12 @@ function runClassification({ apiOutput, apiFails = false, classifierFails = fals
   fs.writeFileSync(classifierPath, classifierFails
     ? 'process.exit(1);\n'
     : fs.readFileSync(path.join(repoRoot, '.github', 'scripts', 'change-surface.cjs')));
+  const fileRecords = Array.isArray(apiOutput) ? apiOutput : [apiOutput ?? '"README.md"'];
+  const fileList = fileObjects ?? fileRecords.map((record) => ({ filename: JSON.parse(record) }));
+  const filePages = JSON.stringify([fileList]);
   fs.writeFileSync(ghPath, apiFails
     ? '#!/bin/sh\nexit 1\n'
-    : `#!/bin/sh\ntouch "$GH_CALL_MARKER"\nprintf '%s\\n' ${(Array.isArray(apiOutput) ? apiOutput : [apiOutput]).map((record) => JSON.stringify(record)).join(' ')}\n`);
+    : `#!/bin/sh\ntouch "$GH_CALL_MARKER"\ncase "$*" in\n  *changed_files*) printf '%s\\n' "$EXPECTED_CHANGED_FILES" ;;\n  *'/files'*) printf '%s\\n' '${filePages}' ;;\nesac\n`);
   fs.chmodSync(ghPath, 0o755);
 
   try {
@@ -49,6 +52,7 @@ function runClassification({ apiOutput, apiFails = false, classifierFails = fals
       GITHUB_REPOSITORY: 'wjarka/cezar',
       GITHUB_WORKSPACE: tempDir,
       GH_CALL_MARKER: apiCallMarker,
+      EXPECTED_CHANGED_FILES: String(changedFiles ?? fileList.length),
       PATH: `${tempDir}:${process.env.PATH}`,
       PR_NUMBER: '42',
     });
@@ -96,22 +100,33 @@ test('the required aggregate depends on the cockpit browser job', () => {
 
 test('CI classifies pull request changes from a trusted base checkout', () => {
   const ci = workflow();
+  assert.ok(ci.on.pull_request_target, 'CI must use the trusted pull_request_target trigger');
+  assert.equal(ci.on.pull_request, undefined, 'PR code must not control the CI workflow definition');
   const job = ci.jobs['change-surface'];
   assert.ok(job, 'expected a change-surface job');
   assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read' });
   assert.equal(job.outputs.surface, '${{ steps.classify.outputs.surface }}');
   const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'));
   assert.ok(checkout, 'expected a checkout step');
-  assert.equal(checkout.if, "github.event_name == 'pull_request'");
+  assert.equal(checkout.if, "github.event_name == 'pull_request_target'");
   assert.equal(checkout.with.ref, '${{ github.event.pull_request.base.sha }}');
   assert.equal(checkout.with['persist-credentials'], false);
   const classify = job.steps.find((step) => step.id === 'classify');
   assert.ok(classify, 'expected an output-producing classify step');
-  assert.match(classify.run, /gh api --paginate --jq '\.\[\]\.filename \| @json' "repos\/\$GITHUB_REPOSITORY\/pulls\/\$PR_NUMBER\/files"/);
+  assert.match(classify.run, /gh api --paginate --slurp/);
+  assert.match(classify.run, /changed_files/);
+  assert.match(classify.run, /previous_filename/);
   assert.match(classify.run, /node [^\n]*\.github\/scripts\/change-surface\.cjs/);
   assert.match(classify.run, /surface=full-matrix/);
   assert.match(classify.run, /if ! files=/);
-  assert.match(classify.run, /if ! surface=/);
+});
+
+test('PR jobs check out the merge ref when CI runs from the trusted target workflow', () => {
+  const ci = workflow();
+  for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
+    const checkout = ci.jobs[name].steps.find((step) => step.uses?.startsWith('actions/checkout@'));
+    assert.match(checkout?.with?.ref || '', /format\('refs\/pull\/\{0\}\/merge', github\.event\.pull_request\.number\)/);
+  }
 });
 
 test('change-surface fails closed when the API or classifier fails', () => {
@@ -131,6 +146,14 @@ test('change-surface fails closed when the API or classifier fails', () => {
   assert.equal(classifierFailure.result.status, 0, classifierFailure.result.stderr);
   assert.equal(classifierFailure.output, 'surface=full-matrix\n');
 
+  const incomplete = runClassification({ apiOutput: ['"README.md"'], changedFiles: 2 });
+  assert.equal(incomplete.result.status, 0, incomplete.result.stderr);
+  assert.equal(incomplete.output, 'surface=full-matrix\n');
+
+  const rename = runClassification({ fileObjects: [{ filename: 'docs/new.md', previous_filename: 'src/old.ts' }] });
+  assert.equal(rename.result.status, 0, rename.result.stderr);
+  assert.equal(rename.output, 'surface=full-matrix\n');
+
   const push = runClassification({ apiOutput: ['"README.md"'], eventName: 'push' });
   assert.equal(push.result.status, 0, push.result.stderr);
   assert.equal(push.output, 'surface=full-matrix\n');
@@ -139,7 +162,7 @@ test('change-surface fails closed when the API or classifier fails', () => {
 
 test('classification is not a path filter and build-and-package stays unconditional', () => {
   const ci = workflow();
-  assert.equal(ci.on.pull_request.paths, undefined);
+  assert.equal(ci.on.pull_request_target.paths, undefined);
   assert.equal(ci.on.push.paths, undefined);
   assert.equal(ci.jobs['build-and-package'].if, undefined);
   assert.equal(ci.jobs['build-and-package'].needs, undefined);
@@ -151,7 +174,7 @@ test('test jobs require full-matrix classification without losing the bot bump s
     const job = ci.jobs[name];
     assert.ok(job.needs === 'change-surface' || job.needs?.includes('change-surface'));
     assert.match(job.if, /needs\.change-surface\.outputs\.surface == ['"]full-matrix['"]/);
-    assert.match(job.if, /github\.event_name == ['"]pull_request['"]/);
+    assert.match(job.if, /github\.event_name == ['"]pull_request_target['"]/);
     assert.match(job.if, /startsWith\(github\.head_ref, ['"]release\/v['"]\)/);
     assert.match(job.if, /github\.actor == ['"]github-actions\[bot\]['"]/);
   }
@@ -195,6 +218,7 @@ test('CI runs on push to main and still does not publish snapshots from main', (
   assert.equal(ci.concurrency['cancel-in-progress'], true);
   const publishIf = ci.jobs['publish-snapshot'].if;
   assert.match(publishIf, /github\.ref == 'refs\/heads\/develop'/);
+  assert.match(publishIf, /github\.event_name == 'pull_request_target'/);
   assert.doesNotMatch(publishIf, /heads\/main/);
 });
 

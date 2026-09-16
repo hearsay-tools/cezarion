@@ -70,7 +70,9 @@ test('review-round classifies from trusted base before merge checkout and skips 
   assert.ok(classifier, 'review-round must classify the change surface');
   assert.ok(trustedCheckoutIndex < classifierIndex, 'the classifier must come from the trusted checkout');
   assert.ok(classifierIndex < mergeCheckoutIndex, 'classification must run before the PR merge checkout');
-  assert.match(classifier.run, /gh api --paginate/);
+  assert.match(classifier.run, /gh api --paginate --slurp/);
+  assert.match(classifier.run, /changed_files/);
+  assert.match(classifier.run, /previous_filename/);
   assert.match(classifier.run, /change-surface\.cjs/);
   assert.match(classifier.run, /full-matrix/);
   assert.match(round.env.CHANGE_SURFACE, /steps\.change-surface\.outputs\.change_surface/);
@@ -103,6 +105,7 @@ test('review-round classifies from trusted base before merge checkout and skips 
       const classifyOutput = path.join(cwd, 'classify-outputs');
       const roundOutput = path.join(cwd, 'round-outputs');
       const filesJsonLines = files.map((file) => JSON.stringify(file)).join('\n');
+      const filePages = JSON.stringify([files.map((filename) => ({ filename }))]);
       const env = {
         ...process.env,
         BASH_ENV: '/dev/null',
@@ -127,9 +130,11 @@ test('review-round classifies from trusted base before merge checkout and skips 
 }`
         : `gh() {
   case "$*" in
+    *'changed_files'*) printf '%s\\n' '${files.length}' ;;
+    *'map(.[]) | length'*) printf '%s\\n' '${files.length}' ;;
     *'.head.sha'*) echo '${head}' ;;
     *'.base.sha'*) echo '${base}' ;;
-    *'/files'*) printf '%s\\n' "$PR_FILES_JSONL" ;;
+    *'/files'*) printf '%s\\n' '${filePages}' ;;
     *'/reviews'*) : ;;
   esac
 }`;
@@ -217,7 +222,8 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(round, /base_sha: \$\{\{ steps\.review-round\.outputs\.base_sha \}\}/);
   assert.match(round, /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
   assert.match(round, /gh api --paginate "\/repos\/\$GITHUB_REPOSITORY\/pulls\/\$PR_NUMBER\/reviews" --jq '[^\n]*' \| wc -l/);
-  assert.doesNotMatch(round, /--slurp[\s\S]*--jq/, 'gh api does not support combining --slurp with --jq');
+  const classifier = job(workflow, 'review-round').match(/- name: Classify pull request change surface[\s\S]*?(?=\n      - name:|\n      - id:)/)?.[0] || '';
+  assert.doesNotMatch(classifier, /--slurp[\s\S]*--jq/, 'gh api does not support combining --slurp with --jq');
   assert.match(round, /select\(\.user\.login == "github-actions\[bot\]"\)/);
   assert.match(round, /select\(\.submitted_at != null\)/, 'pending bot reviews must not exhaust the cap');
   assert.match(round, /can_review=true/);

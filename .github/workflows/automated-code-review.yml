@@ -70,11 +70,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
         run: |
+          set -o pipefail
           change_surface=full-matrix
           if [ "$EVENT_NAME" = pull_request_target ]; then
-            if ! files="$(gh api --paginate --jq '.[].filename | @json' "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files")"; then
-              echo 'GitHub API file listing failed; using full matrix' >&2
-            elif ! change_surface="$(printf '%s\n' "$files" | node .cez-trusted/.github/scripts/change-surface.cjs)"; then
+            if ! expected_files="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.changed_files')" \
+              || ! [[ "$expected_files" =~ ^[0-9]+$ ]]; then
+              echo 'GitHub API change count failed; using full matrix' >&2
+            elif ! file_pages="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files")" \
+              || ! listed_files="$(printf '%s' "$file_pages" | jq -er 'map(.[]) | length')" \
+              || ! [[ "$listed_files" =~ ^[0-9]+$ ]] \
+              || [ "$listed_files" -ne "$expected_files" ]; then
+              echo 'GitHub API file list is incomplete; using full matrix' >&2
+            elif ! files="$(printf '%s' "$file_pages" | jq -er 'map(.[]) | .[] | .filename, (.previous_filename? // empty) | @json')" \
+              || ! change_surface="$(printf '%s\n' "$files" | node .cez-trusted/.github/scripts/change-surface.cjs)"; then
               echo 'Change-surface classifier failed; using full matrix' >&2
             fi
           fi

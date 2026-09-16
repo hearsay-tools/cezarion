@@ -1,7 +1,7 @@
 name: CI
 
 on:
-  pull_request:
+  pull_request_target:
     branches:
       - main
       - develop
@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Check out trusted pull request base
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request_target'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
@@ -44,18 +44,30 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
+          set -o pipefail
+          if [ "$EVENT_NAME" != "pull_request_target" ]; then
             echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          if ! files="$(gh api --paginate --jq '.[].filename | @json' "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files")"; then
-            echo "GitHub API file listing failed; using full matrix" >&2
+          if ! expected_files="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.changed_files')" \
+            || ! [[ "$expected_files" =~ ^[0-9]+$ ]]; then
+            echo "GitHub API change count failed; using full matrix" >&2
             echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          if ! surface="$(printf '%s\n' "$files" | node "$GITHUB_WORKSPACE/.github/scripts/change-surface.cjs")"; then
+          if ! file_pages="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files")" \
+            || ! listed_files="$(printf '%s' "$file_pages" | jq -er 'map(.[]) | length')" \
+            || ! [[ "$listed_files" =~ ^[0-9]+$ ]] \
+            || [ "$listed_files" -ne "$expected_files" ]; then
+            echo "GitHub API file list is incomplete; using full matrix" >&2
+            echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! files="$(printf '%s' "$file_pages" | jq -er 'map(.[]) | .[] | .filename, (.previous_filename? // empty) | @json')" \
+            || ! surface="$(printf '%s\n' "$files" | node "$GITHUB_WORKSPACE/.github/scripts/change-surface.cjs")"; then
             echo "Change-surface classifier failed; using full matrix" >&2
             echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
             exit 0
@@ -75,6 +87,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
 
       # `lts/*` — the current Node LTS, whatever it is on the day the job runs, so
       # the gate follows the release line users actually install on instead of
@@ -119,7 +133,7 @@ jobs:
     needs: change-surface
     if: >-
       needs.change-surface.outputs.surface == 'full-matrix' &&
-      !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]')
+      !(github.event_name == 'pull_request_target' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]')
     strategy:
       fail-fast: false
       matrix:
@@ -130,6 +144,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -157,7 +173,7 @@ jobs:
     needs: change-surface
     if: >-
       needs.change-surface.outputs.surface == 'full-matrix' &&
-      !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]')
+      !(github.event_name == 'pull_request_target' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]')
     strategy:
       fail-fast: false
       matrix:
@@ -168,6 +184,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -202,7 +220,7 @@ jobs:
           CHANGE_SURFACE: ${{ needs.change-surface.outputs.surface }}
           # Same predicate as the vitest/cockpit-browser job ifs: only a bot
           # release/v* PR may leave those two skipped; build-and-package never may.
-          BUMP_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]' }}
+          BUMP_PR: ${{ github.event_name == 'pull_request_target' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]' }}
         run: |
           test "$BUILD_AND_PACKAGE_RESULT" = success
           if [ "$CHANGE_SURFACE" = docs-only ] || [ "$BUMP_PR" = true ]; then
@@ -224,7 +242,7 @@ jobs:
     needs: verify
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
-      (github.event_name == 'pull_request' &&
+      (github.event_name == 'pull_request_target' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -241,6 +259,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -282,7 +302,7 @@ jobs:
           EOF
 
       - name: Comment preview on PR
-        if: github.event_name == 'pull_request' && steps.snapshot.outputs.attempted == 'true'
+        if: github.event_name == 'pull_request_target' && steps.snapshot.outputs.attempted == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           RESULT: ${{ steps.snapshot.outputs.result }}
