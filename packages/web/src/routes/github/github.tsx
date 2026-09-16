@@ -382,6 +382,7 @@ export function GithubRoute({
 
   const allItems = openItems
   const items = filterGithubItems(allItems, { query, labels: labelFilter, ...(view === 'issues' ? { assignees: assigneeFilter, projectId: activeProject } : {}) })
+  const compactPreview = view === 'issues' && n !== undefined && !mobileListExpanded
   const filtering = query.trim() !== '' || labelFilter.length > 0 || (view === 'issues' && (assigneeFilter.length > 0 || activeProject !== ''))
   // Only the settled query may contribute rows, filter metadata or error states. Disabling the
   // query does not evict its cached data, so never render data solely because it is available.
@@ -652,7 +653,7 @@ export function GithubRoute({
       {/* Issue list and detail stack on mobile. A selected PR has a full-width review surface. */}
       <section
         data-slot="gh-list"
-        data-mobile-preview={view === 'issues' && n !== undefined && !mobileListExpanded || undefined}
+        data-mobile-preview={compactPreview || undefined}
         style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
         className="relative flex w-full min-h-0 flex-col rounded-lg border border-border bg-card p-3 md:w-[var(--github-list-width)] md:shrink-0"
       >
@@ -670,13 +671,14 @@ export function GithubRoute({
           )
         ) : (
           <ul data-slot="gh-rows" className="flex flex-col gap-1">
-            {items.map((item) => (
+            {items.map((item, index) => (
               <GithubRow
                 key={item.url}
                 item={item}
                 view={view}
                 colors={labelColors}
                 active={selected?.url === item.url}
+                compactHidden={compactPreview && index >= 2 && selected?.url !== item.url}
                 queued={queued.has(item.url)}
                 checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
               />
@@ -791,6 +793,7 @@ function GithubRow({
   view,
   colors,
   active,
+  compactHidden,
   queued,
   checks,
 }: {
@@ -798,6 +801,7 @@ function GithubRow({
   view: GithubView
   colors: Record<string, string>
   active: boolean
+  compactHidden?: boolean
   queued: boolean
   /** Resolved checks glyph — the lazily-hydrated value overrides the list's `null` (#664). */
   checks?: GithubItem['checks']
@@ -827,7 +831,7 @@ function GithubRow({
   }
 
   return (
-    <li>
+    <li data-compact-hidden={compactHidden || undefined}>
       <Link
         to={`${view === 'issues' ? '/github/issues' : '/github/prs'}/${item.number}`}
         draggable

@@ -340,11 +340,20 @@ describe('the GitHub tab against the live dry-run server', () => {
 
       if (gh.issues.length > 2) {
         const visibleRows = () => browser.evaluate(`[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length`)
-        expect(visibleRows()).toBe(2)
-        browser.click('[data-slot="gh-expand-list"]')
+        const selectedIndex = Number(browser.evaluate(
+          `[...document.querySelectorAll('[data-slot="gh-rows"] > li')].findIndex(li => li.querySelector("[aria-current='page']"))`,
+        ))
+        const compactedVisible = 2 + (selectedIndex >= 2 ? 1 : 0)
+        const toggleList = (expanded: 'true' | 'false') => {
+          browser.evaluate(`document.querySelector('[data-slot="gh-expand-list"]').scrollIntoView({ block: 'center', behavior: 'instant' })`)
+          browser.click('[data-slot="gh-expand-list"]')
+          browser.waitForFunction(`document.querySelector('[data-slot="gh-expand-list"]').getAttribute('aria-expanded') === '${expanded}'`)
+        }
+        expect(visibleRows()).toBe(compactedVisible)
+        toggleList('true')
         expect(visibleRows()).toBe(gh.issues.length)
-        browser.click('[data-slot="gh-expand-list"]')
-        expect(visibleRows()).toBe(2)
+        toggleList('false')
+        expect(visibleRows()).toBe(compactedVisible)
       }
       browser.screenshot(`${artifactsDir}/github-iphone.png`)
     } finally {

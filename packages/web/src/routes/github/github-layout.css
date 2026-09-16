@@ -36,7 +36,7 @@
 [data-slot='gh-hand'] > [data-slot='prompt-template-trigger'] { align-self: flex-start; min-height: 44px; border-radius: 8px; padding: 0 12px; }
 
 @media (max-width: 767px) {
-  [data-slot='gh-list'][data-mobile-preview='true'] [data-slot='gh-rows'] > li:nth-child(n+3):not(:has([aria-current='page'])) { display: none; }
+  [data-slot='gh-list'][data-mobile-preview] [data-slot='gh-rows'] > li[data-compact-hidden] { display: none; }
 }
 
 @media (max-width: 767px) {
