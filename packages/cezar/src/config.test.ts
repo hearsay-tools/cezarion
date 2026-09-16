@@ -245,6 +245,62 @@ describe('resolveWorktreeRetention', () => {
 });
 
 /**
+ * #359: the vendor-default skills source must stay OFF inside the vitest suite. Every
+ * configless fixture repoRoot otherwise activates `open-mercato/skills`, and each test
+ * file's first catalog read clones/fetches/lists the developer's real `~/.cache/cez`
+ * bare cache — ~50 `git show` spawns plus a network `git fetch` per file (18,798 shows
+ * and 61 fetches measured over one default-worker `npm test`) — the ambient subprocess
+ * load that timed delegation-cleanup and query-parity tests out at the 5s limit. The
+ * suppression is env-gated exactly the way `open-in-terminal.ts` refuses to spawn under
+ * vitest; a repo (or test) that sets its OWN `skillsRepos` is honored verbatim, and the
+ * production zero-config default is untouched.
+ */
+describe('loadConfig skillsRepos under the test environment (#359)', () => {
+  let repoRoot: string;
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'cez-skills-default-'));
+    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  const write = (value: unknown) =>
+    writeFileSync(join(repoRoot, '.ai/cezar', 'config.json'), JSON.stringify(value), 'utf8');
+
+  it('suppresses the vendor default when no config exists (zero-config fixture)', async () => {
+    expect((await loadConfig(repoRoot)).skillsRepos).toEqual([]);
+  });
+
+  it('suppresses the vendor default when the config omits skillsRepos (additive)', async () => {
+    write({ maxParallel: 4 });
+    expect((await loadConfig(repoRoot)).skillsRepos).toEqual([]);
+  });
+
+  it('degrades a malformed config to the suppressed default (like loadConfig)', async () => {
+    writeFileSync(join(repoRoot, '.ai/cezar', 'config.json'), '{ nope', 'utf8');
+    expect((await loadConfig(repoRoot)).skillsRepos).toEqual([]);
+  });
+
+  it('keeps a repo-configured skillsRepos honored verbatim', async () => {
+    write({ skillsRepos: [{ repo: 'acme/team-skills', ref: 'main' }] });
+    expect((await loadConfig(repoRoot)).skillsRepos).toEqual([{ repo: 'acme/team-skills', ref: 'main' }]);
+  });
+
+  it('keeps the vendor default outside vitest (production zero-config)', async () => {
+    const vitest = process.env.VITEST;
+    delete process.env.VITEST;
+    try {
+      expect((await loadConfig(repoRoot)).skillsRepos).toEqual(DEFAULT_SKILLS_REPOS);
+    } finally {
+      if (vitest !== undefined) process.env.VITEST = vitest;
+    }
+  });
+});
+
+/**
  * `gatedSkillsRepos` decides which repos are opt-in per skill (the "Import skills" flow). The
  * invariant: the vendor default (`open-mercato/skills`) is gated for the zero-config majority,
  * and a repo that sets its OWN `skillsRepos` gates nothing (it took control — everything it lists

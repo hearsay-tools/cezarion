@@ -22,6 +22,22 @@ export const DEFAULT_SKILLS_REPOS: SkillsRepoSource[] = [
   { repo: 'open-mercato/skills', ref: 'main' },
 ];
 
+/**
+ * #359: the schema default for `skillsRepos`, suppressed under vitest. The unit suite
+ * boots an app per test FILE, and every configless fixture repoRoot would otherwise
+ * activate the vendor source: the first catalog read per process clones/fetches the
+ * global `~/.cache/cez` bare cache and lists it with one `git show` per skill — ~50
+ * real spawns plus a network fetch per file (18,798 shows / 61 fetches measured over
+ * one default-worker `npm test`). That ambient load is what timed delegation-cleanup
+ * and query-parity tests out at the 5s limit, and it made results depend on the
+ * developer's machine state (CI has no cache and no network, so it never saw it).
+ * The same env gate `open-in-terminal.ts` uses to refuse spawning from tests; a repo
+ * that sets its OWN `skillsRepos` — in production or in a test — is unaffected.
+ */
+function defaultSkillsRepos(): SkillsRepoSource[] {
+  return process.env.VITEST ? [] : DEFAULT_SKILLS_REPOS;
+}
+
 /** Last-resort retention when neither the repo nor the workspace says anything. */
 export const DEFAULT_WORKTREE_RETENTION = 10;
 
@@ -31,7 +47,7 @@ export const DEFAULT_WORKTREE_RETENTION = 10;
 const worktreeRetentionSchema = z.number().int().min(0).max(1000);
 
 const configSchema = z.object({
-  skillsRepos: z.array(skillsRepoSchema).default(DEFAULT_SKILLS_REPOS),
+  skillsRepos: z.array(skillsRepoSchema).default(defaultSkillsRepos),
   /** How many tasks may run at once (spec 006). Non-git dirs always run 1. */
   maxParallel: z.number().int().min(1).max(16).default(2),
   /**
