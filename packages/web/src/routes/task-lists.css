@@ -24,7 +24,7 @@
 @media (max-width: 767px) {
   [data-route="tasks"] h1, [data-route="global-tasks"] h1 { font-size: 24px; }
   [data-slot="mark-all-read"] { display: inline-flex; }
-  [data-slot="new-task-fab"] { background: var(--accent-strong); color: white; }
+  [data-slot="new-task-fab"] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 }
 
 /* Frame 5 is the ungrouped summary; frame 26 exposes grouped run-action cards. */
@@ -157,7 +157,7 @@
   [data-route="tasks"] [data-slot="archive-finished"] { grid-column: 1; }
 }
 [data-route="tasks"][data-presentation="resources"] [data-slot="new-task-inline"],
-[data-slot="table-title-editor"] button:first-of-type { background: var(--accent-strong); color: white; }
+[data-slot="table-title-editor"] button:first-of-type { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 
 /* Summary references use the design's plain status label. The shared chip still
    owns navigation, live status, its accessible name and the conflict-action panel. */

@@ -30,7 +30,7 @@
 .settings-panel [data-slot="prompt-template-new"] { padding: 20px 0; border: 0; border-radius: 0; gap: 12px; border-bottom: 1px solid var(--border); }
 .settings-panel [data-slot="agent-config-agents"] { padding: 0; background: transparent; gap: 8px; }
 .settings-panel [data-slot="agent-config-agent"] { border: 1px solid var(--border); }
-.settings-panel [data-slot="agent-config-agent"][aria-selected=true] { background: var(--accent-strong); color: white; }
+.settings-panel [data-slot="agent-config-agent"][aria-selected=true] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 .settings-panel [data-slot="accounts-tabs"] { flex-wrap: wrap; height: auto; }
 /* Keep the complete table semantics/data while arranging each record as the
    reference's vertical card, so long paths and tag editors fit at any width. */
@@ -102,7 +102,7 @@
 .settings-panel .settings-form-actions { display: flex; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--border); padding-top: 20px; }
 .settings-panel [data-slot=accounts-tabs] { gap: 8px; }
 .settings-panel [data-slot=accounts-tabs] button { border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; }
-.settings-panel [data-slot=accounts-tabs] [data-state=active] { background: var(--accent-strong); color: white; }
+.settings-panel [data-slot=accounts-tabs] [data-state=active] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 .settings-panel [data-slot=accounts-tabs] [data-state=active]::after { display: none; }
 @media (max-width: 767px) {
   .settings-route { padding: 28px 18px 32px; gap: 24px; }
@@ -200,7 +200,7 @@
    Scoped here so framework behavior and other route families remain untouched. */
 .settings-route [data-slot=button] { font-weight: 400; border-radius: 8px; }
 .settings-panel [data-slot=button] { padding-inline: 16px; }
-.settings-route [data-slot=button][data-variant=primary] { background: var(--accent-strong); color: white; }
+.settings-route [data-slot=button][data-variant=primary] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 .settings-route [data-slot=switch-thumb] { background: white; }
 .settings-panel .settings-form-actions [data-variant=primary] { order: 1; }
 .settings-panel .settings-form-actions > span { order: 2; }
@@ -208,7 +208,7 @@
 .settings-config-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .settings-config-file-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .settings-config-file-row button { border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 10px 16px; font-size: 12px; font-weight: 400; }
-.settings-config-file-row button[aria-pressed=true] { background: var(--accent-strong); color: white; }
+.settings-config-file-row button[aria-pressed=true] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 .settings-config-agent-choice { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; color: var(--muted-foreground); }
 .settings-panel .settings-config-agent-choice select { min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; }
 .settings-config-content-heading { border-top: 1px solid var(--border); padding-top: 20px; margin-top: 8px; }
