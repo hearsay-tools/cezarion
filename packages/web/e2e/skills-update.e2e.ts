@@ -15,14 +15,24 @@ import { readSharedProjects, writeSharedProjects } from './workspace-registry'
  * Chrome would require a production-only lock file and network-backed `npx skills check`.
  */
 
-const artifactsDir = resolve(
-  import.meta.dirname,
-  '../../../.ai/runs/2026-07-22-automatic-open-mercato-skills-updates/checkpoint-3-artifacts',
-)
+// Dated checkpoints are historical evidence; fresh E2E output belongs in ignored QA storage.
+const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const workspaceConfig = resolve(import.meta.dirname, '../../../.ai/qa/cez-home/config.json')
 const sessionId = `e2e-skills-update-${process.pid}`
 const DESKTOP = { width: 1440, height: 900 }
 const IPHONE = { width: 390, height: 844 }
+const checkpointDir = resolve(
+  import.meta.dirname,
+  '../../../.ai/runs/2026-07-22-automatic-open-mercato-skills-updates/checkpoint-3-artifacts',
+)
+const screenshotNames = [
+  'settings-skills-auto-update.png',
+  'skills-navigation-current.png',
+  'skills-update-success.png',
+  'skills-mobile-navigation.png',
+]
+const qaArtifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
+let checkpoints: { name: string; bytes: Buffer }[]
 
 let browser: AgentBrowser
 let baseUrl: string
@@ -36,6 +46,9 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 beforeAll(async () => {
+  checkpoints = screenshotNames.map((name) => ({ name, bytes: readFileSync(resolve(checkpointDir, name)) }))
+  // A previous run's screenshots must not satisfy the output assertion.
+  for (const name of screenshotNames) rmSync(resolve(qaArtifactsDir, name), { force: true })
   baseUrl = readTestEnv().baseUrl
   projectId = await bootProjectId(baseUrl)
   previousConfig = existsSync(workspaceConfig) ? readFileSync(workspaceConfig, 'utf8') : null
@@ -119,5 +132,12 @@ describe('automatic Open Mercato skills updates', () => {
     expect(browser.evaluate(`[...document.querySelectorAll('[role="dialog"] nav')].map((nav) => nav.textContent).join(' ')`)).toContain('Skills')
     expect(browser.count('[role="dialog"] [data-slot="nav-update-marker"]')).toBe(0)
     browser.screenshot(`${artifactsDir}/skills-mobile-navigation.png`, { viewport: true })
+  })
+
+  it('preserves tracked checkpoints while producing fresh QA screenshots', () => {
+    for (const { name, bytes } of checkpoints) {
+      expect(readFileSync(resolve(checkpointDir, name)).equals(bytes), name).toBe(true)
+      expect(readFileSync(resolve(qaArtifactsDir, name)).length, name).toBeGreaterThan(0)
+    }
   })
 })
