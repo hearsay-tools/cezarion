@@ -50,6 +50,37 @@ test('the required aggregate depends on the cockpit browser job', () => {
   assert.match(gate, /needs\['cockpit-browser'\]\.result|needs\.cockpit-browser\.result/);
 });
 
+test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr file allowlist', () => {
+  const ci = workflow();
+  const classify = ci.jobs['classify-pr'];
+  assert.ok(classify, 'expected classify-pr job');
+  assert.deepEqual(classify.permissions, { contents: 'read', 'pull-requests': 'read' });
+  assert.equal(classify.outputs.bump_pr, '${{ steps.classify.outputs.bump_pr }}');
+  const checkout = classify.steps.find((step) => step.name === 'Check out trusted classifier');
+  assert.equal(checkout.with.ref, '${{ github.event.pull_request.base.sha || github.sha }}');
+  assert.equal(checkout.with['persist-credentials'], false);
+  const classifyStep = classify.steps.find((step) => step.id === 'classify');
+  assert.match(classifyStep.run, /release-bump-pr\.cjs/);
+  assert.match(classifyStep.run, /pulls\/\$\{PR_NUMBER\}\/files/);
+  assert.match(classifyStep.run, /PR_FILES_OK=1/);
+  assert.doesNotMatch(classifyStep.run, /\|\| true/);
+  assert.match(classifyStep.run, /LIVE_HEAD_SHA/);
+  assert.match(classifyStep.run, /bump_pr=false/);
+  assert.equal(classifyStep.env.EVENT_NAME, '${{ github.event_name }}');
+  assert.equal(classifyStep.env.PR_AUTHOR, '${{ github.event.pull_request.user.login }}');
+  assert.equal(classifyStep.env.EXPECTED_HEAD_SHA, '${{ github.event.pull_request.head.sha }}');
+  assert.equal(ci.jobs.vitest.needs, 'classify-pr');
+  assert.equal(ci.jobs['cockpit-browser'].needs, 'classify-pr');
+  assert.equal(ci.jobs.vitest.if, "needs.classify-pr.outputs.bump_pr != 'true'");
+  assert.equal(ci.jobs['cockpit-browser'].if, "needs.classify-pr.outputs.bump_pr != 'true'");
+  assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
+  const verifyEnv = ci.jobs.verify.steps.find((step) => step.name === 'Require every verification job').env;
+  assert.equal(verifyEnv.BUMP_PR, '${{ needs.classify-pr.outputs.bump_pr }}');
+  assert.doesNotMatch(ci.jobs.vitest.if, /github\.actor/);
+  assert.doesNotMatch(ci.jobs['cockpit-browser'].if, /github\.actor/);
+  assert.doesNotMatch(JSON.stringify(ci.jobs), /github\.actor/);
+});
+
 test('CI runs on push to main and still does not publish snapshots from main', () => {
   const ci = workflow();
   assert.ok(ci.on.push.branches.includes('main'));

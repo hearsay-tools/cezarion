@@ -19,14 +19,38 @@ concurrency:
 jobs:
   validate-provider:
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       provider: ${{ steps.provider.outputs.provider }}
     steps:
+      - name: Check out release-bump classifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Reject untrusted bot actors
         env:
           ACTOR: ${{ github.actor }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Verified manifest-only bot release/v* bumps: review-round sets
+          # can_review=false. Allow the actor through so the aggregate stays green.
+          if [ -n "${PR_NUMBER:-}" ]; then
+            if LIVE_HEAD_SHA="$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)" \
+              && PR_FILES="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"; then
+              export LIVE_HEAD_SHA PR_FILES PR_FILES_OK=1
+            fi
+          fi
+          if node -e 'process.exit(require("./.github/scripts/release-bump-pr.cjs").classifyFromEnv()?0:1)'; then
+            exit 0
+          fi
           if [[ "$ACTOR" == *'[bot]' && "$ACTOR" != 'claude[bot]' ]]; then
             echo "Unsupported bot actor: $ACTOR. Only claude[bot] may trigger automated review." >&2
             exit 1
@@ -54,6 +78,13 @@ jobs:
       base_sha: ${{ steps.review-round.outputs.base_sha }}
       patch_id: ${{ steps.review-round.outputs.patch_id }}
     steps:
+      # Trusted base first — classifier must not come from the PR merge tree.
+      - name: Checkout trusted classifier from base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: .cez-trusted
+          persist-credentials: false
       - name: Checkout pull request merge for patch-id
         if: github.event_name != 'workflow_dispatch'
         continue-on-error: true
@@ -69,6 +100,8 @@ jobs:
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           AUTOMATED_REVIEW_ROUNDS: ${{ vars.AUTOMATED_REVIEW_ROUNDS }}
         run: |
           if [ -z "$PR_NUMBER" ]; then
@@ -82,6 +115,10 @@ jobs:
             exit 1
           fi
           patch_id=""
+          # Empty on workflow_dispatch (no pull_request payload); keep -u safe.
+          head_ref="${HEAD_REF:-}"
+          pr_author="${PR_AUTHOR:-}"
+          classifier=".cez-trusted/.github/scripts/release-bump-pr.cjs"
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
             head_sha="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
             base_sha="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .base.sha)"
@@ -89,11 +126,26 @@ jobs:
           else
             head_sha="$EVENT_HEAD_SHA"
             base_sha="$EVENT_BASE_SHA"
-            review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | .id' | wc -l)"
-            if [ "$review_count" -lt "$AUTOMATED_REVIEW_ROUNDS" ]; then
-              can_review=true
+            # Manifest-only bot chore(release) PRs: no code to review. Author +
+            # release/v* is not enough — trusted release-bump-pr.cjs also checks
+            # the live PR file allowlist (same paths release-finalization stages).
+            export HEAD_REF="$head_ref" PR_AUTHOR="$pr_author" CLASSIFIER="$classifier"
+            export EXPECTED_HEAD_SHA="$head_sha" BASE_SHA="$base_sha"
+            if LIVE_HEAD_SHA="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)" \
+              && PR_FILES="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')"; then
+              export LIVE_HEAD_SHA PR_FILES PR_FILES_OK=1
             else
+              unset PR_FILES PR_FILES_OK LIVE_HEAD_SHA || true
+            fi
+            if [ -f "$classifier" ] && node --input-type=commonjs -e "process.exit(require(require('node:path').resolve(process.cwd(), process.env.CLASSIFIER)).classifyFromEnv()?0:1)"; then
               can_review=false
+            else
+              review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | .id' | wc -l)"
+              if [ "$review_count" -lt "$AUTOMATED_REVIEW_ROUNDS" ]; then
+                can_review=true
+              else
+                can_review=false
+              fi
             fi
           fi
           if [ "$EVENT_NAME" != workflow_dispatch ] && [ "$can_review" = true ]; then
