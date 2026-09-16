@@ -1,6 +1,7 @@
 'use strict';
 
 const { countAutomatedReviews } = require('./automated-review.cjs');
+const { isBotReleaseBumpPr } = require('./release-bump-pr.cjs');
 
 const CI_PATH = '.github/workflows/ci.yml';
 const REVIEW_PATH = '.github/workflows/automated-code-review.yml';
@@ -59,9 +60,14 @@ async function recoverReview({ github, owner, repo, event, maxRounds = '', log =
     const pull = await get('pulls/{pull_number}', { pull_number: matches[0].number });
     if (pull?.state !== 'open' || pull.head?.sha !== source.head_sha || pull.head?.repo?.full_name !== repository ||
         pull.base?.ref !== 'main' || pull.base?.repo?.full_name !== repository) return skip('PR changed during resolution');
-    // Bot-authored release/v* PRs skip automated review entirely (manifest bumps).
-    if (typeof pull.head?.ref === 'string' && pull.head.ref.startsWith('release/v') &&
-        pull.user?.login === 'github-actions[bot]') {
+    // Verified manifest-only bot release/v* PRs skip automated review entirely.
+    const pullFiles = await list('pulls/{pull_number}/files', { pull_number: pull.number });
+    const fileNames = pullFiles.map((file) => file.filename).filter(Boolean);
+    if (isBotReleaseBumpPr({
+      headRef: pull.head?.ref,
+      prAuthor: pull.user?.login,
+      files: fileNames,
+    })) {
       return skip('bot release version-bump PR');
     }
 

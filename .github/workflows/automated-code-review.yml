@@ -19,19 +19,32 @@ concurrency:
 jobs:
   validate-provider:
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       provider: ${{ steps.provider.outputs.provider }}
     steps:
+      - name: Check out release-bump classifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Reject untrusted bot actors
         env:
           ACTOR: ${{ github.actor }}
+          EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Bot-authored release/v* PRs are version bumps only; review-round sets
+          # Verified manifest-only bot release/v* bumps: review-round sets
           # can_review=false. Allow the actor through so the aggregate stays green.
-          if [[ "${HEAD_REF:-}" == release/v* && "${PR_AUTHOR:-}" == 'github-actions[bot]' ]]; then
+          if [ -n "${PR_NUMBER:-}" ]; then
+            PR_FILES="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename' || true)"
+            export PR_FILES
+          fi
+          if node -e 'process.exit(require("./.github/scripts/release-bump-pr.cjs").classifyFromEnv()?0:1)'; then
             exit 0
           fi
           if [[ "$ACTOR" == *'[bot]' && "$ACTOR" != 'claude[bot]' ]]; then
@@ -101,9 +114,12 @@ jobs:
           else
             head_sha="$EVENT_HEAD_SHA"
             base_sha="$EVENT_BASE_SHA"
-            # Manifest-only bot chore(release) PRs: no code to review. Key on PR
-            # author (not actor) so human pushes that update the bump still skip.
-            if [[ "$head_ref" == release/v* && "$pr_author" == 'github-actions[bot]' ]]; then
+            # Manifest-only bot chore(release) PRs: no code to review. Author +
+            # release/v* is not enough — release-bump-pr.cjs also checks the live
+            # PR file allowlist (same paths release-finalization stages).
+            PR_FILES="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename' || true)"
+            export PR_FILES HEAD_REF="$head_ref" PR_AUTHOR="$pr_author"
+            if node -e 'process.exit(require("./.github/scripts/release-bump-pr.cjs").classifyFromEnv()?0:1)'; then
               can_review=false
             else
               review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | .id' | wc -l)"

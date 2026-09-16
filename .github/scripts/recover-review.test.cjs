@@ -14,6 +14,7 @@ function fixture() {
   return {
     event: { workflow_run: structuredClone(ci) }, ci, review,
     pulls: [{ number: 7, state: 'open', head: { sha: SHA, ref: 'fix/task', repo: { full_name: REPO } }, base: { ref: 'main', repo: { full_name: REPO } } }],
+    pullFiles: [{ filename: 'packages/cezar/src/index.ts' }],
     ciRuns: [ci], reviewRuns: [review], reviews: [],
     ciJobs: [job(101, 'Unit, build, E2E, and package', 'success', '12')],
     reviewJobs: [job(201, 'validate-provider', 'success'), job(202, 'review-round', 'success'), job(203, 'wait-for-ci', 'failure'), job(204, 'claude-review', 'skipped'), job(205, 'codex-review', 'skipped'), job(206, 'post-review', 'skipped'), job(207, 'Automated Code Review', 'failure')],
@@ -39,6 +40,7 @@ function harness(state = fixture(), beforeRead = () => {}) {
     let data;
     if (route.endsWith('/pulls')) data = state.pulls;
     else if (route.endsWith('/pulls/{pull_number}')) data = state.pulls.find(p => p.number === args.pull_number);
+    else if (route.endsWith('/pulls/{pull_number}/files')) data = state.pullFiles ?? [];
     else if (route.endsWith('/reviews')) data = state.reviews;
     else if (route.endsWith('/workflows/{workflow_id}/runs')) data = args.workflow_id === 'ci.yml' ? state.ciRuns : state.reviewRuns;
     else if (route.endsWith('/runs/{run_id}')) data = [state.ci, state.review, ...state.ciRuns, ...state.reviewRuns].find(run => run.id === args.run_id);
@@ -80,10 +82,32 @@ test('bot-authored release/v* bump PRs are never recovered for automated review'
     head: { sha: SHA, ref: 'release/v0.13.5', repo: { full_name: REPO } },
     user: { login: 'github-actions[bot]' },
   };
+  h.state.pullFiles = [
+    { filename: 'packages/cezar/package.json' },
+    { filename: 'package-lock.json' },
+  ];
   const result = await recover(h);
   assert.equal(result.recovered, false);
   assert.equal(result.reason, 'bot release version-bump PR');
   assert.equal(h.writes.length, 0);
+});
+
+test('bot-authored release/v* PRs with non-manifest files remain recoverable', async () => {
+  const h = harness();
+  h.state.ci.head_branch = 'release/v0.13.5';
+  h.state.review.head_branch = 'release/v0.13.5';
+  h.state.pulls[0] = {
+    ...h.state.pulls[0],
+    head: { sha: SHA, ref: 'release/v0.13.5', repo: { full_name: REPO } },
+    user: { login: 'github-actions[bot]' },
+  };
+  h.state.pullFiles = [
+    { filename: 'packages/cezar/package.json' },
+    { filename: '.github/workflows/ci.yml' },
+  ];
+  const result = await recover(h);
+  assert.equal(result.recovered, true);
+  assert.equal(h.writes.length, 1);
 });
 
 test('duplicate completion events skip an in-flight and then completed review', async () => {

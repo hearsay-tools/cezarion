@@ -50,17 +50,25 @@ test('the required aggregate depends on the cockpit browser job', () => {
   assert.match(gate, /needs\['cockpit-browser'\]\.result|needs\.cockpit-browser\.result/);
 });
 
-test('bot-authored release/v* PRs skip Vitest and cockpit E2E keyed on PR author', () => {
+test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr file allowlist', () => {
   const ci = workflow();
-  const bump =
-    "github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.event.pull_request.user.login == 'github-actions[bot]'";
-  assert.match(ci.jobs.vitest.if, new RegExp(bump.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(ci.jobs['cockpit-browser'].if, new RegExp(bump.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const classify = ci.jobs['classify-pr'];
+  assert.ok(classify, 'expected classify-pr job');
+  assert.equal(classify.outputs.bump_pr, '${{ steps.classify.outputs.bump_pr }}');
+  const classifyStep = classify.steps.find((step) => step.id === 'classify');
+  assert.match(classifyStep.run, /release-bump-pr\.cjs/);
+  assert.equal(classifyStep.env.EVENT_NAME, '${{ github.event_name }}');
+  assert.equal(classifyStep.env.PR_AUTHOR, '${{ github.event.pull_request.user.login }}');
+  assert.equal(ci.jobs.vitest.needs, 'classify-pr');
+  assert.equal(ci.jobs['cockpit-browser'].needs, 'classify-pr');
+  assert.equal(ci.jobs.vitest.if, "needs.classify-pr.outputs.bump_pr != 'true'");
+  assert.equal(ci.jobs['cockpit-browser'].if, "needs.classify-pr.outputs.bump_pr != 'true'");
+  assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
   const verifyEnv = ci.jobs.verify.steps.find((step) => step.name === 'Require every verification job').env;
-  assert.equal(verifyEnv.BUMP_PR, `\${{ ${bump} }}`);
+  assert.equal(verifyEnv.BUMP_PR, '${{ needs.classify-pr.outputs.bump_pr }}');
   assert.doesNotMatch(ci.jobs.vitest.if, /github\.actor/);
   assert.doesNotMatch(ci.jobs['cockpit-browser'].if, /github\.actor/);
-  assert.doesNotMatch(verifyEnv.BUMP_PR, /github\.actor/);
+  assert.doesNotMatch(JSON.stringify(ci.jobs), /github\.actor/);
 });
 
 test('CI runs on push to main and still does not publish snapshots from main', () => {
