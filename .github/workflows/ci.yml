@@ -19,6 +19,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  change-surface:
+    name: Classify pull request change surface
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      surface: ${{ steps.classify.outputs.surface }}
+
+    steps:
+      - name: Check out trusted pull request base
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Classify changed files
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! files="$(gh api --paginate --jq '.[].filename | @json' "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files")"; then
+            echo "GitHub API file listing failed; using full matrix" >&2
+            echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! surface="$(printf '%s\n' "$files" | node "$GITHUB_WORKSPACE/.github/scripts/change-surface.cjs")"; then
+            echo "Change-surface classifier failed; using full matrix" >&2
+            echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          case "$surface" in
+            docs-only|full-matrix) ;;
+            *) surface=full-matrix ;;
+          esac
+          echo "surface=$surface" >> "$GITHUB_OUTPUT"
+
   build-and-package:
     name: Typecheck, unit, build, and package
     runs-on: ubuntu-24.04
@@ -68,7 +116,10 @@ jobs:
     # Release bump PRs only stamp manifests + lockfile; release.yml already ran
     # the full suite on the same source. Skip Vitest there (actor must be the
     # bot so a human push to release/v* still runs the matrix).
-    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]') }}
+    needs: change-surface
+    if: >-
+      needs.change-surface.outputs.surface == 'full-matrix' &&
+      !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]')
     strategy:
       fail-fast: false
       matrix:
@@ -103,7 +154,10 @@ jobs:
   cockpit-browser:
     name: Cockpit browser E2E shard ${{ matrix.shard }}/4
     # Same bump-PR skip as vitest — browser E2E is redundant on manifest-only commits.
-    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]') }}
+    needs: change-surface
+    if: >-
+      needs.change-surface.outputs.surface == 'full-matrix' &&
+      !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]')
     strategy:
       fail-fast: false
       matrix:
@@ -134,7 +188,7 @@ jobs:
   # cockpit browser jobs.
   verify:
     name: Unit, build, E2E, and package
-    needs: [build-and-package, vitest, cockpit-browser]
+    needs: [change-surface, build-and-package, vitest, cockpit-browser]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -145,12 +199,13 @@ jobs:
           BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
           VITEST_RESULT: ${{ needs.vitest.result }}
           COCKPIT_BROWSER_RESULT: ${{ needs['cockpit-browser'].result }}
+          CHANGE_SURFACE: ${{ needs.change-surface.outputs.surface }}
           # Same predicate as the vitest/cockpit-browser job ifs: only a bot
           # release/v* PR may leave those two skipped; build-and-package never may.
           BUMP_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]' }}
         run: |
           test "$BUILD_AND_PACKAGE_RESULT" = success
-          if [ "$BUMP_PR" = true ]; then
+          if [ "$CHANGE_SURFACE" = docs-only ] || [ "$BUMP_PR" = true ]; then
             test "$VITEST_RESULT" = success -o "$VITEST_RESULT" = skipped
             test "$COCKPIT_BROWSER_RESULT" = success -o "$COCKPIT_BROWSER_RESULT" = skipped
           else
