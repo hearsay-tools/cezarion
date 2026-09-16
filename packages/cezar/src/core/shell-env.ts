@@ -60,3 +60,10 @@ export function withEnvPrefix(
   const prefix = renderEnvPrefix(env, platform);
   return prefix === null ? null : `${prefix}${command}`;
 }
+
+/** A configured executable as one shell word, or null when the target shell cannot carry it. */
+export function quoteExecutable(value: string, platform: NodeJS.Platform): string | null {
+  if (!value || CONTROL_CHARS_RE.test(value) || (platform === 'win32' && WIN32_UNSAFE_RE.test(value))) return null;
+  if (/^[A-Za-z0-9_./-]+$/.test(value)) return value;
+  return platform === 'win32' ? `"${value}"` : shellQuote(value);
+}

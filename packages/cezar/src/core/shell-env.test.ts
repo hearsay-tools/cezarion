@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderEnvPrefix, shellQuote, withEnvPrefix } from './shell-env.ts';
+import { renderEnvPrefix, shellQuote, withEnvPrefix, quoteExecutable } from './shell-env.ts';
 
 /**
  * Rendering an agent account's config dir into a shell command (spec 2026-07-29-agent-profiles).
@@ -70,5 +70,19 @@ describe('shellQuote', () => {
   it('makes every non-control character inert', () => {
     expect(shellQuote("a'b")).toBe("'a'\\''b'");
     expect(shellQuote('a b$c`d')).toBe("'a b$c`d'");
+  });
+});
+
+describe('quoteExecutable', () => {
+  it('keeps a PATH command portable and quotes custom paths for the target shell', () => {
+    expect(quoteExecutable('agent', 'linux')).toBe('agent');
+    expect(quoteExecutable('/custom path/agent', 'linux')).toBe("'/custom path/agent'");
+    expect(quoteExecutable('C:\\Program Files\\agent.exe', 'win32')).toBe('"C:\\Program Files\\agent.exe"');
+  });
+  it('quotes POSIX metacharacters and refuses unsafe cmd expansion and controls', () => {
+    expect(quoteExecutable('/tmp/$(echo injected)/agent', 'linux')).toBe("'/tmp/$(echo injected)/agent'");
+    for (const path of ['C:\\%TEMP%\\agent', 'C:\\bang!\\agent', '"agent"']) expect(quoteExecutable(path, 'win32')).toBeNull();
+    expect(quoteExecutable('agent\nother', 'linux')).toBeNull();
+    expect(quoteExecutable('', 'linux')).toBeNull();
   });
 });

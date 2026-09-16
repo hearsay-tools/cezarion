@@ -161,6 +161,7 @@ describe('resumeCommand — per backend, mirroring the server', () => {
     ['claude', 'claude --resume s1'],
     [undefined, 'claude --resume s1'], // legacy records predate the runner choice
     ['codex', 'codex resume s1'],
+    ['cursor', 'agent --resume s1'],
     ['opencode', 'opencode --session s1'],
   ] as Array<[RunRecord['runner'], string]>)('%s → %s', (runner, expected) => {
     expect(resumeCommand(runner, 's1')).toBe(expected)

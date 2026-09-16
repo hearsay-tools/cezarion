@@ -153,7 +153,8 @@ import {
   type ResolvedAgentProfile,
 } from '../workspace/agent-profiles.ts';
 import { PROFILE_CAPABLE_PROVIDERS, profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
-import { withEnvPrefix } from '../core/shell-env.ts';
+import { quoteExecutable, withEnvPrefix } from '../core/shell-env.ts';
+import { resolveCursorExecutable } from '../core/cursor-model-catalog.ts';
 import {
   allocateProjectSlug,
   listProjects,
@@ -4052,7 +4053,8 @@ export function createApp(deps: ServerDeps) {
         // An id resumeCommand refuses (#431) degrades to a fresh CLI in the worktree,
         // exactly like a run that never recorded a session.
         const resume = sessionId && cliRunner === (run.runner ?? 'claude') ? resumeCommand(cliRunner, sessionId) : null;
-        const command = resume ?? (cliRunner === 'cursor' ? 'agent' : cliRunner);
+        const command = resume ?? (cliRunner === 'cursor' ? quoteExecutable(resolveCursorExecutable(), process.platform) : cliRunner);
+        if (command === null) return c.json({ error: 'the configured Cursor executable cannot be used in a terminal command' }, 409);
         // BOTH branches carry the account (spec 2026-07-29-agent-profiles): a resume needs the
         // config dir that holds its session, and a FRESH CLI in this worktree should still open
         // on the account the project works under — otherwise "Open in → Claude CLI" quietly
@@ -5907,8 +5909,10 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
       return `codex resume ${sessionId}`;
     case 'opencode':
       return `opencode --session ${sessionId}`;
-    case 'cursor':
-      return `agent --resume ${sessionId}`;
+    case 'cursor': {
+      const executable = quoteExecutable(resolveCursorExecutable(), process.platform);
+      return executable === null ? null : `${executable} --resume ${sessionId}`;
+    }
     case 'pi':
       return `pi --session ${sessionId}`;
     default:

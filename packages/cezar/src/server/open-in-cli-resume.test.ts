@@ -22,7 +22,7 @@ const { createApp } = await import('./server.ts');
 const providerAuth = (disconnected: ProviderId[] = []) => new ProviderAuthService({
   platform: 'linux',
   runCommand: async (executable) => {
-    if (executable === 'agent') return { stdout: '{"status":"authenticated","isAuthenticated":true}', stderr: '', exitCode: 0 };
+    if (executable === (process.env.CEZ_CURSOR_BIN ?? 'agent')) return { stdout: '{"status":"authenticated","isAuthenticated":true}', stderr: '', exitCode: 0 };
     const provider = executable === 'claude'
       ? 'claude'
       : executable === 'codex'
@@ -157,6 +157,16 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     const res = await openIn(run.id, 'cli:cursor');
     expect(res.status).toBe(200);
     expect(((await res.json()) as { command: string }).command).toBe('agent');
+  });
+
+  it.each([false, true])('uses the quoted Cursor override for handoff with resume=%s', async (resume) => {
+    vi.stubEnv('CEZ_CURSOR_BIN', '/custom path/agent');
+    try {
+      const run = makeRun('cursor', resume ? 'sess-1' : undefined);
+      const res = await openIn(run.id, 'cli:cursor');
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { command: string }).command).toBe(`'/custom path/agent'${resume ? ' --resume sess-1' : ''}`);
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it('no session yet: even the matching CLI launches fresh instead of erroring', async () => {
