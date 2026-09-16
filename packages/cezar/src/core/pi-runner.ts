@@ -17,7 +17,7 @@ import type {
 import { isSignalTerminationExit } from './agent-runner.js';
 import { buildChildEnv } from './agent-env.js';
 import { readNdjson } from './ndjson.js';
-import { createPiUiState, mapPiRpcMessage, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
+import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
 import { V1TextCoalescer } from './v1-text-coalescer.js';
 import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
 
@@ -142,6 +142,13 @@ export class PiRunner implements AgentRunner {
 
     const emitUi = (value: unknown): void => {
       const mapped = mapPiRpcMessage(value, piUi);
+      piUi = mapped.state;
+      for (const event of mapped.events) opts.onUiEvent?.(event);
+    };
+    /** The mapper latches a provider failure until the turn settles; when the RPC
+     *  stream ends without `agent_settled` this releases it the way v1 does. */
+    const emitLatchedUiProviderError = (): void => {
+      const mapped = piFlushProviderError(piUi);
       piUi = mapped.state;
       for (const event of mapped.events) opts.onUiEvent?.(event);
     };
@@ -367,6 +374,7 @@ export class PiRunner implements AgentRunner {
 
       flushText();
       emitLatchedProviderError();
+      emitLatchedUiProviderError();
       const exitCode = await waitForExit(child);
       if (spawnError) throw spawnError;
       if (timedOut) {

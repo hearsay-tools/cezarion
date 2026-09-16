@@ -634,8 +634,9 @@ describe('pi provider failures on assistant message_end (#54)', () => {
       usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
     } });`,
     );
-    const { events } = await runPiMock(cwd, mockPath);
+    const { events, uiEvents } = await runPiMock(cwd, mockPath);
     expect(events.some((e) => e.type === 'error')).toBe(false);
+    expect(uiEvents.some((e) => e.type === 'session.error')).toBe(false);
     expect(events.some((e) => e.type === 'turn-end')).toBe(true);
   });
 
@@ -662,10 +663,17 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
 `,
       { mode: 0o755 },
     );
-    const { events } = await runPiMock(cwd, mockPath);
+    const { events, uiEvents } = await runPiMock(cwd, mockPath);
     expect(events.find((e) => e.type === 'error')?.message).toBe(
       'pi: xai/grok-4.6 request failed: Error Code null: Internal error during token generation',
     );
+    expect(uiEvents.filter((e) => e.type === 'session.error')).toEqual([
+      {
+        type: 'session.error',
+        message: 'pi: xai/grok-4.6 request failed: Error Code null: Internal error during token generation',
+        fatal: false,
+      },
+    ]);
   });
 
   it('reports the original xAI wording after degraded-service retries are exhausted (#276)', async () => {
