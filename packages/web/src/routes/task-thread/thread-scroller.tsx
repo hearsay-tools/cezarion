@@ -78,6 +78,8 @@ export function useThreadScroll(
   } = {},
 ): ThreadScrollControls {
   const { surface = 'document', onLoadOlder, onJumpToLatest, rowKeys = [] } = options
+  const viewKeyRef = useRef(viewKey)
+  viewKeyRef.current = viewKey
   const scrollElRef = useRef<HTMLElement | null>(null)
   // State, not a ref: crossing the virtualization threshold mid-replay REPLACES the rows
   // container, and the observers below must re-subscribe to the new element.
@@ -200,13 +202,15 @@ export function useThreadScroll(
     const beforeViewportTop = scroller.getBoundingClientRect().top
     const anchor = firstVisibleThreadAnchor(beforeViewportTop, measuredRows(scroller))
     const anchorIndex = anchor === undefined ? -1 : rowKeysRef.current.indexOf(anchor.key)
+    const requestViewKey = viewKeyRef.current
     void onLoadOlder().then(
       () => {
+        if (viewKeyRef.current !== requestViewKey) return
         pendingHistoryRestoreRef.current = { beforeHeight, beforeTop, anchor, anchorIndex }
       },
       () => {},
     ).finally(() => {
-      loadingOlderRef.current = false
+      if (viewKeyRef.current === requestViewKey) loadingOlderRef.current = false
     })
   }, [measuredRows, onLoadOlder])
 
@@ -235,6 +239,10 @@ export function useThreadScroll(
 
   const lastRowKey = rowKeys.at(-1)
   const rowCount = rowKeys.length
+  useLayoutEffect(() => {
+    pendingHistoryRestoreRef.current = null
+    loadingOlderRef.current = false
+  }, [viewKey])
   useLayoutEffect(() => {
     const pending = pendingHistoryRestoreRef.current
     if (pending) {

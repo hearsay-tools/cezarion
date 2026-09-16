@@ -361,6 +361,46 @@ describe('useThreadScroll — outside a shell scroller (jsdom, tests, storybook-
     hook.unmount()
     scroller.remove()
   })
+
+  it('does not restore a previous task\'s history anchor after navigating away mid-load', async () => {
+    let resolveLoad!: () => void
+    const onLoadOlder = vi.fn(() => new Promise<void>((resolve) => { resolveLoad = resolve }))
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, {
+      clientHeight: { value: 400, configurable: true },
+      scrollHeight: { value: 1_000, configurable: true },
+    })
+    scroller.getBoundingClientRect = () => ({
+      top: 0, bottom: 400, left: 0, right: 800, width: 800, height: 400, x: 0, y: 0, toJSON() {},
+    })
+    const content = document.createElement('div')
+    const row = document.createElement('div')
+    row.dataset.slot = 'thread-row'
+    row.dataset.rowKey = 'turn-seq-2777:user'
+    row.getBoundingClientRect = () => ({
+      top: 80, bottom: 160, left: 0, right: 800, width: 800, height: 80, x: 0, y: 80, toJSON() {},
+    })
+    content.append(row)
+    scroller.append(content)
+    const hook = renderHook(
+      ({ viewKey, rowKeys }: { viewKey: string; rowKeys: string[] }) =>
+        useThreadScroll(viewKey, { onLoadOlder, rowKeys }),
+      { initialProps: { viewKey: 'run-a:main', rowKeys: ['task', 'turn-seq-2777:user'] } },
+    )
+    act(() => hook.result.current.attachContent(content))
+    const handle = { scrollTo: vi.fn(), scrollToIndex: vi.fn() }
+    hook.result.current.virtualizerRef.current = handle as never
+    scroller.scrollTop = 80
+
+    act(() => hook.result.current.loadOlder())
+    act(() => hook.rerender({ viewKey: 'run-b:main', rowKeys: ['task', 'other'] }))
+    await act(async () => { resolveLoad(); await Promise.resolve() })
+    act(() => hook.rerender({ viewKey: 'run-b:main', rowKeys: ['task', 'older', 'turn-seq-2777:user'] }))
+    expect(handle.scrollToIndex).not.toHaveBeenCalled()
+    hook.unmount()
+    scroller.remove()
+  })
 })
 
 describe('useThreadScroll — jump to latest', () => {
