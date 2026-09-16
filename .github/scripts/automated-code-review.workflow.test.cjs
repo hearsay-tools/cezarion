@@ -267,10 +267,26 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(validator, /permissions: \{\}/);
   assert.match(validator, /name: Reject untrusted bot actors/);
   assert.match(validator, /ACTOR: \$\{\{ github\.actor \}\}/);
+  assert.match(validator, /HEAD_REF: \$\{\{ github\.head_ref \}\}/);
+  assert.match(validator, /PR_AUTHOR: \$\{\{ github\.event\.pull_request\.user\.login \}\}/);
+  assert.match(validator, /\[\[ "\$\{HEAD_REF:-\}" == release\/v\* && "\$\{PR_AUTHOR:-\}" == 'github-actions\[bot\]' \]\]/);
   assert.match(validator, /\[\[ "\$ACTOR" == \*'\[bot\]' && "\$ACTOR" != 'claude\[bot\]' \]\]/);
   assert.ok(validator.indexOf('name: Reject untrusted bot actors') < validator.indexOf('id: provider'), 'bot guard must run before provider validation and the wildcard action allowlist');
   assert.match(aggregate, /permissions: \{\}/);
   assert.doesNotMatch(workflow, /resolveReviewThread/i, 'workflow must never resolve review threads automatically');
+});
+
+test('bot-authored release/v* PRs set can_review=false without spending a review round', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const round = job(workflow, 'review-round');
+  assert.match(round, /HEAD_REF: \$\{\{ github\.head_ref \}\}/);
+  assert.match(round, /PR_AUTHOR: \$\{\{ github\.event\.pull_request\.user\.login \}\}/);
+  assert.match(round, /head_ref="\$\{HEAD_REF:-\}"/);
+  assert.match(round, /pr_author="\$\{PR_AUTHOR:-\}"/);
+  assert.match(round, /\[\[ "\$head_ref" == release\/v\* && "\$pr_author" == 'github-actions\[bot\]' \]\]/);
+  assert.match(round, /can_review=false/);
+  // Manual dispatch still reviews even when the PR is a bump.
+  assert.match(round, /EVENT_NAME" = workflow_dispatch[\s\S]*can_review=true/);
 });
 
 test('automated review rounds read AUTOMATED_REVIEW_ROUNDS and ignore the cap on workflow_dispatch', () => {
@@ -398,7 +414,7 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
   const patchId = 'c'.repeat(40);
   const marker = `<!-- cez-review-patch-id: ${patchId} -->`;
 
-  async function runRound({ event, gitOk, reviewsOut }) {
+  async function runRound({ event, gitOk, reviewsOut, headRef = '', prAuthor = '' }) {
     const cwd = fs.mkdtempSync(path.join(tmpdir(), 'review-patch-id-'));
     const output = path.join(cwd, 'outputs');
     const env = {
@@ -411,6 +427,8 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
       AUTOMATED_REVIEW_ROUNDS: '3',
       EVENT_HEAD_SHA: event === 'workflow_dispatch' ? '' : head,
       EVENT_BASE_SHA: event === 'workflow_dispatch' ? '' : base,
+      HEAD_REF: headRef,
+      PR_AUTHOR: prAuthor,
     };
     const gitStub = gitOk
       ? `git() { printf '%s ignored\\n' '${patchId}'; }`
@@ -458,6 +476,40 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
 
   await t.test('workflow_dispatch still reviews past the patch-id skip', async () => {
     const outputs = await runRound({ event: 'workflow_dispatch', gitOk: true, reviewsOut: marker });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('bot-authored release/v* head skips review', async () => {
+    const outputs = await runRound({
+      event: 'pull_request_target',
+      gitOk: true,
+      reviewsOut: 'No issues found',
+      headRef: 'release/v0.13.5',
+      prAuthor: 'github-actions[bot]',
+    });
+    assert.equal(outputs.can_review, 'false');
+    assert.equal(outputs.patch_id, '');
+  });
+
+  await t.test('human-authored release/v* head still reviews', async () => {
+    const outputs = await runRound({
+      event: 'pull_request_target',
+      gitOk: true,
+      reviewsOut: 'No issues found',
+      headRef: 'release/v0.13.5',
+      prAuthor: 'human',
+    });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('workflow_dispatch still reviews a bot release/v* PR', async () => {
+    const outputs = await runRound({
+      event: 'workflow_dispatch',
+      gitOk: true,
+      reviewsOut: marker,
+      headRef: 'release/v0.13.5',
+      prAuthor: 'github-actions[bot]',
+    });
     assert.equal(outputs.can_review, 'true');
   });
 });

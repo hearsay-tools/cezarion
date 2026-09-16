@@ -26,7 +26,14 @@ jobs:
       - name: Reject untrusted bot actors
         env:
           ACTOR: ${{ github.actor }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
+          # Bot-authored release/v* PRs are version bumps only; review-round sets
+          # can_review=false. Allow the actor through so the aggregate stays green.
+          if [[ "${HEAD_REF:-}" == release/v* && "${PR_AUTHOR:-}" == 'github-actions[bot]' ]]; then
+            exit 0
+          fi
           if [[ "$ACTOR" == *'[bot]' && "$ACTOR" != 'claude[bot]' ]]; then
             echo "Unsupported bot actor: $ACTOR. Only claude[bot] may trigger automated review." >&2
             exit 1
@@ -69,6 +76,8 @@ jobs:
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           AUTOMATED_REVIEW_ROUNDS: ${{ vars.AUTOMATED_REVIEW_ROUNDS }}
         run: |
           if [ -z "$PR_NUMBER" ]; then
@@ -82,6 +91,9 @@ jobs:
             exit 1
           fi
           patch_id=""
+          # Empty on workflow_dispatch (no pull_request payload); keep -u safe.
+          head_ref="${HEAD_REF:-}"
+          pr_author="${PR_AUTHOR:-}"
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
             head_sha="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
             base_sha="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .base.sha)"
@@ -89,11 +101,17 @@ jobs:
           else
             head_sha="$EVENT_HEAD_SHA"
             base_sha="$EVENT_BASE_SHA"
-            review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | .id' | wc -l)"
-            if [ "$review_count" -lt "$AUTOMATED_REVIEW_ROUNDS" ]; then
-              can_review=true
-            else
+            # Manifest-only bot chore(release) PRs: no code to review. Key on PR
+            # author (not actor) so human pushes that update the bump still skip.
+            if [[ "$head_ref" == release/v* && "$pr_author" == 'github-actions[bot]' ]]; then
               can_review=false
+            else
+              review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | .id' | wc -l)"
+              if [ "$review_count" -lt "$AUTOMATED_REVIEW_ROUNDS" ]; then
+                can_review=true
+              else
+                can_review=false
+              fi
             fi
           fi
           if [ "$EVENT_NAME" != workflow_dispatch ] && [ "$can_review" = true ]; then

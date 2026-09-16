@@ -59,6 +59,11 @@ async function recoverReview({ github, owner, repo, event, maxRounds = '', log =
     const pull = await get('pulls/{pull_number}', { pull_number: matches[0].number });
     if (pull?.state !== 'open' || pull.head?.sha !== source.head_sha || pull.head?.repo?.full_name !== repository ||
         pull.base?.ref !== 'main' || pull.base?.repo?.full_name !== repository) return skip('PR changed during resolution');
+    // Bot-authored release/v* PRs skip automated review entirely (manifest bumps).
+    if (typeof pull.head?.ref === 'string' && pull.head.ref.startsWith('release/v') &&
+        pull.user?.login === 'github-actions[bot]') {
+      return skip('bot release version-bump PR');
+    }
 
     const ciRuns = await list('actions/workflows/{workflow_id}/runs', { workflow_id: 'ci.yml', event: 'pull_request', head_sha: pull.head.sha });
     const latestCi = ciRuns.filter(run => run.event === 'pull_request' && run.head_sha === pull.head.sha).sort((a, b) => b.id - a.id)[0];

@@ -71,6 +71,21 @@ test('failed CI followed by success resumes only the failed review gate and its 
   assert.match(h.logs.join('\n'), /CI 42 attempt 2.*review 50 attempt 1.*203/);
 });
 
+test('bot-authored release/v* bump PRs are never recovered for automated review', async () => {
+  const h = harness();
+  h.state.ci.head_branch = 'release/v0.13.5';
+  h.state.review.head_branch = 'release/v0.13.5';
+  h.state.pulls[0] = {
+    ...h.state.pulls[0],
+    head: { sha: SHA, ref: 'release/v0.13.5', repo: { full_name: REPO } },
+    user: { login: 'github-actions[bot]' },
+  };
+  const result = await recover(h);
+  assert.equal(result.recovered, false);
+  assert.equal(result.reason, 'bot release version-bump PR');
+  assert.equal(h.writes.length, 0);
+});
+
 test('duplicate completion events skip an in-flight and then completed review', async () => {
   const h = harness();
   await recover(h); await recover(h);
