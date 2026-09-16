@@ -1311,6 +1311,9 @@ describe('submit', () => {
     await pillReady()
     const worktree = document.querySelector('[data-slot="worktree-toggle"]') as HTMLButtonElement
     expect(worktree.getAttribute('aria-checked')).toBe('false')
+    const thumb = worktree.querySelector('span[aria-hidden="true"] > span') as HTMLElement
+    expect(thumb.className).toContain('bg-foreground')
+    expect(thumb.className).not.toContain('bg-accent-strong-foreground')
     fireEvent.change(textarea(), { target: { value: 'Use the environment seed' } })
     await startTask()
     expect(postedBody()).toMatchObject({ workflow: 'quick-task', worktree: false })
