@@ -87,7 +87,7 @@ async function recoverReview({
     }
 
     const ciRuns = await list('actions/workflows/{workflow_id}/runs', { workflow_id: 'ci.yml', head_sha: pull.head.sha });
-    const latestCi = ciRuns.filter(run => ['pull_request', 'pull_request_target'].includes(run.event) && run.head_sha === pull.head.sha).sort((a, b) => b.id - a.id)[0];
+    const latestCi = ciRuns.filter(run => ['pull_request', 'pull_request_target'].includes(run.event) && run.head_sha === pull.head.sha && run.conclusion !== 'cancelled').sort((a, b) => b.id - a.id)[0];
     if (!latestCi) return skip('no CI for the current head');
     const ci = await runDetails(latestCi.id);
     ciIdentity = `CI ${ci.id} attempt ${ci.run_attempt}`;

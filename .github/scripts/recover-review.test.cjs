@@ -94,6 +94,22 @@ test('recovery accepts CI completions from the trusted pull request target workf
   assert.equal(h.writes.length, 1);
 });
 
+test('recovery ignores a newer cancelled target run when older pull_request verification succeeded', async () => {
+  const h = harness();
+  h.options.event = { workflow_run: structuredClone(h.state.review) };
+  h.state.ciRuns.unshift({
+    ...h.state.ci,
+    id: 60,
+    event: 'pull_request_target',
+    status: 'completed',
+    conclusion: 'cancelled',
+    run_attempt: 1,
+  });
+  const result = await recover(h);
+  assert.equal(result.recovered, true, result.reason);
+  assert.equal(h.writes.length, 1);
+});
+
 test('bot-authored release/v* bump PRs are never recovered for automated review', async () => {
   const h = harness();
   h.state.ci.head_branch = 'release/v0.13.5';
