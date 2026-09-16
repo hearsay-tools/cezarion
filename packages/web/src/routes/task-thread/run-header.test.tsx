@@ -1232,6 +1232,20 @@ describe('meta line, tabs, pill and resume hint', () => {
       expect(badge.getAttribute('aria-label')).not.toContain('account')
       expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · opus')
     })
+
+    it('still names a removed account once the runner is down to one login (#251)', async () => {
+      // Deleting the second account must not retroactively erase history: a step that recorded
+      // `work` before the account was deleted still has that id as its only pointer to the folder
+      // its sessions live in (spec 2026-07-29-agent-profiles), so the lone-catalog rule hides
+      // KNOWN accounts only — a removed one stays visible as `<id> (removed)`.
+      withOneAccount()
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', profileId: 'work' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      await within(meta).findByRole('button', { name: /account work \(removed\)/ })
+    })
   })
 
   describe('the canonical model identity (#546)', () => {

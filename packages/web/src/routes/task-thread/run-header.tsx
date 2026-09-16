@@ -709,17 +709,21 @@ function AgentBadge({ run }: { run: ApiRun }) {
   // changed since — both would name an account this run may never have touched. The last step that
   // recorded one is what ran; `sessionId` and `profileId` are a pair for exactly this reason.
   const accountId = [...run.steps].reverse().find((step) => step.profileId)?.profileId
-  // One login is not a choice (#251, spec 2026-07-29-agent-profiles): the badge names the account
+  // One login is not a choice (#251, spec 2026-07-29-agent-profiles): a KNOWN account is named
   // only when the CHOSEN runner has two or more defined accounts — the same `hasAccountChoice`
-  // count the composer pill applies — and stays silent while the profiles query is in flight, so
-  // a lone `default` never paints the summary just to vanish a moment later.
-  const account = hasAccountChoice(accounts, runner) && accountId !== undefined
-    ? accountId === DEFAULT_AGENT_ACCOUNT_ID
-      ? 'default'
-      // A deleted account still names the folder this run's sessions live in, so the id is shown
-      // rather than swallowed — "gone" is the useful half of that answer.
-      : profiles.data?.profiles.find((p) => p.id === accountId)?.label ?? `${accountId} (removed)`
-    : undefined
+  // count the composer pill applies — and the badge stays silent while the profiles query is in
+  // flight, so a lone `default` never paints the summary just to vanish a moment later. A REMOVED
+  // account is the exception to the count: the id is the only remaining pointer to the folder its
+  // sessions live in, so `<id> (removed)` shows regardless of how many logins are left — deleting
+  // an account must not retroactively erase which one a historical run ran under.
+  const known = profiles.data?.profiles.find((p) => p.id === accountId)
+  const account = !profiles.data || accountId === undefined
+    ? undefined
+    : known
+      ? hasAccountChoice(accounts, runner)
+        ? accountId === DEFAULT_AGENT_ACCOUNT_ID ? 'default' : known.label
+        : undefined
+      : `${accountId} (removed)`
   // The canonical `provider/model` the run actually resolved to (#405), shown only when it says
   // something `model` does not (#546). `model` is the free-text the caller ASKED for — `opus`,
   // `auto`, a gateway id — so on a repo whose Claude runner points at a custom endpoint the two
