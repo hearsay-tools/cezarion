@@ -52,12 +52,16 @@ remain unchanged.
 
 The upstream ACP schema separately defines optional `usage_update` with
 `used` (tokens currently in context), `size` (context capacity), and optional
-cumulative `cost: {amount, currency}`. A dedicated unit test checks forward
-compatibility without adding a fabricated frame to the baseline fixture.
-The normalized event puts occupancy in `total` and capacity in
-`contextWindow`; required directional fields are zero because ACP did not
-report those counts. This snapshot is never attached as per-turn usage.
-Only USD costs populate `costUsd`.
+cumulative `cost: {amount, currency}`. This is occupancy, not cumulative
+session token consumption. The mapper deliberately emits no usage event
+for this shape: `UiEvent` cannot represent occupancy alone, and inventing
+zero directional counts would mislabel the snapshot as token spend. A
+separate unit test pins this limitation. Directional usage stays absent
+until the vendor reports telemetry compatible with the normalized contract.
+
+Malformed plan/todo snapshots emit no events and preserve the existing dock,
+including when only part of a snapshot is malformed. An explicitly empty,
+valid array still clears the dock.
 
 ## Tasks and negotiated child sessions
 

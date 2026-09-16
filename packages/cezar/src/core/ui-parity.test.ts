@@ -93,8 +93,8 @@ const CAPABILITIES: ReadonlyArray<[name: string, produced: (events: UiEvent[]) =
 
 /** Cursor 2026.09.15-d2fe57e: ACP presenter in 1699.index.js emits no usage,
  * and session/prompt returns only stopReason. Confirmed by a live probe; see
- * __fixtures__/cursor/README.md. Optional upstream usage_update compatibility
- * is unit-tested separately and is not evidence that Cursor emits telemetry.
+ * __fixtures__/cursor/README.md. Optional upstream usage_update is occupancy, not consumption,
+ * and is deliberately not mapped (pinned by a separate unit test).
  * Keep inverse assertions so fabricated fixture usage cannot erase the gap.
  */
 const CURSOR_NO_USAGE_TELEMETRY = new Set([

@@ -66,9 +66,34 @@ describe('Cursor ACP mapper', () => {
     expect(mapCursorMessage(todos([], false), b.state).events).toEqual([{ type: 'plan.updated', entries: [] }]);
   });
 
-  it('maps optional ACP context telemetry separately from baseline Cursor fixtures', () => {
+  it.each([null, {}, [null], [{ content: 'missing status' }], [
+    { id: 'new', content: 'Valid', status: 'completed' }, { content: 'Broken', status: false },
+  ]].map((entries) => [entries]))('preserves the dock when a plan or todo snapshot is malformed: %j', (entries) => {
+    const initial = mapCursorMessage({ method: 'cursor/update_todos', params: { merge: false,
+      todos: [{ id: 'existing', content: 'Keep this', status: 'pending' }],
+    } }, start()).state;
+    for (const frame of [update({ sessionUpdate: 'plan', entries }),
+      { method: 'cursor/update_todos', params: { merge: false, todos: entries } },
+      { method: 'cursor/update_todos', params: { merge: true, todos: entries } }]) {
+      const mapped = mapCursorMessage(frame, initial);
+      expect(mapped.events).toEqual([]);
+      expect(mapped.state).toBe(initial);
+      expect([...mapped.state.todos.values()]).toEqual([{ content: 'Keep this', status: 'pending' }]);
+    }
+  });
+
+  it('rejects a todo without an id but permits deliberate empty snapshots', () => {
+    const state = start();
+    const invalid = mapCursorMessage({ method: 'cursor/update_todos', params: { merge: false,
+      todos: [{ content: 'No id', status: 'pending' }],
+    } }, state);
+    expect(invalid).toEqual({ state, events: [] });
+    expect(mapCursorMessage(update({ sessionUpdate: 'plan', entries: [] }), state).events).toEqual([{ type: 'plan.updated', entries: [] }]);
+  });
+
+  it('does not misreport optional ACP context occupancy as cumulative token usage', () => {
     const mapped = mapCursorMessage(update({ sessionUpdate: 'usage_update', used: 20, size: 100, cost: { amount: 0.5, currency: 'USD' } }), start());
-    expect(mapped.events).toEqual([{ type: 'usage.updated', usage: { input: 0, output: 0, total: 20, contextWindow: 100 }, costUsd: 0.5 }]);
+    expect(mapped.events).toEqual([]);
     expect(cursorTurnCompleted('end_turn', mapped.state).events).toEqual([{ type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' }]);
     expect(mapCursorMessage(update({ sessionUpdate: 'usage_update', used: -1, size: 100 }), mapped.state).events).toEqual([]);
   });
@@ -85,7 +110,7 @@ describe('Cursor ACP mapper', () => {
       { content: 'Bad status', status: { toString: 3 } },
       { content: 'Good entry', status: 'pending', priority: { toString: 3 } },
     ] }), start());
-    expect(mapped.events).toEqual([{ type: 'plan.updated', entries: [{ content: 'Good entry', status: 'pending' }] }]);
+    expect(mapped.events).toEqual([]);
   });
 
   it.each([['end_turn', 'end_turn'], ['max_tokens', 'max_tokens'], ['max_turn_requests', 'max_tokens'], ['refusal', 'refusal'], ['cancelled', 'cancelled'], ['error', 'error'], ['unknown', 'error']])('normalizes stop reason %s', (wire, expected) => {

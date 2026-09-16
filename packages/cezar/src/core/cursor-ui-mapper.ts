@@ -132,7 +132,8 @@ function mapSessionMessage(message: unknown, state: CursorUiState): CursorUiMapp
     const todos = params.merge ? new Map(state.todos) : new Map<string, PlanEntry>();
     for (const value of params.todos) {
       const entry = planEntry(value);
-      if (entry && record(value) && str(value.id)) todos.set(value.id as string, entry);
+      if (!entry || !record(value) || !str(value.id)) return noop;
+      todos.set(value.id as string, entry);
     }
     return { state: { ...state, todos }, events: [{ type: 'plan.updated', entries: [...todos.values()] }] };
   }
@@ -167,16 +168,19 @@ function mapSessionMessage(message: unknown, state: CursorUiState): CursorUiMapp
     case 'tool_call_update': return tool(value, state);
     case 'plan': {
       if (!Array.isArray(value.entries)) return noop;
-      const entries = value.entries.map(planEntry).filter((entry): entry is PlanEntry => entry !== undefined);
+      const entries: PlanEntry[] = [];
+      for (const raw of value.entries) {
+        const entry = planEntry(raw);
+        if (!entry) return noop;
+        entries.push(entry);
+      }
       return { state, events: [{ type: 'plan.updated', entries }] };
     }
-    case 'usage_update': {
-      // ACP reports context occupancy, NOT directional/per-turn token consumption.
-      // Zero directional fields mean unavailable; never attach this to turn.completed.
-      if (!count(value.used) || !count(value.size)) return noop;
-      const cost = record(value.cost) && value.cost.currency === 'USD' && nonnegative(value.cost.amount) ? value.cost.amount : undefined;
-      return { state, events: [{ type: 'usage.updated', usage: { input: 0, output: 0, total: value.used, contextWindow: value.size }, ...(cost !== undefined ? { costUsd: cost } : {}) }] };
-    }
+    case 'usage_update':
+      // ACP used/size reports context occupancy, not cumulative consumption.
+      // UiEvent has no occupancy-only event; do not invent directional tokens
+      // or mislabel a context snapshot as cumulative session usage.
+      return noop;
     default: return noop;
   }
 }
