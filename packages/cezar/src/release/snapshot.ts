@@ -16,7 +16,7 @@ import { stampManifestSet, type ReleaseManifests as ReleaseManifestSet } from '.
 
 /** The CI facts the decision needs, straight from GitHub Actions' env/event. */
 export interface SnapshotContext {
-  /** `GITHUB_EVENT_NAME` — `pull_request` and `push` publish previews; `schedule`
+  /** `GITHUB_EVENT_NAME` — `pull_request` / `pull_request_target` and `push` publish previews; `schedule`
    *  and `workflow_dispatch` publish only the explicitly requested nightly. */
   eventName: string;
   /** `GITHUB_REF_NAME` for push events — only `develop` publishes a snapshot;
@@ -32,7 +32,7 @@ export interface SnapshotContext {
   /** `YYYYMMDD` (UTC) of the day a nightly is cut — the nightly version is named
    *  after its date. Required for the nightly channel, ignored by every other. */
   nightlyDate?: string;
-  /** PR number for pull_request events; absent/invalid → no publish. */
+  /** PR number for pull request events; absent/invalid → no publish. */
   prNumber?: number;
   /** `owner/name` of the PR head repo — fork PRs (≠ `repo`) never publish. */
   headRepo?: string;
@@ -90,7 +90,7 @@ function resolveChannel(ctx: SnapshotContext): { channel: string; distTag: strin
     if (ctx.refName !== 'main') return null;
     return { channel: 'nightly', distTag: 'nightly' };
   }
-  if (ctx.eventName === 'pull_request') {
+  if (ctx.eventName === 'pull_request' || ctx.eventName === 'pull_request_target') {
     const n = ctx.prNumber;
     if (n === undefined || !Number.isInteger(n) || n <= 0) return null;
     // Defense in depth: the workflow's `if` already excludes forks, and fork PRs

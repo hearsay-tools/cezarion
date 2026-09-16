@@ -51,6 +51,134 @@ test('Codex receives resolved review metadata for PR and manual triggers', async
   assert.doesNotMatch(prompt, /Read `\$GITHUB_EVENT_PATH`/);
 });
 
+test('review-round classifies from trusted base before merge checkout and skips only docs-only PRs', async (t) => {
+  const { parse } = await import('yaml');
+  const { execFileSync } = require('node:child_process');
+  const { tmpdir } = require('node:os');
+  const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const roundJob = workflow.jobs['review-round'];
+  const steps = roundJob.steps;
+  const trustedCheckoutIndex = steps.findIndex((step) => step.with?.path === '.cez-trusted');
+  const classifier = steps.find((step) => step.id === 'change-surface');
+  const classifierIndex = steps.indexOf(classifier);
+  const mergeCheckoutIndex = steps.findIndex((step) => step.with?.ref?.includes('refs/pull/'));
+  const round = steps.find((step) => step.id === 'review-round');
+
+  assert.ok(trustedCheckoutIndex >= 0, 'review-round must check out a trusted classifier');
+  assert.equal(steps[trustedCheckoutIndex].with.ref, '${{ github.event.pull_request.base.sha || github.sha }}');
+  assert.equal(steps[trustedCheckoutIndex].with['persist-credentials'], false);
+  assert.ok(classifier, 'review-round must classify the change surface');
+  assert.ok(trustedCheckoutIndex < classifierIndex, 'the classifier must come from the trusted checkout');
+  assert.ok(classifierIndex < mergeCheckoutIndex, 'classification must run before the PR merge checkout');
+  assert.match(classifier.run, /gh api --paginate --slurp/);
+  assert.match(classifier.run, /changed_files/);
+  assert.match(classifier.run, /previous_filename/);
+  assert.match(classifier.run, /change-surface\.cjs/);
+  assert.match(classifier.run, /full-matrix/);
+  assert.match(round.env.CHANGE_SURFACE, /steps\.change-surface\.outputs\.change_surface/);
+  assert.equal(roundJob.outputs.change_surface, '${{ steps.review-round.outputs.change_surface }}');
+  assert.match(round.run, /\[ "\$EVENT_NAME" = pull_request_target \] && \[ "\$change_surface" = docs-only \]/);
+  assert.match(round.run, /can_review=false/);
+
+  const head = 'a'.repeat(40);
+  const base = 'b'.repeat(40);
+
+  function outputsAt(output) {
+    return Object.fromEntries(fs.readFileSync(output, 'utf8').trim().split('\n').filter(Boolean).map((line) => {
+      const index = line.indexOf('=');
+      return [line.slice(0, index), line.slice(index + 1)];
+    }));
+  }
+
+  function runScript(script, cwd, env) {
+    execFileSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', script], { cwd, env });
+  }
+
+  function runRound({ event, files = [], apiFailure = false, classifierFailure = false }) {
+    const cwd = fs.mkdtempSync(path.join(tmpdir(), 'review-change-surface-'));
+    try {
+      const trustedPath = path.join(cwd, '.cez-trusted', '.github', 'scripts');
+      fs.mkdirSync(trustedPath, { recursive: true });
+      if (!classifierFailure) {
+        fs.copyFileSync(path.join(__dirname, 'change-surface.cjs'), path.join(trustedPath, 'change-surface.cjs'));
+      }
+      const classifyOutput = path.join(cwd, 'classify-outputs');
+      const roundOutput = path.join(cwd, 'round-outputs');
+      const filesJsonLines = files.map((file) => JSON.stringify(file)).join('\n');
+      const filePages = JSON.stringify([files.map((filename) => ({ filename }))]);
+      const env = {
+        ...process.env,
+        BASH_ENV: '/dev/null',
+        GITHUB_OUTPUT: classifyOutput,
+        GITHUB_WORKSPACE: cwd,
+        GITHUB_REPOSITORY: 'owner/repo',
+        PR_NUMBER: '220',
+        EVENT_NAME: event,
+        EVENT_HEAD_SHA: event === 'workflow_dispatch' ? '' : head,
+        EVENT_BASE_SHA: event === 'workflow_dispatch' ? '' : base,
+        AUTOMATED_REVIEW_ROUNDS: '3',
+        PR_FILES_JSONL: filesJsonLines,
+      };
+      const gh = apiFailure
+        ? `gh() {
+  case "$*" in
+    *'/files'*) echo 'GitHub API unavailable' >&2; return 1 ;;
+    *'/reviews'*) : ;;
+    *'.head.sha'*) echo '${head}' ;;
+    *'.base.sha'*) echo '${base}' ;;
+  esac
+}`
+        : `gh() {
+  case "$*" in
+    *'changed_files'*) printf '%s\\n' '${files.length}' ;;
+    *'map(.[]) | length'*) printf '%s\\n' '${files.length}' ;;
+    *'.head.sha'*) echo '${head}' ;;
+    *'.base.sha'*) echo '${base}' ;;
+    *'/files'*) printf '%s\\n' '${filePages}' ;;
+    *'/reviews'*) : ;;
+  esac
+}`;
+      runScript(`${gh}\n${classifier.run}`, cwd, env);
+      const changeSurface = outputsAt(classifyOutput).change_surface;
+      assert.ok(changeSurface, 'classifier must publish change_surface');
+
+      const roundEnv = {
+        ...env,
+        GITHUB_OUTPUT: roundOutput,
+        CHANGE_SURFACE: changeSurface,
+      };
+      runScript(`${gh}\n${round.run}`, cwd, roundEnv);
+      return outputsAt(roundOutput);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  await t.test('docs-only PRs skip review without a patch id', () => {
+    const outputs = runRound({ event: 'pull_request_target', files: ['README.md', 'docs/guide.md'] });
+    assert.equal(outputs.change_surface, 'docs-only');
+    assert.equal(outputs.can_review, 'false');
+    assert.equal(outputs.patch_id, '');
+  });
+
+  await t.test('mixed PRs retain full-matrix review behavior', () => {
+    const outputs = runRound({ event: 'pull_request_target', files: ['README.md', 'packages/cezar/src/index.ts'] });
+    assert.equal(outputs.change_surface, 'full-matrix');
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('manual dispatch is always full-matrix and does not list files', () => {
+    const outputs = runRound({ event: 'workflow_dispatch', files: ['README.md'] });
+    assert.equal(outputs.change_surface, 'full-matrix');
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('API and trusted-classifier failures fail open to full-matrix', () => {
+    assert.equal(runRound({ event: 'pull_request_target', files: ['README.md'], apiFailure: true }).change_surface, 'full-matrix');
+    assert.equal(runRound({ event: 'pull_request_target', files: ['README.md'], classifierFailure: true }).change_surface, 'full-matrix');
+  });
+});
+
 function assertCodexEnvironment(prompt) {
   assert.match(prompt, /read-only sandbox/i);
   assert.match(prompt, /`\/tmp`/);
@@ -94,7 +222,8 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(round, /base_sha: \$\{\{ steps\.review-round\.outputs\.base_sha \}\}/);
   assert.match(round, /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
   assert.match(round, /gh api --paginate "\/repos\/\$GITHUB_REPOSITORY\/pulls\/\$PR_NUMBER\/reviews" --jq '[^\n]*' \| wc -l/);
-  assert.doesNotMatch(round, /--slurp[\s\S]*--jq/, 'gh api does not support combining --slurp with --jq');
+  const classifier = job(workflow, 'review-round').match(/- name: Classify pull request change surface[\s\S]*?(?=\n      - name:|\n      - id:)/)?.[0] || '';
+  assert.doesNotMatch(classifier, /--slurp[\s\S]*--jq/, 'gh api does not support combining --slurp with --jq');
   assert.match(round, /select\(\.user\.login == "github-actions\[bot\]"\)/);
   assert.match(round, /select\(\.submitted_at != null\)/, 'pending bot reviews must not exhaust the cap');
   assert.match(round, /can_review=true/);
@@ -411,6 +540,7 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
   assert.equal(trusted?.with?.['persist-credentials'], false);
   const checkout = roundJob.steps.find((step) => step.name === 'Checkout pull request merge for patch-id');
   assert.equal(checkout?.with?.['persist-credentials'], false);
+  assert.equal(checkout?.with?.['allow-unsafe-pr-checkout'], true);
   assert.match(checkout?.with?.ref || '', /refs\/pull\/.*\/merge/);
   const round = roundJob.steps.find((step) => step.id === 'review-round');
   assert.match(round.run, /git diff --full-index/);
@@ -620,6 +750,10 @@ test('both model jobs require successful verification and trusted context rechec
       const trustedIndex = modelJob.steps.indexOf(trusted);
       const mergeIndex = modelJob.steps.findIndex(step => step.with?.ref?.startsWith('refs/pull/'));
       assert.ok(mergeIndex < resetIndex && resetIndex < trustedIndex, 'remove the PR-controlled path before trusted checkout');
+      assert.equal(modelJob.steps[mergeIndex]?.with?.['allow-unsafe-pr-checkout'], true);
+    } else {
+      const mergeIndex = modelJob.steps.findIndex(step => step.with?.ref?.startsWith('refs/pull/'));
+      assert.equal(modelJob.steps[mergeIndex]?.with?.['allow-unsafe-pr-checkout'], true);
     }
   }
 });

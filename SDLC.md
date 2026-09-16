@@ -103,6 +103,19 @@ Every PR passes the full validation gate before review sign-off, in this order:
 
 Any non-zero exit fails the gate and blocks the PR. `npm test` is the fast server + cockpit unit/component suite (vitest) and `npm run test:unit` the node:test core-module suite; the build includes the `check:pack` tarball gate, and `npm run test:package` builds a release tarball, installs it into an isolated consumer, and exercises the offline CLI workflow. Packaged CLI E2E (`npm run test:package`) and cockpit browser E2E (`npm run test:e2e`) are separate checks; pull request CI rejects a skipped or failed cockpit suite. The implementing skills run the configured gate before opening a PR, and `om-check-and-commit` runs it before pushing a hand-worked branch. The command list lives in `.ai/agentic.config.json`; when it changes, update it there and in this section together.
 
+### PR change surface
+
+Pull-request CI runs from the trusted `pull_request_target` workflow definition, checks out the PR merge ref only inside the jobs that execute PR code, and classifies the changed paths before selecting checks:
+
+| Surface | Paths | Checks and review |
+|---|---|---|
+| Docs-only | Every changed path matches the allowlist below | Vitest and cockpit browser E2E may skip; the required build/package aggregate and `verify` must pass, and automated review may skip |
+| Mixed or full | Any other path, or any invalid/empty classifier input | All checks and automated review are required |
+
+The exact docs-only allowlist is: root-level `*.md`; any file under `docs/`, `.ai/specs/`, or `.ai/analysis/`; `AGENT_PROTOCOL.md`, `AGENTS.md`, `BACKWARD_COMPATIBILITY.md`, `CODE_REVIEW.md`, or `SDLC.md`; and root-level `LICENSE*`. The `docs/` and `.ai/` surfaces are recursive. A missing, malformed, empty, unsafe, or failed classification fails closed to full-matrix. Build and package verification remains unconditional for every surface. The existing release-bump skip applies only to a GitHub Actions bot change on `release/v*`; it skips Vitest and cockpit browser E2E, while build-and-package and `verify` remain required. It is separate from docs-only classification.
+
+Manual review dispatches bypass the automated-review budget and the docs-only review skip; they run the full matrix. Recovery is limited to a failed automated-review run blocked at a failed `wait-for-ci` after CI had succeeded. Docs-only `review-complete` succeeds with `wait-for-ci` skipped and cannot qualify for recovery. Recovery does not reclassify a PR, recover a skipped check, or dispatch a new review.
+
 ## Amending this process
 
 This document and `.ai/agentic.config.json` describe the same process: change them together, and re-run the `om-setup-agent-pipeline` skill when the toolchain or label taxonomy changes. Per-skill deviations — extra review rules, a different PR body template, an added gate step — belong in a repo-local skill of the same name at `.ai/skills/<skill-name>/SKILL.md`, which takes precedence over the installed skill (and can `@`-import or reference it to extend rather than replace it); local rules win, but a repo-local skill cannot grant what the installed skill's safety rules forbid.

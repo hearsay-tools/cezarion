@@ -77,6 +77,7 @@ jobs:
       head_sha: ${{ steps.review-round.outputs.head_sha }}
       base_sha: ${{ steps.review-round.outputs.base_sha }}
       patch_id: ${{ steps.review-round.outputs.patch_id }}
+      change_surface: ${{ steps.review-round.outputs.change_surface }}
     steps:
       # Trusted base first — classifier must not come from the PR merge tree.
       - name: Checkout trusted classifier from base
@@ -84,7 +85,39 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           path: .cez-trusted
+          sparse-checkout: |
+            .github/scripts/change-surface.cjs
+            .github/scripts/release-bump-pr.cjs
+          sparse-checkout-cone-mode: false
           persist-credentials: false
+      - name: Classify pull request change surface
+        id: change-surface
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+        run: |
+          set -o pipefail
+          change_surface=full-matrix
+          if [ "$EVENT_NAME" = pull_request_target ]; then
+            if ! expected_files="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.changed_files')" \
+              || ! [[ "$expected_files" =~ ^[0-9]+$ ]]; then
+              echo 'GitHub API change count failed; using full matrix' >&2
+            elif ! file_pages="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files")" \
+              || ! listed_files="$(printf '%s' "$file_pages" | jq -er 'map(.[]) | length')" \
+              || ! [[ "$listed_files" =~ ^[0-9]+$ ]] \
+              || [ "$listed_files" -ne "$expected_files" ]; then
+              echo 'GitHub API file list is incomplete; using full matrix' >&2
+            elif ! files="$(printf '%s' "$file_pages" | jq -er 'map(.[]) | .[] | .filename, (.previous_filename? // empty) | @json')" \
+              || ! change_surface="$(printf '%s\n' "$files" | node .cez-trusted/.github/scripts/change-surface.cjs)"; then
+              echo 'Change-surface classifier failed; using full matrix' >&2
+            fi
+          fi
+          case "$change_surface" in
+            docs-only|full-matrix) ;;
+            *) change_surface=full-matrix ;;
+          esac
+          echo "change_surface=$change_surface" >> "$GITHUB_OUTPUT"
       - name: Checkout pull request merge for patch-id
         if: github.event_name != 'workflow_dispatch'
         continue-on-error: true
@@ -93,6 +126,7 @@ jobs:
           ref: refs/pull/${{ github.event.pull_request.number || inputs.pr_number }}/merge
           fetch-depth: 0
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
       - id: review-round
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,6 +134,7 @@ jobs:
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
+          CHANGE_SURFACE: ${{ steps.change-surface.outputs.change_surface }}
           HEAD_REF: ${{ github.head_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           AUTOMATED_REVIEW_ROUNDS: ${{ vars.AUTOMATED_REVIEW_ROUNDS }}
@@ -115,6 +150,11 @@ jobs:
             exit 1
           fi
           patch_id=""
+          change_surface="${CHANGE_SURFACE:-full-matrix}"
+          case "$change_surface" in
+            docs-only|full-matrix) ;;
+            *) change_surface=full-matrix ;;
+          esac
           # Empty on workflow_dispatch (no pull_request payload); keep -u safe.
           head_ref="${HEAD_REF:-}"
           pr_author="${PR_AUTHOR:-}"
@@ -166,11 +206,16 @@ jobs:
               patch_id=""
             fi
           fi
+          if [ "$EVENT_NAME" = pull_request_target ] && [ "$change_surface" = docs-only ]; then
+            can_review=false
+            patch_id=""
+          fi
           echo "can_review=$can_review" >> "$GITHUB_OUTPUT"
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
           echo "patch_id=$patch_id" >> "$GITHUB_OUTPUT"
+          echo "change_surface=$change_surface" >> "$GITHUB_OUTPUT"
 
   claude-review:
     needs: [validate-provider, review-round, wait-for-ci]
@@ -190,6 +235,7 @@ jobs:
           ref: refs/pull/${{ needs.review-round.outputs.pr_number }}/merge
           fetch-depth: 0
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
 
       - name: Remove pull-request content at the trusted checkout path
         run: rm -rf -- trusted-review
@@ -351,6 +397,7 @@ jobs:
           path: pull-request
           fetch-depth: 0
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
 
       - name: Fetch prior automated review context
         env:

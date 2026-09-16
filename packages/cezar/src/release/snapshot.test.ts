@@ -27,6 +27,14 @@ describe('computeSnapshot', () => {
     });
   });
 
+  it('publishes a same-repo PR from the trusted pull request target event', () => {
+    expect(computeSnapshot({ ...base, eventName: 'pull_request_target' })).toEqual({
+      channel: 'pr482',
+      version: '0.1.5-pr482.123',
+      distTag: 'pr-482',
+    });
+  });
+
   it('never publishes a fork PR, even when the workflow guard is bypassed', () => {
     expect(computeSnapshot({ ...base, headRepo: 'someone/cezar' })).toBeNull();
     expect(computeSnapshot({ ...base, headRepo: undefined })).toBeNull();

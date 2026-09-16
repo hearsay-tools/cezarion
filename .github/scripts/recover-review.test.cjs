@@ -80,9 +80,34 @@ test('failed CI followed by success resumes only the failed review gate and its 
   h.state.ci.conclusion = 'success';
   h.state.ciJobs[0].conclusion = 'success';
   const result = await recover(h);
-  assert.equal(result.recovered, true);
+  assert.equal(result.recovered, true, result.reason);
   assert.equal(h.writes.length, 1);
   assert.match(h.logs.join('\n'), /CI 42 attempt 2.*review 50 attempt 1.*203/);
+});
+
+test('recovery accepts CI completions from the trusted pull request target workflow', async () => {
+  const h = harness();
+  h.state.ci.event = 'pull_request_target';
+  h.state.event.workflow_run.event = 'pull_request_target';
+  const result = await recover(h);
+  assert.equal(result.recovered, true, result.reason);
+  assert.equal(h.writes.length, 1);
+});
+
+test('recovery ignores a newer cancelled target run when older pull_request verification succeeded', async () => {
+  const h = harness();
+  h.options.event = { workflow_run: structuredClone(h.state.review) };
+  h.state.ciRuns.unshift({
+    ...h.state.ci,
+    id: 60,
+    event: 'pull_request_target',
+    status: 'completed',
+    conclusion: 'cancelled',
+    run_attempt: 1,
+  });
+  const result = await recover(h);
+  assert.equal(result.recovered, true, result.reason);
+  assert.equal(h.writes.length, 1);
 });
 
 test('bot-authored release/v* bump PRs are never recovered for automated review', async () => {
@@ -151,6 +176,40 @@ test('duplicate completion events skip an in-flight and then completed review', 
   h.state.review.status = 'completed'; h.state.review.conclusion = 'success';
   await recover(h);
   assert.equal(h.writes.length, 1);
+});
+
+test('docs-only review with a skipped wait gate is not recovered', async () => {
+  const h = harness();
+  Object.assign(h.state.review, { status: 'completed', conclusion: 'failure' });
+  const waitGate = h.state.reviewJobs.find(j => j.name === 'wait-for-ci');
+  Object.assign(waitGate, { status: 'completed', conclusion: 'skipped' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'Automated Code Review'), { status: 'completed', conclusion: 'success' });
+  const result = await recover(h);
+  assert.equal(result.recovered, false);
+  assert.equal(h.writes.length, 0);
+  assert.ok(h.calls.some(([route, args]) => route.endsWith('/attempts/{attempt_number}/jobs') && args.run_id === 50));
+  assert.equal(waitGate.conclusion, 'skipped');
+  assert.match(h.logs.join('\n'), /not blocked solely at wait-for-ci/);
+});
+
+test('completed successful review is not recovered', async () => {
+  const h = harness();
+  Object.assign(h.state.review, { status: 'completed', conclusion: 'success' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'validate-provider'), { status: 'completed', conclusion: 'success' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'review-round'), { status: 'completed', conclusion: 'success' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'wait-for-ci'), { status: 'completed', conclusion: 'skipped' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'claude-review'), { status: 'completed', conclusion: 'skipped' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'codex-review'), { status: 'completed', conclusion: 'skipped' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'post-review'), { status: 'completed', conclusion: 'skipped' });
+  const waitGate = h.state.reviewJobs.find(j => j.name === 'wait-for-ci');
+  assert.equal(waitGate.conclusion, 'skipped');
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'Automated Code Review'), { status: 'completed', conclusion: 'success' });
+  h.options.event = { workflow_run: structuredClone(h.state.review) };
+  const result = await recover(h);
+  assert.equal(result.recovered, false);
+  assert.equal(h.writes.length, 0);
+  assert.equal(h.calls.filter(([route, args]) => route.endsWith('/attempts/{attempt_number}/jobs') && args.run_id === 50).length, 0);
+  assert.match(h.logs.join('\n'), /review already completed on this head/);
 });
 
 for (const status of ['queued', 'in_progress', 'waiting', 'requested', 'pending']) {

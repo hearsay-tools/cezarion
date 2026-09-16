@@ -48,7 +48,7 @@ async function recoverReview({
     const source = await runDetails(trigger.id);
     if (!sameAttempt(source, trigger) || source.status !== 'completed') return skip('superseded or unfinished completion');
     if (!sameRepo(source) || !allowedActor(source.actor)) return skip('ineligible source repository or bot actor');
-    const fromCi = source.path === CI_PATH && source.event === 'pull_request';
+    const fromCi = source.path === CI_PATH && ['pull_request', 'pull_request_target'].includes(source.event);
     const fromReview = source.path === REVIEW_PATH && source.event === 'pull_request_target';
     if (!fromCi && !fromReview) return skip('not a CI or automatic review completion');
 
@@ -86,12 +86,12 @@ async function recoverReview({
       return skip('bot release version-bump PR');
     }
 
-    const ciRuns = await list('actions/workflows/{workflow_id}/runs', { workflow_id: 'ci.yml', event: 'pull_request', head_sha: pull.head.sha });
-    const latestCi = ciRuns.filter(run => run.event === 'pull_request' && run.head_sha === pull.head.sha).sort((a, b) => b.id - a.id)[0];
+    const ciRuns = await list('actions/workflows/{workflow_id}/runs', { workflow_id: 'ci.yml', head_sha: pull.head.sha });
+    const latestCi = ciRuns.filter(run => ['pull_request', 'pull_request_target'].includes(run.event) && run.head_sha === pull.head.sha && run.conclusion !== 'cancelled').sort((a, b) => b.id - a.id)[0];
     if (!latestCi) return skip('no CI for the current head');
     const ci = await runDetails(latestCi.id);
     ciIdentity = `CI ${ci.id} attempt ${ci.run_attempt}`;
-    if (ci.path !== CI_PATH || ci.event !== 'pull_request' || !sameRepo(ci) || ci.head_sha !== pull.head.sha ||
+    if (ci.path !== CI_PATH || !['pull_request', 'pull_request_target'].includes(ci.event) || !sameRepo(ci) || ci.head_sha !== pull.head.sha ||
         !positiveId(ci.run_attempt) || ci.status !== 'completed' || ci.conclusion === 'cancelled') return skip('latest CI attempt is ineligible or unfinished');
     if (fromCi && !sameAttempt(ci, source)) return skip('CI completion was superseded by a newer run or attempt');
     const verification = oneJob(await jobs(ci), VERIFY);
