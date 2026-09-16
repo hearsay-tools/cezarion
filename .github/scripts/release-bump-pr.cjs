@@ -26,10 +26,13 @@ function isBotReleaseBumpPr({ headRef, prAuthor, files } = {}) {
     && isManifestOnlyFiles(files);
 }
 
-// Version stamps only: same JSON shape; every changed leaf must be the same
-// single old→new release version pair (optional caret). Blocks script/key adds
-// and arbitrary dependency retargets.
+// Release-generated stamps only: same JSON shape; changes only at version /
+// dependency-map leaves; every changed leaf shares one old→new semver pair
+// (optional caret). Blocks script/key adds and arbitrary field retargets.
 const VERSION_VALUE_RE = /^(\^?)(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/;
+const DEP_MAP_KEYS = new Set([
+  'dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies',
+]);
 
 function parseVersionValue(value) {
   if (typeof value !== 'string') return null;
@@ -38,36 +41,67 @@ function parseVersionValue(value) {
   return { caret: match[1] === '^', version: match[2] };
 }
 
-function onlyVersionValueChanges(before, after) {
-  let pair = null;
+function onlyVersionValueChanges(before, after, sharedPair) {
+  const pair = sharedPair || { from: null, to: null };
+  let sawChange = false;
 
-  function walk(left, right) {
+  function acceptVersionChange(left, right) {
+    const from = parseVersionValue(left);
+    const to = parseVersionValue(right);
+    if (!from || !to || from.caret !== to.caret || from.version === to.version) return false;
+    if (!pair.from) {
+      pair.from = from.version;
+      pair.to = to.version;
+    } else if (pair.from !== from.version || pair.to !== to.version) {
+      return false;
+    }
+    sawChange = true;
+    return true;
+  }
+
+  function walk(left, right, pathKind) {
     if (Object.is(left, right)) return true;
     if (typeof left !== typeof right || left === null || right === null) return false;
     if (typeof left === 'string') {
-      const from = parseVersionValue(left);
-      const to = parseVersionValue(right);
-      if (!from || !to || from.caret !== to.caret || from.version === to.version) return false;
-      if (!pair) {
-        pair = { from: from.version, to: to.version };
-        return true;
+      if (
+        pathKind === 'root-version'
+        || pathKind === 'dep-map'
+        || pathKind === 'lock-pkg-version'
+        || pathKind === 'lock-pkg-deps'
+      ) {
+        return acceptVersionChange(left, right);
       }
-      return pair.from === from.version && pair.to === to.version;
+      return false;
     }
     if (typeof left !== 'object') return false;
     if (Array.isArray(left)) {
       if (!Array.isArray(right) || left.length !== right.length) return false;
-      return left.every((value, index) => walk(value, right[index]));
+      return left.every((value, index) => walk(value, right[index], pathKind));
     }
     if (Array.isArray(right)) return false;
     const leftKeys = Object.keys(left).sort();
     const rightKeys = Object.keys(right).sort();
     if (leftKeys.length !== rightKeys.length) return false;
     if (leftKeys.some((key, index) => key !== rightKeys[index])) return false;
-    return leftKeys.every((key) => walk(left[key], right[key]));
+    return leftKeys.every((key) => {
+      let nextKind = 'other';
+      if (pathKind === 'root' && key === 'version') nextKind = 'root-version';
+      else if (pathKind === 'root' && key === 'packages') nextKind = 'lock-pkg-map';
+      else if (pathKind === 'root' && DEP_MAP_KEYS.has(key)) nextKind = 'dep-map';
+      else if (pathKind === 'lock-pkg-map') nextKind = 'lock-pkg';
+      else if (pathKind === 'lock-pkg' && key === 'version') nextKind = 'lock-pkg-version';
+      else if (pathKind === 'lock-pkg' && DEP_MAP_KEYS.has(key) && key !== 'packages') nextKind = 'lock-pkg-deps';
+      else if (pathKind === 'dep-map' || pathKind === 'lock-pkg-deps') nextKind = pathKind;
+      if (nextKind === 'other') {
+        return JSON.stringify(left[key]) === JSON.stringify(right[key]);
+      }
+      return walk(left[key], right[key], nextKind);
+    });
   }
 
-  return walk(before, after) && pair !== null;
+  if (!walk(before, after, 'root')) return false;
+  if (sharedPair) return true;
+  return sawChange && Boolean(pair.from && pair.to);
 }
 
 function readRepoJsonFile({ repository, path: filePath, ref, env = process.env } = {}) {
@@ -90,11 +124,13 @@ function filesAreVersionStampsOnly({
 } = {}) {
   if (!repository || !baseRef || !headRef || !isManifestOnlyFiles(files)) return false;
   try {
-    return files.every((filePath) => {
+    const pair = { from: null, to: null };
+    for (const filePath of files) {
       const before = readJsonFile({ repository, path: filePath, ref: baseRef, env });
       const after = readJsonFile({ repository, path: filePath, ref: headRef, env });
-      return onlyVersionValueChanges(before, after);
-    });
+      if (!onlyVersionValueChanges(before, after, pair)) return false;
+    }
+    return Boolean(pair.from && pair.to && pair.from !== pair.to);
   } catch {
     return false;
   }
