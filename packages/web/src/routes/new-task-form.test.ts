@@ -40,6 +40,11 @@ const skill = (name: string, source: Skill['source'] = 'ai'): Skill => ({
 const workflow = (name: string): WorkflowDef => ({ name, source: 'built-in', steps: [] })
 
 describe('availableRunners (legacy renderChrome rule)', () => {
+  it('offers only native effort for Cursor and clears stale generic effort', () => {
+    const options = effortOptionsForModel('cursor', 'model[effort=high]')
+    expect(options.map((option) => option.value)).toEqual([''])
+    expect(resolveEffort('high', options)).toBe('')
+  })
   it('offers Cursor only when detected and preserves its native default model', () => {
     expect(availableRunners([check('cursor', true)])).toEqual(['cursor'])
     expect(availableRunners([check('claude', true), check('cursor', false)])).toEqual(['claude'])
@@ -281,6 +286,16 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
     })
     // What actually goes over the wire: the undefineds vanish.
     expect(JSON.parse(JSON.stringify(body))).toEqual({ task: 'do the thing', workflow: 'quick-task' })
+  })
+
+  it('keeps a Cursor parameterized model ID intact and omits generic effort', () => {
+    const body = buildCreateRunBody({
+      task: 'hard', source: { source: 'workflow', ref: 'quick-task' },
+      model: 'model[effort=high]', effort: 'max', runner: 'cursor', defaultRunner: 'claude',
+      variants: 1, images: [],
+    })
+    expect(body.model).toBe('model[effort=high]')
+    expect(body.effort).toBeUndefined()
   })
 
   it('sends a pinned effort and omits auto (#45)', () => {

@@ -51,8 +51,8 @@ export const RUNNERS: readonly RunnerOption[] = [
   { id: 'claude', label: 'claude', desc: 'Claude Code CLI' },
   { id: 'codex', label: 'codex', desc: 'OpenAI Codex (app-server)' },
   { id: 'opencode', label: 'opencode', desc: 'OpenCode (serve)' },
-  { id: 'cursor', label: 'Cursor', desc: 'Cursor CLI (ACP)' },
   { id: 'pi', label: 'pi', desc: 'pi CLI (provider/model)' },
+  { id: 'cursor', label: 'Cursor', desc: 'Cursor CLI (ACP)' },
 ]
 
 export interface ModelPreset {
@@ -103,6 +103,8 @@ export function effortOptionsForModel(
   model: string,
   catalog?: RunnerModelCatalogResponse,
 ): readonly EffortOption[] {
+  // Cursor encodes optional effort inside the model ID; ACP has no independent effort field.
+  if (runner === 'cursor') return [EFFORT_OPTIONS[0]]
   const levels = runnerDiscoversModels(runner)
     ? catalog?.models.find((entry) => entry.id === model)?.effortLevels
     : undefined
@@ -361,7 +363,7 @@ export function buildCreateRunBody(opts: {
       ? { steps: [{ id: 'task', name: source.ref, skill: source.ref, prompt: '{{task}}' }] }
       : { workflow: source?.ref ?? QUICK_TASK }),
     model: modelsLocked ? undefined : model || undefined,
-    effort: modelsLocked ? undefined : effort || undefined,
+    effort: modelsLocked || runner === 'cursor' ? undefined : effort || undefined,
     runner: runnerOverride(runner, defaultRunner, runnerExplicit),
     // Sent only when the user picked one — an absent key is "follow the project", which is what
     // every launch that never touched the control means.
