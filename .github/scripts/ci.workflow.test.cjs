@@ -257,7 +257,7 @@ test('CI runs on push to main and still does not publish snapshots from main', (
   const publishIf = ci.jobs['publish-snapshot'].if;
   assert.match(publishIf, /github\.ref == 'refs\/heads\/develop'/);
   assert.match(publishIf, /github\.event_name == 'pull_request'/);
-  assert.match(publishIf, /github\.event_name == 'pull_request_target'/);
+  assert.doesNotMatch(publishIf, /pull_request_target/);
   assert.doesNotMatch(publishIf, /heads\/main/);
 });
 
