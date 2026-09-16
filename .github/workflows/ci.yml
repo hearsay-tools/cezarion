@@ -1,6 +1,13 @@
 name: CI
 
 on:
+  # GitHub matches pull_request against this PR's workflow and
+  # pull_request_target against main. Keep both until main has
+  # pull_request_target; otherwise this introducing PR launches no CI.
+  pull_request:
+    branches:
+      - main
+      - develop
   pull_request_target:
     branches:
       - main
@@ -294,7 +301,7 @@ jobs:
     needs: verify
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
-      (github.event_name == 'pull_request_target' &&
+      ((github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -354,7 +361,7 @@ jobs:
           EOF
 
       - name: Comment preview on PR
-        if: github.event_name == 'pull_request_target' && steps.snapshot.outputs.attempted == 'true'
+        if: (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && steps.snapshot.outputs.attempted == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           RESULT: ${{ steps.snapshot.outputs.result }}

@@ -101,7 +101,12 @@ test('the required aggregate depends on the cockpit browser job', () => {
 test('CI classifies pull request changes from a trusted base checkout', () => {
   const ci = workflow();
   assert.ok(ci.on.pull_request_target, 'CI must use the trusted pull_request_target trigger');
-  assert.equal(ci.on.pull_request, undefined, 'PR code must not control the CI workflow definition');
+  assert.ok(
+    ci.on.pull_request,
+    'GitHub matches pull_request against the PR workflow and pull_request_target against the base; dropping pull_request before the base has pull_request_target launches no CI',
+  );
+  assert.deepEqual(ci.on.pull_request.branches, ['main', 'develop']);
+  assert.deepEqual(ci.on.pull_request_target.branches, ['main', 'develop']);
   const job = ci.jobs['change-surface'];
   assert.ok(job, 'expected a change-surface job');
   assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read' });
@@ -163,6 +168,7 @@ test('change-surface fails closed when the API or classifier fails', () => {
 
 test('classification is not a path filter and build-and-package stays unconditional', () => {
   const ci = workflow();
+  assert.equal(ci.on.pull_request.paths, undefined);
   assert.equal(ci.on.pull_request_target.paths, undefined);
   assert.equal(ci.on.push.paths, undefined);
   assert.equal(ci.jobs['build-and-package'].if, undefined);
@@ -249,6 +255,7 @@ test('CI runs on push to main and still does not publish snapshots from main', (
   assert.equal(ci.concurrency['cancel-in-progress'], true);
   const publishIf = ci.jobs['publish-snapshot'].if;
   assert.match(publishIf, /github\.ref == 'refs\/heads\/develop'/);
+  assert.match(publishIf, /github\.event_name == 'pull_request'/);
   assert.match(publishIf, /github\.event_name == 'pull_request_target'/);
   assert.doesNotMatch(publishIf, /heads\/main/);
 });

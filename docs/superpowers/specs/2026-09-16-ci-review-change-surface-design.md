@@ -47,6 +47,11 @@ malformed API response fails closed instead of becoming an empty docs list.
 
 The CI workflow uses `pull_request_target`, so the workflow definition and
 classification invocation come from the trusted base rather than the PR.
+The introducing PR must keep `pull_request` until that trigger exists on
+the default branch: GitHub matches `pull_request` against the PR workflow
+and `pull_request_target` against the base, so dropping `pull_request` first
+launches no CI and leaves automated review waiting. A follow-up can remove
+`pull_request` after the trusted trigger is on `main`.
 PR jobs explicitly check out the PR merge ref before running untrusted code.
 The trusted classification job checks out the base revision of the workflow
 support files, reads the PR file list through the GitHub API, verifies that the
