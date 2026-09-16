@@ -59,11 +59,27 @@ The normalized event puts occupancy in `total` and capacity in
 report those counts. This snapshot is never attached as per-turn usage.
 Only USD costs populate `costUsd`.
 
-## Tasks
+## Tasks and negotiated child sessions
 
-`cursor/task` enriches the existing tool item with `toolKind: task`, retaining
-its existing success/failure status. A standalone completion notification
-can create a task item, but never creates child messages, child session ids,
-or `parentItemId` links. The extension's `agentId` alone is not evidence of a
-child transcript. Capability-negotiated subagent lifecycle support belongs
-to the runner and is outside these fixtures.
+`cursor/task` alone enriches the existing tool item with `toolKind: task`,
+retaining its success/failure status. Its `agentId` is not proof of a child
+transcript.
+
+`acp-subagents.ndjson` is a separate **constructed, vendor-source-derived**
+fixture, not a live capture. The installed `1699.index.js` subagent publisher
+is enabled by client capability `_meta.subagents`. Its `announce` method
+sends `subagent_spawned` on the parent session with `subagentSessionId`,
+`name`, `task`, `capabilities`, and `_meta.cursor.toolCallId/agentId`.
+Its per-child presenter then sends ordinary `session/update` frames with
+the child session id. `sendState` reports `subagent_state_update` on the
+parent session, including completed/failed/cancelled/disconnected states.
+`resolveParentSession` also supports grandchildren.
+
+The mapper records only announced child sessions, scopes their item ids,
+and attributes their items through `parentItemId` to the spawning task.
+Text buffers and tool maps remain independent between sessions. Child
+terminal updates flush child text and settle the task, never the parent's
+turn; only the parent's prompt response completes that turn. Child plans
+and usage do not replace the parent's global panels. Unannounced session
+frames and frames after child settlement are ignored. No child session is
+inferred from an ordinary `cursor/task` frame.

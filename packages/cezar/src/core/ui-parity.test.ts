@@ -122,9 +122,9 @@ describe('protocol v2 backend parity (every mapper emits every matrix capability
 
   // Sub-agent NESTING rides on parentItemId where the wire attributes work
   // to its parent: claude `parent_tool_use_id` and opencode child-session
-  // parts under a `subtask`. Codex's wire has no parent attribution — its
+  // parts under a `subtask`; Cursor capability-negotiated subagent sessions. Codex's wire has no parent attribution — its
   // matrix cell is the review-mode task items asserted above.
-  for (const backend of ['claude', 'opencode'] as const) {
+  for (const backend of ['claude', 'opencode', 'cursor'] as const) {
     it(`${backend} nests sub-agent work via parentItemId`, () => {
       expect(items(fixtureEvents(backend)).some((item) => item.parentItemId !== undefined)).toBe(true);
     });

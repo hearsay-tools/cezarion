@@ -1,10 +1,11 @@
-/** Pure ACP notification mapper. Transport, session filtering and asks belong to the runner.
+/** Pure ACP notification mapper. Transport and asks belong to the runner; session attribution stays here.
  * Wire sources and vendor limitations: __fixtures__/cursor/README.md.
  */
 import type { FileDiff, PlanEntry, StopReason, ToolKind, ToolStatus, UiEvent, UiMessageItem, UiReasoningItem, UiToolItem } from './ui-events.js';
 
 export interface CursorUiState {
   readonly sessionId?: string;
+  readonly childSessions: ReadonlyMap<string, CursorChildSession>;
   readonly turnSeq: number;
   readonly turnId?: string;
   readonly textSeq: number;
@@ -12,19 +13,26 @@ export interface CursorUiState {
   readonly tools: ReadonlyMap<string, UiToolItem>;
   readonly todos: ReadonlyMap<string, PlanEntry>;
 }
+export interface CursorChildSession {
+  readonly parentSessionId: string;
+  readonly parentItemId: string;
+  readonly toolCallId: string;
+  readonly terminal: boolean;
+  readonly state: CursorUiState;
+}
 export interface CursorUiMapping { state: CursorUiState; events: UiEvent[] }
 export function createCursorUiState(): CursorUiState {
-  return { turnSeq: 0, textSeq: 0, tools: new Map(), todos: new Map() };
+  return { turnSeq: 0, textSeq: 0, tools: new Map(), todos: new Map(), childSessions: new Map() };
 }
 export function cursorTurnStarted(state: CursorUiState): CursorUiMapping {
-  const closed = flush(state);
+  const closed = flushAll(state);
   const turnSeq = state.turnSeq + 1;
   const turnId = `turn_${turnSeq}`;
   return { state: { ...closed.state, turnSeq, turnId }, events: [...closed.events, { type: 'turn.started', turnId }] };
 }
 export function cursorTurnCompleted(reason: string, state: CursorUiState): CursorUiMapping {
   if (!state.turnId) return { state, events: [] };
-  const closed = flush(state);
+  const closed = flushAll(state);
   const { turnId, ...next } = closed.state;
   const stopReason: StopReason = reason === 'max_turn_requests' ? 'max_tokens'
     : ['end_turn', 'max_tokens', 'refusal', 'cancelled', 'timeout', 'error'].includes(reason) ? reason as StopReason : 'error';
@@ -36,7 +44,86 @@ function flush(state: CursorUiState): CursorUiMapping {
   return { state: next, events: [{ type: 'item.completed', item: activeText }] };
 }
 
+/** Child ids are namespaced because ACP tool ids are session-local. */
+function childItemId(sessionId: string, itemId: string): string {
+  return `cursor_child_${JSON.stringify([sessionId, itemId])}`;
+}
+function childEvents(events: UiEvent[], sessionId: string, parentItemId: string): UiEvent[] {
+  return events.flatMap((event): UiEvent[] => {
+    switch (event.type) {
+      case 'item.started':
+      case 'item.updated':
+      case 'item.completed':
+        return [{ ...event, item: { ...event.item, id: childItemId(sessionId, event.item.id), parentItemId } }];
+      case 'item.delta': return [{ ...event, itemId: childItemId(sessionId, event.itemId) }];
+      // Child plans/usage must not replace the parent session's global panels.
+      default: return [];
+    }
+  });
+}
+function flushAll(state: CursorUiState): CursorUiMapping {
+  const closed = flush(state);
+  const childSessions = new Map(state.childSessions);
+  const events = [...closed.events];
+  for (const [sessionId, child] of childSessions) {
+    const mapped = flush(child.state);
+    events.push(...childEvents(mapped.events, sessionId, child.parentItemId));
+    childSessions.set(sessionId, { ...child, state: mapped.state, terminal: true });
+  }
+  return { state: { ...closed.state, childSessions }, events };
+}
+
 export function mapCursorMessage(message: unknown, state: CursorUiState): CursorUiMapping {
+  const noop: CursorUiMapping = { state, events: [] };
+  if (!record(message) || !record(message.params)) return noop;
+  if (message.method !== 'session/update') return mapSessionMessage(message, state);
+  const { sessionId, update } = message.params;
+  if (!str(sessionId) || !record(update)) return noop;
+  const sourceId = sessionId as string;
+  const sourceChild = state.childSessions.get(sourceId);
+  if (sourceId !== state.sessionId && (!sourceChild || sourceChild.terminal)) return noop;
+  const source = sourceChild?.state ?? state;
+  const commitSource = (mapped: CursorUiMapping): CursorUiMapping => {
+    if (!sourceChild) return mapped;
+    const childSessions = new Map(state.childSessions);
+    childSessions.set(sourceId, { ...sourceChild, state: mapped.state });
+    return { state: { ...state, childSessions }, events: childEvents(mapped.events, sourceId, sourceChild.parentItemId) };
+  };
+
+  if (update.sessionUpdate === 'subagent_spawned') {
+    const childId = str(update.subagentSessionId);
+    const cursor = record(update._meta) && record(update._meta.cursor) ? update._meta.cursor : undefined;
+    const toolCallId = str(cursor?.toolCallId);
+    if (!childId || !toolCallId || childId === state.sessionId || state.childSessions.has(childId)) return noop;
+    const mapped = commitSource(tool({ toolCallId, kind: 'task', title: str(update.name) ?? 'Task',
+      status: 'in_progress', rawInput: { task: update.task } }, source));
+    const childSessions = new Map(mapped.state.childSessions);
+    childSessions.set(childId, {
+      parentSessionId: sourceId,
+      parentItemId: sourceChild ? childItemId(sourceId, toolCallId) : toolCallId,
+      toolCallId, terminal: false, state: { ...createCursorUiState(), sessionId: childId },
+    });
+    return { state: { ...mapped.state, childSessions }, events: mapped.events };
+  }
+  if (update.sessionUpdate === 'subagent_state_update') {
+    const childId = str(update.subagentSessionId);
+    const child = childId ? state.childSessions.get(childId) : undefined;
+    if (!childId || !child || child.terminal || child.parentSessionId !== sourceId ||
+      typeof update.state !== 'string' || !['completed', 'failed', 'cancelled', 'disconnected'].includes(update.state)) return noop;
+    const closed = flush(child.state);
+    const mapped = commitSource(tool({ toolCallId: child.toolCallId, kind: 'task',
+      status: update.state === 'completed' ? 'completed' : 'failed' }, source));
+    const childSessions = new Map(mapped.state.childSessions);
+    childSessions.set(childId, { ...child, state: closed.state, terminal: true });
+    return { state: { ...mapped.state, childSessions },
+      events: [...childEvents(closed.events, childId, child.parentItemId), ...mapped.events] };
+  }
+  const mapped = mapSessionMessage(message, source);
+  if (mapped.state === source && mapped.events.length === 0) return noop;
+  return commitSource(mapped);
+}
+
+function mapSessionMessage(message: unknown, state: CursorUiState): CursorUiMapping {
   const noop = { state, events: [] };
   if (!record(message) || !record(message.params)) return noop;
   const params = message.params;

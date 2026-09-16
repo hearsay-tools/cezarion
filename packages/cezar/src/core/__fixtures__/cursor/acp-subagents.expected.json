@@ -1,0 +1,128 @@
+[
+  {
+    "type": "turn.started",
+    "turnId": "turn_1"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "spawn-1",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Explorer",
+      "status": "running",
+      "input": {
+        "task": "Inspect file"
+      }
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "cursor_child_[\"child-1\",\"cursor_text_1\"]",
+      "role": "assistant",
+      "text": "Inspecting.",
+      "parentItemId": "spawn-1"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "cursor_child_[\"child-1\",\"cursor_text_1\"]",
+      "role": "assistant",
+      "text": "Inspecting.",
+      "parentItemId": "spawn-1"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "cursor_child_[\"child-1\",\"read-1\"]",
+      "name": "read",
+      "toolKind": "read",
+      "title": "Read file",
+      "status": "pending",
+      "input": {
+        "path": "/repo/a.ts"
+      },
+      "parentItemId": "spawn-1"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "cursor_child_[\"child-1\",\"read-1\"]",
+      "name": "read",
+      "toolKind": "read",
+      "title": "Read file",
+      "status": "completed",
+      "input": {
+        "path": "/repo/a.ts"
+      },
+      "parentItemId": "spawn-1",
+      "output": "export {};"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "cursor_child_[\"child-1\",\"cursor_text_2\"]",
+      "role": "assistant",
+      "text": "Found file.",
+      "parentItemId": "spawn-1"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "cursor_child_[\"child-1\",\"cursor_text_2\"]",
+      "role": "assistant",
+      "text": "Found file.",
+      "parentItemId": "spawn-1"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "spawn-1",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Explorer",
+      "status": "completed",
+      "input": {
+        "task": "Inspect file"
+      }
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "cursor_text_1",
+      "role": "assistant",
+      "text": "Parent continues."
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "cursor_text_1",
+      "role": "assistant",
+      "text": "Parent continues."
+    }
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_1",
+    "stopReason": "end_turn"
+  }
+]

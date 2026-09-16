@@ -94,9 +94,9 @@ describe('Cursor ACP mapper', () => {
 });
 
 describe('Cursor ACP golden fixtures', () => {
-  it('replays schema/source-derived lifecycle frames exactly as the runner drives the mapper', () => {
+  it.each(['acp-lifecycle', 'acp-subagents'])('replays source/schema-derived %s exactly as the runner drives the mapper', (fixture) => {
     const base = new URL('./__fixtures__/cursor/', import.meta.url);
-    const frames = readFileSync(new URL('acp-lifecycle.ndjson', base), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    const frames = readFileSync(new URL(`${fixture}.ndjson`, base), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
     let state = createCursorUiState();
     const events: UiEvent[] = [];
     const push = (mapped: ReturnType<typeof mapCursorMessage>) => { state = mapped.state; events.push(...mapped.events); };
@@ -106,6 +106,61 @@ describe('Cursor ACP golden fixtures', () => {
       if (frame.result?.stopReason) push(cursorTurnCompleted(frame.result.stopReason, state));
       else push(mapCursorMessage(frame, state));
     }
-    expect(events).toStrictEqual(JSON.parse(readFileSync(new URL('acp-lifecycle.expected.json', base), 'utf8')));
+    expect(events).toStrictEqual(JSON.parse(readFileSync(new URL(`${fixture}.expected.json`, base), 'utf8')));
+  });
+});
+
+describe('Cursor negotiated subagent sessions', () => {
+  const scoped = (sessionId: string, value: Record<string, unknown>) => ({ method: 'session/update', params: { sessionId, update: value } });
+  const spawn = (sessionId = 's', child = 'child', toolCallId = 'task') => scoped(sessionId, {
+    sessionUpdate: 'subagent_spawned', subagentSessionId: child, name: 'Explorer', task: 'Find files', capabilities: {},
+    _meta: { cursor: { toolCallId, agentId: child } },
+  });
+  const chunk = (sessionId: string, value: string) => scoped(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: value } });
+
+  it('isolates interleaved parent and child text and ignores unannounced sessions', () => {
+    const parent = mapCursorMessage(text('Parent'), start());
+    expect(mapCursorMessage(chunk('unknown', 'wrong'), parent.state)).toEqual({ state: parent.state, events: [] });
+    const announced = mapCursorMessage(spawn(), parent.state);
+    const child = mapCursorMessage(chunk('child', 'Child'), announced.state);
+    expect(child.events).toMatchObject([{ type: 'item.started', item: { text: 'Child', parentItemId: 'task' } }]);
+    const childId = child.events[0]?.type === 'item.started' ? child.events[0].item.id : '';
+    expect(childId).not.toBe('cursor_text_1');
+    const continued = mapCursorMessage(text(' continues'), child.state);
+    expect(continued.events).toEqual([{ type: 'item.started', item: { kind: 'message', id: 'cursor_text_2', role: 'assistant', text: ' continues' } }]);
+    const more = mapCursorMessage(chunk('child', ' continues'), continued.state);
+    expect(more.events).toEqual([{ type: 'item.delta', itemId: childId, field: 'text', delta: ' continues' }]);
+    expect(child.state.childSessions.get('child')?.state.activeText?.text).toBe('Child');
+    expect(parent.state.childSessions.size).toBe(0);
+  });
+
+  it('child terminal flushes its text and task without ending the parent turn', () => {
+    const announced = mapCursorMessage(spawn(), start());
+    const child = mapCursorMessage(chunk('child', 'Done'), announced.state);
+    const terminal = mapCursorMessage(scoped('s', { sessionUpdate: 'subagent_state_update', subagentSessionId: 'child', state: 'completed', _meta: { cursor: { toolCallId: 'task', agentId: 'child' } } }), child.state);
+    expect(terminal.events).toMatchObject([
+      { type: 'item.completed', item: { kind: 'message', text: 'Done', parentItemId: 'task' } },
+      { type: 'item.completed', item: { kind: 'tool', id: 'task', toolKind: 'task', status: 'completed' } },
+    ]);
+    expect(terminal.events.some((event) => event.type === 'turn.completed')).toBe(false);
+    expect(terminal.state.turnId).toBe('turn_1');
+    expect(mapCursorMessage(chunk('child', 'late'), terminal.state).events).toEqual([]);
+    expect(mapCursorMessage(spawn('unknown', 'intruder'), terminal.state).state).toBe(terminal.state);
+  });
+
+  it('nests grandchildren under scoped tools and rejects forged terminal ownership', () => {
+    let state = mapCursorMessage(spawn(), start()).state;
+    const nested = mapCursorMessage(spawn('child', 'grandchild', 'nested-task'), state);
+    state = nested.state;
+    const task = nested.events.find((event) => event.type === 'item.started');
+    expect(task).toMatchObject({ item: { toolKind: 'task', parentItemId: 'task' } });
+    const scopedTaskId = task?.type === 'item.started' ? task.item.id : '';
+    const child = mapCursorMessage(chunk('grandchild', 'nested'), state);
+    expect(child.events).toMatchObject([{ item: { parentItemId: scopedTaskId, text: 'nested' } }]);
+    const forged = mapCursorMessage(scoped('s', { sessionUpdate: 'subagent_state_update', subagentSessionId: 'grandchild', state: 'failed' }), child.state);
+    expect(forged.state).toBe(child.state);
+    const ended = cursorTurnCompleted('cancelled', child.state);
+    expect(ended.events).toContainEqual(expect.objectContaining({ type: 'item.completed', item: expect.objectContaining({ text: 'nested', parentItemId: scopedTaskId }) }));
+    expect(ended.events.filter((event) => event.type === 'turn.completed')).toHaveLength(1);
   });
 });
