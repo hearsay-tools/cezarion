@@ -220,6 +220,7 @@ export function useThreadScroll(
     const scroller = scrollElRef.current
     if (!scroller) return
     pendingRestoreRef.current = null
+    pendingHistoryRestoreRef.current = null
     stuckRef.current = true
     // Refreshing paged history can remount the transcript before this promise settles.
     // Let its replacement restore the user's new tail intent, not the old reading offset.
@@ -287,6 +288,7 @@ export function useThreadScroll(
     let previousScrollTop = scroller.scrollTop
     const unstick = () => {
       pendingRestoreRef.current = null
+      pendingHistoryRestoreRef.current = null
       stuckRef.current = false
       downIntentAt = 0 // the LATEST intent wins — an up gesture voids a recent down one
     }
