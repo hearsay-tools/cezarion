@@ -66,9 +66,18 @@ test('failed CI followed by success resumes only the failed review gate and its 
   h.state.ci.conclusion = 'success';
   h.state.ciJobs[0].conclusion = 'success';
   const result = await recover(h);
-  assert.equal(result.recovered, true);
+  assert.equal(result.recovered, true, result.reason);
   assert.equal(h.writes.length, 1);
   assert.match(h.logs.join('\n'), /CI 42 attempt 2.*review 50 attempt 1.*203/);
+});
+
+test('recovery accepts CI completions from the trusted pull request target workflow', async () => {
+  const h = harness();
+  h.state.ci.event = 'pull_request_target';
+  h.state.event.workflow_run.event = 'pull_request_target';
+  const result = await recover(h);
+  assert.equal(result.recovered, true, result.reason);
+  assert.equal(h.writes.length, 1);
 });
 
 test('duplicate completion events skip an in-flight and then completed review', async () => {

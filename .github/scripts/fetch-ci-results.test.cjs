@@ -58,6 +58,13 @@ test('verification completion releases review while publishing is still running'
   assert.match(text, /publishing.*not included/i);
 });
 
+test('trusted pull request target CI runs can provide review verification', () => {
+  const h = harness([{ runs: [run({ event: 'pull_request_target' })], jobs: [job(), publish()] }]);
+  const selected = waitForCiRun(h.options);
+  assert.equal(selected.databaseId, 42);
+  assert.equal(collectCiResults(h.options).conclusion, 'success');
+});
+
 for (const state of ['queued', 'in_progress', 'completed']) {
   test(`pending verification waits when publishing is ${state}`, () => {
     const h = harness([

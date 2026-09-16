@@ -515,6 +515,7 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
   const roundJob = workflow.jobs['review-round'];
   const checkout = roundJob.steps.find((step) => step.uses?.includes('actions/checkout') && step.with?.ref?.includes('refs/pull/'));
   assert.equal(checkout?.with?.['persist-credentials'], false);
+  assert.equal(checkout?.with?.['allow-unsafe-pr-checkout'], true);
   assert.match(checkout?.with?.ref || '', /refs\/pull\/.*\/merge/);
   const round = roundJob.steps.find((step) => step.id === 'review-round');
   assert.match(round.run, /git diff --full-index/);
@@ -630,6 +631,10 @@ test('both model jobs require successful verification and trusted context rechec
       const trustedIndex = modelJob.steps.indexOf(trusted);
       const mergeIndex = modelJob.steps.findIndex(step => step.with?.ref?.startsWith('refs/pull/'));
       assert.ok(mergeIndex < resetIndex && resetIndex < trustedIndex, 'remove the PR-controlled path before trusted checkout');
+      assert.equal(modelJob.steps[mergeIndex]?.with?.['allow-unsafe-pr-checkout'], true);
+    } else {
+      const mergeIndex = modelJob.steps.findIndex(step => step.with?.ref?.startsWith('refs/pull/'));
+      assert.equal(modelJob.steps[mergeIndex]?.with?.['allow-unsafe-pr-checkout'], true);
     }
   }
 });

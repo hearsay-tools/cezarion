@@ -99,6 +99,7 @@ jobs:
           ref: refs/pull/${{ github.event.pull_request.number || inputs.pr_number }}/merge
           fetch-depth: 0
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
       - id: review-round
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -186,6 +187,7 @@ jobs:
           ref: refs/pull/${{ needs.review-round.outputs.pr_number }}/merge
           fetch-depth: 0
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
 
       - name: Remove pull-request content at the trusted checkout path
         run: rm -rf -- trusted-review
@@ -347,6 +349,7 @@ jobs:
           path: pull-request
           fetch-depth: 0
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
 
       - name: Fetch prior automated review context
         env:

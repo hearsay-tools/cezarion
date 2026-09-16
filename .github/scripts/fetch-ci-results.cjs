@@ -7,7 +7,7 @@ const { execFileSync } = require('node:child_process');
 const VERIFICATION_JOB = 'Unit, build, E2E, and package';
 
 function pickPullRequestRun(runs, headSha) {
-  return (runs || []).find((run) => run.event === 'pull_request' &&
+  return (runs || []).find((run) => ['pull_request', 'pull_request_target'].includes(run.event) &&
     (headSha === undefined || run.headSha === headSha)) || null;
 }
 

@@ -126,6 +126,7 @@ test('PR jobs check out the merge ref when CI runs from the trusted target workf
   for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
     const checkout = ci.jobs[name].steps.find((step) => step.uses?.startsWith('actions/checkout@'));
     assert.match(checkout?.with?.ref || '', /format\('refs\/pull\/\{0\}\/merge', github\.event\.pull_request\.number\)/);
+    assert.equal(checkout?.with?.['allow-unsafe-pr-checkout'], true, `${name} must opt in to fork PR merge checkout explicitly`);
   }
 });
 
