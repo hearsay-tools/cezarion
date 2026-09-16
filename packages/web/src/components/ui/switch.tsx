@@ -25,7 +25,7 @@ function Switch({
       <SwitchPrimitive.Thumb
         data-slot="switch-thumb"
         className={cn(
-          // `bg-background` follows theme and keeps the thumb distinct from the purple track.
+          // `bg-background` follows theme and keeps the thumb distinct from the accent track.
           "pointer-events-none block rounded-full bg-background ring-0 transition-transform group-data-[size=default]/switch:size-[18px] group-data-[size=sm]/switch:size-3 group-data-[size=default]/switch:data-[state=checked]:translate-x-5 group-data-[size=default]/switch:data-[state=unchecked]:translate-x-0.5 group-data-[size=sm]/switch:data-[state=checked]:translate-x-[calc(100%-2px)] group-data-[size=sm]/switch:data-[state=unchecked]:translate-x-0"
         )}
       />

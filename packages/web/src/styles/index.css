@@ -78,8 +78,10 @@
   /* Role-named family selected by appearance.accent. Cezarion is the sole family today. */
   --action: #f4c542;
   --action-foreground: #0b0f17;
-  --accent-strong: #7c3aed;
-  --accent-strong-foreground: #ffffff;
+  --accent-strong: #2dd4bf;
+  --accent-strong-foreground: #0b0f17;
+  --merged-strong: #7c3aed;
+  --merged-text: #d7bdff;
 
   /* Cezarion surfaces from design.pen. Elevation comes from surface steps, not shadows. */
   --surface-base: #0b0f17;
@@ -89,19 +91,19 @@
   --text-primary: #f8fafc;
   --text-secondary: #afb5c5;
   --text-muted: #8992a6;
-  --accent-text: #d7bdff;
-  --accent-icon: #8f86e8b3;
+  --accent-text: #5eead4;
+  --accent-icon: #2dd4bfb3;
   --task-brand-bg: #080f17;
-  --task-brand-selected: #2c1d46;
-  --composer-border: #644393;
+  --task-brand-selected: #123c3a;
+  --composer-border: #347d75;
 
-  /* Thread conversation surfaces (#252). Yellow is user intent; violet is the agent reply. */
+  /* Thread conversation surfaces (#252). Yellow is user intent; teal is the agent reply. */
   --message-user-bg: #1b1912;
   --message-user-border: #4d4324;
   --message-user-accent: #f4c542;
-  --message-agent-bg: #111824;
-  --message-agent-border: #343b4e;
-  --message-agent-accent: #a89bff;
+  --message-agent-bg: #10201f;
+  --message-agent-border: #29423f;
+  --message-agent-accent: #5eead4;
 
   /* Existing semantic names remain the compatibility layer for every screen. */
   --background: var(--surface-base);
@@ -129,7 +131,7 @@
   --success: #74d5a1;
   --pending: var(--action);
   /* Waiting on a PERSON — a reference that needs a reviewer, as opposed to one that is done
-   * (violet), finished well (success) or broken (danger). The palette had no blue outside the
+   * (teal completed / reserved purple merged), finished well (success) or broken (danger). The palette had no blue outside the
    * syntax theme, which is exactly why this reads as its own thing: nothing else in the cockpit
    * is blue. Ink-only, per theme, AA on both backgrounds (10.9:1 here, 6.7:1 on light). */
   --info: #83baff;
@@ -169,7 +171,7 @@
   --measure: 820px;
 
   /* shiki syntax highlighting (dark) */
-  --syn-key: #c4b5fd;
+  --syn-key: #5eead4;
   --syn-str: #86efac;
   --syn-fn: #93c5fd;
   --syn-com: #6b7280;
@@ -201,18 +203,22 @@
   --text-primary: #0f172a;
   --text-secondary: #4b5566;
   --text-muted: #667084;
-  --accent-text: #6d28d9;
-  --accent-icon: #7c3aedcc;
+  --accent-strong: #0f766e;
+  --accent-strong-foreground: #ffffff;
+  --accent-text: #0f766e;
+  --accent-icon: #0f766ecc;
   --task-brand-bg: #f8fafc;
-  --task-brand-selected: #ede5fc;
-  --composer-border: #c4b5fd;
+  --task-brand-selected: #ccfbf1;
+  --composer-border: #438c84;
+  --merged-strong: #7c3aed;
+  --merged-text: #6d28d9;
 
   --message-user-bg: #fff9e8;
   --message-user-border: #ddc978;
   --message-user-accent: #805d00;
-  --message-agent-bg: #f7f6fc;
-  --message-agent-border: #d8d4e7;
-  --message-agent-accent: #6049b6;
+  --message-agent-bg: #f1f8f7;
+  --message-agent-border: #c9deda;
+  --message-agent-accent: #0f766e;
 
   --background: var(--surface-base);
   --foreground: var(--text-primary);
@@ -253,7 +259,7 @@
   --diff-del-bg: rgba(239, 68, 68, 0.07);
 
   /* shiki syntax highlighting (light) */
-  --syn-key: #7c3aed;
+  --syn-key: #0f766e;
   --syn-str: #15803d;
   --syn-fn: #1d4ed8;
   --syn-com: #9ca3af;
@@ -298,7 +304,7 @@
   }
 
   :where(button, select, [role='button'], nav a, a[data-slot='button']):focus-visible {
-    /* Use semantic ink: the violet fill/ring is below 3:1 on the light sidebar. */
+    /* Use semantic ink: the accent fill/ring is below 3:1 on the light sidebar. */
     outline: 2px solid var(--link-foreground);
     outline-offset: 2px;
   }
@@ -391,6 +397,8 @@
   --color-accent-strong-foreground: var(--accent-strong-foreground);
   --color-accent-text: var(--accent-text);
   --color-accent-icon: var(--accent-icon);
+  --color-merged-strong: var(--merged-strong);
+  --color-merged-text: var(--merged-text);
   --color-ring: var(--ring);
 
   --color-danger: var(--danger);
@@ -747,6 +755,12 @@
   [data-slot='task-row'] > [data-slot='pin-toggle']:not([data-pinned]) { min-width: 0; min-height: 0; }
 }
 
+/* The close control sits on the dark nav scrim, not on an accent fill. */
+[data-slot='mobile-nav-drawer'] button[aria-label='Close menu'] { color: #f8fafc; }
+[data-slot='mobile-nav-drawer'] button[aria-label='Close menu']:hover {
+  background-color: #f8fafc1a; color: #f8fafc;
+}
+
 /* The mobile design reserves 20px of layout for its menu glyph, with a 44px hit area. */
 [data-slot='mobile-top-bar'] { background: var(--task-brand-bg); }
 [data-slot='mobile-top-bar'] button[aria-label='Open menu'] {
@@ -756,7 +770,7 @@
   content: ''; position: absolute; top: 0; bottom: 0; left: -12px; right: -12px;
 }
 [data-slot='mobile-top-bar'] > div { height: 51px; }
-/* Leading activity dots use the readable accent; unread completions keep brand purple. */
+/* Leading activity dots use the readable accent; unread completions keep brand teal. */
 [data-slot='task-row'] > [data-slot='status-dot'][data-tone='accent'] { background-color: var(--accent-text); }
 
 [data-slot='mobile-status']:empty { display: none; }

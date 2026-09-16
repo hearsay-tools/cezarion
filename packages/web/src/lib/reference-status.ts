@@ -24,6 +24,7 @@ export type ReferenceStatusTone =
   | 'success'
   | 'danger'
   | 'accent'
+  | 'merged'
   | 'neutral'
   | 'pending'
   | 'info'
@@ -40,7 +41,7 @@ export const REFERENCE_STATUS: Record<ReferenceStatus, ReferenceStatusPresentati
   'review-required': {
     label: 'Waiting for review',
     hint: 'checks are fine, no one has reviewed it yet',
-    // NOT violet, which is where `merged` and `completed` live: this one is waiting on a person
+    // NOT brand accent or reserved merged purple: this one is waiting on a person
     // and that is the opposite of finished. Blue is the only hue the cockpit does not otherwise
     // use, so it reads as its own thing at a glance rather than as a shade of done.
     tone: 'info',
@@ -68,7 +69,7 @@ export const REFERENCE_STATUS: Record<ReferenceStatus, ReferenceStatusPresentati
   merged: {
     label: 'Merged',
     hint: 'this landed on its base branch',
-    tone: 'accent',
+    tone: 'merged',
   },
   closed: {
     label: 'Closed',

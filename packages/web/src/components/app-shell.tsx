@@ -444,7 +444,7 @@ function MobileNavDrawer({ onNavigate, onCloseAutoFocus, ...props }: NavProps & 
         headerAction={
           <SheetClose asChild>
             {/* size-11: the ≥44px touch target the spec's mobile rules require. */}
-            <Button variant="ghost" size="icon" aria-label="Close menu" className="absolute top-5 -right-14 size-11 text-accent-strong-foreground hover:bg-accent-strong-foreground/10 hover:text-accent-strong-foreground">
+            <Button variant="ghost" size="icon" aria-label="Close menu" className="absolute top-5 -right-14 size-11">
               <XIcon className="size-[22px]" aria-hidden="true" />
             </Button>
           </SheetClose>

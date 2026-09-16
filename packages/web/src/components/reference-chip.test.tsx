@@ -35,7 +35,7 @@ function chipOf(ui: React.ReactElement) {
 }
 
 describe('ReferenceChip without a status', () => {
-  it('is the neutral violet chip, with the URL as its native tooltip', () => {
+  it('is the neutral brand chip, with the URL as its native tooltip', () => {
     // The pre-status treatment, unchanged: nothing is known about the PR, so nothing is claimed.
     const chip = chipOf(<ReferenceChip reference={PR} taskTitle="Add checkout" />)
 
@@ -64,7 +64,7 @@ describe('ReferenceChip with a status', () => {
   })
 
   it.each([
-    ['merged', 'text-accent-text'],
+    ['merged', 'text-merged-text'],
     ['ready', 'text-success'],
     ['review-required', 'text-info'],
     ['changes-requested', 'text-danger'],
@@ -76,6 +76,18 @@ describe('ReferenceChip with a status', () => {
   ] as const)('paints %s with the %s tone', (status, tone) => {
     const chip = chipOf(<ReferenceChip reference={PR} taskTitle="t" status={status} />)
     expect(chip.className).toContain(tone)
+  })
+
+  it('keeps merged on reserved purple and completed on brand accent', () => {
+    expect(REFERENCE_STATUS.merged.tone).toBe('merged')
+    expect(REFERENCE_STATUS.completed.tone).toBe('accent')
+    const merged = chipOf(<ReferenceChip reference={PR} taskTitle="t" status="merged" />)
+    cleanup()
+    const completed = chipOf(<ReferenceChip reference={PR} taskTitle="t" status="completed" />)
+    expect(merged.className).toContain('text-merged-text')
+    expect(merged.className).not.toContain('text-accent-text')
+    expect(completed.className).toContain('text-accent-text')
+    expect(completed.className).not.toContain('text-merged-text')
   })
 
   it('does not paint "waiting for review" the same as "merged"', () => {
