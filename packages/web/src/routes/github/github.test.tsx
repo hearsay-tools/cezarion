@@ -1332,6 +1332,20 @@ describe('GitHub handoff field chrome (#243)', () => {
     expect(css).not.toMatch(/\[data-slot='gh-filter-toolbar'\]\s*\{[^}]*flex-direction:\s*column/)
   })
 
+  it('keeps the Workflow trigger in the shared field grammar — no workflow-only overrides (#262)', () => {
+    // The trigger markup already mirrors Skills; any rule naming it is a rewrite of that
+    // geometry (icon hidden, chevron moved left), which is what #262 came to remove.
+    expect(css).not.toMatch(/gh-workflow-trigger/)
+    const field = cascadeCss(css, ['.gh-field > button, .gh-field > select'])
+    expect(field['min-height']).toBe('44px')
+    expect(field.width).toBe('100%')
+  })
+
+  it('gives the Account pill the full-width field the other pickers get (#262)', () => {
+    const pill = cascadeCss(css, [".gh-field [data-slot='account-pill']"])
+    expect(pill.width).toBe('100%')
+  })
+
   it('gives the model picker the same bordered 44px field as Workflow', () => {
     const model = cascadeCss(css, [
       '.gh-engine-fields > button',
@@ -1615,6 +1629,48 @@ describe('the hand-to-agent agent account', () => {
     )
   })
 
+  it('offers the account as the panel pill, not a bare native select (#262)', async () => {
+    stubFetch({
+      'GET /api/v1/health': SINGLE_BACKEND,
+      'GET /api/v1/workspace/agent-profiles': agentProfiles(TWO_CLAUDE_LOGINS),
+    })
+    await openDetail()
+
+    await waitFor(() => expect(document.querySelector('[data-slot="account-pill"]')).not.toBeNull())
+    const pill = document.querySelector('[data-slot="account-pill"]')!
+    expect(pill.tagName).toBe('BUTTON')
+    // The hand-off panel keeps no native select: every field shares the pill chrome.
+    expect(document.querySelector('[data-slot="gh-hand"] select')).toBeNull()
+
+    fireEvent.pointerDown(pill)
+    const menu = await screen.findByTestId('account-pill-menu')
+    await waitFor(() =>
+      expect(
+        within(menu).getAllByRole('menuitemradio').map((o) => o.textContent),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('Default'),
+          expect.stringContaining('Klaudiusz'),
+        ]),
+      ),
+    )
+  })
+
+  it('the Account pill disables with the pills while a run starts (#262)', async () => {
+    stubFetch({
+      'GET /api/v1/health': SINGLE_BACKEND,
+      'GET /api/v1/workspace/agent-profiles': agentProfiles(TWO_CLAUDE_LOGINS),
+      'POST /api/v1/runs': () => new Promise<Response>(() => {}),
+    })
+    await openDetail()
+    await waitForAgentRunEnabled()
+
+    const pill = () => document.querySelector<HTMLButtonElement>('[data-slot="account-pill"]')!
+    expect(pill().disabled).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: /Run agent on this issue/ }))
+    await waitFor(() => expect(pill().disabled).toBe(true))
+  })
+
   it('posts the picked account as agentProfile', async () => {
     const sent = stubFetch({
       'GET /api/v1/health': SINGLE_BACKEND,
@@ -1623,7 +1679,7 @@ describe('the hand-to-agent agent account', () => {
     await openDetail()
 
     await waitFor(() => expect(document.querySelector('[data-slot="runner-pill"]')).not.toBeNull())
-    fireEvent.change(screen.getByRole('combobox', { name: 'Account' }), { target: { value: 'klaudiusz' } })
+    await pickPill('account-pill', 'Klaudiusz')
     await waitForAgentRunEnabled()
 
     fireEvent.click(screen.getByRole('button', { name: /Run agent on this issue/ }))
@@ -1765,6 +1821,24 @@ async function selectSkill(name: string): Promise<void> {
 }
 
 describe('the hand-to-agent pickers (#385)', () => {
+  it('the workflow trigger carries the Skills grammar — icon, value, right-side chevron (#262)', async () => {
+    stubFetch()
+    await openDetail()
+
+    const workflow = document.querySelector('[data-slot="gh-workflow-trigger"]')!
+    const skills = document.querySelector('[data-slot="gh-skills-trigger"]')!
+    // Nothing is selected on either trigger, so the chrome classes must be identical —
+    // the CSS may not rewrite one trigger's geometry away from the other's.
+    expect(workflow.className).toBe(skills.className)
+    const children = Array.from(workflow.children)
+    expect(children[0]?.tagName).toBe('svg')
+    expect(children[children.length - 1]?.tagName).toBe('svg')
+    // The value sits between the icons and reads as a placeholder while empty.
+    const span = children[1]
+    expect(span?.tagName).toBe('SPAN')
+    expect(span?.textContent).toBe('workflow')
+  })
+
   it('the workflow dropdown lists, filters, selects — and re-selecting deselects', async () => {
     stubFetch()
     await openDetail()

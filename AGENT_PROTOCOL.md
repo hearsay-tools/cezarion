@@ -725,6 +725,12 @@ To be first-class:
    the guard tests fail the suite until each `(criterion, runner)` cell is a live row or a
    declared `PARITY_EXEMPTIONS` entry naming the wire limitation. Never an `it.skip`, and
    never "not implemented yet".
+   Choose the ask path explicitly: either map the backend's native question wire to
+   `ask.requested`, or rely on the portable `CEZ:ASK` marker path in `workflows/run.ts`.
+   A native bridge must keep its pending request in that runner's `AgentSession` state and
+   route the next human answer through the same state back to the provider. Harness rows R3
+   and R4 pin valid and malformed asks; R6 and R7 pin human-answer routing, queued agent
+   input, and recovery with an unanswered ask.
 9. **Plumbing** — the run-store `runner` enum, workflow step schema, the
    `POST /api/runs` / `PUT /api/config` bodies, `resumeCommand()`, the web
    `Runner` type, composer pills/presets, and Settings → Agents. Keep additive
