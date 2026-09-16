@@ -2,6 +2,12 @@
 
 How to review a diff in this repository. Applies to humans and to the `om-code-review` skill alike. The full validation gate in `.ai/agentic.config.json` must be green before a review verdict is meaningful: typecheck, the vitest unit/component suites (`npm test`), the node:test core-module suite (`npm run test:unit`), build (which includes the `check:pack` tarball gate), the packaged CLI E2E (`npm run test:package`), and the cockpit browser E2E (`npm run test:e2e`). The unit/component suites are the fast correctness gate. Packaged CLI E2E and cockpit browser E2E are separate checks; pull request CI rejects a skipped or failed cockpit suite.
 
+## CI surface rules
+
+Docs/process-only PRs may have skipped Vitest and cockpit browser E2E only when the required build/package aggregate is green and `verify` succeeds. The docs-only allowlist is root-level `*.md`; recursive `docs/`, `.ai/specs/`, and `.ai/analysis/`; `AGENT_PROTOCOL.md`, `AGENTS.md`, `BACKWARD_COMPATIBILITY.md`, `CODE_REVIEW.md`, and `SDLC.md`; and `LICENSE*`. Any mixed change, unlisted path, malformed input, or classifier failure is full-matrix and must pass every check plus automated review. Build/package verification is never skipped.
+
+Manual-dispatch review runs use the full matrix and bypass docs-only skips. Release-bump skips are limited to release-bump work and do not waive PR verification. Recovery can retry an incomplete automated-review round after successful CI, but cannot recover skipped checks or create a new review dispatch.
+
 ## Review priorities (in order)
 
 1. **Correctness of the run lifecycle** — runs, steps, worktrees, sessions. A bug here loses user work.
