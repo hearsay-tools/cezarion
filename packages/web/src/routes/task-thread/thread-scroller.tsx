@@ -147,6 +147,7 @@ export function useThreadScroll(
   }, [toBottom])
 
   const loadingOlderRef = useRef(false)
+  const loadingOlderOwnerRef = useRef(0)
   const wheelGestureActiveRef = useRef(false)
   const wheelGestureTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const touchHistoryConsumedRef = useRef(false)
@@ -198,6 +199,8 @@ export function useThreadScroll(
     pendingRestoreRef.current = null
     stuckRef.current = false
     loadingOlderRef.current = true
+    const requestId = loadingOlderOwnerRef.current + 1
+    loadingOlderOwnerRef.current = requestId
     const beforeHeight = scroller.scrollHeight
     const beforeTop = scroller.scrollTop
     const beforeViewportTop = scroller.getBoundingClientRect().top
@@ -213,10 +216,7 @@ export function useThreadScroll(
       },
       () => {},
     ).finally(() => {
-      if (
-        viewKeyRef.current === requestViewKey
-        && historyRestoreGenerationRef.current === requestGeneration
-      ) loadingOlderRef.current = false
+      if (loadingOlderOwnerRef.current === requestId) loadingOlderRef.current = false
     })
   }, [measuredRows, onLoadOlder])
 

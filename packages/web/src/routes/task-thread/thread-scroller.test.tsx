@@ -523,6 +523,37 @@ describe('useThreadScroll — outside a shell scroller (jsdom, tests, storybook-
     hook.unmount()
     scroller.remove()
   })
+
+  it('releases the older-page lock when a superseded in-flight request settles', async () => {
+    let resolveLoad!: () => void
+    const onLoadOlder = vi.fn(() => new Promise<void>((resolve) => { resolveLoad = resolve }))
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, {
+      clientHeight: { value: 400, configurable: true },
+      scrollHeight: { value: 1_000, configurable: true },
+    })
+    scroller.getBoundingClientRect = () => ({
+      top: 0, bottom: 400, left: 0, right: 800, width: 800, height: 400, x: 0, y: 0, toJSON() {},
+    })
+    const content = document.createElement('div')
+    scroller.append(content)
+    const hook = renderHook(
+      ({ rowKeys }: { rowKeys: string[] }) => useThreadScroll('hist-run', { onLoadOlder, rowKeys }),
+      { initialProps: { rowKeys: ['task', 'turn-seq-2777:user'] } },
+    )
+    act(() => hook.result.current.attachContent(content))
+    scroller.scrollTop = 80
+
+    act(() => hook.result.current.loadOlder())
+    expect(onLoadOlder).toHaveBeenCalledTimes(1)
+    act(() => { fireEvent.wheel(scroller, { deltaY: 120 }) })
+    await act(async () => { resolveLoad(); await Promise.resolve() })
+    act(() => hook.result.current.loadOlder())
+    expect(onLoadOlder).toHaveBeenCalledTimes(2)
+    hook.unmount()
+    scroller.remove()
+  })
 })
 
 describe('useThreadScroll — jump to latest', () => {
