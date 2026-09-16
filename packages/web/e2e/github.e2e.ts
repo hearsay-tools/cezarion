@@ -339,20 +339,28 @@ describe('the GitHub tab against the live dry-run server', () => {
       ).toBe(scoped('/github'))
 
       if (gh.issues.length > 2) {
+        const visibleRowsCountJs = (count: number) =>
+          `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length === ${count}`
         const visibleRows = () => browser.evaluate(`[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length`)
         const selectedIndex = Number(browser.evaluate(
           `[...document.querySelectorAll('[data-slot="gh-rows"] > li')].findIndex(li => li.querySelector("[aria-current='page']"))`,
         ))
         const compactedVisible = 2 + (selectedIndex >= 2 ? 1 : 0)
-        const toggleList = (expanded: 'true' | 'false') => {
+        // Wait on both observables the toggle drives, never on a clock (#341): the control's
+        // own state and the row visibility the assertions count. One React commit flips them
+        // together today, so waiting on the count costs one poll — and if that atomicity ever
+        // breaks, this settles to the committed state instead of sampling mid-flight.
+        const toggleList = (expanded: 'true' | 'false', expectedVisible: number) => {
           browser.evaluate(`document.querySelector('[data-slot="gh-expand-list"]').scrollIntoView({ block: 'center', behavior: 'instant' })`)
           browser.click('[data-slot="gh-expand-list"]')
           browser.waitForFunction(`document.querySelector('[data-slot="gh-expand-list"]').getAttribute('aria-expanded') === '${expanded}'`)
+          browser.waitForFunction(visibleRowsCountJs(expectedVisible))
         }
+        browser.waitForFunction(visibleRowsCountJs(compactedVisible))
         expect(visibleRows()).toBe(compactedVisible)
-        toggleList('true')
+        toggleList('true', gh.issues.length)
         expect(visibleRows()).toBe(gh.issues.length)
-        toggleList('false')
+        toggleList('false', compactedVisible)
         expect(visibleRows()).toBe(compactedVisible)
       }
       browser.screenshot(`${artifactsDir}/github-iphone.png`)
