@@ -1176,6 +1176,135 @@ describe('meta line, tabs, pill and resume hint', () => {
       const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
       await within(meta).findByRole('button', { name: /account deleted-one \(removed\)/ })
     })
+
+    // One login is not a choice (#251): the badge counts DEFINED accounts for the CHOSEN runner
+    // the same way the composer pill does (`hasAccountChoice`), so a lone `default` login stops
+    // crowding the truncating summary.
+    const withOneAccount = (extra: Record<string, () => Response> = {}) => stubFetch({
+      '/api/v1/workspace/agent-profiles': () => jsonResponse({
+        editable: true,
+        profileCapableProviders: ['claude'],
+        selections: {},
+        defaults: {},
+        profiles: [
+          { id: 'default', provider: 'claude', label: 'Default', configDir: '~/.claude', path: '/home/u/.claude', exists: true, looksValid: true, isDefault: true, files: [] },
+        ],
+      }),
+      ...extra,
+    })
+
+    it('omits a lone account from the summary, accessible name and menu (#251)', async () => {
+      withOneAccount()
+      renderHeader(run('done', {
+        runner: 'claude',
+        model: 'opus',
+        effort: 'high',
+        steps: [step({ sessionId: 'sess-1', profileId: 'default' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      const badge = await within(meta).findByRole('button', { name: 'Agent: claude, model opus, effort high' })
+      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · opus · high')
+
+      fireEvent.pointerDown(badge, { button: 0, ctrlKey: false, pointerType: 'mouse' })
+      const menu = await screen.findByRole('menu')
+      expect(menu.querySelector('[data-slot="agent-badge-account"]')).toBeNull()
+      expect(menu.textContent).not.toContain('account:')
+      // The effort pin and the single-account rule are independent — both hold at once.
+      expect(menu.querySelector('[data-slot="agent-badge-effort"]')?.textContent).toBe('effort: high')
+    })
+
+    it('keeps the account out of the badge while profiles are still loading — fail closed (#251)', async () => {
+      // A fail-open gate would paint the raw id first and drop it once the count arrived — the
+      // flash the issue names. A never-resolving profiles query is that pending state, held.
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === '/api/v1/workspace/agent-profiles') {
+          return new Promise<Response>(() => {})
+        }
+        return jsonResponse({})
+      }))
+      renderHeader(run('done', {
+        runner: 'claude',
+        model: 'opus',
+        steps: [step({ sessionId: 'sess-1', profileId: 'default' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      const badge = within(meta).getByRole('button', { name: 'Agent: claude, model opus' })
+      expect(badge.getAttribute('aria-label')).not.toContain('account')
+      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · opus')
+    })
+
+    it('still names a removed account once the runner is down to one login (#251)', async () => {
+      // Deleting the second account must not retroactively erase history: a step that recorded
+      // `work` before the account was deleted still has that id as its only pointer to the folder
+      // its sessions live in (spec 2026-07-29-agent-profiles), so the lone-catalog rule hides
+      // KNOWN accounts only — a removed one stays visible as `<id> (removed)`.
+      withOneAccount()
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', profileId: 'work' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      await within(meta).findByRole('button', { name: /account work \(removed\)/ })
+    })
+
+    // A step may run a different backend than the run's `runner` (spec 2026-07-29-agent-profiles
+    // puts the account on the SPAWNING step), so the choice count is judged against THAT backend's
+    // catalog — not against the runner in the summary line.
+    const withMixedBackends = (claudeLabel: string, codexCount: number) => stubFetch({
+      '/api/v1/workspace/agent-profiles': () => jsonResponse({
+        editable: true,
+        profileCapableProviders: ['claude', 'codex'],
+        selections: {},
+        defaults: {},
+        profiles: [
+          { id: 'default', provider: 'claude', label: 'Default', configDir: '~/.claude', path: '/home/u/.claude', exists: true, looksValid: true, isDefault: true, files: [] },
+          ...(claudeLabel === 'Default' ? [] : [{ id: 'work-desk', provider: 'claude', label: claudeLabel, configDir: '~/.claude-work', path: '/home/u/.claude-work', exists: true, looksValid: true, isDefault: false, files: [] }]),
+          { id: 'default', provider: 'codex', label: 'Default', configDir: '~/.codex', path: '/home/u/.codex', exists: true, looksValid: true, isDefault: true, files: [] },
+          ...(codexCount > 1 ? [{ id: 'work-laptop', provider: 'codex', label: 'Work Laptop', configDir: '~/.codex-work', path: '/home/u/.codex-work', exists: true, looksValid: true, isDefault: false, files: [] }] : []),
+        ],
+      }),
+    })
+
+    it('shows a known account its own backend has a choice for, even when the run runner does not (#251)', async () => {
+      withMixedBackends('Default', 2)
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', backend: 'codex', profileId: 'work-laptop' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      await within(meta).findByRole('button', { name: /account Work Laptop/ })
+    })
+
+    it('hides a lone account whose backend differs from the run runner (#251)', async () => {
+      // The mirror: two Claude logins do not make a lone Codex one a choice. The badge paints
+      // before the profiles fetch lands, so the assertion waits for it to settle first —
+      // otherwise it would judge the empty initial catalog and pass for the wrong reason.
+      const sent = withMixedBackends('Work Desk', 1)
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', backend: 'codex', profileId: 'default' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      await waitFor(() => expect(sent.map((r) => r.path)).toContain('/api/v1/workspace/agent-profiles'))
+      await act(async () => {})
+      const badge = within(meta).getByRole('button', { name: 'Agent: claude, model auto' })
+      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · auto')
+    })
+
+    it('falls back to the recorded id when the profiles query fails (#251)', async () => {
+      // Pending stays silent (the pin above); a FAILED query never settles, so silence would be
+      // permanent and the recorded id is the only remaining pointer to the account. It is shown
+      // exactly as recorded — no `(removed)` claim the unavailable catalog cannot back.
+      stubFetch({
+        '/api/v1/workspace/agent-profiles': () => new Response('profiles unavailable', { status: 404 }),
+      })
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', profileId: 'work' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      await within(meta).findByRole('button', { name: 'Agent: claude, account work, model auto' })
+    })
   })
 
   describe('the canonical model identity (#546)', () => {
