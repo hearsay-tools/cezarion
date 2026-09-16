@@ -82,19 +82,26 @@ test('duplicate completion events skip an in-flight and then completed review', 
 
 test('docs-only review with a skipped wait gate is not recovered', async () => {
   const h = harness();
-  h.state.reviewJobs.find(j => j.name === 'wait-for-ci').conclusion = 'skipped';
-  h.state.reviewJobs.find(j => j.name === 'Automated Code Review').conclusion = 'success';
+  Object.assign(h.state.review, { status: 'completed', conclusion: 'failure' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'wait-for-ci'), { status: 'completed', conclusion: 'skipped' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'Automated Code Review'), { status: 'completed', conclusion: 'success' });
   const result = await recover(h);
   assert.equal(result.recovered, false);
   assert.equal(h.writes.length, 0);
+  assert.ok(h.calls.some(([route, args]) => route.endsWith('/attempts/{attempt_number}/jobs') && args.run_id === 50));
   assert.match(h.logs.join('\n'), /not blocked solely at wait-for-ci/);
 });
 
 test('completed successful review is not recovered', async () => {
   const h = harness();
-  h.state.review.conclusion = 'success';
-  h.state.reviewJobs.find(j => j.name === 'wait-for-ci').conclusion = 'skipped';
-  h.state.reviewJobs.find(j => j.name === 'Automated Code Review').conclusion = 'success';
+  Object.assign(h.state.review, { status: 'completed', conclusion: 'success' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'validate-provider'), { status: 'completed', conclusion: 'success' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'review-round'), { status: 'completed', conclusion: 'success' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'wait-for-ci'), { status: 'completed', conclusion: 'skipped' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'claude-review'), { status: 'completed', conclusion: 'skipped' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'codex-review'), { status: 'completed', conclusion: 'skipped' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'post-review'), { status: 'completed', conclusion: 'skipped' });
+  Object.assign(h.state.reviewJobs.find(j => j.name === 'Automated Code Review'), { status: 'completed', conclusion: 'success' });
   h.options.event = { workflow_run: structuredClone(h.state.review) };
   const result = await recover(h);
   assert.equal(result.recovered, false);
