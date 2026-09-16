@@ -82,6 +82,9 @@ export function readTestEnv(): EnvDescriptor {
  * spec order-dependent — once the registry holds more than one project the sidebar renders
  * the grouped multi-project shell instead of the flat one these specs assert against.
  * Pinning it inside `dataRoot` means the spec's own `rmSync(dataRoot)` cleans it up too.
+ * `CEZ_REMOTE` defaults to local (`0`) for the same reason — a hosted parent would otherwise
+ * hide account catalogs under `localHandoff:false` (#358); pass `CEZ_REMOTE: '1'` in `extra`
+ * when a fixture intentionally tests hosted security.
  *
  * The shared test env pins the same variable under `.ai/qa/cez-home`
  * (`.ai/scripts/test-env-up.sh`); this is that rule for the specs that boot their own server.
@@ -125,6 +128,10 @@ export function fixtureServeEnv(
     // (`skills-update.e2e.ts` attaches to it) is where that behaviour is exercised on purpose;
     // `extra` can still turn it back on for a spec that wants it.
     CEZ_SKILLS_AUTO_UPDATE: extra.CEZ_SKILLS_AUTO_UPDATE ?? '0',
+    // Local by default (#358). A hosted parent exports CEZ_REMOTE=1 into process.env; spreading
+    // it would hide the account catalog and trip phone-layout assertions. Specs that exercise
+    // hosted security pass CEZ_REMOTE: '1' in extra.
+    CEZ_REMOTE: extra.CEZ_REMOTE ?? '0',
   }
 }
 

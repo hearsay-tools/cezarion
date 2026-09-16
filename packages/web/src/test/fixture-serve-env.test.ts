@@ -65,3 +65,12 @@ it('refuses uncertain discovery instead of treating it as a non-Git fixture', ()
   expect(() => fixtureServeEnv(join(root(), 'missing'))).toThrow()
   expect(() => fixtureServeEnv(root(), { PATH: '' })).toThrow(/verify fixture/)
 })
+// #358: a hosted parent exports CEZ_REMOTE=1; local fixtures must not inherit it.
+it('defaults to local mode when the parent exports CEZ_REMOTE=1', () => {
+  vi.stubEnv('CEZ_REMOTE', '1')
+  expect(fixtureServeEnv(root()).CEZ_REMOTE).toBe('0')
+})
+it('allows a fixture to request hosted mode explicitly', () => {
+  vi.stubEnv('CEZ_REMOTE', '0')
+  expect(fixtureServeEnv(root(), { CEZ_REMOTE: '1' }).CEZ_REMOTE).toBe('1')
+})
