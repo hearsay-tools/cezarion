@@ -8,7 +8,6 @@
 .gh-field { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
 .gh-field > span { color: var(--muted-foreground); font-size: 11px; }
 .gh-field > button, .gh-field > select { width: 100%; min-height: 44px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 0 12px; color: var(--foreground); text-align: left; font-size: 12px; }
-.gh-field > button > span { max-width: none; }
 .gh-field > button > svg:last-child { margin-left: auto; }
 [data-slot='gh-custom-prompt'] { margin-top: 0; min-height: 150px; padding: 16px; font-size: 14px; }
 .gh-engine-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
@@ -75,10 +74,9 @@
 .gh-prompt-field { gap: 8px; }
 .gh-prompt-field [data-slot='gh-custom-prompt'] { min-height: 96px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
 .gh-engine-fields [data-slot='model-pill'] { justify-content: flex-start; }
-.gh-field [data-slot='gh-workflow-trigger'] { font-family: inherit; font-weight: 400; }
-.gh-field [data-slot='gh-workflow-trigger'] > svg:first-child { display: none; }
-.gh-field [data-slot='gh-workflow-trigger'] > svg:last-child { order: -1; margin-left: 0; }
-.gh-field [data-slot='gh-workflow-trigger'] > span { margin-left: auto; }
+/* #262: the Account field shares the panel's pill grammar; the width rule reaches through the
+   disabled PickerPill's span wrapper, where `.gh-field > button` no longer matches. */
+.gh-field [data-slot='account-pill'] { width: 100%; }
 @media (max-width: 767px) {
   [data-slot='gh-tabs'] .gh-utility:first-of-type { margin-left: 0; }
   [data-slot='gh-detail-inner'] { padding: 16px; }
