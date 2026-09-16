@@ -429,6 +429,15 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
     const scriptsDir = path.join(cwd, '.cez-trusted', '.github', 'scripts');
     fs.mkdirSync(scriptsDir, { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'release-bump-pr.cjs'), path.join(scriptsDir, 'release-bump-pr.cjs'));
+    // Stub version-stamp compare so bash harnesses do not need real file contents.
+    const classifierSrc = fs.readFileSync(path.join(scriptsDir, 'release-bump-pr.cjs'), 'utf8');
+    fs.writeFileSync(
+      path.join(scriptsDir, 'release-bump-pr.cjs'),
+      classifierSrc.replace(
+        'function filesAreVersionStampsOnly({ repository, files, baseRef, headRef, env = process.env } = {}) {',
+        "function filesAreVersionStampsOnly({ repository, files, baseRef, headRef, env = process.env } = {}) {\n  if (env.TEST_STAMPS_OK === '1') return true;\n  if (env.TEST_STAMPS_OK === '0') return false;",
+      ),
+    );
     const env = {
       ...process.env,
       BASH_ENV: '/dev/null',
@@ -442,6 +451,7 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
       HEAD_REF: headRef,
       PR_AUTHOR: prAuthor,
       GH_TOKEN: 'test-token',
+      TEST_STAMPS_OK: '1',
     };
     const gitStub = gitOk
       ? `git() { printf '%s ignored\\n' '${patchId}'; }`

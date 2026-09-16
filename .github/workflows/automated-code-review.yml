@@ -37,6 +37,7 @@ jobs:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Verified manifest-only bot release/v* bumps: review-round sets
@@ -129,7 +130,7 @@ jobs:
             # release/v* is not enough — trusted release-bump-pr.cjs also checks
             # the live PR file allowlist (same paths release-finalization stages).
             export HEAD_REF="$head_ref" PR_AUTHOR="$pr_author" CLASSIFIER="$classifier"
-            export EXPECTED_HEAD_SHA="$head_sha"
+            export EXPECTED_HEAD_SHA="$head_sha" BASE_SHA="$base_sha"
             if LIVE_HEAD_SHA="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)" \
               && PR_FILES="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')"; then
               export LIVE_HEAD_SHA PR_FILES PR_FILES_OK=1

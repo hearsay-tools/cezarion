@@ -6,6 +6,7 @@ const {
   isReleaseBumpFile,
   isManifestOnlyFiles,
   isBotReleaseBumpPr,
+  onlyVersionValueChanges,
   classifyFromEnv,
 } = require('./release-bump-pr.cjs');
 
@@ -80,20 +81,51 @@ test('bot release bump needs release/v* head, bot author, and manifest-only file
   );
 });
 
-test('classifyFromEnv requires matching event/live head SHAs and successful file list', () => {
+test('onlyVersionValueChanges allows version string edits and rejects structure/script changes', () => {
+  assert.equal(
+    onlyVersionValueChanges(
+      { name: 'x', version: '1.0.0', dependencies: { y: '^1.0.0' } },
+      { name: 'x', version: '1.0.1', dependencies: { y: '^1.0.1' } },
+    ),
+    true,
+  );
+  assert.equal(
+    onlyVersionValueChanges(
+      { name: 'x', version: '1.0.0', scripts: { test: 'vitest' } },
+      { name: 'x', version: '1.0.0', scripts: { test: 'vitest', postinstall: 'curl evil' } },
+    ),
+    false,
+  );
+  assert.equal(
+    onlyVersionValueChanges(
+      { name: 'x', version: '1.0.0' },
+      { name: 'x', version: '1.0.0', dependencies: { evil: '1.0.0' } },
+    ),
+    false,
+  );
+  assert.equal(onlyVersionValueChanges({ version: '1.0.0' }, { version: 'not-a-version' }), false);
+});
+
+test('classifyFromEnv requires matching event/live head SHAs, file list, and version stamps', () => {
   const base = {
     EVENT_NAME: 'pull_request',
     HEAD_REF: 'release/v0.13.5',
     PR_AUTHOR: 'github-actions[bot]',
     EXPECTED_HEAD_SHA: HEAD,
     LIVE_HEAD_SHA: HEAD,
+    BASE_SHA: 'c'.repeat(40),
+    GITHUB_REPOSITORY: 'owner/repo',
     PR_FILES_OK: '1',
     PR_FILES: MANIFEST.join('\n'),
   };
-  assert.equal(classifyFromEnv(base), true);
-  assert.equal(classifyFromEnv({ ...base, LIVE_HEAD_SHA: 'b'.repeat(40) }), false);
-  assert.equal(classifyFromEnv({ ...base, EXPECTED_HEAD_SHA: 'notasha' }), false);
-  assert.equal(classifyFromEnv({ ...base, PR_FILES_OK: '0' }), false);
-  assert.equal(classifyFromEnv({ ...base, PR_FILES_OK: undefined }), false);
-  assert.equal(classifyFromEnv({ ...base, PR_FILES: '' }), false);
+  const stampsOk = { filesAreVersionStampsOnly: () => true };
+  const stampsBad = { filesAreVersionStampsOnly: () => false };
+  assert.equal(classifyFromEnv(base, stampsOk), true);
+  assert.equal(classifyFromEnv(base, stampsBad), false);
+  assert.equal(classifyFromEnv({ ...base, LIVE_HEAD_SHA: 'b'.repeat(40) }, stampsOk), false);
+  assert.equal(classifyFromEnv({ ...base, EXPECTED_HEAD_SHA: 'notasha' }, stampsOk), false);
+  assert.equal(classifyFromEnv({ ...base, PR_FILES_OK: '0' }, stampsOk), false);
+  assert.equal(classifyFromEnv({ ...base, PR_FILES_OK: undefined }, stampsOk), false);
+  assert.equal(classifyFromEnv({ ...base, PR_FILES: '' }, stampsOk), false);
+  assert.equal(classifyFromEnv({ ...base, BASE_SHA: 'short' }, stampsOk), false);
 });
