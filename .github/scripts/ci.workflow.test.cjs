@@ -54,9 +54,11 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   const ci = workflow();
   const classify = ci.jobs['classify-pr'];
   assert.ok(classify, 'expected classify-pr job');
+  assert.deepEqual(classify.permissions, { contents: 'read', 'pull-requests': 'read' });
   assert.equal(classify.outputs.bump_pr, '${{ steps.classify.outputs.bump_pr }}');
   const classifyStep = classify.steps.find((step) => step.id === 'classify');
   assert.match(classifyStep.run, /release-bump-pr\.cjs/);
+  assert.match(classifyStep.run, /pulls\/\$\{PR_NUMBER\}\/files/);
   assert.equal(classifyStep.env.EVENT_NAME, '${{ github.event_name }}');
   assert.equal(classifyStep.env.PR_AUTHOR, '${{ github.event.pull_request.user.login }}');
   assert.equal(ci.jobs.vitest.needs, 'classify-pr');

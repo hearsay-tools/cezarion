@@ -26,6 +26,9 @@ jobs:
     name: Classify PR shape
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       bump_pr: ${{ steps.classify.outputs.bump_pr }}
     steps:
