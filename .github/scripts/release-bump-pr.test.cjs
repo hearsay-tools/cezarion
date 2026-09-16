@@ -6,7 +6,10 @@ const {
   isReleaseBumpFile,
   isManifestOnlyFiles,
   isBotReleaseBumpPr,
+  classifyFromEnv,
 } = require('./release-bump-pr.cjs');
+
+const HEAD = 'a'.repeat(40);
 
 const MANIFEST = [
   'packages/cezar/package.json',
@@ -75,4 +78,22 @@ test('bot release bump needs release/v* head, bot author, and manifest-only file
     }),
     false,
   );
+});
+
+test('classifyFromEnv requires matching event/live head SHAs and successful file list', () => {
+  const base = {
+    EVENT_NAME: 'pull_request',
+    HEAD_REF: 'release/v0.13.5',
+    PR_AUTHOR: 'github-actions[bot]',
+    EXPECTED_HEAD_SHA: HEAD,
+    LIVE_HEAD_SHA: HEAD,
+    PR_FILES_OK: '1',
+    PR_FILES: MANIFEST.join('\n'),
+  };
+  assert.equal(classifyFromEnv(base), true);
+  assert.equal(classifyFromEnv({ ...base, LIVE_HEAD_SHA: 'b'.repeat(40) }), false);
+  assert.equal(classifyFromEnv({ ...base, EXPECTED_HEAD_SHA: 'notasha' }), false);
+  assert.equal(classifyFromEnv({ ...base, PR_FILES_OK: '0' }), false);
+  assert.equal(classifyFromEnv({ ...base, PR_FILES_OK: undefined }), false);
+  assert.equal(classifyFromEnv({ ...base, PR_FILES: '' }), false);
 });

@@ -45,6 +45,7 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ ! -f .github/scripts/release-bump-pr.cjs ]; then
@@ -52,8 +53,16 @@ jobs:
             exit 0
           fi
           if [ "${EVENT_NAME}" = pull_request ] && [ -n "${PR_NUMBER:-}" ]; then
-            PR_FILES="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename' || true)"
-            export PR_FILES
+            if ! LIVE_HEAD_SHA="$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)"; then
+              echo 'bump_pr=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            export LIVE_HEAD_SHA
+            if ! PR_FILES="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"; then
+              echo 'bump_pr=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            export PR_FILES PR_FILES_OK=1
           fi
           node .github/scripts/release-bump-pr.cjs
 

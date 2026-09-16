@@ -62,9 +62,13 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   const classifyStep = classify.steps.find((step) => step.id === 'classify');
   assert.match(classifyStep.run, /release-bump-pr\.cjs/);
   assert.match(classifyStep.run, /pulls\/\$\{PR_NUMBER\}\/files/);
+  assert.match(classifyStep.run, /PR_FILES_OK=1/);
+  assert.doesNotMatch(classifyStep.run, /\|\| true/);
+  assert.match(classifyStep.run, /LIVE_HEAD_SHA/);
   assert.match(classifyStep.run, /bump_pr=false/);
   assert.equal(classifyStep.env.EVENT_NAME, '${{ github.event_name }}');
   assert.equal(classifyStep.env.PR_AUTHOR, '${{ github.event.pull_request.user.login }}');
+  assert.equal(classifyStep.env.EXPECTED_HEAD_SHA, '${{ github.event.pull_request.head.sha }}');
   assert.equal(ci.jobs.vitest.needs, 'classify-pr');
   assert.equal(ci.jobs['cockpit-browser'].needs, 'classify-pr');
   assert.equal(ci.jobs.vitest.if, "needs.classify-pr.outputs.bump_pr != 'true'");

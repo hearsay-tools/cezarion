@@ -44,9 +44,16 @@ function writeGithubOutput(name, value, outputPath = process.env.GITHUB_OUTPUT) 
   appendFileSync(outputPath, `${name}=${value}\n`);
 }
 
-// CI / review classify entry: EVENT_NAME, HEAD_REF, PR_AUTHOR, and either
-// PR_FILES (newline-separated) or PR_NUMBER + GITHUB_REPOSITORY + GH_TOKEN to
-// list files via gh. Fail-closed to bump_pr=false.
+function headShasMatch(expected, live) {
+  return typeof expected === 'string'
+    && typeof live === 'string'
+    && /^[a-f0-9]{40}$/i.test(expected)
+    && expected.toLowerCase() === live.toLowerCase();
+}
+
+// CI / review classify entry: EVENT_NAME, HEAD_REF, PR_AUTHOR, EXPECTED_HEAD_SHA,
+// LIVE_HEAD_SHA, and PR_FILES with PR_FILES_OK=1 (successful full list only).
+// Fail-closed to bump_pr=false on any missing/mismatched input.
 function classifyFromEnv(env = process.env) {
   if (env.EVENT_NAME !== 'pull_request' && env.EVENT_NAME !== 'pull_request_target') {
     return false;
@@ -56,20 +63,13 @@ function classifyFromEnv(env = process.env) {
   if (!headRef.startsWith('release/v') || prAuthor !== 'github-actions[bot]') {
     return false;
   }
-  let files = [];
-  if (typeof env.PR_FILES === 'string') {
-    files = env.PR_FILES.split('\n').map((line) => line.trim()).filter(Boolean);
-  } else {
-    try {
-      files = listPullFilesViaGh({
-        repository: env.GITHUB_REPOSITORY,
-        pullNumber: env.PR_NUMBER,
-        env,
-      });
-    } catch {
-      return false;
-    }
+  if (!headShasMatch(env.EXPECTED_HEAD_SHA, env.LIVE_HEAD_SHA)) {
+    return false;
   }
+  if (env.PR_FILES_OK !== '1' || typeof env.PR_FILES !== 'string') {
+    return false;
+  }
+  const files = env.PR_FILES.split('\n').map((line) => line.trim()).filter(Boolean);
   return isBotReleaseBumpPr({ headRef, prAuthor, files });
 }
 
@@ -83,6 +83,7 @@ module.exports = {
   isReleaseBumpFile,
   isManifestOnlyFiles,
   isBotReleaseBumpPr,
+  headShasMatch,
   listPullFilesViaGh,
   classifyFromEnv,
   writeGithubOutput,

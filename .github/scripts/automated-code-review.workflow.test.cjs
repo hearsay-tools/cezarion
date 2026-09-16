@@ -423,7 +423,7 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
   const patchId = 'c'.repeat(40);
   const marker = `<!-- cez-review-patch-id: ${patchId} -->`;
 
-  async function runRound({ event, gitOk, reviewsOut, headRef = '', prAuthor = '', filesOut = 'packages/cezar/src/index.ts' }) {
+  async function runRound({ event, gitOk, reviewsOut, headRef = '', prAuthor = '', filesOut = 'packages/cezar/src/index.ts', liveHead = head, filesOk = true }) {
     const cwd = fs.mkdtempSync(path.join(tmpdir(), 'review-patch-id-'));
     const output = path.join(cwd, 'outputs');
     const scriptsDir = path.join(cwd, '.cez-trusted', '.github', 'scripts');
@@ -447,8 +447,11 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
       ? `git() { printf '%s ignored\\n' '${patchId}'; }`
       : `git() { echo 'missing objects' >&2; return 128; }`;
     const filesLiteral = filesOut.replace(/'/g, `'\\''`);
+    const filesBranch = filesOk
+      ? `printf '%s\\n' '${filesLiteral}'`
+      : `echo 'page failed' >&2; return 1`;
     const script = [
-      `gh() { case "$*" in *'.head.sha'*) echo '${head}';; *'.base.sha'*) echo '${base}';; *'/files'*) printf '%s\\n' '${filesLiteral}';; *'/reviews'*) printf '%s\\n' '${reviewsOut}';; *) echo "unexpected gh: $*" >&2; return 1;; esac; }`,
+      `gh() { case "$*" in *'.head.sha'*) echo '${liveHead}';; *'.base.sha'*) echo '${base}';; *'/files'*) ${filesBranch};; *'/reviews'*) printf '%s\\n' '${reviewsOut}';; *) echo "unexpected gh: $*" >&2; return 1;; esac; }`,
       gitStub,
       round.run,
     ].join('\n');
@@ -514,6 +517,32 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
       headRef: 'release/v0.13.5',
       prAuthor: 'github-actions[bot]',
       filesOut: 'packages/cezar/package.json\n.github/workflows/ci.yml',
+    });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('bot-authored release/v* head still reviews when live head drifts', async () => {
+    const outputs = await runRound({
+      event: 'pull_request_target',
+      gitOk: true,
+      reviewsOut: 'No issues found',
+      headRef: 'release/v0.13.5',
+      prAuthor: 'github-actions[bot]',
+      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+      liveHead: 'd'.repeat(40),
+    });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('bot-authored release/v* head still reviews when file list fetch fails', async () => {
+    const outputs = await runRound({
+      event: 'pull_request_target',
+      gitOk: true,
+      reviewsOut: 'No issues found',
+      headRef: 'release/v0.13.5',
+      prAuthor: 'github-actions[bot]',
+      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+      filesOk: false,
     });
     assert.equal(outputs.can_review, 'true');
   });
