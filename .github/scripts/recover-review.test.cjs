@@ -80,6 +80,28 @@ test('duplicate completion events skip an in-flight and then completed review', 
   assert.equal(h.writes.length, 1);
 });
 
+test('docs-only review with a skipped wait gate is not recovered', async () => {
+  const h = harness();
+  h.state.reviewJobs.find(j => j.name === 'wait-for-ci').conclusion = 'skipped';
+  h.state.reviewJobs.find(j => j.name === 'Automated Code Review').conclusion = 'success';
+  const result = await recover(h);
+  assert.equal(result.recovered, false);
+  assert.equal(h.writes.length, 0);
+  assert.match(h.logs.join('\n'), /not blocked solely at wait-for-ci/);
+});
+
+test('completed successful review is not recovered', async () => {
+  const h = harness();
+  h.state.review.conclusion = 'success';
+  h.state.reviewJobs.find(j => j.name === 'wait-for-ci').conclusion = 'skipped';
+  h.state.reviewJobs.find(j => j.name === 'Automated Code Review').conclusion = 'success';
+  h.options.event = { workflow_run: structuredClone(h.state.review) };
+  const result = await recover(h);
+  assert.equal(result.recovered, false);
+  assert.equal(h.writes.length, 0);
+  assert.match(h.logs.join('\n'), /review already completed on this head/);
+});
+
 for (const status of ['queued', 'in_progress', 'waiting', 'requested', 'pending']) {
   test(`active review ${status} is never restarted`, async () => {
     const h = harness(); h.state.review.status = status;
