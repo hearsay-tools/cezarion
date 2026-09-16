@@ -7,8 +7,10 @@ const { execFileSync } = require('node:child_process');
 const VERIFICATION_JOB = 'Unit, build, E2E, and package';
 
 function pickPullRequestRun(runs, headSha) {
-  return (runs || []).find((run) => ['pull_request', 'pull_request_target'].includes(run.event) &&
-    (headSha === undefined || run.headSha === headSha)) || null;
+  const candidates = (runs || []).filter((run) => ['pull_request', 'pull_request_target'].includes(run.event) &&
+    (headSha === undefined || run.headSha === headSha) &&
+    run.conclusion !== 'cancelled');
+  return candidates.find((run) => run.event === 'pull_request_target') || candidates[0] || null;
 }
 
 function verificationJob(jobs) {

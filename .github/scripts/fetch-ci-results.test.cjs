@@ -26,9 +26,11 @@ function harness(snapshots) {
       return JSON.stringify(snapshot.runs ?? [run()]);
     }
     if (args[0] === 'run' && args[1] === 'view' && args.includes('jobs')) {
-      assert.equal(args[2], '42');
       if (snapshot.jobsError) throw snapshot.jobsError;
-      return JSON.stringify({ jobs: snapshot.jobs });
+      const jobs = snapshot.jobsById?.[args[2]] ?? snapshot.jobs;
+      assert.ok(jobs, `jobs must be defined for run ${args[2]}`);
+      snapshot.jobs = jobs;
+      return JSON.stringify({ jobs });
     }
     if (args[0] === 'api') {
       const id = Number(args[1].match(/\/jobs\/(\d+)\/logs$/)?.[1]);
@@ -60,6 +62,21 @@ test('verification completion releases review while publishing is still running'
 
 test('trusted pull request target CI runs can provide review verification', () => {
   const h = harness([{ runs: [run({ event: 'pull_request_target' })], jobs: [job(), publish()] }]);
+  const selected = waitForCiRun(h.options);
+  assert.equal(selected.databaseId, 42);
+  assert.equal(collectCiResults(h.options).conclusion, 'success');
+});
+
+test('review polling prefers a live target run over a cancelled pull_request run', () => {
+  const cancelled = run({ databaseId: 41, event: 'pull_request', status: 'completed', conclusion: 'cancelled' });
+  const target = run({ databaseId: 42, event: 'pull_request_target', status: 'in_progress', conclusion: '' });
+  const h = harness([{
+    runs: [cancelled, target],
+    jobsById: {
+      41: [job({ conclusion: 'cancelled' }), publish({ status: 'completed', conclusion: 'cancelled' })],
+      42: [job(), publish()],
+    },
+  }]);
   const selected = waitForCiRun(h.options);
   assert.equal(selected.databaseId, 42);
   assert.equal(collectCiResults(h.options).conclusion, 'success');
