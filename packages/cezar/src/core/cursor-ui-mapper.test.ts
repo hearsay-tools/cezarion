@@ -159,6 +159,14 @@ describe('Cursor negotiated subagent sessions', () => {
     expect(parent.state.childSessions.size).toBe(0);
   });
 
+  it('keeps child extension todos out of the parent plan dock', () => {
+    let state = mapCursorMessage(spawn(), cursorTurnStarted({ ...createCursorUiState(), sessionId: 's' }).state).state;
+    state = mapCursorMessage(scoped('child', { sessionUpdate: 'tool_call', toolCallId: 'child-todos', kind: 'other', title: 'Todos', status: 'in_progress' }), state).state;
+    const mapped = mapCursorMessage({ method: 'cursor/update_todos', params: { toolCallId: 'child-todos', merge: false, todos: [{ id: 'a', content: 'Child work', status: 'pending' }] } }, state);
+    expect(mapped.events.some(e => e.type === 'plan.updated')).toBe(false);
+    expect(mapped.state.todos.size).toBe(0);
+  });
+
   it('child terminal flushes its text and task without ending the parent turn', () => {
     const announced = mapCursorMessage(spawn(), start());
     const child = mapCursorMessage(chunk('child', 'Done'), announced.state);

@@ -882,6 +882,13 @@ describe('harness parity — D1 governed native delegation', () => {
             const { config: _config, ...rest } = controlled.params;
             expect(rest).toEqual(normal.params);
             expect(normal.params).not.toHaveProperty('config');
+          } else if (backend === 'cursor') {
+            const normal = ordinary!.find(row => row.method === 'initialize');
+            const controlled = restricted!.find(row => row.method === 'initialize');
+            expect(normal.params.clientCapabilities._meta.subagents).toBe(true);
+            expect(controlled.params.clientCapabilities._meta.subagents).toBe(false);
+            const normalize = (rows: typeof ordinary) => rows!.filter(row => row.method !== 'initialize');
+            expect(normalize(restricted)).toEqual(normalize(ordinary));
           } else {
             const normal = ordinary!.find(row => row.method === 'POST' && row.url === '/session');
             const controlled = restricted!.find(row => row.method === 'POST' && row.url === '/session');

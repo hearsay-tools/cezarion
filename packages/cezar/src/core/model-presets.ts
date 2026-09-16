@@ -36,6 +36,7 @@ export const KNOWN_PRESETS_BY_RUNNER: Record<RunnerId, readonly string[]> = {
     'claude-haiku-4-5',
   ],
   codex: ['gpt-5.1-codex', 'gpt-5.1-codex-mini', 'gpt-5-codex'],
+  cursor: [],
   opencode: [],
   // pi lists nothing for the same reason OpenCode does (#794), plus one of its own: it picks a
   // model with the canonical `provider/model` convention and has no default provider, so the
@@ -76,6 +77,8 @@ export function modelConflictsWithRunner(model: string, runner: RunnerId): boole
   // lists — it keeps holding for models that do not exist yet. That is what lets OpenCode's
   // entry above be empty (#794) without losing the protection it used to provide.
   if (namesAnotherKnownProvider(model, runner)) return true;
+  // Cursor's live catalog legitimately overlaps Claude/Codex bare IDs.
+  if (runner === 'cursor') return false;
   return Object.entries(KNOWN_PRESETS_BY_RUNNER).some(
     ([other, presets]) => other !== runner && presets.includes(model),
   );

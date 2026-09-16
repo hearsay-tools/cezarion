@@ -76,7 +76,23 @@ function flushAll(state: CursorUiState): CursorUiMapping {
 export function mapCursorMessage(message: unknown, state: CursorUiState): CursorUiMapping {
   const noop: CursorUiMapping = { state, events: [] };
   if (!record(message) || !record(message.params)) return noop;
-  if (message.method !== 'session/update') return mapSessionMessage(message, state);
+  if (message.method !== 'session/update') {
+    // Cursor extensions omit sessionId, including those sent by child presenters.
+    // Attribute their tool id before touching any session-wide panel.
+    const toolId = str(message.params.toolCallId);
+    const children = toolId ? [...state.childSessions].filter(([, child]) => child.state.tools.has(toolId)) : [];
+    if (children.length > 1 || (children.length && toolId && state.tools.has(toolId))) return noop;
+    const owner = children[0];
+    if (owner) {
+      const [sessionId, child] = owner;
+      const mapped = mapSessionMessage(message, child.state);
+      const childSessions = new Map(state.childSessions);
+      childSessions.set(sessionId, { ...child, state: mapped.state });
+      return { state: { ...state, childSessions }, events: childEvents(mapped.events, sessionId, child.parentItemId) };
+    }
+    if ((!toolId || !state.tools.has(toolId)) && [...state.childSessions.values()].some(child => !child.terminal)) return noop;
+    return mapSessionMessage(message, state);
+  }
   const { sessionId, update } = message.params;
   if (!str(sessionId) || !record(update)) return noop;
   const sourceId = sessionId as string;

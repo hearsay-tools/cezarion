@@ -147,7 +147,7 @@ describe('the full-screen /new against a live dry-run server', () => {
     const health = (await (await fetch(`${baseUrl}/api/v1/health`)).json()) as {
       checks: Array<{ name: string; available: boolean }>
     }
-    const runners = ['claude', 'codex', 'opencode', 'pi'].filter((id) =>
+    const runners = ['claude', 'codex', 'cursor', 'opencode', 'pi'].filter((id) =>
       health.checks.some((c) => c.name === id && c.available),
     )
     if (runners.length > 1) {

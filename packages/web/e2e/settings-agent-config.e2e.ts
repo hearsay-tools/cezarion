@@ -63,6 +63,7 @@ describe('settings → agent config: the Pi pane', () => {
       'codex',
       'opencode',
       'pi',
+      'cursor',
     ])
     browser.click(PI_TAB)
     browser.waitForFunction(`document.querySelector(${JSON.stringify(PI_MCP_EMPTY)}) !== null`)

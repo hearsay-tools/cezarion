@@ -241,3 +241,11 @@ describe('normalizeModelForBackend', () => {
     expect(normalized && formatModelIdentity(normalized.identity)).toBe('anthropic/sonnet');
   });
 });
+
+it('round-trips Cursor bare and parameterized model IDs without adding a vendor prefix', () => {
+  for (const model of ['auto', 'claude-sonnet-5', 'gpt-5.6-sol[context=272k,reasoning=medium,fast=false]']) {
+    const identity = resolveModelIdentity('cursor', model);
+    expect(identity).toEqual({ provider: 'cursor', model });
+    expect(toBackendModel('cursor', identity!)).toBe(model);
+  }
+});

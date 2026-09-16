@@ -1,0 +1,112 @@
+import { describe, expect, it } from 'vitest';
+import { createRunner } from './runner-factory.ts';
+import type { RunnerId } from './agent-runner.ts';
+
+describe('Cursor ACP runner', () => {
+  it('constructs the Cursor backend instead of silently falling back to Claude', () => {
+    expect(createRunner('cursor' as RunnerId).backend).toBe('cursor');
+  });
+});
+
+import { fileURLToPath } from 'node:url';
+import { vi } from 'vitest';
+import { waitFor } from './harness-parity.testkit.ts';
+import type { AgentEvent, AgentSession } from './agent-runner.ts';
+import type { UiEvent } from './ui-events.ts';
+const mock = fileURLToPath(new URL('../../scripts/mock-cursor-acp.mjs', import.meta.url));
+
+async function withSession(prompt: string, body: (session: AgentSession, v1: AgentEvent[], v2: UiEvent[]) => Promise<void>) {
+  vi.stubEnv('CEZ_CURSOR_BIN', mock);
+  const v1: AgentEvent[] = []; const v2: UiEvent[] = [];
+  const session = createRunner('cursor' as RunnerId).startSession({ cwd: process.cwd(), userPrompt: prompt, timeoutMs: 5000 }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
+  try { await body(session, v1, v2); } finally { session.interrupt(); await session.result.catch(() => {}); vi.unstubAllEnvs(); }
+}
+it('streams tools and complete v1 text, then accepts another turn on the same process', async () => {
+  await withSession('inspect', async (session, v1) => {
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    const pid = session.pid;
+    expect(v1.some(e => e.type === 'tool-call')).toBe(true);
+    expect(v1.some(e => e.type === 'tool-result')).toBe(true);
+    expect(session.sendMessage([{ type: 'text', text: 'next' }])).toBe(true);
+    await waitFor(() => v1.filter(e => e.type === 'turn-end').length === 2);
+    expect(session.pid).toBe(pid);
+  });
+});
+it('surfaces Cursor transport-error prose followed by end_turn as failure', async () => {
+  await withSession('mock:provider-error', async (session, v1, v2) => {
+    await session.result.catch(() => {});
+    expect(v1.some(e => e.type === 'error')).toBe(true);
+    expect(v2.some(e => e.type === 'session.error')).toBe(true);
+    expect(v2.some(e => e.type === 'turn.completed' && e.stopReason === 'end_turn')).toBe(false);
+  });
+});
+it('native questions refuse agent input and resume only after a human answer', async () => {
+  await withSession('mock:ask', async (session, v1, v2) => {
+    await waitFor(() => v2.some(e => e.type === 'ask.requested'));
+    expect(session.sendAgentMessage([{ type: 'text', text: 'Vitest' }])).toBe(false);
+    expect(session.sendMessage([{ type: 'text', text: 'Vitest' }])).toBe(true);
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    expect(v1.some(e => e.type === 'text' && e.text.includes('vitest'))).toBe(true);
+  });
+});
+
+it('rejects malformed native asks without parking an invisible question', async () => {
+  await withSession('mock:ask-bad', async (_session, v1, v2) => {
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    expect(v2.some(e => e.type === 'ask.requested')).toBe(false);
+    expect(v1.some(e => e.type === 'error')).toBe(false);
+  });
+});
+it('preserves a free-text native answer as the next prompt instead of inventing option IDs', async () => {
+  await withSession('mock:ask', async (session, v1, v2) => {
+    await waitFor(() => v2.some(e => e.type === 'ask.requested'));
+    expect(session.sendMessage([{ type: 'text', text: 'mock:agent-echo use a custom runner' }])).toBe(true);
+    await waitFor(() => v1.filter(e => e.type === 'turn-end').length === 2);
+    expect(v1.some(e => e.type === 'text' && e.text.includes('use a custom runner'))).toBe(true);
+  });
+});
+it('does not report provider request errors as successful turns', async () => {
+  await withSession('mock:rpc-error', async (session, v1, v2) => {
+    await session.result;
+    expect(v1.filter(e => e.type === 'error')).toHaveLength(1);
+    expect(v1.at(-1)?.type).toBe('done');
+    expect(v2.some(e => e.type === 'turn.completed' && e.stopReason === 'end_turn')).toBe(false);
+  });
+});
+
+it('keeps multiple native questions independently addressable under a shared title', async () => {
+  await withSession('mock:multi-ask', async (session, v1, v2) => {
+    await waitFor(() => v2.some(e => e.type === 'ask.requested'));
+    const ask = v2.find(e => e.type === 'ask.requested');
+    if (ask?.type !== 'ask.requested') throw new Error('missing ask');
+    expect(new Set(ask.questions.map(q => q.header)).size).toBe(2);
+    session.sendMessage([{ type: 'text', text: `${ask.questions[0]!.header}: Vitest\n${ask.questions[1]!.header}: Vite` }]);
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    expect(v1.some(e => e.type === 'text' && e.text.includes('"selectedOptionIds":["vite"]'))).toBe(true);
+  });
+});
+
+it('accepts native plans using the cockpit header-prefixed answer', async () => {
+  await withSession('mock:plan', async (session, v1, v2) => {
+    await waitFor(() => v2.some(e => e.type === 'ask.requested'));
+    expect(session.sendAgentMessage([{ type: 'text', text: 'Plan: Approve' }])).toBe(false);
+    session.sendMessage([{ type: 'text', text: 'Plan: Approve' }]);
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    expect(v1.some(e => e.type === 'text' && e.text.includes('"outcome":"accepted"'))).toBe(true);
+  });
+});
+
+it('keeps queued human input ahead of reentrant worker input at turn end', async () => {
+  vi.stubEnv('CEZ_CURSOR_BIN', mock);
+  let session: AgentSession;
+  let admitted: false | Promise<void> | undefined;
+  let turns = 0;
+  session = createRunner('cursor').startSession({ cwd: process.cwd(), userPrompt: 'mock:hold' }, e => {
+    if (e.type === 'turn-end' && ++turns === 1) admitted = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo WORKER' }]);
+  });
+  try {
+    session.sendMessage([{ type: 'text', text: 'mock:agent-echo HUMAN' }]);
+    await waitFor(() => turns >= 2);
+    expect(admitted).toBe(false);
+  } finally { session.interrupt(); await session.result; vi.unstubAllEnvs(); }
+});

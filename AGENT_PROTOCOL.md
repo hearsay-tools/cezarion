@@ -35,7 +35,7 @@ id — that is the whole point of the seam.
 ### Identity
 
 ```ts
-const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi'] as const;  // the source of truth
+const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor'] as const;  // the source of truth
 type RunnerId     = (typeof RUNNER_IDS)[number];                   // user-selectable
 type AgentBackend = RunnerId | 'claude-cli';                       // + legacy id, still parses
 ```
@@ -442,6 +442,44 @@ messages" tests).
 
 ---
 
+### Cursor ACP (#264)
+
+`cursor-acp-runner.ts` launches `agent --force acp` and holds one JSON-RPC stdio
+connection across prompts. `initialize` precedes `session/new` or `session/load`;
+`session/set_model` preserves the selected model ID. Only the response to the
+matching `session/prompt` completes the parent turn. Resume history is suppressed
+before the opening prompt, so Continue cannot replay old terminal markers.
+
+`cursor-ui-mapper.ts` maps ACP message/thought chunks, tool calls and updates,
+structured diff content, plans, and Cursor todo/task extensions. Child updates
+are attributed through `subagent_spawned` metadata and cannot enter parent v1
+text. Native `cursor/ask_question` keeps its request ID until a human reply;
+nonhuman input never answers it. Option labels map back to the original option
+IDs. Free text skips the choice request and follows as a new prompt. Plan
+approval displays the plan and asks explicitly. Unknown RPC methods receive a
+method-not-found error rather than leaving the provider blocked.
+
+Wire evidence: [Cursor ACP documentation](https://cursor.com/docs/cli/acp),
+[ACP schema](https://agentclientprotocol.com/protocol/v1/schema), and the installed
+Cursor CLI `2026.09.15-d2fe57e` ACP implementation. That build catches provider
+errors as an assistant chunk beginning `\n\nError: ` and then returns
+`end_turn`; the runner classifies this exact envelope as a sanitized failure.
+The local probe confirmed this with a TLS transport rejection.
+
+**Telemetry limitation:** this Cursor build emits no token usage, and its prompt
+response contains only `stopReason`. ACP's optional `usage_update` describes
+context occupancy, not cumulative token consumption. Cezar reports no invented
+usage: the UI usage rows and harness S4 carry named, inverse-asserted wire-gap
+exemptions. Other matrix rows remain required. Revisit these exemptions when
+Cursor exposes directional token usage; the fixtures document their sources.
+
+The generic effort field and per-session tool/command allowlists have no ACP
+mapping and are declared unsupported. Model-specific effort can travel in an
+opaque parameterized Cursor model ID. Additional roots use `--add-dir`.
+Cursor's composite native model setting stays CLI-owned when no model is pinned.
+
+---
+
 ## 5. The tool display model (`packages/cezar/src/core/tool-display.ts`)
 
 `toolDisplay(name, input)` turns a backend tool name + raw input into
@@ -477,7 +515,10 @@ or a new fixture set forgets one — a named row fails. The matrix:
 - sub-agent **nesting** via `parentItemId` where the upstream wire attributes
   child work to a parent
 
-A new backend is not "done" until it produces every row.
+A new backend must produce every row its wire supports. A genuine upstream gap
+requires a named, versioned exemption with an inverse assertion; Cursor token
+telemetry above is the first UI-matrix exemption. Missing implementation is never
+a wire gap.
 
 That covers what a mapper EMITS. The other half of the same requirement — what a
 runner DOES — is §7, and a new backend has to satisfy both.
@@ -597,6 +638,7 @@ accepted identity, empty grants and distinct per-session delegation credentials.
 | Claude Code 2.1.260 | `--disallowedTools Agent,Task` | `claude --help` documents the deny flag; installed `sdk-tools.d.ts` names `AgentInput`. `Task` covers the legacy name in recorded fixtures. Other tools and permission modes are preserved. |
 | Codex 0.153.4 | `thread/start` and `thread/resume` `config: { "features.multi_agent": false, "features.multi_agent_v2": false }` | `codex features list` names both flags; `codex --help` documents dotted config overrides; `codex app-server generate-json-schema` confirms both request config fields. Existing sandbox, approval, account and model settings remain unchanged. |
 | OpenCode 1.18.29 | `POST /session` `permission: [{ permission: "task", pattern: "*", action: "deny" }]` | Installed server `/doc` declares `PermissionRuleset`; its embedded `TaskTool.execute` checks `task`. Later prompt requests contain no `tools` map that would replace session rules. The current adapter creates a fresh session on Continue, so the deny applies there too. It still does not map general `allowedTools`. |
+| Cursor 2026.09.15-d2fe57e | `initialize.clientCapabilities._meta.subagents = false` | Installed `src/acp/agent.ts` negotiates native delegation from this capability; `src/acp/session.ts` passes it to the agent. Ordinary runs advertise `true`; start and Continue use the same handshake. Custom tools and unrestricted shell remain outside hard isolation. |
 | pi 0.85.1 | `--exclude-tools subagent` | Installed `pi --help` applies exclusions to built-in/extension/custom names; the shipped `examples/extensions/subagent/index.ts` registers `subagent`. Other extension discovery and ordinary tool settings remain unchanged. |
 
 **Explicit D1 pi exemption:** pi's RPC has no native delegation primitive or

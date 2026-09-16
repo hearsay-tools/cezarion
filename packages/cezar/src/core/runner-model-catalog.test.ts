@@ -7,6 +7,7 @@ const UNAVAILABLE_REASON_NAME: Record<RunnerId, string> = {
   codex: 'Codex',
   opencode: 'OpenCode',
   pi: 'Pi',
+  cursor: 'Cursor',
 };
 
 const models: ModelOption[] = [

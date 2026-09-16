@@ -648,7 +648,7 @@ cezar is not married to one vendor. Every agent step runs through a single
 | **Claude Code** (default) | [`claude`](https://github.com/anthropics/claude-code) | Headless `stream-json` mode. | Per-tool `--allowedTools` (`bashAllowlist` scopes `Bash`); `dontAsk` denies unapproved tools without prompting (`CEZ_APPROVAL_GATE=1` → `acceptEdits` + approval UI; `CEZ_CLAUDE_PERMISSION_MODE=bypass` → `--dangerously-skip-permissions`). |
 | **Codex** | [`codex`](https://github.com/openai/codex) | `codex app-server` — JSON-RPC over stdio, the same transport the Codex IDE extensions use. | Ignores `allowedTools`; the default auto mode uses `danger-full-access` with `approvalPolicy: never` (`CEZ_CODEX_NETWORK=0` opts into the network-blocked `workspace-write` sandbox). |
 | **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; every permission is auto-approved. |
-| **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Persistent ACP over stdio. | Native Cursor permission requests through ACP. |
+| **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Persistent ACP over stdio. | Uses `--force` and approves ACP allow-once requests; Cursor’s native deny rules still apply. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
 | **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi's `--tools` allowlist; default sessions also pass harness extras (`Subagent`, `SubagentSupervisor`, `SubagentWait`) through `--tools`, and an explicit `allowedTools` still restricts. A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
 
 > ⚠️ **OpenCode and pi support are experimental.** Both runners work but are less
@@ -665,6 +665,8 @@ Install [Cursor CLI](https://cursor.com/docs/cli/installation) and run `agent lo
 or set `CURSOR_API_KEY`. Cezar discovers `agent` on PATH; `CEZ_CURSOR_BIN` overrides
 its location. Select **Cursor** in the runner picker to use a persistent ACP session.
 A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
+Cursor ACP currently provides no token-usage telemetry; Cezar leaves usage unavailable
+instead of estimating it. Model-specific effort stays in Cursor’s parameterized model IDs.
 
 Settings → Agent config exposes Cursor’s global `cli-config.json`, project
 `.cursor/cli.json` permissions, `.cursor/mcp.json`, and shared `AGENTS.md`.

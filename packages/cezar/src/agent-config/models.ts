@@ -18,6 +18,10 @@ const MODEL_SETTINGS_STRATEGIES: Record<RunnerId, AgentModelSettingsStrategy> = 
   codex: codexModelSettingsStrategy,
   opencode: opencodeModelSettingsStrategy,
   pi: piModelSettingsStrategy,
+  // Cursor persists a model object plus CLI-managed parameter/override flags.
+  // Do not flatten that object into a guessed model string: leaving the prompt
+  // unpinned preserves the CLI's own effective default and model parameters.
+  cursor: { runner: 'cursor', async read() { return {}; } },
 };
 
 export function readAgentModelSettings(
