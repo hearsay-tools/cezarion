@@ -78,6 +78,8 @@ export function useThreadScroll(
   } = {},
 ): ThreadScrollControls {
   const { surface = 'document', onLoadOlder, onJumpToLatest, rowKeys = [] } = options
+  const viewKeyRef = useRef(viewKey)
+  viewKeyRef.current = viewKey
   const scrollElRef = useRef<HTMLElement | null>(null)
   // State, not a ref: crossing the virtualization threshold mid-replay REPLACES the rows
   // container, and the observers below must re-subscribe to the new element.
@@ -145,6 +147,7 @@ export function useThreadScroll(
   }, [toBottom])
 
   const loadingOlderRef = useRef(false)
+  const loadingOlderOwnerRef = useRef(0)
   const wheelGestureActiveRef = useRef(false)
   const wheelGestureTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const touchHistoryConsumedRef = useRef(false)
@@ -158,6 +161,36 @@ export function useThreadScroll(
       return { key: row.dataset.rowKey!, top: rect.top, bottom: rect.bottom }
     }), [])
 
+  const pendingHistoryRestoreRef = useRef<{
+    beforeHeight: number
+    beforeTop: number
+    anchor: ReturnType<typeof firstVisibleThreadAnchor>
+    anchorIndex: number
+  } | null>(null)
+  const historyRestoreGenerationRef = useRef(0)
+
+  const restoreHistoryAnchor = useCallback(() => {
+    const pending = pendingHistoryRestoreRef.current
+    const current = scrollElRef.current
+    if (!pending || !current) return
+    pendingHistoryRestoreRef.current = null
+    const fallbackTop = pending.beforeTop + Math.max(0, current.scrollHeight - pending.beforeHeight)
+    const viewportTop = current.getBoundingClientRect().top
+    const anchorIndex = pending.anchor === undefined ? -1 : rowKeysRef.current.indexOf(pending.anchor.key)
+    const handle = virtualizerRef.current
+    if (handle && anchorIndex >= 0) {
+      handle.scrollToIndex(anchorIndex, { align: 'start', offset: -pending.anchor!.offset })
+    } else {
+      setOffset(threadAnchorScrollTop(
+        current.scrollTop,
+        viewportTop,
+        pending.anchor,
+        measuredRows(current),
+        fallbackTop,
+      ))
+    }
+  }, [measuredRows, setOffset])
+
   const loadOlder = useCallback(() => {
     const scroller = scrollElRef.current
     if (!scroller || !onLoadOlder || loadingOlderRef.current) return
@@ -166,34 +199,26 @@ export function useThreadScroll(
     pendingRestoreRef.current = null
     stuckRef.current = false
     loadingOlderRef.current = true
+    const requestId = loadingOlderOwnerRef.current + 1
+    loadingOlderOwnerRef.current = requestId
     const beforeHeight = scroller.scrollHeight
     const beforeTop = scroller.scrollTop
     const beforeViewportTop = scroller.getBoundingClientRect().top
     const anchor = firstVisibleThreadAnchor(beforeViewportTop, measuredRows(scroller))
-    void onLoadOlder().finally(() => {
-      requestAnimationFrame(() => {
-        const current = scrollElRef.current
-        if (current) {
-          const fallbackTop = beforeTop + Math.max(0, current.scrollHeight - beforeHeight)
-          const viewportTop = current.getBoundingClientRect().top
-          const anchorIndex = anchor === undefined ? -1 : rowKeysRef.current.indexOf(anchor.key)
-          const handle = virtualizerRef.current
-          if (handle && anchorIndex >= 0) {
-            handle.scrollToIndex(anchorIndex, { align: 'start', offset: -anchor!.offset })
-          } else {
-            setOffset(threadAnchorScrollTop(
-              current.scrollTop,
-              viewportTop,
-              anchor,
-              measuredRows(current),
-              fallbackTop,
-            ))
-          }
-        }
-        loadingOlderRef.current = false
-      })
+    const anchorIndex = anchor === undefined ? -1 : rowKeysRef.current.indexOf(anchor.key)
+    const requestViewKey = viewKeyRef.current
+    const requestGeneration = historyRestoreGenerationRef.current
+    void onLoadOlder().then(
+      () => {
+        if (viewKeyRef.current !== requestViewKey) return
+        if (historyRestoreGenerationRef.current !== requestGeneration) return
+        pendingHistoryRestoreRef.current = { beforeHeight, beforeTop, anchor, anchorIndex }
+      },
+      () => {},
+    ).finally(() => {
+      if (loadingOlderOwnerRef.current === requestId) loadingOlderRef.current = false
     })
-  }, [measuredRows, onLoadOlder, setOffset])
+  }, [measuredRows, onLoadOlder])
 
   useEffect(() => () => clearTimeout(wheelGestureTimerRef.current), [])
 
@@ -201,6 +226,8 @@ export function useThreadScroll(
     const scroller = scrollElRef.current
     if (!scroller) return
     pendingRestoreRef.current = null
+    historyRestoreGenerationRef.current += 1
+    pendingHistoryRestoreRef.current = null
     stuckRef.current = true
     // Refreshing paged history can remount the transcript before this promise settles.
     // Let its replacement restore the user's new tail intent, not the old reading offset.
@@ -221,8 +248,18 @@ export function useThreadScroll(
   const lastRowKey = rowKeys.at(-1)
   const rowCount = rowKeys.length
   useLayoutEffect(() => {
-    if (stuckRef.current) toBottom()
-  }, [lastRowKey, rowCount, toBottom])
+    historyRestoreGenerationRef.current += 1
+    pendingHistoryRestoreRef.current = null
+    loadingOlderRef.current = false
+  }, [viewKey])
+  useLayoutEffect(() => {
+    const pending = pendingHistoryRestoreRef.current
+    if (pending) {
+      const committedIndex = pending.anchor === undefined ? -1 : rowKeysRef.current.indexOf(pending.anchor.key)
+      if (committedIndex > pending.anchorIndex) restoreHistoryAnchor()
+      else pendingHistoryRestoreRef.current = null
+    } else if (stuckRef.current) toBottom()
+  }, [lastRowKey, rowCount, restoreHistoryAnchor, toBottom])
 
   // Arrival is the route-owned pre-paint write. AppShell deliberately does not reset task
   // routes, so a destination thread never exposes an intermediate top-of-transcript frame.
@@ -259,10 +296,14 @@ export function useThreadScroll(
     let previousScrollTop = scroller.scrollTop
     const unstick = () => {
       pendingRestoreRef.current = null
+      historyRestoreGenerationRef.current += 1
+      pendingHistoryRestoreRef.current = null
       stuckRef.current = false
       downIntentAt = 0 // the LATEST intent wins — an up gesture voids a recent down one
     }
     const markDown = () => {
+      historyRestoreGenerationRef.current += 1
+      pendingHistoryRestoreRef.current = null
       downIntentAt = Date.now()
     }
     const onWheel = (event: WheelEvent) => {

@@ -11,10 +11,15 @@ import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 
 vi.mock('node:fs', async original => { const fs = await original<typeof import('node:fs')>(); return { ...fs, rmSync: vi.fn(fs.rmSync) }; });
 
-describe('verified destruction retains results through explicit history deletion', () => {
+// Git worktree teardown + a live RunManager contend under full-suite workers; cancel/dispose
+// without polling. Timeout matches the suite's 15s git/manager waits rather than the 5s default.
+describe('verified destruction retains results through explicit history deletion', { timeout: 15_000 }, () => {
   let f: ReturnType<typeof fixture>;
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(() => { vi.restoreAllMocks(); f.close(); vi.unstubAllEnvs(); });
+  afterEach(() => {
+    for (const run of f.store.listRuns()) f.manager.cancel(run.id);
+    vi.restoreAllMocks(); f.close(); vi.unstubAllEnvs();
+  });
   async function completed() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });
     const run = f.store.getRun(workerId)!;
