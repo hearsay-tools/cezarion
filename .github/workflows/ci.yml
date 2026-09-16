@@ -1,13 +1,8 @@
 name: CI
 
 on:
-  # GitHub matches pull_request against this PR's workflow and
-  # pull_request_target against main. Keep both until main has
-  # pull_request_target; otherwise this introducing PR launches no CI.
-  pull_request:
-    branches:
-      - main
-      - develop
+  # The target trigger is installed on main. One PR event owns verification;
+  # PR publishing is isolated in publish-pr-snapshot.yml after this run completes.
   pull_request_target:
     branches:
       - main
@@ -294,8 +289,8 @@ jobs:
           fi
 
   # npm preview publishing (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482).
-  # Publishes a snapshot of both packages after a fully green verify run:
-  # same-repo PRs → dist-tag pr-<N>, develop pushes → @develop. `main` pushes do
+  # Publishes develop snapshots after a fully green verify run.
+  # PR archives below are published separately by publish-pr-snapshot.yml. `main` pushes do
   # NOT publish — stable `latest` releases are owner-driven and manual via
   # release.yml, so CI never moves `latest`. Without the NPM_TOKEN secret the
   # script degrades to a loud dry run, so this job stays green on unconfigured forks.
@@ -303,14 +298,11 @@ jobs:
     name: Publish npm snapshot
     needs: verify
     if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+      github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: write # sticky preview comment on PRs
       id-token: write # npm provenance attestation
     # Never cancel mid-publish: an interrupted run could leave the scoped
     # package on the registry without its alias.
@@ -364,38 +356,35 @@ jobs:
           console.log('```');
           EOF
 
-      - name: Comment preview on PR
-        if: (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && steps.snapshot.outputs.attempted == 'true'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          RESULT: ${{ steps.snapshot.outputs.result }}
+
+  prepare-pr-snapshot:
+    name: Prepare PR snapshot archives
+    needs: verify
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          script: |
-            const marker = '<!-- cezar-npm-preview -->';
-            const r = JSON.parse(process.env.RESULT);
-            const lines = r.installLines.map((l) => `    ${l}`).join('\n');
-            const banner = r.dryRun
-              ? '\n> ⚠️ **Dry run** — the `NPM_TOKEN` secret is not configured, so nothing was actually published. See `docs/publishing.md` for the one-time admin setup.\n'
-              : '';
-            const body = [
-              marker,
-              `### 📦 npm preview ${r.dryRun ? 'dry run' : 'published'} — \`${r.version}\``,
-              banner,
-              'Try this PR build (exact pinned version — copy-paste as-is):',
-              '',
-              lines,
-              '',
-              `Also tagged: \`npm install -g ${r.aliasName}@${r.distTag}\` (moving tag for this PR).`,
-              `Packages: \`${r.aliasName}@${r.version}\` → \`${r.rootName}@${r.version}\` → \`${r.apiClientName}@${r.version}\`${r.dryRun ? '' : ' (provenance attested)'}.`,
-            ].join('\n');
-            const { data: comments } = await github.rest.issues.listComments({
-              ...context.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
-            });
-            const existing = comments.find((c) => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
-            } else {
-              await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
-            }
+          ref: ${{ format('refs/pull/{0}/merge', github.event.pull_request.number) }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+      - run: npm ci
+      - run: npm run build
+      # This job may execute PR code, but has no publishing credentials or OIDC.
+      - run: node scripts/release-snapshot.mjs --pack-only
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-snapshot-${{ github.run_attempt }}
+          path: snapshot-artifacts/*.tgz
+          if-no-files-found: error
+          retention-days: 3

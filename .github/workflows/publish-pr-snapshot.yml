@@ -1,0 +1,94 @@
+name: Publish PR Snapshot
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      plan: ${{ steps.resolve.outputs.plan }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: resolve
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { resolveSnapshot } = require('./.github/scripts/pr-snapshot.cjs');
+            const plan = await resolveSnapshot({ github, ...context.repo, trigger: context.payload.workflow_run });
+            core.setOutput('plan', plan ? JSON.stringify(plan) : '');
+            if (!plan) core.info('No eligible current PR snapshot from this CI attempt.');
+
+  publish:
+    name: Publish verified PR snapshot
+    needs: resolve
+    if: needs.resolve.outputs.plan != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+      id-token: write
+    concurrency:
+      group: npm-snapshot-${{ fromJSON(needs.resolve.outputs.plan).pr }}
+      cancel-in-progress: false
+    steps:
+      # Only trusted default-branch code runs in this job. No npm ci, PR checkout,
+      # or PR build is allowed on the credentialed runner. Archives are validated
+      # and repacked as data before npm sees them; package scripts never execute.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ fromJSON(needs.resolve.outputs.plan).artifactId }}
+          run-id: ${{ fromJSON(needs.resolve.outputs.plan).runId }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/pr-snapshot-archives
+          merge-multiple: true
+      - name: Validate and publish archives
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PLAN: ${{ needs.resolve.outputs.plan }}
+          ARCHIVES: ${{ runner.temp }}/pr-snapshot-archives
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { resolveSnapshot, validateArchives, publishArchives } = require('./.github/scripts/pr-snapshot.cjs');
+            const plan = JSON.parse(process.env.PLAN);
+            const current = await resolveSnapshot({ github, ...context.repo, trigger: context.payload.workflow_run });
+            if (JSON.stringify(current) !== JSON.stringify(plan)) {
+              core.info('Snapshot was superseded while waiting to publish.');
+              return;
+            }
+            const dirs = { contract: 'packages/contract', apiClient: 'packages/api-client', cezar: 'packages/cezar', web: 'packages/web', alias: 'alias-cezarion' };
+            const manifests = Object.fromEntries(Object.entries(dirs).map(([key, dir]) => [key, JSON.parse(fs.readFileSync(`${dir}/package.json`, 'utf8'))]));
+            const entries = validateArchives({ artifacts: process.env.ARCHIVES, manifests, plan });
+            const dryRun = !process.env.NODE_AUTH_TOKEN;
+            publishArchives({ entries, plan, dryRun });
+            const alias = entries.find(e => e.key === 'alias').pkg;
+            const marker = '<!-- cezar-npm-preview -->';
+            const body = `${marker}\n### npm preview ${dryRun ? 'dry run (NPM_TOKEN not configured)' : 'published'} — \`${alias.version}\`\n\n\`npx ${alias.name}@${alias.version}\`\n\nMoving tag: \`${alias.name}@pr-${plan.pr}\``;
+            await core.summary.addRaw(body).write();
+            const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: plan.pr, per_page: 100 });
+            const existing = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
+            if (existing) await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            else await github.rest.issues.createComment({ ...context.repo, issue_number: plan.pr, body });

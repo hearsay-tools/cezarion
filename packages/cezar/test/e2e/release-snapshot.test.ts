@@ -304,3 +304,22 @@ test('a non-publishable event exits 0 without touching the manifests', { timeout
     await rm(root, { recursive: true, force: true });
   }
 });
+
+ test('pack-only produces snapshot archives without publishing or running lifecycle scripts', { timeout: 120_000 }, async () => {
+  const root = await makeFixture();
+  try {
+    const pkgPath = join(root, 'packages/cezar/package.json');
+    const pkg = JSON.parse(await readFile(pkgPath, 'utf8'));
+    pkg.scripts = { prepack: 'exit 91', prepublishOnly: 'exit 92' };
+    await writeFile(pkgPath, JSON.stringify(pkg));
+    await runScript(root, {
+      GITHUB_EVENT_NAME: 'pull_request_target', PR_NUMBER: '77',
+      PR_HEAD_REPO: 'o/n', GITHUB_REPOSITORY: 'o/n', GITHUB_RUN_NUMBER: '5',
+    }, ['--pack-only']);
+    for (const key of ['apiClient', 'cezar', 'alias']) {
+      const file = join(root, 'snapshot-artifacts', `${key}.tgz`);
+      const { stdout } = await execFile('tar', ['-xOf', file, 'package/package.json']);
+      assert.equal(JSON.parse(stdout).version, '0.9.9-pr77.5');
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
