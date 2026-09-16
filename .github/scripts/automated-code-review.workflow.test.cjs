@@ -286,9 +286,10 @@ test('bot-authored release/v* PRs set can_review=false without spending a review
   assert.match(round, /PR_AUTHOR: \$\{\{ github\.event\.pull_request\.user\.login \}\}/);
   assert.match(round, /head_ref="\$\{HEAD_REF:-\}"/);
   assert.match(round, /pr_author="\$\{PR_AUTHOR:-\}"/);
-  assert.match(round, /release-bump-pr\.cjs/);
+  assert.match(round, /\.cez-trusted\/\.github\/scripts\/release-bump-pr\.cjs/);
   assert.match(round, /classifyFromEnv/);
   assert.match(round, /can_review=false/);
+  assert.match(round, /Checkout trusted classifier from base/);
   // Manual dispatch still reviews even when the PR is a bump.
   assert.match(round, /EVENT_NAME" = workflow_dispatch[\s\S]*can_review=true/);
 });
@@ -404,7 +405,11 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
   const { tmpdir } = require('node:os');
   const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
   const roundJob = workflow.jobs['review-round'];
-  const checkout = roundJob.steps.find((step) => step.uses?.includes('actions/checkout'));
+  const trusted = roundJob.steps.find((step) => step.name === 'Checkout trusted classifier from base');
+  assert.equal(trusted?.with?.path, '.cez-trusted');
+  assert.equal(trusted?.with?.ref, '${{ github.event.pull_request.base.sha || github.sha }}');
+  assert.equal(trusted?.with?.['persist-credentials'], false);
+  const checkout = roundJob.steps.find((step) => step.name === 'Checkout pull request merge for patch-id');
   assert.equal(checkout?.with?.['persist-credentials'], false);
   assert.match(checkout?.with?.ref || '', /refs\/pull\/.*\/merge/);
   const round = roundJob.steps.find((step) => step.id === 'review-round');
@@ -421,7 +426,7 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
   async function runRound({ event, gitOk, reviewsOut, headRef = '', prAuthor = '', filesOut = 'packages/cezar/src/index.ts' }) {
     const cwd = fs.mkdtempSync(path.join(tmpdir(), 'review-patch-id-'));
     const output = path.join(cwd, 'outputs');
-    const scriptsDir = path.join(cwd, '.github', 'scripts');
+    const scriptsDir = path.join(cwd, '.cez-trusted', '.github', 'scripts');
     fs.mkdirSync(scriptsDir, { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'release-bump-pr.cjs'), path.join(scriptsDir, 'release-bump-pr.cjs'));
     const env = {
