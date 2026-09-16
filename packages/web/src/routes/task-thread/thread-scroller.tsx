@@ -166,6 +166,7 @@ export function useThreadScroll(
     anchor: ReturnType<typeof firstVisibleThreadAnchor>
     anchorIndex: number
   } | null>(null)
+  const historyRestoreGenerationRef = useRef(0)
 
   const restoreHistoryAnchor = useCallback(() => {
     const pending = pendingHistoryRestoreRef.current
@@ -203,14 +204,19 @@ export function useThreadScroll(
     const anchor = firstVisibleThreadAnchor(beforeViewportTop, measuredRows(scroller))
     const anchorIndex = anchor === undefined ? -1 : rowKeysRef.current.indexOf(anchor.key)
     const requestViewKey = viewKeyRef.current
+    const requestGeneration = historyRestoreGenerationRef.current
     void onLoadOlder().then(
       () => {
         if (viewKeyRef.current !== requestViewKey) return
+        if (historyRestoreGenerationRef.current !== requestGeneration) return
         pendingHistoryRestoreRef.current = { beforeHeight, beforeTop, anchor, anchorIndex }
       },
       () => {},
     ).finally(() => {
-      if (viewKeyRef.current === requestViewKey) loadingOlderRef.current = false
+      if (
+        viewKeyRef.current === requestViewKey
+        && historyRestoreGenerationRef.current === requestGeneration
+      ) loadingOlderRef.current = false
     })
   }, [measuredRows, onLoadOlder])
 
@@ -220,6 +226,7 @@ export function useThreadScroll(
     const scroller = scrollElRef.current
     if (!scroller) return
     pendingRestoreRef.current = null
+    historyRestoreGenerationRef.current += 1
     pendingHistoryRestoreRef.current = null
     stuckRef.current = true
     // Refreshing paged history can remount the transcript before this promise settles.
@@ -241,6 +248,7 @@ export function useThreadScroll(
   const lastRowKey = rowKeys.at(-1)
   const rowCount = rowKeys.length
   useLayoutEffect(() => {
+    historyRestoreGenerationRef.current += 1
     pendingHistoryRestoreRef.current = null
     loadingOlderRef.current = false
   }, [viewKey])
@@ -288,11 +296,14 @@ export function useThreadScroll(
     let previousScrollTop = scroller.scrollTop
     const unstick = () => {
       pendingRestoreRef.current = null
+      historyRestoreGenerationRef.current += 1
       pendingHistoryRestoreRef.current = null
       stuckRef.current = false
       downIntentAt = 0 // the LATEST intent wins — an up gesture voids a recent down one
     }
     const markDown = () => {
+      historyRestoreGenerationRef.current += 1
+      pendingHistoryRestoreRef.current = null
       downIntentAt = Date.now()
     }
     const onWheel = (event: WheelEvent) => {
