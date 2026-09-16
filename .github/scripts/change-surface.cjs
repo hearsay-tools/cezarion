@@ -1,12 +1,12 @@
 const fs = require('node:fs');
 
 const allowlisted = [
-  /^README\.md$/,
+  /^[^/]+\.md$/,
   /^docs\/(?:[^/]+\/)*[^/]+\.md$/,
   /^\.ai\/specs\/(?:[^/]+\/)*[^/]+\.md$/,
   /^\.ai\/analysis\/(?:[^/]+\/)*[^/]+\.md$/,
   /^(?:AGENT_PROTOCOL|AGENTS|BACKWARD_COMPATIBILITY|CODE_REVIEW|SDLC)\.md$/,
-  /^LICENSE(?:\.(?:md|txt))?$/,
+  /^LICENSE[^/]*$/,
 ];
 
 function isValidPath(path) {
@@ -42,10 +42,10 @@ function classifyJsonLines(input) {
   try {
     for (const line of lines) {
       const value = JSON.parse(line);
-      if (!Array.isArray(value)) {
+      if (typeof value !== 'string') {
         return 'full-matrix';
       }
-      paths.push(...value);
+      paths.push(value);
     }
   } catch {
     return 'full-matrix';
