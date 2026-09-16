@@ -3478,14 +3478,36 @@ it('keeps passing checks with unknown requirements blocked', async () => {
 })
 
 
+const compactHiddenFlags = () =>
+  rows().map((row) => row.closest('li')?.hasAttribute('data-compact-hidden') ?? false)
+
+it('hides phone-list rows past the second unless that row is the open detail (#344)', async () => {
+  const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
+  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  renderAt('/github/issues/142')
+  await screen.findByRole('button', { name: 'View all 3 issues' })
+  expect(compactHiddenFlags()).toEqual([false, false, true])
+})
+
+it('keeps the selected phone-list row when it sits past the second (#344)', async () => {
+  const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
+  stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  renderAt('/github/issues/138')
+  await screen.findByRole('button', { name: 'View all 3 issues' })
+  expect(compactHiddenFlags()).toEqual([false, false, false])
+  expect(rows()[2]?.getAttribute('aria-current')).toBe('page')
+})
+
 it('lets a mobile detail preview reveal every issue without losing its selected item', async () => {
   const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
   stubFetch({ 'GET /api/v1/github?limit=1000': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
   renderAt('/github/issues/142')
   const expand = await screen.findByRole('button', { name: 'View all 3 issues' })
   expect(expand.getAttribute('aria-expanded')).toBe('false')
+  expect(compactHiddenFlags()).toEqual([false, false, true])
   fireEvent.click(expand)
   expect(screen.getByRole('button', { name: 'Show fewer issues' }).getAttribute('aria-expanded')).toBe('true')
   expect(rows()).toHaveLength(3)
+  expect(compactHiddenFlags()).toEqual([false, false, false])
   expect(rows()[0]?.getAttribute('aria-current')).toBe('page')
 })
