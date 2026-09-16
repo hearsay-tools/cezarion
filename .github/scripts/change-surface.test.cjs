@@ -14,9 +14,9 @@ const rootProcessDocuments = [
 
 test('classifies every allowlisted path group as docs-only', () => {
   assert.equal(classifyPaths(['README.md', 'CHANGELOG.md', 'notes.md']), 'docs-only');
-  assert.equal(classifyPaths(['docs/guide.md']), 'docs-only');
-  assert.equal(classifyPaths(['.ai/specs/2026-09-16.md']), 'docs-only');
-  assert.equal(classifyPaths(['.ai/analysis/notes.md']), 'docs-only');
+  assert.equal(classifyPaths(['docs/guide.md', 'docs/assets/diagram.svg']), 'docs-only');
+  assert.equal(classifyPaths(['.ai/specs/2026-09-16.md', '.ai/specs/schema.yaml']), 'docs-only');
+  assert.equal(classifyPaths(['.ai/analysis/notes.md', '.ai/analysis/data.json']), 'docs-only');
   for (const document of rootProcessDocuments) {
     assert.equal(classifyPaths([document]), 'docs-only');
   }
@@ -92,4 +92,17 @@ test('CLI emits exactly one supported classification line', () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /^(docs-only|full-matrix)\n$/);
   assert.equal(result.stderr, '');
+});
+
+test('CLI fails closed and exits cleanly for malformed or blank stdin', () => {
+  for (const input of ['not json\n', '']) {
+    const result = spawnSync(process.execPath, ['./change-surface.cjs'], {
+      cwd: __dirname,
+      input,
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, JSON.stringify(input));
+    assert.equal(result.stdout, 'full-matrix\n', JSON.stringify(input));
+    assert.equal(result.stderr, '', JSON.stringify(input));
+  }
 });

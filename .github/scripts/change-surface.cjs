@@ -2,9 +2,9 @@ const fs = require('node:fs');
 
 const allowlisted = [
   /^[^/]+\.md$/,
-  /^docs\/(?:[^/]+\/)*[^/]+\.md$/,
-  /^\.ai\/specs\/(?:[^/]+\/)*[^/]+\.md$/,
-  /^\.ai\/analysis\/(?:[^/]+\/)*[^/]+\.md$/,
+  /^docs\/(?:[^/]+\/)*[^/]+$/,
+  /^\.ai\/specs\/(?:[^/]+\/)*[^/]+$/,
+  /^\.ai\/analysis\/(?:[^/]+\/)*[^/]+$/,
   /^(?:AGENT_PROTOCOL|AGENTS|BACKWARD_COMPATIBILITY|CODE_REVIEW|SDLC)\.md$/,
   /^LICENSE[^/]*$/,
 ];
