@@ -1246,6 +1246,50 @@ describe('meta line, tabs, pill and resume hint', () => {
       const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
       await within(meta).findByRole('button', { name: /account work \(removed\)/ })
     })
+
+    // A step may run a different backend than the run's `runner` (spec 2026-07-29-agent-profiles
+    // puts the account on the SPAWNING step), so the choice count is judged against THAT backend's
+    // catalog — not against the runner in the summary line.
+    const withMixedBackends = (claudeLabel: string, codexCount: number) => stubFetch({
+      '/api/v1/workspace/agent-profiles': () => jsonResponse({
+        editable: true,
+        profileCapableProviders: ['claude', 'codex'],
+        selections: {},
+        defaults: {},
+        profiles: [
+          { id: 'default', provider: 'claude', label: 'Default', configDir: '~/.claude', path: '/home/u/.claude', exists: true, looksValid: true, isDefault: true, files: [] },
+          ...(claudeLabel === 'Default' ? [] : [{ id: 'work-desk', provider: 'claude', label: claudeLabel, configDir: '~/.claude-work', path: '/home/u/.claude-work', exists: true, looksValid: true, isDefault: false, files: [] }]),
+          { id: 'default', provider: 'codex', label: 'Default', configDir: '~/.codex', path: '/home/u/.codex', exists: true, looksValid: true, isDefault: true, files: [] },
+          ...(codexCount > 1 ? [{ id: 'work-laptop', provider: 'codex', label: 'Work Laptop', configDir: '~/.codex-work', path: '/home/u/.codex-work', exists: true, looksValid: true, isDefault: false, files: [] }] : []),
+        ],
+      }),
+    })
+
+    it('shows a known account its own backend has a choice for, even when the run runner does not (#251)', async () => {
+      withMixedBackends('Default', 2)
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', backend: 'codex', profileId: 'work-laptop' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      await within(meta).findByRole('button', { name: /account Work Laptop/ })
+    })
+
+    it('hides a lone account whose backend differs from the run runner (#251)', async () => {
+      // The mirror: two Claude logins do not make a lone Codex one a choice. The badge paints
+      // before the profiles fetch lands, so the assertion waits for it to settle first —
+      // otherwise it would judge the empty initial catalog and pass for the wrong reason.
+      const sent = withMixedBackends('Work Desk', 1)
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', backend: 'codex', profileId: 'default' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      await waitFor(() => expect(sent.map((r) => r.path)).toContain('/api/v1/workspace/agent-profiles'))
+      await act(async () => {})
+      const badge = within(meta).getByRole('button', { name: 'Agent: claude, model auto' })
+      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · auto')
+    })
   })
 
   describe('the canonical model identity (#546)', () => {

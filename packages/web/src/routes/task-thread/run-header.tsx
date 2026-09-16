@@ -708,9 +708,16 @@ function AgentBadge({ run }: { run: ApiRun }) {
   // absent whenever the run just followed the project, and the project's selection can have been
   // changed since — both would name an account this run may never have touched. The last step that
   // recorded one is what ran; `sessionId` and `profileId` are a pair for exactly this reason.
-  const accountId = [...run.steps].reverse().find((step) => step.profileId)?.profileId
+  const profileStep = [...run.steps].reverse().find((step) => step.profileId)
+  const accountId = profileStep?.profileId
+  // The choice count is judged against the backend that RECORDED the account, not the run's
+  // `runner`: spec 2026-07-29-agent-profiles puts the account on the spawning step, and a step
+  // may run a different backend than the run label — counting Claude's logins for a Codex
+  // account both hides Codex accounts on a lone-Claude host and shows lone Codex logins on a
+  // multi-Claude one. Steps from before the field existed fall back to the run runner.
+  const accountBackend = profileStep?.backend ?? runner
   // One login is not a choice (#251, spec 2026-07-29-agent-profiles): a KNOWN account is named
-  // only when the CHOSEN runner has two or more defined accounts — the same `hasAccountChoice`
+  // only when its backend has two or more defined accounts — the same `hasAccountChoice`
   // count the composer pill applies — and the badge stays silent while the profiles query is in
   // flight, so a lone `default` never paints the summary just to vanish a moment later. A REMOVED
   // account is the exception to the count: the id is the only remaining pointer to the folder its
@@ -720,7 +727,7 @@ function AgentBadge({ run }: { run: ApiRun }) {
   const account = !profiles.data || accountId === undefined
     ? undefined
     : known
-      ? hasAccountChoice(accounts, runner)
+      ? hasAccountChoice(accounts, accountBackend)
         ? accountId === DEFAULT_AGENT_ACCOUNT_ID ? 'default' : known.label
         : undefined
       : `${accountId} (removed)`
