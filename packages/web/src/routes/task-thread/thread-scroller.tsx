@@ -158,6 +158,34 @@ export function useThreadScroll(
       return { key: row.dataset.rowKey!, top: rect.top, bottom: rect.bottom }
     }), [])
 
+  const pendingHistoryRestoreRef = useRef<{
+    beforeHeight: number
+    beforeTop: number
+    anchor: ReturnType<typeof firstVisibleThreadAnchor>
+  } | null>(null)
+
+  const restoreHistoryAnchor = useCallback(() => {
+    const pending = pendingHistoryRestoreRef.current
+    const current = scrollElRef.current
+    if (!pending || !current) return
+    pendingHistoryRestoreRef.current = null
+    const fallbackTop = pending.beforeTop + Math.max(0, current.scrollHeight - pending.beforeHeight)
+    const viewportTop = current.getBoundingClientRect().top
+    const anchorIndex = pending.anchor === undefined ? -1 : rowKeysRef.current.indexOf(pending.anchor.key)
+    const handle = virtualizerRef.current
+    if (handle && anchorIndex >= 0) {
+      handle.scrollToIndex(anchorIndex, { align: 'start', offset: -pending.anchor!.offset })
+    } else {
+      setOffset(threadAnchorScrollTop(
+        current.scrollTop,
+        viewportTop,
+        pending.anchor,
+        measuredRows(current),
+        fallbackTop,
+      ))
+    }
+  }, [measuredRows, setOffset])
+
   const loadOlder = useCallback(() => {
     const scroller = scrollElRef.current
     if (!scroller || !onLoadOlder || loadingOlderRef.current) return
@@ -171,29 +199,10 @@ export function useThreadScroll(
     const beforeViewportTop = scroller.getBoundingClientRect().top
     const anchor = firstVisibleThreadAnchor(beforeViewportTop, measuredRows(scroller))
     void onLoadOlder().finally(() => {
-      requestAnimationFrame(() => {
-        const current = scrollElRef.current
-        if (current) {
-          const fallbackTop = beforeTop + Math.max(0, current.scrollHeight - beforeHeight)
-          const viewportTop = current.getBoundingClientRect().top
-          const anchorIndex = anchor === undefined ? -1 : rowKeysRef.current.indexOf(anchor.key)
-          const handle = virtualizerRef.current
-          if (handle && anchorIndex >= 0) {
-            handle.scrollToIndex(anchorIndex, { align: 'start', offset: -anchor!.offset })
-          } else {
-            setOffset(threadAnchorScrollTop(
-              current.scrollTop,
-              viewportTop,
-              anchor,
-              measuredRows(current),
-              fallbackTop,
-            ))
-          }
-        }
-        loadingOlderRef.current = false
-      })
+      pendingHistoryRestoreRef.current = { beforeHeight, beforeTop, anchor }
+      loadingOlderRef.current = false
     })
-  }, [measuredRows, onLoadOlder, setOffset])
+  }, [measuredRows, onLoadOlder])
 
   useEffect(() => () => clearTimeout(wheelGestureTimerRef.current), [])
 
@@ -221,8 +230,9 @@ export function useThreadScroll(
   const lastRowKey = rowKeys.at(-1)
   const rowCount = rowKeys.length
   useLayoutEffect(() => {
-    if (stuckRef.current) toBottom()
-  }, [lastRowKey, rowCount, toBottom])
+    if (pendingHistoryRestoreRef.current) restoreHistoryAnchor()
+    else if (stuckRef.current) toBottom()
+  }, [lastRowKey, rowCount, restoreHistoryAnchor, toBottom])
 
   // Arrival is the route-owned pre-paint write. AppShell deliberately does not reset task
   // routes, so a destination thread never exposes an intermediate top-of-transcript frame.

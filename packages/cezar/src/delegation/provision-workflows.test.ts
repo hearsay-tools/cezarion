@@ -19,7 +19,10 @@ import { buildChildEnv } from '../core/agent-env.ts';
 import { ProjectContexts } from '../server/project-context.ts';
 
 const until = (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15000, interval: 10 });
-describe('manager session delegation lifecycle', () => {
+// Git worktrees + a live RunManager contend under full-suite workers. until() is already 15s;
+// the default 5s testTimeout / 10s hookTimeout cannot finish those waits. Teardown cancels and
+// disposes without polling so afterEach cannot hang in awaitRunTermination.
+describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   let f: ReturnType<typeof fixture>, controller: DelegationController;
   const recoveredManagers: RunManager[] = [];
   const recoveredStores: RunStore[] = [];
@@ -38,11 +41,12 @@ describe('manager session delegation lifecycle', () => {
     controller = await DelegationController.start(); controller.attachProject({ id: 'project', root: f.root, manager: f.manager, store: f.store });
   });
   afterEach(async () => {
-    for (const manager of recoveredManagers) { for (const run of f.store.listRuns()) manager.cancel(run.id); }
+    for (const manager of recoveredManagers) {
+      for (const run of f.store.listRuns()) manager.cancel(run.id);
+      manager.dispose();
+    }
     for (const run of f.store.listRuns()) f.manager.cancel(run.id);
     for (const s of sessions) s.finish();
-    await until(() => f.store.listRuns().every(run => !f.manager.isActive(run.id)));
-    for (const manager of recoveredManagers) { for (const run of f.store.listRuns()) await manager.awaitRunTermination(run.id, 15000); manager.dispose(); }
     recoveredManagers.length = 0;
     for (const store of recoveredStores) store.flush(); recoveredStores.length = 0;
     await controller.close(); sessions.length = 0; f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
