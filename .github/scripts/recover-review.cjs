@@ -1,7 +1,7 @@
 'use strict';
 
 const { countAutomatedReviews } = require('./automated-review.cjs');
-const { isBotReleaseBumpPr } = require('./release-bump-pr.cjs');
+const { isBotReleaseBumpPr, filesAreVersionStampsOnly, headShasMatch } = require('./release-bump-pr.cjs');
 
 const CI_PATH = '.github/workflows/ci.yml';
 const REVIEW_PATH = '.github/workflows/automated-code-review.yml';
@@ -21,7 +21,9 @@ function oneJob(jobs, name) {
 // write, then rerun the original trusted gate and dependents (not dispatch, which
 // deliberately bypasses the normal round cap). Original PR concurrency and the
 // provider/context/posting guards remain in force on that same workflow run.
-async function recoverReview({ github, owner, repo, event, maxRounds = '', log = console.log }) {
+async function recoverReview({
+  github, owner, repo, event, maxRounds = '', log = console.log, readJsonFile,
+} = {}) {
   const roundsRaw = maxRounds === '' ? '3' : String(maxRounds);
   const rounds = Number(roundsRaw);
   if (!/^[1-9][0-9]*$/.test(roundsRaw) || !Number.isSafeInteger(rounds)) {
@@ -60,14 +62,27 @@ async function recoverReview({ github, owner, repo, event, maxRounds = '', log =
     const pull = await get('pulls/{pull_number}', { pull_number: matches[0].number });
     if (pull?.state !== 'open' || pull.head?.sha !== source.head_sha || pull.head?.repo?.full_name !== repository ||
         pull.base?.ref !== 'main' || pull.base?.repo?.full_name !== repository) return skip('PR changed during resolution');
-    // Verified manifest-only bot release/v* PRs skip automated review entirely.
+    // Verified bot release/v* bumps skip review — same gates as classify-pr
+    // (allowlist + version-stamp content). Head is already the live PR head.
     const pullFiles = await list('pulls/{pull_number}/files', { pull_number: pull.number });
     const fileNames = pullFiles.map((file) => file.filename).filter(Boolean);
-    if (isBotReleaseBumpPr({
-      headRef: pull.head?.ref,
-      prAuthor: pull.user?.login,
-      files: fileNames,
-    })) {
+    const headSha = pull.head?.sha;
+    if (
+      isBotReleaseBumpPr({
+        headRef: pull.head?.ref,
+        prAuthor: pull.user?.login,
+        files: fileNames,
+      })
+      && headShasMatch(headSha, headSha)
+      && typeof pull.base?.sha === 'string'
+      && filesAreVersionStampsOnly({
+        repository,
+        files: fileNames,
+        baseRef: pull.base.sha,
+        headRef: headSha,
+        readJsonFile,
+      })
+    ) {
       return skip('bot release version-bump PR');
     }
 

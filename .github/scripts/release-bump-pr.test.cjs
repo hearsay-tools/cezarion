@@ -81,13 +81,20 @@ test('bot release bump needs release/v* head, bot author, and manifest-only file
   );
 });
 
-test('onlyVersionValueChanges allows version string edits and rejects structure/script changes', () => {
+test('onlyVersionValueChanges allows one old→new version pair and rejects structure/script changes', () => {
   assert.equal(
     onlyVersionValueChanges(
       { name: 'x', version: '1.0.0', dependencies: { y: '^1.0.0' } },
       { name: 'x', version: '1.0.1', dependencies: { y: '^1.0.1' } },
     ),
     true,
+  );
+  assert.equal(
+    onlyVersionValueChanges(
+      { name: 'x', version: '1.0.0', dependencies: { y: '^1.0.0' } },
+      { name: 'x', version: '1.0.1', dependencies: { y: '^9.9.9' } },
+    ),
+    false,
   );
   assert.equal(
     onlyVersionValueChanges(

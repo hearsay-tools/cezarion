@@ -50,7 +50,19 @@ function harness(state = fixture(), beforeRead = () => {}) {
     } else throw new Error(`Unexpected route ${route}`);
     return { data: structuredClone(data) };
   };
-  return { state, writes, logs, calls, options: { github: { request, paginate: async (route, args) => (await request(route, args)).data }, owner: 'o', repo: 'n', event: state.event, maxRounds: '3', log: text => logs.push(text) } };
+  return {
+    state, writes, logs, calls,
+    options: {
+      github: { request, paginate: async (route, args) => (await request(route, args)).data },
+      owner: 'o', repo: 'n', event: state.event, maxRounds: '3', log: text => logs.push(text),
+      // Hermetic content reader: version-only stamp between base and head refs.
+      readJsonFile: ({ path: filePath, ref }) => {
+        const base = state.pulls[0]?.base?.sha || 'base';
+        if (ref === base) return { name: filePath, version: '1.0.0' };
+        return { name: filePath, version: '1.0.1' };
+      },
+    },
+  };
 }
 async function recover(h) {
   const { recoverReview } = require('./recover-review.cjs');
@@ -80,6 +92,7 @@ test('bot-authored release/v* bump PRs are never recovered for automated review'
   h.state.pulls[0] = {
     ...h.state.pulls[0],
     head: { sha: SHA, ref: 'release/v0.13.5', repo: { full_name: REPO } },
+    base: { ref: 'main', sha: 'b'.repeat(40), repo: { full_name: REPO } },
     user: { login: 'github-actions[bot]' },
   };
   h.state.pullFiles = [
@@ -99,12 +112,33 @@ test('bot-authored release/v* PRs with non-manifest files remain recoverable', a
   h.state.pulls[0] = {
     ...h.state.pulls[0],
     head: { sha: SHA, ref: 'release/v0.13.5', repo: { full_name: REPO } },
+    base: { ref: 'main', sha: 'b'.repeat(40), repo: { full_name: REPO } },
     user: { login: 'github-actions[bot]' },
   };
   h.state.pullFiles = [
     { filename: 'packages/cezar/package.json' },
     { filename: '.github/workflows/ci.yml' },
   ];
+  const result = await recover(h);
+  assert.equal(result.recovered, true);
+  assert.equal(h.writes.length, 1);
+});
+
+test('bot-authored release/v* PRs with non-version manifest edits remain recoverable', async () => {
+  const h = harness();
+  h.state.ci.head_branch = 'release/v0.13.5';
+  h.state.review.head_branch = 'release/v0.13.5';
+  h.state.pulls[0] = {
+    ...h.state.pulls[0],
+    head: { sha: SHA, ref: 'release/v0.13.5', repo: { full_name: REPO } },
+    base: { ref: 'main', sha: 'b'.repeat(40), repo: { full_name: REPO } },
+    user: { login: 'github-actions[bot]' },
+  };
+  h.state.pullFiles = [{ filename: 'packages/cezar/package.json' }];
+  h.options.readJsonFile = ({ ref }) => {
+    if (ref === 'b'.repeat(40)) return { name: 'x', version: '1.0.0', scripts: { test: 't' } };
+    return { name: 'x', version: '1.0.0', scripts: { test: 't', postinstall: 'evil' } };
+  };
   const result = await recover(h);
   assert.equal(result.recovered, true);
   assert.equal(h.writes.length, 1);

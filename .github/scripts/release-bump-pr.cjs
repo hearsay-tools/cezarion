@@ -26,27 +26,48 @@ function isBotReleaseBumpPr({ headRef, prAuthor, files } = {}) {
     && isManifestOnlyFiles(files);
 }
 
-// Version stamps only: same JSON shape, differing leaves must both look like
-// semver (optionally caret). Blocks added scripts/deps/keys and non-version edits.
-const VERSION_VALUE_RE = /^\^?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+// Version stamps only: same JSON shape; every changed leaf must be the same
+// single old→new release version pair (optional caret). Blocks script/key adds
+// and arbitrary dependency retargets.
+const VERSION_VALUE_RE = /^(\^?)(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/;
+
+function parseVersionValue(value) {
+  if (typeof value !== 'string') return null;
+  const match = VERSION_VALUE_RE.exec(value);
+  if (!match) return null;
+  return { caret: match[1] === '^', version: match[2] };
+}
 
 function onlyVersionValueChanges(before, after) {
-  if (Object.is(before, after)) return true;
-  if (typeof before !== typeof after || before === null || after === null) return false;
-  if (typeof before === 'string') {
-    return VERSION_VALUE_RE.test(before) && VERSION_VALUE_RE.test(after);
+  let pair = null;
+
+  function walk(left, right) {
+    if (Object.is(left, right)) return true;
+    if (typeof left !== typeof right || left === null || right === null) return false;
+    if (typeof left === 'string') {
+      const from = parseVersionValue(left);
+      const to = parseVersionValue(right);
+      if (!from || !to || from.caret !== to.caret || from.version === to.version) return false;
+      if (!pair) {
+        pair = { from: from.version, to: to.version };
+        return true;
+      }
+      return pair.from === from.version && pair.to === to.version;
+    }
+    if (typeof left !== 'object') return false;
+    if (Array.isArray(left)) {
+      if (!Array.isArray(right) || left.length !== right.length) return false;
+      return left.every((value, index) => walk(value, right[index]));
+    }
+    if (Array.isArray(right)) return false;
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    if (leftKeys.length !== rightKeys.length) return false;
+    if (leftKeys.some((key, index) => key !== rightKeys[index])) return false;
+    return leftKeys.every((key) => walk(left[key], right[key]));
   }
-  if (typeof before !== 'object') return false;
-  if (Array.isArray(before)) {
-    if (!Array.isArray(after) || before.length !== after.length) return false;
-    return before.every((value, index) => onlyVersionValueChanges(value, after[index]));
-  }
-  if (Array.isArray(after)) return false;
-  const beforeKeys = Object.keys(before).sort();
-  const afterKeys = Object.keys(after).sort();
-  if (beforeKeys.length !== afterKeys.length) return false;
-  if (beforeKeys.some((key, index) => key !== afterKeys[index])) return false;
-  return beforeKeys.every((key) => onlyVersionValueChanges(before[key], after[key]));
+
+  return walk(before, after) && pair !== null;
 }
 
 function readRepoJsonFile({ repository, path: filePath, ref, env = process.env } = {}) {
@@ -59,12 +80,19 @@ function readRepoJsonFile({ repository, path: filePath, ref, env = process.env }
   return JSON.parse(Buffer.from(out, 'base64').toString('utf8'));
 }
 
-function filesAreVersionStampsOnly({ repository, files, baseRef, headRef, env = process.env } = {}) {
+function filesAreVersionStampsOnly({
+  repository,
+  files,
+  baseRef,
+  headRef,
+  env = process.env,
+  readJsonFile = readRepoJsonFile,
+} = {}) {
   if (!repository || !baseRef || !headRef || !isManifestOnlyFiles(files)) return false;
   try {
     return files.every((filePath) => {
-      const before = readRepoJsonFile({ repository, path: filePath, ref: baseRef, env });
-      const after = readRepoJsonFile({ repository, path: filePath, ref: headRef, env });
+      const before = readJsonFile({ repository, path: filePath, ref: baseRef, env });
+      const after = readJsonFile({ repository, path: filePath, ref: headRef, env });
       return onlyVersionValueChanges(before, after);
     });
   } catch {

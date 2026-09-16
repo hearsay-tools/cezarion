@@ -431,13 +431,12 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
     fs.copyFileSync(path.join(__dirname, 'release-bump-pr.cjs'), path.join(scriptsDir, 'release-bump-pr.cjs'));
     // Stub version-stamp compare so bash harnesses do not need real file contents.
     const classifierSrc = fs.readFileSync(path.join(scriptsDir, 'release-bump-pr.cjs'), 'utf8');
-    fs.writeFileSync(
-      path.join(scriptsDir, 'release-bump-pr.cjs'),
-      classifierSrc.replace(
-        'function filesAreVersionStampsOnly({ repository, files, baseRef, headRef, env = process.env } = {}) {',
-        "function filesAreVersionStampsOnly({ repository, files, baseRef, headRef, env = process.env } = {}) {\n  if (env.TEST_STAMPS_OK === '1') return true;\n  if (env.TEST_STAMPS_OK === '0') return false;",
-      ),
+    const stamped = classifierSrc.replace(
+      /function filesAreVersionStampsOnly\(\{[\s\S]*?\} = \{\}\) \{/,
+      (match) => `${match}\n  if (env.TEST_STAMPS_OK === '1') return true;\n  if (env.TEST_STAMPS_OK === '0') return false;`,
     );
+    assert.notEqual(stamped, classifierSrc, 'expected version-stamp stub injection');
+    fs.writeFileSync(path.join(scriptsDir, 'release-bump-pr.cjs'), stamped);
     const env = {
       ...process.env,
       BASH_ENV: '/dev/null',
