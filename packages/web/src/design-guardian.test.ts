@@ -347,6 +347,16 @@ describe('design guardian', () => {
     }
   })
 
+  it('keeps summary merged chips on reserved purple, not brand accent', () => {
+    const css = readFileSync(path.join(APP_ROOT, 'src/routes/task-lists.css'), 'utf8')
+    expect(css).toMatch(
+      /\[data-slot="pr-chip"\]\[data-status="merged"\][^{]*\{[^}]*color:\s*var\(--merged-text\)/,
+    )
+    expect(css).not.toMatch(
+      /\[data-slot="pr-chip"\]:is\(\[data-status="merged"\],\s*\[data-conflicting="true"\]\)[^{]*\{[^}]*color:\s*var\(--accent-text\)/,
+    )
+  })
+
   it('builds shared controls on the 44px Cezarion rhythm and composer accent', () => {
     const button = readFileSync(path.join(APP_ROOT, 'src/components/ui/button.tsx'), 'utf8')
     const input = readFileSync(path.join(APP_ROOT, 'src/components/ui/input.tsx'), 'utf8')
