@@ -4,9 +4,9 @@ How to review a diff in this repository. Applies to humans and to the `om-code-r
 
 ## CI surface rules
 
-Docs/process-only PRs may have skipped Vitest and cockpit browser E2E only when the required build/package aggregate is green and `verify` succeeds. The docs-only allowlist is root-level `*.md`; recursive `docs/`, `.ai/specs/`, and `.ai/analysis/`; `AGENT_PROTOCOL.md`, `AGENTS.md`, `BACKWARD_COMPATIBILITY.md`, `CODE_REVIEW.md`, and `SDLC.md`; and `LICENSE*`. Any mixed change, unlisted path, malformed input, or classifier failure is full-matrix and must pass every check plus automated review. Build/package verification is never skipped.
+Docs/process-only PRs may have skipped Vitest and cockpit browser E2E only when the required build/package aggregate is green and `verify` succeeds; docs-only `review-complete` succeeds with `wait-for-ci` skipped. The exact allowlist is root-level `*.md` and root-level `LICENSE*`; recursive `docs/`, `.ai/specs/`, and `.ai/analysis/`; and `AGENT_PROTOCOL.md`, `AGENTS.md`, `BACKWARD_COMPATIBILITY.md`, `CODE_REVIEW.md`, and `SDLC.md`. Any mixed change, unlisted path, malformed input, or classifier failure is full-matrix and must pass every check plus automated review. Build/package verification is never skipped.
 
-Manual-dispatch review runs use the full matrix and bypass docs-only skips. Release-bump skips are limited to release-bump work and do not waive PR verification. Recovery can retry an incomplete automated-review round after successful CI, but cannot recover skipped checks or create a new review dispatch.
+Manual-dispatch review runs use the full matrix and bypass docs-only skips. The existing release-bump predicate is a GitHub Actions bot on `release/v*`; it skips Vitest and cockpit browser E2E, while build-and-package and `verify` remain required. Recovery is limited to a failed automated-review run blocked at a failed `wait-for-ci` after successful CI. Docs-only `review-complete` succeeds with skipped `wait-for-ci` and cannot qualify for recovery; recovery cannot recover skipped checks or create a new review dispatch.
 
 ## Review priorities (in order)
 

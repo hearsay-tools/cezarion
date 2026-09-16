@@ -112,9 +112,9 @@ Pull-request CI classifies the changed paths before selecting checks:
 | Docs-only | Every changed path matches the allowlist below | Vitest and cockpit browser E2E may skip; the required build/package aggregate and `verify` must pass, and automated review may skip |
 | Mixed or full | Any other path, or any invalid/empty classifier input | All checks and automated review are required |
 
-The exact docs-only allowlist is: root-level `*.md`; any file under `docs/`, `.ai/specs/`, or `.ai/analysis/`; `AGENT_PROTOCOL.md`, `AGENTS.md`, `BACKWARD_COMPATIBILITY.md`, `CODE_REVIEW.md`, or `SDLC.md`; and `LICENSE*` files. A missing, malformed, empty, unsafe, or failed classification fails closed to full-matrix. Build and package verification remains unconditional for every surface. A release-bump skip is separate: it only avoids the release-bump-specific work and does not make a docs-only PR or its required verification green.
+The exact docs-only allowlist is: root-level `*.md`; any file under `docs/`, `.ai/specs/`, or `.ai/analysis/`; `AGENT_PROTOCOL.md`, `AGENTS.md`, `BACKWARD_COMPATIBILITY.md`, `CODE_REVIEW.md`, or `SDLC.md`; and root-level `LICENSE*`. The `docs/` and `.ai/` surfaces are recursive. A missing, malformed, empty, unsafe, or failed classification fails closed to full-matrix. Build and package verification remains unconditional for every surface. The existing release-bump skip applies only to a GitHub Actions bot change on `release/v*`; it skips Vitest and cockpit browser E2E, while build-and-package and `verify` remain required. It is separate from docs-only classification.
 
-Manual review dispatches bypass the automated-review budget and the docs-only review skip; they run the full matrix. Recovery only retries an incomplete automated-review round after successful CI. It does not reclassify a PR, recover a skipped check, or dispatch a new review.
+Manual review dispatches bypass the automated-review budget and the docs-only review skip; they run the full matrix. Recovery is limited to a failed automated-review run blocked at a failed `wait-for-ci` after CI had succeeded. Docs-only `review-complete` succeeds with `wait-for-ci` skipped and cannot qualify for recovery. Recovery does not reclassify a PR, recover a skipped check, or dispatch a new review.
 
 ## Amending this process
 
