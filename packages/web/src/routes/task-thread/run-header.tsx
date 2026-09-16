@@ -722,15 +722,19 @@ function AgentBadge({ run }: { run: ApiRun }) {
   // flight, so a lone `default` never paints the summary just to vanish a moment later. A REMOVED
   // account is the exception to the count: the id is the only remaining pointer to the folder its
   // sessions live in, so `<id> (removed)` shows regardless of how many logins are left — deleting
-  // an account must not retroactively erase which one a historical run ran under.
+  // an account must not retroactively erase which one a historical run ran under. A FAILED query
+  // never settles, so silence there would be permanent; the recorded id shows verbatim, without
+  // a `(removed)` claim the unreadable catalog cannot back.
   const known = profiles.data?.profiles.find((p) => p.id === accountId)
-  const account = !profiles.data || accountId === undefined
+  const account = accountId === undefined || profiles.isPending
     ? undefined
-    : known
-      ? hasAccountChoice(accounts, accountBackend)
-        ? accountId === DEFAULT_AGENT_ACCOUNT_ID ? 'default' : known.label
-        : undefined
-      : `${accountId} (removed)`
+    : profiles.isError
+      ? accountId
+      : known
+        ? hasAccountChoice(accounts, accountBackend)
+          ? accountId === DEFAULT_AGENT_ACCOUNT_ID ? 'default' : known.label
+          : undefined
+        : `${accountId} (removed)`
   // The canonical `provider/model` the run actually resolved to (#405), shown only when it says
   // something `model` does not (#546). `model` is the free-text the caller ASKED for — `opus`,
   // `auto`, a gateway id — so on a repo whose Claude runner points at a custom endpoint the two

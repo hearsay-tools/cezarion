@@ -1290,6 +1290,21 @@ describe('meta line, tabs, pill and resume hint', () => {
       const badge = within(meta).getByRole('button', { name: 'Agent: claude, model auto' })
       expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · auto')
     })
+
+    it('falls back to the recorded id when the profiles query fails (#251)', async () => {
+      // Pending stays silent (the pin above); a FAILED query never settles, so silence would be
+      // permanent and the recorded id is the only remaining pointer to the account. It is shown
+      // exactly as recorded — no `(removed)` claim the unavailable catalog cannot back.
+      stubFetch({
+        '/api/v1/workspace/agent-profiles': () => new Response('profiles unavailable', { status: 404 }),
+      })
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', profileId: 'work' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      await within(meta).findByRole('button', { name: 'Agent: claude, account work, model auto' })
+    })
   })
 
   describe('the canonical model identity (#546)', () => {
