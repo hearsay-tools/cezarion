@@ -66,9 +66,9 @@ jobs:
   vitest:
     name: Vitest shard ${{ matrix.shard }}/2
     # Release bump PRs only stamp manifests + lockfile; release.yml already ran
-    # the full suite on the same source. Skip Vitest there (actor must be the
-    # bot so a human push to release/v* still runs the matrix).
-    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]') }}
+    # the full suite on the same source. Skip Vitest there (PR author must be the
+    # bot so a human-authored release/v* PR still runs the matrix).
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.event.pull_request.user.login == 'github-actions[bot]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -103,7 +103,7 @@ jobs:
   cockpit-browser:
     name: Cockpit browser E2E shard ${{ matrix.shard }}/4
     # Same bump-PR skip as vitest — browser E2E is redundant on manifest-only commits.
-    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]') }}
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.event.pull_request.user.login == 'github-actions[bot]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -145,9 +145,9 @@ jobs:
           BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
           VITEST_RESULT: ${{ needs.vitest.result }}
           COCKPIT_BROWSER_RESULT: ${{ needs['cockpit-browser'].result }}
-          # Same predicate as the vitest/cockpit-browser job ifs: only a bot
+          # Same predicate as the vitest/cockpit-browser job ifs: only a bot-authored
           # release/v* PR may leave those two skipped; build-and-package never may.
-          BUMP_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.actor == 'github-actions[bot]' }}
+          BUMP_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v') && github.event.pull_request.user.login == 'github-actions[bot]' }}
         run: |
           test "$BUILD_AND_PACKAGE_RESULT" = success
           if [ "$BUMP_PR" = true ]; then
