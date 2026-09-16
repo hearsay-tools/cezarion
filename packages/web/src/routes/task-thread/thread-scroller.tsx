@@ -162,6 +162,7 @@ export function useThreadScroll(
     beforeHeight: number
     beforeTop: number
     anchor: ReturnType<typeof firstVisibleThreadAnchor>
+    anchorIndex: number
   } | null>(null)
 
   const restoreHistoryAnchor = useCallback(() => {
@@ -198,8 +199,13 @@ export function useThreadScroll(
     const beforeTop = scroller.scrollTop
     const beforeViewportTop = scroller.getBoundingClientRect().top
     const anchor = firstVisibleThreadAnchor(beforeViewportTop, measuredRows(scroller))
-    void onLoadOlder().finally(() => {
-      pendingHistoryRestoreRef.current = { beforeHeight, beforeTop, anchor }
+    const anchorIndex = anchor === undefined ? -1 : rowKeysRef.current.indexOf(anchor.key)
+    void onLoadOlder().then(
+      () => {
+        pendingHistoryRestoreRef.current = { beforeHeight, beforeTop, anchor, anchorIndex }
+      },
+      () => {},
+    ).finally(() => {
       loadingOlderRef.current = false
     })
   }, [measuredRows, onLoadOlder])
@@ -230,8 +236,12 @@ export function useThreadScroll(
   const lastRowKey = rowKeys.at(-1)
   const rowCount = rowKeys.length
   useLayoutEffect(() => {
-    if (pendingHistoryRestoreRef.current) restoreHistoryAnchor()
-    else if (stuckRef.current) toBottom()
+    const pending = pendingHistoryRestoreRef.current
+    if (pending) {
+      const committedIndex = pending.anchor === undefined ? -1 : rowKeysRef.current.indexOf(pending.anchor.key)
+      if (committedIndex > pending.anchorIndex) restoreHistoryAnchor()
+      else pendingHistoryRestoreRef.current = null
+    } else if (stuckRef.current) toBottom()
   }, [lastRowKey, rowCount, restoreHistoryAnchor, toBottom])
 
   // Arrival is the route-owned pre-paint write. AppShell deliberately does not reset task
