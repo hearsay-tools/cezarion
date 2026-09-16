@@ -130,6 +130,16 @@ export const AGENT_DESCRIPTORS: AgentDescriptor[] = [
       group('pi', 'memory', 'Memory & instructions'),
     ],
   },
+  {
+    id: 'cursor',
+    label: 'Cursor',
+    note: EDITOR_PLUS_COMMIT,
+    groups: [
+      group('cursor', 'settings', 'Settings'),
+      group('cursor', 'mcp', 'MCP', 'Cursor CLI uses the editor’s MCP configuration.'),
+      group('cursor', 'memory', 'Memory & instructions', 'Cursor also reads CLAUDE.md and .cursor/rules.'),
+    ],
+  },
 ]
 
 export function descriptorFor(agent: Runner): AgentDescriptor {

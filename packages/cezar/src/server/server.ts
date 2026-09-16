@@ -1783,7 +1783,7 @@ export function createApp(deps: ServerDeps) {
       },
     )
 
-    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, or pi' }), async (c) => {
+    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, pi, or cursor' }), async (c) => {
       const body = { data: c.req.valid('json') };
 
       const provider = body.data.provider as ProviderId;
@@ -2996,6 +2996,7 @@ export function createApp(deps: ServerDeps) {
             codex: z.string().trim().min(1).max(200).nullable().optional(),
             opencode: z.string().trim().min(1).max(200).nullable().optional(),
             pi: z.string().trim().min(1).max(200).nullable().optional(),
+            cursor: z.string().trim().min(1).max(200).nullable().optional(),
           })
           .optional(),
       })
@@ -4051,7 +4052,7 @@ export function createApp(deps: ServerDeps) {
         // An id resumeCommand refuses (#431) degrades to a fresh CLI in the worktree,
         // exactly like a run that never recorded a session.
         const resume = sessionId && cliRunner === (run.runner ?? 'claude') ? resumeCommand(cliRunner, sessionId) : null;
-        const command = resume ?? cliRunner;
+        const command = resume ?? (cliRunner === 'cursor' ? 'agent' : cliRunner);
         // BOTH branches carry the account (spec 2026-07-29-agent-profiles): a resume needs the
         // config dir that holds its session, and a FRESH CLI in this worktree should still open
         // on the account the project works under — otherwise "Open in → Claude CLI" quietly
@@ -5325,6 +5326,7 @@ export function createApp(deps: ServerDeps) {
         codex: modelPresetSchema,
         opencode: modelPresetSchema,
         pi: modelPresetSchema,
+        cursor: modelPresetSchema,
       })
       .optional(),
     // Concurrency + memory guard (Settings → Resources). maxParallel clamps to
@@ -5905,6 +5907,8 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
       return `codex resume ${sessionId}`;
     case 'opencode':
       return `opencode --session ${sessionId}`;
+    case 'cursor':
+      return `agent --resume ${sessionId}`;
     case 'pi':
       return `pi --session ${sessionId}`;
     default:

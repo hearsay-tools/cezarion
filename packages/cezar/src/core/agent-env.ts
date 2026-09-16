@@ -222,6 +222,7 @@ const BACKEND_ALLOW_PREFIXES: Record<AgentBackend, readonly string[]> = {
   'claude-cli': ['ANTHROPIC_', 'CLAUDE_'],
   codex: ['OPENAI_', 'CODEX_', 'AZURE_OPENAI_'],
   opencode: MULTI_PROVIDER_PREFIXES,
+  cursor: ['CURSOR_'],
   // pi selects models as `provider/model` (#387), so it needs both its own config and any
   // provider a configured model id can name — the same set OpenCode gets, for the same reason.
   // Deliberately NOT `CLAUDE_`: pi is not Claude Code and reads none of its variables, and the

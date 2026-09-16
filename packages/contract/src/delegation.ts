@@ -69,7 +69,7 @@ export const workerCreationReceiptSchema = z.object({
   deletion: z.object({ phase: z.enum(['pending', 'complete']), revision: z.number().int().nonnegative(), resourceId: z.uuid(), generation: z.uuid() }).strict().optional(),
 }).strict();
 
-export const workerBackendSchema = z.enum(['claude', 'codex', 'opencode', 'pi']);
+export const workerBackendSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor']);
 const relativeInputPath = z.string().min(1).max(4096).refine(path =>
   !/[\\\u0000-\u001f\u007f:]/.test(path) && !path.startsWith('/') &&
   path.split('/').every(part => part !== '' && part !== '.' && part !== '..'));

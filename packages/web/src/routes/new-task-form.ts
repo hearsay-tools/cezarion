@@ -51,6 +51,7 @@ export const RUNNERS: readonly RunnerOption[] = [
   { id: 'claude', label: 'claude', desc: 'Claude Code CLI' },
   { id: 'codex', label: 'codex', desc: 'OpenAI Codex (app-server)' },
   { id: 'opencode', label: 'opencode', desc: 'OpenCode (serve)' },
+  { id: 'cursor', label: 'Cursor', desc: 'Cursor CLI (ACP)' },
   { id: 'pi', label: 'pi', desc: 'pi CLI (provider/model)' },
 ]
 
@@ -77,6 +78,7 @@ export const MODELS_BY_RUNNER: Record<Runner, readonly ModelPreset[]> = {
   ],
   // pi selects a model with the same `provider/model` convention as opencode, and its
   // entries come from discovery (`pi --list-models`) for the same reason OpenCode's do.
+  cursor: [{ id: '', label: 'auto', desc: 'Use your Cursor default model' }],
   pi: [
     { id: '', label: 'auto', desc: 'Use your pi default model' },
   ],
@@ -187,6 +189,7 @@ const DISCOVERY_RUNNER_LABEL: Record<ModelDiscoveryRunner, string> = {
   codex: 'Codex',
   opencode: 'OpenCode',
   pi: 'Pi',
+  cursor: 'Cursor',
 }
 
 export function modelCatalogStatus(

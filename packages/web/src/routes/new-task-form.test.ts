@@ -40,6 +40,11 @@ const skill = (name: string, source: Skill['source'] = 'ai'): Skill => ({
 const workflow = (name: string): WorkflowDef => ({ name, source: 'built-in', steps: [] })
 
 describe('availableRunners (legacy renderChrome rule)', () => {
+  it('offers Cursor only when detected and preserves its native default model', () => {
+    expect(availableRunners([check('cursor', true)])).toEqual(['cursor'])
+    expect(availableRunners([check('claude', true), check('cursor', false)])).toEqual(['claude'])
+    expect(modelsForRunner('cursor')[0]).toMatchObject({ id: '', desc: 'Use your Cursor default model' })
+  })
   it('offers exactly the detected backends, in RUNNERS order', () => {
     const checks = [check('opencode', true), check('git', true), check('claude', true), check('codex', false)]
     expect(availableRunners(checks)).toEqual(['claude', 'opencode'])

@@ -94,6 +94,7 @@ describe('agentHomePaths', () => {
     expect(paths.codex).toBe('/home/u/.codex');
     expect(paths.opencodeConfig).toBe('/home/u/.config/opencode');
     expect(paths.pi).toBe('/home/u/.pi/agent');
+    expect(paths.cursor).toBe('/home/u/.cursor');
   });
 
   it('honors agent-specific home overrides', () => {

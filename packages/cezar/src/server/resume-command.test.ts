@@ -15,6 +15,7 @@ describe('resumeCommand — session id validation', () => {
     expect(resumeCommand(undefined, id)).toBe(`claude --resume ${id}`);
     expect(resumeCommand('codex', id)).toBe(`codex resume ${id}`);
     expect(resumeCommand('opencode', id)).toBe(`opencode --session ${id}`);
+    expect(resumeCommand('cursor', id)).toBe(`agent --resume ${id}`);
     expect(resumeCommand('pi', id)).toBe(`pi --session ${id}`);
   });
 
@@ -22,7 +23,7 @@ describe('resumeCommand — session id validation', () => {
   // would hand the user a `claude --resume` for a session claude does not own (#387).
   it.each(RUNNER_IDS)('maps %s to its own CLI, never silently to claude', (runner) => {
     const id = '9f8e7d6c-1234-4abc-9def-0123456789ab';
-    expect(resumeCommand(runner, id)?.startsWith(`${runner} `)).toBe(true);
+    expect(resumeCommand(runner, id)?.startsWith(`${runner === 'cursor' ? 'agent' : runner} `)).toBe(true);
   });
 
   it('never emits a quote character — a POSIX quote would reach cmd.exe literally on win32', () => {

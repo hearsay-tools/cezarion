@@ -22,6 +22,7 @@ const { createApp } = await import('./server.ts');
 const providerAuth = (disconnected: ProviderId[] = []) => new ProviderAuthService({
   platform: 'linux',
   runCommand: async (executable) => {
+    if (executable === 'agent') return { stdout: '{"status":"authenticated","isAuthenticated":true}', stderr: '', exitCode: 0 };
     const provider = executable === 'claude'
       ? 'claude'
       : executable === 'codex'
@@ -149,6 +150,13 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     expect(res.status).toBe(200);
     expect(((await res.json()) as { command: string }).command).toBe('codex');
     expect(mockOpenInTerminal).toHaveBeenCalledWith(expect.any(String), 'codex', {});
+  });
+
+  it('opens Cursor with agent rather than launching the desktop cursor command', async () => {
+    const run = makeRun('claude', undefined);
+    const res = await openIn(run.id, 'cli:cursor');
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { command: string }).command).toBe('agent');
   });
 
   it('no session yet: even the matching CLI launches fresh instead of erroring', async () => {

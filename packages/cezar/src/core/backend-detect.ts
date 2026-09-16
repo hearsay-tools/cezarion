@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile);
 
 export interface BackendCheck {
-  name: 'claude' | 'codex' | 'opencode' | 'pi' | 'gh' | 'git';
+  name: 'claude' | 'codex' | 'opencode' | 'pi' | 'cursor' | 'gh' | 'git';
   available: boolean;
   version?: string;
   hint?: string;
@@ -23,6 +23,7 @@ export async function detectEnvironment(): Promise<BackendCheck[]> {
     probeCodex(),
     probeOpencode(),
     probePi(),
+    probeCursor(),
     probeGh(),
     probeGit(),
   ]);
@@ -124,6 +125,19 @@ async function probePi(): Promise<BackendCheck> {
       available: false,
       hint: 'optional: install the pi CLI and log in to use the pi runner',
     };
+  }
+}
+
+async function probeCursor(): Promise<BackendCheck> {
+  if (process.env.CEZ_DRY_RUN === '1') {
+    return { name: 'cursor', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+  }
+  const bin = process.env.CEZ_CURSOR_BIN ?? 'agent';
+  try {
+    const { stdout } = await exec(bin, ['--version'], { timeout: 10_000 });
+    return { name: 'cursor', available: true, version: stdout.trim(), hint: 'Run `agent login` to connect Cursor.' };
+  } catch {
+    return { name: 'cursor', available: false, hint: 'Optional: install Cursor CLI (https://cursor.com/docs/cli/installation), then run `agent login`.' };
   }
 }
 

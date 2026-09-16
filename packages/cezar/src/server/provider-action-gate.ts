@@ -10,6 +10,7 @@ const LABEL: Record<ProviderId, string> = {
   codex: 'Codex',
   opencode: 'OpenCode',
   pi: 'pi',
+  cursor: 'Cursor',
 };
 
 export function providerForExistingRun(

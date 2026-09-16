@@ -167,6 +167,9 @@ export function agentHomePaths(env: NodeJS.ProcessEnv = process.env): AgentHomeP
     codex: env.CODEX_HOME?.trim() || join(home, '.codex'),
     opencodeConfig: join(xdgConfig, 'opencode'),
     pi: env.PI_CODING_AGENT_DIR?.trim() || join(home, '.pi', 'agent'),
+    cursor: env.CURSOR_CONFIG_DIR?.trim()
+      || ((process.platform === 'linux' || process.platform === 'freebsd') && env.XDG_CONFIG_HOME?.trim()
+        ? join(env.XDG_CONFIG_HOME.trim(), 'cursor') : join(home, '.cursor')),
   };
 }
 
