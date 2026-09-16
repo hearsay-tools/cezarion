@@ -1,4 +1,4 @@
-import type { RunRecord, RunStatus, Runner } from '@open-mercato/cezar-api-client'
+import type { ApiRun, RunRecord, RunStatus, Runner } from '@open-mercato/cezar-api-client'
 import { cliTargetRunner } from '@/components/open-in-menu'
 import { canBeUnread, isUnread } from '@/lib/read-state'
 
@@ -45,7 +45,8 @@ export function resumeCommand(runner: Runner | undefined, sessionId: string): st
     case 'codex':
       return `codex resume ${sessionId}`
     case 'cursor':
-      return `agent --resume ${sessionId}`
+      // Only the server knows CEZ_CURSOR_BIN and its host shell quoting rules.
+      return undefined
     case 'opencode':
       return `opencode --session ${sessionId}`
     default:
@@ -57,11 +58,12 @@ export function resumeCommand(runner: Runner | undefined, sessionId: string): st
  *  let go of the session (same gate as the Terminal button). Prefixes the `cd` when the run
  *  has its own worktree, because the resume only makes sense from in there. Absent for an id
  *  `resumeCommand` refuses (#431), exactly as for a run that never recorded a session. */
-export function resumeHint(run: RunRecord): string | undefined {
+export function resumeHint(run: ApiRun): string | undefined {
   if (isRunActive(run.status)) return undefined
   const sessionId = lastSessionId(run)
   if (sessionId === undefined) return undefined
-  const command = resumeCommand(run.runner, sessionId)
+  if (!SAFE_SESSION_ID.test(sessionId)) return undefined
+  const command = run.runner === 'cursor' ? run.cliResumeCommand : resumeCommand(run.runner, sessionId)
   if (command === undefined) return undefined
   return run.worktreePath ? `cd ${run.worktreePath} && ${command}` : command
 }

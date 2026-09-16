@@ -126,6 +126,20 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
   const openInCli = (runId: string, options: { disabled?: ProviderId[]; disconnected?: ProviderId[] } = {}) =>
     apiRequest(app(options), `/api/v1/runs/${runId}/open-in-cli`, { method: 'POST' });
 
+  it('exposes the configured Cursor resume command without launching a terminal', async () => {
+    const prior = process.env.CEZ_CURSOR_BIN;
+    process.env.CEZ_CURSOR_BIN = '/opt/Cursor Agent/agent';
+    try {
+      const run = makeRun('cursor', 'sess-1');
+      const response = await apiRequest(app(), `/api/v1/runs/${run.id}`);
+      expect(await response.json()).toMatchObject({ cliResumeCommand: "'/opt/Cursor Agent/agent' --resume sess-1" });
+      expect(mockOpenInTerminal).not.toHaveBeenCalled();
+    } finally {
+      if (prior === undefined) delete process.env.CEZ_CURSOR_BIN;
+      else process.env.CEZ_CURSOR_BIN = prior;
+    }
+  });
+
   it.each([
     ['claude', 'cli:claude', 'claude --resume sess-1'],
     ['codex', 'cli:codex', 'codex resume sess-1'],

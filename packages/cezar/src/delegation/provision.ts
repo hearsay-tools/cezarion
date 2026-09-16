@@ -66,7 +66,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         conversationGuidance,
         `Use ${invocation} spawn --baseline parent-head --request-id <UUID> '<task>' (or an explicit committed ref).`,
         `Reuse the request ID only for the exact same task/baseline/context/backend/model/effort on a retry.`,
-        `Optional spawn flags: --context '<selected text>' or --context-file <local-UTF-8-file> (mutually exclusive), --backend <claude|codex|opencode|pi>, --model <model>, --effort <low|medium|high|xhigh|max>.`,
+        `Optional spawn flags: --context '<selected text>' or --context-file <local-UTF-8-file> (mutually exclusive), --backend <claude|codex|opencode|pi|cursor>, --model <model>, --effort <low|medium|high|xhigh|max>.`,
         `Example: spawn --baseline parent-head --request-id <UUID> --backend codex --context 'Inspect only the parser' 'Review parser'.`,
         `Task plus context text is limited to 100,000 characters.`,
         `The API also accepts up to 32 baseline-file or parent-attachment references, with at most 8 MiB of copied attachments.`,

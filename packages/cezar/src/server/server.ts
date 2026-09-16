@@ -1,3 +1,4 @@
+import type { ApiRun } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
@@ -3470,9 +3471,11 @@ export function createApp(deps: ServerDeps) {
   // Additive `usage` field (#348): the latest CPU/RSS/proc-count sample of the
   // run's live process tree — absent for finished runs and when `ps` yields
   // nothing. The stored record itself is never touched.
-  const withUsage = (run: RunRecord): RunRecord & { usage?: ReturnType<typeof currentUsage> } => {
+  const withUsage = (run: RunRecord): ApiRun => {
     const usage = currentUsage(run.id);
-    return usage ? { ...run, usage } : run;
+    const sessionId = [...run.steps].reverse().find(step => step.sessionId)?.sessionId;
+    const command = run.runner === 'cursor' && sessionId ? resumeCommand('cursor', sessionId) : null;
+    return { ...run, ...(usage ? { usage } : {}), ...(command ? { cliResumeCommand: command } : {}) };
   };
 
   // The inbox half of a composer launch (#374). Since the cockpit's "▶ Run"

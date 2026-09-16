@@ -161,9 +161,9 @@ describe('resumeCommand — per backend, mirroring the server', () => {
     ['claude', 'claude --resume s1'],
     [undefined, 'claude --resume s1'], // legacy records predate the runner choice
     ['codex', 'codex resume s1'],
-    ['cursor', 'agent --resume s1'],
+    ['cursor', undefined],
     ['opencode', 'opencode --session s1'],
-  ] as Array<[RunRecord['runner'], string]>)('%s → %s', (runner, expected) => {
+  ] as Array<[RunRecord['runner'], string | undefined]>)('%s → %s', (runner, expected) => {
     expect(resumeCommand(runner, 's1')).toBe(expected)
   })
 
@@ -196,6 +196,12 @@ describe('resumeCommand — per backend, mirroring the server', () => {
 })
 
 describe('resumeHint', () => {
+  it('uses the server-resolved Cursor executable and waits for it instead of guessing', () => {
+    const cursor = run('done', { runner: 'cursor' })
+    expect(resumeHint(cursor)).toBeUndefined()
+    expect(resumeHint({ ...cursor, cliResumeCommand: "'/opt/Cursor Agent/agent' --resume sess-1" })).toBe("'/opt/Cursor Agent/agent' --resume sess-1")
+  })
+
   it('cd-prefixes into the worktree when the run has one', () => {
     expect(resumeHint(run('failed', { worktreePath: '/tmp/wt', runner: 'codex' }))).toBe(
       'cd /tmp/wt && codex resume sess-1',
