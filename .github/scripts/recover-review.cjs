@@ -3,6 +3,8 @@
 const { countAutomatedReviews } = require('./automated-review.cjs');
 const { isBotReleaseBumpPr, filesAreVersionStampsOnly, headShasMatch } = require('./release-bump-pr.cjs');
 
+const { pickPullRequestRun } = require('./fetch-ci-results.cjs');
+
 const CI_PATH = '.github/workflows/ci.yml';
 const REVIEW_PATH = '.github/workflows/automated-code-review.yml';
 const VERIFY = 'Unit, build, E2E, and package';
@@ -87,7 +89,7 @@ async function recoverReview({
     }
 
     const ciRuns = await list('actions/workflows/{workflow_id}/runs', { workflow_id: 'ci.yml', head_sha: pull.head.sha });
-    const latestCi = ciRuns.filter(run => ['pull_request', 'pull_request_target'].includes(run.event) && run.head_sha === pull.head.sha && run.conclusion !== 'cancelled').sort((a, b) => b.id - a.id)[0];
+    const latestCi = pickPullRequestRun(ciRuns.map(run => ({ ...run, databaseId: run.id, headSha: run.head_sha })), pull.head.sha);
     if (!latestCi) return skip('no CI for the current head');
     const ci = await runDetails(latestCi.id);
     ciIdentity = `CI ${ci.id} attempt ${ci.run_attempt}`;

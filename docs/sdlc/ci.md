@@ -1,14 +1,34 @@
 # Continuous integration
 
-`.github/workflows/ci.yml` runs on pull requests to `main` or `develop`, pushes to those branches, and manual dispatch.
+`.github/workflows/ci.yml` uses only `pull_request_target` for PR verification on
+`main` and `develop`. Pushes to those branches and manual dispatch still run CI.
+The trusted base defines classification and the required checks; PR code runs
+with read-only repository permissions and no publishing credentials. Each PR
+has one concurrency group, so a new head cancels its predecessor without a
+competing same-head `pull_request` run. Failed or cancelled verification never
+satisfies the required aggregate.
+
+Review polling and recovery use the newest target run for the current head.
+They fall back to legacy `pull_request` CI only when no target run exists,
+never when target verification failed or was cancelled.
 
 Verification runs in seven parallel jobs with the current Node LTS:
 
-- Two Vitest shards on `blacksmith-4vcpu-ubuntu-2404` each install dependencies, build the server, and run `npm test -- --shard=N/2 --maxWorkers=4`.
-- The build/package job on `blacksmith-4vcpu-ubuntu-2404` runs typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing.
+- Two Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/2 --maxWorkers=4`.
+- The build/package job on `ubuntu-24.04` runs typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing.
 - Four cockpit browser E2E shards on `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
-The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, both Vitest shards, and all four cockpit browser shards succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. The snapshot job still waits for this aggregate check and retains its existing publication conditions.
+The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, both Vitest shards, and all four cockpit browser shards succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
+PRs instead run `prepare-pr-snapshot` after verification, packing snapshot
+archives without publishing credentials. `publish-pr-snapshot.yml` listens for
+completed CI, validates the current open PR head, authoritative run/attempt,
+successful verification and preparation, and exact artifact identity. Its trusted
+publisher validates package names, snapshot versions, configuration and sibling
+pins, repacks validated files into canonical tarballs, then publishes with lifecycle scripts disabled from a clean
+directory. Fork PRs cannot publish; no PR code executes with `NPM_TOKEN` or OIDC.
+Missing `NPM_TOKEN` produces an explicit dry run. The publisher serializes each
+PR's snapshots without cancelling an active publish and rechecks eligibility
+after waiting.
 
 Cockpit shards run on separate VMs, each owning its server, `CEZ_HOME`, test-env descriptor and browser namespace. The browser sequencer uses measured durations in `.github/cockpit-test-durations.json` to select each slice; `fileParallelism: false` keeps tests sequential within each shard. The matrix uses `fail-fast: false` so a failure does not cancel evidence from the other shards. The aggregate waits on the entire matrix and requires its result to be `success`.
 
@@ -103,3 +123,16 @@ positive/negative examples and manual recovery.
 
 Node-side browser-test API requests send `Connection: close`. The synchronous agent-browser commands can block the test process long enough for a fixture server to expire an idle connection before Node handles its close event. CI diagnostics captured reused sockets after 6–23 seconds without an event-loop tick, followed by `UND_ERR_SOCKET`. Fresh connections avoid that stale pool; the real browser and application server keep their normal connection policies. No request retries are added.
 Wed Sep 16 13:50:51 CEST 2026
+
+## Single-trigger migration (#371)
+
+The introducing PR removes `pull_request` from its own workflow while the
+already-installed `pull_request_target` definition on `main` provides its CI.
+The archive publisher becomes active after landing on the default branch; old
+CI attempts without prepared archives cannot publish through it. Live evidence
+for the introducing PR demonstrates event routing, not execution of its new
+target workflow definition. Local regression tests cover both supported base
+names, push/manual routing, classification, cancellation, recovery and snapshot
+eligibility. There was no remote `develop` at migration time; live validation
+there is deferred. Create any future `develop` from a revision containing the
+target workflow before opening PRs against it.

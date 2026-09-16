@@ -94,7 +94,7 @@ test('recovery accepts CI completions from the trusted pull request target workf
   assert.equal(h.writes.length, 1);
 });
 
-test('recovery ignores a newer cancelled target run when older pull_request verification succeeded', async () => {
+test('recovery does not recover from legacy success after authoritative target cancellation', async () => {
   const h = harness();
   h.options.event = { workflow_run: structuredClone(h.state.review) };
   h.state.ciRuns.unshift({
@@ -106,8 +106,8 @@ test('recovery ignores a newer cancelled target run when older pull_request veri
     run_attempt: 1,
   });
   const result = await recover(h);
-  assert.equal(result.recovered, true, result.reason);
-  assert.equal(h.writes.length, 1);
+  assert.equal(result.recovered, false);
+  assert.equal(h.writes.length, 0);
 });
 
 test('bot-authored release/v* bump PRs are never recovered for automated review', async () => {
@@ -391,4 +391,14 @@ test('trusted recovery workflow listens to completions and never executes PR cod
     { env: { AUTOMATED_REVIEW_ROUNDS: '3' } },
   );
   assert.equal(h.writes.length, 1, 'the shipped workflow must actually invoke recovery');
+});
+
+ test('recovery prefers authoritative target CI over a newer successful legacy run', async () => {
+  const h = harness();
+  h.state.ci.event = 'pull_request_target';
+  h.state.event.workflow_run.event = 'pull_request_target';
+  h.state.ciRuns.push({ ...h.state.ci, id: 43, event: 'pull_request' });
+  const result = await recover(h);
+  assert.equal(result.recovered, true, result.reason);
+  assert.equal(h.writes.length, 1);
 });

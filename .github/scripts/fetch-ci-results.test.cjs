@@ -206,3 +206,13 @@ test('parseArgs supports required-success context collection', () => {
     repo: 'o/n', headSha: 'abc', out: 'ci.md', requireSuccess: true,
   });
 });
+
+ test('newest target run is authoritative even when cancelled or older legacy CI succeeded', () => {
+  const old = run({ databaseId: 41, event: 'pull_request_target', conclusion: 'success' });
+  const latest = run({ databaseId: 44, event: 'pull_request_target', conclusion: 'cancelled' });
+  const legacy = run({ databaseId: 45, conclusion: 'success' });
+  const h = harness([{ runs: [legacy, old, latest], jobsById: {
+    41: [job()], 45: [job()], 44: [job({ conclusion: 'cancelled' })],
+  } }]);
+  assert.throws(() => waitForCiRun(h.options), /cancelled/);
+});
