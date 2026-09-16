@@ -119,6 +119,9 @@ describe('the agent-config API', () => {
       version: null,
     });
     expect(userScope.status).toBe(409);
+    // the Pi ids added with #322 sit behind the same gate — a repo-local one AND a home one
+    expect((await put('pi.project.settings', { content: '{}', version: null })).status).toBe(409);
+    expect((await put('pi.user.settings', { content: '{}', version: null })).status).toBe(409);
   });
 
   it('hosted mode: repo-file reads work, home-dir file reads are withheld, userMcp is null', async () => {
@@ -137,5 +140,6 @@ describe('the agent-config API', () => {
     // but an OUTSIDE-REPO ($HOME) file's contents are NOT served — they can hold secrets
     expect((await apiRequest(app, '/api/v1/agent-config/claude.user.settings')).status).toBe(409);
     expect((await apiRequest(app, '/api/v1/agent-config/codex.user.config')).status).toBe(409);
+    expect((await apiRequest(app, '/api/v1/agent-config/pi.user.settings')).status).toBe(409);
   });
 });

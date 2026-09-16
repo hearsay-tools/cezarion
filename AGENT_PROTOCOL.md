@@ -735,7 +735,18 @@ To be first-class:
    `POST /api/runs` / `PUT /api/config` bodies, `resumeCommand()`, the web
    `Runner` type, composer pills/presets, and Settings → Agents. Keep additive
    so old `runs.json` records still parse (the `runner` enum keeps `claude-cli`
-   parseable — follow that precedent).
+   parseable — follow that precedent). **Settings → Agent config ships with the
+   runner, not after it**: one `AGENT_DESCRIPTORS` entry in
+   `packages/web/src/routes/settings/agent-descriptors.ts` keyed by the runner id,
+   plus the vendor's documented config files in
+   `packages/cezar/src/agent-config/catalog.ts` (paths, format, verbatim
+   precedence, `docsUrl`; a home variable goes in `AgentHomePaths` /
+   `agentHomePaths()` only when the vendor documents one). The guard in
+   `agent-descriptors.test.ts` fails the suite for any `RUNNER_IDS` member
+   without a descriptor, the way item 11's guard fails one without a
+   model-discovery adapter (#321). A vendor that documents no editable file still gets its
+   tab — give the group `empty` copy that says why and what to try, never omit
+   the agent (#322, Pi's MCP group: "No MCP.").
 10. **Model selection** — accept `provider/model` where relevant; #387 documents
    the existing inconsistencies (opencode drops a bare model silently) — do not
    reproduce a silent-drop. A backend with no default provider gets no entry in
