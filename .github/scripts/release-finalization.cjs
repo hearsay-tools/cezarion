@@ -2,6 +2,7 @@
 // no retry updates an existing branch, PR, tag, or release (#192).
 const { execFileSync } = require('node:child_process');
 const { appendFileSync } = require('node:fs');
+const { isReleaseBumpFile } = require('./release-bump-pr.cjs');
 
 const command = (program, args) => execFileSync(program, args, {
   encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
@@ -35,7 +36,7 @@ async function bumpPr({ github, context, core }) {
     // Use Git pathspecs, not a shell. Stage all stamped workspaces and the alias.
     git('add', 'packages/*/package.json', 'alias-cezarion/package.json', 'package-lock.json');
     const changed = git('diff', '--cached', '--name-only').split('\n').filter(Boolean);
-    if (changed.some((file) => !/^(packages\/[^/]+\/package\.json|alias-cezarion\/package\.json|package-lock\.json)$/.test(file))) {
+    if (changed.some((file) => !isReleaseBumpFile(file))) {
       throw new Error('Unexpected staged changes; refusing to include them in the version-bump branch.');
     }
     const tree = git('write-tree');

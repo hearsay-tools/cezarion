@@ -239,7 +239,7 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.doesNotMatch(claude, /id-token: write/, 'the Claude job authenticates with GITHUB_TOKEN, not the OIDC app-token exchange, which rejects pull_request_target tokens');
   assert.match(claude, /anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/);
   assert.equal((workflow.match(/ANTHROPIC_API_KEY/g) || []).length, 1, 'only the Claude job may reference ANTHROPIC_API_KEY');
-  assert.equal((workflow.match(/secrets\.GITHUB_TOKEN/g) || []).length, 8, 'only the read-only round guard, wait-for-ci, and provider context fetches use secrets.GITHUB_TOKEN');
+  assert.equal((workflow.match(/secrets\.GITHUB_TOKEN/g) || []).length, 9, 'validate-provider bump classify, read-only round guard, wait-for-ci, and provider context fetches use secrets.GITHUB_TOKEN');
   assert.match(claude, /anthropics\/claude-code-action@[0-9a-f]{40}/);
   assert.match(claude, /ref: refs\/pull\/\$\{\{ needs\.review-round\.outputs\.pr_number \}\}\/merge/);
   assert.match(claude, /fetch-depth: 0/);
@@ -393,13 +393,34 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(aggregate, /\[ "\$CAN_REVIEW" = 'false' \] && exit 0/);
 
   const validator = job(workflow, 'validate-provider');
-  assert.match(validator, /permissions: \{\}/);
+  assert.match(validator, /permissions:\n      contents: read\n      pull-requests: read/);
+  assert.doesNotMatch(validator, /permissions: \{\}/);
+  assert.doesNotMatch(validator, /contents: write|pull-requests: write/);
   assert.match(validator, /name: Reject untrusted bot actors/);
   assert.match(validator, /ACTOR: \$\{\{ github\.actor \}\}/);
+  assert.match(validator, /HEAD_REF: \$\{\{ github\.head_ref \}\}/);
+  assert.match(validator, /PR_AUTHOR: \$\{\{ github\.event\.pull_request\.user\.login \}\}/);
+  assert.match(validator, /release-bump-pr\.cjs/);
+  assert.match(validator, /classifyFromEnv/);
   assert.match(validator, /\[\[ "\$ACTOR" == \*'\[bot\]' && "\$ACTOR" != 'claude\[bot\]' \]\]/);
   assert.ok(validator.indexOf('name: Reject untrusted bot actors') < validator.indexOf('id: provider'), 'bot guard must run before provider validation and the wildcard action allowlist');
   assert.match(aggregate, /permissions: \{\}/);
   assert.doesNotMatch(workflow, /resolveReviewThread/i, 'workflow must never resolve review threads automatically');
+});
+
+test('bot-authored release/v* PRs set can_review=false without spending a review round', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const round = job(workflow, 'review-round');
+  assert.match(round, /HEAD_REF: \$\{\{ github\.head_ref \}\}/);
+  assert.match(round, /PR_AUTHOR: \$\{\{ github\.event\.pull_request\.user\.login \}\}/);
+  assert.match(round, /head_ref="\$\{HEAD_REF:-\}"/);
+  assert.match(round, /pr_author="\$\{PR_AUTHOR:-\}"/);
+  assert.match(round, /\.cez-trusted\/\.github\/scripts\/release-bump-pr\.cjs/);
+  assert.match(round, /classifyFromEnv/);
+  assert.match(round, /can_review=false/);
+  assert.match(round, /Checkout trusted classifier from base/);
+  // Manual dispatch still reviews even when the PR is a bump.
+  assert.match(round, /EVENT_NAME" = workflow_dispatch[\s\S]*can_review=true/);
 });
 
 test('automated review rounds read AUTOMATED_REVIEW_ROUNDS and ignore the cap on workflow_dispatch', () => {
@@ -513,7 +534,11 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
   const { tmpdir } = require('node:os');
   const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
   const roundJob = workflow.jobs['review-round'];
-  const checkout = roundJob.steps.find((step) => step.uses?.includes('actions/checkout') && step.with?.ref?.includes('refs/pull/'));
+  const trusted = roundJob.steps.find((step) => step.name === 'Checkout trusted classifier from base');
+  assert.equal(trusted?.with?.path, '.cez-trusted');
+  assert.equal(trusted?.with?.ref, '${{ github.event.pull_request.base.sha || github.sha }}');
+  assert.equal(trusted?.with?.['persist-credentials'], false);
+  const checkout = roundJob.steps.find((step) => step.name === 'Checkout pull request merge for patch-id');
   assert.equal(checkout?.with?.['persist-credentials'], false);
   assert.equal(checkout?.with?.['allow-unsafe-pr-checkout'], true);
   assert.match(checkout?.with?.ref || '', /refs\/pull\/.*\/merge/);
@@ -528,9 +553,20 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
   const patchId = 'c'.repeat(40);
   const marker = `<!-- cez-review-patch-id: ${patchId} -->`;
 
-  async function runRound({ event, gitOk, reviewsOut }) {
+  async function runRound({ event, gitOk, reviewsOut, headRef = '', prAuthor = '', filesOut = 'packages/cezar/src/index.ts', liveHead = head, filesOk = true }) {
     const cwd = fs.mkdtempSync(path.join(tmpdir(), 'review-patch-id-'));
     const output = path.join(cwd, 'outputs');
+    const scriptsDir = path.join(cwd, '.cez-trusted', '.github', 'scripts');
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.copyFileSync(path.join(__dirname, 'release-bump-pr.cjs'), path.join(scriptsDir, 'release-bump-pr.cjs'));
+    // Stub version-stamp compare so bash harnesses do not need real file contents.
+    const classifierSrc = fs.readFileSync(path.join(scriptsDir, 'release-bump-pr.cjs'), 'utf8');
+    const stamped = classifierSrc.replace(
+      /function filesAreVersionStampsOnly\(\{[\s\S]*?\} = \{\}\) \{/,
+      (match) => `${match}\n  if (env.TEST_STAMPS_OK === '1') return true;\n  if (env.TEST_STAMPS_OK === '0') return false;`,
+    );
+    assert.notEqual(stamped, classifierSrc, 'expected version-stamp stub injection');
+    fs.writeFileSync(path.join(scriptsDir, 'release-bump-pr.cjs'), stamped);
     const env = {
       ...process.env,
       BASH_ENV: '/dev/null',
@@ -541,12 +577,20 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
       AUTOMATED_REVIEW_ROUNDS: '3',
       EVENT_HEAD_SHA: event === 'workflow_dispatch' ? '' : head,
       EVENT_BASE_SHA: event === 'workflow_dispatch' ? '' : base,
+      HEAD_REF: headRef,
+      PR_AUTHOR: prAuthor,
+      GH_TOKEN: 'test-token',
+      TEST_STAMPS_OK: '1',
     };
     const gitStub = gitOk
       ? `git() { printf '%s ignored\\n' '${patchId}'; }`
       : `git() { echo 'missing objects' >&2; return 128; }`;
+    const filesLiteral = filesOut.replace(/'/g, `'\\''`);
+    const filesBranch = filesOk
+      ? `printf '%s\\n' '${filesLiteral}'`
+      : `echo 'page failed' >&2; return 1`;
     const script = [
-      `gh() { case "$*" in *'.head.sha'*) echo '${head}';; *'.base.sha'*) echo '${base}';; *'/reviews'*) printf '%s\\n' '${reviewsOut}';; esac; }`,
+      `gh() { case "$*" in *'.head.sha'*) echo '${liveHead}';; *'.base.sha'*) echo '${base}';; *'/files'*) ${filesBranch};; *'/reviews'*) printf '%s\\n' '${reviewsOut}';; *) echo "unexpected gh: $*" >&2; return 1;; esac; }`,
       gitStub,
       round.run,
     ].join('\n');
@@ -588,6 +632,81 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
 
   await t.test('workflow_dispatch still reviews past the patch-id skip', async () => {
     const outputs = await runRound({ event: 'workflow_dispatch', gitOk: true, reviewsOut: marker });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('bot-authored release/v* head skips review when files are manifest-only', async () => {
+    const outputs = await runRound({
+      event: 'pull_request_target',
+      gitOk: true,
+      reviewsOut: 'No issues found',
+      headRef: 'release/v0.13.5',
+      prAuthor: 'github-actions[bot]',
+      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+    });
+    assert.equal(outputs.can_review, 'false');
+    assert.equal(outputs.patch_id, '');
+  });
+
+  await t.test('bot-authored release/v* head still reviews when files leave the allowlist', async () => {
+    const outputs = await runRound({
+      event: 'pull_request_target',
+      gitOk: true,
+      reviewsOut: 'No issues found',
+      headRef: 'release/v0.13.5',
+      prAuthor: 'github-actions[bot]',
+      filesOut: 'packages/cezar/package.json\n.github/workflows/ci.yml',
+    });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('bot-authored release/v* head still reviews when live head drifts', async () => {
+    const outputs = await runRound({
+      event: 'pull_request_target',
+      gitOk: true,
+      reviewsOut: 'No issues found',
+      headRef: 'release/v0.13.5',
+      prAuthor: 'github-actions[bot]',
+      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+      liveHead: 'd'.repeat(40),
+    });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('bot-authored release/v* head still reviews when file list fetch fails', async () => {
+    const outputs = await runRound({
+      event: 'pull_request_target',
+      gitOk: true,
+      reviewsOut: 'No issues found',
+      headRef: 'release/v0.13.5',
+      prAuthor: 'github-actions[bot]',
+      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+      filesOk: false,
+    });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('human-authored release/v* head still reviews', async () => {
+    const outputs = await runRound({
+      event: 'pull_request_target',
+      gitOk: true,
+      reviewsOut: 'No issues found',
+      headRef: 'release/v0.13.5',
+      prAuthor: 'human',
+      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+    });
+    assert.equal(outputs.can_review, 'true');
+  });
+
+  await t.test('workflow_dispatch still reviews a bot release/v* PR', async () => {
+    const outputs = await runRound({
+      event: 'workflow_dispatch',
+      gitOk: true,
+      reviewsOut: marker,
+      headRef: 'release/v0.13.5',
+      prAuthor: 'github-actions[bot]',
+      filesOut: 'packages/cezar/package.json\npackage-lock.json',
+    });
     assert.equal(outputs.can_review, 'true');
   });
 });
