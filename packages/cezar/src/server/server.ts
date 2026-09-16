@@ -3473,8 +3473,10 @@ export function createApp(deps: ServerDeps) {
   // nothing. The stored record itself is never touched.
   const withUsage = (run: RunRecord): ApiRun => {
     const usage = currentUsage(run.id);
-    const sessionId = [...run.steps].reverse().find(step => step.sessionId)?.sessionId;
-    const command = run.runner === 'cursor' && sessionId ? resumeCommand('cursor', sessionId) : null;
+    const sessionStep = [...run.steps].reverse().find(step => step.sessionId);
+    const sessionId = sessionStep?.sessionId;
+    const backend = sessionStep?.backend ?? run.runner ?? 'claude';
+    const command = backend === 'cursor' && sessionId ? resumeCommand(backend, sessionId) : null;
     return { ...run, ...(usage ? { usage } : {}), ...(command ? { cliResumeCommand: command } : {}) };
   };
 
@@ -3946,14 +3948,15 @@ export function createApp(deps: ServerDeps) {
       const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
       const sessionId = sessionStep?.sessionId;
       if (!sessionId) return c.json({ error: 'no agent session to resume' }, 409);
-      const blocked = await providerActionError([providerForExistingRun(run)]);
+      const backend = sessionStep?.backend ?? run.runner ?? 'claude';
+      const blocked = await providerActionError([backend]);
       if (blocked) return c.json({ error: blocked }, 409);
       const cwd = run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : repoRoot;
-      const command = resumeCommand(run.runner, sessionId);
+      const command = resumeCommand(backend, sessionId);
       // Fails closed on an id we do not recognise — see resumeCommand (#431).
       if (!command) return c.json({ error: 'the recorded session id has an unexpected shape' }, 409);
       // The account that OWNS this session, not the project's current one (spec 2026-07-29).
-      const account = await handoffEnv(run.runner ?? 'claude', sessionStep?.profileId);
+      const account = await handoffEnv(backend, sessionStep?.profileId);
       if ('error' in account) return c.json({ error: account.error }, 409);
       const fallback = handoffFallbackCommand(cwd, command, account.env);
       // Fail closed for the same reason as the session id: a terminal opened without the
@@ -4035,7 +4038,7 @@ export function createApp(deps: ServerDeps) {
       }
 
       // Coding-agent CLI handoff (#cli-handoff, #402): open a terminal in the worktree that resumes
-      // THIS run's session when the chosen CLI is the run's own runner (and a session exists), or
+      // THIS run's latest session when the chosen CLI owns it (and a session exists), or
       // starts a fresh CLI there otherwise. Same terminal launcher the Terminal button uses.
       // Records that predate the runner choice carry no `runner` at all — they default to Claude
       // everywhere else (resumeCommand, the client's resumeHint/cliTargetResumes), so the match
@@ -4055,7 +4058,7 @@ export function createApp(deps: ServerDeps) {
         const sessionId = sessionStep?.sessionId;
         // An id resumeCommand refuses (#431) degrades to a fresh CLI in the worktree,
         // exactly like a run that never recorded a session.
-        const resume = sessionId && cliRunner === (run.runner ?? 'claude') ? resumeCommand(cliRunner, sessionId) : null;
+        const resume = sessionId && cliRunner === (sessionStep?.backend ?? run.runner ?? 'claude') ? resumeCommand(cliRunner, sessionId) : null;
         const command = resume ?? (cliRunner === 'cursor' ? quoteExecutable(resolveCursorExecutable(), process.platform) : cliRunner);
         if (command === null) return c.json({ error: 'the configured Cursor executable cannot be used in a terminal command' }, 409);
         // BOTH branches carry the account (spec 2026-07-29-agent-profiles): a resume needs the

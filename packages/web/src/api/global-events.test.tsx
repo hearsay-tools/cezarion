@@ -292,10 +292,10 @@ describe('useGlobalEvents — run events', () => {
   })
 
   it('refreshes an opened Cursor detail for its server-resolved resume command', () => {
-    client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), runRecord('r1', { runner: 'cursor' }))
+    client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), runRecord('r1', { runner: 'claude' }))
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
-    source.emit('run', stampedRun(runRecord('r1', { runner: 'cursor', status: 'done' })))
+    source.emit('run', stampedRun(runRecord('r1', { runner: 'claude', status: 'done', steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, backend: 'cursor', sessionId: 's1' }] })))
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.detail('r1') })
   })
 

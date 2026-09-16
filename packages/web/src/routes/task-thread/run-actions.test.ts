@@ -196,6 +196,17 @@ describe('resumeCommand — per backend, mirroring the server', () => {
 })
 
 describe('resumeHint', () => {
+  it.each([
+    ['claude', 'cursor', 'agent --resume sess-1'],
+    ['cursor', 'claude', 'claude --resume sess-1'],
+  ] as const)('uses the session backend %s → %s for hints and target labels', (runner, backend, expected) => {
+    const mixed = { ...run('done', { runner, steps: [step({ backend, sessionId: 'sess-1' })] }),
+      ...(backend === 'cursor' ? { cliResumeCommand: expected } : {}) }
+    expect(resumeHint(mixed)).toBe(expected)
+    expect(cliTargetResumes(mixed, `cli:${backend}`)).toBe(true)
+    expect(cliTargetResumes(mixed, `cli:${runner}`)).toBe(false)
+  })
+
   it('uses the server-resolved Cursor executable and waits for it instead of guessing', () => {
     const cursor = run('done', { runner: 'cursor' })
     expect(resumeHint(cursor)).toBeUndefined()

@@ -126,6 +126,24 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
   const openInCli = (runId: string, options: { disabled?: ProviderId[]; disconnected?: ProviderId[] } = {}) =>
     apiRequest(app(options), `/api/v1/runs/${runId}/open-in-cli`, { method: 'POST' });
 
+  it.each([
+    ['claude', 'cursor', 'agent --resume sess-1'],
+    ['cursor', 'claude', 'claude --resume sess-1'],
+  ] as const)('hands a %s run to its latest %s session backend', async (runner, backend, expected) => {
+    const run = makeRun(runner, 'sess-1');
+    store.updateStep(run.id, 'work', { backend });
+    const detail = await apiRequest(app(), `/api/v1/runs/${run.id}`);
+    const body = await detail.json() as { cliResumeCommand?: string };
+    expect(body.cliResumeCommand).toBe(backend === 'cursor' ? expected : undefined);
+    const response = await openInCli(run.id, { disabled: [runner] });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ command: expected });
+    const selected = await openIn(run.id, `cli:${backend}`);
+    expect(await selected.json()).toMatchObject({ command: expected });
+    const foreign = await openIn(run.id, `cli:${runner}`);
+    expect(await foreign.json()).toMatchObject({ command: runner === 'cursor' ? 'agent' : runner });
+  });
+
   it('exposes the configured Cursor resume command without launching a terminal', async () => {
     const prior = process.env.CEZ_CURSOR_BIN;
     process.env.CEZ_CURSOR_BIN = '/opt/Cursor Agent/agent';

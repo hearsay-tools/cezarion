@@ -24,6 +24,11 @@ export function lastSessionId(run: RunRecord): string | undefined {
   return [...run.steps].reverse().find((step) => step.sessionId)?.sessionId
 }
 
+/** The backend owning the latest session; old records fall back to the run default. */
+export function lastSessionBackend(run: RunRecord): Runner {
+  return [...run.steps].reverse().find(step => step.sessionId)?.backend ?? run.runner ?? 'claude'
+}
+
 /**
  * The session id shapes the backends mint — the mirror of the server's `SAFE_SESSION_ID`
  * (server.ts, #431). Kept in lockstep by hand: the cockpit bundles separately from the
@@ -63,7 +68,8 @@ export function resumeHint(run: ApiRun): string | undefined {
   const sessionId = lastSessionId(run)
   if (sessionId === undefined) return undefined
   if (!SAFE_SESSION_ID.test(sessionId)) return undefined
-  const command = run.runner === 'cursor' ? run.cliResumeCommand : resumeCommand(run.runner, sessionId)
+  const backend = lastSessionBackend(run)
+  const command = backend === 'cursor' ? run.cliResumeCommand : resumeCommand(backend, sessionId)
   if (command === undefined) return undefined
   return run.worktreePath ? `cd ${run.worktreePath} && ${command}` : command
 }
@@ -71,8 +77,8 @@ export function resumeHint(run: ApiRun): string | undefined {
 /** Does picking this "Open in…" CLI target resume THIS run's own session, or start a fresh
  *  one (#402)? Only the backend that produced the session can resume it — a foreign CLI's
  *  session id means nothing to a different agent, so cross-runner picks always launch clean.
- *  Legacy runs with no `runner` recorded predate the runner choice and default to Claude, same
- *  as `resumeCommand`.
+ *  The session step's backend takes precedence over the run default; old records fall back
+ *  to the run backend and then Claude.
  *  Active runs never resume, same gate as `resumeHint`/`runActionFlags.terminal`: the engine
  *  seeds `sessionId` when the step STARTS (workflows/run.ts), so a running run already has one
  *  and would otherwise offer to attach a second CLI to the transcript the engine is driving.
@@ -81,7 +87,7 @@ export function cliTargetResumes(run: RunRecord, targetId: string): boolean {
   const runner = cliTargetRunner(targetId)
   if (!runner) return false
   if (isRunActive(run.status)) return false
-  return runner === (run.runner ?? 'claude') && lastSessionId(run) !== undefined
+  return runner === lastSessionBackend(run) && lastSessionId(run) !== undefined
 }
 
 export interface RunActionFlags {

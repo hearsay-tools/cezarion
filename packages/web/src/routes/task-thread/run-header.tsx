@@ -68,7 +68,7 @@ import { usageMetricVisibility } from '@/lib/token-metrics'
 import { cn, isHttpUrl } from '@/lib/utils'
 
 import { Markdown } from './markdown'
-import { cliTargetResumes, cliTargetRunner, resumeHint, runActionFlags } from './run-actions'
+import { cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
 import { RunRelationshipsPanel } from './run-relationships'
 import { WorkflowSteps } from './step-rail'
 import { useFinishRun } from './use-finish-run'
@@ -285,7 +285,7 @@ function OpenInMenuForRun({
   // available because they do not launch a provider.
   const agentAvailable = (runner: ApiRun['runner']) =>
     !providers.isSuccess || availableRunners.includes(runner ?? 'claude')
-  const canResumeHere = canResume && agentAvailable(run.runner)
+  const canResumeHere = canResume && agentAvailable(lastSessionBackend(run))
   const choices: OpenInChoice[] = run.worktreePath
     ? (targets.data?.targets ?? [])
         .filter((target) => {

@@ -241,7 +241,8 @@ function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: Gl
         queryClient.setQueryData<ApiRun>(key, (previous) => mergeRun(previous, event.run))
         // Stored run events omit host-derived commands. Fetch the new session's command
         // once it can be copied; never retain a command for a previous session.
-        if (event.run.runner === 'cursor' && !['running', 'queued', 'waiting'].includes(event.run.status)) {
+        const sessionBackend = [...event.run.steps].reverse().find(step => step.sessionId)?.backend ?? event.run.runner
+        if (sessionBackend === 'cursor' && !['running', 'queued', 'waiting'].includes(event.run.status)) {
           void queryClient.invalidateQueries({ queryKey: key })
         }
       }
