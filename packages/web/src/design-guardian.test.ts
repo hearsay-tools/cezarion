@@ -25,6 +25,32 @@ import { describe, expect, it } from 'vitest'
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SELF = path.basename(fileURLToPath(import.meta.url))
 
+function cssBlock(css: string, open: string): string {
+  const idx = css.indexOf(open)
+  if (idx < 0) throw new Error(`missing ${open}`)
+  const brace = css.indexOf('{', idx)
+  let depth = 0
+  for (let i = brace; i < css.length; i++) {
+    if (css[i] === '{') depth += 1
+    else if (css[i] === '}') {
+      depth -= 1
+      if (depth === 0) return css.slice(brace + 1, i)
+    }
+  }
+  throw new Error(`unclosed ${open}`)
+}
+
+function cssTokenMap(css: string, open: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const match of cssBlock(css, open).matchAll(/--([\w-]+):\s*([^;]+);/g)) {
+    const name = match[1]
+    const value = match[2]
+    if (name === undefined || value === undefined) continue
+    out[name] = value.trim().toLowerCase()
+  }
+  return out
+}
+
 interface SourceFile {
   /** Path relative to packages/web, always with `/` separators (allowlists match on it). */
   rel: string
@@ -275,20 +301,49 @@ describe('design guardian', () => {
     expect(existsSync(path.join(poppinsRoot, 'LICENSE'))).toBe(true)
   })
 
-  it('defines the approved purple chrome and gold action token vocabulary', () => {
+  it('defines the approved mineral-teal chrome and gold action token vocabulary', () => {
     const css = readFileSync(path.join(APP_ROOT, 'src/styles/index.css'), 'utf8')
-    for (const token of [
-      '--action:',
-      '--action-foreground:',
-      '--accent-strong:',
-      '--accent-strong-foreground:',
-      '--accent-text:',
-      '--accent-icon:',
-      '--task-brand-bg:',
-      '--task-brand-selected:',
-      '--pending: var(--action)',
-    ]) {
-      expect(css).toContain(token)
+    const dark = cssTokenMap(css, ':root {')
+    const light = cssTokenMap(css, '.light {')
+
+    expect(dark['action']).toBe('#f4c542')
+    expect(dark['pending']).toBe('var(--action)')
+    expect(light['action'] ?? dark['action']).toBe('#f4c542')
+
+    expect(dark).toMatchObject({
+      'accent-text': '#5eead4',
+      'accent-strong': '#2dd4bf',
+      'accent-strong-foreground': '#0b0f17',
+      'accent-icon': '#2dd4bfb3',
+      'task-brand-selected': '#123c3a',
+      'composer-border': '#347d75',
+      'message-agent-accent': '#5eead4',
+      'message-agent-bg': '#10201f',
+      'message-agent-border': '#29423f',
+      'syn-key': '#5eead4',
+      'merged-strong': '#7c3aed',
+      'merged-text': '#d7bdff',
+    })
+    expect(light).toMatchObject({
+      'accent-text': '#0f766e',
+      'accent-strong': '#0f766e',
+      'accent-strong-foreground': '#ffffff',
+      'accent-icon': '#0f766ecc',
+      'task-brand-selected': '#ccfbf1',
+      'composer-border': '#438c84',
+      'message-agent-accent': '#0f766e',
+      'message-agent-bg': '#f1f8f7',
+      'message-agent-border': '#c9deda',
+      'syn-key': '#0f766e',
+      'merged-strong': '#7c3aed',
+      'merged-text': '#6d28d9',
+    })
+
+    const reservedPurple = new Set(['#6d28d9', '#7c3aed', '#d7bdff', '#7c3aedcc', '#8f86e8b3'])
+    for (const [name, value] of [...Object.entries(dark), ...Object.entries(light)]) {
+      if (reservedPurple.has(value)) {
+        expect(name.startsWith('merged'), `${name} still carries reserved purple ${value}`).toBe(true)
+      }
     }
   })
 
