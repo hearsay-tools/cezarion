@@ -31,7 +31,7 @@ export type AttentionBucket = keyof typeof ATTENTION_RANK
 /** The dot tones the design system defines (`--success`/`--pending`/`--danger`/`--accent-strong`, plus
  *  the neutral `--soft-foreground`). Named here rather than imported from `StatusDot` to keep
  *  this module UI-free; `attention.test.ts` asserts the two sets stay identical. */
-export type AttentionTone = 'success' | 'pending' | 'danger' | 'accent' | 'neutral'
+export type AttentionTone = 'success' | 'pending' | 'danger' | 'accent' | 'info' | 'neutral'
 
 export interface Attention {
   bucket: AttentionBucket
