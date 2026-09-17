@@ -44,13 +44,14 @@ async function fixture(t, base = 'main') {
     }
   };
   stamp();
-  const state = { prs: [], release: null, tag: null, denyPr: false, denyRelease: false, denyRead: false };
+  const state = { prs: [], runs: [], dispatches: [], release: null, tag: null, denyPr: false, denyRelease: false, denyRead: false };
   const repo = { owner: 'example', repo: 'project' };
   const url = 'https://github.com/example/project';
   const github = {
     paginate: async (method, args) => (await method(args)).data,
     rest: {
       pulls: {
+        get: async () => ({ data: state.prs[0] }),
         list: async (args) => {
           assert.equal(args.owner, repo.owner);
           assert.equal(args.repo, repo.repo);
@@ -71,6 +72,16 @@ async function fixture(t, base = 'main') {
           return { data: pr };
         },
       },
+      actions: {
+        listWorkflowRuns: async () => ({ data: state.runs }),
+        createWorkflowDispatch: async (args) => {
+          if (state.denyDispatch) throw Object.assign(new Error(state.dispatchMessage ?? 'Resource not accessible by integration'), { status: 403 });
+          state.dispatches.push(args);
+          state.runs.push({ id: 123, event: 'workflow_dispatch', head_branch: args.ref,
+            head_sha: state.prs[0].head.sha, status: 'queued', html_url: `${url}/actions/runs/123` });
+          return { status: 204 };
+        },
+      },
       repos: {
         getReleaseByTag: async () => {
           if (state.denyRead) throw denied();
@@ -89,6 +100,7 @@ async function fixture(t, base = 'main') {
       },
       git: {
         getRef: async ({ ref }) => {
+          if (ref.startsWith('heads/')) return { data: { object: { sha: state.prs[0].head.sha } } };
           assert.equal(ref, 'tags/v0.12.1');
           if (state.denyRead) throw denied();
           if (!state.tag) throw missing();
@@ -193,6 +205,55 @@ test('retry after a pushed branch and denied PR reuses the original commit', asy
   assert.equal(f.state.prs.length, 1);
   assert.equal(f.git('rev-parse', 'HEAD'), f.sha);
   assert.equal(f.git('ls-remote', 'origin', 'refs/heads/main').split(/\s/)[0], f.sha);
+});
+
+test('new bump PR starts CI and an existing-PR retry reuses active verification', async (t) => {
+  const f = await fixture(t);
+  await f.run(bumpStep);
+  assert.equal(f.state.dispatches.length, 1, 'a bot-created PR must explicitly start CI');
+  assert.deepEqual(f.state.dispatches[0], { owner: 'example', repo: 'project', workflow_id: 'ci.yml', ref: 'release/v0.12.1' });
+  assert.equal(f.outputs.bump_pr.ci_status, 'dispatched');
+  f.reset();
+  await f.run(bumpStep);
+  assert.equal(f.state.prs.length, 1);
+  assert.equal(f.state.dispatches.length, 1, 'retry must not duplicate active CI');
+  assert.equal(f.outputs.bump_pr.ci_status, 'active');
+});
+
+test('existing bump PR with missing CI starts verification on retry', async (t) => {
+  const f = await fixture(t);
+  await f.run(bumpStep);
+  f.state.runs = [];
+  f.state.dispatches = [];
+  f.reset();
+  await f.run(bumpStep);
+  assert.equal(f.state.prs.length, 1);
+  assert.equal(f.outputs.bump_pr.status, 'reused');
+  assert.equal(f.state.dispatches.length, 1);
+});
+
+test('dispatch rejection reports recovery without preventing GitHub Release creation', async (t) => {
+  const f = await fixture(t);
+  f.state.denyDispatch = true;
+  await f.run(bumpStep);
+  assert.equal(f.outputs.bump_pr.status, 'created', 'PR creation succeeded independently');
+  assert.equal(f.outputs.bump_pr.ci_status, 'failed');
+  assert.match(f.errors.join('\n'), /403.*Resource not accessible/);
+  assert.match(f.errors.join('\n'), /actions: write/);
+  assert.match(f.errors.join('\n'), /node .github\/scripts\/release-ci.cjs example\/project 1 [a-f0-9]{40}/);
+  await f.run(releaseStep);
+  await f.run(summaryStep);
+  assert.equal(f.outputs.github_release.status, 'created');
+  assert.match(fs.readFileSync(f.summary, 'utf8'), /CI.*failed/);
+});
+
+test('verbose dispatch failures keep recovery in the bounded release summary', async (t) => {
+  const f = await fixture(t);
+  f.state.denyDispatch = true;
+  f.state.dispatchMessage = 'Denied '.repeat(1000);
+  await f.run(bumpStep);
+  assert.match(f.outputs.bump_pr.ci_reason, /Recovery: node .github\/scripts\/release-ci.cjs example\/project 1 [a-f0-9]{40}/);
+  assert.ok(f.outputs.bump_pr.ci_reason.length <= 2000);
 });
 
 test('conflicting remote contents stay untouched and identify manual recovery', async (t) => {

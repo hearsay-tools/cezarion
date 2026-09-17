@@ -133,6 +133,64 @@ timestamp. A matching open or merged PR is reused; a deleted branch belonging to
 a matching merged PR stays deleted. A matching GitHub Release and source tag are
 also reused. The `existing` input needs no bump PR.
 
+### Recovering missing version-bump CI
+
+Release finalization explicitly dispatches `ci.yml` for both new and reused open
+version-bump PRs. PRs created with `GITHUB_TOKEN` do not trigger
+`pull_request_target`; an explicit `workflow_dispatch` does trigger Actions.
+The release job needs `actions: write` for this step. Verification keeps read-only
+permissions and the required check name **Unit, build, E2E, and package**.
+
+Dispatch runs at the release branch, so GitHub attaches its checks to that head
+commit. The verification jobs check out the immutable `github.sha`, not a moving
+branch or an input-supplied revision. Dispatch has no PR payload and deliberately
+runs the full matrix; PR-event manifest-only classification and its safeguards
+are unchanged. Dispatch never publishes npm packages or PR snapshots.
+
+From a checkout containing this recovery helper, use the PR number and the exact
+head SHA you intend to verify. For the blocked `0.13.6` PR #374:
+
+```bash
+node .github/scripts/release-ci.cjs hearsay-tools/cezarion 374 95a6d5193a19ef8baa7a063695f2ac003f644442
+```
+
+The command uses your existing `gh` authentication. It rejects a changed head or
+foreign repository, reuses active CI for that commit, and only accepts completed
+CI when the required aggregate passed. Otherwise it dispatches and waits up to
+55 seconds for a run attributed to that exact SHA. Its JSON result links the run:
+`dispatched` and `active` mean verification is still pending, not passed. Watch
+that run with `gh run watch RUN_ID --repo hearsay-tools/cezarion --exit-status`.
+If GitHub accepted a dispatch but the run is not visible yet, inspect Actions
+before retrying; the same command checks again for active verification.
+
+The underlying recovery dispatch for #374 was accepted on 2026-09-17:
+`gh workflow run ci.yml --repo hearsay-tools/cezarion --ref release/v0.13.6`
+started [run 35211101741](https://github.com/hearsay-tools/cezarion/actions/runs/35211101741)
+at `95a6d5193a19ef8baa7a063695f2ac003f644442`. The reported dispatch rejection did
+not reproduce. That run correctly failed the required aggregate on a test cleanup
+error. The helper recovered it with [run 35211503672](https://github.com/hearsay-tools/cezarion/actions/runs/35211503672),
+which passed every verification job. All seven build/test job checkout logs and
+the required GitHub Actions check recorded that same head SHA. Repeating the helper
+during the run returned `active`, and after completion returned `passed`, without
+another dispatch. Prefer the helper above: it validates the expected commit
+and avoids repeating active verification. Do not dispatch on `main` and merely
+override checkout to the release commit: that attaches the check to the wrong SHA.
+
+A failed trigger leaves PR creation and npm publication outcomes visible in the
+release summary, reports the API error, and prints the recovery command. For a
+403, check the caller's Actions write permission and repository/organization
+Actions policy. For a 404/422, check the repository, release branch, active
+`ci.yml` workflow, and its `workflow_dispatch` declaration. Re-running an old
+release retains its old workflow code: recover CI directly instead of publishing
+another version. Older release branches also retain their old checkout logic;
+confirm their job checkout SHA matches the run's head SHA before relying on the
+result. Recovery does not edit those branches or weaken merge protection.
+
+See GitHub's [workflow triggering rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)
+and [dispatch API](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event).
+
+### Release finalization conflicts
+
 Conflicting branch contents, a different source parent, a closed unmerged PR, or
 a different release/tag produce an error with a recovery link. No existing remote
 work is overwritten. Inspect the linked comparison or Release and resolve the

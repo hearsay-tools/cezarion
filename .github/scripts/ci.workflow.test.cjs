@@ -17,6 +17,21 @@ function stepsText(job) {
   return JSON.stringify(job.steps);
 }
 
+test('dispatched verification checks out the attributed SHA even after its branch moves', () => {
+  const { runInNewContext } = require('node:vm');
+  const ci = workflow();
+  for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
+    const checkout = ci.jobs[name].steps.find((s) => s.uses?.startsWith('actions/checkout@'));
+    const expression = checkout.with.ref.slice(3, -2).trim();
+    const ref = runInNewContext(expression, { github: {
+      event: { pull_request: {} }, ref: 'refs/heads/release/v0.13.6', sha: 'a'.repeat(40),
+    } });
+    assert.equal(ref, 'a'.repeat(40), `${name} must verify the commit receiving the check`);
+    assert.equal(checkout.with['persist-credentials'], false);
+    assert.equal(ci.jobs[name].permissions?.contents ?? ci.permissions.contents, 'read');
+  }
+});
+
 function runShell(command, env = {}) {
   return spawnSync('bash', ['-e', '-c', command], {
     cwd: repoRoot,
