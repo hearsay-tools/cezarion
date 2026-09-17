@@ -27,5 +27,6 @@ export function fixture(): { root: string; sha: string; store: RunStore; manager
   const service = new DelegationService();
   service.registerProject({ id: 'project', root, store, manager });
   return { root, sha, store, manager, parent, credentials, caller, token, service,
-    close() { credentials.close(); manager.dispose(); store.flush(); rmSync(root, { recursive: true, force: true }); } };
+    // Git can still write maintenance files while recursive removal walks the fixture.
+    close() { credentials.close(); manager.dispose(); store.flush(); rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); } };
 }

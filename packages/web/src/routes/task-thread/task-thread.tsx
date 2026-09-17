@@ -444,7 +444,7 @@ export function ThreadView({
               className="flex items-center gap-2 px-1 text-xs text-muted-foreground"
             >
               <StatusDot tone={attention.tone} pulse={attention.pulse} />
-              {attention.bucket === 'waiting' ? 'The agent is paused, waiting for your reply' : 'Waiting on workers — you can send a message to resume'}
+              {attention.bucket === 'waiting' ? 'The agent is paused, waiting for your reply' : `${attention.label.charAt(0).toUpperCase()}${attention.label.slice(1)} — you can send a message to resume`}
             </div>
           ) : null}
 
@@ -464,7 +464,7 @@ export function ThreadView({
 
           <Composer
             onStop={runActionFlags(run).cancel ? stopAction.stop : undefined}
-            stopOnEmpty={run.status === 'queued' || run.status === 'running' || (run.status === 'waiting' && attention.label === 'waiting on workers' && !needsAnswer)}
+            stopOnEmpty={run.status === 'queued' || run.status === 'running' || (run.status === 'waiting' && attention.bucket === 'none' && !needsAnswer)}
             stopping={stopAction.stopping}
             retainDraftUntilSuccess
             compactFeedback

@@ -175,9 +175,11 @@ export type DelegationState = z.infer<typeof delegationStateSchema>;
 /** Slim list/palette projection. Never copies resource paths, permissions or receipts. */
 export const runDelegationSummarySchema = z.discriminatedUnion('role', [
   delegationStateSchema.options[0].pick({ role: true }).strip().extend({
-    wait: workerWaitSchema.pick({ phase: true }).strip().optional(),
+    wait: workerWaitSchema.pick({ phase: true, requestIds: true }).strip().optional(),
   }),
-  delegationStateSchema.options[1].pick({ role: true }).strip(),
+  delegationStateSchema.options[1].pick({ role: true }).strip().extend({
+    wait: workerWaitSchema.pick({ phase: true, requestIds: true }).strip().optional(),
+  }),
   delegationStateSchema.options[2].strip(),
 ]);
 export type RunDelegationSummary = z.infer<typeof runDelegationSummarySchema>;

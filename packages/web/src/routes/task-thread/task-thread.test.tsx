@@ -1256,3 +1256,17 @@ describe('composer replies after idle close (#315)', () => {
     },
   )
 })
+
+
+it.each(['root', 'worker'] as const)('shows the actual dependency in a parked %s request thread', role => {
+  const wait = { id: 'wait', workerIds: [], requestIds: ['request'], deadline: '2026-09-17T00:00:00.000Z', phase: 'parked' as const, outcomes: [] }
+  const delegation: ApiRun['delegation'] = role === 'root' ? { role, permissions: [], receipts: [], wait } : {
+    role, permissions: [], parentRunId: 'parent', wait,
+    workspace: { kind: 'owned-isolated', ownerRunId: 'worker', resourceId: 'worker', path: '/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) },
+  }
+  renderView(<ThreadView run={run('waiting', { delegation })} thread={reduceThread([])} />)
+  expect(document.querySelector('[data-slot="paused-hint"]')?.textContent).toContain(role === 'worker' ? 'Waiting on parent reply' : 'Waiting on worker replies')
+  expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies')
+  expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+  expect(screen.getAllByRole('button', { name: 'Stop' }).some(button => !button.hasAttribute('disabled'))).toBe(true)
+})

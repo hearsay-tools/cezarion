@@ -116,7 +116,7 @@ it('keeps every one of 32 worker links in the bounded list, independent of root 
 it.each([root, child])('shows request waiting for either participant ($id)', run => {
   if (!run.delegation || run.delegation.role === 'invalid') throw Error('fixture');
   setup({ ...run, delegation: { ...run.delegation, wait: { id: '10000000-0000-4000-8000-000000000003', workerIds: [], requestIds: [workerId], phase: 'parked', deadline: at, outcomes: [] } } });
-  expect(screen.getByText(/Waiting on request replies/)).toBeTruthy();
+  expect(screen.getByText(run.delegation.role === 'worker' ? /Waiting on parent reply/ : /Waiting on worker replies/)).toBeTruthy();
 });
 
 
