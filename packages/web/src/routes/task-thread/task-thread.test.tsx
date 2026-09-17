@@ -786,7 +786,7 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="note-line"]')?.textContent).toContain('re-queued')
   })
 
-  it('no plan → no dock, no header mirror; steps present → the rail renders in the header', () => {
+  it('groups session activity into the dock and leaves the header rail off the session tab', () => {
     renderView(
       <ThreadView
         run={run('running', {
@@ -798,17 +798,14 @@ describe('ThreadView', () => {
         thread={reduceThread(EVENTS)}
       />,
     )
+    expect(document.querySelector('[data-slot="run-activity-dock"]')).not.toBeNull()
     expect(document.querySelector('[data-slot="plan-dock"]')).toBeNull()
     expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
-    // The header shows the compact one-line summary (collapsed by default): a dot per step and
-    // the active step's name + position. The full rows only mount once it's expanded.
-    const summary = document.querySelector('[data-slot="workflow-steps"]')
-    expect(summary).not.toBeNull()
-    expect(summary!.textContent).toContain('Do the task')
-    expect(summary!.textContent).toContain('step 1 of 2')
-    const dots = [...document.querySelectorAll('[data-slot="step-dot"]')]
-    expect(dots.map((dot) => dot.getAttribute('data-visual'))).toEqual(['active', 'pending'])
-    expect(document.querySelector('[data-slot="step-row"]')).toBeNull()
+    expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
+    const dock = document.querySelector('[data-slot="run-activity-dock"]')!
+    expect(dock.textContent).toContain('Run activity')
+    expect(dock.textContent).toContain('sections')
+    expect(dock.textContent).toContain('Working')
   })
 
   it('a plan in the stream → the dock above the composer area + the compact header mirror', () => {
@@ -823,11 +820,12 @@ describe('ThreadView', () => {
       }),
     ]
     renderView(<ThreadView run={run('running')} thread={reduceThread(withPlan)} />)
+    expect(document.querySelector('[data-slot="run-activity-dock"]')).not.toBeNull()
     expect(document.querySelector('[data-slot="plan-dock"]')).not.toBeNull()
     expect(document.querySelector('[data-slot="plan-count"]')?.textContent).toBe('· 1/3')
-    expect(document.querySelector('[data-slot="plan-mirror"]')?.textContent).toBe('Plan 1/3')
-    // No steps on this run — the rail knows to stay away.
-    expect(document.querySelector('[data-slot="step-rail"]')).toBeNull()
+    expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
+    // The workflow rail has moved into the session dock, so the header stays clear.
+    expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
   })
 
   it('plan-kind tool cards stay out of the thread — the dock is their surface (#382)', () => {

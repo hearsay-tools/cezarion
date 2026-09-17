@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, WorkerInspection } from '@open-mercato/cezar-api-client'
-import { RunHeader, type RunTab } from './run-header'
+import { RunRelationshipsPanel } from './run-relationships'
 
 const parentId = '10000000-0000-4000-8000-000000000001'
 const workerId = '10000000-0000-4000-8000-000000000002'
@@ -16,7 +16,7 @@ const ordinary: ApiRun = { id: parentId, title: 'Parent', task: 'Do task', workf
 const root: ApiRun = { ...ordinary, delegation: { role: 'root', permissions: [], receipts: [{ requestId: workerId, workerId, requestHash: 'b'.repeat(64) }] } }
 const child: ApiRun = { ...ordinary, id: workerId, delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace } }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
-function setup(run: ApiRun, response: () => Promise<Response> = async () => json({ workers: [] }), tab = '') {
+function setup(run: ApiRun, response: () => Promise<Response> = async () => json({ workers: [] })) {
   const requests: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
     const path = String(url); requests.push(path)
@@ -27,13 +27,21 @@ function setup(run: ApiRun, response: () => Promise<Response> = async () => json
     return json({})
   }))
   const client = createQueryClient(); client.setDefaultOptions({ queries: { retry: false } })
-  const view = render(<QueryClientProvider client={client}><ProjectScopeProvider projectId="sample"><MemoryRouter initialEntries={[`/p/sample/tasks/${run.id}${tab}`]}><RunHeader run={run} tab={(tab.slice(1) || 'session') as RunTab} /></MemoryRouter></ProjectScopeProvider></QueryClientProvider>)
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ProjectScopeProvider projectId="sample">
+        <MemoryRouter initialEntries={[`/p/sample/tasks/${run.id}`]}>
+          <RunRelationshipsPanel run={run} />
+        </MemoryRouter>
+      </ProjectScopeProvider>
+    </QueryClientProvider>,
+  )
   return { ...view, requests, client }
 }
 afterEach(() => { cleanup(); onlineManager.setOnline(true); vi.unstubAllGlobals() })
 
-it.each(['', '/changes', '/commits', '/files'])('keeps a scoped parent link in the shared header on tab %s', async tab => {
-  const { requests } = setup(child, async () => json({ parentRunId: parentId, workers: [] }), tab)
+it('keeps a scoped parent link in the relationships panel', async () => {
+  const { requests } = setup(child, async () => json({ parentRunId: parentId, workers: [] }))
   const link = screen.getByRole('link', { name: new RegExp(`parent task ${parentId}`, 'i') })
   expect(link.getAttribute('href')).toBe(`/p/sample/tasks/${parentId}`)
   expect(link.className).toContain('min-h-11')

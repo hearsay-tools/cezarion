@@ -69,7 +69,6 @@ import { cn, isHttpUrl } from '@/lib/utils'
 
 import { Markdown } from './markdown'
 import { cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
-import { RunRelationshipsPanel } from './run-relationships'
 import { WorkflowSteps } from './step-rail'
 import { useFinishRun } from './use-finish-run'
 
@@ -107,13 +106,11 @@ const detailsOpenByRun = new Map<string, boolean>()
 
 export function RunHeader({
   run,
-  planTally,
   tab = 'session',
   hasPendingHumanAsk = false,
   onMarkedUnread,
 }: {
   run: ApiRun
-  planTally?: { done: number; total: number }
   tab?: RunTab
   hasPendingHumanAsk?: boolean
   /** Fired the moment "Mark unread" is invoked, BEFORE the mutation — the Session tab uses it
@@ -165,14 +162,6 @@ export function RunHeader({
             {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
           </Pill>
           <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">
-            {planTally ? (
-              // The plan dock's compact mirror (spec: "mirrored as a compact progress line in
-              // the run header"). Desktop only since #764: on a phone the dock it mirrors is
-              // itself on screen, so the mirror would spend the tightest row here restating it.
-              <span data-slot="plan-mirror" className="hidden text-[11px] text-soft-foreground tabular-nums md:inline">
-                Plan {planTally.done}/{planTally.total}
-              </span>
-            ) : null}
             {/* Phone-width only: above `md` the meta row never collapses, so a control to expand
                 it would be a permanently disabled-looking chevron next to always-visible content.
                 On the Session tab of a run with a plan it lands in the slot #764 freed by hiding
@@ -233,8 +222,6 @@ export function RunHeader({
 
 
         </div>
-
-        <RunRelationshipsPanel run={run} />
 
         {tab !== 'session' && run.steps.length > 0 ? (
           <div className="border-t border-border pt-1 pb-0 md:pt-2 md:pb-1">

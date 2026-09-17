@@ -87,7 +87,6 @@ function stubFetch(overrides: Record<string, () => Response> = {}): SentRequest[
 function renderHeader(
   record: ApiRun,
   onMarkedUnread?: () => void,
-  planTally?: { done: number; total: number },
 ) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
@@ -95,7 +94,7 @@ function renderHeader(
         <Routes>
           <Route
             path="/tasks/:id"
-            element={<RunHeader run={record} onMarkedUnread={onMarkedUnread} planTally={planTally} />}
+            element={<RunHeader run={record} onMarkedUnread={onMarkedUnread} />}
           />
           <Route path="/" element={<div data-slot="home-probe" />} />
         </Routes>
@@ -707,14 +706,11 @@ describe('dense run details (#765)', () => {
     expect(details.contains(schedule)).toBe(false)
   })
 
-  it('drops the plan mirror at phone width — the dock it mirrors is already on screen there', () => {
+  it('no longer renders a plan mirror in the session header', () => {
     stubFetch()
-    renderHeader(run('running', { id: freshRunId() }), undefined, { done: 1, total: 3 })
+    renderHeader(run('running', { id: freshRunId() }))
 
-    const mirror = document.querySelector('[data-slot="plan-mirror"]') as HTMLElement
-    expect(mirror.textContent).toBe('Plan 1/3')
-    expect(mirror.className).toContain('hidden')
-    expect(mirror.className).toContain('md:inline')
+    expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
   })
 })
 
@@ -759,11 +755,9 @@ describe('meta line, tabs, pill and resume hint', () => {
     expect(classes).not.toContain('md:top-0')
   })
 
-  // The plan mirror hides on phones so the title row keeps its space for the status pill and
-  // the kebab. It switches at `md`, the same breakpoint as the sticky header, the tabs, the
-  // composer and the dock — an `sm:` here would reveal it between 640-768px in a header that
-  // is still not sticky, a state the responsive pass never designed for.
-  it('hides the plan mirror on phones and reveals it at the same md breakpoint as the rest of the header', () => {
+  // The session header no longer owns plan progress — the dock does. The header must stay
+  // free of that mirror on every width.
+  it('does not render a plan mirror in the session header at any width', () => {
     stubFetch()
     render(
       <QueryClientProvider client={createQueryClient()}>
@@ -771,19 +765,14 @@ describe('meta line, tabs, pill and resume hint', () => {
           <Routes>
             <Route
               path="/tasks/:id"
-              element={<RunHeader run={run('running')} planTally={{ done: 2, total: 5 }} />}
+              element={<RunHeader run={run('running')} />}
             />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>,
     )
 
-    const mirror = document.querySelector('[data-slot="plan-mirror"]') as HTMLElement
-    expect(mirror.textContent).toContain('Plan 2/5')
-    const classes = mirror.className.split(/\s+/)
-    expect(classes).toContain('hidden')
-    expect(classes).toContain('md:inline')
-    expect(classes).not.toContain('sm:inline')
+    expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
   })
 
   it('meta shows workflow · branch chip · ± · input/output · cost, with the agent summary in the badge', () => {
