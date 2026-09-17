@@ -15,7 +15,7 @@ const statusDotVariants = cva("inline-block size-[7px] shrink-0 rounded-full", {
       pending: "bg-pending-strong",
       danger: "bg-danger",
       accent: "bg-accent-strong",
-      running: "bg-info",
+      running: "bg-running",
       neutral: "bg-soft-foreground",
     },
     pulse: {

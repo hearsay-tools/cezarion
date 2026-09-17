@@ -82,6 +82,9 @@
   --accent-strong-foreground: #0b0f17;
   --merged-strong: #7c3aed;
   --merged-text: #d7bdff;
+  /* Live-run fill. Same hex as --merged-strong (the pre-#373 accent-strong); own role so
+   * running/monitoring dots are not merged chips and not review-required --info. */
+  --running: #7c3aed;
 
   /* Cezarion surfaces from design.pen. Elevation comes from surface steps, not shadows. */
   --surface-base: #0b0f17;
@@ -212,6 +215,7 @@
   --composer-border: #438c84;
   --merged-strong: #7c3aed;
   --merged-text: #6d28d9;
+  --running: #7c3aed;
 
   --message-user-bg: #fff9e8;
   --message-user-border: #ddc978;
@@ -399,6 +403,7 @@
   --color-accent-icon: var(--accent-icon);
   --color-merged-strong: var(--merged-strong);
   --color-merged-text: var(--merged-text);
+  --color-running: var(--running);
   --color-ring: var(--ring);
 
   --color-danger: var(--danger);

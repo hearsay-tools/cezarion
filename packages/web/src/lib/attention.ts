@@ -28,7 +28,7 @@ export const ATTENTION_RANK = {
 
 export type AttentionBucket = keyof typeof ATTENTION_RANK
 
-/** The dot tones the design system defines (`--success`/`--pending`/`--danger`/`--accent-strong`, plus
+/** The dot tones the design system defines (`--success`/`--pending`/`--danger`/`--accent-strong`/`--running`, plus
  *  the neutral `--soft-foreground`). Named here rather than imported from `StatusDot` to keep
  *  this module UI-free; `attention.test.ts` asserts the two sets stay identical. */
 export type AttentionTone = 'success' | 'pending' | 'danger' | 'accent' | 'running' | 'neutral'
@@ -88,7 +88,7 @@ export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResume
  *  - `waiting` → amber/pending: the agent stopped and is asking you something.
  *  - `review` → violet, matching the violet PR chip beside it: there is work to look at.
  *    (The legacy UI painted both amber; the redesign splits them, per the mockup.)
- *  - `running` → violet, pulsing.
+ *  - `running` → reserved purple (`--running`), pulsing. Not brand teal, not review-required blue.
  *  - `queued` → neutral and still: parked, not transitioning. Its row shows `#2` instead.
  *  - `done`/`failed` → the green/red outcome, still.
  */

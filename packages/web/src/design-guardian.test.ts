@@ -323,6 +323,7 @@ describe('design guardian', () => {
       'syn-key': '#5eead4',
       'merged-strong': '#7c3aed',
       'merged-text': '#d7bdff',
+      running: '#7c3aed',
     })
     expect(light).toMatchObject({
       'accent-text': '#0f766e',
@@ -337,14 +338,32 @@ describe('design guardian', () => {
       'syn-key': '#0f766e',
       'merged-strong': '#7c3aed',
       'merged-text': '#6d28d9',
+      running: '#7c3aed',
     })
 
     const reservedPurple = new Set(['#6d28d9', '#7c3aed', '#d7bdff', '#7c3aedcc', '#8f86e8b3'])
     for (const [name, value] of [...Object.entries(dark), ...Object.entries(light)]) {
       if (reservedPurple.has(value)) {
-        expect(name.startsWith('merged'), `${name} still carries reserved purple ${value}`).toBe(true)
+        expect(
+          name.startsWith('merged') || name === 'running',
+          `${name} still carries reserved purple ${value}`,
+        ).toBe(true)
       }
     }
+  })
+
+  it('paints live-run dots with dedicated running purple, not review-required info', () => {
+    const css = readFileSync(path.join(APP_ROOT, 'src/styles/index.css'), 'utf8')
+    const dark = cssTokenMap(css, ':root {')
+    const light = cssTokenMap(css, '.light {')
+    expect(dark['running']).toBe('#7c3aed')
+    expect(light['running']).toBe('#7c3aed')
+    expect(dark['info']).toBe('#83baff')
+    expect(light['info']).toBe('#2366b1')
+
+    const source = readFileSync(path.join(APP_ROOT, 'src/components/status-dot.tsx'), 'utf8')
+    expect(source).toMatch(/running:\s*"bg-running"/)
+    expect(source).not.toMatch(/running:\s*"bg-info"/)
   })
 
   it('keeps summary merged chips on reserved purple, not brand accent', () => {
