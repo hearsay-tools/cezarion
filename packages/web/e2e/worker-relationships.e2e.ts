@@ -79,10 +79,12 @@ afterAll(async () => {
 
 function open(id = parentId, suffix = '') {
   browser.goto(`${base}${route(id)}${suffix}`)
-  browser.waitForFunction(`document.querySelector(${JSON.stringify(region)}) !== null`)
   browser.evaluate(`(() => {
     const dockButton = document.querySelector('[data-slot="run-activity-dock"] > button[aria-expanded="false"]')
     dockButton?.click()
+  })()`)
+  browser.waitForFunction(`document.querySelector(${JSON.stringify(region)}) !== null`)
+  browser.evaluate(`(() => {
     const disclosure = document.querySelector(${JSON.stringify(`${region} > button[aria-expanded="false"]`)})
     disclosure?.click()
   })()`)
