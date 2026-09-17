@@ -31,7 +31,7 @@ export type AttentionBucket = keyof typeof ATTENTION_RANK
 /** The dot tones the design system defines (`--success`/`--pending`/`--danger`/`--accent-strong`, plus
  *  the neutral `--soft-foreground`). Named here rather than imported from `StatusDot` to keep
  *  this module UI-free; `attention.test.ts` asserts the two sets stay identical. */
-export type AttentionTone = 'success' | 'pending' | 'danger' | 'accent' | 'info' | 'neutral'
+export type AttentionTone = 'success' | 'pending' | 'danger' | 'accent' | 'running' | 'neutral'
 
 export interface Attention {
   bucket: AttentionBucket
@@ -121,10 +121,10 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
     // Still working, but on its OWN downstream work (a sub-agent / a monitored
     // command), not on you (#490). A sub-state of `running`, so it stays in the
     // `running` bucket — no notification, no "Needs you" — with its own label.
-    return { bucket: 'running', tone: 'info', pulse: true, label: 'monitoring' }
+    return { bucket: 'running', tone: 'running', pulse: true, label: 'monitoring' }
   }
   if (run.status === 'running') {
-    return { bucket: 'running', tone: 'info', pulse: true, label: 'running' }
+    return { bucket: 'running', tone: 'running', pulse: true, label: 'running' }
   }
   if (isUnseen(run)) {
     return { bucket: 'unseen', tone: 'accent', pulse: false, label: 'unseen' }

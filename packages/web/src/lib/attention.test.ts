@@ -44,7 +44,7 @@ describe('deriveAttention', () => {
   const cases: ReadonlyArray<[RunStatus, Attention]> = [
     ['waiting', { bucket: 'waiting', tone: 'pending', pulse: true, label: 'needs you' }],
     ['review', { bucket: 'waiting', tone: 'accent', pulse: true, label: 'needs review' }],
-    ['running', { bucket: 'running', tone: 'info', pulse: true, label: 'running' }],
+    ['running', { bucket: 'running', tone: 'running', pulse: true, label: 'running' }],
     ['queued', { bucket: 'none', tone: 'neutral', pulse: false, label: 'queued' }],
     ['done', { bucket: 'none', tone: 'success', pulse: false, label: 'done' }],
     ['failed', { bucket: 'error', tone: 'danger', pulse: false, label: 'failed' }],
@@ -181,7 +181,7 @@ describe("running activity: 'monitoring' (#490)", () => {
   it('is a distinct, non-attention sub-state of running', () => {
     expect(deriveAttention(run({ status: 'running', activity: 'monitoring' }))).toEqual({
       bucket: 'running',
-      tone: 'info',
+      tone: 'running',
       pulse: true,
       label: 'monitoring',
     })
@@ -210,7 +210,7 @@ describe('tone vocabulary', () => {
 
   it('every status yields a tone StatusDot can paint', () => {
     const tones = new Set(ALL_STATUSES.map((status) => deriveAttention(run({ status })).tone))
-    expect([...tones].sort()).toEqual(['accent', 'danger', 'info', 'neutral', 'pending', 'success'])
+    expect([...tones].sort()).toEqual(['accent', 'danger', 'neutral', 'pending', 'running', 'success'])
   })
 })
 
