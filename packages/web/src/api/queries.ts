@@ -307,7 +307,8 @@ export function useRunnerModelCatalogs(
   const codex = useRunnerModels('codex', enabled)
   const opencode = useRunnerModels('opencode', enabled)
   const pi = useRunnerModels('pi', enabled)
-  return { claude, codex, opencode, pi }
+  const cursor = useRunnerModels('cursor', enabled)
+  return { claude, codex, opencode, pi, cursor }
 }
 
 export function useProviderStatus() {

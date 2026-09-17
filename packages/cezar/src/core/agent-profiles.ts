@@ -42,6 +42,8 @@ export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   codex: 'CODEX_HOME',
   opencode: null,
   pi: null,
+  // CURSOR_CONFIG_DIR relocates configuration, not a verified whole account home.
+  cursor: null,
 };
 
 /** Providers that can carry more than one account — what the UI offers "Add account" for. */
@@ -95,4 +97,5 @@ const PROFILE_DIR_MARKERS: Record<ProviderId, readonly string[]> = {
   // pi cannot carry profiles (`PROFILE_ENV_VAR.pi === null`), so nothing ever probes a pi
   // profile dir; the entry exists to keep this table exhaustive over `ProviderId`.
   pi: [],
+  cursor: [],
 };

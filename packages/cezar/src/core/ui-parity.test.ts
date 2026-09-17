@@ -27,7 +27,7 @@ import { describe, expect, it } from 'vitest';
 import type { UiEvent, UiItem } from './ui-events.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BACKENDS = ['claude', 'codex', 'opencode', 'pi'] as const;
+const BACKENDS = ['claude', 'codex', 'opencode', 'pi', 'cursor'] as const;
 
 /** Every event across every golden fixture of one backend. */
 function fixtureEvents(backend: (typeof BACKENDS)[number]): UiEvent[] {
@@ -91,10 +91,29 @@ const CAPABILITIES: ReadonlyArray<[name: string, produced: (events: UiEvent[]) =
   ['turn.completed with a stopReason', (events) => events.some((e) => e.type === 'turn.completed' && e.stopReason !== undefined)],
 ] as const;
 
+/** Cursor 2026.09.15-d2fe57e: ACP presenter in 1699.index.js emits no usage,
+ * and session/prompt returns only stopReason. Confirmed by a live probe; see
+ * __fixtures__/cursor/README.md. Optional upstream usage_update is occupancy, not consumption,
+ * and is deliberately not mapped (pinned by a separate unit test).
+ * Keep inverse assertions so fabricated fixture usage cannot erase the gap.
+ */
+const CURSOR_NO_USAGE_TELEMETRY = new Set([
+  'usage.updated with raw token counts',
+  'turn.completed with per-turn directional usage',
+]);
+
 describe('protocol v2 backend parity (every mapper emits every matrix capability)', () => {
   for (const backend of BACKENDS) {
     const events = fixtureEvents(backend);
     for (const [name, produced] of CAPABILITIES) {
+      if (backend === 'cursor' && CURSOR_NO_USAGE_TELEMETRY.has(name)) {
+        it(`cursor explicitly lacks ${name} (2026.09.15-d2fe57e ACP has no telemetry)`, () => {
+          expect(produced(events)).toBe(false);
+          expect(events.some((event) => event.type === 'usage.updated')).toBe(false);
+          expect(events.some((event) => event.type === 'turn.completed' && event.usage !== undefined)).toBe(false);
+        });
+        continue;
+      }
       it(`${backend} produces ${name}`, () => {
         expect(produced(events)).toBe(true);
       });
@@ -103,9 +122,9 @@ describe('protocol v2 backend parity (every mapper emits every matrix capability
 
   // Sub-agent NESTING rides on parentItemId where the wire attributes work
   // to its parent: claude `parent_tool_use_id` and opencode child-session
-  // parts under a `subtask`. Codex's wire has no parent attribution — its
+  // parts under a `subtask`; Cursor capability-negotiated subagent sessions. Codex's wire has no parent attribution — its
   // matrix cell is the review-mode task items asserted above.
-  for (const backend of ['claude', 'opencode'] as const) {
+  for (const backend of ['claude', 'opencode', 'cursor'] as const) {
     it(`${backend} nests sub-agent work via parentItemId`, () => {
       expect(items(fixtureEvents(backend)).some((item) => item.parentItemId !== undefined)).toBe(true);
     });

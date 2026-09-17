@@ -105,6 +105,11 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       expect(spec.systemPrompt).toContain('--effort');
       expect(controller.credentials.authenticate(spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: run.id });
     }
+    // These mocked roots still finish asynchronously after cancellation. Wait before
+    // afterEach removes their repository, especially recovery's worktree metadata.
+    f.manager.cancel(run.id);
+    for (const session of sessions) session.finish();
+    await until(() => !f.manager.isActive(run.id));
   });
   it('refuses a failed continuation checkpoint without advancing revision or opening another session', async () => {
     const a = await acceptIdentityWorker(); await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);

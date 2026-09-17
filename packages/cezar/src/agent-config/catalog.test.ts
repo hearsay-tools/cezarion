@@ -6,6 +6,7 @@ const HOME: AgentHomePaths = {
   codex: '/home/u/.codex',
   opencodeConfig: '/home/u/.config/opencode',
   pi: '/home/u/.pi/agent',
+  cursor: '/home/u/.cursor',
 };
 
 describe('agent-config catalog', () => {
@@ -25,7 +26,7 @@ describe('agent-config catalog', () => {
   it('<repo>/AGENTS.md is ONE entry read by every runner that loads it (Codex, OpenCode, Pi)', () => {
     const agents = CONFIG_FILES.filter((f) => f.label === 'AGENTS.md' && f.scope === 'project');
     expect(agents).toHaveLength(1);
-    expect(agents[0]!.runners).toEqual(['codex', 'opencode', 'pi']);
+    expect(agents[0]!.runners).toEqual(['codex', 'opencode', 'pi', 'cursor']);
   });
 
   it('lists Pi’s documented files: settings at both scopes and the global AGENTS.md — and no MCP file', () => {
@@ -80,6 +81,7 @@ describe('agent-config catalog', () => {
       'claude.project.mcp',
       'codex.project.config',
       'codex.user.config',
+      'cursor.project.mcp',
       'opencode.project.config',
       'opencode.user.config',
     ]);

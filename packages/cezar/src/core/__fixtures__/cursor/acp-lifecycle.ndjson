@@ -1,0 +1,15 @@
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Inspect first."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "I will "}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "edit."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "plan", "entries": [{"content": "Update file", "status": "in_progress", "priority": "high"}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "tool_call", "toolCallId": "edit-1", "title": "Edit file", "kind": "edit", "status": "pending", "rawInput": {"path": "/repo/a.ts"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "edit-1", "status": "in_progress"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "edit-1", "status": "completed", "content": [{"type": "diff", "path": "/repo/a.ts", "oldText": "old", "newText": "new"}], "locations": [{"path": "/repo/a.ts", "line": 1}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "tool_call", "toolCallId": "shell-1", "title": "Run tests", "kind": "execute", "status": "pending", "rawInput": {"command": "npm test"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "shell-1", "status": "failed", "content": [{"type": "content", "content": {"type": "text", "text": "Tests failed"}}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "tool_call", "toolCallId": "task-1", "title": "Explore", "kind": "other", "status": "pending"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "task-1", "status": "completed", "rawOutput": "Found a.ts"}}}
+{"jsonrpc": "2.0", "id": 50, "method": "cursor/task", "params": {"toolCallId": "task-1", "description": "Explore", "prompt": "Find files", "subagentType": "explore", "durationMs": 12}}
+{"jsonrpc": "2.0", "id": 51, "method": "cursor/update_todos", "params": {"toolCallId": "todos-1", "todos": [{"id": "one", "content": "Update file", "status": "completed"}], "merge": false}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Done."}}}}
+{"jsonrpc": "2.0", "id": 1, "result": {"stopReason": "end_turn"}}

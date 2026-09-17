@@ -137,6 +137,14 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       subagent: 'mock:subagent',
     },
   },
+  cursor: {
+    backend: 'cursor',
+    binEnv: 'CEZ_CURSOR_BIN',
+    mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
+    scenarios: { baseline: BASELINE_PROMPT, done: 'mock:done', hold: 'mock:hold',
+      'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
+      ask: 'mock:ask', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent' },
+  },
   pi: {
     backend: 'pi',
     binEnv: 'CEZ_PI_BIN',
@@ -197,6 +205,10 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  {
+    criterion: 'S4', backend: 'cursor', kind: 'capability-absent',
+    reason: 'Cursor ACP 2026.09.15-d2fe57e emits no token usage (src/acp presenter and prompt result; live probe). Do not manufacture counts from text. Revisit when upstream emits telemetry.',
+  },
   {
     criterion: 'R12',
     backend: 'pi',
@@ -403,9 +415,13 @@ export async function driveRun(
       await new Promise((r) => setTimeout(r, 50));
     }
     store.flush();
-    return { statuses, record: record(), events: readRunEvents(repoRoot, started.id) };
+    // Cleanup mutates the live record; return the observed state before cancellation.
+    return { statuses, record: structuredClone(record()), events: readRunEvents(repoRoot, started.id) };
   } finally {
-    if (runId && manager) manager.cancel(runId);
+    if (runId && manager) {
+      manager.cancel(runId);
+      await waitFor(() => !manager!.isActive(runId!));
+    }
     store?.flush();
     if (savedBin === undefined) delete process.env[adapter.binEnv];
     else process.env[adapter.binEnv] = savedBin;

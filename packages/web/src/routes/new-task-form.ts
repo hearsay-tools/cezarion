@@ -52,6 +52,7 @@ export const RUNNERS: readonly RunnerOption[] = [
   { id: 'codex', label: 'codex', desc: 'OpenAI Codex (app-server)' },
   { id: 'opencode', label: 'opencode', desc: 'OpenCode (serve)' },
   { id: 'pi', label: 'pi', desc: 'pi CLI (provider/model)' },
+  { id: 'cursor', label: 'Cursor', desc: 'Cursor CLI (ACP)' },
 ]
 
 export interface ModelPreset {
@@ -77,6 +78,7 @@ export const MODELS_BY_RUNNER: Record<Runner, readonly ModelPreset[]> = {
   ],
   // pi selects a model with the same `provider/model` convention as opencode, and its
   // entries come from discovery (`pi --list-models`) for the same reason OpenCode's do.
+  cursor: [{ id: '', label: 'auto', desc: 'Use your Cursor default model' }],
   pi: [
     { id: '', label: 'auto', desc: 'Use your pi default model' },
   ],
@@ -95,16 +97,17 @@ export const EFFORT_OPTIONS = [
 
 export type EffortOption = (typeof EFFORT_OPTIONS)[number]
 
-/** `auto` plus this model's discovered levels, or the complete backward-compatible fallback. */
+/** Auto plus advertised levels. Cursor has no generic fallback without model metadata. */
 export function effortOptionsForModel(
   runner: Runner,
   model: string,
   catalog?: RunnerModelCatalogResponse,
 ): readonly EffortOption[] {
-  const levels = runnerDiscoversModels(runner)
+  const fallback = runner === 'cursor' ? [EFFORT_OPTIONS[0]] : EFFORT_OPTIONS
+  const levels = runnerDiscoversModels(runner) && (runner !== 'cursor' || catalog?.runner === runner)
     ? catalog?.models.find((entry) => entry.id === model)?.effortLevels
     : undefined
-  if (!levels?.length) return EFFORT_OPTIONS
+  if (!levels?.length) return fallback
 
   const options: EffortOption[] = [EFFORT_OPTIONS[0]]
   const seen = new Set<string>()
@@ -115,7 +118,7 @@ export function effortOptionsForModel(
     seen.add(level)
     options.push(option)
   }
-  return options.length > 1 ? options : EFFORT_OPTIONS
+  return options.length > 1 ? options : fallback
 }
 
 /** Resolve stale or inherited effort through the same options the picker displays. */
@@ -142,6 +145,8 @@ const PROVIDER_SPANNING_RUNNERS: readonly Runner[] = ['opencode', 'pi']
  * (#480).
  * Unknown ids remain valid custom models; only a known cross-runner mismatch is discarded. */
 export function modelConflictsWithRunner(model: string, runner: Runner): boolean {
+  // Cursor legitimately serves bare IDs from multiple providers, even when discovery is unavailable.
+  if (runner === 'cursor') return false
   if (!model || MODELS_BY_RUNNER[runner].some((preset) => preset.id === model)) return false
   // Preserve the retired dated suggestions' mismatch guard. Provider-qualified IDs stay free-form.
   const legacyClaudeIds = ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5']
@@ -187,6 +192,7 @@ const DISCOVERY_RUNNER_LABEL: Record<ModelDiscoveryRunner, string> = {
   codex: 'Codex',
   opencode: 'OpenCode',
   pi: 'Pi',
+  cursor: 'Cursor',
 }
 
 export function modelCatalogStatus(

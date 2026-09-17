@@ -199,6 +199,7 @@ export const HARNESS_EXTRA_TOOLS: { readonly [K in RunnerId]: readonly string[] 
   codex: [],
   opencode: [],
   pi: ['Subagent', 'SubagentSupervisor', 'SubagentWait'],
+  cursor: [],
 };
 
 export function allowedToolsForStep(

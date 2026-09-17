@@ -11,7 +11,7 @@ const absolutePathSchema = z.string().min(1).max(4096).refine(isAbsolute).refine
 
 /** Internal durable evidence, never a public environment override or credential snapshot. */
 export const workerAccountBindingSchema = z.object({
-  provider: z.enum(['claude', 'codex', 'opencode', 'pi']),
+  provider: z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor']),
   profileId: z.string().min(1).max(64),
   homePath: absolutePathSchema.optional(),
   // Identical config directories can have different state/login files depending on invocation.

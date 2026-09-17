@@ -1,3 +1,4 @@
+import type { ApiRun } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
@@ -153,7 +154,8 @@ import {
   type ResolvedAgentProfile,
 } from '../workspace/agent-profiles.ts';
 import { PROFILE_CAPABLE_PROVIDERS, profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
-import { withEnvPrefix } from '../core/shell-env.ts';
+import { quoteExecutable, withEnvPrefix } from '../core/shell-env.ts';
+import { resolveCursorExecutable } from '../core/cursor-model-catalog.ts';
 import {
   allocateProjectSlug,
   listProjects,
@@ -1783,7 +1785,7 @@ export function createApp(deps: ServerDeps) {
       },
     )
 
-    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, or pi' }), async (c) => {
+    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, pi, or cursor' }), async (c) => {
       const body = { data: c.req.valid('json') };
 
       const provider = body.data.provider as ProviderId;
@@ -2996,6 +2998,7 @@ export function createApp(deps: ServerDeps) {
             codex: z.string().trim().min(1).max(200).nullable().optional(),
             opencode: z.string().trim().min(1).max(200).nullable().optional(),
             pi: z.string().trim().min(1).max(200).nullable().optional(),
+            cursor: z.string().trim().min(1).max(200).nullable().optional(),
           })
           .optional(),
       })
@@ -3468,9 +3471,13 @@ export function createApp(deps: ServerDeps) {
   // Additive `usage` field (#348): the latest CPU/RSS/proc-count sample of the
   // run's live process tree — absent for finished runs and when `ps` yields
   // nothing. The stored record itself is never touched.
-  const withUsage = (run: RunRecord): RunRecord & { usage?: ReturnType<typeof currentUsage> } => {
+  const withUsage = (run: RunRecord): ApiRun => {
     const usage = currentUsage(run.id);
-    return usage ? { ...run, usage } : run;
+    const sessionStep = [...run.steps].reverse().find(step => step.sessionId);
+    const sessionId = sessionStep?.sessionId;
+    const backend = sessionStep?.backend ?? run.runner ?? 'claude';
+    const command = backend === 'cursor' && sessionId ? resumeCommand(backend, sessionId) : null;
+    return { ...run, ...(usage ? { usage } : {}), ...(command ? { cliResumeCommand: command } : {}) };
   };
 
   // The inbox half of a composer launch (#374). Since the cockpit's "▶ Run"
@@ -3941,14 +3948,15 @@ export function createApp(deps: ServerDeps) {
       const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
       const sessionId = sessionStep?.sessionId;
       if (!sessionId) return c.json({ error: 'no agent session to resume' }, 409);
-      const blocked = await providerActionError([providerForExistingRun(run)]);
+      const backend = sessionStep?.backend ?? run.runner ?? 'claude';
+      const blocked = await providerActionError([backend]);
       if (blocked) return c.json({ error: blocked }, 409);
       const cwd = run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : repoRoot;
-      const command = resumeCommand(run.runner, sessionId);
+      const command = resumeCommand(backend, sessionId);
       // Fails closed on an id we do not recognise — see resumeCommand (#431).
       if (!command) return c.json({ error: 'the recorded session id has an unexpected shape' }, 409);
       // The account that OWNS this session, not the project's current one (spec 2026-07-29).
-      const account = await handoffEnv(run.runner ?? 'claude', sessionStep?.profileId);
+      const account = await handoffEnv(backend, sessionStep?.profileId);
       if ('error' in account) return c.json({ error: account.error }, 409);
       const fallback = handoffFallbackCommand(cwd, command, account.env);
       // Fail closed for the same reason as the session id: a terminal opened without the
@@ -4030,7 +4038,7 @@ export function createApp(deps: ServerDeps) {
       }
 
       // Coding-agent CLI handoff (#cli-handoff, #402): open a terminal in the worktree that resumes
-      // THIS run's session when the chosen CLI is the run's own runner (and a session exists), or
+      // THIS run's latest session when the chosen CLI owns it (and a session exists), or
       // starts a fresh CLI there otherwise. Same terminal launcher the Terminal button uses.
       // Records that predate the runner choice carry no `runner` at all — they default to Claude
       // everywhere else (resumeCommand, the client's resumeHint/cliTargetResumes), so the match
@@ -4050,8 +4058,9 @@ export function createApp(deps: ServerDeps) {
         const sessionId = sessionStep?.sessionId;
         // An id resumeCommand refuses (#431) degrades to a fresh CLI in the worktree,
         // exactly like a run that never recorded a session.
-        const resume = sessionId && cliRunner === (run.runner ?? 'claude') ? resumeCommand(cliRunner, sessionId) : null;
-        const command = resume ?? cliRunner;
+        const resume = sessionId && cliRunner === (sessionStep?.backend ?? run.runner ?? 'claude') ? resumeCommand(cliRunner, sessionId) : null;
+        const command = resume ?? (cliRunner === 'cursor' ? quoteExecutable(resolveCursorExecutable(), process.platform) : cliRunner);
+        if (command === null) return c.json({ error: 'the configured Cursor executable cannot be used in a terminal command' }, 409);
         // BOTH branches carry the account (spec 2026-07-29-agent-profiles): a resume needs the
         // config dir that holds its session, and a FRESH CLI in this worktree should still open
         // on the account the project works under — otherwise "Open in → Claude CLI" quietly
@@ -5325,6 +5334,7 @@ export function createApp(deps: ServerDeps) {
         codex: modelPresetSchema,
         opencode: modelPresetSchema,
         pi: modelPresetSchema,
+        cursor: modelPresetSchema,
       })
       .optional(),
     // Concurrency + memory guard (Settings → Resources). maxParallel clamps to
@@ -5905,6 +5915,10 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
       return `codex resume ${sessionId}`;
     case 'opencode':
       return `opencode --session ${sessionId}`;
+    case 'cursor': {
+      const executable = quoteExecutable(resolveCursorExecutable(), process.platform);
+      return executable === null ? null : `${executable} --resume ${sessionId}`;
+    }
     case 'pi':
       return `pi --session ${sessionId}`;
     default:

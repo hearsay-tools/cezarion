@@ -4,7 +4,7 @@ import { AGENT_MODELS_LOCKED_ENV } from './agent-model-policy.ts';
 import { profileEnv } from './agent-profiles.ts';
 import { withEnvPrefix } from './shell-env.ts';
 
-export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'pi'] as const;
+export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderConnectionState =
   | 'connected'
@@ -227,6 +227,25 @@ function parsePiStatus(result: ProviderCommandResult): ProviderConnectionState |
   return null;
 }
 
+// Verified against Cursor CLI 2026.09.15 status --format json implementation.
+function parseCursorStatus(result: ProviderCommandResult): ProviderConnectionState | null {
+  try {
+    const value = JSON.parse(result.stdout) as { isAuthenticated?: unknown; status?: unknown };
+    // `agent status` checks stored login tokens only (CLI 2026.09.15), while ACP
+    // also accepts environment credentials. Like OpenCode's environment count,
+    // configured credentials permit a run; a vendor rejection is latched at runtime.
+    if (result.exitCode === 0 && (process.env.CURSOR_API_KEY?.trim() || process.env.CURSOR_AUTH_TOKEN?.trim())) {
+      return 'connected';
+    }
+    if (value.isAuthenticated === true && result.exitCode === 0) return 'connected';
+    if (value.isAuthenticated === false && result.exitCode === 0
+      && (value.status === 'unauthenticated' || value.status === 'partially-authenticated')) return 'disconnected';
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 const DESCRIPTORS: readonly ProviderDescriptor[] = [
   {
     id: 'claude',
@@ -259,6 +278,14 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
     loginArgs: ['/login'],
     installHint: 'Install pi, then run `pi /login`.',
     parse: parsePiStatus,
+  },
+  {
+    id: 'cursor',
+    executable: () => process.env.CEZ_CURSOR_BIN ?? 'agent',
+    statusArgs: ['status', '--format', 'json'],
+    loginArgs: ['login'],
+    installHint: 'Install Cursor CLI, then run `agent login`.',
+    parse: parseCursorStatus,
   },
 ];
 

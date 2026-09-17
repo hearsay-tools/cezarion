@@ -16,6 +16,7 @@ import { apiRequest } from './loopback-request.testkit.ts';
 import { WorkspaceEventBus, createApp } from './server.ts';
 
 const CONNECTED_OUTPUT: Record<ProviderId, string> = {
+  cursor: '{"status":"authenticated","isAuthenticated":true}',
   claude: '{"loggedIn":true}',
   codex: 'Logged in using ChatGPT',
   opencode: [
@@ -27,6 +28,7 @@ const CONNECTED_OUTPUT: Record<ProviderId, string> = {
 };
 
 const DISCONNECTED_OUTPUT: Record<ProviderId, string> = {
+  cursor: '{"status":"unauthenticated","isAuthenticated":false}',
   claude: '{"loggedIn":false}',
   codex: 'Not logged in',
   opencode: [
@@ -37,6 +39,7 @@ const DISCONNECTED_OUTPUT: Record<ProviderId, string> = {
 };
 
 const providerForExecutable = (executable: string): ProviderId => {
+  if (executable === 'agent') return 'cursor';
   if (executable === 'claude' || executable === 'codex' || executable === 'opencode' || executable === 'pi') return executable;
   throw new Error(`unexpected executable: ${executable}`);
 };
@@ -164,6 +167,7 @@ describe('workspace provider API', () => {
           enabled: true,
         },
         { provider: 'pi', status: 'connected', enabled: true },
+        { provider: 'cursor', status: 'connected', enabled: true },
       ],
     });
   });
@@ -184,6 +188,7 @@ describe('workspace provider API', () => {
         { provider: 'codex', status: 'connected', enabled: true },
         { provider: 'opencode', status: 'connected', enabled: true },
         { provider: 'pi', status: 'connected', enabled: true },
+        { provider: 'cursor', status: 'connected', enabled: true },
       ],
     });
     expect(runCommand).not.toHaveBeenCalled();
@@ -286,7 +291,7 @@ describe('workspace provider API', () => {
     await apiRequest(server, '/api/v1/providers/status');
     await apiRequest(server, '/api/v1/providers/status?refresh=1');
 
-    expect(runCommand).toHaveBeenCalledTimes(8);
+    expect(runCommand).toHaveBeenCalledTimes(10);
   });
 
   it('GET without refresh reuses the completed provider cache', async () => {
@@ -300,7 +305,7 @@ describe('workspace provider API', () => {
     await apiRequest(server, '/api/v1/providers/status');
     await apiRequest(server, '/api/v1/providers/status');
 
-    expect(runCommand).toHaveBeenCalledTimes(4);
+    expect(runCommand).toHaveBeenCalledTimes(5);
   });
 
   it('POST /api/v1/providers/:provider/retry clears only the current incident without enabling a disabled provider', async () => {
@@ -485,7 +490,7 @@ describe('workspace provider API', () => {
     const openTerminal = vi.fn(async () => true);
     const pending = connect(app({ providerAuth, openTerminal }), 'claude');
 
-    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(5));
     providerAuth.reportRuntimeAuthFailure('claude');
     release();
 
@@ -685,7 +690,7 @@ describe('workspace provider API', () => {
     });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'provider must be claude, codex, opencode, or pi' });
+    expect(await response.json()).toEqual({ error: 'provider must be claude, codex, opencode, pi, or cursor' });
   });
 
   it('never places request-controlled text in the opened command', async () => {

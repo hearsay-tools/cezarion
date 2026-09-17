@@ -95,8 +95,8 @@ describe('settings → agents against the live dry-run server', () => {
   it('renders every knob, agent-agnostically named', () => {
     gotoAgents()
     browser.waitForFunction(`document.querySelector('[data-slot="agents-base-branch"]') !== null`)
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="agents-runner"] [role="radio"]')].map(el => el.dataset.value).sort()`)).toEqual(['claude', 'codex', 'opencode', 'pi'])
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="agents-model"]')].map(el => el.dataset.runner).sort()`)).toEqual(['claude', 'codex', 'opencode', 'pi'])
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="agents-runner"] [role="radio"]')].map(el => el.dataset.value).sort()`)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi'])
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="agents-model"]')].map(el => el.dataset.runner).sort()`)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi'])
     expect(browser.count('[data-slot="agents-system-prompt"]')).toBe(1)
     // The dry-run repo is a git checkout, so the base-branch picker is the real control.
     expect(browser.count('[data-slot="agents-base-branch"]')).toBe(1)

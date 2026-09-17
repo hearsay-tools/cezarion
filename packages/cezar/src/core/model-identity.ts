@@ -93,6 +93,9 @@ export const BACKEND_MODEL_MAP: Readonly<Record<AgentBackend, BackendModelMap>> 
   codex: { defaultProvider: 'openai' },
   // opencode selects across providers, so a bare model is ambiguous: reject it
   // loudly rather than let the server pick a default the user never asked for.
+  // Cursor owns an opaque multi-vendor catalog; the namespace is the harness,
+  // not a guessed upstream provider. Its CLI receives the bare ID unchanged.
+  cursor: { defaultProvider: 'cursor' },
   opencode: {},
   // pi selects across providers with the same `provider/model` convention as
   // opencode (#387) — no default provider, so a bare model is rejected loudly

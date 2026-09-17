@@ -40,6 +40,16 @@ const skill = (name: string, source: Skill['source'] = 'ai'): Skill => ({
 const workflow = (name: string): WorkflowDef => ({ name, source: 'built-in', steps: [] })
 
 describe('availableRunners (legacy renderChrome rule)', () => {
+  it('offers only auto for Cursor without advertised effort and clears stale effort', () => {
+    const options = effortOptionsForModel('cursor', 'model[effort=high]')
+    expect(options.map((option) => option.value)).toEqual([''])
+    expect(resolveEffort('high', options)).toBe('')
+  })
+  it('offers Cursor only when detected and preserves its native default model', () => {
+    expect(availableRunners([check('cursor', true)])).toEqual(['cursor'])
+    expect(availableRunners([check('claude', true), check('cursor', false)])).toEqual(['claude'])
+    expect(modelsForRunner('cursor')[0]).toMatchObject({ id: '', desc: 'Use your Cursor default model' })
+  })
   it('offers exactly the detected backends, in RUNNERS order', () => {
     const checks = [check('opencode', true), check('git', true), check('claude', true), check('codex', false)]
     expect(availableRunners(checks)).toEqual(['claude', 'opencode'])
@@ -113,6 +123,16 @@ describe('model option resolution', () => {
         ['openai/gpt-5.1'],
       ).map((m) => m.id),
     ).toEqual(['', 'openai/gpt-5.1'])
+  })
+
+  it.each(['gpt-5.1-codex', 'claude-sonnet-5'])('preserves configured Cursor model %s when discovery omits it', (model) => {
+    for (const catalog of [
+      undefined,
+      { runner: 'cursor' as const, models: [], source: 'unavailable' as const, stale: false },
+      { runner: 'cursor' as const, models: [{ id: 'another-model', label: 'Another', description: '' }], source: 'live' as const, stale: false },
+    ]) {
+      expect(modelsForRunner('cursor', catalog, [model]).map((entry) => entry.id)).toContain(model)
+    }
   })
 
   it('never reads a provider-spanning runner’s preset as another runner’s exclusive model', () => {
@@ -276,6 +296,16 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
     })
     // What actually goes over the wire: the undefineds vanish.
     expect(JSON.parse(JSON.stringify(body))).toEqual({ task: 'do the thing', workflow: 'quick-task' })
+  })
+
+  it('keeps a Cursor parameterized model ID intact and passes the validated selected effort', () => {
+    const body = buildCreateRunBody({
+      task: 'hard', source: { source: 'workflow', ref: 'quick-task' },
+      model: 'model[effort=high]', effort: 'max', runner: 'cursor', defaultRunner: 'claude',
+      variants: 1, images: [],
+    })
+    expect(body.model).toBe('model[effort=high]')
+    expect(body.effort).toBe('max')
   })
 
   it('sends a pinned effort and omits auto (#45)', () => {
@@ -509,4 +539,31 @@ it('reports discovery in progress without masking cached feedback', () => {
   expect(modelCatalogStatus('claude', undefined, false, true)).toBe('Loading Claude models…')
   expect(modelCatalogStatus('claude', { runner: 'claude', models: [], source: 'cache', stale: true }, false, true)).toBe('Using cached Claude model list')
   expect(modelCatalogStatus('claude', undefined, false, false)).toBeUndefined()
+})
+
+
+describe('Cursor advertised effort options', () => {
+  const catalog: RunnerModelCatalogResponse = {
+    runner: 'cursor', source: 'live', stale: false,
+    models: [
+      { id: 'base', label: 'Base', description: '', effortLevels: ['high', 'low', 'high'] },
+      { id: 'empty', label: 'Empty', description: '', effortLevels: [] },
+      { id: 'absent', label: 'Absent', description: '' },
+    ],
+  }
+  it('offers only advertised values in order and serializes supported selections', () => {
+    const options = effortOptionsForModel('cursor', 'base', catalog)
+    expect(options.map(option => option.value)).toEqual(['', 'high', 'low'])
+    for (const [selected, expected] of [['high', 'high'], ['max', undefined], ['', undefined]]) {
+      const body = buildCreateRunBody({ task: 'Task', source: null, model: 'base', runner: 'cursor', defaultRunner: 'cursor',
+        effort: resolveEffort(selected, options), variants: 1, images: [] })
+      expect(body.effort).toBe(expected)
+    }
+  })
+  it.each(['empty', 'absent', 'unknown', ''])('offers auto only for %j', model => {
+    expect(effortOptionsForModel('cursor', model, catalog).map(option => option.value)).toEqual([''])
+  })
+  it('does not borrow another backend catalog', () => {
+    expect(effortOptionsForModel('cursor', 'base', { ...catalog, runner: 'codex' }).map(option => option.value)).toEqual([''])
+  })
 })

@@ -303,11 +303,14 @@ export const runRecordSchema = z.object({
 export type RunRecord = z.infer<typeof runRecordSchema>;
 
 /**
- * What `GET /runs` and `GET /runs/:id` answer: the stored record plus the live `usage` sample the
- * server attaches on the way out (`withUsage`). Absent for finished runs and wherever `ps` yields
- * nothing — never persisted, and never attached by the mutation routes.
+ * What `GET /runs` and `GET /runs/:id` answer: the stored record plus host-derived fields.
+ * The live `usage` sample is absent for finished runs and wherever `ps` yields nothing.
+ * Cursor resume commands use the server executable override. Neither field is persisted
+ * or attached by mutation routes.
  */
 export const apiRunSchema = runRecordSchema.extend({
+  /** Server-resolved Cursor CLI command, including the configured executable. Never persisted. */
+  cliResumeCommand: z.string().optional(),
   usage: processUsageSchema.optional(),
 });
 export type ApiRun = z.infer<typeof apiRunSchema>;

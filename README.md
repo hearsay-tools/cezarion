@@ -494,7 +494,7 @@ cez worker destroy <worker-id>
 
 Commands return bounded JSON and a nonzero exit on failure or incomplete cleanup. Spawn requires a committed baseline (`parent-head` or an explicit ref) and pins its SHA at acceptance; dirty parent edits are excluded. Optional `--context '<text>'` or `--context-file <UTF-8-file>` supplies selected context, not the parent's conversation. The two flags are mutually exclusive, and combined task/context text is limited to 100,000 characters. The API also accepts up to 32 pinned-baseline file or parent-attachment references, with at most 8 MiB of copied attachments. Inspect reports worker-local input locations. Reuse a request ID only with the same task, baseline, context, backend, model and effort when retrying a lost response. There are at most 32 accepted creations per parent, counting destroyed workers, and 32 undelivered steering messages per worker.
 
-Omitted `--backend` inherits the parent's active backend. Same-backend workers inherit omitted model/account/effort; `--backend <claude|codex|opencode|pi>` selecting another backend resolves that backend's project/default account and model without forwarding another provider's settings. `--model <model>` selects a supported model, subject to existing locks. `--effort <low|medium|high|xhigh|max>` pins reasoning effort on same-backend and mixed-backend spawn; omitted `--effort` still inherits the parent pin on same-backend spawn and drops it on mixed-backend spawn. Accepted identity and grants remain fixed across queuing, restart and Continue, including explicit empty grants. Changing or deleting an account registry entry does not rebind a worker. Missing accepted identity evidence or account homes, incompatible Claude state-file layouts, and conflicting later model locks refuse execution explicitly. Credentials and vendor configuration are never copied; each worker receives its own delegation credential, and unspecified native models stay unspecified.
+Omitted `--backend` inherits the parent's active backend. Same-backend workers inherit omitted model/account/effort; `--backend <claude|codex|opencode|pi|cursor>` selecting another backend resolves that backend's project/default account and model without forwarding another provider's settings. `--model <model>` selects a supported model, subject to existing locks. `--effort <low|medium|high|xhigh|max>` pins reasoning effort on same-backend and mixed-backend spawn; omitted `--effort` still inherits the parent pin on same-backend spawn and drops it on mixed-backend spawn. Accepted identity and grants remain fixed across queuing, restart and Continue, including explicit empty grants. Changing or deleting an account registry entry does not rebind a worker. Missing accepted identity evidence or account homes, incompatible Claude state-file layouts, and conflicting later model locks refuse execution explicitly. Credentials and vendor configuration are never copied; each worker receives its own delegation credential, and unspecified native models stay unspecified.
 
 Wait registers immediately. End the parent turn to release scheduler capacity; Cezar resumes it on a selected settled outcome or the finite deadline. `any` is the default, `one` requires exactly one worker, and `all` waits for every selected worker. Review, completion, failure, cancellation with proven termination, and destruction are outcomes. Timeout defaults to 600 seconds (1–1800 accepted). `cancel-wait` is idempotent for the retained wait ID and cannot cancel a newer wait. Timeout and wait cancellation report partial outcomes and unresolved workers, never cancel workers, and never automatically re-wait. Steering is attributed agent input and cannot answer a pending human question.
 
@@ -584,6 +584,7 @@ Useful environment variables:
 | `CEZ_CODEX_BIN=/path/to/codex` | Override which `codex` binary is used. |
 | `CEZ_OPENCODE_BIN=/path/to/opencode` | Override which `opencode` binary is used. |
 | `CEZ_PI_BIN=/path/to/pi` | Override which `pi` binary is used. |
+| `CEZ_CURSOR_BIN=/path/to/agent` | Override the Cursor CLI (`agent`) executable. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME` | The agents' **own** variables, honoured where the vendor documents one. Setting one moves that agent's **default account** — the config folder cezar discovers. A *second* login of the same CLI is deliberately not an environment setting, since one process-wide value cannot differ per project: add it under **Settings → Agent accounts** and pick it per project. |
 | `CEZ_BROWSE_ROOT=~/` | Default root for **Add project → Open local folder…**. The picker cannot navigate above it; a saved workspace value overrides the environment default and must name an existing folder. |
 | `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub**. Saved workspace settings override it, and missing directories are created recursively. |
@@ -640,13 +641,14 @@ platform.
 ## Coding agent backends
 
 cezar is not married to one vendor. Every agent step runs through a single
-`AgentRunner` seam with four built-in backends:
+`AgentRunner` seam with five built-in backends:
 
 | Backend | CLI | How cezar drives it | Tool access |
 |---|---|---|---|
 | **Claude Code** (default) | [`claude`](https://github.com/anthropics/claude-code) | Headless `stream-json` mode. | Per-tool `--allowedTools` (`bashAllowlist` scopes `Bash`); `dontAsk` denies unapproved tools without prompting (`CEZ_APPROVAL_GATE=1` → `acceptEdits` + approval UI; `CEZ_CLAUDE_PERMISSION_MODE=bypass` → `--dangerously-skip-permissions`). |
 | **Codex** | [`codex`](https://github.com/openai/codex) | `codex app-server` — JSON-RPC over stdio, the same transport the Codex IDE extensions use. | Ignores `allowedTools`; the default auto mode uses `danger-full-access` with `approvalPolicy: never` (`CEZ_CODEX_NETWORK=0` opts into the network-blocked `workspace-write` sandbox). |
 | **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; every permission is auto-approved. |
+| **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Persistent ACP over stdio. | Uses `--force` and approves ACP allow-once requests; Cursor’s native deny rules still apply. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
 | **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi's `--tools` allowlist; default sessions also pass harness extras (`Subagent`, `SubagentSupervisor`, `SubagentWait`) through `--tools`, and an explicit `allowedTools` still restricts. A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
 
 > ⚠️ **OpenCode and pi support are experimental.** Both runners work but are less
@@ -655,7 +657,29 @@ cezar is not married to one vendor. Every agent step runs through a single
 > rough edges.
 
 On startup cezar probes which CLIs are installed and the cockpit only offers
-the backends it found — install any one of the four and you're operational.
+the backends it found — install any one of the five and you're operational.
+
+### Cursor CLI
+
+Install [Cursor CLI](https://cursor.com/docs/cli/installation) and run `agent login`,
+or set `CURSOR_API_KEY`. Cezar discovers `agent` on PATH; `CEZ_CURSOR_BIN` overrides
+its location. Select **Cursor** in the runner picker to use a persistent ACP session.
+A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
+Cursor ACP currently provides no token-usage telemetry; Cezar leaves usage unavailable
+instead of estimating it. Cezar negotiates Cursor’s parameterized model picker and
+shows only the effort levels the selected model advertises. The runner applies
+`effort` or `reasoning` through ACP session config options before prompting;
+unsupported explicit values fail instead of silently using a default. Initial models
+are pinned with `--model`; opaque parameterized IDs and legacy model discovery
+remain compatibility paths for older CLIs.
+
+Settings → Agent config exposes Cursor’s global `cli-config.json`, project
+`.cursor/cli.json` permissions, `.cursor/mcp.json`, and shared `AGENTS.md`.
+[Cursor’s configuration reference](https://cursor.com/docs/cli/reference/configuration)
+documents `CURSOR_CONFIG_DIR` and the Linux/BSD `XDG_CONFIG_HOME/cursor` override.
+These select configuration; Cezar does not offer alternate Cursor account profiles
+because a complete credential-and-session home override has not been verified.
+
 
 **Pick a backend at three levels** (most specific wins):
 

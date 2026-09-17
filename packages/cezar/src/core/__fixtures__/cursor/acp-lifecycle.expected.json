@@ -1,0 +1,216 @@
+[
+  {
+    "type": "turn.started",
+    "turnId": "turn_1"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "reasoning",
+      "id": "cursor_text_1",
+      "text": "Inspect first."
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "reasoning",
+      "id": "cursor_text_1",
+      "text": "Inspect first."
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "cursor_text_2",
+      "role": "assistant",
+      "text": "I will "
+    }
+  },
+  {
+    "type": "item.delta",
+    "itemId": "cursor_text_2",
+    "field": "text",
+    "delta": "edit."
+  },
+  {
+    "type": "plan.updated",
+    "entries": [
+      {
+        "content": "Update file",
+        "status": "in_progress",
+        "priority": "high"
+      }
+    ]
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "cursor_text_2",
+      "role": "assistant",
+      "text": "I will edit."
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "edit-1",
+      "name": "edit",
+      "toolKind": "edit",
+      "title": "Edit file",
+      "status": "pending",
+      "input": {
+        "path": "/repo/a.ts"
+      }
+    }
+  },
+  {
+    "type": "item.updated",
+    "item": {
+      "kind": "tool",
+      "id": "edit-1",
+      "name": "edit",
+      "toolKind": "edit",
+      "title": "Edit file",
+      "status": "running",
+      "input": {
+        "path": "/repo/a.ts"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "edit-1",
+      "name": "edit",
+      "toolKind": "edit",
+      "title": "Edit file",
+      "status": "completed",
+      "input": {
+        "path": "/repo/a.ts"
+      },
+      "diffs": [
+        {
+          "path": "/repo/a.ts",
+          "oldText": "old",
+          "newText": "new"
+        }
+      ],
+      "locations": [
+        {
+          "path": "/repo/a.ts",
+          "line": 1
+        }
+      ]
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "shell-1",
+      "name": "execute",
+      "toolKind": "execute",
+      "title": "Run tests",
+      "status": "pending",
+      "input": {
+        "command": "npm test"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "shell-1",
+      "name": "execute",
+      "toolKind": "execute",
+      "title": "Run tests",
+      "status": "failed",
+      "input": {
+        "command": "npm test"
+      },
+      "output": "Tests failed",
+      "error": "Tests failed",
+      "diffs": []
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "task-1",
+      "name": "other",
+      "toolKind": "other",
+      "title": "Explore",
+      "status": "pending"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "task-1",
+      "name": "other",
+      "toolKind": "other",
+      "title": "Explore",
+      "status": "completed",
+      "output": "Found a.ts"
+    }
+  },
+  {
+    "type": "item.updated",
+    "item": {
+      "kind": "tool",
+      "id": "task-1",
+      "name": "task",
+      "toolKind": "task",
+      "title": "Explore",
+      "status": "completed",
+      "output": "Found a.ts",
+      "input": {
+        "toolCallId": "task-1",
+        "description": "Explore",
+        "prompt": "Find files",
+        "subagentType": "explore",
+        "durationMs": 12
+      }
+    }
+  },
+  {
+    "type": "plan.updated",
+    "entries": [
+      {
+        "content": "Update file",
+        "status": "completed"
+      }
+    ]
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "cursor_text_3",
+      "role": "assistant",
+      "text": "Done."
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "cursor_text_3",
+      "role": "assistant",
+      "text": "Done."
+    }
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_1",
+    "stopReason": "end_turn"
+  }
+]
