@@ -80,6 +80,9 @@ afterAll(async () => {
 function open(id = parentId, suffix = '') {
   browser.goto(`${base}${route(id)}${suffix}`)
   browser.waitForFunction(`document.querySelector(${JSON.stringify(region)}) !== null`)
+  const dock = '[data-slot="run-activity-dock"]'
+  const dockButton = `${dock} > button[aria-expanded="false"]`
+  if (browser.count(dockButton) && browser.isVisible(dockButton)) browser.click(dockButton)
   const disclosure = `${region} > button[aria-expanded="false"]`
   if (browser.count(disclosure) && browser.isVisible(disclosure)) browser.click(disclosure)
 }

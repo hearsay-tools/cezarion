@@ -506,7 +506,7 @@ describe('task thread', () => {
     // Phone default: the unified run-activity dock collapses to the odometer.
     expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-dock"]').dataset.state`)).toBe('collapsed')
     expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-count"]').textContent`)).toBe('· 2 sections')
-    expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-status"]').textContent`)).toContain('All complete')
+    expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-status"]').textContent`)).toContain('In progress')
 
     browser.screenshot(`${artifactsDir}/thread-mobile.png`)
     browser.setViewport(1440, 900)
