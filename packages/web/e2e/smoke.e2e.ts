@@ -300,23 +300,32 @@ describe('cockpit app shell', () => {
       )
 
     // Every URL below is a LEGACY flat one, so each load settles in two hops: the boot-project
-    // redirect, then whatever the route itself redirects to. Sampling the nav before the last
-    // hop reads the wrong screen's answer, so wait for the settled pathname each time.
-    const settleAt = (pathname: string) =>
-      browser.waitForFunction(`location.pathname === '${pathname}'`)
+    // redirect, then whatever the route itself redirects to. Pathname can update a tick before
+    // React commits `aria-current`, so wait for both — sampling the nav on URL alone reads the
+    // previous screen's answer.
+    const settleAt = (pathname: string, label: string) =>
+      browser.waitForFunction(`(() => {
+        if (location.pathname !== '${pathname}') return false
+        const labels = Array.from(document.querySelectorAll('[data-slot="sidebar"] nav a[aria-current="page"]')).map(a => {
+          const clone = a.cloneNode(true)
+          clone.querySelector('[data-slot="nav-badge"], [data-slot="nav-unread-badge"]')?.remove()
+          return clone.textContent.trim()
+        })
+        return labels.length === 1 && labels[0] === '${label}'
+      })()`)
 
     browser.goto(baseUrl + '/')
-    settleAt(scoped('/'))
+    settleAt(scoped('/'), 'Tasks')
     expect(activeLabel()).toEqual(['Tasks'])
 
     browser.goto(baseUrl + '/git')
-    settleAt(scoped('/git'))
+    settleAt(scoped('/git'), 'Git')
     expect(activeLabel()).toEqual(['Git'])
 
     // The nested Settings area: the more specific item wins, and only it. `/settings/skills`
     // is itself a redirect onto the top-level catalog, so this asserts both hops.
     browser.goto(baseUrl + '/settings/skills')
-    settleAt(scoped('/skills'))
+    settleAt(scoped('/skills'), 'Skills')
     expect(activeLabel()).toEqual(['Skills'])
   })
 

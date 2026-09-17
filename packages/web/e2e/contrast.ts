@@ -147,5 +147,10 @@ export function hoverVisiblePoint(browser: AgentBrowser, selector: string): void
     return null
   })()`) as { x: number; y: number } | null
   if (!point) throw new Error(`no visible hover point for ${selector}`)
-  browser.moveTo(point.x, point.y)
+  // Round to the same integers `moveTo` sends. Do not wait on CSS :hover afterwards:
+  // agent-browser's CDP mouse-move does not set it on wrapping inline links (diagnosed
+  // #369, timed out at 25s). Do not wait on these frozen coordinates either — a later
+  // layout pass (viewport/theme in the QA matrix) leaves them pointing at empty space.
+  // Callers that need a settled pointer re-hit-test current rects, not this snapshot.
+  browser.moveTo(Math.round(point.x), Math.round(point.y))
 }

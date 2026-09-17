@@ -165,11 +165,6 @@ describe('task thread', () => {
       for (const variant of contrastQaVariants) {
         applyContrastQaVariant(browser, variant)
         const normal = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
-        browser.evaluate(`(() => {
-          const target = document.querySelector(${JSON.stringify(link)})
-          const scroller = document.querySelector('[data-slot="main"]')
-          scroller.scrollTop += target.getBoundingClientRect().top - 180
-        })()`)
         hoverVisiblePoint(browser, link)
         const hovered = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
         expect(normal.ratio, `${variant.id} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)

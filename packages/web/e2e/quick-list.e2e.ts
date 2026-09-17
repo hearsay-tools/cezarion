@@ -608,8 +608,14 @@ describe('tasks table overview', () => {
 
           const row = `${TABLE_ROW}[data-run-id="fix-review-pr"]`
           focusWithKeyboard(browser, `${row} [data-slot="row-rename"]`)
+          // The pencil is `opacity-0 transition-opacity focus-visible:opacity-100`. Tab is not
+          // the same tick as :focus-visible, and that class — not a computed-style poll alone —
+          // is what starts the fade. Wait on both so we do not sample mid-transition.
           browser.waitForFunction(
-            `getComputedStyle(document.querySelector('${row} [data-slot="row-rename"]')).opacity === '1'`,
+            `(() => {
+              const button = document.querySelector('${row} [data-slot="row-rename"]')
+              return !!button && button === document.activeElement && button.matches(':focus-visible') && getComputedStyle(button).opacity === '1'
+            })()`,
           )
           const actions = browser.evaluate(`(() => {
             const cell = document.querySelector('${row} td[data-column-id="task"]')
