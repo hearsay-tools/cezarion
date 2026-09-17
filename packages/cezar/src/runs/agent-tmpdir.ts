@@ -104,6 +104,72 @@ function dataDirOwner(dataDir: string): string {
   return createHash('sha256').update(`cez-agent-owner:${dataDir}`).digest('hex').slice(0, 16);
 }
 
+/**
+ * Write the ownership marker. `'wx'` never follows an existing name: an agent
+ * that replaced a previous marker with a symlink must not turn this rewrite
+ * into an arbitrary-file write. An existing marker is verified by content —
+ * a mismatch means the directory's ownership is no longer what the digest
+ * name promises, and the spawn refuses rather than guess.
+ */
+function writeOwnerMarker(dir: string, dataDir: string): void {
+  const marker = join(dir, OWNER_FILE);
+  const expected = dataDirOwner(dataDir);
+  try {
+    writeFileSync(marker, expected, { encoding: 'utf8', flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    let actual = '';
+    try {
+      actual = readFileSync(marker, 'utf8').trim();
+    } catch {
+      // unreadable marker (symlink to nowhere, wrong type): verify below.
+    }
+    if (actual !== expected) {
+      throw new AgentTempDirError(dir, new Error('ownership marker was replaced — remove the directory to re-mint it'));
+    }
+  }
+}
+
+/**
+ * Where the fallback lives for this dataDir+run pair. The name digests the
+ * dataDir in, because the OS temp root is SHARED: a name derived from the run
+ * id alone would let one repo's reap delete another repo's live scratch when
+ * two run ids happen to share their leading characters. The name alone cannot
+ * make the sweep safe — a digest is not reversible, so a sweep could not tell
+ * its own stale directories from another project's live ones — which is why
+ * every fallback directory also carries the `.cez-owner` marker.
+ */
+function fallbackTmpDir(dataDir: string, runId: string): string {
+  const digest = createHash('sha256').update(`${dataDir}:${runId}`).digest('hex');
+  return join(osTempRoot(), FALLBACK_PREFIX + digest.slice(0, FALLBACK_NAME_LENGTH));
+}
+
+/**
+ * The temp directory this run should use: the repo-local per-run directory
+ * when it is short enough for unix-socket paths, and a short directory under
+ * the OS temp root when it is not (#387). Pure resolution — nothing is
+ * created, nothing is probed; `agentTmpEnv` owns the side effects.
+ */
+export function resolveAgentTmpDir(dataDir: string, runId: string): string {
+  const local = agentTmpDir(dataDir, runId);
+  if (Buffer.byteLength(local, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH) return local;
+  const fallback = fallbackTmpDir(dataDir, runId);
+  if (Buffer.byteLength(fallback, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH) return fallback;
+  // Nothing fits — a host TMPDIR so long that even the OS-root candidate
+  // crosses the cap. Minting either would hand the agent a temp directory
+  // that cannot serve unix sockets: the silent failure #387 is about. Fail
+  // the spawn with the named error instead; the remedy names the escape.
+  throw new AgentTempDirError(
+    Buffer.byteLength(fallback) < Buffer.byteLength(local) ? fallback : local,
+    new Error(
+      `no socket-safe temp directory exists — repo-local path is `
+        + `${Buffer.byteLength(local)} bytes and the OS temp root candidate is `
+        + `${Buffer.byteLength(fallback)} bytes, both past the `
+        + `${MAX_SOCKET_SAFE_DIR_LENGTH}-byte unix socket budget`,
+    ),
+  );
+}
+
 /** `errno` → the phrasing a human recognises from their shell. */
 const REASONS: Readonly<Record<string, string>> = {
   EDQUOT: 'Disk quota exceeded',
@@ -199,7 +265,7 @@ export function agentTmpEnv(
     // In the shared OS root the directory carries its ownership marker, so a
     // startup sweep from another project can tell it apart from stale
     // scratch (the sweep skips anything whose marker is missing or foreign).
-    if (dir !== local) writeFileSync(join(dir, OWNER_FILE), dataDirOwner(dataDir), 'utf8');
+    if (dir !== local) writeOwnerMarker(dir, dataDir);
   } catch (err) {
     throw new AgentTempDirError(dir, err);
   }

@@ -347,6 +347,24 @@ describe('socket-safe temp directory length (#387)', () => {
     }
   });
 
+  it('refuses to rewrite an ownership marker the directory no longer controls', () => {
+    const dir = deepDataDir();
+    const runId = '88888888-9999-4aaa-8bbb-ccccdddd0001';
+    const minted = mint(dir, runId);
+    // A Continue re-mints the marker. An agent running as the same user can
+    // replace it with a symlink first; the rewrite must not follow it.
+    const victim = join(osRoot(), 'cez-marker-victim.txt');
+    writeFileSync(victim, 'sentinel', 'utf8');
+    rmSync(join(minted, '.cez-owner'));
+    symlinkSync(victim, join(minted, '.cez-owner'));
+    try {
+      expect(() => agentTmpEnv(dir, runId, {})).toThrow(AgentTempDirError);
+      expect(readFileSync(victim, 'utf8')).toBe('sentinel');
+    } finally {
+      rmSync(victim, { force: true });
+    }
+  });
+
   it('sweeps orphaned fallback directories and keeps the live ones', () => {
     const dir = deepDataDir();
     const liveId = 'aaaa2222-0000-4000-8000-000000000001';
