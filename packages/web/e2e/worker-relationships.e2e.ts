@@ -77,10 +77,14 @@ afterAll(async () => {
   if (root) rmSync(root, { recursive: true, force: true })
 })
 
-function open(id = parentId, suffix = '') {
-  browser.goto(`${base}${route(id)}${suffix}`)
-  browser.waitForFunction(`document.querySelector('[data-slot="run-activity-dock"]') !== null`)
-  browser.waitForFunction(`document.querySelector('[data-slot="run-activity-dock"] > button') !== null`)
+// Since #402 the panel has two homes: the Session tab reaches it through the unified run
+// activity dock above the composer, while Changes / Commits / Files keep the header panel.
+// The dock is also collapsed by default on a phone, so reaching the region is a click there
+// and already open on a desktop — wait for whichever surface this tab rendered, then expand.
+function reveal() {
+  browser.waitForFunction(
+    `document.querySelector('[data-slot="run-activity-dock"] > button') !== null || document.querySelector(${JSON.stringify(region)}) !== null`,
+  )
   browser.evaluate(`(() => {
     const dockButton = document.querySelector('[data-slot="run-activity-dock"] > button[aria-expanded="false"]')
     dockButton?.click()
@@ -90,6 +94,11 @@ function open(id = parentId, suffix = '') {
     const disclosure = document.querySelector(${JSON.stringify(`${region} > button[aria-expanded="false"]`)})
     disclosure?.click()
   })()`)
+}
+
+function open(id = parentId, suffix = '') {
+  browser.goto(`${base}${route(id)}${suffix}`)
+  reveal()
 }
 
 it('retains all 32 scoped links on Session, Changes, Commits and Files, including archived workers', () => {
@@ -129,7 +138,11 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     expect(facts.theme).toBe(true); expect(facts.reducedMotion).toBe(true); expect(facts.focusRing).not.toBe('none')
     browser.screenshot(join(artifacts, `workers-${width}-${theme}.png`), { viewport: true })
     browser.press('Enter')
-    browser.waitForFunction(`location.pathname === '${route(ids[31]!)}' && document.querySelector('${region} a[aria-label="Parent task ${parentId}"]') !== null`)
+    // In-app navigation, so the worker task arrives with its own dock state: collapsed at
+    // phone width until `reveal` opens it.
+    browser.waitForFunction(`location.pathname === '${route(ids[31]!)}'`)
+    reveal()
+    browser.waitForFunction(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]') !== null`)
     expect(browser.evaluate(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]').getAttribute('href')`)).toBe(route(parentId))
   }, 120_000)
 }
