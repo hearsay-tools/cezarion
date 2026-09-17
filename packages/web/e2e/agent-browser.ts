@@ -178,11 +178,16 @@ export class AgentBrowser {
   ) {}
 
   static open(session: string): AgentBrowser {
-    const env = readTestEnv()
-    if (!env.browser.installed) {
-      throw new Error(`cezar e2e: the agent-browser provider is not installed (${env.browser.notes})`)
+    return AgentBrowser.attach(readTestEnv().browser, session)
+  }
+
+  /** The same seam over an explicit provider descriptor rather than the shared test env's —
+   *  how a unit test drives it through a stand-in binary without a Chrome behind it. */
+  static attach(browser: EnvDescriptor['browser'], session: string): AgentBrowser {
+    if (!browser.installed) {
+      throw new Error(`cezar e2e: the agent-browser provider is not installed (${browser.notes})`)
     }
-    return new AgentBrowser(env.browser.command, session, env.browser)
+    return new AgentBrowser(browser.command, session, browser)
   }
 
   /** One agent-browser invocation. `--json` on every call so results are parsed, not scraped. */
@@ -258,9 +263,35 @@ export class AgentBrowser {
     this.run(['press', key])
   }
 
+  /** operation: interact (`wait <selector>`) — every interaction that takes a selector runs
+   *  this first, so the seam waits the way Playwright's `locator.click()` does and no spec has
+   *  to (#405).
+   *
+   *  agent-browser's `click`, `hover` and `fill` act at once: a target that is one request away
+   *  from rendering (the health-gated Tools trigger behind a runs-driven list) is "Element not
+   *  found", and the per-site `waitForFunction` that fixes it sits on a different request's DOM
+   *  than the control it protects — the treadmill #369 and #393 ran on. `wait <selector>` is the
+   *  CLI's own primitive: it blocks until the element is attached and has a non-zero box, and
+   *  gives up after its default timeout (`AGENT_BROWSER_DEFAULT_TIMEOUT`, 25 s), which stays
+   *  inside both `run()`'s 60 s kill and the suite's 60 s test timeout. Waits on a state rather
+   *  than on existence (opacity, `aria-current`, a hover hit-test) are not covered and stay
+   *  per-assertion.
+   *
+   *  `count`, `isVisible` and `evaluate` never go through here: they assert absence and a wait
+   *  would turn "not there" into a 25 s timeout. */
+  private awaitTarget(action: 'click' | 'hover' | 'fill', selector: string): void {
+    try {
+      this.run(['wait', selector])
+    } catch (cause) {
+      throw new Error(`cezar e2e: ${action} target never appeared: ${selector}`, { cause })
+    }
+  }
+
   /** operation: interact (`fill`) — set a field's value the way typing would (real input
-   *  events, so controlled React inputs — the ⌘K palette's filter — see the change). */
+   *  events, so controlled React inputs — the ⌘K palette's filter — see the change).
+   *  Waits for the field first; see `awaitTarget`. */
   fill(selector: string, value: string): void {
+    this.awaitTarget('fill', selector)
     this.run(['fill', selector, value])
   }
 
@@ -325,14 +356,17 @@ export class AgentBrowser {
     this.run(['set', 'media', 'reduced-motion'])
   }
 
-  /** operation: interact (`click`). */
+  /** operation: interact (`click`). Waits for the target first; see `awaitTarget`. */
   click(selector: string): void {
+    this.awaitTarget('click', selector)
     this.run(['click', selector])
   }
 
   /** operation: interact (`hover`) — hover-revealed affordances (the table's rename pencil)
-   *  only exist under a real pointer; tests must produce one, not reach past it. */
+   *  only exist under a real pointer; tests must produce one, not reach past it.
+   *  Waits for the target first; see `awaitTarget`. */
   hover(selector: string): void {
+    this.awaitTarget('hover', selector)
     this.run(['hover', selector])
   }
 

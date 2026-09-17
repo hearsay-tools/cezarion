@@ -58,7 +58,6 @@ describe('GitHub automations', () => {
     )
     const name = `E2E issue triage ${process.pid}`
     browser.goto(`${baseUrl}/p/${bootProject}/automations/new`)
-    browser.waitForFunction(`document.querySelector('#automation-name') !== null`)
     browser.fill('#automation-name', name)
     browser.fill('#automation-prompt', 'Triage {{github.url}}')
     browser.click('button[type="submit"]')

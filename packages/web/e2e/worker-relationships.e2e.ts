@@ -202,7 +202,6 @@ it('global Tasks and cross-project palette retain worker labels and parked-root 
   expect(browser.text(`[data-slot="global-task-row"][data-run-id="${waitingId}"]`)).toContain('waiting on workers')
   expect(browser.text('body')).toContain('Worker')
   browser.press('Control+k')
-  browser.waitForFunction(`document.querySelector('[cmdk-input]') !== null`)
   browser.fill('[cmdk-input]', 'Waiting root fixture')
   browser.waitForFunction(`document.querySelector('[cmdk-list]')?.textContent.includes('Waiting root fixture')`)
   expect(browser.count('[cmdk-list] [aria-label="waiting on workers"]')).toBe(1)
@@ -239,7 +238,6 @@ it('keeps request waits consistent in threads, global tasks and the palette at p
     expect(browser.text(row)).not.toContain('needs you')
   }
   browser.press('Control+k')
-  browser.waitForFunction(`document.querySelector('[cmdk-input]') !== null`)
   browser.fill('[cmdk-input]', 'Worker awaiting parent reply')
   browser.waitForFunction(`document.querySelector('[cmdk-list] [aria-label="waiting on parent reply"]') !== null`)
   expect(browser.count('[cmdk-list] [aria-label="needs you"]')).toBe(0)

@@ -181,7 +181,6 @@ describe('a queued run’s prompt is amendable (#472)', () => {
 
   it('edits the stacked message in place', async () => {
     browser.click('[aria-label="Remove message"], [aria-label="Edit message"]')
-    browser.waitForFunction(`document.querySelector('[aria-label="Edit the message"]') !== null`)
     browser.fill('[aria-label="Edit the message"]', 'also update the changelog and the README')
     browser.screenshot(`${artifactsDir}/queued-editing.png`)
     browser.click('[data-slot="user-bubble"][data-editing="true"] button:last-of-type')

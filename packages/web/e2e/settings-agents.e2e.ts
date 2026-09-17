@@ -122,7 +122,6 @@ describe('settings → agents against the live dry-run server', () => {
 
   it('system prompt: explicit save persists the trimmed text', async () => {
     gotoAgents()
-    browser.waitForFunction(`document.querySelector('[data-slot="agents-system-prompt"]') !== null`)
     browser.click('[data-slot="agents-system-prompt"]')
     setTextarea('[data-slot="agents-system-prompt"]', 'Always add tests. (e2e)')
     browser.waitForFunction(`document.querySelector('[data-slot="agents-system-prompt"]')?.value === 'Always add tests. (e2e)'`)
