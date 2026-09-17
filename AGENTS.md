@@ -148,13 +148,19 @@ A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run
 Before any commit or PR, run in order:
 
 ```bash
-npm run typecheck   # tsc --noEmit (api-client + server + web)
+npm run typecheck   # refresh server declarations, then check all four workspaces
 npm test            # vitest — server + cockpit unit suites
 npm run test:unit   # node:test — fast core-module coverage (packages/cezar/test/unit/)
 npm run build       # tsc → dist/, vite → packages/cezar/web/dist/, then the check:pack tarball gate
 npm run test:package # pack/install the release tarball and exercise the built CLI (packages/cezar/test/e2e/)
 npm run test:e2e    # real-browser cockpit suite (agent-browser); CI rejects skipped
 ```
+
+For web-only verification, use `npm run typecheck:web` or
+`npm run typecheck -w @open-mercato/cezar-web`. Both rebuild server declarations
+from this worktree before checking web sources; direct `tsc --noEmit` does not.
+The full root typecheck runs web first, preparing declarations once for all four
+workspace checks.
 
 `npm test` and `npm run test:unit` are the fast unit gate: no server, no browser. They must stay that way. `npm run test:package` needs a completed `npm run build` (it packs the tarball). Pull request CI runs packaged CLI E2E and cockpit browser E2E as separate checks; the required aggregate fails if the cockpit suite is skipped or failed.
 
