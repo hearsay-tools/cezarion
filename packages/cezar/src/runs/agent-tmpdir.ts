@@ -68,14 +68,15 @@ function agentTmpRoot(dataDir: string): string {
 
 /**
  * The longest a per-run temp directory may be so that tools binding named
- * unix sockets under it still work (#387). `sockaddr_un.sun_path` holds 108
- * bytes on Linux and 104 on macOS, NUL included; the longest name a known
- * tool lays down under TMPDIR is tsx's IPC socket, `<tmpdir>/tsx-<uid>/
- * <pid>.pipe`, ~22 bytes (Chrome's `SingletonSocket` is 16). A 78-byte
- * ceiling leaves ≥25 bytes of headroom on the tighter platform — past
- * anything these tools generate — while keeping ordinary checkouts on their
- * repo-local scratch: only a genuinely deep path, like the 100-character
- * directories #387 reports, moves to the fallback.
+ * unix sockets under it still work (#387), measured in UTF-8 bytes — the
+ * kernel bounds the encoded path, not the JavaScript character count.
+ * `sockaddr_un.sun_path` holds 108 bytes on Linux and 104 on macOS, NUL
+ * included; the longest name a known tool lays down under TMPDIR is tsx's IPC
+ * socket, `<tmpdir>/tsx-<uid>/<pid>.pipe`, ~22 bytes (Chrome's
+ * `SingletonSocket` is 16). A 78-byte ceiling leaves ≥25 bytes of headroom on
+ * the tighter platform — past anything these tools generate — while keeping
+ * ordinary checkouts on their repo-local scratch: only a genuinely deep path,
+ * like the 100-character directories #387 reports, moves to the fallback.
  */
 export const MAX_SOCKET_SAFE_DIR_LENGTH = 78;
 
@@ -112,12 +113,12 @@ function fallbackTmpDir(dataDir: string, runId: string): string {
  */
 export function resolveAgentTmpDir(dataDir: string, runId: string): string {
   const local = agentTmpDir(dataDir, runId);
-  if (local.length <= MAX_SOCKET_SAFE_DIR_LENGTH) return local;
+  if (Buffer.byteLength(local, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH) return local;
   const fallback = fallbackTmpDir(dataDir, runId);
-  if (fallback.length <= MAX_SOCKET_SAFE_DIR_LENGTH) return fallback;
+  if (Buffer.byteLength(fallback, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH) return fallback;
   // No candidate fits (a pathological host TMPDIR over a pathological repo
   // path together): keep whichever leaves socket names the most room.
-  return fallback.length < local.length ? fallback : local;
+  return Buffer.byteLength(fallback) < Buffer.byteLength(local) ? fallback : local;
 }
 
 /** `errno` → the phrasing a human recognises from their shell. */

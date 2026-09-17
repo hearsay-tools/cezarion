@@ -297,6 +297,21 @@ describe('socket-safe temp directory length (#387)', () => {
     expect(existsSync(dir)).toBe(false);
   });
 
+  it('measures the cap in bytes, so a multibyte path cannot hide past it', () => {
+    const root = osRoot();
+    // 'é' is one JS character but two UTF-8 bytes: the kernel bounds the byte
+    // length, so a directory whose string length fits while its byte length
+    // crosses the cap must still fall back.
+    const pad = 'é'.repeat(Math.max(1, Math.floor((90 - Buffer.byteLength(root)) / 2)));
+    const dir = join(root, pad);
+    const local = join(dir, 'tmp', 'run-a');
+    expect(local.length).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
+    expect(Buffer.byteLength(local)).toBeGreaterThan(MAX_SOCKET_SAFE_DIR_LENGTH);
+    const resolved = resolveAgentTmpDir(dir, 'run-a');
+    expect(resolved).not.toBe(local);
+    expect(Buffer.byteLength(resolved)).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
+  });
+
   it('reaps the fallback when the run ends', () => {
     const dir = deepDataDir();
     const runId = 'aaaa2222-bbbb-4ccc-8ddd-eeeeffff0001';
