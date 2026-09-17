@@ -12,6 +12,16 @@ Review polling and recovery use the newest target run for the current head.
 They fall back to legacy `pull_request` CI only when no target run exists,
 never when target verification failed or was cancelled.
 
+Local typechecking starts with `npm ci` in the checkout being verified, including
+nested task worktrees. Both `npm run typecheck:web` and
+`npm run typecheck -w @open-mercato/cezar-web` use the web workspace's
+`pretypecheck` hook to rebuild the local server declarations before checking web
+sources. This prevents missing or stale local declarations from falling back to
+an older parent checkout. The full `npm run typecheck` checks web first, then
+contract, API client, and server, so it builds declarations once. Direct
+`tsc --noEmit` calls bypass preparation; use the npm commands for verification.
+The nested-worktree regression runs with `npm run test:unit`.
+
 Verification runs in seven parallel jobs with the current Node LTS:
 
 - Two Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/2 --maxWorkers=4`.

@@ -6,6 +6,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "pretypecheck": "npm run build -w @wjarka/cezarion",
     "build": "vite build",
     "dev": "vite",
     "test": "vitest run",
