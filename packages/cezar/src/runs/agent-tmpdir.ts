@@ -104,36 +104,6 @@ function dataDirOwner(dataDir: string): string {
   return createHash('sha256').update(`cez-agent-owner:${dataDir}`).digest('hex').slice(0, 16);
 }
 
-/**
- * Where the fallback lives for this dataDir+run pair. The name digests the
- * dataDir in, because the OS temp root is SHARED: a name derived from the run
- * id alone would let one repo's reap delete another repo's live scratch when
- * two run ids happen to share their leading characters. The name alone cannot
- * make the sweep safe — a digest is not reversible, so a sweep could not tell
- * its own stale directories from another project's live ones — which is why
- * every fallback directory also carries the `.cez-owner` marker.
- */
-function fallbackTmpDir(dataDir: string, runId: string): string {
-  const digest = createHash('sha256').update(`${dataDir}:${runId}`).digest('hex');
-  return join(osTempRoot(), FALLBACK_PREFIX + digest.slice(0, FALLBACK_NAME_LENGTH));
-}
-
-/**
- * The temp directory this run should use: the repo-local per-run directory
- * when it is short enough for unix-socket paths, and a short directory under
- * the OS temp root when it is not (#387). Pure resolution — nothing is
- * created, nothing is probed; `agentTmpEnv` owns the side effects.
- */
-export function resolveAgentTmpDir(dataDir: string, runId: string): string {
-  const local = agentTmpDir(dataDir, runId);
-  if (Buffer.byteLength(local, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH) return local;
-  const fallback = fallbackTmpDir(dataDir, runId);
-  if (Buffer.byteLength(fallback, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH) return fallback;
-  // No candidate fits (a pathological host TMPDIR over a pathological repo
-  // path together): keep whichever leaves socket names the most room.
-  return Buffer.byteLength(fallback) < Buffer.byteLength(local) ? fallback : local;
-}
-
 /** `errno` → the phrasing a human recognises from their shell. */
 const REASONS: Readonly<Record<string, string>> = {
   EDQUOT: 'Disk quota exceeded',

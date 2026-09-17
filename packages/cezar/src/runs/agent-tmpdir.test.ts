@@ -4,8 +4,10 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -318,6 +320,31 @@ describe('socket-safe temp directory length (#387)', () => {
     expect(existsSync(mint(dir, runId))).toBe(true);
     removeAgentTmpDir(dir, runId);
     expect(existsSync(resolveAgentTmpDir(dir, runId))).toBe(false);
+  });
+
+  it('fails loudly when no socket-safe root exists, rather than minting an overlong directory', () => {
+    // A host TMPDIR long enough that the OS-root candidate ALSO crosses the
+    // cap: minting either directory would hand the agent a temp directory
+    // that cannot serve unix sockets — the failure #387 is about — so the
+    // run must refuse to start with a named error instead.
+    const longRoot = join(osRoot(), `cez-long-${'t'.repeat(60)}`);
+    mkdirSync(longRoot, { recursive: true });
+    const restore = process.env.TMPDIR;
+    process.env.TMPDIR = longRoot;
+    try {
+      let thrown: unknown;
+      try {
+        agentTmpEnv(deepDataDir(), '77777777-8888-4999-8aaa-bbbbccccdddd', {});
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(AgentTempDirError);
+      expect((thrown as Error).message).toContain('CEZ_AGENT_TMPDIR=0');
+    } finally {
+      if (restore === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = restore;
+      rmSync(longRoot, { recursive: true, force: true });
+    }
   });
 
   it('sweeps orphaned fallback directories and keeps the live ones', () => {
