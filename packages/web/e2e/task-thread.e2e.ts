@@ -164,6 +164,10 @@ describe('task thread', () => {
     try {
       for (const variant of contrastQaVariants) {
         applyContrastQaVariant(browser, variant)
+        browser.evaluate(`(() => {
+          const target = document.querySelector(${JSON.stringify(link)})
+          target?.scrollIntoView({ block: 'center', inline: 'nearest' })
+        })()`)
         const normal = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
         hoverVisiblePoint(browser, link)
         const hovered = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
