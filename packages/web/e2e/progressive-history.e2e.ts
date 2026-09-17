@@ -374,7 +374,6 @@ describe('progressive long-session history', () => {
       `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages`,
     ))).toBe(5)
     browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
-    browser.waitForFunction(`document.querySelector('[data-slot="jump-to-latest"]') !== null`)
     browser.click('[data-slot="jump-to-latest"]')
     browser.waitForFunction(
       `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '1'`,

@@ -326,7 +326,6 @@ describe('workflow builder against the live dry-run server', () => {
       '      max: 2',
     ].join('\n')
     browser.click('[data-slot="wb-import"]')
-    browser.waitForFunction(`document.querySelector('[data-slot="wb-import-text"]') !== null`)
     browser.fill('[data-slot="wb-import-text"]', pasted)
     // The expanded import card can place its actions below the nested page viewport.
     browser.evaluate(`document.querySelector('[data-slot="wb-import-run"]').scrollIntoView({ block: 'center' })`)

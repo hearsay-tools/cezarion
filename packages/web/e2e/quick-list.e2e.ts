@@ -188,19 +188,6 @@ const rowsIn = (label: string) =>
     return [...bucket.querySelectorAll('${ROW}, ${TILE}')].map((el) => el.textContent.trim())
   })()`) as string[] | null
 
-/** The sidebar's Tools trigger, waited on before it is clicked.
- *
- *  The button is not there on page load: `ToolsMenu` renders nothing until `GET /api/v1/health`
- *  has answered, and every wait the specs put before it (`quick-list-bucket`, the table rows) sits
- *  on `GET /api/v1/runs` — a different request, answered from memory. Under full-suite load health
- *  lands after the list, and agent-browser's `click` does not wait, so the click must wait on the
- *  control itself (#393). */
-const TOOLS = '[data-slot="sidebar"] [aria-label="Tools"]'
-const openTools = () => {
-  browser.waitForFunction(`document.querySelector(${JSON.stringify(TOOLS)}) !== null`)
-  browser.click(TOOLS)
-}
-
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-'))
   mkdirSync(join(dataRoot, '.ai/cezar'), { recursive: true })
@@ -373,7 +360,7 @@ describe('task quick-list', () => {
   it('switches to the archived view, and back', () => {
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
-    openTools()
+    browser.click('[data-slot="sidebar"] [aria-label="Tools"]')
     browser.waitForFunction(`document.querySelector('[data-slot="sidebar-session-scope"]') !== null`)
     expect(textOf('[data-slot="view-tab"][data-view="active"]')).toBe('Active5')
     expect(textOf('[data-slot="view-tab"][data-view="archived"]')).toBe('Archived1')
@@ -720,7 +707,7 @@ describe('tasks table overview', () => {
     browser.waitForFunction(`document.querySelector('${TABLE_ROW}[data-run-id="fix-archived"]') !== null`)
     expect(browser.count(TABLE_ROW)).toBe(1)
     // The sidebar keeps showing live runs while the table browses archived history (#211).
-    openTools()
+    browser.click('[data-slot="sidebar"] [aria-label="Tools"]')
     browser.waitForFunction(`document.querySelector('[data-slot="sidebar-session-scope"]') !== null`)
     expect(
       browser.evaluate(

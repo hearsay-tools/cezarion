@@ -88,7 +88,6 @@ it('keeps comparison selection behind confirmation and acknowledges a note throu
   expect(browser.text('[role="alertdialog"]')).toContain('no undo')
   browser.click('[data-slot="alert-dialog-cancel"]')
   browser.goto(base + scoped('/inbox'))
-  browser.waitForFunction(`document.querySelector('[data-action="todo-acknowledge"]') !== null`)
   browser.click('[data-action="todo-acknowledge"]')
   browser.waitForFunction(`document.querySelectorAll('[data-slot="todo-card"]').length === 1`)
 }, 60_000)
