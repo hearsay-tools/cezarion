@@ -817,6 +817,22 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="run-activity-dock"]')).toBeNull()
   })
 
+  it('a live run is never reported as All complete, however quiet its rows are', () => {
+    // A parent parked on its workers has no workflow, agent or plan rows at all, and a running
+    // run's visible items settle between turns — completeness is a claim about the run.
+    const delegation = { role: 'root', permissions: [], receipts: [] }
+    renderView(<ThreadView run={run('waiting', { id: 'dock-waiting', delegation } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    const status = document.querySelector('[data-slot="run-activity-status"]')?.textContent
+    expect(status).not.toContain('All complete')
+    expect(status).toContain('In progress')
+  })
+
+  it('a finished run with everything settled still reads All complete', () => {
+    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+    renderView(<ThreadView run={run('done', { id: 'dock-done', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).toContain('All complete')
+  })
+
   it('the dock re-derives its collapse default per run, like the docks it replaced', () => {
     const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }]
     const { rerender } = renderView(

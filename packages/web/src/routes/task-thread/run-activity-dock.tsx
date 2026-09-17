@@ -48,7 +48,11 @@ export function RunActivityDock({
 
   if (parts.length === 0) return null
 
-  const allComplete = workflowComplete && agentCounts.done === agentCounts.total && planCountsValue.done === planCountsValue.total
+  // Completeness is a claim about the RUN, not only about the rows on screen. A parent parked
+  // on its workers carries no workflow, agent or plan rows at all, and a running run's visible
+  // items settle between turns — both would otherwise read "All complete" mid-flight.
+  const allComplete =
+    runIsTerminal && workflowComplete && agentCounts.done === agentCounts.total && planCountsValue.done === planCountsValue.total
 
   const summary = `${allComplete ? 'All complete' : run.status === 'running' ? 'Working' : 'In progress'}`
 
