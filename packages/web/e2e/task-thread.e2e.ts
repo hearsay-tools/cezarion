@@ -503,9 +503,10 @@ describe('task thread', () => {
       })()`),
     ).toBe(true)
 
-    // Phone default: the dock collapses to the odometer (the mockup's mobile reflow).
-    expect(browser.evaluate(`document.querySelector('[data-slot="plan-dock"]').dataset.state`)).toBe('collapsed')
-    expect(browser.evaluate(`document.querySelector('[data-slot="plan-count"]').textContent`)).toBe('· 2/4')
+    // Phone default: the unified run-activity dock collapses to the odometer.
+    expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-dock"]').dataset.state`)).toBe('collapsed')
+    expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-count"]').textContent`)).toBe('· 2 sections')
+    expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-status"]').textContent`)).toContain('All complete')
 
     browser.screenshot(`${artifactsDir}/thread-mobile.png`)
     browser.setViewport(1440, 900)
