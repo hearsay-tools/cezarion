@@ -905,12 +905,20 @@ npm run dev          # server (API :4321) + Vite dev server, opens the cockpit i
 npm run dev:server   # tsx packages/cezar/src/index.ts — the API server alone
 npm run dev:web      # Vite dev server alone (proxies /api to :4321)
 npm run build        # tsc → packages/cezar/dist/, vite build → packages/cezar/web/dist/, then the pack gate
-npm run typecheck    # server + web (tsc --noEmit)
+npm run typecheck    # refresh server declarations, then check all four workspaces
+npm run typecheck:web # refresh server declarations, then check web sources
 npm test             # vitest — server + cockpit unit suites
 npm run test:unit    # node:test — fast core-module tests
 npm run test:package # pack/install and exercise the built CLI
 npm run test:e2e     # real-browser cockpit suite (agent-browser)
 ```
+
+Both `npm run typecheck:web` and
+`npm run typecheck -w @open-mercato/cezar-web` rebuild server declarations from
+the current checkout before checking web sources. Run `npm ci` in each new
+worktree first. The full `npm run typecheck` starts with the web check, so it
+prepares declarations once before checking the remaining workspaces. Calling
+`tsc --noEmit` directly skips this preparation and can consume stale declarations.
 
 CI runs two duration-balanced Vitest shards alongside the build and package checks.
 See [CI verification](docs/sdlc/ci.md) for the job graph and local commands.

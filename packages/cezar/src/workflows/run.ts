@@ -834,6 +834,10 @@ export class RunManager {
    *  `active`, which is why the timer cannot live on an `ActiveRun` like the monitoring one. */
   private readonly autoResumeTimers = new Map<string, NodeJS.Timeout>();
   private pumping = false;
+  /** The scheduler only needs repo presence, stable for this manager's lifetime.
+   * Cache the promise (including null) so every sweep doesn't spawn Git (#364).
+   * execute() still reads fresh branch/remote metadata for each run. */
+  private pumpRepoInfo?: ReturnType<typeof getRepoInfo>;
   /** A pump that arrived while one was in flight — replayed by `pump()`'s own
    *  loop so a slot freed mid-sweep is never a lost wakeup. */
   private pumpAgain = false;
@@ -1315,7 +1319,7 @@ export class RunManager {
     try {
       do {
         this.pumpAgain = false;
-        const repo = await getRepoInfo(this.repoRoot);
+        const repo = await (this.pumpRepoInfo ??= getRepoInfo(this.repoRoot));
         const maxParallel = this.semaphore.maxParallel();
         // Per-project ceiling (spec 2026-07-22-per-project-concurrency): this
         // project never runs more than its own configured `maxParallel`; absent
@@ -3555,6 +3559,9 @@ export class RunManager {
         finishedAt: undefined,
         currentStepId: undefined,
       });
+      // Enqueueing must wake the scheduler even if the previous execution's
+      // slot-release sweep has already finished (#364).
+      void this.pump();
       return { ok: true };
     }
     this.starting.add(runId);
