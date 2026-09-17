@@ -80,6 +80,7 @@ afterAll(async () => {
 function open(id = parentId, suffix = '') {
   browser.goto(`${base}${route(id)}${suffix}`)
   browser.waitForFunction(`document.querySelector('[data-slot="run-activity-dock"]') !== null`)
+  browser.waitForFunction(`document.querySelector('[data-slot="run-activity-dock"] > button') !== null`)
   browser.evaluate(`(() => {
     const dockButton = document.querySelector('[data-slot="run-activity-dock"] > button[aria-expanded="false"]')
     dockButton?.click()
