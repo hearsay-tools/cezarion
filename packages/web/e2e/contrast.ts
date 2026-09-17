@@ -147,16 +147,10 @@ export function hoverVisiblePoint(browser: AgentBrowser, selector: string): void
     return null
   })()`) as { x: number; y: number } | null
   if (!point) throw new Error(`no visible hover point for ${selector}`)
-  const x = Math.round(point.x)
-  const y = Math.round(point.y)
-  browser.moveTo(x, y)
-  // agent-browser's CDP mouse-move does not reliably set CSS :hover (diagnosed #369).
-  // The honest end-state is hit-testing: the pointer we just placed is still over the
-  // target. Do not scroll here — that would slide it out from under the pointer.
-  browser.waitForFunction(`(() => {
-    const target = document.querySelector(${JSON.stringify(selector)})
-    if (!target) return false
-    const hit = document.elementFromPoint(${x}, ${y})
-    return hit === target || (hit !== null && target.contains(hit))
-  })()`)
+  // Round to the same integers `moveTo` sends. Do not wait on CSS :hover afterwards:
+  // agent-browser's CDP mouse-move does not set it on wrapping inline links (diagnosed
+  // #369, timed out at 25s). Do not wait on these frozen coordinates either — a later
+  // layout pass (viewport/theme in the QA matrix) leaves them pointing at empty space.
+  // Callers that need a settled pointer re-hit-test current rects, not this snapshot.
+  browser.moveTo(Math.round(point.x), Math.round(point.y))
 }
