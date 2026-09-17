@@ -245,7 +245,7 @@ describe('TaskQuickList', () => {
       })
       expect(dotOf('w')?.getAttribute('data-tone')).toBe('pending')
       expect(dotOf('v')?.getAttribute('data-tone')).toBe('accent')
-      expect(dotOf('r')?.getAttribute('data-tone')).toBe('accent')
+      expect(dotOf('r')?.getAttribute('data-tone')).toBe('info')
       expect(dotOf('d')?.getAttribute('data-tone')).toBe('success')
       expect(dotOf('f')?.getAttribute('data-tone')).toBe('danger')
 
@@ -552,7 +552,7 @@ describe('TaskQuickList', () => {
       // The letter chip, its own dot, and what actually differs between the variants.
       expect(metadataText(row('va'))).toBe('Aclaude · IN 92.0k · OUT 4.2k · $0.31')
       expect(metadataText(row('vb'))).toBe('Bcodex · IN 40.0k · OUT 1.8k · $0.12')
-      expect(dotOf('va')?.getAttribute('data-tone')).toBe('accent')
+      expect(dotOf('va')?.getAttribute('data-tone')).toBe('info')
       // Each variant is still its own deep link.
       expect(row('vb')?.querySelector('a')?.getAttribute('href')).toBe('/tasks/vb')
 
