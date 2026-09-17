@@ -97,18 +97,17 @@ export const EFFORT_OPTIONS = [
 
 export type EffortOption = (typeof EFFORT_OPTIONS)[number]
 
-/** `auto` plus this model's discovered levels, or the complete backward-compatible fallback. */
+/** Auto plus advertised levels. Cursor has no generic fallback without model metadata. */
 export function effortOptionsForModel(
   runner: Runner,
   model: string,
   catalog?: RunnerModelCatalogResponse,
 ): readonly EffortOption[] {
-  // Cursor encodes optional effort inside the model ID; ACP has no independent effort field.
-  if (runner === 'cursor') return [EFFORT_OPTIONS[0]]
-  const levels = runnerDiscoversModels(runner)
+  const fallback = runner === 'cursor' ? [EFFORT_OPTIONS[0]] : EFFORT_OPTIONS
+  const levels = runnerDiscoversModels(runner) && (runner !== 'cursor' || catalog?.runner === runner)
     ? catalog?.models.find((entry) => entry.id === model)?.effortLevels
     : undefined
-  if (!levels?.length) return EFFORT_OPTIONS
+  if (!levels?.length) return fallback
 
   const options: EffortOption[] = [EFFORT_OPTIONS[0]]
   const seen = new Set<string>()
@@ -119,7 +118,7 @@ export function effortOptionsForModel(
     seen.add(level)
     options.push(option)
   }
-  return options.length > 1 ? options : EFFORT_OPTIONS
+  return options.length > 1 ? options : fallback
 }
 
 /** Resolve stale or inherited effort through the same options the picker displays. */
@@ -363,7 +362,7 @@ export function buildCreateRunBody(opts: {
       ? { steps: [{ id: 'task', name: source.ref, skill: source.ref, prompt: '{{task}}' }] }
       : { workflow: source?.ref ?? QUICK_TASK }),
     model: modelsLocked ? undefined : model || undefined,
-    effort: modelsLocked || runner === 'cursor' ? undefined : effort || undefined,
+    effort: modelsLocked ? undefined : effort || undefined,
     runner: runnerOverride(runner, defaultRunner, runnerExplicit),
     // Sent only when the user picked one — an absent key is "follow the project", which is what
     // every launch that never touched the control means.
