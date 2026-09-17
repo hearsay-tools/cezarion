@@ -18,19 +18,21 @@ const configOptions = () => [
 ];
 const configuration = () => process.env.CEZ_MOCK_CURSOR_LEGACY === '1' ? {} : { configOptions: configOptions() };
 let pendingAsk;
+let resumeDone = false;
 const update = (value, id = sessionId) => emit({ method: 'session/update', params: { sessionId: id, update: value } });
 const text = value => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: value } });
 const complete = id => reply(id, { stopReason: 'end_turn' });
 const question = { id: 'tests', prompt: 'Which test runner?', options: [{ id: 'vitest', label: 'Vitest' }, { id: 'jest', label: 'Jest' }], allowMultiple: false };
 async function prompt(id, content) {
   const input = content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+  if (resumeDone) { resumeDone = false; text('Resumed work finished.\nCEZ:DONE'); complete(id); return; }
   if (input.includes('mock:hold')) await new Promise(r => setTimeout(r, 500));
   if (input.includes('mock:rpc-error')) { emit({ id, error: { code: -32603, message: 'Provider rejected request' } }); return; }
   if (input.includes('mock:provider-error')) { text('\n\nError: [unauthenticated] Backend rejected authentication.'); complete(id); return; }
   if (input.includes('mock:ask-bad')) { pendingAsk = { id }; emit({ id: 'bad-question', method: 'cursor/ask_question', params: { questions: [] } }); return; }
-  if (input.includes('mock:plan')) { pendingAsk = { id }; emit({ id: 'plan-1', method: 'cursor/create_plan', params: { name: 'Test plan', overview: 'Approve the changes?', plan: 'Implement the change and run tests.' } }); return; }
+  if (input.includes('mock:plan')) { pendingAsk = { id, input }; emit({ id: 'plan-1', method: 'cursor/create_plan', params: { name: 'Test plan', overview: 'Approve the changes?', plan: 'Implement the change and run tests.' } }); return; }
   if (input.includes('mock:multi-ask')) { pendingAsk = { id }; emit({ id: 'multi-question', method: 'cursor/ask_question', params: { title: 'Choices', questions: [question, { ...question, id: 'build', prompt: 'Which build tool?', options: [{ id: 'vite', label: 'Vite' }, { id: 'webpack', label: 'Webpack' }] }] } }); return; }
-  if (input.includes('mock:ask')) { pendingAsk = { id }; emit({ id: 'question-1', method: 'cursor/ask_question', params: { toolCallId: 'ask-tool', title: 'Tests', questions: [question] } }); return; }
+  if (input.includes('mock:ask')) { pendingAsk = { id, input }; emit({ id: 'question-1', method: 'cursor/ask_question', params: { toolCallId: 'ask-tool', title: 'Tests', questions: [question] } }); return; }
   if (input.includes('mock:permission')) { pendingAsk = { id }; emit({ id: 'permission-1', method: 'session/request_permission', params: { sessionId, toolCall: { toolCallId: 'shell-1', title: 'echo hello', kind: 'execute' }, options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' }] } }); return; }
   if (input.includes('mock:subagent')) {
     update({ sessionUpdate: 'tool_call', toolCallId: 'task-1', title: 'Review', kind: 'other', rawInput: { description: 'Review' }, status: 'in_progress' });
@@ -56,7 +58,17 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (!msg.method) {
     if (pendingAsk) {
       const pending = pendingAsk; pendingAsk = undefined;
-      setTimeout(() => { text(msg.id === 'bad-question' ? 'Malformed question skipped.' : `Answer accepted: ${JSON.stringify(msg.result)}`); complete(pending.id); }, 40);
+      // #383 run f192490f seq188–194: native reply, tool closes, end_turn.
+      // Variants exercise documented ACP terminal/ask frames at that boundary.
+      setTimeout(() => {
+        text(msg.id === 'bad-question' ? 'Malformed question skipped.' : `Answer accepted: ${JSON.stringify(msg.result)}`);
+        const input = pending.input ?? '';
+        resumeDone = input.includes('mock:resume-done');
+        if (input.includes('mock:answer-done')) text('\nCEZ:DONE');
+        if (input.includes('mock:answer-monitoring')) text('\nCEZ:MONITORING');
+        if (input.includes('mock:answer-ask')) emit({ id: 'question-2', method: 'cursor/ask_question', params: { title: 'Tests', questions: [question] } });
+        reply(pending.id, { stopReason: input.includes('mock:answer-cancelled') ? 'cancelled' : 'end_turn' });
+      }, 40);
     }
     return;
   }
