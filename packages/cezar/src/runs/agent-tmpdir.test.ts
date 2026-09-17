@@ -343,18 +343,40 @@ describe('socket-safe temp directory length (#387)', () => {
     const sharedPrefix = join(osRoot(), 'cez-agent-tmpdir-fixture');
     const unrelated = join(osRoot(), 'cez-other-abcdefghijkl');
     const notADir = join(osRoot(), 'cez-agent-abcdefghijkl');
+    // Pattern-perfect but carrying no ownership marker: never ours to remove.
+    const ownerless = join(osRoot(), 'cez-agent-000000000001');
     mkdirSync(sharedPrefix, { recursive: true });
     mkdirSync(unrelated, { recursive: true });
+    mkdirSync(ownerless, { recursive: true });
     writeFileSync(notADir, 'x', 'utf8');
     try {
       sweepAgentTmpDirs(deepDataDir(), []);
       expect(existsSync(sharedPrefix)).toBe(true);
       expect(existsSync(unrelated)).toBe(true);
       expect(existsSync(notADir)).toBe(true);
+      expect(existsSync(ownerless)).toBe(true);
     } finally {
       rmSync(sharedPrefix, { recursive: true, force: true });
       rmSync(unrelated, { recursive: true, force: true });
       rmSync(notADir, { force: true });
+      rmSync(ownerless, { recursive: true, force: true });
+    }
+  });
+
+  it('never sweeps another dataDir’s fallback directory', () => {
+    // A second checkout is a second cezar project with live runs of its own;
+    // its fallback directories sit in the SAME shared root and must survive
+    // this dataDir's startup sweep untouched.
+    const mine = deepDataDir();
+    const theirsRoot = join(osRoot(), `cez-deep-${'o'.repeat(80)}`);
+    const theirs = join(theirsRoot, 'other', '.ai', 'cezar');
+    const theirDir = mint(theirs, '33333333-4444-4555-8666-777788889999');
+    try {
+      const reaped = sweepAgentTmpDirs(mine, []);
+      expect(existsSync(theirDir)).toBe(true);
+      expect(reaped).not.toContain(basename(theirDir));
+    } finally {
+      rmSync(theirsRoot, { recursive: true, force: true });
     }
   });
 });

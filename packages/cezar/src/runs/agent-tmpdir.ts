@@ -41,7 +41,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
-import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -94,11 +94,24 @@ function osTempRoot(): string {
 const FALLBACK_PREFIX = 'cez-agent-';
 const FALLBACK_NAME_LENGTH = 12;
 
+/** The marker file inside a fallback directory naming the dataDir that minted
+ *  it. The directory name digests `dataDir:runId` and is not reversible, so
+ *  without this marker a sweep could not tell its own stale directories from
+ *  another project's live ones in the shared root — and would delete them. */
+const OWNER_FILE = '.cez-owner';
+
+function dataDirOwner(dataDir: string): string {
+  return createHash('sha256').update(`cez-agent-owner:${dataDir}`).digest('hex').slice(0, 16);
+}
+
 /**
  * Where the fallback lives for this dataDir+run pair. The name digests the
  * dataDir in, because the OS temp root is SHARED: a name derived from the run
- * id alone would let one repo's reap or sweep delete another repo's live
- * scratch when two run ids happen to share their leading characters.
+ * id alone would let one repo's reap delete another repo's live scratch when
+ * two run ids happen to share their leading characters. The name alone cannot
+ * make the sweep safe — a digest is not reversible, so a sweep could not tell
+ * its own stale directories from another project's live ones — which is why
+ * every fallback directory also carries the `.cez-owner` marker.
  */
 function fallbackTmpDir(dataDir: string, runId: string): string {
   const digest = createHash('sha256').update(`${dataDir}:${runId}`).digest('hex');
@@ -213,6 +226,10 @@ export function agentTmpEnv(
   const dir = resolveAgentTmpDir(dataDir, runId);
   try {
     mkdirSync(dir, dir === local ? { recursive: true } : { recursive: true, mode: 0o700 });
+    // In the shared OS root the directory carries its ownership marker, so a
+    // startup sweep from another project can tell it apart from stale
+    // scratch (the sweep skips anything whose marker is missing or foreign).
+    if (dir !== local) writeFileSync(join(dir, OWNER_FILE), dataDirOwner(dataDir), 'utf8');
   } catch (err) {
     throw new AgentTempDirError(dir, err);
   }
@@ -251,8 +268,9 @@ export function removeAgentTmpDir(dataDir: string, runId: string): void {
  *     name digests the dataDir and is not reversible to a run id (reports the
  *     directory names reaped). The pattern is exact — prefix, lowercase hex,
  *     fixed length, directories only — and a directory is removed only when
- *     THIS dataDir cannot claim it, so another repo's scratch in the shared
- *     root is never touched.
+ *     its `.cez-owner` marker names THIS dataDir and none of this dataDir's
+ *     kept runs claims it, so another project's scratch in the shared root is
+ *     never touched.
  */
 export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>): string[] {
   const keep = new Set(keepRunIds);
@@ -278,8 +296,12 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
     }
   }
   // The #387 fallback location, in the shared OS temp root. Kept narrow on
-  // purpose: exact prefix, 12 lowercase-hex name, directories only, and only
-  // names this dataDir cannot claim.
+  // purpose: exact prefix, 12 lowercase-hex name, directories only, and
+  // ownership — a directory is removed only when its `.cez-owner` marker
+  // names THIS dataDir (a marker that is missing or foreign is another
+  // project's, or unknown, and is never ours to remove) and none of this
+  // dataDir's kept runs claims it.
+  const owner = dataDirOwner(dataDir);
   const claimed = new Set(
     [...keep].filter(safeRunId).map((id) => basename(fallbackTmpDir(dataDir, id))),
   );
@@ -293,6 +315,13 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
   for (const entry of fallbackEntries) {
     if (!entry.isDirectory() || !entry.name.startsWith(FALLBACK_PREFIX)) continue;
     if (!/^[0-9a-f]{12}$/.test(entry.name.slice(FALLBACK_PREFIX.length))) continue;
+    let entryOwner: string;
+    try {
+      entryOwner = readFileSync(join(osRoot, entry.name, OWNER_FILE), 'utf8').trim();
+    } catch {
+      continue; // no readable marker: unknown ownership is never ours to remove.
+    }
+    if (entryOwner !== owner) continue;
     if (claimed.has(entry.name)) continue;
     try {
       rmSync(join(osRoot, entry.name), { recursive: true, force: true });
