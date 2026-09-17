@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
+import { resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { planOwnedWorkspace, removeOwnedWorkspace } from '../delegation/workspace.ts';
 import { isReclaimable, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -272,7 +273,11 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     releases.push(() => child?.kill('SIGKILL'));
     manager.enqueueOwnedRun(w.id); await until(() => ready);
     const prior = store.readWorkerExecution(w.id)!;
-    const scratch = join(root, '.ai/cezar/tmp', w.id, 'retained.txt'); writeFileSync(scratch, 'old process scratch');
+    // Resolved, not hand-built: the run's scratch lives wherever the socket-safe
+    // resolver (#387) put it, and the recovery barrier must see that location.
+    const scratchDir = resolveAgentTmpDir(join(root, '.ai/cezar'), w.id);
+    mkdirSync(scratchDir, { recursive: true });
+    const scratch = join(scratchDir, 'retained.txt'); writeFileSync(scratch, 'old process scratch');
     manager.dispose(); store.updateRun(w.id, { status }); store.flush();
     const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
     try {

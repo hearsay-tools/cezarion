@@ -20,7 +20,7 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { registerRunProcess, unregisterRunProcess } from '../core/process-usage.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import { createWorktree } from '../git-worktree.ts';
-import { agentTmpDir } from '../runs/agent-tmpdir.ts';
+import { resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { RunStore, type RunRecord, type StepState } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { parseTaskMarkers } from '../runs/task-markers.ts';
@@ -1676,7 +1676,9 @@ describe('CEZ:MONITORING parks as running/monitoring, not waiting (#490)', () =>
     const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
     if (!session?.open || !idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
 
-    const scratch = agentTmpDir(join(repoRoot, '.ai/cezar'), record.id);
+    // Resolved, not hand-built: a deep sandbox checkout falls back to the short
+    // OS-temp location (#387), and the idle-close must release THAT directory.
+    const scratch = resolveAgentTmpDir(join(repoRoot, '.ai/cezar'), record.id);
     expect(existsSync(scratch)).toBe(true);
     idleTimer._onTimeout();
     await waitFor(record.id, () => !internals.active.has(record.id));

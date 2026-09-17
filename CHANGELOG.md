@@ -28,6 +28,15 @@
   is a 400, matching `POST /api/v1/runs`. Spec: `.ai/specs/2026-07-29-agent-profiles.md`.
 
 ## 🐛 Fixes
+- 🐛 **A deep checkout no longer breaks the tools an agent runs inside it.** Every task hands its
+  agent a private `TMPDIR` at `.ai/cezar/tmp/<task-id>` (#785), and from a nested checkout —
+  Cezar's own task worktrees included — that path ran past 100 characters. Tools bind *named*
+  unix sockets under `TMPDIR` (tsx's IPC server, Chrome's SingletonSocket), and the kernel caps a
+  socket path at 104–108 bytes, so `npm install` and typechecking inside the task died with
+  `listen EINVAL` until `TMPDIR=/tmp` was set by hand. A run whose per-task path would cross the
+  socket budget now resolves its temp directory to a short `cez-agent-…` directory under the
+  system temp dir — still per-task, still write-probed before the agent spawns, still reaped when
+  the run ends. Checkouts whose path already fits keep the repo-local directory unchanged. (#387)
 - 🐛 **A version-bump commit is installable again.** The Release workflow stamped
   api-client, cezar and the alias, then opened a bump PR that `npm ci` could not
   install: `packages/contract` stayed on the previous version while its consumers
