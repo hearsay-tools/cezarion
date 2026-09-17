@@ -11,6 +11,8 @@ on:
     branches:
       - develop
       - main
+  # Release finalization explicitly dispatches bot-created PRs at their head branch.
+  # Without a PR event payload these run the full matrix, never a classifier skip.
   workflow_dispatch:
 
 permissions:
@@ -135,10 +137,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # Dispatch checks belong to github.sha; never verify a later moving branch tip.
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
+          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
           # CI intentionally executes the PR merge result under pull_request_target;
           # opt out of checkout's fork protection for this reviewed, read-only gate.
           allow-unsafe-pr-checkout: true
@@ -198,7 +201,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
+          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
           allow-unsafe-pr-checkout: true
           persist-credentials: false
 
@@ -240,7 +243,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
+          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
           allow-unsafe-pr-checkout: true
           persist-credentials: false
 

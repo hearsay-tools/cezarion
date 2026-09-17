@@ -3,6 +3,7 @@
 const { execFileSync } = require('node:child_process');
 const { appendFileSync } = require('node:fs');
 const { isReleaseBumpFile } = require('./release-bump-pr.cjs');
+const { ensureReleaseCi } = require('./release-ci.cjs');
 
 const command = (program, args) => execFileSync(program, args, {
   encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
@@ -24,6 +25,17 @@ function failed(core, error) {
 }
 
 async function bumpPr({ github, context, core }) {
+  const startCi = async (pr, sha) => {
+    try {
+      const result = await ensureReleaseCi({ github, repo: context.repo, prNumber: pr.number, expectedSha: sha });
+      core.setOutput('ci_status', result.status);
+      core.setOutput('ci_url', result.url);
+    } catch (error) {
+      core.setOutput('ci_status', 'failed');
+      core.setOutput('ci_reason', message(error));
+      core.setFailed(message(error));
+    }
+  };
   const version = process.env.VERSION;
   const base = process.env.BASE_BRANCH;
   const branch = `release/v${version}`;
@@ -73,6 +85,8 @@ async function bumpPr({ github, context, core }) {
         || (pr.state !== 'open' && !pr.merged_at)) throw conflict();
       core.setOutput('status', 'reused');
       core.setOutput('url', pr.html_url);
+      if (!pr.merged_at) await startCi(pr, sha);
+      else core.setOutput('ci_status', 'not-needed');
       return;
     }
     if (!sha) {
@@ -103,6 +117,7 @@ async function bumpPr({ github, context, core }) {
     }
     core.setOutput('status', 'created');
     core.setOutput('url', pr.html_url);
+    await startCi(pr, sha);
   } catch (error) { failed(core, error); }
 }
 
@@ -166,10 +181,12 @@ function summary() {
     `## Release ${env.VERSION}`, '',
     `- npm publication: ${published ? `published \`${env.ALIAS_NAME}@${env.VERSION}\` (including packages already published on an earlier attempt)` : 'dry run — nothing was published'}.`,
     `- Version-bump PR: ${published ? pr : 'skipped'}${env.PR_URL ? ` — ${env.PR_URL}` : ''}.`,
+    `- Version-bump CI: ${published ? env.CI_STATUS || 'not requested' : 'skipped'}${env.CI_URL ? ` — ${env.CI_URL}` : ''}.`,
     `- GitHub Release: ${published ? release : 'skipped'}${env.RELEASE_URL ? ` — ${env.RELEASE_URL}` : ''}.`,
     `- Tag: ${published && env.TAG_VERIFIED === 'true' ? `verified \`v${env.VERSION}\` at the published source commit` : 'not confirmed at the published source commit'}.`,
   ];
   if (env.PR_REASON) lines.push('', `PR recovery: ${env.PR_REASON}`);
+  if (env.CI_REASON) lines.push('', `CI recovery: ${env.CI_REASON}`);
   if (env.RELEASE_REASON) lines.push('', `Release recovery: ${env.RELEASE_REASON}`);
   appendFileSync(env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
 }

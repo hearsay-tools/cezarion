@@ -85,6 +85,7 @@ jobs:
       contents: write # create the release tag + GitHub Release via the API
       id-token: write # npm trusted publishing (OIDC) + provenance
       pull-requests: write # open the version-bump PR for patch/minor/major releases
+      actions: write # explicitly start CI for GITHUB_TOKEN-created release PRs
 
     steps:
       - name: Check out repository
@@ -150,6 +151,9 @@ jobs:
           PR_STATUS: ${{ steps.bump_pr.outputs.status }}
           PR_URL: ${{ steps.bump_pr.outputs.url }}
           PR_REASON: ${{ steps.bump_pr.outputs.reason }}
+          CI_STATUS: ${{ steps.bump_pr.outputs.ci_status }}
+          CI_URL: ${{ steps.bump_pr.outputs.ci_url }}
+          CI_REASON: ${{ steps.bump_pr.outputs.ci_reason }}
           RELEASE_STATUS: ${{ steps.github_release.outputs.status }}
           RELEASE_URL: ${{ steps.github_release.outputs.url }}
           RELEASE_REASON: ${{ steps.github_release.outputs.reason }}
