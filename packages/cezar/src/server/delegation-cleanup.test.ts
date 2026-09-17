@@ -10,7 +10,7 @@ import { workerDestroyResultSchema } from '@open-mercato/cezar-contract';
 describe('human owned-worker cleanup', () => {
   let f: ReturnType<typeof fixture>;
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(() => { f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   it('rejects malformed human cleanup without state or intent changes and accepts absent or empty bodies', async () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
     vi.stubEnv('CEZ_DELEGATION', '0');

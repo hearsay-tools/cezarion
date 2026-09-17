@@ -16,7 +16,7 @@ describe('explicit owned worker context', () => {
     writeFileSync(join(dir, name), content); return join(dir, name);
   };
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(() => { f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   it('pins repository references and copies parent attachments into owned input storage before enqueue', async () => {
     writeFileSync(join(f.root, 'source.txt'), 'committed');
     execFileSync('git', ['add', 'source.txt'], { cwd: f.root });

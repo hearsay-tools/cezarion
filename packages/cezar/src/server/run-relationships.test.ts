@@ -5,7 +5,7 @@ import { createApp } from './server.ts';
 import { fixture } from '../delegation/service.testkit.ts';
 let f: ReturnType<typeof fixture>;
 beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-afterEach(() => { f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 // Exercise all 32 real durable creations; this is not a 5s filesystem throughput assertion.
 it('reads all owned workers including archived records through each human project alias with delegation off', { timeout: 30_000 }, async () => {
   const workers: WorkerSpawnResult[] = [];

@@ -9,9 +9,21 @@ import { RunManager } from '../workflows/run.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
 import { DelegationService } from './service.ts';
 
-export function fixture(): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; close(): void } {
+export async function waitForOwnedWork(manager: RunManager, store: RunStore): Promise<void> {
+  await Promise.all(store.listRuns().filter(run => manager.isActive(run.id)).map(run => manager.awaitRunTermination(run.id, 8_000).then(() => undefined)));
+}
+
+export async function removeAfterOwnedWork(root: string, ownedWork: Promise<void>): Promise<void> {
+  await ownedWork;
+  rmSync(root, { recursive: true, force: true });
+}
+
+export function fixture(): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; close(): Promise<void> } {
   const root = mkdtempSync(join(tmpdir(), 'cez-delegation-service-'));
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+  // Auto-gc detaches after commit and writes into `.git` while recursive removal walks it.
+  execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
+  execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
@@ -27,6 +39,8 @@ export function fixture(): { root: string; sha: string; store: RunStore; manager
   const service = new DelegationService();
   service.registerProject({ id: 'project', root, store, manager });
   return { root, sha, store, manager, parent, credentials, caller, token, service,
-    // Git can still write maintenance files while recursive removal walks the fixture.
-    close() { credentials.close(); manager.dispose(); store.flush(); rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); } };
+    async close() {
+      credentials.close();
+      await removeAfterOwnedWork(root, waitForOwnedWork(manager, store).then(() => { manager.dispose(); store.flush(); }));
+    } };
 }

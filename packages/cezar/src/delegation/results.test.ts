@@ -15,7 +15,7 @@ vi.mock('node:fs', async importOriginal => {
 describe('parent-owned collected worker results', () => {
   let f: ReturnType<typeof fixture>;
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(() => { f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   async function worker() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });
     return f.store.getRun(workerId)!;

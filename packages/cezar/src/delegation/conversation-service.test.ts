@@ -8,7 +8,7 @@ import { fixture } from './service.testkit.ts';
 describe('durable conversations', () => {
   let f: ReturnType<typeof fixture>;
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(() => { f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   async function worker() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     f.store.updateRun(workerId, { status: 'running' });
