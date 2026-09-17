@@ -30,7 +30,10 @@ export function RunActivityDock({
   const workflow = run.steps.length > 0 ? run.steps : []
   const agents = useMemo(() => collectSubagents(currentThread.turns, runIsTerminal), [currentThread.turns, runIsTerminal])
   const planEntries = latestPlanEntries(currentThread) ?? []
-  const workerSection = run.delegation ? <RunRelationshipsPanel run={run} /> : undefined
+  // `invalid` is the contract's parking spot for unreadable delegation metadata, and
+  // RunRelationshipsPanel renders nothing for it — so it is not a section to count or frame.
+  const workerSection =
+    run.delegation && run.delegation.role !== 'invalid' ? <RunRelationshipsPanel run={run} /> : undefined
   const workflowComplete =
     workflow.length === 0 ||
     workflow.every((step) => step.status === 'done' || step.status === 'failed' || step.status === 'cancelled' || step.status === 'skipped')
