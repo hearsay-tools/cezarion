@@ -69,6 +69,7 @@ import { cn, isHttpUrl } from '@/lib/utils'
 
 import { Markdown } from './markdown'
 import { cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
+import { RunRelationshipsPanel } from './run-relationships'
 import { WorkflowSteps } from './step-rail'
 import { useFinishRun } from './use-finish-run'
 
@@ -222,6 +223,8 @@ export function RunHeader({
 
 
         </div>
+
+        {tab !== 'session' ? <RunRelationshipsPanel run={run} /> : null}
 
         {tab !== 'session' && run.steps.length > 0 ? (
           <div className="border-t border-border pt-1 pb-0 md:pt-2 md:pb-1">

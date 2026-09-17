@@ -334,10 +334,11 @@ describe('task thread', () => {
     browser.click('[data-slot="workflow-steps"] [data-slot="collapsible-trigger"]')
   })
 
-  it('the plan dock shows the LATEST snapshot (2/4), expanded on desktop, mirrored in the header', () => {
+  it('the plan dock shows the LATEST snapshot (2/4), expanded in the session dock', () => {
     expect(browser.evaluate(`document.querySelector('[data-slot="plan-dock"]').dataset.state`)).toBe('open')
     expect(browser.evaluate(`document.querySelector('[data-slot="plan-count"]').textContent`)).toBe('· 2/4')
-    expect(browser.evaluate(`document.querySelector('[data-slot="plan-mirror"]').textContent`)).toBe('Plan 2/4')
+    expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-dock"]').dataset.state`)).toBe('open')
+    expect(browser.evaluate(`document.querySelector('[data-slot="plan-mirror"]') === null`)).toBe(true)
 
     // The turn-2 snapshot won (turn 1 said 0/4 with "Read README and docs" in progress).
     const items = browser.evaluate(`[...document.querySelectorAll('[data-slot="plan-item"]')].map((el) => ({
