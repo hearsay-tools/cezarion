@@ -666,7 +666,12 @@ or set `CURSOR_API_KEY`. Cezar discovers `agent` on PATH; `CEZ_CURSOR_BIN` overr
 its location. Select **Cursor** in the runner picker to use a persistent ACP session.
 A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
 Cursor ACP currently provides no token-usage telemetry; Cezar leaves usage unavailable
-instead of estimating it. Model-specific effort stays in Cursor’s parameterized model IDs.
+instead of estimating it. Cezar negotiates Cursor’s parameterized model picker and
+shows only the effort levels the selected model advertises. The runner applies
+`effort` or `reasoning` through ACP session config options before prompting;
+unsupported explicit values fail instead of silently using a default. Initial models
+are pinned with `--model`; opaque parameterized IDs and legacy model discovery
+remain compatibility paths for older CLIs.
 
 Settings → Agent config exposes Cursor’s global `cli-config.json`, project
 `.cursor/cli.json` permissions, `.cursor/mcp.json`, and shared `AGENTS.md`.

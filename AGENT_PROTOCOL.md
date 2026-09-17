@@ -473,10 +473,20 @@ usage: the UI usage rows and harness S4 carry named, inverse-asserted wire-gap
 exemptions. Other matrix rows remain required. Revisit these exemptions when
 Cursor exposes directional token usage; the fixtures document their sources.
 
-The generic effort field and per-session tool/command allowlists have no ACP
-mapping and are declared unsupported. Model-specific effort can travel in an
-opaque parameterized Cursor model ID. Additional roots use `--add-dir`.
-Cursor's composite native model setting stays CLI-owned when no model is pinned.
+Cursor initializes with `_meta.parameterizedModelPicker: true`. It captures session
+`configOptions` and `config_option_update` snapshots, then maps generic effort to
+an advertised `effort`, `reasoning`, or `reasoning_effort` select value through `session/set_config_option`.
+It verifies the returned current value before inference; unsupported effort fails.
+`--model` pins the initial model before the ACP session is built. Advertised model
+config options are preferred, with opaque IDs and legacy `session/set_model` retained
+for compatibility. Read-only `cursor/list_available_models` supplies base models and
+parameter options; older CLIs fall back to `--list-models` without guessed effort.
+Per-session tool/command allowlists remain unsupported. Additional roots use
+`--add-dir`; Cursor's native defaults remain authoritative when no model/effort is pinned.
+
+Verified on Cursor `2026.09.15-d2fe57e`: Sonnet exposes `effort`, GPT-5.4 Mini exposes
+`reasoning`, and a live Cezar runner turn with `reasoning=low` completed successfully.
+See [ACP Session Config Options](https://agentclientprotocol.com/protocol/v1/session-config-options).
 
 ---
 

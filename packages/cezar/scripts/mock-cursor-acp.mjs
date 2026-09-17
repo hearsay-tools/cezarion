@@ -7,6 +7,16 @@ record(process.env.CEZ_MOCK_ARGS_FILE, process.argv.slice(2));
 const emit = value => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...value })}\n`);
 const reply = (id, result) => emit({ id, result });
 let sessionId = 'cursor-offline-session';
+let model = process.argv[process.argv.indexOf('--model') + 1];
+if (!process.argv.includes('--model')) model = 'gpt-test';
+const requestedModel = model;
+if (process.env.CEZ_MOCK_CURSOR_INITIAL_MODEL) model = process.env.CEZ_MOCK_CURSOR_INITIAL_MODEL;
+let effort = 'medium';
+const configOptions = () => [
+  { id: 'model', name: 'Model', type: 'select', currentValue: model, options: [...new Set([model, requestedModel])].map(value => ({ value, name: value })) },
+  { id: model.startsWith('sonnet') ? 'effort' : 'reasoning', name: 'Reasoning', type: 'select', currentValue: effort, options: ['low', 'medium', 'high', 'xhigh', 'max'].map(value => ({ value, name: value })) },
+];
+const configuration = () => process.env.CEZ_MOCK_CURSOR_LEGACY === '1' ? {} : { configOptions: configOptions() };
 let pendingAsk;
 const update = (value, id = sessionId) => emit({ method: 'session/update', params: { sessionId: id, update: value } });
 const text = value => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: value } });
@@ -52,9 +62,14 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   switch (msg.method) {
     case 'initialize': reply(msg.id, { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: true } } }); break;
-    case 'session/new': reply(msg.id, { sessionId }); break;
-    case 'session/load': sessionId = msg.params.sessionId; reply(msg.id, {}); break;
-    case 'session/set_model': reply(msg.id, {}); break;
+    case 'cursor/list_available_models': reply(msg.id, { models: [{ value: model, name: model, configOptions: configOptions().filter(option => option.id !== 'model') }] }); break;
+    case 'session/new': reply(msg.id, { sessionId, ...configuration() }); break;
+    case 'session/load': sessionId = msg.params.sessionId; reply(msg.id, configuration()); break;
+    case 'session/set_model': model = msg.params.modelId; reply(msg.id, {}); break;
+    case 'session/set_config_option':
+      if (msg.params.configId === 'model') model = msg.params.value;
+      else if (process.env.CEZ_MOCK_CURSOR_STALE_CONFIG !== '1') effort = msg.params.value;
+      reply(msg.id, { configOptions: configOptions() }); break;
     case 'session/prompt': void prompt(msg.id, msg.params.prompt); break;
     case 'session/cancel': break;
     default: emit({ id: msg.id, error: { code: -32601, message: 'Method not found' } });

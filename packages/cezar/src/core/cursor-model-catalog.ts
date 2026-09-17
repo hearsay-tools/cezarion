@@ -12,6 +12,9 @@ export interface CursorModelDiscoveryOptions {
 }
 
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 10_000;
+// ACP initializes provider services before listing parameters; the installed build
+// exceeded the legacy listing's 10s deadline under load. Keep a finite startup bound.
+const DEFAULT_ACP_DISCOVERY_TIMEOUT_MS = 30_000;
 const KILL_GRACE_MS = 2_000;
 const MAX_MODELS = 500;
 const MAX_OUTPUT_CHARS = 512 * 1_024;
@@ -79,7 +82,7 @@ function discoverParameterizedModels(options: CursorModelDiscoveryOptions): Prom
       else resolve(models ?? []);
     };
     const fail = (reason: string) => finish(new Error(`Cursor model discovery ${reason}`));
-    const timeout = setTimeout(() => fail('timed out'), options.timeoutMs ?? DEFAULT_DISCOVERY_TIMEOUT_MS);
+    const timeout = setTimeout(() => fail('timed out'), options.timeoutMs ?? DEFAULT_ACP_DISCOVERY_TIMEOUT_MS);
     timeout.unref?.();
     const send = (id: number, method: string, params: unknown) => {
       try {

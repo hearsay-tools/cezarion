@@ -1,3 +1,4 @@
+import { parseCursorConfigOptions, cursorEffortSelection, type CursorConfigOption } from './cursor-config-options.ts';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport, AgentSession, AgentToolCallRecord, ContentBlock, SessionOptions } from './agent-runner.ts';
@@ -19,8 +20,8 @@ export const CURSOR_SPEC_SUPPORT: AgentRunSpecSupport = {
   restrictNativeDelegation: { honored: true, via: 'initialize clientCapabilities._meta.subagents=false; Cursor 2026.09.15 negotiates native delegation from this capability' },
   additionalDirectories: { honored: true, via: '--add-dir per additional workspace root' },
   env: { honored: true, via: 'buildChildEnv cursor backend with per-run env' },
-  model: { honored: true, via: 'session/set_model modelId (bare and parameterized IDs preserved)' },
-  effort: { honored: false, reason: 'ACP has no portable independent effort field; Cursor encodes model-specific parameters in modelId' },
+  model: { honored: true, via: '--model pins initial selection; ACP model config option for advertised IDs, legacy session/set_model fallback' },
+  effort: { honored: true, via: 'advertised effort/reasoning/reasoning_effort select value via session/set_config_option; unsupported values fail before inference' },
   timeoutMs: { honored: true, via: 'wall-clock deadline with bounded TERM/KILL teardown' },
   sessionId: { honored: true, via: 'session/load sessionId on resume; session/new mints fresh ID' },
   resume: { honored: true, via: 'session/load instead of session/new' },
@@ -58,6 +59,7 @@ class CursorSession implements AgentSession {
   private ready = false;
   private markerAsk = false;
   private sessionId?: string;
+  private configOptions: CursorConfigOption[] = [];
   private pendingAsk?: PendingAsk;
   private queued: ContentBlock[][] = [];
   private requestId = 0;
@@ -77,7 +79,7 @@ class CursorSession implements AgentSession {
 
   constructor(bin: string, private readonly spec: AgentRunSpec, timeoutMs: number, private readonly onEvent: ((event: AgentEvent) => void) | undefined, private readonly opts: SessionOptions) {
     this.result = new Promise(resolve => { this.resolveResult = resolve; });
-    this.child = spawn(bin, ['--force', ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp'], {
+    this.child = spawn(bin, ['--force', ...(spec.model ? ['--model', spec.model] : []), ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp'], {
       cwd: spec.cwd, env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
     });
     this.hasExited = trackChildExit(this.child);
@@ -141,7 +143,7 @@ class CursorSession implements AgentSession {
   }
   private async bootstrap(): Promise<void> {
     const init = await this.request('initialize', { protocolVersion: 1, clientInfo: { name: 'cezar', version: '1' },
-      clientCapabilities: { _meta: { subagents: !this.spec.restrictNativeDelegation } } });
+      clientCapabilities: { _meta: { subagents: !this.spec.restrictNativeDelegation, parameterizedModelPicker: true } } });
     if (!this.open) return;
     if (init.protocolVersion !== 1) throw new Error('Cursor ACP protocol version is unsupported');
     if (this.spec.resume && this.spec.sessionId && object(init.agentCapabilities).loadSession !== true) throw new Error('Cursor CLI does not support session resume');
@@ -153,12 +155,33 @@ class CursorSession implements AgentSession {
     this.sessionId = resume ? this.spec.sessionId : typeof response.sessionId === 'string' ? response.sessionId : undefined;
     if (!this.sessionId) throw new Error('Cursor ACP returned no session ID');
     this.state = { ...this.state, sessionId: this.sessionId };
-    if (this.spec.model) await this.request('session/set_model', { sessionId: this.sessionId, modelId: this.spec.model });
+    const config = parseCursorConfigOptions(response.configOptions);
+    if (config) this.configOptions = config;
+    const modelOption = this.configOptions.find(option => option.id === 'model');
+    if (this.spec.model && modelOption?.options.some(option => option.value === this.spec.model)) {
+      if (modelOption.currentValue !== this.spec.model) await this.setConfigOption('model', this.spec.model);
+    } else if (this.spec.model && config === undefined) {
+      // Older Cursor builds expose only the legacy model control. Opaque IDs are
+      // also passed intact at process launch, before the provider session is built.
+      await this.request('session/set_model', { sessionId: this.sessionId, modelId: this.spec.model });
+    }
+    if (this.spec.effort) {
+      const selection = cursorEffortSelection(this.configOptions, this.spec.effort);
+      await this.setConfigOption(selection.configId, selection.value);
+    }
     if (!this.open) return;
     this.emit({ type: 'session', sessionId: this.sessionId });
     this.ui({ type: 'session.started', backend: 'cursor', sessionId: this.sessionId, cwd: this.spec.cwd, ...(this.spec.model ? { model: this.spec.model } : {}) });
     this.ready = true;
     this.startTurn([{ type: 'text', text: prependSystemPrompt(this.spec.systemPrompt, this.spec.userPrompt) }, ...(this.spec.images ?? [])]);
+  }
+  private async setConfigOption(configId: string, value: string): Promise<void> {
+    const response = await this.request('session/set_config_option', { sessionId: this.sessionId, configId, value });
+    const options = parseCursorConfigOptions(response.configOptions);
+    if (options) this.configOptions = options;
+    if (!options || !options.some(option => option.id === configId && option.currentValue === value)) {
+      throw new Error('Cursor ACP did not confirm the requested session configuration');
+    }
   }
   private startTurn(content: ContentBlock[], accepted?: (error?: Error | null) => void): void {
     if (!this.open || !this.sessionId) { accepted?.(new Error('Cursor session closed')); return; }
@@ -265,6 +288,12 @@ class CursorSession implements AgentSession {
     for await (const line of readNdjson(this.child.stdout)) {
       let raw: unknown; try { raw = JSON.parse(line); } catch { continue; }
       const msg = object(raw);
+      const params = object(msg.params);
+      const update = object(params.update);
+      if (msg.method === 'session/update' && params.sessionId === this.sessionId && update.sessionUpdate === 'config_option_update') {
+        const options = parseCursorConfigOptions(update.configOptions);
+        if (options) this.configOptions = options;
+      }
       const id = typeof msg.id === 'number' || typeof msg.id === 'string' ? msg.id : undefined;
       if (typeof msg.method !== 'string') {
         if (id === undefined) continue;
@@ -276,7 +305,6 @@ class CursorSession implements AgentSession {
         continue;
       }
       if (this.closing) continue;
-      const params = object(msg.params);
       // session/load replays history before its response; it is already in the
       // persisted transcript and must not be emitted as this turn's new output.
       if (!this.ready) { if (id !== undefined) this.write({ id, error: { code: -32601, message: 'Session not ready' } }); continue; }

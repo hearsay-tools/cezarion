@@ -110,3 +110,57 @@ it('keeps queued human input ahead of reentrant worker input at turn end', async
     expect(admitted).toBe(false);
   } finally { session.interrupt(); await session.result; vi.unstubAllEnvs(); }
 });
+
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { CursorAcpRunner } from './cursor-acp-runner.ts';
+it.each([['sonnet-test', 'effort'], ['gpt-test', 'reasoning']])('applies advertised effort for %s before the first prompt', async (model, configId) => {
+  const dir = mkdtempSync(join(tmpdir(), 'cursor-config-'));
+  const file = join(dir, 'wire.ndjson');
+  try {
+    const result = await new CursorAcpRunner({ bin: mock }).run({ cwd: dir, userPrompt: 'mock:done', model, effort: 'high', env: { CEZ_MOCK_STDIN_FILE: file }, timeoutMs: 5000 });
+    expect(result.text).toContain('Done.');
+    const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    expect(rows.find(row => row.method === 'initialize').params.clientCapabilities._meta.parameterizedModelPicker).toBe(true);
+    const setting = rows.findIndex(row => row.method === 'session/set_config_option' && row.params.configId === configId && row.params.value === 'high');
+    expect(setting).toBeGreaterThan(0);
+    expect(setting).toBeLessThan(rows.findIndex(row => row.method === 'session/prompt'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+it('fails before inference when the selected model does not advertise the requested effort', async () => {
+  const errors: AgentEvent[] = [];
+  const result = await new CursorAcpRunner({ bin: mock }).run({ cwd: process.cwd(), userPrompt: 'mock:done', effort: 'impossible', timeoutMs: 5000 }, event => errors.push(event));
+  expect(result.text).toBe('');
+  expect(errors.some(event => event.type === 'error' && event.message.includes('does not advertise'))).toBe(true);
+});
+
+it('refreshes model-dependent effort options after setting the advertised model', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cursor-config-model-'));
+  const file = join(dir, 'wire.ndjson');
+  try {
+    const result = await new CursorAcpRunner({ bin: mock }).run({ cwd: dir, userPrompt: 'mock:done', model: 'sonnet-test', effort: 'high', env: { CEZ_MOCK_STDIN_FILE: file, CEZ_MOCK_CURSOR_INITIAL_MODEL: 'gpt-test' }, timeoutMs: 5000 });
+    expect(result.text).toContain('Done.');
+    const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    const settings = rows.filter(row => row.method === 'session/set_config_option').map(row => [row.params.configId, row.params.value]);
+    expect(settings).toEqual([['model', 'sonnet-test'], ['effort', 'high']]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+it('keeps legacy model control when config options are absent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cursor-config-legacy-'));
+  const file = join(dir, 'wire.ndjson');
+  try {
+    const model = 'model[effort=high]';
+    const result = await new CursorAcpRunner({ bin: mock }).run({ cwd: dir, userPrompt: 'mock:done', model, env: { CEZ_MOCK_STDIN_FILE: file, CEZ_MOCK_CURSOR_LEGACY: '1' }, timeoutMs: 5000 });
+    expect(result.text).toContain('Done.');
+    const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    expect(rows.find(row => row.method === 'session/set_model')?.params.modelId).toBe(model);
+    expect(rows.some(row => row.method === 'session/set_config_option')).toBe(false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+it('refuses a config acknowledgement that does not confirm the requested value', async () => {
+  const errors: AgentEvent[] = [];
+  const result = await new CursorAcpRunner({ bin: mock }).run({ cwd: process.cwd(), userPrompt: 'mock:done', effort: 'high', env: { CEZ_MOCK_CURSOR_STALE_CONFIG: '1' }, timeoutMs: 5000 }, event => errors.push(event));
+  expect(result.text).toBe('');
+  expect(errors.some(event => event.type === 'error' && event.message.includes('did not confirm'))).toBe(true);
+});
