@@ -333,10 +333,10 @@ describe('workspace runs index API', () => {
     const live = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     const wait = { id: workerId, workerIds: [workerId], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked' as const, outcomes: [] };
     store.updateRun(live.id, { status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait } });
-    seedColdProject(otherRoot, [storedRun({ id: workerId, title: 'Worker', delegation: { role: 'worker', permissions: [], parentRunId: live.id, workspace: { kind: 'owned-isolated', ownerRunId: workerId, resourceId: workerId, path: '/managed/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), storedRun({ id: 'ordinary', title: 'Ordinary' })]);
+    seedColdProject(otherRoot, [storedRun({ id: workerId, title: 'Worker', delegation: { role: 'worker', permissions: [], parentRunId: live.id, wait: { ...wait, workerIds: [], requestIds: [workerId] }, workspace: { kind: 'owned-isolated', ownerRunId: workerId, resourceId: workerId, path: '/managed/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), storedRun({ id: 'ordinary', title: 'Ordinary' })]);
     const body = await getIndex();
     expect(body.runs.find(run => run.id === live.id)).toHaveProperty('delegation', { role: 'root', wait: { phase: 'parked' } });
-    expect(body.runs.find(run => run.id === workerId)).toHaveProperty('delegation', { role: 'worker' });
+    expect(body.runs.find(run => run.id === workerId)).toHaveProperty('delegation', { role: 'worker', wait: { phase: 'parked', requestIds: [workerId] } });
     expect(body.runs.find(run => run.id === 'ordinary')).not.toHaveProperty('delegation');
     expect(runsIndexResponseSchema.parse(body)).toEqual(body);
     expect(JSON.stringify(body)).not.toMatch(/receipts|outcomes|workspace|permissions|parentRunId|managed/);

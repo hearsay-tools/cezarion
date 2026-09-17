@@ -12,6 +12,7 @@ const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const parentId = randomUUID(), orphanId = randomUUID(), absentId = randomUUID()
 const waitingId = randomUUID(), askId = randomUUID(), emptyId = randomUUID()
 const loadingId = randomUUID(), errorId = randomUUID()
+const requestParentId = randomUUID(), requestWorkerId = randomUUID()
 const ids = Array.from({ length: 32 }, () => randomUUID())
 const now = new Date().toISOString()
 const region = '[aria-label="Task relationships"]'
@@ -35,6 +36,8 @@ beforeAll(async () => {
     record(orphanId, 'Worker with unavailable parent', { delegation: worker(orphanId, absentId) }),
     record(waitingId, 'Waiting root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() } }),
     record(askId, 'Question root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() } }),
+    record(requestParentId, 'Parent awaiting worker reply', { status: 'waiting', delegation: { ...rootMetadata([requestWorkerId]), wait: { ...wait(), workerIds: [], requestIds: [randomUUID()] } } }),
+    record(requestWorkerId, 'Worker awaiting parent reply', { status: 'waiting', delegation: worker(requestWorkerId, requestParentId, { wait: { ...wait(), workerIds: [], requestIds: [randomUUID()] } }) }),
     record(emptyId, 'Empty root fixture', { delegation: rootMetadata([]) }),
     ...[loadingId, errorId].map(id => record(id, 'Relationship fault fixture', { delegation: rootMetadata([absentId]) })),
   ]
@@ -209,3 +212,36 @@ it('global Tasks and cross-project palette retain worker labels and parked-root 
   browser.press('Escape')
   observations.push({ globalTasks: 'worker label and waiting on workers', palette: 'cross-project index matches local status' })
 })
+
+
+it('keeps request waits consistent in threads, global tasks and the palette at phone and desktop widths', () => {
+  for (const [width, height] of [[1440, 900], [360, 640]] as const) for (const theme of ['light', 'dark']) {
+    browser.setViewport(width, height)
+    browser.goto(`${base}/settings/appearance`)
+    browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
+    browser.click(`[data-slot="appearance-theme"] [data-value="${theme}"]`)
+    for (const [id, label] of [[requestParentId, 'Waiting on worker replies'], [requestWorkerId, 'Waiting on parent reply']] as const) {
+      open(id)
+      browser.waitForFunction(`document.querySelector('[data-slot="paused-hint"]') !== null`)
+      expect(browser.text('[data-slot="paused-hint"]')).toContain(label)
+      expect(browser.text(region)).toContain(label)
+      expect(browser.count('[data-slot="ask-card"]')).toBe(0)
+      expect(browser.evaluate('document.documentElement.scrollWidth > innerWidth')).toBe(false)
+      browser.screenshot(join(artifacts, `request-wait-${id === requestWorkerId ? 'worker' : 'parent'}-${width}-${theme}.png`), { viewport: true })
+      observations.push({ requestWait: id === requestWorkerId ? 'worker' : 'parent', width, height, theme, label, overflow: false })
+    }
+  }
+  browser.goto(`${base}/tasks`)
+  for (const [id, label] of [[requestParentId, 'waiting on worker replies'], [requestWorkerId, 'waiting on parent reply']] as const) {
+    const row = `[data-slot="global-task-row"][data-run-id="${id}"]`
+    browser.waitForFunction(`document.querySelector('${row}') !== null`)
+    expect(browser.text(row)).toContain(label)
+    expect(browser.text(row)).not.toContain('needs you')
+  }
+  browser.press('Control+k')
+  browser.waitForFunction(`document.querySelector('[cmdk-input]') !== null`)
+  browser.fill('[cmdk-input]', 'Worker awaiting parent reply')
+  browser.waitForFunction(`document.querySelector('[cmdk-list] [aria-label="waiting on parent reply"]') !== null`)
+  expect(browser.count('[cmdk-list] [aria-label="needs you"]')).toBe(0)
+  browser.press('Escape')
+}, 120_000)

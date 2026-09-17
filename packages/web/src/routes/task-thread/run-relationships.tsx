@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { BotIcon, ChevronDownIcon, GitBranchIcon } from '@/components/design-icons'
 import { useIsDesktop } from '@/lib/use-desktop'
+import { delegationWaitLabel } from '@/lib/attention'
 import { runTitle } from '@/lib/task-groups'
 import type { ApiRun, WorkerDestroy } from '@open-mercato/cezar-api-client'
 import { useRun, useRunRelationships, useRuns } from '@/api/queries'
@@ -28,6 +29,7 @@ function Relationships({ run }: { run: ApiRun }) {
   const workers = new Map(query.data?.workers.map(worker => [worker.workerId, worker]))
   const ids = [...new Set([...knownIds, ...workers.keys()])].slice(0, 32)
   const wait = metadata && metadata.role !== 'invalid' ? metadata.wait : undefined
+  const dependencyLabel = delegationWaitLabel(metadata)
   return (
     <section aria-label="Task relationships" className="min-w-0 border-t border-border py-2 text-sm text-muted-foreground">
       <button
@@ -45,7 +47,8 @@ function Relationships({ run }: { run: ApiRun }) {
       </button>
         {metadata?.role === 'worker' && metadata.destroy ? <Cleanup state={metadata.destroy} /> : null}
         {wait ? <p className="px-2 break-words">
-          {wait.requestIds ? (wait.phase === 'parked' ? 'Waiting on request replies' : wait.phase === 'wake-pending'
+          {wait.phase === 'parked' && dependencyLabel ? `${dependencyLabel.charAt(0).toUpperCase()}${dependencyLabel.slice(1)}`
+            : wait.requestIds ? (wait.phase === 'parked' ? 'Waiting on request replies' : wait.phase === 'wake-pending'
             ? 'Conversation update queued for this task' : 'Request wait registered — the agent is finishing its turn')
             : wait.phase === 'parked' ? 'Waiting on workers' : wait.phase === 'wake-pending'
             ? 'Worker update queued for the parent' : 'Worker wait registered — the agent is finishing its turn'}.

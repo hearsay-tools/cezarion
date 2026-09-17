@@ -79,6 +79,16 @@ function isUnseen(_run: AttentionInput): boolean {
  *  contract projection: both full run records and workspace index rows carry this context. */
 export type AttentionInput = Pick<RunRecord, 'status' | 'activity' | 'autoResumeAt' | 'hasPendingHumanAsk'> & Pick<RunIndexEntry, 'delegation'>
 
+/** Dependency wording shared by attention and relationship details (#375). A worker can only
+ * wait on requests to its parent; only roots can wait for worker completion. */
+export function delegationWaitLabel(delegation: AttentionInput['delegation']): string | undefined {
+  if (!delegation || delegation.role === 'invalid' || !delegation.wait) return undefined
+  if (delegation.wait.requestIds?.length) {
+    return delegation.role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies'
+  }
+  return delegation.role === 'root' ? 'waiting on workers' : undefined
+}
+
 /**
  * `RunRecord` → attention.
  *
@@ -108,8 +118,9 @@ export function deriveAttention(run: AttentionInput, hasPendingHumanAsk = false)
   if (run.status === 'failed') {
     return { bucket: 'error', tone: 'danger', pulse: false, label: 'failed' }
   }
-  if (!hasPendingHumanAsk && !run.hasPendingHumanAsk && run.status === 'waiting' && run.delegation?.role === 'root' && run.delegation.wait?.phase === 'parked') {
-    return { bucket: 'none', tone: 'accent', pulse: false, label: 'waiting on workers' }
+  const dependencyLabel = delegationWaitLabel(run.delegation)
+  if (!hasPendingHumanAsk && !run.hasPendingHumanAsk && run.status === 'waiting' && run.delegation?.role !== 'invalid' && run.delegation?.wait?.phase === 'parked' && dependencyLabel) {
+    return { bucket: 'none', tone: 'accent', pulse: false, label: dependencyLabel }
   }
   if (run.status === 'waiting') {
     return { bucket: 'waiting', tone: 'pending', pulse: true, label: 'needs you' }
