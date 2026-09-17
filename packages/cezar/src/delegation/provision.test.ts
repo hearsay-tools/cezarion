@@ -9,7 +9,7 @@ import * as transport from './transport.ts';
 describe('session provisioning', () => {
   let f: ReturnType<typeof fixture>;
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(() => { f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const provision = (id = f.parent.id) => provisionDelegationSession({ projectId: 'project', runId: id, store: f.store, credentials: f.credentials, url: 'http://127.0.0.1:12345/api/v1/delegation' });
   it('rotates session identity, revokes on teardown, and never includes a token in instructions/events', () => {
     expect(provision()!.instructions).toContain('--backend <claude|codex|opencode|pi|cursor>');

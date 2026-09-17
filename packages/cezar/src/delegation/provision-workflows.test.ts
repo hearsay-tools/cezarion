@@ -9,7 +9,7 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunStore } from '../runs/store.ts';
 import { join } from 'node:path';
 import { planOwnedWorkspace } from './workspace.ts';
-import { fixture } from './service.testkit.ts';
+import { fixture, waitForOwnedWork } from './service.testkit.ts';
 import { DelegationController } from './provision.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
@@ -20,8 +20,8 @@ import { ProjectContexts } from '../server/project-context.ts';
 
 const until = (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15000, interval: 10 });
 // Git worktrees + a live RunManager contend under full-suite workers. until() is already 15s;
-// the default 5s testTimeout / 10s hookTimeout cannot finish those waits. Teardown cancels and
-// disposes without polling so afterEach cannot hang in awaitRunTermination.
+// the default 5s testTimeout / 10s hookTimeout cannot finish those waits. Teardown still cancels
+// and finishes sessions without polling, then waits for owned work before removing the fixture.
 describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   let f: ReturnType<typeof fixture>, controller: DelegationController;
   const recoveredManagers: RunManager[] = [];
@@ -43,13 +43,16 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   afterEach(async () => {
     for (const manager of recoveredManagers) {
       for (const run of f.store.listRuns()) manager.cancel(run.id);
-      manager.dispose();
     }
     for (const run of f.store.listRuns()) f.manager.cancel(run.id);
     for (const s of sessions) s.finish();
+    for (const manager of recoveredManagers) {
+      await waitForOwnedWork(manager, f.store);
+      manager.dispose();
+    }
     recoveredManagers.length = 0;
     for (const store of recoveredStores) store.flush(); recoveredStores.length = 0;
-    await controller.close(); sessions.length = 0; f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
+    await controller.close(); sessions.length = 0; await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
   });
   // Real acceptance/store/manager and account registry; only the external agent wire is fake.
   async function acceptIdentityWorker(settings: { model?: string; effort?: string } = { model: 'haiku', effort: 'high' }, grants?: { allowedTools: string[]; bashAllowlist: string[] }, spawnInputs: Pick<WorkerSpawnRequest, 'context' | 'backend' | 'model'> = {}, prepare?: (parentId: string) => void) {

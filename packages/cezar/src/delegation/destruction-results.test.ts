@@ -16,9 +16,9 @@ vi.mock('node:fs', async original => { const fs = await original<typeof import('
 describe('verified destruction retains results through explicit history deletion', { timeout: 15_000 }, () => {
   let f: ReturnType<typeof fixture>;
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(() => {
+  afterEach(async () => {
     for (const run of f.store.listRuns()) f.manager.cancel(run.id);
-    vi.restoreAllMocks(); f.close(); vi.unstubAllEnvs();
+    vi.restoreAllMocks(); await f.close(); vi.unstubAllEnvs();
   });
   async function completed() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });

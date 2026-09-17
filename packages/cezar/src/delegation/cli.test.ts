@@ -16,7 +16,7 @@ describe('bundled worker CLI', () => {
     env = { CEZ_DELEGATION_URL: transport.url, CEZ_DELEGATION_TOKEN: f.token };
     output = vi.spyOn(console, 'log').mockImplementation(() => {});
   });
-  afterEach(async () => { await transport?.close(); f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(async () => { await transport?.close(); await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const json = () => JSON.parse(String(output.mock.calls.at(-1)?.[0]));
   it('prints the same JSON usage for no args, -h, and --help', async () => {
     expect(await runWorkerCommand([], env)).toBe(1);
