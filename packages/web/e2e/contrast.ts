@@ -147,5 +147,16 @@ export function hoverVisiblePoint(browser: AgentBrowser, selector: string): void
     return null
   })()`) as { x: number; y: number } | null
   if (!point) throw new Error(`no visible hover point for ${selector}`)
-  browser.moveTo(point.x, point.y)
+  const x = Math.round(point.x)
+  const y = Math.round(point.y)
+  browser.moveTo(x, y)
+  // agent-browser's CDP mouse-move does not reliably set CSS :hover (diagnosed #369).
+  // The honest end-state is hit-testing: the pointer we just placed is still over the
+  // target. Do not scroll here — that would slide it out from under the pointer.
+  browser.waitForFunction(`(() => {
+    const target = document.querySelector(${JSON.stringify(selector)})
+    if (!target) return false
+    const hit = document.elementFromPoint(${x}, ${y})
+    return hit === target || (hit !== null && target.contains(hit))
+  })()`)
 }
