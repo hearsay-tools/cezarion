@@ -54,17 +54,17 @@ export interface CodexRunnerOptions {
  * `thread/resume` to reopen a stored thread for "Continue".
  *
  * Auth = the host's logged-in ChatGPT/Codex session (or CODEX_API_KEY). The
- * agent runs autonomously via `sandbox: danger-full-access` +
- * `approvalPolicy: never`, matching cezar's default auto permission mode
- * (spec 2026-07-17-permission-modes). Codex has no per-tool allowlist, so
+ * agent runs with cezar's sandbox choice and leaves approval policy to the
+ * app-server default, so enterprise-managed permission modes keep working.
+ * Codex has no per-tool allowlist, so
  * `spec.allowedTools` is ignored. `CEZ_CODEX_NETWORK=0` retains the previous
  * network-blocked `workspace-write` sandbox as an explicit restriction.
  */
 /**
  * What the codex app-server receives from each `AgentRunSpec` field (#284).
- * Tool access does not cross this wire: the `auto` preset runs
- * `danger-full-access` with `approvalPolicy: never` and the app-server has no
- * per-tool allowlist, so `allowedTools`/`bashAllowlist` are declared dropped
+ * Tool access does not cross this wire: the `auto` preset runs with cezar's
+ * sandbox choice and the app-server default approval policy, and the
+ * app-server has no per-tool allowlist, so `allowedTools`/`bashAllowlist` are declared dropped
  * rather than mapped (spec 2026-07-17-permission-modes). Held against the
  * recorded JSON-RPC by the harness parity matrix.
  */
@@ -410,7 +410,6 @@ class CodexSession implements AgentSession {
       // keeps container installs working when bubblewrap cannot create a UID map (#563).
       // CEZ_CODEX_NETWORK=0 remains the backwards-compatible explicit sandbox opt-out.
       sandbox: process.env.CEZ_CODEX_NETWORK === '0' ? 'workspace-write' : 'danger-full-access',
-      approvalPolicy: 'never',
       // ThreadStartParams AND ThreadResumeParams accept dotted config overrides.
       // Both feature generations exist in Codex 0.153.4; no global config write.
       ...(this.spec.restrictNativeDelegation ? { config: { 'features.multi_agent': false, 'features.multi_agent_v2': false } } : {}),

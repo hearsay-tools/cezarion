@@ -46,8 +46,8 @@ rl.on('line', (line) => {
     emit({ id: msg.id, result: { userAgent: 'mock-codex/0.0.0' } });
   } else if (msg.method === 'thread/start' || msg.method === 'thread/resume') {
     const expectedSandbox = process.env.CEZ_CODEX_NETWORK === '0' ? 'workspace-write' : 'danger-full-access';
-    if (msg.params?.sandbox !== expectedSandbox || msg.params?.approvalPolicy !== 'never') {
-      emit({ id: msg.id, error: { code: -32602, message: `expected ${expectedSandbox} auto permissions` } });
+    if (msg.params?.sandbox !== expectedSandbox || msg.params?.approvalPolicy !== undefined) {
+      emit({ id: msg.id, error: { code: -32602, message: `expected ${expectedSandbox} managed permissions` } });
       return;
     }
     if (process.argv.includes('sandbox_workspace_write.network_access=true')) {
