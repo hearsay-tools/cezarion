@@ -817,6 +817,25 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="run-activity-dock"]')).toBeNull()
   })
 
+  it('the dock re-derives its collapse default per run, like the docks it replaced', () => {
+    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }]
+    const { rerender } = renderView(
+      <ThreadView run={run('running', { id: 'dock-run-a', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Run activity/ }))
+    expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
+
+    // The route does not remount between tasks: only the run prop changes.
+    rerender(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <ThreadView run={run('running', { id: 'dock-run-b', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('open')
+  })
+
   it('a plan in the stream → the dock above the composer area + the compact header mirror', () => {
     const withPlan: RunEvent[] = [
       ...EVENTS,
