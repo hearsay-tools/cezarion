@@ -456,7 +456,14 @@ are attributed through `subagent_spawned` metadata and cannot enter parent v1
 text. Native `cursor/ask_question` keeps its request ID until a human reply;
 nonhuman input never answers it. Option labels map back to the original option
 IDs. Free text skips the choice request and follows as a new prompt. Plan
-approval displays the plan and asks explicitly. Unknown RPC methods receive a
+approval displays the plan and asks explicitly. After a human native answer,
+a successful markerless `end_turn` resumes once on the same session without a
+second human prompt (#383). An already queued human prompt takes precedence;
+rejection remains rejection. Pending asks, DONE/MONITORING markers and non-success
+stop reasons prevent this automatic resume. The intermediate ACP boundary remains
+in v2 turn accounting but emits no v1 idle handoff. Ordinary markerless turns
+without a native answer still yield to the human; completion requires `CEZ:DONE`.
+Unknown RPC methods receive a
 method-not-found error rather than leaving the provider blocked.
 
 Wire evidence: [Cursor ACP documentation](https://cursor.com/docs/cli/acp),

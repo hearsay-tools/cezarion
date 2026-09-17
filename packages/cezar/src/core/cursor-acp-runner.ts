@@ -61,6 +61,7 @@ class CursorSession implements AgentSession {
   private sessionId?: string;
   private configOptions: CursorConfigOption[] = [];
   private pendingAsk?: PendingAsk;
+  private answeredNativeAsk = false;
   private queued: ContentBlock[][] = [];
   private requestId = 0;
   private readonly pending = new Map<RpcId, { resolve: (value: Obj) => void; reject: (error: Error) => void; timer?: NodeJS.Timeout }>();
@@ -185,7 +186,7 @@ class CursorSession implements AgentSession {
   }
   private startTurn(content: ContentBlock[], accepted?: (error?: Error | null) => void): void {
     if (!this.open || !this.sessionId) { accepted?.(new Error('Cursor session closed')); return; }
-    this.busy = true; this.markerAsk = false; this.turnText = '';
+    this.busy = true; this.markerAsk = false; this.turnText = ''; this.answeredNativeAsk = false;
     this.clearAutoEnd();
     this.mapped(cursorTurnStarted(this.state));
     const prompt = content.map(block => block.type === 'text' ? block : { type: 'image', mimeType: block.source.media_type, data: block.source.data });
@@ -196,6 +197,16 @@ class CursorSession implements AgentSession {
       this.busy = false;
       this.markerAsk = parseAskMarker(this.turnText) !== null;
       if (this.markerAsk) this.discardQueuedMessages();
+      // Cursor can finish the ACP prompt immediately after accepting a native
+      // answer (#383). That is a wire boundary, not a handoff back to the human.
+      // Keep v2 turn accounting, but expose v1 idle only after the resumed work.
+      const resume = this.answeredNativeAsk;
+      this.answeredNativeAsk = false;
+      if (resume && result.stopReason === 'end_turn' && !this.pendingAsk && !this.markerAsk
+        && !/CEZ:(?:DONE|MONITORING)\s*$/.test(this.turnText)) {
+        this.startTurn(this.queued.shift() ?? [{ type: 'text', text: 'Continue using the answer just supplied to the native question or plan. Respect rejection; do not treat a rejected plan as approved. If the task is complete, report completion with CEZ:DONE.' }]);
+        return;
+      }
       this.emit({ type: 'turn-end' });
       // onEvent can synchronously reserve a new turn; do not clobber its state.
       if (!this.open || this.busy) return;
@@ -209,6 +220,7 @@ class CursorSession implements AgentSession {
     this.clearAutoEnd(); this.markerAsk = false;
     if (this.pendingAsk) {
       const pending = this.pendingAsk; this.pendingAsk = undefined;
+      this.answeredNativeAsk = true;
       const text = content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
       if (pending.kind === 'plan') {
         const answer = text.replace(/^Plan:\s*/i, '');

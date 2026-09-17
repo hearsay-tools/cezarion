@@ -10,7 +10,7 @@ describe('Cursor ACP runner', () => {
 
 import { fileURLToPath } from 'node:url';
 import { vi } from 'vitest';
-import { waitFor } from './harness-parity.testkit.ts';
+import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import type { AgentEvent, AgentSession } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 const mock = fileURLToPath(new URL('../../scripts/mock-cursor-acp.mjs', import.meta.url));
@@ -61,7 +61,9 @@ it('preserves a free-text native answer as the next prompt instead of inventing 
   await withSession('mock:ask', async (session, v1, v2) => {
     await waitFor(() => v2.some(e => e.type === 'ask.requested'));
     expect(session.sendMessage([{ type: 'text', text: 'mock:agent-echo use a custom runner' }])).toBe(true);
-    await waitFor(() => v1.filter(e => e.type === 'turn-end').length === 2);
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    expect(v2.filter(e => e.type === 'turn.started')).toHaveLength(2);
+    expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
     expect(v1.some(e => e.type === 'text' && e.text.includes('use a custom runner'))).toBe(true);
   });
 });
@@ -93,6 +95,64 @@ it('accepts native plans using the cockpit header-prefixed answer', async () => 
     session.sendMessage([{ type: 'text', text: 'Plan: Approve' }]);
     await waitFor(() => v1.some(e => e.type === 'turn-end'));
     expect(v1.some(e => e.type === 'text' && e.text.includes('"outcome":"accepted"'))).toBe(true);
+  });
+});
+
+it.each([['mock:plan', 'Plan: Approve'], ['mock:ask', 'Tests: Vitest']])('resumes %s after its native answer without exposing an idle park', async (prompt, answer) => {
+  await withSession(prompt, async (session, v1, v2) => {
+    await waitFor(() => v2.some(e => e.type === 'ask.requested'));
+    session.sendMessage([{ type: 'text', text: answer }]);
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    expect(v2.filter(e => e.type === 'turn.started')).toHaveLength(2);
+    expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
+    expect(v1.some(e => e.type === 'text' && e.text.includes('Cursor inspected'))).toBe(true);
+  });
+});
+
+it.each(['done', 'monitoring', 'ask', 'cancelled'])('does not auto-resume across an answer-%s boundary', async kind => {
+  await withSession(`mock:plan mock:answer-${kind}`, async (session, v1, v2) => {
+    await waitFor(() => v2.some(e => e.type === 'ask.requested'));
+    session.sendMessage([{ type: 'text', text: 'Plan: Approve' }]);
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    expect(v2.filter(e => e.type === 'turn.started')).toHaveLength(1);
+    if (kind === 'ask') expect(session.sendAgentMessage([{ type: 'text', text: 'do not answer' }])).toBe(false);
+  });
+});
+
+it.each([['mock:plan', 'Plan: Approve'], ['mock:ask', 'Tests: Vitest'], ['mock:ask', 'Use a custom runner']])('takes %s from cockpit answer to completed work without another needs-you park', async (prompt, answer) => {
+  await withOwnedInputRun('cursor', 'ask', async ({ store, manager, runId }) => {
+    store.updateRun(runId, { task: `${prompt} mock:resume-done` });
+    manager.enqueueOwnedRun(runId);
+    await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
+    expect(store.getRun(runId)?.status).toBe('waiting');
+    const statuses: string[] = [];
+    store.on('run', run => { if (run.id === runId) statuses.push(run.status); });
+    expect(manager.sendMessage(runId, [{ type: 'text', text: answer }])).toBe(true);
+    // The synchronous delivery checkpoint is written before sendMessage unparks.
+    expect(store.getRun(runId)?.status).toBe('running');
+    statuses.length = 0;
+    await waitFor(() => !manager.isActive(runId));
+    expect(store.getRun(runId)?.status).toBe('done');
+    expect(store.getRun(runId)?.steps[0]?.status).toBe('done');
+    expect(statuses).not.toContain('waiting');
+    const events = store.readEvents(runId);
+    expect(events.filter(e => e.type === 'user-message')).toHaveLength(1);
+    expect(events.filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
+    expect(events.filter(e => e.type === 'turn.started')).toHaveLength(2);
+    expect(events.filter(e => e.type === 'turn-end')).toHaveLength(1);
+  });
+}, 30_000);
+
+it('preserves rejection and uses queued human input instead of an extra automatic prompt', async () => {
+  await withSession('mock:plan', async (session, v1, v2) => {
+    await waitFor(() => v2.some(e => e.type === 'ask.requested'));
+    session.sendMessage([{ type: 'text', text: 'Plan: Reject' }]);
+    session.sendMessage([{ type: 'text', text: 'mock:agent-echo Revise the plan' }]);
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    expect(v1.some(e => e.type === 'text' && e.text.includes('"outcome":"rejected"'))).toBe(true);
+    expect(v1.some(e => e.type === 'text' && e.text.includes('Revise the plan'))).toBe(true);
+    expect(v2.filter(e => e.type === 'turn.started')).toHaveLength(2);
+    expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
   });
 });
 
