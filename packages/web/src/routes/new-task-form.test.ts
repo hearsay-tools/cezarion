@@ -125,6 +125,16 @@ describe('model option resolution', () => {
     ).toEqual(['', 'openai/gpt-5.1'])
   })
 
+  it.each(['gpt-5.1-codex', 'claude-sonnet-5'])('preserves configured Cursor model %s when discovery omits it', (model) => {
+    for (const catalog of [
+      undefined,
+      { runner: 'cursor' as const, models: [], source: 'unavailable' as const, stale: false },
+      { runner: 'cursor' as const, models: [{ id: 'another-model', label: 'Another', description: '' }], source: 'live' as const, stale: false },
+    ]) {
+      expect(modelsForRunner('cursor', catalog, [model]).map((entry) => entry.id)).toContain(model)
+    }
+  })
+
   it('never reads a provider-spanning runner’s preset as another runner’s exclusive model', () => {
     // pi and OpenCode both pick with `provider/model` and span every configured provider.
     // Counting either's list as evidence of "belongs to another runner" would silently strip

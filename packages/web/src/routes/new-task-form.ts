@@ -145,6 +145,8 @@ const PROVIDER_SPANNING_RUNNERS: readonly Runner[] = ['opencode', 'pi']
  * (#480).
  * Unknown ids remain valid custom models; only a known cross-runner mismatch is discarded. */
 export function modelConflictsWithRunner(model: string, runner: Runner): boolean {
+  // Cursor legitimately serves bare IDs from multiple providers, even when discovery is unavailable.
+  if (runner === 'cursor') return false
   if (!model || MODELS_BY_RUNNER[runner].some((preset) => preset.id === model)) return false
   // Preserve the retired dated suggestions' mismatch guard. Provider-qualified IDs stay free-form.
   const legacyClaudeIds = ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5']
