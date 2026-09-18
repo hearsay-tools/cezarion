@@ -16,7 +16,9 @@ import type { AgentEvent, AgentRunner, AgentSession } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 const mock = fileURLToPath(new URL('../../scripts/mock-cursor-acp.mjs', import.meta.url));
 
-/** Retry tuning for #443 scenarios: real caps, instant waits included, negligible sleeps. */
+/** Retry tuning for #443 scenarios: real caps, instant waits included, negligible sleeps.
+ *  `CursorAcpRunner` arrives from the file's grouped import block further down — ES imports
+ *  hoist, so using it here in test callbacks is fine. */
 const fastRetry = () => new CursorAcpRunner({ providerRetry: { backoffMs: 10 } });
 
 async function withSession(prompt: string, body: (session: AgentSession, v1: AgentEvent[], v2: UiEvent[]) => Promise<void>, runner: AgentRunner = createRunner('cursor' as RunnerId)) {
@@ -56,6 +58,15 @@ it('recovers a bare transient provider failure with one bounded inline retry', a
     expect(notes[0]?.message).toContain('502 bad gateway');
     expect(notes[0]?.message).toContain('retrying (1/2)');
     expect(v1.some(e => e.type === 'text' && e.text.includes('Cursor inspected the workspace.'))).toBe(true);
+  }, fastRetry());
+});
+it('completes the failed attempt as an error turn before the retry opens its own', async () => {
+  // The v2 stream must never carry a started-but-never-completed turn across a retry:
+  // usage accounting and complete-turn projections pair every turn.started with a turn.completed.
+  await withSession('mock:provider-error-transient', async (_session, v1, v2) => {
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    const completions = v2.filter((e): e is Extract<UiEvent, { type: 'turn.completed' }> => e.type === 'turn.completed');
+    expect(completions.map(e => e.stopReason)).toEqual(['error', 'end_turn']);
   }, fastRetry());
 });
 it('waits out a near reset instant and retries on the same session', async () => {
