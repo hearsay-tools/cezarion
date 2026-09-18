@@ -423,19 +423,21 @@ describe('task thread', () => {
     // claimed: this is a NEW read of a surface the spec had not touched, so it follows this
     // directory's default — wait and read as one step (README, "Wait, then read") — rather than
     // fixing anything. The expression withholds a sample until the Archive button itself is
-    // present, because the row mounts with its own controls and an empty `[]` would otherwise be
-    // a non-null sample the default matcher accepts and the assertion below then fails on.
+    // present. It withholds it until BOTH labels are, because the two arrive from different
+    // sources: Archive renders straight from the record, while Continue is the primary's label
+    // only once the async provider query has made the run continuable — before that the primary
+    // reads `Send`. Waiting on Archive alone would hand back a sample the exact assertion below
+    // then fails on, which is the same wait-narrower-than-the-read mistake one step along.
     const composerActions = browser.waitForValue(
       `(() => {
         const row = document.querySelector('[data-slot="composer-actions"]')
         if (!row) return null
         const labels = [...row.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))
-        return labels.includes('Archive task') ? JSON.stringify(labels) : null
+        return labels.includes('Archive task') && labels.includes('Continue') ? JSON.stringify(labels) : null
       })()`,
     ) as string
-    // The exact pair, not a `toContain`: a finished run's row carries Archive and Continue and
-    // nothing else, which is also where #281's "one control per screen" rule would break first
-    // if Stop ever leaked back in beside them.
+    // The wait proves both are present; this proves there is nothing else and in that order —
+    // where #281's "one control per screen" rule would break first if Stop leaked back in.
     expect(JSON.parse(composerActions)).toEqual(['Archive task', 'Continue'])
 
     browser.click('[aria-label="Run actions"]')
