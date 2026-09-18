@@ -613,7 +613,11 @@ it.each(['ready', 'unknown', 'conflicting'].flatMap(state => [1440, 402].flatMap
     }
     if (state === 'conflicting') {
       stateBrowser.evaluate(`[...document.querySelectorAll('[data-slot="gh-merge-box"] button')].find(el => el.textContent === 'Run agent on this PR').click()`)
-      expect(stateBrowser.evaluate(`document.activeElement === document.querySelector('[data-slot="gh-custom-prompt"]')`)).toBe(true)
+      // Focus moves to the prompt in the product's own handler; wait for it rather than sample it.
+      // Not a flake fix: no failure is on record for this line. Wait-discipline rule 7 (#410)
+      // surfaced it as a one-shot read of the focused element after an in-page click, and a
+      // wait on the same condition costs nothing while a sample is only ever right by timing.
+      stateBrowser.waitForFunction(`document.activeElement === document.querySelector('[data-slot="gh-custom-prompt"]')`)
     }
     expect(stateBrowser.evaluate('window.__mergePosts')).toBe(0)
   } finally { stateBrowser.close() }
