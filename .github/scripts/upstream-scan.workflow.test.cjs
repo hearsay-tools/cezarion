@@ -98,3 +98,20 @@ test('openScanPr leaves an open PR for the same branch alone so reviewer edits s
   assert.equal(h.outputs.status, 'exists');
   assert.equal(h.outputs.url, 'https://example.test/pull/7');
 });
+
+test('openScanPr blocks on any open upstream-scan PR, not only the one for today, so two scan PRs never coexist', async () => {
+  const h = harness({ summary: ADDED, prs: [{ html_url: 'https://example.test/pull/5', state: 'open', head: { ref: 'upstream-scan/2026-09-11' } }] });
+  await h.run();
+  const flat = h.calls.map((c) => c.join(' '));
+  assert.ok(!flat.some((c) => c.startsWith('push')), 'last week\'s undecided PR must not be joined by a second one');
+  assert.deepEqual(h.created, []);
+  assert.equal(h.outputs.status, 'exists');
+  assert.equal(h.outputs.url, 'https://example.test/pull/5');
+});
+
+test('openScanPr ignores open PRs on unrelated branches', async () => {
+  const h = harness({ summary: ADDED, prs: [{ html_url: 'https://example.test/pull/9', state: 'open', head: { ref: 'feature/unrelated' } }] });
+  await h.run();
+  assert.equal(h.created.length, 1);
+  assert.equal(h.outputs.status, 'created');
+});

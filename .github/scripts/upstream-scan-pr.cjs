@@ -3,14 +3,16 @@
 // into SCAN_JSON. Nothing new → no git, no PR. Otherwise commit `.ai/upstream`
 // on `upstream-scan/<date>` and open one draft PR against BASE_BRANCH.
 //
-// An OPEN PR for that branch is left untouched: its branch may already carry a
-// reviewer's status edits, and a rerun the same day must not push over them.
-// A branch with no open PR (a closed one, or a failed earlier run) is bot-owned
-// and is overwritten.
+// Any OPEN upstream-scan/* PR blocks a new one: its branch may already carry a
+// reviewer's status edits, and a later scan would start from main's ledger and
+// duplicate every row it holds. A branch with no open PR (a closed one, or a
+// failed earlier run) is bot-owned and is overwritten.
 'use strict';
 
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
+
+const BRANCH_PREFIX = 'upstream-scan';
 
 function defaultGit(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -40,13 +42,15 @@ async function openScanPr({ github, context, core, env = process.env, git = defa
     return;
   }
   if (!base || !/^\d{4}-\d{2}-\d{2}$/.test(summary.date ?? '')) throw new Error('openScanPr needs BASE_BRANCH and a dated scan summary.');
-  const branch = `upstream-scan/${summary.date}`;
-  const prs = await github.paginate(github.rest.pulls.list, {
-    ...context.repo, state: 'open', head: `${context.repo.owner}:${branch}`, per_page: 100,
-  });
-  if (prs.length) {
+  const branch = `${BRANCH_PREFIX}/${summary.date}`;
+  // One scan PR at a time, whatever its date. A second scan while last week's PR is still
+  // undecided would start from main's ledger, rediscover every row that PR already holds and
+  // open a duplicate that conflicts with it on merge. Block until the open one is decided.
+  const open = await github.paginate(github.rest.pulls.list, { ...context.repo, state: 'open', per_page: 100 });
+  const existing = open.find((pr) => typeof pr.head?.ref === 'string' && pr.head.ref.startsWith(`${BRANCH_PREFIX}/`));
+  if (existing) {
     core.setOutput('status', 'exists');
-    core.setOutput('url', prs[0].html_url);
+    core.setOutput('url', existing.html_url);
     return;
   }
   git('config', 'user.name', 'github-actions[bot]');
@@ -67,4 +71,4 @@ async function openScanPr({ github, context, core, env = process.env, git = defa
   core.setOutput('url', data.html_url);
 }
 
-module.exports = { openScanPr, body };
+module.exports = { openScanPr, body, BRANCH_PREFIX };
