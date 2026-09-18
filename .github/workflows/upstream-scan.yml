@@ -1,0 +1,77 @@
+name: Upstream Scan
+
+# Weekly: append every new open-mercato/cezar commit to .ai/upstream/ledger.yaml
+# as `pending` and open a draft PR with the rows, so the decision (port, reject,
+# diverged, n/a) is made in review. Spec: .ai/specs/2026-09-18-upstream-ledger.md.
+
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: upstream-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    # Manual dispatch must use the default branch too: the ledger on main is the
+    # baseline every scan appends to.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # push upstream-scan/<date>
+      pull-requests: write # open the draft PR
+    steps:
+      - name: Check out trusted scan code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0 # the 3-way dry run and the upstream range walk need full history
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Scan upstream
+        id: scan
+        # Fetches upstream main into refs/cez-upstream/main (never a remote) and
+        # prints one JSON line; that line is the whole contract with the PR step.
+        run: |
+          summary="$(node .github/scripts/upstream-scan.cjs)"
+          echo "$summary"
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+
+      - name: Open the scan PR
+        id: pr
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SCAN_JSON: ${{ steps.scan.outputs.summary }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            await require('./.github/scripts/upstream-scan-pr.cjs').openScanPr({ github, context, core });
+
+      - name: Write workflow summary
+        if: always()
+        env:
+          STATUS: ${{ steps.pr.outputs.status }}
+          URL: ${{ steps.pr.outputs.url }}
+          SCAN: ${{ steps.scan.outputs.summary }}
+        run: |
+          {
+            echo "# Upstream scan: ${STATUS:-failed}"
+            echo
+            [ -n "$URL" ] && echo "PR: $URL" && echo
+            echo '```json'
+            echo "${SCAN:-{}}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
