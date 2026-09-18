@@ -196,6 +196,15 @@ network), reuses an already-healthy instance instead of double-booting, and writ
 Pull request CI pipes that log through `.github/scripts/require-e2e-passed.cjs` and fails
 on skipped or failed.
 
+A red spec leaves evidence behind (#408): the seam in `packages/web/e2e/agent-browser.ts`
+writes `.ai/qa/failures/<spec>/<test>-<n>/` — viewport `screenshot.png`, `snapshot.txt`
+(`snapshot -i`) and `probe.json` (URL, the selector or predicate that timed out, focused
+element, the target's count/rect/computed style and the element under its centre) — when a
+`wait` gives up, and `packages/web/e2e/failure-setup.ts` writes the same bundle from
+`onTestFailed` for a plain `expect` failure. The thrown error names the directory; CI
+uploads it as the `cockpit-failures-shard-<n>` artifact and lists it in the step summary.
+Read the bundle before theorizing about a flake.
+
 `CEZ_DRY_RUN=1 npm run dev` still exercises the whole cockpit offline for manual verification.
 
 ## Related documents

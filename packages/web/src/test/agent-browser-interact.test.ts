@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AgentBrowser } from '../../e2e/agent-browser'
+import { AgentBrowser, configureFailureCapture } from '../../e2e/agent-browser'
 
 /**
  * A stand-in `agent-browser` that records every invocation and answers `{ success: true }`.
@@ -27,6 +27,9 @@ function fakeBrowser(opts: { waitFails?: boolean } = {}) {
   const bin = join(dir, 'agent-browser')
   writeFileSync(bin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\n`)
   chmodSync(bin, 0o755)
+  // A failed wait writes a failure bundle (#408); keep it under the fake's own directory
+  // rather than the repo's `.ai/qa/failures`.
+  configureFailureCapture({ root: join(dir, 'failures') })
   const browser = AgentBrowser.attach(
     {
       installed: true,
@@ -48,7 +51,10 @@ function fakeBrowser(opts: { waitFails?: boolean } = {}) {
 }
 
 const fakes: Array<{ dispose: () => void }> = []
-afterEach(() => { for (const fake of fakes.splice(0)) fake.dispose() })
+afterEach(() => {
+  for (const fake of fakes.splice(0)) fake.dispose()
+  configureFailureCapture({ root: undefined })
+})
 function open(opts?: { waitFails?: boolean }) {
   const fake = fakeBrowser(opts)
   fakes.push(fake)
@@ -94,6 +100,11 @@ describe('AgentBrowser auto-wait (#405)', () => {
   it('a click target that never appears fails naming the selector, and never clicks', () => {
     const { browser, commands } = open({ waitFails: true })
     expect(() => browser.click('[data-slot="never"]')).toThrow(/click.*\[data-slot="never"\]/)
-    expect(commands()).toEqual([['wait', '[data-slot="never"]']])
+    const actions = commands().map(([action]) => action)
+    expect(actions[0]).toBe('wait')
+    expect(actions).not.toContain('click')
+    // What follows the failed wait is the failure-bundle capture, pinned in
+    // agent-browser-failure.test.ts (#408).
+    expect(actions.slice(1)).toEqual(['screenshot', 'snapshot', 'eval'])
   })
 })

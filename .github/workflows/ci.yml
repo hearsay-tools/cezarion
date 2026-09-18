@@ -261,6 +261,35 @@ jobs:
           npm run test:e2e -- --shard=${{ matrix.shard }}/4 2>&1 | tee e2e.log
           node .github/scripts/require-e2e-passed.cjs < e2e.log
 
+      # A red spec writes `.ai/qa/failures/<spec>/<test>-<n>/` (screenshot, snapshot, probe)
+      # through the e2e seam (#408). Ship it so the flake can be read instead of guessed at;
+      # a green shard has no directory and uploads nothing.
+      - name: Upload failure bundles
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cockpit-failures-shard-${{ matrix.shard }}
+          path: .ai/qa/failures/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Summarize failure bundles
+        if: failure()
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          if [ -d .ai/qa/failures ]; then
+            {
+              echo "### Cockpit failure bundles (shard $SHARD/4)"
+              echo
+              echo "Artifact \`cockpit-failures-shard-$SHARD\` holds each bundle's screenshot.png, snapshot.txt and probe.json."
+              echo
+              find .ai/qa/failures -mindepth 2 -maxdepth 2 -type d | sort | sed 's/^/- `/; s/$/`/'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Cockpit failure bundles (shard $SHARD/4): none written" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # Keep this aggregate job's name stable: branch protection uses it as the
   # required-check identity while the work runs in the build, Vitest, and
   # cockpit browser jobs.
