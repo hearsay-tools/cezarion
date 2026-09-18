@@ -92,7 +92,54 @@ export function lastAttachedBrowser(): AgentBrowser | null {
 type FailureReason =
   | { kind: 'wait-selector'; action: 'click' | 'hover' | 'fill'; selector: string }
   | { kind: 'wait-fn'; predicate: string }
+  | { kind: 'wait-value'; expression: string; lastValue: unknown; lastError?: string }
   | { kind: 'test' }
+
+/**
+ * The CLI's own default wait budget, read from the variable agent-browser reads
+ * (`AGENT_BROWSER_DEFAULT_TIMEOUT`, milliseconds), so a seam-side poll gives up when a
+ * `wait <selector>` would. 25 s stays inside both `run()`'s 60 s kill and the suite's 60 s test
+ * timeout; a unit test shortens it through the same variable.
+ */
+function defaultWaitTimeoutMs(): number {
+  const fromEnv = Number(process.env.AGENT_BROWSER_DEFAULT_TIMEOUT)
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 25_000
+}
+
+/** A blocking pause. The seam is synchronous end to end (`execFileSync`), so a poll interval
+ *  cannot `await`; `Atomics.wait` sleeps the thread without spinning it. */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/** `JSON.stringify` bounded for an error message: a sample can be a whole layout snapshot. */
+function summarize(value: unknown, max = 400): string {
+  let text: string
+  try {
+    text = JSON.stringify(value) ?? String(value)
+  } catch {
+    text = String(value)
+  }
+  return text.length > max ? `${text.slice(0, max)}…` : text
+}
+
+/**
+ * What `waitForValue` throws when the matcher never passed. Carries the last sample so a helper
+ * built on the primitive (`focusWithKeyboard`) can name what it saw — the element that took
+ * focus — without a second, one-shot read of a page that has already moved on.
+ */
+export class WaitForValueError extends Error {
+  constructor(
+    message: string,
+    readonly expression: string,
+    readonly lastValue: unknown,
+    readonly bundle: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+    this.name = 'WaitForValueError'
+  }
+}
 
 /**
  * The in-page probe. Built as one expression so a single `eval` fetches everything, and
@@ -463,6 +510,71 @@ export class AgentBrowser {
       const bundle = this.captureFailure({ kind: 'wait-fn', predicate: js }, cause)
       throw new Error(`cezar e2e: predicate never became truthy: ${js} (failure bundle: ${bundle})`, { cause })
     }
+  }
+
+  /** operation: assert (`eval`), polled — "wait, then read" as one step (#409).
+   *
+   *  `waitForFunction` answers *whether* the page reached a state; the read that follows it is a
+   *  second CLI call against a page that may have moved on, which is the two-call race
+   *  `hoverVisiblePoint` used to lose (`no visible hover point`: the predicate scrolled and
+   *  hit-tested, the read hit-tested a layout that had shifted since). This samples `js` until
+   *  `matcher` accepts a value and returns THAT value, so the state checked and the state read
+   *  are the same sample.
+   *
+   *  The default matcher accepts anything but `null`, `undefined` and `false`, so an expression
+   *  can answer "not yet" with `null` and still hand back `0` or `''` as a real value. A sample
+   *  whose expression throws in the page (`querySelector(...)` was `null`) is a miss, not a
+   *  failure: it is retried, and the last page error is reported if nothing ever matched.
+   *
+   *  Gives up after the CLI's default timeout (`AGENT_BROWSER_DEFAULT_TIMEOUT`, 25 s) through
+   *  the #408 failure bundle, whose `probe.json` records the expression and the last sample.
+   *  `failure` replaces the generic headline of that error with the caller's own ("no visible
+   *  hover point for …"). Never use it to assert absence: "not there" is a value, read it once. */
+  waitForValue<T, U extends T>(
+    js: string,
+    matcher: (value: T) => value is U,
+    options?: { intervalMs?: number; failure?: string },
+  ): U
+  waitForValue<T = unknown>(
+    js: string,
+    matcher?: (value: T) => boolean,
+    options?: { intervalMs?: number; failure?: string },
+  ): T
+  waitForValue<T = unknown>(
+    js: string,
+    matcher: (value: T) => boolean = (value) => value !== null && value !== undefined && value !== false,
+    { intervalMs = 100, failure }: { intervalMs?: number; failure?: string } = {},
+  ): T {
+    const deadline = Date.now() + defaultWaitTimeoutMs()
+    let lastValue: unknown = undefined
+    let lastError: unknown = undefined
+    for (;;) {
+      try {
+        const value = this.evaluate(js) as T
+        lastValue = value
+        lastError = undefined
+        if (matcher(value)) return value
+      } catch (cause) {
+        lastError = cause
+      }
+      if (Date.now() >= deadline) break
+      pause(intervalMs)
+    }
+    const reason: FailureReason = {
+      kind: 'wait-value',
+      expression: js,
+      lastValue,
+      ...(lastError !== undefined ? { lastError: describeError(lastError) } : {}),
+    }
+    const bundle = this.captureFailure(reason, lastError ?? new Error(`last value: ${summarize(lastValue)}`))
+    const last = lastError !== undefined ? `last error: ${describeError(lastError)}` : `last value: ${summarize(lastValue)}`
+    throw new WaitForValueError(
+      `cezar e2e: ${failure ?? 'value never matched'}: ${js} (${last}) (failure bundle: ${bundle})`,
+      js,
+      lastValue,
+      bundle,
+      lastError !== undefined ? { cause: lastError } : undefined,
+    )
   }
 
   /** operation: interact (`press`) — a key press against whatever currently has focus. */

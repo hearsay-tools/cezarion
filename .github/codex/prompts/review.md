@@ -13,6 +13,11 @@ run has not finished, treat the tests as pending and do not run the suite.
 
 Review this pull request for actionable bugs.
 
+A change under `packages/web/e2e/` that fixes or retries a flaky spec must cite a
+failure bundle or a local reproduction (see `packages/web/e2e/README.md`); report
+one that cites neither, and report any growth of
+`packages/web/src/test/e2e-wait-discipline.baseline.json`.
+
 Inspect the merge-base diff between the pull request head and its base, then
 report only defects introduced or exposed by changed lines. Do not report style,
 formatting, speculative concerns, or issues whose fix is not clear and useful to

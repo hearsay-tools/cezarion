@@ -150,6 +150,13 @@ Use only a ref returned by the latest snapshot:
 Other actions use the matching CLI command shown by
 `"$AGENT_BROWSER_BIN" --help`; never interpolate untrusted shell fragments.
 
+No command waits implicitly. `click`, `hover`, `fill` and `eval` act on the page as it is
+when the command lands, and a target one request away from rendering is `Element not
+found`. Wait first — `wait "$SELECTOR"` blocks until the element is attached with a
+non-zero box, `wait --fn "$JS"` until a predicate is truthy — and when a value is needed
+after a wait, read it in the same expression that waited for it rather than in a second
+call against a page that may have moved on.
+
 ### assert
 
 Use JSON output and compare the observed value in the current shell. Examples:
@@ -192,3 +199,7 @@ ignore only an already-closed-session error.
   profile unless the operator explicitly requested that profile.
 - Keep all operation targets local to the application under test. Do not enable
   a cloud provider or send credentials to a remote browser service.
+- `hover` and `mouse move` drive the pointer over CDP, and that move does not set
+  CSS `:hover` on wrapping inline elements. Never wait on `matches(':hover')`; assert
+  what the hover reveals instead. A one-shot `:hover` check holds only under
+  `--blink-settings=primaryHoverType=2`, passed through `AGENT_BROWSER_ARGS`.
