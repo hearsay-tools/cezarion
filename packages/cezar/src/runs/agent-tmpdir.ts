@@ -30,7 +30,12 @@
  *      typechecking inside the run. A directory that would land too deep
  *      resolves instead to a short digest-named directory under the OS temp
  *      root — still per-run, still probed, still reaped. A repo whose own path
- *      already fits keeps today's directory, byte for byte.
+ *      already fits keeps today's directory, byte for byte. When the ambient
+ *      `TMPDIR` itself is too deep for that root's candidate (#440 — routine
+ *      inside a cezar task session, whose `TMPDIR` is the checkout's own
+ *      scratch tree per #785), the next root is the platform's own temp root
+ *      (`/tmp`), which `TMPDIR` cannot deepen; only when no root fits does the
+ *      spawn refuse.
  *
  * `CEZ_AGENT_TMPDIR=0` opts out of ALL THREE — cezar keeps its hands off the
  * temp directory entirely and the pre-#785 behaviour is back, byte for byte.
@@ -91,6 +96,33 @@ function osTempRoot(): string {
   }
 }
 
+/** The platform's own temp root — the one `TMPDIR`/`TEMP`/`TMP` cannot move.
+ *  POSIX spells it `/tmp` (resolved through symlinks for the same reason
+ *  `osTempRoot` resolves them). Windows has no such constant and no named
+ *  unix sockets to protect, so it contributes no second root and keeps
+ *  today's single-root behaviour. */
+function platformTempRoot(): string | undefined {
+  if (process.platform === 'win32') return undefined;
+  try {
+    return realpathSync('/tmp');
+  } catch {
+    return '/tmp';
+  }
+}
+
+/** Every root a fallback directory can hang off, most preferred first: the
+ *  env-honouring OS temp root, then the platform default (#440). A cezar task
+ *  session exports a `TMPDIR` as deep as the checkout it belongs to (#785),
+ *  so the first root's candidate can itself cross the socket cap while the
+ *  platform default still fits. Resolution picks the first root whose
+ *  candidate fits; removal and the sweep walk them all, because the env can
+ *  differ between mint and reap. */
+function osTempRoots(): string[] {
+  const env = osTempRoot();
+  const platform = platformTempRoot();
+  return platform && platform !== env ? [env, platform] : [env];
+}
+
 const FALLBACK_PREFIX = 'cez-agent-';
 const FALLBACK_NAME_LENGTH = 12;
 
@@ -131,41 +163,56 @@ function writeOwnerMarker(dir: string, dataDir: string): void {
 }
 
 /**
- * Where the fallback lives for this dataDir+run pair. The name digests the
- * dataDir in, because the OS temp root is SHARED: a name derived from the run
- * id alone would let one repo's reap delete another repo's live scratch when
- * two run ids happen to share their leading characters. The name alone cannot
- * make the sweep safe — a digest is not reversible, so a sweep could not tell
- * its own stale directories from another project's live ones — which is why
- * every fallback directory also carries the `.cez-owner` marker.
+ * Where the fallback lives for this dataDir+run pair under one root. The name
+ * digests the dataDir in, because the OS temp roots are SHARED: a name derived
+ * from the run id alone would let one repo's reap delete another repo's live
+ * scratch when two run ids happen to share their leading characters. The name
+ * alone cannot make the sweep safe — a digest is not reversible, so a sweep
+ * could not tell its own stale directories from another project's live ones —
+ * which is why every fallback directory also carries the `.cez-owner` marker.
+ * The digest does not include the root, so the name is stable across roots:
+ * whatever env a later reap or sweep runs under, it can find the directory.
  */
-function fallbackTmpDir(dataDir: string, runId: string): string {
+function fallbackTmpDir(root: string, dataDir: string, runId: string): string {
   const digest = createHash('sha256').update(`${dataDir}:${runId}`).digest('hex');
-  return join(osTempRoot(), FALLBACK_PREFIX + digest.slice(0, FALLBACK_NAME_LENGTH));
+  return join(root, FALLBACK_PREFIX + digest.slice(0, FALLBACK_NAME_LENGTH));
+}
+
+/** The first path whose UTF-8 byte length fits the socket budget, or
+ *  `undefined` when none does. Pure on purpose (#440): resolution calls it
+ *  with the real candidates, tests with synthetic ones, so the nothing-fits
+ *  branch stays exercised even though a real platform root is always short. */
+export function firstSocketSafeDir(paths: readonly string[]): string | undefined {
+  return paths.find((path) => Buffer.byteLength(path, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH);
 }
 
 /**
  * The temp directory this run should use: the repo-local per-run directory
- * when it is short enough for unix-socket paths, and a short directory under
- * the OS temp root when it is not (#387). Pure resolution — nothing is
- * created, nothing is probed; `agentTmpEnv` owns the side effects.
+ * when it is short enough for unix-socket paths, and otherwise a short
+ * digest-named directory under the first OS temp root whose candidate fits —
+ * the env-honouring root first, the platform default when `TMPDIR` itself is
+ * too deep (#387, #440). Pure resolution — nothing is created, nothing is
+ * probed; `agentTmpEnv` owns the side effects.
  */
 export function resolveAgentTmpDir(dataDir: string, runId: string): string {
   const local = agentTmpDir(dataDir, runId);
   if (Buffer.byteLength(local, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH) return local;
-  const fallback = fallbackTmpDir(dataDir, runId);
-  if (Buffer.byteLength(fallback, 'utf8') <= MAX_SOCKET_SAFE_DIR_LENGTH) return fallback;
-  // Nothing fits — a host TMPDIR so long that even the OS-root candidate
-  // crosses the cap. Minting either would hand the agent a temp directory
-  // that cannot serve unix sockets: the silent failure #387 is about. Fail
-  // the spawn with the named error instead; the remedy names the escape.
+  const candidates = osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId));
+  const fallback = firstSocketSafeDir(candidates);
+  if (fallback) return fallback;
+  // Nothing fits — every root, the platform default included, has a candidate
+  // past the cap. Minting any would hand the agent a temp directory that
+  // cannot serve unix sockets: the silent failure #387 is about. Fail the
+  // spawn with the named error instead; the remedy names the escape.
+  const shortest = candidates.reduce((a, b) =>
+    Buffer.byteLength(a, 'utf8') < Buffer.byteLength(b, 'utf8') ? a : b);
   throw new AgentTempDirError(
-    Buffer.byteLength(fallback) < Buffer.byteLength(local) ? fallback : local,
+    Buffer.byteLength(shortest) < Buffer.byteLength(local) ? shortest : local,
     new Error(
       `no socket-safe temp directory exists — repo-local path is `
-        + `${Buffer.byteLength(local)} bytes and the OS temp root candidate is `
-        + `${Buffer.byteLength(fallback)} bytes, both past the `
-        + `${MAX_SOCKET_SAFE_DIR_LENGTH}-byte unix socket budget`,
+        + `${Buffer.byteLength(local)} bytes and every OS temp root candidate is past the `
+        + `${MAX_SOCKET_SAFE_DIR_LENGTH}-byte unix socket budget (tried: `
+        + candidates.map((c) => `${c} (${Buffer.byteLength(c)} bytes)`).join(', ') + ')',
     ),
   );
 }
@@ -278,14 +325,16 @@ export function agentTmpEnv(
  * agent is gone, and a Continue re-creates it through `agentTmpEnv`. Never
  * throws — reaping must not break a terminal transition.
  *
- * Both locations are tried because the resolution depends on the length of
- * `dataDir`, which a Continue or a re-base can change between mint and reap;
- * removing a name that was never minted is a no-op, so trying both is pure
- * safety.
+ * The repo-local directory and the digest name under EVERY root are tried,
+ * because the resolution depends on the lengths of `dataDir` and the ambient
+ * `TMPDIR`, either of which a Continue, a re-base or a changed env can move
+ * between mint and reap; removing a name that was never minted is a no-op, so
+ * trying them all is pure safety.
  */
 export function removeAgentTmpDir(dataDir: string, runId: string): void {
   if (!safeRunId(runId)) return;
-  for (const dir of [agentTmpDir(dataDir, runId), fallbackTmpDir(dataDir, runId)]) {
+  const locations = [agentTmpDir(dataDir, runId), ...osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId))];
+  for (const dir of locations) {
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {
@@ -297,15 +346,16 @@ export function removeAgentTmpDir(dataDir: string, runId: string): void {
 /**
  * Remove every per-run directory that is not in `keepRunIds` — the startup
  * sweep, so a crash (which never reaches the terminal-transition reap) cannot
- * accumulate them forever. Two confined roots are swept and nothing else:
+ * accumulate them forever. Three confined sets are swept and nothing else:
  *
  *   - `<dataDir>/tmp`, where entries ARE the run ids (reports the ids reaped);
- *   - the OS temp root's `cez-agent-<12 hex>` directories (#387), where the
- *     name digests the dataDir and is not reversible to a run id (reports the
+ *   - the `cez-agent-<12 hex>` directories under EVERY OS temp root — the
+ *     env-honouring root and the platform default (#440) — where the name
+ *     digests the dataDir and is not reversible to a run id (reports the
  *     directory names reaped). The pattern is exact — prefix, lowercase hex,
  *     fixed length, directories only — and a directory is removed only when
  *     its `.cez-owner` marker names THIS dataDir and none of this dataDir's
- *     kept runs claims it, so another project's scratch in the shared root is
+ *     kept runs claims it, so another project's scratch in a shared root is
  *     never touched.
  */
 export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>): string[] {
@@ -331,7 +381,7 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
       }
     }
   }
-  // The #387 fallback location, in the shared OS temp root. Kept narrow on
+  // The #387 fallback locations, in every shared OS temp root. Kept narrow on
   // purpose: exact prefix, 12 lowercase-hex name, directories only, and
   // ownership — a directory is removed only when its `.cez-owner` marker
   // names THIS dataDir (a marker that is missing or foreign is another
@@ -339,31 +389,32 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
   // dataDir's kept runs claims it.
   const owner = dataDirOwner(dataDir);
   const claimed = new Set(
-    [...keep].filter(safeRunId).map((id) => basename(fallbackTmpDir(dataDir, id))),
+    [...keep].filter(safeRunId).map((id) => basename(fallbackTmpDir(osTempRoot(), dataDir, id))),
   );
-  const osRoot = osTempRoot();
-  let fallbackEntries: Dirent[];
-  try {
-    fallbackEntries = readdirSync(osRoot, { withFileTypes: true });
-  } catch {
-    return reaped;
-  }
-  for (const entry of fallbackEntries) {
-    if (!entry.isDirectory() || !entry.name.startsWith(FALLBACK_PREFIX)) continue;
-    if (!/^[0-9a-f]{12}$/.test(entry.name.slice(FALLBACK_PREFIX.length))) continue;
-    let entryOwner: string;
+  for (const osRoot of osTempRoots()) {
+    let fallbackEntries: Dirent[];
     try {
-      entryOwner = readFileSync(join(osRoot, entry.name, OWNER_FILE), 'utf8').trim();
+      fallbackEntries = readdirSync(osRoot, { withFileTypes: true });
     } catch {
-      continue; // no readable marker: unknown ownership is never ours to remove.
+      continue; // an unreadable root is skipped, not fatal: others remain.
     }
-    if (entryOwner !== owner) continue;
-    if (claimed.has(entry.name)) continue;
-    try {
-      rmSync(join(osRoot, entry.name), { recursive: true, force: true });
-      reaped.push(entry.name);
-    } catch {
-      // best-effort: a locked directory is retried on the next boot.
+    for (const entry of fallbackEntries) {
+      if (!entry.isDirectory() || !entry.name.startsWith(FALLBACK_PREFIX)) continue;
+      if (!/^[0-9a-f]{12}$/.test(entry.name.slice(FALLBACK_PREFIX.length))) continue;
+      let entryOwner: string;
+      try {
+        entryOwner = readFileSync(join(osRoot, entry.name, OWNER_FILE), 'utf8').trim();
+      } catch {
+        continue; // no readable marker: unknown ownership is never ours to remove.
+      }
+      if (entryOwner !== owner) continue;
+      if (claimed.has(entry.name)) continue;
+      try {
+        rmSync(join(osRoot, entry.name), { recursive: true, force: true });
+        reaped.push(entry.name);
+      } catch {
+        // best-effort: a locked directory is retried on the next boot.
+      }
     }
   }
   return reaped;
