@@ -19,16 +19,24 @@ const configOptions = () => [
 const configuration = () => process.env.CEZ_MOCK_CURSOR_LEGACY === '1' ? {} : { configOptions: configOptions() };
 let pendingAsk;
 let resumeDone = false;
+let prompts = 0;
 const update = (value, id = sessionId) => emit({ method: 'session/update', params: { sessionId: id, update: value } });
 const text = value => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: value } });
 const complete = id => reply(id, { stopReason: 'end_turn' });
 const question = { id: 'tests', prompt: 'Which test runner?', options: [{ id: 'vitest', label: 'Vitest' }, { id: 'jest', label: 'Jest' }], allowMultiple: false };
 async function prompt(id, content) {
   const input = content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+  prompts += 1;
   if (resumeDone) { resumeDone = false; text('Resumed work finished.\nCEZ:DONE'); complete(id); return; }
   if (input.includes('mock:hold')) await new Promise(r => setTimeout(r, 500));
   if (input.includes('mock:rpc-error')) { emit({ id, error: { code: -32603, message: 'Provider rejected request' } }); return; }
-  if (input.includes('mock:provider-error')) { text('\n\nError: [unauthenticated] Backend rejected authentication.'); complete(id); return; }
+  // #443 provider-error envelopes: the specific scenarios must be matched BEFORE the
+  // bare 'mock:provider-error' prefix, which every one of them contains.
+  if (input.includes('mock:provider-error-transient') && prompts === 1) { text('\n\nError: 502 bad gateway.'); complete(id); return; }
+  if (input.includes('mock:provider-error-bare')) { text('\n\nError: 502 bad gateway.'); complete(id); return; }
+  if (input.includes('mock:provider-error-instant-near') && prompts === 1) { text(`\n\nError: 429 rate limited, try again at ${new Date(Date.now() + 300).toISOString()}.`); complete(id); return; }
+  if (input.includes('mock:provider-error-instant-far')) { text(`\n\nError: usage limit reached, try again at ${new Date(Date.now() + 6 * 3600000).toISOString()}.`); complete(id); return; }
+  if (input.includes('mock:provider-error') && !input.includes('mock:provider-error-')) { text('\n\nError: [unauthenticated] Backend rejected authentication.'); complete(id); return; }
   if (input.includes('mock:ask-bad')) { pendingAsk = { id }; emit({ id: 'bad-question', method: 'cursor/ask_question', params: { questions: [] } }); return; }
   if (input.includes('mock:plan')) { pendingAsk = { id, input }; emit({ id: 'plan-1', method: 'cursor/create_plan', params: { name: 'Test plan', overview: 'Approve the changes?', plan: 'Implement the change and run tests.' } }); return; }
   if (input.includes('mock:multi-ask')) { pendingAsk = { id }; emit({ id: 'multi-question', method: 'cursor/ask_question', params: { title: 'Choices', questions: [question, { ...question, id: 'build', prompt: 'Which build tool?', options: [{ id: 'vite', label: 'Vite' }, { id: 'webpack', label: 'Webpack' }] }] } }); return; }

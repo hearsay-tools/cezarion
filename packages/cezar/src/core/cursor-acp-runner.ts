@@ -8,7 +8,24 @@ import { parseAskMarker, parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
 import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, EOF_TERM_GRACE_MS, EOF_KILL_GRACE_MS } from './runner-runtime.ts';
 import { createCursorUiState, mapCursorMessage, cursorTurnStarted, cursorTurnCompleted } from './cursor-ui-mapper.ts';
+import { classifyCursorProviderError, sanitizeCursorProviderError, type CursorProviderErrorClassification } from './cursor-provider-error.ts';
 import type { UiEvent } from './ui-events.ts';
+
+/** Transient provider failures recover on their own (#443): two inline retries, then fatal. */
+export const CURSOR_PROVIDER_MAX_RETRIES = 2;
+/** Short fixed backoff for instant-less blips (502, connection reset) — no exponential ladder. */
+export const CURSOR_PROVIDER_RETRY_BACKOFF_MS = 2_000;
+/** A reset instant at most this far out is waited out inline; anything longer fails and lets
+ *  the auto-resume scheduler (spec 2026-08-03) park the resume at the instant. */
+export const CURSOR_PROVIDER_MAX_INLINE_WAIT_MS = 60_000;
+/** Fired a moment after the named instant — landing exactly on it races the provider's clock. */
+const CURSOR_PROVIDER_INSTANT_GRACE_MS = 1_000;
+
+export interface CursorProviderRetryOptions {
+  maxRetries?: number;
+  backoffMs?: number;
+  maxInlineWaitMs?: number;
+}
 
 export const CURSOR_SPEC_SUPPORT: AgentRunSpecSupport = {
   systemPrompt: { honored: true, via: 'prependSystemPrompt in opening ACP prompt' },
@@ -31,11 +48,15 @@ export class CursorAcpRunner implements AgentRunner {
   readonly backend = 'cursor' as const;
   readonly specSupport = CURSOR_SPEC_SUPPORT;
   private lastSession?: AgentSession;
-  constructor(private readonly options: { bin?: string; timeoutMs?: number } = {}) {}
+  constructor(private readonly options: { bin?: string; timeoutMs?: number; providerRetry?: CursorProviderRetryOptions } = {}) {}
   startSession(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void, opts: SessionOptions = {}): AgentSession {
     const bin = this.options.bin ?? process.env.CEZ_CURSOR_BIN ?? (process.env.CEZ_DRY_RUN === '1'
       ? fileURLToPath(new URL('../../scripts/mock-cursor-acp.mjs', import.meta.url)) : 'agent');
-    return this.lastSession = new CursorSession(bin, spec, this.options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS, onEvent, opts);
+    return this.lastSession = new CursorSession(bin, spec, this.options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS, onEvent, opts, {
+      maxRetries: this.options.providerRetry?.maxRetries ?? CURSOR_PROVIDER_MAX_RETRIES,
+      backoffMs: this.options.providerRetry?.backoffMs ?? CURSOR_PROVIDER_RETRY_BACKOFF_MS,
+      maxInlineWaitMs: this.options.providerRetry?.maxInlineWaitMs ?? CURSOR_PROVIDER_MAX_INLINE_WAIT_MS,
+    });
   }
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
     return this.startSession(spec, onEvent, { autoEndAfterFirstTurn: true }).result;
@@ -47,6 +68,8 @@ type RpcId = number | string;
 type Obj = Record<string, unknown>;
 const object = (value: unknown): Obj => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Obj : {};
 interface PendingAsk { id: RpcId; questions: AskQuestion[]; wire: Obj[]; kind: 'question' | 'plan' }
+interface ProviderRetryOptions { maxRetries: number; backoffMs: number; maxInlineWaitMs: number }
+interface PendingProviderRetry { classification: CursorProviderErrorClassification; detail: string }
 
 /** One ACP process; prompt responses, never notifications, own turn completion. */
 class CursorSession implements AgentSession {
@@ -71,6 +94,10 @@ class CursorSession implements AgentSession {
   private turnText = '';
   private tokensUsed = 0;
   private failure?: string;
+  private lastPrompt?: ContentBlock[];
+  private pendingProviderRetry?: PendingProviderRetry;
+  private providerRetryTimer?: NodeJS.Timeout;
+  private providerRetryAttempts = 0;
   private autoEnd?: NodeJS.Timeout;
   private deadline?: NodeJS.Timeout;
   private termTimer?: NodeJS.Timeout;
@@ -78,7 +105,7 @@ class CursorSession implements AgentSession {
   private resolveResult!: (value: AgentRunResult) => void;
   private settled = false;
 
-  constructor(bin: string, private readonly spec: AgentRunSpec, timeoutMs: number, private readonly onEvent: ((event: AgentEvent) => void) | undefined, private readonly opts: SessionOptions) {
+  constructor(bin: string, private readonly spec: AgentRunSpec, timeoutMs: number, private readonly onEvent: ((event: AgentEvent) => void) | undefined, private readonly opts: SessionOptions, private readonly providerRetry: ProviderRetryOptions) {
     this.result = new Promise(resolve => { this.resolveResult = resolve; });
     this.child = spawn(bin, ['--force', ...(spec.model ? ['--model', spec.model] : []), ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp'], {
       cwd: spec.cwd, env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
@@ -186,15 +213,22 @@ class CursorSession implements AgentSession {
   }
   private startTurn(content: ContentBlock[], accepted?: (error?: Error | null) => void): void {
     if (!this.open || !this.sessionId) { accepted?.(new Error('Cursor session closed')); return; }
+    this.lastPrompt = content;
     this.busy = true; this.markerAsk = false; this.turnText = ''; this.answeredNativeAsk = false;
     this.clearAutoEnd();
     this.mapped(cursorTurnStarted(this.state));
     const prompt = content.map(block => block.type === 'text' ? block : { type: 'image', mimeType: block.source.media_type, data: block.source.data });
     void this.request('session/prompt', { sessionId: this.sessionId, prompt }, accepted).then(result => {
       if (!this.open) return;
+      // A provider error envelope latches a retry decision instead of failing outright
+      // (#443); the end_turn that follows it resolves the prompt, and the retry —
+      // not the turn's completion — owns what happens next.
+      const retry = this.pendingProviderRetry;
+      if (retry) { this.pendingProviderRetry = undefined; this.handleProviderRetry(retry); return; }
       this.mapped(cursorTurnCompleted(typeof result.stopReason === 'string' ? result.stopReason : 'error', this.state));
       if (this.failure) return;
       this.busy = false;
+      this.providerRetryAttempts = 0;
       this.markerAsk = parseAskMarker(this.turnText) !== null;
       if (this.markerAsk) this.discardQueuedMessages();
       // Cursor can finish the ACP prompt immediately after accepting a native
@@ -284,10 +318,63 @@ class CursorSession implements AgentSession {
     this.mapped(cursorTurnCompleted('error', this.state));
     this.interrupt();
   }
+
+  /**
+   * A Cursor provider error envelope arrived (#443). Preserve the provider's text, sanitized,
+   * in every outcome: authentication keeps the login guidance and fails fatally; unknown prose
+   * fails fatally named after the failed request; a transient failure latches a bounded retry
+   * that fires when the prompt's end_turn resolves. Retry accounting lives in
+   * `handleProviderRetry` — the cap is 2 inline retries, stated on the transcript.
+   */
+  private envelopeError(text: string): void {
+    const classification = classifyCursorProviderError(text);
+    const detail = sanitizeCursorProviderError(text);
+    if (classification.kind === 'auth') {
+      this.fail(`Cursor provider authentication failed; run agent login — provider said: ${detail}`);
+      return;
+    }
+    if (classification.kind === 'fatal') {
+      this.fail(`Cursor provider request failed: ${detail}`);
+      return;
+    }
+    this.pendingProviderRetry = { classification, detail };
+  }
+
+  /** Fire the latched provider retry: wait out a near reset instant or back off briefly,
+   *  say the attempt on the transcript, and re-prompt the same session with the same content.
+   *  `busy` stays true throughout, so no auto-end or queued input can land mid-retry. */
+  private handleProviderRetry(retry: PendingProviderRetry): void {
+    if (this.providerRetryAttempts >= this.providerRetry.maxRetries) {
+      this.fail(`Cursor provider request failed after ${this.providerRetryAttempts + 1} attempts: ${retry.detail}`);
+      return;
+    }
+    const attempt = this.providerRetryAttempts + 1;
+    this.providerRetryAttempts = attempt;
+    let delay = this.providerRetry.backoffMs;
+    const resetAt = retry.classification.kind === 'transient' ? retry.classification.resetAt : undefined;
+    if (resetAt) {
+      const wait = resetAt.getTime() - Date.now();
+      if (wait > this.providerRetry.maxInlineWaitMs) {
+        // Too far out to hold the session open. Failing with the preserved text lets the
+        // auto-resume scheduler (spec 2026-08-03) park a resume at the instant — no human.
+        this.fail(`Cursor provider request failed: ${retry.detail}`);
+        return;
+      }
+      delay = Math.max(0, wait) + CURSOR_PROVIDER_INSTANT_GRACE_MS;
+    }
+    this.ui({ type: 'session.error', fatal: false,
+      message: `Cursor provider request failed: ${retry.detail}; retrying (${attempt}/${this.providerRetry.maxRetries})` });
+    this.providerRetryTimer = setTimeout(() => {
+      this.providerRetryTimer = undefined;
+      if (!this.open || this.closing) return;
+      this.startTurn(this.lastPrompt ?? [{ type: 'text', text: 'Continue after the provider error.' }]);
+    }, delay);
+    this.providerRetryTimer.unref?.();
+  }
   private finish(): void {
     if (this.settled) return;
     this.isOpen = false;
-    for (const timer of [this.deadline, this.autoEnd, this.termTimer, this.killTimer]) if (timer) clearTimeout(timer);
+    for (const timer of [this.deadline, this.autoEnd, this.termTimer, this.killTimer, this.providerRetryTimer]) if (timer) clearTimeout(timer);
     for (const request of this.pending.values()) { if (request.timer) clearTimeout(request.timer); request.reject(new Error('Cursor session closed')); }
     this.pending.clear();
     if (this.busy && !this.failure) this.mapped(cursorTurnCompleted('cancelled', this.state));
@@ -326,7 +413,7 @@ class CursorSession implements AgentSession {
         // then returns end_turn. Narrow to its error envelope, not arbitrary prose.
         if (params.sessionId === this.sessionId && update.sessionUpdate === 'agent_message_chunk'
           && typeof content.text === 'string' && /^\n\nError: /u.test(content.text)) {
-          this.fail(/unauthenticated/i.test(content.text) ? 'Cursor provider authentication failed; run agent login' : 'Cursor provider request failed; check the Cursor CLI connection'); continue;
+          this.envelopeError(content.text); continue;
         }
       }
       if (msg.method === 'cursor/ask_question' && id !== undefined) { this.ask(id, params); continue; }

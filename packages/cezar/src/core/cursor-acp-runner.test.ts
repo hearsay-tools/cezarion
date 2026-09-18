@@ -10,12 +10,16 @@ describe('Cursor ACP runner', () => {
 
 import { fileURLToPath } from 'node:url';
 import { vi } from 'vitest';
+import { parseUsageLimit } from './usage-limit.ts';
 import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
-import type { AgentEvent, AgentSession } from './agent-runner.ts';
+import type { AgentEvent, AgentRunner, AgentSession } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 const mock = fileURLToPath(new URL('../../scripts/mock-cursor-acp.mjs', import.meta.url));
 
-async function withSession(prompt: string, body: (session: AgentSession, v1: AgentEvent[], v2: UiEvent[]) => Promise<void>) {
+/** Retry tuning for #443 scenarios: real caps, instant waits included, negligible sleeps. */
+const fastRetry = () => new CursorAcpRunner({ providerRetry: { backoffMs: 10 } });
+
+async function withSession(prompt: string, body: (session: AgentSession, v1: AgentEvent[], v2: UiEvent[]) => Promise<void>, runner: AgentRunner = createRunner('cursor' as RunnerId)) {
   vi.stubEnv('CEZ_CURSOR_BIN', mock);
   const v1: AgentEvent[] = []; const v2: UiEvent[] = [];
   const session = createRunner('cursor' as RunnerId).startSession({ cwd: process.cwd(), userPrompt: prompt, timeoutMs: 5000 }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
@@ -36,9 +40,53 @@ it('surfaces Cursor transport-error prose followed by end_turn as failure', asyn
   await withSession('mock:provider-error', async (session, v1, v2) => {
     await session.result.catch(() => {});
     expect(v1.some(e => e.type === 'error')).toBe(true);
+    expect(v1.some(e => e.type === 'error' && e.message.includes('run agent login'))).toBe(true);
     expect(v2.some(e => e.type === 'session.error')).toBe(true);
     expect(v2.some(e => e.type === 'turn.completed' && e.stopReason === 'end_turn')).toBe(false);
+    // Authentication is never retried: no transient note may precede the fatal error.
+    expect(v2.some(e => e.type === 'session.error' && !e.fatal)).toBe(false);
   });
+});
+it('recovers a bare transient provider failure with one bounded inline retry', async () => {
+  await withSession('mock:provider-error-transient', async (session, v1, v2) => {
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    expect(v1.some(e => e.type === 'error')).toBe(false);
+    const notes = v2.filter((e): e is Extract<UiEvent, { type: 'session.error' }> => e.type === 'session.error' && !e.fatal);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.message).toContain('502 bad gateway');
+    expect(notes[0]?.message).toContain('retrying (1/2)');
+    expect(v1.some(e => e.type === 'text' && e.text.includes('Cursor inspected the workspace.'))).toBe(true);
+  }, fastRetry());
+});
+it('waits out a near reset instant and retries on the same session', async () => {
+  await withSession('mock:provider-error-instant-near', async (_session, v1, v2) => {
+    await waitFor(() => v1.some(e => e.type === 'turn-end'));
+    expect(v1.some(e => e.type === 'error')).toBe(false);
+    expect(v2.some(e => e.type === 'session.error' && !e.fatal && e.message.includes('429 rate limited'))).toBe(true);
+    expect(v1.some(e => e.type === 'text' && e.text.includes('Cursor inspected the workspace.'))).toBe(true);
+  }, fastRetry());
+});
+it('gives up after the stated retry cap when the provider keeps failing without an instant', async () => {
+  await withSession('mock:provider-error-bare', async (_session, v1, v2) => {
+    await waitFor(() => v1.some(e => e.type === 'error'));
+    const notes = v2.filter((e): e is Extract<UiEvent, { type: 'session.error' }> => e.type === 'session.error' && !e.fatal);
+    expect(notes.map(e => e.message.match(/retrying \(\d\/2\)/)?.[0])).toEqual(['retrying (1/2)', 'retrying (2/2)']);
+    const error = v1.find((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error');
+    expect(error?.message).toContain('after 3 attempts');
+    expect(error?.message).toContain('502 bad gateway');
+    expect(v2.some(e => e.type === 'turn.completed' && e.stopReason === 'end_turn')).toBe(false);
+  }, fastRetry());
+});
+it('fails fatally with the preserved reset instant when the wait is too long to retry inline', async () => {
+  await withSession('mock:provider-error-instant-far', async (session, v1, v2) => {
+    await session.result.catch(() => {});
+    const error = v1.find((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error');
+    expect(error?.message).toContain('usage limit reached');
+    expect(error?.message).not.toContain('check the Cursor CLI connection');
+    // The preserved text must keep feeding the auto-resume scheduler (spec 2026-08-03).
+    expect(parseUsageLimit(error?.message)?.resetAt).toBeTruthy();
+    expect(v2.some(e => e.type === 'session.error' && !e.fatal)).toBe(false);
+  }, fastRetry());
 });
 it('native questions refuse agent input and resume only after a human answer', async () => {
   await withSession('mock:ask', async (session, v1, v2) => {
