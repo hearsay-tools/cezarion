@@ -93,9 +93,22 @@ export function RunActivityDock({
   // Completeness is a claim about the RUN, not only about the rows on screen. A parent parked
   // on its workers carries no workflow, agent or plan rows at all, and a running run's visible
   // items settle between turns — both would otherwise read "All complete" mid-flight.
+  // ...and settled is not succeeded, one level up either: `runIsTerminal` covers `failed`,
+  // `cancelled` and the `review` park, none of which finished well (or at all). Only a `done`
+  // run earns the green line; a run that failed or was cancelled says which, rather than
+  // claiming completion or hiding behind "In progress".
   const allComplete =
-    runIsTerminal && workflowSucceeded && agentCounts.done === agentCounts.total && planCountsValue.done === planCountsValue.total
-  const summary = allComplete ? 'All complete' : run.status === 'running' ? 'Working' : 'In progress'
+    run.status === 'done' && workflowSucceeded && agentCounts.done === agentCounts.total && planCountsValue.done === planCountsValue.total
+  const summary = allComplete
+    ? 'All complete'
+    : run.status === 'failed'
+      ? 'Failed'
+      : run.status === 'cancelled'
+        ? 'Cancelled'
+        : run.status === 'running'
+          ? 'Working'
+          : 'In progress'
+  const failed = run.status === 'failed' || run.status === 'cancelled'
 
   return (
     <section
@@ -121,7 +134,7 @@ export function RunActivityDock({
           data-slot="run-activity-status"
           className={cn(
             'ml-auto flex min-w-0 shrink items-center gap-1.5 truncate text-[12.5px]',
-            allComplete ? 'text-success' : 'text-muted-foreground',
+            allComplete ? 'text-success' : failed ? 'text-danger' : 'text-muted-foreground',
           )}
         >
           {allComplete ? <CircleCheckIcon aria-hidden className="size-3.5 shrink-0" /> : null}

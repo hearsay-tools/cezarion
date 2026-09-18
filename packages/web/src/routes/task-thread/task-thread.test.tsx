@@ -847,6 +847,26 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).toContain('All complete')
   })
 
+  it.each([
+    ['failed', 'Failed'],
+    ['cancelled', 'Cancelled'],
+  ] as const)('a %s run says so instead of All complete', (status, summary) => {
+    // `runIsTerminal` is true for every settled status, but settled is not successful: a run
+    // that failed with a finished workflow behind it was reading the green "All complete".
+    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+    renderView(<ThreadView run={run(status, { id: `dock-${status}`, steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    const status_ = document.querySelector('[data-slot="run-activity-status"]')?.textContent
+    expect(status_).not.toContain('All complete')
+    expect(status_).toContain(summary)
+  })
+
+  it('a run parked at the review gate is not complete either', () => {
+    // Parked awaiting a human, like a `review` STEP, which `railVisual` calls active.
+    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+    renderView(<ThreadView run={run('review', { id: 'dock-review', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).not.toContain('All complete')
+  })
+
   it('the dock re-derives its collapse default per run, like the docks it replaced', () => {
     const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }]
     const { rerender } = renderView(
