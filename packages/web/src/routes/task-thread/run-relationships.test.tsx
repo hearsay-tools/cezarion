@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, WorkerInspection } from '@open-mercato/cezar-api-client'
-import { RunHeader, type RunTab } from './run-header'
+import { RunRelationshipsPanel } from './run-relationships'
 
 const parentId = '10000000-0000-4000-8000-000000000001'
 const workerId = '10000000-0000-4000-8000-000000000002'
@@ -16,7 +16,7 @@ const ordinary: ApiRun = { id: parentId, title: 'Parent', task: 'Do task', workf
 const root: ApiRun = { ...ordinary, delegation: { role: 'root', permissions: [], receipts: [{ requestId: workerId, workerId, requestHash: 'b'.repeat(64) }] } }
 const child: ApiRun = { ...ordinary, id: workerId, delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace } }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
-function setup(run: ApiRun, response: () => Promise<Response> = async () => json({ workers: [] }), tab = '') {
+function setup(run: ApiRun, response: () => Promise<Response> = async () => json({ workers: [] })) {
   const requests: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
     const path = String(url); requests.push(path)
@@ -27,13 +27,21 @@ function setup(run: ApiRun, response: () => Promise<Response> = async () => json
     return json({})
   }))
   const client = createQueryClient(); client.setDefaultOptions({ queries: { retry: false } })
-  const view = render(<QueryClientProvider client={client}><ProjectScopeProvider projectId="sample"><MemoryRouter initialEntries={[`/p/sample/tasks/${run.id}${tab}`]}><RunHeader run={run} tab={(tab.slice(1) || 'session') as RunTab} /></MemoryRouter></ProjectScopeProvider></QueryClientProvider>)
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ProjectScopeProvider projectId="sample">
+        <MemoryRouter initialEntries={[`/p/sample/tasks/${run.id}`]}>
+          <RunRelationshipsPanel run={run} />
+        </MemoryRouter>
+      </ProjectScopeProvider>
+    </QueryClientProvider>,
+  )
   return { ...view, requests, client }
 }
 afterEach(() => { cleanup(); onlineManager.setOnline(true); vi.unstubAllGlobals() })
 
-it.each(['', '/changes', '/commits', '/files'])('keeps a scoped parent link in the shared header on tab %s', async tab => {
-  const { requests } = setup(child, async () => json({ parentRunId: parentId, workers: [] }), tab)
+it('keeps a scoped parent link in the relationships panel', async () => {
+  const { requests } = setup(child, async () => json({ parentRunId: parentId, workers: [] }))
   const link = screen.getByRole('link', { name: new RegExp(`parent task ${parentId}`, 'i') })
   expect(link.getAttribute('href')).toBe(`/p/sample/tasks/${parentId}`)
   expect(link.className).toContain('min-h-11')
@@ -47,6 +55,29 @@ it('renders complete worker status and incomplete cleanup in accessible scoped l
   expect(within(panel).getByText(/Cleanup incomplete/)).toBeTruthy()
   expect(within(panel).getByText(/branch/)).toBeTruthy()
   expect(panel.querySelector('a a')).toBeNull()
+})
+it('says nothing about a cleanup that completed with nothing left behind', async () => {
+  // Every destroyed worker carried a "Cleanup complete" line, on every row, forever. A
+  // cleanup that left nothing behind is the expected end of a worker's life, so the line
+  // only ever told the reader what they already assumed (#402 feedback).
+  const tidy: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'complete', remaining: [] } }
+  setup(root, async () => json({ workers: [tidy] }))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  await within(panel).findByText('done')
+  expect(within(panel).queryByText(/Cleanup/)).toBeNull()
+})
+it('still reports a cleanup that completed with something left behind', async () => {
+  const leftovers: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'complete', remaining: ['worktree'] } }
+  setup(root, async () => json({ workers: [leftovers] }))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  expect(await within(panel).findByText(/Cleanup complete/)).toBeTruthy()
+  expect(within(panel).getByText(/worktree/)).toBeTruthy()
+})
+it('still reports a cleanup that is only part-way through', async () => {
+  const midway: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'cleaning', remaining: [] } }
+  setup(root, async () => json({ workers: [midway] }))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  expect(await within(panel).findByText(/Cleanup cleaning/)).toBeTruthy()
 })
 it('keeps durable IDs while loading, failing and retrying instead of inventing an empty list', async () => {
   let finish!: (r: Response) => void

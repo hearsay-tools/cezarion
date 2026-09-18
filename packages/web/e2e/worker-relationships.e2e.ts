@@ -77,11 +77,36 @@ afterAll(async () => {
   if (root) rmSync(root, { recursive: true, force: true })
 })
 
+// Since #402 the panel has two homes: the Session tab reaches it through the unified run
+// activity dock above the composer, while Changes / Commits / Files keep the header panel.
+// The dock is also collapsed by default on a phone, so reaching the region is a click there
+// and already open on a desktop — wait for whichever surface this tab rendered, then expand.
+function reveal() {
+  browser.waitForFunction(
+    `document.querySelector('[data-slot="run-activity-dock"] > button') !== null || document.querySelector(${JSON.stringify(region)}) !== null`,
+  )
+  // Retried, not fired once: the card mounts as soon as the run record lands, and a tap
+  // dispatched in that frame — right after an in-app navigation — can reach a button whose
+  // handler React has not attached yet, which fails the whole spec for a timing reason.
+  // The Workers row is normally already open; the second click covers a remembered collapse.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (browser.evaluate(`document.querySelector(${JSON.stringify(region)}) !== null`) === true) break
+    browser.evaluate(`(() => {
+      document.querySelector('[data-slot="run-activity-dock"] > button[aria-expanded="false"]')?.click()
+      document.querySelector('[data-slot="run-activity-workers"] > button[aria-expanded="false"]')?.click()
+      return true
+    })()`)
+  }
+  browser.waitForFunction(`document.querySelector(${JSON.stringify(region)}) !== null`)
+  browser.evaluate(`(() => {
+    const disclosure = document.querySelector(${JSON.stringify(`${region} > button[aria-expanded="false"]`)})
+    disclosure?.click()
+  })()`)
+}
+
 function open(id = parentId, suffix = '') {
   browser.goto(`${base}${route(id)}${suffix}`)
-  browser.waitForFunction(`document.querySelector(${JSON.stringify(region)}) !== null`)
-  const disclosure = `${region} > button[aria-expanded="false"]`
-  if (browser.count(disclosure) && browser.isVisible(disclosure)) browser.click(disclosure)
+  reveal()
 }
 
 it('retains all 32 scoped links on Session, Changes, Commits and Files, including archived workers', () => {
@@ -121,7 +146,11 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     expect(facts.theme).toBe(true); expect(facts.reducedMotion).toBe(true); expect(facts.focusRing).not.toBe('none')
     browser.screenshot(join(artifacts, `workers-${width}-${theme}.png`), { viewport: true })
     browser.press('Enter')
-    browser.waitForFunction(`location.pathname === '${route(ids[31]!)}' && document.querySelector('${region} a[aria-label="Parent task ${parentId}"]') !== null`)
+    // In-app navigation, so the worker task arrives with its own dock state: collapsed at
+    // phone width until `reveal` opens it.
+    browser.waitForFunction(`location.pathname === '${route(ids[31]!)}'`)
+    reveal()
+    browser.waitForFunction(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]') !== null`)
     expect(browser.evaluate(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]').getAttribute('href')`)).toBe(route(parentId))
   }, 120_000)
 }

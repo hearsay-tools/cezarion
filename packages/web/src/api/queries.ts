@@ -855,10 +855,13 @@ export function useProjectRuns(projectId: string, enabled = true, boot = false) 
 }
 
 /** Complete relationship context, refreshed through the existing global run stream. */
-export function useRunRelationships(runId: string) {
+/** `enabled` so a caller that only wants the ANSWER for a delegated run (the activity dock's
+ *  completion claim) can ask without mounting a relationships request on every ordinary task. */
+export function useRunRelationships(runId: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: queryKeys.runs.relationships(runId),
     queryFn: ({ signal }) => getRunRelationships(runId, { signal }),
+    enabled: options.enabled ?? true,
   })
 }
 

@@ -31,15 +31,13 @@ import { cn, isHttpUrl } from '@/lib/utils'
 import { AutoResumeHint } from './auto-resume-hint'
 import { WorkingIndicator } from './thread-items'
 import { useContinueAction } from './follow-up-engine'
-import { AgentsDock } from './agents-dock'
-import { PlanDock, planCounts } from './plan-dock'
-import { collectSubagents, findSubagent, subagentChildren } from './subagent-dock'
+import { findSubagent, subagentChildren } from './subagent-dock'
 import { SubagentSheet } from './subagent-sheet'
 import { AcceptCelebration, ReviewPanel } from './review-panel'
 import { queuePosition, runActionFlags } from './run-actions'
 import { useStopAction } from './stop-action'
-import { WorkflowSteps } from './step-rail'
 import { RunHeader } from './run-header'
+import { RunActivityDock } from './run-activity-dock'
 import { AskCard } from './ask-card'
 import { useAskAnswer } from './ask-answer'
 import { useRunRecordReconcile } from './run-reconcile'
@@ -54,7 +52,6 @@ import {
   type TranscriptMessageActions,
 } from './session-transcript'
 import {
-  latestPlanEntries,
   reduceThread,
   threadFilePaths,
   threadFooter,
@@ -186,15 +183,13 @@ export function ThreadView({
     : currentThread.turns.some(turn => turn.items.some(item => item.kind === 'ask' && !item.resolved))
   const attention = deriveAttention(run, hasPendingHumanAsk)
   const footer = threadFooter(run.status, run.error)
-  // The dock's data: the latest plan snapshot across turns (full replacement — an emptied
-  // plan hides the dock and the header mirror alike).
-  const plan = latestPlanEntries(currentThread)
-  const planTally = plan !== undefined && plan.length > 0 ? planCounts(plan) : undefined
   // The Agents dock's data: the current fan-out's sub-agents, or [] when there is none to
   // show (#474). Derived from the same reduced turns the thread renders — no new subscription.
   // The legacy session-open rule (web/app.js `updateDetail`): the composer can deliver while
   // the engine owns a live session — running queues the message, waiting answers it.
   const sessionOpen = run.status === 'running' || run.status === 'waiting'
+  // Closed runs keep their in-flight sub-agent cards as historical rows.
+  const runIsTerminal = !sessionOpen && run.status !== 'queued'
   // Queued sends amend the original prompt; they do not open a provider session.
   const queued = run.status === 'queued'
   // …and the fourth: a closed run whose last session can be reopened. Continue used to be a
@@ -215,11 +210,6 @@ export function ThreadView({
   // Derived from `sessionOpen` rather than enumerated, so it cannot drift when a status is
   // added: anything that is neither live nor still queued is closed. `review` matters most —
   // it is where this pipeline's runs normally END, and `threadFooter` already calls it closed.
-  const runIsTerminal = !sessionOpen && run.status !== 'queued'
-  const agents = useMemo(
-    () => collectSubagents(currentThread.turns, runIsTerminal),
-    [currentThread.turns, runIsTerminal],
-  )
   // The drill-down's whole state: which agent is open. Ephemeral by design (spec Q2/Q5) —
   // sub-agents have no stable identity outside their run, so there is nothing to persist.
   const [openAgentId, setOpenAgentId] = useState<string | undefined>(undefined)
@@ -308,7 +298,7 @@ export function ThreadView({
 
   return (
     <div data-route="task-thread" data-run-id={run.id} className="flex min-h-full flex-col">
-      <RunHeader run={run} hasPendingHumanAsk={hasPendingHumanAsk} planTally={planTally} onMarkedUnread={() => onMarkedUnread?.(run.id)} />
+      <RunHeader run={run} hasPendingHumanAsk={hasPendingHumanAsk} onMarkedUnread={() => onMarkedUnread?.(run.id)} />
 
       {/* Row spacing lives on each thread row (pb-2.5, both render modes measure alike);
           this gap only separates the sections — rows, empty state, footer, review panel. */}
@@ -420,19 +410,10 @@ export function ThreadView({
           </div>
         ) : null}
         <div className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-1.5 px-[14px] md:gap-2.5 md:px-16">
-          {run.steps.length > 0 ? (
-            <div data-slot="session-workflow-summary" className="rounded-xl border border-border bg-card px-3 py-2">
-              <WorkflowSteps runId={run.id} steps={run.steps} />
-            </div>
-          ) : null}
-          {/* Agents above the plan: the fan-out is the more urgent "what is happening now",
-              and it is transient — the plan outlives it. Keyed by run id like the plan dock. */}
-          <AgentsDock key={`agents:${run.id}`} runId={run.id} agents={agents} onSelect={setOpenAgentId} />
-
-          {plan !== undefined && plan.length > 0 ? (
-            // Keyed by run id: the collapse default re-derives per task (see PlanDock).
-            <PlanDock key={run.id} runId={run.id} entries={plan} />
-          ) : null}
+          {/* Keyed by run id, like the docks it replaced: the route survives a task change, so
+              an unkeyed dock would carry the previous run's collapse state — its own and every
+              nested section's — into the next one. */}
+          <RunActivityDock key={run.id} run={run} currentThread={currentThread} onOpenWorker={setOpenAgentId} />
 
           {/* A usage-limit stop is the one `failed` state that is still going somewhere — the
               dock says so before the composer offers a Continue nobody needs to press. */}
