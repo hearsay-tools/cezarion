@@ -585,7 +585,13 @@ export function Composer({
       aria-label={finishing ? 'Finishing…' : 'Finish'}
       aria-busy={finishing || undefined}
       title="Close the session and mark this task done"
-      disabled={disabled || busy || stopPending || finishing}
+      // Deliberately NOT gated on `disabled`, which is the SENDING gate — a disconnected or
+      // disabled provider cannot carry a message, but finishing only settles the run the engine
+      // already owns and needs no credentials. `stopControl` above has always been independent of
+      // it for exactly that reason. Gating Finish here would strand a Needs-you task whose
+      // provider went away with no way out of the list, since the Session tab's kebab no longer
+      // carries Finish once this button has it.
+      disabled={busy || stopPending || finishing}
       className="h-11 w-auto gap-[7px] px-5 active:opacity-80"
       onClick={() => void onFinish?.()}
     >

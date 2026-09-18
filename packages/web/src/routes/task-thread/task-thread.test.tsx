@@ -1365,7 +1365,7 @@ describe('the composer action row (#281)', () => {
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
-  function renderThread(record: ApiRun) {
+  function renderThread(record: ApiRun, claudeStatus = 'connected') {
     const sent: Array<{ path: string; method: string; body: unknown }> = []
     vi.stubGlobal(
       'fetch',
@@ -1377,7 +1377,7 @@ describe('the composer action row (#281)', () => {
           path === '/api/v1/providers/status'
             ? {
                 providers: [
-                  { provider: 'claude', status: 'connected', enabled: true },
+                  { provider: 'claude', status: claudeStatus, enabled: true },
                   { provider: 'codex', status: 'not-installed', enabled: true },
                   { provider: 'opencode', status: 'not-installed', enabled: true },
                 ],
@@ -1435,6 +1435,25 @@ describe('the composer action row (#281)', () => {
     const stop = composerActions().querySelector('[aria-label="Stop"]')
     expect(stop).not.toBeNull()
     expect(stop?.getAttribute('title')).toBe('Stop execution; keep existing work')
+  })
+
+  it('a blocked provider disables the message, never Finish — finishing needs no credentials', async () => {
+    // The composer's `disabled` gate is about SENDING: a disconnected provider cannot carry a
+    // message. Finishing only settles the run the engine already owns, so gating it on the
+    // provider would strand a Needs-you task with no way out on this tab — the kebab no longer
+    // carries Finish here. Stop has always been independent of that gate for the same reason;
+    // Finish now matches it.
+    const sent = renderThread(run('waiting'), 'not-installed')
+    await waitFor(() =>
+      expect((screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement).disabled).toBe(true),
+    )
+    const finish = finishButton() as HTMLButtonElement
+    expect(finish).not.toBeNull()
+    expect(finish.disabled).toBe(false)
+    fireEvent.click(finish)
+    await waitFor(() =>
+      expect(sent.some((r) => r.method === 'POST' && r.path === '/api/v1/runs/r1/finish')).toBe(true),
+    )
   })
 
   it('a pending human ask keeps Finish away — the ask card owns the reply, and /finish would 409', () => {
