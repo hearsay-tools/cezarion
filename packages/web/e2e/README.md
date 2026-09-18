@@ -90,6 +90,16 @@ line; the fix is a wait, never a baseline entry.
    order outright. Only in-page code counts: indexing an array `evaluate` RETURNED is reading a
    result, not addressing a row.
 
+7. **No keyboard step or focus read after a bare `press('Escape')`.** A Radix overlay closed
+   with Escape returns focus to its trigger one task after its content unmounts, so a wait for the
+   content to be `null` settles inside that gap and the next `Tab` starts from the trigger
+   (#410). Within twelve lines of a bare Escape, a `press('Tab'|'Enter'|'Space')`, a
+   `focusWithKeyboard`, or a read of `activeElement`/`:focus` is flagged unless something settled
+   focus first: `dismissWithEscape`, a wait that names `activeElement`, or a click, fill, tap or
+   navigation that moves focus on its own. A dismissal in one helper and a Tab in another test are
+   beyond a line scan; that case is why the helper exists, so use it for every dismissal a keyboard
+   step follows.
+
 One site to know about: `selection-states.e2e.ts` asserts `matches(':hover')` after
 `hoverVisiblePoint`. That is a one-shot assertion, not a wait, and it holds because that spec adds
 `--blink-settings=primaryHoverType=2` to `AGENT_BROWSER_ARGS` before it attaches. Rule 1

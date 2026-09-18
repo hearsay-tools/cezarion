@@ -238,6 +238,59 @@ describe('a rendered row addressed by position', () => {
   })
 })
 
+describe('a focus-dependent step after a bare Escape', () => {
+  it('flags Tab, focusWithKeyboard and a read of activeElement after press(\'Escape\') with nothing settling focus between', () => {
+    const src = [
+      "browser.press('Escape')",
+      "browser.waitForFunction(`document.querySelector('[data-slot=\"popover-content\"]') === null`)",
+      "browser.press('Tab')",
+      '',
+      "browser.press('Escape')",
+      "focusWithKeyboard(browser, pencil)",
+      '',
+      "browser.press('Escape')",
+      "browser.waitForFunction(`document.querySelector('[role=\"menuitem\"]') === null`)",
+      "expect(browser.evaluate(`document.activeElement.getAttribute('aria-label')`)).toBe('Task actions')",
+    ].join('\n')
+    const sites = scanSource('x.e2e.ts', src)
+    expect(rules(sites).filter((r) => r === 'focus-after-bare-escape')).toHaveLength(3)
+    expect(lines(sites.filter((s) => s.rule === 'focus-after-bare-escape'))).toEqual([3, 6, 10])
+  })
+
+  it('accepts dismissWithEscape, a wait that names activeElement, and a click that moves focus itself', () => {
+    const src = [
+      "dismissWithEscape(browser, { content: menu, focus: trigger })",
+      "browser.press('Tab')",
+      '',
+      "browser.press('Escape')",
+      "browser.waitForFunction(`document.querySelector(${content}) === null && document.activeElement === document.querySelector(${focus})`)",
+      "browser.press('Tab')",
+      '',
+      "browser.press('Escape')",
+      "browser.waitForFunction(`document.querySelector('[data-slot=\"source-menu\"]') === null`)",
+      "browser.click('[data-slot=\"composer\"] textarea')",
+      "browser.press('Enter')",
+    ].join('\n')
+    expect(scanSource('x.e2e.ts', src).filter((s) => s.rule === 'focus-after-bare-escape')).toEqual([])
+  })
+
+  it('reads a wait as a span: a predicate naming activeElement on the line after waitForFunction( settles focus', () => {
+    const src = [
+      "browser.press('Escape')",
+      'browser.waitForFunction(',
+      "  `document.querySelector(${content}) === null && document.activeElement === document.querySelector(${focus})`,",
+      ')',
+      "browser.press('Tab')",
+    ].join('\n')
+    expect(scanSource('x.e2e.ts', src).filter((s) => s.rule === 'focus-after-bare-escape')).toEqual([])
+  })
+
+  it('stops looking past the window, so an unrelated later test is not attributed to the Escape', () => {
+    const src = ["browser.press('Escape')", ...Array.from({ length: 12 }, () => "browser.count('li')"), "browser.press('Tab')"].join('\n')
+    expect(scanSource('x.e2e.ts', src).filter((s) => s.rule === 'focus-after-bare-escape')).toEqual([])
+  })
+})
+
 describe('the baseline', () => {
   it('tallies sites by file, rule and site text, sorted', () => {
     const sites: Site[] = [

@@ -20,6 +20,7 @@ export type Rule =
   | 'sleep'
   | 'product-dom-write'
   | 'positional-row-index'
+  | 'focus-after-bare-escape'
 
 export interface Site {
   file: string
@@ -53,6 +54,19 @@ const read = /\bexpect\(\(?\s*\w+\.(?:evaluate|count|isVisible|text|url)\(/
 const wait = /\b(?:waitFor\w*|settle\w*)\s*\(/
 const sleep = /\bsetTimeout\s*\(/
 
+/** An Escape pressed through the seam directly, not through `dismissWithEscape`. */
+const bareEscape = /\b\w+\.press\(\s*['"`]Escape['"`]\s*\)/
+/** Something that moves or settles focus on its own: a pointer action, a navigation or the
+ *  dismissal helper. A wait that names where focus is settles it too; those are matched as
+ *  call spans in `scanSource`. */
+const settlesFocus = /\b\w+\.(?:click|fill|tapAt|goto)\(|\bdismissWithEscape\(/
+/** A read of where focus is. */
+const focusState = /activeElement|:focus\b|:focus-visible/
+/** Something whose outcome depends on where focus is right now. */
+const focusDependent = new RegExp(`\\b\\w+\\.press\\(\\s*['"\`](?:Tab|Shift\\+Tab|Enter|Space| )['"\`]\\s*\\)|\\bfocusWithKeyboard\\(|${focusState.source}`)
+/** How far past a bare Escape the focus rule looks. */
+const ESCAPE_WINDOW = 12
+
 export function scanSource(file: string, source: string): Site[] {
   const lines = source.split('\n')
   const sites: Site[] = []
@@ -83,6 +97,38 @@ export function scanSource(file: string, source: string): Site[] {
   // so a helper could sleep for any reason at all under a good name.
   lines.forEach((line, i) => {
     if (sleep.test(line)) sites.push(at('sleep', i))
+  })
+
+  // Rule 7 — a keyboard step, or a read of where focus is, after an Escape nobody waited out.
+  // A Radix overlay closed with Escape hands focus back to its trigger one task AFTER its
+  // content unmounts, so a wait for the content to be gone settles inside that gap and the
+  // next Tab starts from wherever the refocus put it (#410). `dismissWithEscape` waits for the
+  // returned focus; a plain `press('Escape')` does not, so anything that depends on focus
+  // before something else moves it deterministically is flagged. The window ends at the next
+  // pointer action or navigation (a click sets focus itself), at a wait that names
+  // `activeElement` (that IS the settled wait), or after a few lines — a dismissal in one helper
+  // and a Tab in another test is beyond a line scan, which is what the helper is for.
+  // Waits are matched as spans, not lines: a predicate usually sits on the line after
+  // `waitForFunction(`, and a wait's own mention of `activeElement` is the settled wait, never
+  // a one-shot read of it.
+  const waitLines = new Map<number, 'settles' | 'other'>()
+  for (const call of callSpans(source, /\b(waitForFunction|waitForValue)\(/g)) {
+    const kind = focusState.test(call.text) ? 'settles' : 'other'
+    for (let l = lineOf(source, call.start); l <= lineOf(source, call.textStart + call.text.length); l += 1) waitLines.set(l, kind)
+  }
+  lines.forEach((line, i) => {
+    if (!bareEscape.test(line)) return
+    for (let j = i + 1; j <= i + ESCAPE_WINDOW && j < lines.length; j += 1) {
+      const inWait = waitLines.get(j)
+      if (inWait === 'settles') break
+      if (inWait === 'other') continue
+      const candidate = lines[j] ?? ''
+      if (settlesFocus.test(candidate)) break
+      if (focusDependent.test(candidate)) {
+        sites.push(at('focus-after-bare-escape', j))
+        break
+      }
+    }
   })
 
   // Rules 5 and 6 — what a spec does to the page it is measuring. Both only look inside in-page

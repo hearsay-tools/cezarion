@@ -613,7 +613,8 @@ it.each(['ready', 'unknown', 'conflicting'].flatMap(state => [1440, 402].flatMap
     }
     if (state === 'conflicting') {
       stateBrowser.evaluate(`[...document.querySelectorAll('[data-slot="gh-merge-box"] button')].find(el => el.textContent === 'Run agent on this PR').click()`)
-      expect(stateBrowser.evaluate(`document.activeElement === document.querySelector('[data-slot="gh-custom-prompt"]')`)).toBe(true)
+      // Focus moves to the prompt in the product's own handler; wait for it rather than sample it.
+      stateBrowser.waitForFunction(`document.activeElement === document.querySelector('[data-slot="gh-custom-prompt"]')`)
     }
     expect(stateBrowser.evaluate('window.__mergePosts')).toBe(0)
   } finally { stateBrowser.close() }
