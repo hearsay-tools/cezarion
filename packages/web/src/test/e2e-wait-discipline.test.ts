@@ -131,7 +131,7 @@ describe('a sleep', () => {
     expect(rules(sites)).toEqual(['sleep', 'sleep'])
   })
 
-  it('accepts the poll interval of a looping waitFor helper', () => {
+  it('flags a sleep inside a looping waitFor helper too — the name-based exemption is gone (#416)', () => {
     const src = [
       `async function waitForHealth(url: string): Promise<void> {`,
       `  for (let attempt = 0; attempt < 60; attempt += 1) {`,
@@ -148,8 +148,15 @@ describe('a sleep', () => {
       `}`,
     ].join('\n')
     const sites = scanSource('x.e2e.ts', src)
-    expect(rules(sites)).toEqual(['sleep'])
-    expect(lines(sites)).toEqual([12])
+    // A spec that must poll the server imports `e2e/poll.ts`; re-copying the loop under a
+    // `waitFor…` name is exactly what this rule now refuses.
+    expect(rules(sites)).toEqual(['sleep', 'sleep'])
+    expect(lines(sites)).toEqual([6, 12])
+  })
+
+  it('does not scan the shared poll module, which is where those sleeps now live', () => {
+    expect(scanSuite().some((s) => s.file === 'poll.ts')).toBe(false)
+    expect(readFileSync(join(e2eDir, 'poll.ts'), 'utf8')).toContain('setTimeout')
   })
 })
 

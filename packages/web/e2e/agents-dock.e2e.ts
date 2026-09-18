@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/subagents-run.record.json'
+import { waitForHealth } from './poll'
 
 /**
  * The grouped sub-agent display (spec `.ai/specs/2026-07-20-grouped-subagent-display.md`,
@@ -42,17 +43,6 @@ function freePort(): Promise<number> {
   })
 }
 
-async function waitForHealth(url: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${url}/api/v1/health`)).ok) return
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  throw new Error(`cezar e2e: the agents-dock server never answered at ${url}`)
-}
 
 let browser: AgentBrowser
 let server: ChildProcess

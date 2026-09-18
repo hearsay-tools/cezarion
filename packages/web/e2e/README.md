@@ -53,9 +53,14 @@ line; the fix is a wait, never a baseline entry.
 3. **No `scrollIntoView` inside a `waitForFunction` predicate.** A predicate that scrolls moves
    the layout that the read after it depends on. Scroll inside a `waitForValue` expression
    instead, where the same call reads the result, or scroll once in an `evaluate` and then wait.
-4. **No sleep.** `setTimeout` stands in for a condition nobody named. Name it. The one shape
-   the scan accepts is the poll interval of a looping `waitFor…`/`poll…` helper such as the
-   specs' `waitForHealth`, which re-checks the server between sleeps and throws when it runs out.
+4. **No sleep, anywhere in a spec.** `setTimeout` stands in for a condition nobody named. Name
+   it. Waiting on the browser is `waitForFunction`/`waitForValue`; waiting on the SERVER is
+   `poll.ts` — the shared module of HTTP polls (`waitForHealth`, `waitForStatus`,
+   `waitForConfig`, `waitForServerAppearance`) built on one `pollFor` loop. It is the only file
+   under `e2e/` the scan skips, and the only place a spec-side poll sleeps. Need a condition it
+   does not cover? Call `pollFor` with your own probe; do not re-copy the loop (#416). The rule
+   used to exempt any looping function whose name began `waitFor` or `poll`, which trusted a
+   name rather than a mechanism.
 
 One site to know about: `selection-states.e2e.ts` asserts `matches(':hover')` after
 `hoverVisiblePoint`. That is a one-shot assertion, not a wait, and it holds because that spec adds

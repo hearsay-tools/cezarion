@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, readTestEnv } from './agent-browser'
+import { waitForServerAppearance } from './poll'
 
 /**
  * Global settings shell + Appearance (R6 Step 1.3; moved to the global area in the
@@ -44,17 +45,6 @@ afterAll(() => {
   browser?.close()
 })
 
-/** The PUT behind an appearance click is fire-and-forget from the UI's point of view — poll
- *  the API until the write lands rather than assume it beat this assertion. */
-async function waitForServerAppearance(check: (appearance: Record<string, unknown>) => boolean) {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const res = await fetch(`${baseUrl}/api/v1/workspace/ui-state`)
-    const state = (await res.json()) as { appearance?: Record<string, unknown> }
-    if (state.appearance && check(state.appearance)) return state.appearance
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error('ui-state.json never showed the expected appearance')
-}
 
 describe('settings → appearance against the live dry-run server', () => {
   it('the shell renders the registry sections — hidden ones absent, active one marked', () => {
@@ -109,12 +99,12 @@ describe('settings → appearance against the live dry-run server', () => {
     // Saving another appearance field writes the complete normalized object, proving accent is
     // still connected rather than deleted along with the redundant control.
     browser.click('[data-slot="appearance-density"] [data-value="compact"]')
-    const appearance = await waitForServerAppearance((a) => a.accent === 'cezarion' && a.density === 'compact')
+    const appearance = await waitForServerAppearance(baseUrl, (a) => a.accent === 'cezarion' && a.density === 'compact')
     expect(appearance.accent).toBe('cezarion')
     browser.click('[data-slot="appearance-density"] [data-value="comfortable"]')
-    await waitForServerAppearance((a) => a.density === 'comfortable')
+    await waitForServerAppearance(baseUrl, (a) => a.density === 'comfortable')
     browser.click('[data-slot="appearance-width"] [data-value="narrow"]')
-    await waitForServerAppearance((a) => a.density === 'comfortable' && a.width === 'narrow')
+    await waitForServerAppearance(baseUrl, (a) => a.density === 'comfortable' && a.width === 'narrow')
     browser.waitForFunction(`document.documentElement.dataset.density === undefined`)
   })
 
@@ -129,7 +119,7 @@ describe('settings → appearance against the live dry-run server', () => {
     // Compact spacing reduces the route header gap by 1px while preserving its title/context.
     expect(Number(browser.evaluate(`${header}.offsetHeight`))).toBe(69)
     expect(Number(browser.evaluate(`parseFloat(getComputedStyle(${section}).rowGap)`))).toBe(24.5)
-    await waitForServerAppearance((a) => a.density === 'compact')
+    await waitForServerAppearance(baseUrl, (a) => a.density === 'compact')
 
     browser.screenshot(`${artifactsDir}/settings-appearance.png`)
 

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/thread-run.record.json'
+import { waitForHealth } from './poll'
 
 /**
  * The task Commits tab's virtualization (`routes/task-git/commit-list.tsx`), in a real browser,
@@ -56,17 +57,6 @@ function freePort(): Promise<number> {
   })
 }
 
-async function waitForHealth(url: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${url}/api/v1/health`)).ok) return
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  throw new Error(`cezar e2e: the fixture server never answered at ${url}`)
-}
 
 /**
  * A worktree on `cez/…` carrying COMMITS commits past `main` — the shape the tab reads.

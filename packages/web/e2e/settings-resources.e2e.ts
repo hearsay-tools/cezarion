@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, readTestEnv } from './agent-browser'
+import { waitForConfig } from './poll'
 
 /**
  * Project settings → Worktrees: retention (#483) end-to-end against the shared dry-run
@@ -43,15 +44,6 @@ interface ConfigAnswer {
   worktreeRetention: number
 }
 
-async function waitForConfig(check: (config: ConfigAnswer) => boolean): Promise<ConfigAnswer> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const res = await fetch(`${baseUrl}/api/v1/config`)
-    const config = (await res.json()) as ConfigAnswer
-    if (check(config)) return config
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  throw new Error('GET /api/v1/config never showed the expected worktreeRetention')
-}
 
 const gotoResources = () => {
   browser.goto(`${baseUrl}/settings/worktrees`)
@@ -75,7 +67,7 @@ describe('project settings → worktrees: retention against the live dry-run ser
     browser.fill('[data-slot="resources-worktree-retention"]', '4')
     browser.waitForFunction(`document.querySelector('[data-action="resources-save-retention"]:not([disabled])') !== null`)
     browser.click('[data-action="resources-save-retention"]')
-    await waitForConfig((c) => c.worktreeRetention === 4)
+    await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.worktreeRetention === 4, 'worktreeRetention 4')
   })
 
   it('0 saves as unlimited (a real value, not a clear)', async () => {
@@ -83,7 +75,7 @@ describe('project settings → worktrees: retention against the live dry-run ser
     browser.fill('[data-slot="resources-worktree-retention"]', '0')
     browser.waitForFunction(`document.querySelector('[data-action="resources-save-retention"]:not([disabled])') !== null`)
     browser.click('[data-action="resources-save-retention"]')
-    const config = await waitForConfig((c) => c.worktreeRetention === 0)
+    const config = await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.worktreeRetention === 0, 'worktreeRetention 0')
     expect(config.worktreeRetention).toBe(0)
   })
 
@@ -95,7 +87,7 @@ describe('project settings → worktrees: retention against the live dry-run ser
     browser.fill('[data-slot="resources-worktree-retention"]', '7')
     browser.waitForFunction(`document.querySelector('[data-action="resources-save-retention"]:not([disabled])') !== null`)
     browser.click('[data-action="resources-save-retention"]')
-    await waitForConfig((c) => c.worktreeRetention === 7)
+    await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.worktreeRetention === 7, 'worktreeRetention 7')
 
     gotoResources()
     expect(
@@ -108,6 +100,6 @@ describe('project settings → worktrees: retention against the live dry-run ser
     browser.fill('[data-slot="resources-worktree-retention"]', '10')
     browser.waitForFunction(`document.querySelector('[data-action="resources-save-retention"]:not([disabled])') !== null`)
     browser.click('[data-action="resources-save-retention"]')
-    await waitForConfig((c) => c.worktreeRetention === 10)
+    await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.worktreeRetention === 10, 'worktreeRetention 10')
   })
 })

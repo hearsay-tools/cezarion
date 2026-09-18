@@ -33,8 +33,9 @@ export const e2eDir = resolve(import.meta.dirname, '../../e2e')
 export const baselinePath = resolve(import.meta.dirname, 'e2e-wait-discipline.baseline.json')
 
 /** The seam defines the waits and its `getJson` retry is a fetch backoff, not a browser
- *  sleep; the config drives nothing. Everything else under `e2e/` drives the browser. */
-const excluded = new Set(['agent-browser.ts', 'vitest.config.ts'])
+ *  sleep; `poll.ts` is where every spec-side HTTP poll sleeps (#416); the config drives
+ *  nothing. Everything else under `e2e/` drives the browser. */
+const excluded = new Set(['agent-browser.ts', 'poll.ts', 'vitest.config.ts'])
 
 /** An action: a seam interaction, or a contrast helper that performs one. */
 const action =
@@ -44,8 +45,6 @@ const read = /\bexpect\(\(?\s*\w+\.(?:evaluate|count|isVisible|text|url)\(/
 /** Anything that blocks on a page condition between an action and a read. */
 const wait = /\b(?:waitFor\w*|settle\w*)\s*\(/
 const sleep = /\bsetTimeout\s*\(/
-const topLevelFunction = /^(?:export\s+)?(?:async\s+)?function\s+(\w+)/
-const loop = /\b(?:for|while)\s*\(/
 
 export function scanSource(file: string, source: string): Site[] {
   const lines = source.split('\n')
@@ -71,27 +70,15 @@ export function scanSource(file: string, source: string): Site[] {
     if (call.name === 'waitForFunction' && call.text.includes('scrollIntoView')) sites.push(at('mutating-predicate', line))
   }
 
-  // Rule 4 — a sleep, unless it is the poll interval of a looping `waitFor…`/`poll…` helper.
+  // Rule 4 — a sleep. No exemption: a spec that must poll the server calls `e2e/poll.ts`,
+  // which is excluded from this scan and is the only place a spec-side poll sleeps (#416).
+  // The name-based exemption this replaces trusted any looping `waitFor…`/`poll…` function,
+  // so a helper could sleep for any reason at all under a good name.
   lines.forEach((line, i) => {
-    if (sleep.test(line) && !isPollInterval(lines, i)) sites.push(at('sleep', i))
+    if (sleep.test(line)) sites.push(at('sleep', i))
   })
 
   return sites.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule))
-}
-
-/** Whether the sleep at `index` sits inside a top-level function named `waitFor…` or `poll…`
- *  that loops before it — a bounded retry that re-checks a condition, which is what a sleep is
- *  for. A helper of that name with no loop is a sleep wearing a good name. */
-function isPollInterval(lines: string[], index: number): boolean {
-  let loops = false
-  for (let i = index - 1; i >= 0; i -= 1) {
-    const line = lines[i] ?? ''
-    if (/^\}/.test(line)) return false
-    if (loop.test(line)) loops = true
-    const fn = topLevelFunction.exec(line)
-    if (fn) return loops && /^(?:waitFor|poll)/.test(fn[1] ?? '')
-  }
-  return false
 }
 
 interface CallSpan {

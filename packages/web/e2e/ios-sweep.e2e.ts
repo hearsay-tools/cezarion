@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, readTestEnv } from './agent-browser'
+import { waitForStatus } from './poll'
 
 /**
  * The R7 iOS sweep (spec step 21): every primary view at an iPhone viewport (390×844 CSS px),
@@ -56,14 +57,6 @@ interface RunRecord {
   archived?: boolean
 }
 
-async function waitForStatus(id: string, wanted: string[]): Promise<string> {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    const record = await api<RunRecord>(`/api/v1/runs/${id}`)
-    if (wanted.includes(record.status)) return record.status
-    await new Promise((r) => setTimeout(r, 500))
-  }
-  throw new Error(`cezar e2e: run ${id} never reached status "${wanted.join('/')}"`)
-}
 
 beforeAll(async () => {
   baseUrl = readTestEnv().baseUrl
@@ -91,10 +84,10 @@ beforeAll(async () => {
     ).json()) as { id: string }
     threadRunId = created.id
     // The dry-run mock's reply carries no CEZ:DONE marker, so the run parks at `waiting`.
-    const status = await waitForStatus(threadRunId, ['waiting', 'review', 'done', 'failed'])
+    const status = await waitForStatus(baseUrl, threadRunId, ['waiting', 'review', 'done', 'failed'])
     if (status === 'waiting') {
       await fetch(`${baseUrl}/api/v1/runs/${threadRunId}/finish`, { method: 'POST' })
-      await waitForStatus(threadRunId, ['review', 'done', 'failed'])
+      await waitForStatus(baseUrl, threadRunId, ['review', 'done', 'failed'])
     }
   }
 
