@@ -26,28 +26,48 @@ export interface PollOptions {
  * `undefined` is the "not yet" sentinel: a probe that has nothing to report returns it and the
  * loop sleeps. `fail` is called only on the last attempt, so a message that costs a fetch of its
  * own (the resource dump `settings-monitoring` prints) costs nothing while the poll is passing.
+ *
+ * **A probe that throws is "not yet" too.** A poll exists because the thing it watches is not
+ * ready, and a server that is not ready answers with a connection reset, a 5xx or a body that is
+ * not JSON as readily as it answers with the wrong status — so a probe rejection that aborted the
+ * whole wait would be the poll giving up at exactly the moment it is for. `queued-stack`'s own
+ * `getRun` retried five times for this reason before it was folded in here, and that guarantee
+ * belongs to every caller rather than to one of them.
+ *
+ * The cause is not swallowed with it: the last rejection is reported alongside `fail()` and
+ * carried as the thrown error's `cause`, so a poll that ran out because the server was broken
+ * says so instead of only saying it timed out.
  */
 export async function pollFor<T>(
   probe: () => T | undefined | Promise<T | undefined>,
   fail: () => string | Promise<string>,
   { tries = 40, intervalMs = 250 }: PollOptions = {},
 ): Promise<T> {
+  let lastError: unknown
   for (let attempt = 0; attempt < tries; attempt += 1) {
-    const answer = await probe()
-    if (answer !== undefined) return answer
+    try {
+      const answer = await probe()
+      if (answer !== undefined) return answer
+    } catch (error) {
+      lastError = error
+    }
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
-  throw new Error(await fail())
+  const reason = await fail()
+  if (lastError === undefined) throw new Error(reason)
+  const detail = lastError instanceof Error ? lastError.message : String(lastError)
+  throw new Error(`${reason} (last probe error: ${detail})`, { cause: lastError })
 }
 
 /** A fixture server is listening and answering its own health route. */
 export async function waitForHealth(baseUrl: string, what = 'the fixture server', options: PollOptions = {}): Promise<void> {
+  // Still starting is the ordinary case here, so a rejected fetch is not even worth reporting as
+  // the last probe error — `pollFor` would otherwise end every boot timeout with ECONNREFUSED.
   await pollFor(
     async () => {
       try {
         return (await fetch(`${baseUrl}/api/v1/health`)).ok || undefined
       } catch {
-        // Still starting: the socket is not up yet, which is not a failure until `tries` runs out.
         return undefined
       }
     },
@@ -65,7 +85,12 @@ export async function waitForStatus(
 ): Promise<string> {
   return pollFor(
     async () => {
-      const record = (await (await fetch(`${baseUrl}/api/v1/runs/${id}`)).json()) as { status?: string }
+      // `pollFor` treats a throw as "not yet", so a reset connection or a 5xx keeps polling
+      // rather than aborting the wait — what `queued-stack`'s five-attempt `getRun` gave this
+      // one spec before the helpers were folded together.
+      const response = await fetch(`${baseUrl}/api/v1/runs/${id}`)
+      if (!response.ok) throw new Error(`GET run ${id} answered ${response.status}`)
+      const record = (await response.json()) as { status?: string }
       return record.status !== undefined && wanted.includes(record.status) ? record.status : undefined
     },
     () => `cezar e2e: run ${id} never reached status "${wanted.join('/')}"`,
