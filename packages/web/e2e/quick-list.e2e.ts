@@ -11,6 +11,7 @@ import {
   applyContrastQaVariant,
   contrastQaVariants,
   contrastSampleExpression,
+  dismissWithEscape,
   focusWithKeyboard,
   restoreContrastQaDefaults,
   type ContrastSample,
@@ -391,7 +392,9 @@ describe('tasks table overview', () => {
     browser.click('[data-slot="task-columns-trigger"]')
     browser.waitForFunction(`document.querySelector('[data-slot="popover-content"]')?.textContent.includes('Resource columns') === true`)
     browser.click('[data-slot="popover-content"] button:last-child')
-    browser.press('Escape')
+    // Escape hands focus back to the trigger one task after the popover unmounts (#410); wait for
+    // that, or the next keyboard step starts from the row and ends in the header.
+    dismissWithEscape(browser, { content: '[data-slot="popover-content"]', focus: '[data-slot="task-columns-trigger"]' })
     browser.waitForFunction(`document.querySelector('[data-slot="tasks-table"]').getBoundingClientRect().width > 0`)
   }
   beforeEach(() => {
@@ -704,7 +707,9 @@ describe('the tasks table under worst-case row content', () => {
     browser.click('[data-slot="task-columns-trigger"]')
     browser.waitForFunction(`document.querySelector('[data-slot="popover-content"]')?.textContent.includes('Resource columns') === true`)
     browser.click('[data-slot="popover-content"] button:last-child')
-    browser.press('Escape')
+    // Escape hands focus back to the trigger one task after the popover unmounts (#410); wait for
+    // that, or the next keyboard step starts from the row and ends in the header.
+    dismissWithEscape(browser, { content: '[data-slot="popover-content"]', focus: '[data-slot="task-columns-trigger"]' })
     browser.waitForFunction(`document.querySelector('[data-slot="tasks-table"]').getBoundingClientRect().width > 0`)
   }
 

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AgentBrowser, WaitForValueError, configureFailureCapture } from '../../e2e/agent-browser'
-import { focusWithKeyboard, hoverVisiblePoint } from '../../e2e/contrast'
+import { dismissWithEscape, focusWithKeyboard, hoverVisiblePoint } from '../../e2e/contrast'
 
 /**
  * A stand-in `agent-browser` whose `eval` answers are scripted per call: the n-th `eval`
@@ -205,5 +205,23 @@ describe('focusWithKeyboard (#409)', () => {
     const { browser, commands } = open([{ ready: false, predecessor: null }])
     expect(() => focusWithKeyboard(browser, selector)).toThrow(/no visible keyboard predecessor for button/)
     expect(actions(commands())).not.toContain('press')
+  })
+})
+
+describe('dismissWithEscape (#410)', () => {
+  const content = '[data-slot="popover-content"]'
+  const focus = '[data-slot="task-columns-trigger"]'
+
+  it('presses Escape, then waits for the content to be gone AND focus to have returned', () => {
+    const { browser, commands } = open([])
+    dismissWithEscape(browser, { content, focus })
+    expect(actions(commands())).toEqual(['press', 'wait'])
+    expect(commands()[0]).toEqual(['press', 'Escape'])
+    const [, flag, predicate] = commands()[1] ?? []
+    expect(flag).toBe('--fn')
+    // The absence alone is the race (#410): Radix refocuses the trigger one task AFTER the
+    // content unmounts, so the wait must name where focus ends up, not only what disappears.
+    expect(predicate).toContain(`document.querySelector(${JSON.stringify(content)}) === null`)
+    expect(predicate).toContain(`document.activeElement === document.querySelector(${JSON.stringify(focus)})`)
   })
 })
