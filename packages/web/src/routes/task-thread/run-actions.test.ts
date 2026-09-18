@@ -11,7 +11,7 @@ import {
   finishTitle,
   isRunActive,
   lastSessionId,
-  primaryRunAction,
+  offersComposerFinish,
   queuePosition,
   resolveConflictsPrompt,
   resumeCommand,
@@ -343,53 +343,70 @@ describe('unstarted continuation (#201)', () => {
   })
 })
 
-describe('primaryRunAction — the one action the header lifts out of the kebab (#281)', () => {
-  // Waiting is the case the issue is about: "Needs you" is marked done far more often than it is
-  // aborted, so Finish must be one click. Archive is the same decision on a finished task — the
-  // slot is shared, only the control differs. Running and queued promote nothing: the header's
-  // verb there is Stop, and Stop lives in the composer.
-  const matrix: Array<{ status: RunStatus; expected: 'finish' | 'archive' | undefined }> = [
-    { status: 'queued', expected: undefined },
-    { status: 'running', expected: undefined },
-    { status: 'waiting', expected: 'finish' },
-    // The ONE status offering both. Finish wins: at the review gate it is the verdict, and
-    // filing the task away without one is the rarer intent, so Archive stays in the kebab.
-    { status: 'review', expected: 'finish' },
-    { status: 'done', expected: 'archive' },
-    { status: 'failed', expected: 'archive' },
-    { status: 'cancelled', expected: 'archive' },
+describe('offersComposerFinish — the gold primary on a Needs-you task (#281)', () => {
+  // The composer's empty-draft primary is already spoken for on most statuses: Stop owns it on
+  // running/queued, Continue on a closed-but-resumable run. The one place it renders DISABLED is a
+  // waiting task with nothing typed — dead pixels on exactly the runs the "Needs you" list is
+  // complaining about. Finish claims that slot and no other, which is why every row below that is
+  // not plain needs-you answers false.
+  const cases: Array<{ name: string; record: RunRecord; ask?: boolean; expected: boolean }> = [
+    { name: 'a waiting task that needs you', record: run('waiting'), expected: true },
+    // Review keeps Continue in the composer and ✓ Accept in the review panel — it is a verdict
+    // surface already, and displacing a live primary is the one thing this rule must not do.
+    { name: 'review — the panel already carries ✓ Accept', record: run('review'), expected: false },
+    { name: 'running', record: run('running'), expected: false },
+    { name: 'queued', record: run('queued'), expected: false },
+    { name: 'done', record: run('done'), expected: false },
+    { name: 'failed', record: run('failed'), expected: false },
+    { name: 'cancelled', record: run('cancelled'), expected: false },
+    // Both of these would 409 out of `finishBlockedReason`, and both are cases where the composer
+    // has something better to offer: the ask card owns the reply, and a parked root owns Stop.
+    { name: 'a pending human ask on the record', record: run('waiting', { hasPendingHumanAsk: true }), expected: false },
+    { name: 'a pending human ask the thread knows about first', record: run('waiting'), ask: true, expected: false },
+    {
+      name: 'a root parked on its workers — Stop is the live primary there',
+      record: run('waiting', {
+        delegation: {
+          role: 'root',
+          permissions: [],
+          receipts: [],
+          wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] },
+        },
+      }),
+      expected: false,
+    },
   ]
 
-  it.each(matrix)('$status (live) → $expected', ({ status, expected }) => {
-    expect(primaryRunAction(run(status))).toBe(expected)
+  it.each(cases)('$name → $expected', ({ record, ask, expected }) => {
+    expect(offersComposerFinish(record, ask ?? false)).toBe(expected)
   })
 
-  // `archived` relabels the control (Archive → Unarchive) but never changes WHICH action is
-  // promoted, exactly as it never changes `runActionFlags.archive`.
-  it.each(matrix)('$status (archived) → $expected', ({ status, expected }) => {
-    expect(primaryRunAction(run(status, { archived: true }))).toBe(expected)
-  })
-
-  it('never promotes an action the flags do not offer', () => {
-    for (const { status } of matrix) {
-      for (const archived of [false, true]) {
-        const record = run(status, { archived })
-        const promoted = primaryRunAction(record)
-        if (promoted === undefined) continue
-        expect(runActionFlags(record)[promoted]).toBe(true)
-      }
+  it('only ever promotes an action the flags offer', () => {
+    for (const { record, ask } of cases) {
+      if (!offersComposerFinish(record, ask ?? false)) continue
+      expect(runActionFlags(record).finish).toBe(true)
     }
   })
 
-  it('promotes something whenever either action is available', () => {
-    // The complement of the rule above: a status offering Finish or Archive must fill the slot,
-    // or the button would vanish on a task that has a verb to offer.
-    for (const { status } of matrix) {
-      for (const archived of [false, true]) {
-        const record = run(status, { archived })
-        const flags = runActionFlags(record)
-        expect(primaryRunAction(record) !== undefined).toBe(flags.finish || flags.archive)
-      }
+  it('archiving does not change the answer — the rule is about the gate, not the filing', () => {
+    for (const { record, ask, expected } of cases) {
+      expect(offersComposerFinish({ ...record, archived: true }, ask ?? false)).toBe(expected)
+    }
+  })
+})
+
+describe('cancel and archive are exact complements — the shared secondary slot (#281)', () => {
+  // The composer's outline slot holds Stop on an active run and Archive on any other. That is only
+  // safe because the two flags partition the statuses: `cancel` is `active`, `archive` is
+  // `!active`, so the slot is never contested and never empty. Pinned here because the slot's
+  // correctness rests on it — a future status that made both true would put two controls in one
+  // place, and one that made both false would leave a hole.
+  const statuses: RunStatus[] = ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']
+
+  it.each(statuses)('%s offers exactly one of Stop and Archive', (status) => {
+    for (const archived of [false, true]) {
+      const flags = runActionFlags(run(status, { archived }))
+      expect([flags.cancel, flags.archive].filter(Boolean)).toHaveLength(1)
     }
   })
 })

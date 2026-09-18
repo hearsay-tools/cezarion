@@ -1,5 +1,6 @@
 import type { ApiRun, RunRecord, RunStatus, Runner } from '@open-mercato/cezar-api-client'
 import { cliTargetRunner } from '@/components/open-in-menu'
+import { deriveAttention } from '@/lib/attention'
 import { canBeUnread, isUnread } from '@/lib/read-state'
 
 export { cliTargetRunner }
@@ -146,29 +147,36 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
 }
 
 /**
- * The ONE action the header lifts out of the kebab (#281) — Finish on a task that is waiting on
- * you, Archive on one that has finished. They share a slot because they never compete for it:
- * across the seven statuses, exactly one of them is on offer at a time. The single exception is
- * `review`, where the record is both finishable and archivable, and there Finish wins — at the
- * review gate it is the verdict, and filing the task away without one is the rarer intent.
+ * Does this run put Finish in the composer's gold primary slot (#281)?
  *
- * Derived from `runActionFlags` rather than from a second list of statuses, for the reason every
- * rule in this module lives here: a status added to `finish` or `archive` reaches the promoted
- * slot automatically, instead of silently keeping the old answer until someone notices the two
- * lists disagree.
+ * The slot is not free on most statuses — Stop owns it on running and queued (`stopOnEmpty`),
+ * Continue owns it on a closed-but-resumable run (`emptySubmitLabel`). It renders DISABLED in
+ * exactly one place: a waiting task with an empty draft, where nothing may be submitted and there
+ * is nothing to stop that the user is likely to want. So Finish takes that slot and no other, and
+ * the rule below is the "never displace a live primary" invariant written out.
  *
- * `undefined` means the slot stays empty. That is running and queued, where the verb the user
- * wants is Stop — and Stop is the composer's, not the header's.
+ * What survives the filters is precisely the `waiting` attention bucket — the sidebar's "Needs
+ * you" — which is the list the issue opens by calling noisy. Two of the exclusions are also the
+ * two client-visible halves of `finishBlockedReason`, so the promoted button avoids the states
+ * where `POST /finish` would answer 409:
  *
- * `archive` covers unarchiving too: the flag it reads already means "archive when live,
- * unarchive when archived", so the CONTROL reads the record for its label exactly as the kebab
- * entry does. Which action is promoted never depends on `archived`.
+ *  - a pending human ask: the ask card owns the reply, and finishing over it is blocked anyway;
+ *  - a root parked on its workers: `bucket === 'none'`, Stop is already its live primary, and
+ *    uncollected workers block the finish.
+ *
+ * `review` is deliberately out. It offers Finish too, but its composer primary is a live Continue
+ * and its review panel already carries ✓ Accept — the same `use-finish-run.ts` mutation — so the
+ * verdict is within reach there without taking anything away.
+ *
+ * `hasPendingHumanAsk` is the thread's own live view of the ask, passed for the same reason the
+ * header takes it: the record's `hasPendingHumanAsk` lags a turn behind what the transcript
+ * already shows.
  */
-export function primaryRunAction(run: RunRecord): 'finish' | 'archive' | undefined {
-  const flags = runActionFlags(run)
-  if (flags.finish) return 'finish'
-  if (flags.archive) return 'archive'
-  return undefined
+export function offersComposerFinish(run: RunRecord, hasPendingHumanAsk = false): boolean {
+  if (!runActionFlags(run).finish) return false
+  if (run.status !== 'waiting') return false
+  if (hasPendingHumanAsk || run.hasPendingHumanAsk) return false
+  return deriveAttention(run, hasPendingHumanAsk).bucket === 'waiting'
 }
 
 /**

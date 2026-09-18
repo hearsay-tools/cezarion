@@ -34,7 +34,9 @@ import { useContinueAction } from './follow-up-engine'
 import { findSubagent, subagentChildren } from './subagent-dock'
 import { SubagentSheet } from './subagent-sheet'
 import { AcceptCelebration, ReviewPanel } from './review-panel'
-import { queuePosition, runActionFlags } from './run-actions'
+import { offersComposerFinish, queuePosition, runActionFlags } from './run-actions'
+import { ArchiveButton } from './archive-action'
+import { useFinishRun } from './use-finish-run'
 import { useStopAction } from './stop-action'
 import { RunHeader } from './run-header'
 import { RunActivityDock } from './run-activity-dock'
@@ -199,6 +201,12 @@ export function ThreadView({
   // submitting an empty one is still the plain one-click Continue.
   const continueAction = useContinueAction(run)
   const stopAction = useStopAction(run)
+  // Finish as the composer's gold primary on a Needs-you task (#281). The rule lives in
+  // run-actions.ts with the rest of the action policy; the mutation is the shared one the header
+  // and the review panel's ✓ Accept already drive, so "finish" can never fork into three
+  // meanings. A rejection is already a danger toast from inside the hook — swallowed here so the
+  // click handler does not also surface it as an unhandled rejection.
+  const finishAction = useFinishRun(run.id)
   const needsAnswer = hasPendingHumanAsk || run.hasPendingHumanAsk === true
   const hasContinuation = !sessionOpen && !queued && continueAction.available
   const continuable = hasContinuation && continueAction.canContinue
@@ -445,6 +453,15 @@ export function ThreadView({
 
           <Composer
             onStop={runActionFlags(run).cancel ? stopAction.stop : undefined}
+            onFinish={
+              offersComposerFinish(run, hasPendingHumanAsk)
+                ? () => finishAction.mutateAsync().catch(() => undefined)
+                : undefined
+            }
+            finishing={finishAction.isPending}
+            // Stop's own slot, once the engine has let go of the run. `archive` is exactly
+            // `!cancel`, so the composer is handed one control or the other and never two.
+            secondaryAction={runActionFlags(run).archive ? <ArchiveButton run={run} /> : undefined}
             stopOnEmpty={run.status === 'queued' || run.status === 'running' || (run.status === 'waiting' && attention.bucket === 'none' && !needsAnswer)}
             stopping={stopAction.stopping}
             retainDraftUntilSuccess

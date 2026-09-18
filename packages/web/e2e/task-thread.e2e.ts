@@ -418,11 +418,24 @@ describe('task thread', () => {
       { text: 'Files', href: scoped(`/tasks/${RUN_ID}/files`), current: null },
     ])
 
+    // #281 moved Archive out of this menu and into the composer's own action row, where a phone
+    // can reach it without scrolling the header away. `waitForValue` rather than `evaluate`: this
+    // is the first read of the composer in the spec, and the row renders from the same SSE replay
+    // the `beforeAll` bubbles wait on — a bare sample can land before the button mounts, which is
+    // the read-before-render race the wait discipline exists for.
+    const composerActions = browser.waitForValue(
+      `(() => {
+        const row = document.querySelector('[data-slot="composer-actions"]')
+        return row ? JSON.stringify([...row.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))) : null
+      })()`,
+    ) as string
+    expect(JSON.parse(composerActions)).toContain('Archive task')
+
     browser.click('[aria-label="Run actions"]')
     const actions = browser.evaluate(
       `[...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map((b) => b.textContent.trim())`,
     ) as string[]
-    expect(actions).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive task', 'Delete task…'])
+    expect(actions).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Delete task…'])
 
     browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent === 'Open in…').click()`)
     // The take-over command remains in the worktree chooser.
