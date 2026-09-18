@@ -115,17 +115,22 @@ describe('AgentBrowser failure bundles (#408)', () => {
     })
   })
 
-  it('a timed-out waitForFunction records the predicate', () => {
-    const { browser } = open()
+  it('a timed-out waitForFunction records the predicate without re-running it', () => {
+    const { browser, commands } = open()
     let error: unknown
     try {
-      browser.waitForFunction('document.title === "never"')
+      browser.waitForFunction('document.querySelector("button").click()')
     } catch (caught) {
       error = caught
     }
     const bundle = bundleFrom(error)
     const probe = JSON.parse(readFileSync(join(bundle, 'probe.json'), 'utf8')) as Record<string, unknown>
-    expect(probe).toMatchObject({ kind: 'wait-fn', predicate: 'document.title === "never"' })
+    expect(probe).toMatchObject({ kind: 'wait-fn', predicate: 'document.querySelector("button").click()' })
+    // A predicate can carry a side effect (thread-scroll clicks inside one), so the probe's
+    // `eval` must not contain it: the capture reads the page, it never drives it.
+    const probeEval = commands().find(([action]) => action === 'eval')
+    expect(probeEval?.[1]).not.toContain('.click()')
+    expect(probeEval?.[1]).not.toContain('eval(')
   })
 
   it('a second capture in the same test gets the next bundle number', () => {

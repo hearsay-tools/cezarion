@@ -98,10 +98,13 @@ type FailureReason =
  * The in-page probe. Built as one expression so a single `eval` fetches everything, and
  * every branch is wrapped so a selector the CSS engine rejects (agent-browser also accepts
  * `text=` and `@ref`) records the rejection instead of failing the probe.
+ *
+ * A timed-out predicate is recorded in `probe.json`, never re-run here: specs put side effects
+ * in predicates (`thread-scroll.e2e.ts` clicks a button inside one), and a capture that fired
+ * them again would alter the session the spec's remaining tests share. The probe only reads.
  */
 function probeScript(reason: FailureReason): string {
   const selector = reason.kind === 'wait-selector' ? JSON.stringify(reason.selector) : 'null'
-  const predicate = reason.kind === 'wait-fn' ? JSON.stringify(reason.predicate) : 'null'
   return `(() => {
     const path = (el) => {
       const parts = []
@@ -160,14 +163,6 @@ function probeScript(reason: FailureReason): string {
         out.target = { count: nodes.length, matches: nodes.slice(0, 5).map(describe) }
       } catch (error) {
         out.target = { count: null, selectorError: String(error) }
-      }
-    }
-    const predicate = ${predicate}
-    if (predicate !== null) {
-      try {
-        out.predicateValue = String((0, eval)(predicate))
-      } catch (error) {
-        out.predicateError = String(error)
       }
     }
     return out
