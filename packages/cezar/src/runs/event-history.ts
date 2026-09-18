@@ -238,7 +238,10 @@ export function canonicalSessionItems(events: readonly RunEvent[]): CanonicalIte
     }
     if (event.type === 'request-outcome') {
       const parsed = requestOutcomeEventSchema.safeParse(event);
-      if (parsed.success) upsert(`request-outcome:${parsed.data.outcome.requestId}`, event);
+      // An outcome has no sender, recipient, title, or request text of its own. It is the
+      // terminal projection of the request card, so pagination must keep both events under
+      // one canonical identity rather than allowing a standalone outcome at a page boundary.
+      if (parsed.success) upsert(`conversation-message:${parsed.data.outcome.requestId}`, event);
       continue;
     }
     if (event.type === 'agent-input') {
