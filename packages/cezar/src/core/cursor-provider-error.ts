@@ -30,18 +30,21 @@ const TRANSIENT_SIGNAL_RE =
   /\b(?:429|500|502|503|504|rate[ _-]?limit(?:ed)?|overloaded|temporar(?:y|ily)|timed?[ _-]?out|bad gateway|service unavailable|internal server error|connection (?:reset|refused|closed|error)|econn(?:reset|refused|aborted)|socket hang up|try again|retry)\b/i;
 
 /**
- * Strip the envelope prefix, control characters and runs of whitespace, and cap
- * the length. The result is safe to embed in a run error and keeps the phrases
- * `parseUsageLimit` matches on intact — that is what lets a fatal outcome still
- * carry the reset instant the auto-resume scheduler reads.
+ * Strip the envelope prefix, control characters and runs of whitespace. Uncapped — this is the
+ * form classification and limit parsing read, so a verbose envelope cannot bury its reset
+ * instant past a display bound (#446 round 3).
+ */
+function collapseCursorProviderError(text: string): string {
+  return text.replace(ENVELOPE_PREFIX_RE, '').replace(CONTROL_RE, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The collapsed text, capped for display. Safe to embed in a run error and transcript;
+ * recovery-relevant structure survives through `classifyCursorProviderError` and the
+ * runner's fatal composition, never through this cap.
  */
 export function sanitizeCursorProviderError(text: string): string {
-  return text
-    .replace(ENVELOPE_PREFIX_RE, '')
-    .replace(CONTROL_RE, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, CURSOR_PROVIDER_ERROR_MAX_CHARS);
+  return collapseCursorProviderError(text).slice(0, CURSOR_PROVIDER_ERROR_MAX_CHARS);
 }
 
 /**
@@ -50,7 +53,7 @@ export function sanitizeCursorProviderError(text: string): string {
  * any other transient signal is transient-without-instant; everything else is fatal.
  */
 export function classifyCursorProviderError(text: string, now = Date.now()): CursorProviderErrorClassification {
-  const detail = sanitizeCursorProviderError(text);
+  const detail = collapseCursorProviderError(text);
   if (/unauthenticated/i.test(detail)) return { kind: 'auth' };
   const limit = parseUsageLimit(detail, now);
   if (limit) return { kind: 'transient', resetAt: limit.resetAt };

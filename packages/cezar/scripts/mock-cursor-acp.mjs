@@ -36,6 +36,7 @@ async function prompt(id, content) {
   if (input.includes('mock:provider-error-bare')) { text('\n\nError: 502 bad gateway.'); complete(id); return; }
   if (input.includes('mock:provider-error-instant-near') && prompts === 1) { text(`\n\nError: 429 rate limited, try again at ${new Date(Date.now() + 300).toISOString()}.`); complete(id); return; }
   if (input.includes('mock:provider-error-instant-far')) { text(`\n\nError: usage limit reached, try again at ${new Date(Date.now() + 6 * 3600000).toISOString()}.`); complete(id); return; }
+  if (input.includes('mock:provider-error-verbose')) { text(`\n\nError: usage limit reached. The request ${'x'.repeat(600)} could not be completed, try again at ${new Date(Date.now() + 6 * 3600000).toISOString()}.`); complete(id); return; }
   if (input.includes('mock:provider-error') && !input.includes('mock:provider-error-')) { text('\n\nError: [unauthenticated] Backend rejected authentication.'); complete(id); return; }
   if (input.includes('mock:ask-bad')) { pendingAsk = { id }; emit({ id: 'bad-question', method: 'cursor/ask_question', params: { questions: [] } }); return; }
   if (input.includes('mock:plan')) { pendingAsk = { id, input }; emit({ id: 'plan-1', method: 'cursor/create_plan', params: { name: 'Test plan', overview: 'Approve the changes?', plan: 'Implement the change and run tests.' } }); return; }

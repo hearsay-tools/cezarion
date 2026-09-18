@@ -340,6 +340,21 @@ class CursorSession implements AgentSession {
     this.pendingProviderRetry = { classification, detail };
   }
 
+  /** The fatal text for a classified provider failure. When the classification knows a reset
+   *  instant that the display cap truncated out of the detail, restate it in a form
+   *  `parseUsageLimit` matches, so the auto-resume scheduler reading `run.error` can still
+   *  fire on a verbose provider message (#446 round 3). */
+  private providerFatalMessage(detail: string, classification: CursorProviderErrorClassification, attempts?: number): string {
+    const resetAt = classification.kind === 'transient' ? classification.resetAt : undefined;
+    const head = attempts === undefined
+      ? 'Cursor provider request failed'
+      : `Cursor provider request failed after ${attempts} attempts`;
+    const instant = resetAt && !detail.includes(resetAt.toISOString())
+      ? ` — usage limit resets at ${resetAt.toISOString()}`
+      : '';
+    return `${head}: ${detail}${instant}`;
+  }
+
   /** Fire the latched provider retry: wait out a near reset instant or back off briefly,
    *  say the attempt on the transcript, and re-prompt the same session with the same content.
    *  `busy` stays true throughout, so no auto-end or queued input can land mid-retry. */
@@ -350,7 +365,7 @@ class CursorSession implements AgentSession {
     // `fail`'s own completion then finds no open turn and is a no-op — never a duplicate.
     this.mapped(cursorTurnCompleted('error', this.state));
     if (this.providerRetryAttempts >= this.providerRetry.maxRetries) {
-      this.fail(`Cursor provider request failed after ${this.providerRetryAttempts + 1} attempts: ${retry.detail}`);
+      this.fail(this.providerFatalMessage(retry.detail, retry.classification, this.providerRetryAttempts + 1));
       return;
     }
     const attempt = this.providerRetryAttempts + 1;
@@ -362,7 +377,7 @@ class CursorSession implements AgentSession {
       if (wait > this.providerRetry.maxInlineWaitMs) {
         // Too far out to hold the session open. Failing with the preserved text lets the
         // auto-resume scheduler (spec 2026-08-03) park a resume at the instant — no human.
-        this.fail(`Cursor provider request failed: ${retry.detail}`);
+        this.fail(this.providerFatalMessage(retry.detail, retry.classification));
         return;
       }
       delay = Math.max(0, wait) + CURSOR_PROVIDER_INSTANT_GRACE_MS;

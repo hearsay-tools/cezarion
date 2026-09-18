@@ -110,6 +110,17 @@ it('fails fatally with the preserved reset instant when the wait is too long to 
     expect(v2.some(e => e.type === 'session.error' && !e.fatal)).toBe(false);
   }, fastRetry());
 });
+it('keeps the reset instant recoverable when a verbose envelope truncates the detail', async () => {
+  // The detail cap is display-only: the fatal message must still carry the instant, or the
+  // auto-resume scheduler reading run.error can never fire on a verbose provider message.
+  await withSession('mock:provider-error-verbose', async (session, v1, v2) => {
+    await session.result.catch(() => {});
+    const error = v1.find((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error');
+    expect(error?.message).not.toContain('check the Cursor CLI connection');
+    expect(parseUsageLimit(error?.message)?.resetAt).toBeTruthy();
+    expect(v2.some(e => e.type === 'session.error' && !e.fatal)).toBe(false);
+  }, fastRetry());
+});
 it('native questions refuse agent input and resume only after a human answer', async () => {
   await withSession('mock:ask', async (session, v1, v2) => {
     await waitFor(() => v2.some(e => e.type === 'ask.requested'));

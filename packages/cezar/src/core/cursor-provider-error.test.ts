@@ -51,4 +51,12 @@ describe('classifyCursorProviderError', () => {
   it('classes unknown provider prose as fatal', () => {
     expect(classifyCursorProviderError('\n\nError: context length exceeded', now)).toEqual({ kind: 'fatal' });
   });
+
+  it('reads a reset instant that sits beyond the display-detail cap', () => {
+    // #446 round 3: the 500-char detail cap is for display; classification parses the full
+    // envelope, or a verbose provider message buries the instant the recovery machinery needs.
+    const verbose = `\n\nError: usage limit reached. The request ${'x'.repeat(600)} could not be completed, try again at 2026-09-18T21:00:00Z`;
+    const hit = classifyCursorProviderError(verbose, now);
+    expect(hit).toEqual({ kind: 'transient', resetAt: new Date('2026-09-18T21:00:00Z') });
+  });
 });
