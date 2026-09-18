@@ -85,10 +85,18 @@ function reveal() {
   browser.waitForFunction(
     `document.querySelector('[data-slot="run-activity-dock"] > button') !== null || document.querySelector(${JSON.stringify(region)}) !== null`,
   )
-  browser.evaluate(`(() => {
-    const dockButton = document.querySelector('[data-slot="run-activity-dock"] > button[aria-expanded="false"]')
-    dockButton?.click()
-  })()`)
+  // Retried, not fired once: the card mounts as soon as the run record lands, and a tap
+  // dispatched in that frame — right after an in-app navigation — can reach a button whose
+  // handler React has not attached yet, which fails the whole spec for a timing reason.
+  // The Workers row is normally already open; the second click covers a remembered collapse.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (browser.evaluate(`document.querySelector(${JSON.stringify(region)}) !== null`) === true) break
+    browser.evaluate(`(() => {
+      document.querySelector('[data-slot="run-activity-dock"] > button[aria-expanded="false"]')?.click()
+      document.querySelector('[data-slot="run-activity-workers"] > button[aria-expanded="false"]')?.click()
+      return true
+    })()`)
+  }
   browser.waitForFunction(`document.querySelector(${JSON.stringify(region)}) !== null`)
   browser.evaluate(`(() => {
     const disclosure = document.querySelector(${JSON.stringify(`${region} > button[aria-expanded="false"]`)})

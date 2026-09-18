@@ -318,7 +318,10 @@ describe('task thread', () => {
   })
 
   it('the step rail maps the record steps to checklist rows over the progress bar', () => {
-    browser.click('[data-slot="workflow-steps"] [data-slot="collapsible-trigger"]')
+    // The rail lives in the Run activity card's workflow section now (#402), whose row is
+    // titled by the current step and opens the same checklist.
+    expect(browser.text('[data-slot="run-activity-workflow"] > button')).toContain('Verify')
+    browser.click('[data-slot="run-activity-workflow"] > button')
     browser.waitForFunction(`document.querySelector('[data-slot="step-progress"] > div') !== null`)
     const rail = browser.evaluate(`(() => {
       const rows = [...document.querySelectorAll('[data-slot="step-row"]')]
@@ -335,14 +338,16 @@ describe('task thread', () => {
     expect(rail.rows[1]!.text).toContain('Verify')
     expect(rail.rows[1]!.text).toContain('check · step 2 of 2')
     expect(rail.bar).toBe('100%') // both steps terminal — (1 + 1) / 2
-    browser.click('[data-slot="workflow-steps"] [data-slot="collapsible-trigger"]')
+    browser.click('[data-slot="run-activity-workflow"] > button')
   })
 
-  it('the plan dock shows the LATEST snapshot (2/4), expanded in the session dock', () => {
-    expect(browser.evaluate(`document.querySelector('[data-slot="plan-dock"]').dataset.state`)).toBe('open')
-    expect(browser.evaluate(`document.querySelector('[data-slot="plan-count"]').textContent`)).toBe('· 2/4')
+  it('the plan section meters the LATEST snapshot (2 of 4) inside the run-activity card', () => {
     expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-dock"]').dataset.state`)).toBe('open')
+    expect(browser.text('[data-slot="run-activity-plan"] [data-slot="run-activity-meta"]')).toBe('2 of 4 complete')
     expect(browser.evaluate(`document.querySelector('[data-slot="plan-mirror"]') === null`)).toBe(true)
+
+    browser.click('[data-slot="run-activity-plan"] > button')
+    browser.waitForFunction(`document.querySelectorAll('[data-slot="plan-item"]').length === 4`)
 
     // The turn-2 snapshot won (turn 1 said 0/4 with "Read README and docs" in progress).
     const items = browser.evaluate(`[...document.querySelectorAll('[data-slot="plan-item"]')].map((el) => ({
@@ -354,19 +359,17 @@ describe('task thread', () => {
     expect(items[2]!.text).toContain('in progress')
 
     // It sits in the dock region above the composer area, not in the thread flow.
-    expect(browser.evaluate(`document.querySelector('[data-slot="thread-dock"] [data-slot="plan-dock"]') !== null`)).toBe(true)
+    expect(browser.evaluate(`document.querySelector('[data-slot="thread-dock"] [data-slot="run-activity-plan"]') !== null`)).toBe(true)
   })
 
-  it('collapsing the dock folds it to the odometer + the activeForm of the current item', () => {
-    browser.click('[data-slot="plan-dock"] button')
-    browser.waitForFunction(`document.querySelector('[data-slot="plan-dock"]').dataset.state === 'collapsed'`)
+  it('collapsing the plan section folds the list away and keeps its odometer', () => {
+    browser.click('[data-slot="run-activity-plan"] > button')
+    browser.waitForFunction(`document.querySelector('[data-slot="run-activity-plan"]').dataset.state === 'collapsed'`)
     expect(browser.count('[data-slot="plan-list"]')).toBe(0)
-    expect(browser.evaluate(`document.querySelector('[data-slot="plan-current"]').textContent`)).toBe(
-      '— Summarizing cockpit features',
-    )
+    expect(browser.text('[data-slot="run-activity-plan"] [data-slot="run-activity-meta"]')).toBe('2 of 4 complete')
     // Re-expand so the desktop screenshot below captures the full checklist.
-    browser.click('[data-slot="plan-dock"] button')
-    browser.waitForFunction(`document.querySelector('[data-slot="plan-dock"]').dataset.state === 'open'`)
+    browser.click('[data-slot="run-activity-plan"] > button')
+    browser.waitForFunction(`document.querySelector('[data-slot="run-activity-plan"]').dataset.state === 'open'`)
   })
 
   it('a card is closed by default and expands to its mono output (the #381 behavior)', () => {
@@ -628,7 +631,7 @@ describe('task thread', () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
     browser.waitForFunction(`document.querySelector('[aria-label="Show run details"]') !== null`)
-    expect(browser.count('[data-slot="plan-dock"]')).toBe(0)
+    expect(browser.count('[data-slot="run-activity-plan"]')).toBe(0)
     browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
     browser.press('Space')
     expect(browser.evaluate(`document.querySelector('[aria-label="Hide run details"]').getAttribute('aria-expanded')`)).toBe('true')

@@ -318,8 +318,14 @@ afterAll(() => {
 describe('progressive long-session history', () => {
   it('paints the current tail and docks without requesting an earlier page', () => {
     expect(Number(browser.evaluate(cursorRequestCount))).toBe(0)
-    expect(browser.text('[data-slot="plan-dock"]')).toContain('Keep the current plan visible')
-    expect(browser.text('[data-slot="agents-dock"]')).toContain('0/1')
+    // Both live in the one Run activity card now (#402): the section heads carry the meters,
+    // and the plan's own entries appear once its row is opened.
+    expect(browser.text('[data-slot="run-activity-subagents"] [data-slot="run-activity-meta"]')).toBe('0 of 1 complete')
+    // A programmatic toggle: this spec's thread is still settling into follow-tail, so a
+    // coordinate click can land on whatever scrolled under the pointer.
+    browser.evaluate(`document.querySelector('[data-slot="run-activity-plan"] > button').click()`)
+    browser.waitForFunction(`document.querySelector('[data-slot="plan-list"]') !== null`)
+    expect(browser.text('[data-slot="run-activity-plan"]')).toContain('Keep the current plan visible')
     expect(browser.count('[data-slot="thread-row"]')).toBeLessThan(300)
     browser.screenshot(join(artifactsDir, 'progressive-history-tail.png'), { viewport: true })
   })

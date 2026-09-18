@@ -224,18 +224,6 @@ export function subagentActivityText(agent: SubagentSummary): string {
   return agent.activity ?? (agent.stalled === true ? 'never finished' : 'starting…')
 }
 
-/**
- * What the collapsed head names: the first agent still working, else the first row.
- *
- * Deliberately NOT stalled-aware: `stalled` is only ever set when the run is terminal, and on a
- * terminal run every agent is either settled or stalled — so a "skip the stalled ones" filter
- * could never change the outcome. The head and the row are kept consistent by both rendering
- * `subagentActivityText`, not by picking a different agent.
- */
-export function activeSubagent(agents: SubagentSummary[]): SubagentSummary | undefined {
-  return agents.find((agent) => !isSettled(agent.status)) ?? agents[0]
-}
-
 /** `Array.prototype.findLastIndex` needs a newer lib target than the cockpit's tsconfig sets. */
 function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
   for (let i = items.length - 1; i >= 0; i -= 1) {

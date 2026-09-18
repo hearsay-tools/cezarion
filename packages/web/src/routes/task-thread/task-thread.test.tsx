@@ -804,8 +804,11 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
     const dock = document.querySelector('[data-slot="run-activity-dock"]')!
     expect(dock.textContent).toContain('Run activity')
-    expect(dock.textContent).toContain('sections')
+    // Only the workflow has anything to show in this fixture — the count is honest about it.
+    expect(dock.textContent).toContain('1 section')
     expect(dock.textContent).toContain('Working')
+    // The workflow row is titled by the step the run is on, not by the word "Workflow".
+    expect(document.querySelector('[data-slot="run-activity-workflow"]')?.textContent).toContain('Do the task')
   })
 
   it('quarantined delegation metadata adds no workers section — and no dock of its own', () => {
@@ -865,8 +868,11 @@ describe('ThreadView', () => {
     ]
     renderView(<ThreadView run={run('running')} thread={reduceThread(withPlan)} />)
     expect(document.querySelector('[data-slot="run-activity-dock"]')).not.toBeNull()
-    expect(document.querySelector('[data-slot="plan-dock"]')).not.toBeNull()
-    expect(document.querySelector('[data-slot="plan-count"]')?.textContent).toBe('· 1/3')
+    // The plan is a section of the one dock now — its own card is gone, its meter moved.
+    expect(document.querySelector('[data-slot="plan-dock"]')).toBeNull()
+    expect(
+      document.querySelector('[data-slot="run-activity-plan"] [data-slot="run-activity-meta"]')?.textContent,
+    ).toBe('1 of 3 complete')
     expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
     // The workflow rail has moved into the session dock, so the header stays clear.
     expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
@@ -891,7 +897,7 @@ describe('ThreadView', () => {
     ]
     renderView(<ThreadView run={run('running')} thread={reduceThread(events)} />)
     expect(document.querySelector('[data-slot="tool-card"]')).toBeNull()
-    expect(document.querySelector('[data-slot="plan-dock"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="run-activity-plan"]')).not.toBeNull()
   })
 })
 

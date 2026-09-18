@@ -1,18 +1,39 @@
-import { ChevronDownIcon } from '@/components/design-icons'
 import { useMemo, useState } from 'react'
+import { LoaderCircleIcon } from 'lucide-react'
+import { BotIcon, ChevronDownIcon, CircleCheckIcon, LayersIcon, ListTodoIcon } from '@/components/design-icons'
 
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { ApiRun, StepState } from '@open-mercato/cezar-api-client'
 import { cn } from '@/lib/utils'
 import { useIsDesktop } from '@/lib/use-desktop'
 
-import { AgentsDock } from './agents-dock'
-import { PlanDock, planCounts } from './plan-dock'
+import { AgentList } from './agents-dock'
+import { PlanList, planCounts } from './plan-dock'
 import { collectSubagents, subagentCounts } from './subagent-dock'
-import { WorkflowSteps } from './step-rail'
-import { RunRelationshipsPanel } from './run-relationships'
+import { StepRail, activeStepIndex, railVisual } from './step-rail'
+import { WorkerActivitySection } from './run-relationships'
+import { ActivityRow, meterText } from './run-activity-row'
 import { latestPlanEntries, type ThreadState } from './thread-state'
 
+/**
+ * **Run activity** (#402, mockups `pasted-1..3.png`) — the single card above the composer that
+ * replaced four stacked docks (workflow rail, agents, workers, plan). One header row naming
+ * how many sections a run has and whether it is finished; underneath, one row per section —
+ * glyph, title, meter, chevron — each opening its own list in place.
+ *
+ * Collapsed it is exactly one line (`Run activity · 4 sections · All complete`), which is the
+ * whole point on a phone: the transcript keeps the screen and the run's state is still a
+ * glance away. Sections with nothing to show omit themselves; a run with no sections at all
+ * renders nothing rather than an empty frame.
+ */
+
+/** Collapse memory per run — the module-level map every dock this replaced kept, for the same
+ *  reason: the four task routes mount their own dock, so an explicit expand must survive a
+ *  Session → Changes → Commits hop. Session-lifetime only; nothing is persisted server-side. */
 const openByRun = new Map<string, boolean>()
+/** The same memory, one level down: `${runId}:${section}`. */
+const openSections = new Map<string, boolean>()
+
+type SectionKey = 'workflow' | 'subagents' | 'workers' | 'plan'
 
 export function RunActivityDock({
   run,
@@ -25,39 +46,53 @@ export function RunActivityDock({
 }) {
   const desktop = useIsDesktop()
   const [open, setOpen] = useState(() => openByRun.get(run.id) ?? desktop)
+  // Nested rows start closed on every viewport — the mockup's expanded card is a list of
+  // section heads, and a reader opens the one they came for. Workers are the exception, open
+  // by default in the mockup and load-bearing before it: the header panel this replaced
+  // listed the worker links on desktop without a click, and they are navigation, not detail.
+  const [sections, setSections] = useState<Record<string, boolean>>({})
   const sessionOpen = run.status === 'running' || run.status === 'waiting'
   const runIsTerminal = !sessionOpen && run.status !== 'queued'
-  const workflow = run.steps.length > 0 ? run.steps : []
+  const workflow = run.steps
   const agents = useMemo(() => collectSubagents(currentThread.turns, runIsTerminal), [currentThread.turns, runIsTerminal])
   const planEntries = latestPlanEntries(currentThread) ?? []
   // `invalid` is the contract's parking spot for unreadable delegation metadata, and
   // RunRelationshipsPanel renders nothing for it — so it is not a section to count or frame.
-  const workerSection =
-    run.delegation && run.delegation.role !== 'invalid' ? <RunRelationshipsPanel run={run} /> : undefined
+  const hasWorkers = run.delegation !== undefined && run.delegation.role !== 'invalid'
   const workflowComplete =
     workflow.length === 0 ||
     workflow.every((step) => step.status === 'done' || step.status === 'failed' || step.status === 'cancelled' || step.status === 'skipped')
   const agentCounts = subagentCounts(agents)
   const planCountsValue = planCounts(planEntries)
-  const parts = [
+  const present: SectionKey[] = [
     workflow.length > 0 ? 'workflow' : undefined,
     agents.length > 0 ? 'subagents' : undefined,
-    workerSection !== undefined ? 'workers' : undefined,
+    hasWorkers ? 'workers' : undefined,
     planEntries.length > 0 ? 'plan' : undefined,
-  ].filter(Boolean) as string[]
+  ].filter((key): key is SectionKey => key !== undefined)
 
-  if (parts.length === 0) return null
+  if (present.length === 0) return null
+
+  const isOpen = (key: SectionKey) => sections[key] ?? openSections.get(`${run.id}:${key}`) ?? key === 'workers'
+  const toggle = (key: SectionKey) => {
+    const next = !isOpen(key)
+    openSections.set(`${run.id}:${key}`, next)
+    setSections((state) => ({ ...state, [key]: next }))
+  }
 
   // Completeness is a claim about the RUN, not only about the rows on screen. A parent parked
   // on its workers carries no workflow, agent or plan rows at all, and a running run's visible
   // items settle between turns — both would otherwise read "All complete" mid-flight.
   const allComplete =
     runIsTerminal && workflowComplete && agentCounts.done === agentCounts.total && planCountsValue.done === planCountsValue.total
-
-  const summary = `${allComplete ? 'All complete' : run.status === 'running' ? 'Working' : 'In progress'}`
+  const summary = allComplete ? 'All complete' : run.status === 'running' ? 'Working' : 'In progress'
 
   return (
-    <section data-slot="run-activity-dock" data-state={open ? 'open' : 'collapsed'} className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-xs">
+    <section
+      data-slot="run-activity-dock"
+      data-state={open ? 'open' : 'collapsed'}
+      className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-xs"
+    >
       <button
         type="button"
         aria-expanded={open}
@@ -65,41 +100,87 @@ export function RunActivityDock({
           openByRun.set(run.id, !open)
           setOpen(!open)
         }}
-        className={cn('flex min-h-11 w-full items-center gap-2 px-3.5 py-2 text-left text-[13px]')}
+        className="flex min-h-11 w-full min-w-0 items-center gap-2.5 px-3.5 py-2 text-left text-[13.5px] hover:bg-muted/40"
       >
+        <LayersIcon aria-hidden className="size-4 shrink-0 text-accent-text" />
         <span className="shrink-0 font-semibold">Run activity</span>
-        <span data-slot="run-activity-count" className="shrink-0 text-muted-foreground tabular-nums">
-          · {parts.length} sections
+        <span data-slot="run-activity-count" className="shrink-0 text-[12.5px] text-muted-foreground tabular-nums">
+          · {present.length} {present.length === 1 ? 'section' : 'sections'}
         </span>
-        <span data-slot="run-activity-status" className="min-w-0 truncate text-muted-foreground">
-          — {summary}
+        <span
+          data-slot="run-activity-status"
+          className={cn(
+            'ml-auto flex min-w-0 shrink items-center gap-1.5 truncate text-[12.5px]',
+            allComplete ? 'text-success' : 'text-muted-foreground',
+          )}
+        >
+          {allComplete ? <CircleCheckIcon aria-hidden className="size-3.5 shrink-0" /> : null}
+          <span className="truncate">{summary}</span>
         </span>
-        <ChevronDownIcon aria-hidden className={cn('ml-auto size-3.5 shrink-0 text-soft-foreground transition-transform', !open && 'rotate-180')} />
+        <ChevronDownIcon
+          aria-hidden
+          className={cn('size-4 shrink-0 text-soft-foreground transition-transform', open && 'rotate-180')}
+        />
       </button>
       {open ? (
-        <div className="flex flex-col gap-2 px-3.5 pb-3">
+        <div className="flex min-w-0 flex-col">
           {workflow.length > 0 ? (
-            <div data-slot="run-activity-workflow" className="rounded-md border border-border bg-background p-2">
-              <WorkflowSteps runId={run.id} steps={workflow} />
-            </div>
+            <ActivityRow
+              slot="workflow"
+              icon={<WorkflowGlyph steps={workflow} />}
+              title={workflow[activeStepIndex(workflow)]!.name}
+              meta={meterText(activeStepIndex(workflow) + 1, workflow.length, desktop, 'step')}
+              open={isOpen('workflow')}
+              onToggle={() => toggle('workflow')}
+            >
+              <StepRail steps={workflow} />
+            </ActivityRow>
           ) : null}
           {agents.length > 0 ? (
-            <div data-slot="run-activity-subagents" className="rounded-md border border-border bg-background p-2">
-              <AgentsDock runId={run.id} agents={agents} onSelect={onOpenWorker} />
-            </div>
+            <ActivityRow
+              slot="subagents"
+              icon={<BotIcon className="size-4" />}
+              title="Subagents"
+              meta={meterText(agentCounts.done, agentCounts.total, desktop)}
+              open={isOpen('subagents')}
+              onToggle={() => toggle('subagents')}
+            >
+              <AgentList agents={agents} onSelect={onOpenWorker} />
+            </ActivityRow>
           ) : null}
-          {workerSection !== undefined ? (
-            <div data-slot="run-activity-workers" className="rounded-md border border-border bg-background p-2">
-              {workerSection}
-            </div>
+          {hasWorkers ? (
+            <WorkerActivitySection run={run} open={isOpen('workers')} onToggle={() => toggle('workers')} />
           ) : null}
           {planEntries.length > 0 ? (
-            <div data-slot="run-activity-plan" className="rounded-md border border-border bg-background p-2">
-              <PlanDock runId={run.id} entries={planEntries} />
-            </div>
+            <ActivityRow
+              slot="plan"
+              icon={<ListTodoIcon className="size-4" />}
+              title="Plan"
+              meta={meterText(planCountsValue.done, planCountsValue.total, desktop)}
+              open={isOpen('plan')}
+              onToggle={() => toggle('plan')}
+            >
+              <PlanList entries={planEntries} />
+            </ActivityRow>
           ) : null}
         </div>
       ) : null}
     </section>
   )
+}
+
+/** The workflow row's glyph: the rail's own state language, so the row and the list it opens
+ *  never disagree — a green check for a finished workflow, the amber spinner while it runs. */
+function WorkflowGlyph({ steps }: { steps: StepState[] }) {
+  const visual = railVisual(steps[activeStepIndex(steps)]!.status)
+  if (visual === 'active') {
+    return (
+      <LoaderCircleIcon
+        role="status"
+        aria-label="Step running"
+        className="size-4 animate-spin stroke-pending motion-reduce:animate-none"
+      />
+    )
+  }
+  return <CircleCheckIcon aria-hidden className={cn('size-4', visual === 'done' ? 'text-success' : 'text-accent-text')} />
 }
