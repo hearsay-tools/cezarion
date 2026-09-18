@@ -24,7 +24,7 @@ const fastRetry = () => new CursorAcpRunner({ providerRetry: { backoffMs: 10 } }
 async function withSession(prompt: string, body: (session: AgentSession, v1: AgentEvent[], v2: UiEvent[]) => Promise<void>, runner: AgentRunner = createRunner('cursor' as RunnerId)) {
   vi.stubEnv('CEZ_CURSOR_BIN', mock);
   const v1: AgentEvent[] = []; const v2: UiEvent[] = [];
-  const session = createRunner('cursor' as RunnerId).startSession({ cwd: process.cwd(), userPrompt: prompt, timeoutMs: 5000 }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
+  const session = runner.startSession({ cwd: process.cwd(), userPrompt: prompt, timeoutMs: 5000 }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
   try { await body(session, v1, v2); } finally { session.interrupt(); await session.result.catch(() => {}); vi.unstubAllEnvs(); }
 }
 it('streams tools and complete v1 text, then accepts another turn on the same process', async () => {
@@ -68,6 +68,17 @@ it('completes the failed attempt as an error turn before the retry opens its own
     const completions = v2.filter((e): e is Extract<UiEvent, { type: 'turn.completed' }> => e.type === 'turn.completed');
     expect(completions.map(e => e.stopReason)).toEqual(['error', 'end_turn']);
   }, fastRetry());
+});
+it('honors the injected retry options instead of silently using the defaults', async () => {
+  // Pins the withSession runner seam: a scenario tuning maxRetries must see exactly that
+  // cap on the transcript, not the production constants.
+  await withSession('mock:provider-error-bare', async (_session, v1, v2) => {
+    await waitFor(() => v1.some(e => e.type === 'error'));
+    const notes = v2.filter((e): e is Extract<UiEvent, { type: 'session.error' }> => e.type === 'session.error' && !e.fatal);
+    expect(notes.map(e => e.message.match(/retrying \(\d\/\d\)/)?.[0])).toEqual(['retrying (1/1)']);
+    const error = v1.find((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error');
+    expect(error?.message).toContain('after 2 attempts');
+  }, new CursorAcpRunner({ providerRetry: { maxRetries: 1, backoffMs: 10 } }));
 });
 it('waits out a near reset instant and retries on the same session', async () => {
   await withSession('mock:provider-error-instant-near', async (_session, v1, v2) => {
