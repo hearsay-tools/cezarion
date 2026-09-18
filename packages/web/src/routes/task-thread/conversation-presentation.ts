@@ -60,6 +60,19 @@ export function conversationOutcomeLabel(status: NonNullable<ThreadConversationM
   }
 }
 
+/** What the card says happened to a request: its recorded (or synthesized pending) outcome,
+ *  or — for a request the engine never enqueued — the delivery that ended it. Anything else
+ *  carries no status of its own. */
+export function conversationStatusLabel(
+  message: Pick<ThreadConversationMessage, 'messageKind' | 'delivery' | 'outcome'>,
+): string | undefined {
+  if (message.outcome) return conversationOutcomeLabel(message.outcome.status)
+  if (message.messageKind === 'request' && message.delivery === 'not-delivered') {
+    return conversationDeliveryLabel('not-delivered')
+  }
+  return undefined
+}
+
 export function conversationDeliveryLabel(delivery: ThreadConversationMessage['delivery']): string {
   switch (delivery) {
     case 'queued':

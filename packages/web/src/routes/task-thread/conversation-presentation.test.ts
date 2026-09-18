@@ -6,6 +6,7 @@ import {
   conversationDirection,
   conversationKindLabel,
   conversationOutcomeLabel,
+  conversationStatusLabel,
   taskTitleFor,
   titlesFromRuns,
 } from './conversation-presentation'
@@ -40,5 +41,13 @@ describe('conversation presentation titles', () => {
     expect(conversationKindLabel('reply')).toBe('Reply')
     expect(conversationOutcomeLabel('replied')).toBe('Replied')
     expect(conversationOutcomeLabel('pending')).toBe('Pending')
+  })
+
+  it('falls back to the terminal delivery only for a request that can never settle', () => {
+    expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued', outcome: { status: 'pending' } })).toBe('Pending')
+    expect(conversationStatusLabel({ messageKind: 'request', delivery: 'not-delivered', outcome: { status: 'sender-closed' } })).toBe('Sender closed')
+    expect(conversationStatusLabel({ messageKind: 'request', delivery: 'not-delivered' })).toBe('Not delivered')
+    expect(conversationStatusLabel({ messageKind: 'progress', delivery: 'not-delivered' })).toBeUndefined()
+    expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued' })).toBeUndefined()
   })
 })

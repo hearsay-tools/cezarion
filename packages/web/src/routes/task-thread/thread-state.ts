@@ -797,8 +797,15 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
     dropLegacyDeltaRuns(draft)
   }
 
+  // Only a request the engine actually enqueued can still settle: `delegation/service.ts`
+  // enqueues when the recipient is neither destroyed nor resumable, and gives only those
+  // requests a deadline. A `continuation-required`/`destroyed` request has no obligation and
+  // no future outcome, so synthesizing "pending" for it would promise a reply nobody owes.
   for (const entry of conversationEntries.values()) {
-    if (entry.messageKind === 'request' && entry.outcome === undefined) entry.outcome = { status: 'pending' }
+    if (entry.messageKind !== 'request' || entry.outcome !== undefined) continue
+    if (entry.delivery === 'not-delivered') continue
+    if (entry.state !== undefined && entry.state !== 'accepted') continue
+    entry.outcome = { status: 'pending' }
   }
 
   return {

@@ -537,6 +537,24 @@ describe('parent/worker conversation transcript', () => {
     expect(document.querySelector('[data-slot="conversation-related"]')?.textContent).toContain('RECEIVED from')
     expect(document.querySelector('[data-direction="outbound"]')).not.toBeNull()
   })
+
+  // A recipient under review or already destroyed never receives the request, so the card
+  // reports that terminal delivery rather than a reply that will never come.
+  it('reports an undelivered request as not delivered instead of pending', () => {
+    const parent = '11111111-1111-4111-8111-111111111111'
+    const alpha = '22222222-2222-4222-8222-222222222222'
+    const request = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', senderRunId: parent, recipientRunId: alpha, kind: 'request', text: 'Ping the parked worker', createdAt: '2026-09-08T12:00:00.000Z', requestHash: 'a'.repeat(64), state: 'continuation-required' }
+    const entries = reduceThread(asRunEvents([
+      { type: 'conversation-message', message: request, delivery: 'not-delivered' },
+    ])).turns.flatMap(turn => turn.items)
+    render(
+      <MemoryRouter initialEntries={['/p/acme/tasks/current']}>
+        <SessionTranscript runId={parent} viewId="main" sections={[{ id: 'conversation', entries }]} mode="document" taskTitles={{ [parent]: 'Parent', [alpha]: 'Alpha' }} />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByText('Pending')).toBeNull()
+    expect(document.querySelector('[data-slot="conversation-outcome"]')?.textContent).toBe('Not delivered')
+  })
 });
 
 

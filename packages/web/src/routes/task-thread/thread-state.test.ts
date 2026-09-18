@@ -955,4 +955,28 @@ describe('reduceThread — parent/worker conversation', () => {
     const { turns } = reduceThread([line(1, 'conversation-message', { message, delivery: 'queued' })])
     expect(turns[0]!.items[0]).toMatchObject({ kind: 'conversation', outcome: { status: 'pending' } })
   })
+
+  // A request the engine refused to enqueue (`enqueue = !destroyed && !resumable` in
+  // delegation/service.ts) carries no deadline and can never settle, so "Pending" would
+  // promise a reply that has no producer. It keeps its delivery state instead.
+  it.each(['continuation-required', 'destroyed'] as const)(
+    'leaves a %s request without a synthesized pending outcome',
+    (state) => {
+      const { turns } = reduceThread([
+        line(1, 'conversation-message', { message: { ...message, state }, delivery: 'not-delivered' }),
+      ])
+      expect(turns[0]!.items[0]).toMatchObject({ kind: 'conversation', delivery: 'not-delivered', state })
+      expect(turns[0]!.items[0]).not.toHaveProperty('outcome')
+    },
+  )
+
+  // The engine still records a real outcome for an undelivered request in one case: a late
+  // reply settles the original as `sender-closed`. A recorded outcome always wins.
+  it('keeps a recorded outcome on an undelivered request', () => {
+    const { turns } = reduceThread([
+      line(1, 'conversation-message', { message: { ...message, state: 'destroyed' }, delivery: 'not-delivered' }),
+      line(2, 'request-outcome', { outcome: { ...outcome, status: 'destroyed', replyId: undefined } }),
+    ])
+    expect(turns[0]!.items[0]).toMatchObject({ kind: 'conversation', outcome: { status: 'destroyed' } })
+  })
 })

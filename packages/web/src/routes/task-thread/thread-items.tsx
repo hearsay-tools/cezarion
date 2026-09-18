@@ -17,7 +17,7 @@ import {
   conversationDeliveryLabel,
   conversationDirection,
   conversationKindLabel,
-  conversationOutcomeLabel,
+  conversationStatusLabel,
   taskTitleFor,
   type TaskTitleMap,
 } from './conversation-presentation'
@@ -325,6 +325,8 @@ function WorkerConversationBatchCard({
   const headingPrefix = direction === 'outbound' ? 'SENT to' : 'RECEIVED from'
   const heading = `${headingPrefix} ${counterpartIds.map((id) => taskTitleFor(id, taskTitles)).join(', ')}`
   const requestMissing = batch.kind !== 'request' && batch.messages.some((message) => message.requestId !== undefined)
+  const soleMessage = batch.messages[0]
+  const soleStatus = soleMessage ? conversationStatusLabel(soleMessage) : undefined
   return (
     <article
       data-slot="worker-conversation-card"
@@ -347,9 +349,9 @@ function WorkerConversationBatchCard({
         <span data-slot="conversation-kind" className="rounded-full bg-background/60 px-2 py-0.5 text-[10.5px] font-semibold tracking-[0.05em] text-foreground uppercase">
           {conversationKindLabel(batch.kind)}
         </span>
-        {batch.kind === 'request' && batch.messages.length === 1 && batch.messages[0]?.outcome ? (
+        {batch.kind === 'request' && batch.messages.length === 1 && soleStatus ? (
           <span data-slot="conversation-outcome" className="text-xs font-medium text-muted-foreground">
-            {conversationOutcomeLabel(batch.messages[0].outcome.status)}
+            {soleStatus}
           </span>
         ) : null}
       </div>
@@ -358,20 +360,21 @@ function WorkerConversationBatchCard({
       </div>
       {batch.kind === 'request' && batch.messages.length > 1 ? (
         <ul className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-          {batch.messages.map((message) => (
-            <li key={message.id} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2">
-              <Link
-                className={conversationLinkClass}
-                to={`/tasks/${message.recipientRunId}`}
-                aria-label={`${taskTitleFor(message.recipientRunId, taskTitles)}${message.outcome ? ` — ${conversationOutcomeLabel(message.outcome.status)}` : ''}`}
-              >
-                {taskTitleFor(message.recipientRunId, taskTitles)}
-              </Link>
-              {message.outcome ? (
-                <span data-slot="conversation-outcome">{conversationOutcomeLabel(message.outcome.status)}</span>
-              ) : null}
-            </li>
-          ))}
+          {batch.messages.map((message) => {
+            const status = conversationStatusLabel(message)
+            return (
+              <li key={message.id} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2">
+                <Link
+                  className={conversationLinkClass}
+                  to={`/tasks/${message.recipientRunId}`}
+                  aria-label={`${taskTitleFor(message.recipientRunId, taskTitles)}${status ? ` — ${status}` : ''}`}
+                >
+                  {taskTitleFor(message.recipientRunId, taskTitles)}
+                </Link>
+                {status ? <span data-slot="conversation-outcome">{status}</span> : null}
+              </li>
+            )
+          })}
         </ul>
       ) : null}
       {requestMissing ? (
