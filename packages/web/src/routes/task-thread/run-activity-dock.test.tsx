@@ -223,3 +223,26 @@ describe('RunActivityDock — narrow viewports', () => {
     expect(metaOf('plan')).toBe('1 / 3')
   })
 })
+
+describe('RunActivityDock — the workflow glyph', () => {
+  const step = (status: StepState['status']): StepState[] => [
+    { id: 'task', name: 'Do the task', kind: 'agent', status, iterations: 1, tokensUsed: 0 },
+  ]
+  const glyph = () =>
+    document
+      .querySelector('[data-slot="run-activity-workflow"] > button [data-slot="workflow-glyph"]')
+      ?.getAttribute('data-visual')
+
+  // The row's glyph and the rail it opens speak for the same step, so they must never
+  // disagree: a check mark on an unstarted or failed workflow reads as "this went fine".
+  it.each([
+    ['done', 'done'],
+    ['running', 'active'],
+    ['pending', 'pending'],
+    ['failed', 'failed'],
+    ['cancelled', 'failed'],
+  ] as const)('renders the rail visual for a %s step, not a check mark', (status, visual) => {
+    renderDock(run({ status: 'done', steps: step(status) }))
+    expect(glyph()).toBe(visual)
+  })
+})

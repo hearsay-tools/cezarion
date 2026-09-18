@@ -1,6 +1,14 @@
 import { useMemo, useState } from 'react'
 import { LoaderCircleIcon } from 'lucide-react'
-import { BotIcon, ChevronDownIcon, CircleCheckIcon, LayersIcon, ListTodoIcon } from '@/components/design-icons'
+import {
+  BotIcon,
+  ChevronDownIcon,
+  CircleCheckIcon,
+  CircleIcon,
+  CircleXIcon,
+  LayersIcon,
+  ListTodoIcon,
+} from '@/components/design-icons'
 
 import type { ApiRun, StepState } from '@open-mercato/cezar-api-client'
 import { cn } from '@/lib/utils'
@@ -170,17 +178,32 @@ export function RunActivityDock({
 }
 
 /** The workflow row's glyph: the rail's own state language, so the row and the list it opens
- *  never disagree — a green check for a finished workflow, the amber spinner while it runs. */
+ *  never disagree — a green check for a finished workflow, the amber spinner while it runs, a
+ *  danger X for a failed or cancelled one, a faint circle for one that has not started. All
+ *  four, not just the spinner: falling through to the check mark told a reader that a step
+ *  which failed, or never ran, had gone fine. */
 function WorkflowGlyph({ steps }: { steps: StepState[] }) {
   const visual = railVisual(steps[activeStepIndex(steps)]!.status)
-  if (visual === 'active') {
-    return (
-      <LoaderCircleIcon
-        role="status"
-        aria-label="Step running"
-        className="size-4 animate-spin stroke-pending motion-reduce:animate-none"
-      />
-    )
+  const base = 'size-4 shrink-0'
+  switch (visual) {
+    case 'active':
+      return (
+        <LoaderCircleIcon
+          role="status"
+          aria-label="Step running"
+          data-slot="workflow-glyph"
+          data-visual={visual}
+          // stroke-pending, not text-*: amber is a dot & spinner color only (guardian rule).
+          className={cn(base, 'animate-spin stroke-pending motion-reduce:animate-none')}
+        />
+      )
+    case 'failed':
+      return <CircleXIcon aria-hidden data-slot="workflow-glyph" data-visual={visual} className={cn(base, 'text-danger')} />
+    case 'pending':
+      return (
+        <CircleIcon aria-hidden data-slot="workflow-glyph" data-visual={visual} className={cn(base, 'text-soft-foreground')} />
+      )
+    case 'done':
+      return <CircleCheckIcon aria-hidden data-slot="workflow-glyph" data-visual={visual} className={cn(base, 'text-success')} />
   }
-  return <CircleCheckIcon aria-hidden className={cn('size-4', visual === 'done' ? 'text-success' : 'text-accent-text')} />
 }
