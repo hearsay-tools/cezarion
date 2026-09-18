@@ -15,3 +15,16 @@ Observed on the actual cockpit:
 QA found and fixed a real history bug: a worker whose transcript contained only conversation projections displayed “No session events yet”, because canonical history item classification omitted the new event types. A focused test reproduced itemCount=0, then passed with itemCount=2 after adding identity-based conversation/outcome/agent-input classification. Reloading the real worker route after rebuilding confirmed two cards and its outcome.
 
 Validation: 179 focused tests passed across CLI, provision, thread reducer/rendering, relationship header, and event history. `npm run build` passed during the final test-env boot. Full integration and provider execution verification are tracked by the parent task.
+
+## Issue #442 presentation QA
+
+Date: 2026-09-18. A temporary replay fixture drove the production build through the repository's native `agent-browser` seam. It contained one human ask, two identical parallel requests from “Parent coordinator” to “Alpha parser worker” and “Bravo test worker”, one correlated reply, one replied outcome, and one pending outcome. The fixture spec was removed after the run; the four screenshots remain as evidence.
+
+- 1440×900 desktop and 360×640 mobile passed in both light and dark themes (`issue-442-*.png`).
+- The two identical requests rendered as one outbound request card with recipient-specific Replied/Pending outcomes. The correlated inbound reply rendered inside that request card.
+- Participant task titles appeared in the primary surface; raw message/run IDs remained inside the collapsed Details disclosure.
+- The existing human ask remained visible and unchanged.
+- The document and card had no horizontal overflow at 360 px. Participant links and Details measured at least 44 px high.
+- Keyboard focus plus Enter opened Details, where request IDs and delivery/debug fields remained inspectable.
+
+Validation: the temporary real-browser QA spec passed all four viewport/theme cases.

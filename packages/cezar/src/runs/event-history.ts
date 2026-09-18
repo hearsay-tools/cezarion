@@ -132,6 +132,7 @@ export function canonicalSessionItems(events: readonly RunEvent[]): CanonicalIte
   const v1Tools: Array<{ key: string; call: RunEvent; result?: RunEvent }> = [];
   const v1Texts: RunEvent[] = [];
   const v2Texts: string[] = [];
+  const requestOutcomes: Array<{ key: string; event: RunEvent }> = [];
 
   const upsert = (key: string, event: RunEvent) => {
     const existing = items.get(key);
@@ -238,7 +239,13 @@ export function canonicalSessionItems(events: readonly RunEvent[]): CanonicalIte
     }
     if (event.type === 'request-outcome') {
       const parsed = requestOutcomeEventSchema.safeParse(event);
-      if (parsed.success) upsert(`request-outcome:${parsed.data.outcome.requestId}`, event);
+      // An outcome has no sender, recipient, title, or request text of its own. It is the
+      // terminal projection of the request card, so pagination must keep both events under
+      // one canonical identity rather than allowing a standalone outcome at a page boundary.
+      if (parsed.success) requestOutcomes.push({
+        key: `conversation-message:${parsed.data.outcome.requestId}`,
+        event,
+      });
       continue;
     }
     if (event.type === 'agent-input') {
@@ -249,6 +256,11 @@ export function canonicalSessionItems(events: readonly RunEvent[]): CanonicalIte
     if (STANDALONE_TYPES.has(event.type)) upsert(`standalone:${event.seq}`, event);
   }
   flushTurn();
+  // Keep the projection in the returned event slice for attachment after an older page loads,
+  // but do not let an outcome whose request is outside this scan consume a visible item slot.
+  for (const { key, event } of requestOutcomes) {
+    if (items.has(key)) upsert(key, event);
+  }
   return [...items.values()].sort((a, b) => a.firstSeq - b.firstSeq);
 }
 

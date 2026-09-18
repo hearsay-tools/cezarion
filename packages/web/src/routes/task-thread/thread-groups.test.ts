@@ -15,7 +15,7 @@ import {
   STREAK_TAIL,
   type ThreadBlock,
 } from './thread-groups'
-import { reduceThread, type ThreadEntry } from './thread-state'
+import { reduceThread, type ThreadConversationMessage, type ThreadEntry } from './thread-state'
 
 /** Golden fixtures are `UiEvent[]` — stamp the wire's seq/ts on them, as the store does. */
 const asRunEvents = (events: object[]): RunEvent[] =>
@@ -284,5 +284,66 @@ describe('groupThreadItems — provider authorization recovery', () => {
       } }),
       expect.objectContaining({ kind: 'entry', id: 'v1:3' }),
     ])
+  })
+})
+
+describe('groupThreadItems — worker conversation', () => {
+  const parent = '11111111-1111-4111-8111-111111111111'
+  const alpha = '22222222-2222-4222-8222-222222222222'
+  const bravo = '55555555-5555-4555-8555-555555555555'
+  const conversation = (
+    messageId: string,
+    extra: Partial<ThreadConversationMessage> & { recipientRunId: string },
+  ): ThreadConversationMessage => ({
+    kind: 'conversation',
+    id: `conversation-message:${messageId}`,
+    messageId,
+    text: extra.text ?? 'Ping both workers',
+    senderRunId: extra.senderRunId ?? parent,
+    recipientRunId: extra.recipientRunId,
+    messageKind: extra.messageKind ?? 'request',
+    delivery: extra.delivery ?? 'delivered',
+    ...(extra.requestId !== undefined ? { requestId: extra.requestId } : {}),
+    ...(extra.outcome !== undefined ? { outcome: extra.outcome } : {}),
+  })
+
+  it('collects worker traffic at the first conversation position and batches identical requests', () => {
+    const reqA = conversation('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', { recipientRunId: alpha, outcome: { status: 'replied' } })
+    const reqB = conversation('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', { recipientRunId: bravo, outcome: { status: 'pending' } })
+    const reply = conversation('cccccccc-cccc-4ccc-8ccc-cccccccccccc', {
+      senderRunId: alpha,
+      recipientRunId: parent,
+      messageKind: 'reply',
+      requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      text: 'Alpha pong',
+    })
+    const blocks = groupThreadItems([
+      { kind: 'reasoning', id: 'r1', text: 'Thinking about workers' },
+      reqA,
+      { kind: 'note', id: 'n1', text: 'lifecycle', tone: 'dim' },
+      reqB,
+      reply,
+    ])
+    expect(shape(blocks)).toEqual(['entry', 'worker-conversation', 'entry'])
+    const group = blocks[1]
+    if (group?.kind !== 'worker-conversation') throw new Error('expected worker conversation')
+    expect(group.batches).toHaveLength(1)
+    expect(group.batches[0]?.messages.map((message) => message.recipientRunId)).toEqual([alpha, bravo])
+    expect(group.batches[0]?.related.map((message) => message.text)).toEqual(['Alpha pong'])
+  })
+
+  it('keeps an orphan reply as a linked batch when its request is outside the turn', () => {
+    const reply = conversation('cccccccc-cccc-4ccc-8ccc-cccccccccccc', {
+      senderRunId: alpha,
+      recipientRunId: parent,
+      messageKind: 'reply',
+      requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      text: 'Alpha pong',
+    })
+    const blocks = groupThreadItems([reply])
+    expect(shape(blocks)).toEqual(['worker-conversation'])
+    const group = blocks[0]
+    if (group?.kind !== 'worker-conversation') throw new Error('expected worker conversation')
+    expect(group.batches[0]).toMatchObject({ kind: 'reply', messages: [reply] })
   })
 })

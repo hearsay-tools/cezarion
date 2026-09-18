@@ -7,6 +7,7 @@ import {
   type ConversationMessage,
   type PlanEntry,
   type PlanStatus,
+  type RequestOutcome,
   type StopReason,
   type UiAskQuestion,
   type UiItem,
@@ -44,8 +45,27 @@ export interface ThreadNote {
   id: string
   text: string
   tone: 'dim' | 'danger'
-  conversation?: Pick<ConversationMessage, 'id' | 'senderRunId' | 'recipientRunId' | 'kind' | 'requestId'> & { delivery: 'queued' | 'delivered' | 'not-delivered'; state?: ConversationMessage['state'] }
   attribution?: { source: 'agent' | 'lifecycle'; parentRunId: string }
+}
+
+export type ThreadConversationDelivery = 'queued' | 'delivered' | 'not-delivered'
+
+/** A parent/worker conversation envelope, with its request outcome folded onto the request. */
+export interface ThreadConversationMessage {
+  kind: 'conversation'
+  id: string
+  messageId: string
+  text: string
+  senderRunId: string
+  recipientRunId: string
+  messageKind: ConversationMessage['kind']
+  requestId?: string
+  delivery: ThreadConversationDelivery
+  state?: ConversationMessage['state']
+  createdAt?: string
+  requestHash?: string
+  deadline?: string
+  outcome?: { status: RequestOutcome['status'] | 'pending'; replyId?: string; observedAt?: string }
 }
 
 /** An image the run persisted (v1 `image` line: served from `/api/runs/:id/images/…`). */
@@ -79,7 +99,7 @@ export interface ThreadProviderAuthRequired {
   authFailureId: string
 }
 
-export type ThreadEntry = UiItem | ThreadNote | ThreadImage | ThreadAsk | ThreadProviderAuthRequired
+export type ThreadEntry = UiItem | ThreadNote | ThreadImage | ThreadAsk | ThreadProviderAuthRequired | ThreadConversationMessage
 
 export interface ThreadTurn {
   /** Stable source-derived render key. The opening event sequence survives prepended pages;
@@ -379,32 +399,79 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
     itemsById.set(key, { turn, entry: draft })
   }
 
-  const conversationNotes = new Map<string, ThreadNote>()
-  const seenOutcomes = new Set<string>()
+  const conversationEntries = new Map<string, ThreadConversationMessage>()
+  const outcomesByRequest = new Map<string, RequestOutcome>()
   const seenInputs = new Set<string>()
+  const attachOutcome = (entry: ThreadConversationMessage) => {
+    if (entry.messageKind !== 'request') return
+    const outcome = outcomesByRequest.get(entry.messageId)
+    if (outcome) {
+      entry.outcome = { status: outcome.status, ...(outcome.replyId !== undefined ? { replyId: outcome.replyId } : {}), observedAt: outcome.observedAt }
+    }
+  }
+  const upsertConversation = (
+    message: {
+      id: string
+      text: string
+      senderRunId: string
+      recipientRunId: string
+      kind: ConversationMessage['kind']
+      requestId?: string
+      state?: ConversationMessage['state']
+      createdAt?: string
+      requestHash?: string
+      deadline?: string
+    },
+    delivery: ThreadConversationDelivery,
+  ): ThreadConversationMessage => {
+    const existing = conversationEntries.get(message.id)
+    if (existing) {
+      if (existing.delivery !== 'delivered') existing.delivery = delivery
+      if (message.text !== '') existing.text = message.text
+      if (message.state !== undefined) existing.state = message.state
+      if (message.createdAt !== undefined) existing.createdAt = message.createdAt
+      if (message.requestHash !== undefined) existing.requestHash = message.requestHash
+      if (message.deadline !== undefined) existing.deadline = message.deadline
+      if (message.requestId !== undefined) existing.requestId = message.requestId
+      attachOutcome(existing)
+      return existing
+    }
+    const entry: ThreadConversationMessage = {
+      kind: 'conversation',
+      id: `conversation-message:${message.id}`,
+      messageId: message.id,
+      text: message.text,
+      senderRunId: message.senderRunId,
+      recipientRunId: message.recipientRunId,
+      messageKind: message.kind,
+      delivery,
+      ...(message.requestId !== undefined ? { requestId: message.requestId } : {}),
+      ...(message.state !== undefined ? { state: message.state } : {}),
+      ...(message.createdAt !== undefined ? { createdAt: message.createdAt } : {}),
+      ...(message.requestHash !== undefined ? { requestHash: message.requestHash } : {}),
+      ...(message.deadline !== undefined ? { deadline: message.deadline } : {}),
+    }
+    attachOutcome(entry)
+    conversationEntries.set(message.id, entry)
+    currentTurn().entries.push({ origin: 'meta', entry })
+    return entry
+  }
   for (const event of events) {
     switch (event.type) {
       // ---- turn boundaries ------------------------------------------------------------
       case 'conversation-message': {
         const parsed = conversationMessageEventSchema.safeParse(event)
         if (!parsed.success) break
-        const { message } = parsed.data
-        const existing = conversationNotes.get(message.id)
-        if (existing) {
-          if (existing.conversation && existing.conversation.delivery !== 'delivered') existing.conversation.delivery = parsed.data.delivery
-          break
-        }
-        const note: ThreadNote = { kind: 'note', id: `conversation-message:${message.id}`, text: message.text, tone: 'dim', conversation: { ...message, delivery: parsed.data.delivery } }
-        conversationNotes.set(message.id, note)
-        currentTurn().entries.push({ origin: 'meta', entry: note })
+        upsertConversation(parsed.data.message, parsed.data.delivery)
         break
       }
       case 'request-outcome': {
         const parsed = requestOutcomeEventSchema.safeParse(event)
-        if (!parsed.success || seenOutcomes.has(parsed.data.outcome.requestId)) break
+        if (!parsed.success || outcomesByRequest.has(parsed.data.outcome.requestId)) break
         const { outcome } = parsed.data
-        seenOutcomes.add(outcome.requestId)
-        currentTurn().entries.push({ origin: 'meta', entry: { kind: 'note', id: `request-outcome:${outcome.requestId}`, text: `Request outcome: ${outcome.status} · Request ${outcome.requestId}${outcome.replyId ? ` · Reply ${outcome.replyId}` : ''}`, tone: 'dim' } })
+        outcomesByRequest.set(outcome.requestId, outcome)
+        const existing = conversationEntries.get(outcome.requestId)
+        if (existing) attachOutcome(existing)
         break
       }
       case 'agent-input': {
@@ -414,13 +481,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         if (seenInputs.has(input.id)) break
         seenInputs.add(input.id)
         if (input.conversation) {
-          const existing = conversationNotes.get(input.id)
-          if (existing?.conversation) existing.conversation.delivery = 'delivered'
-          else {
-            const note: ThreadNote = { kind: 'note', id: `conversation-message:${input.id}`, text: input.text, tone: 'dim', conversation: { id: input.id, ...input.conversation, delivery: 'delivered' } }
-            conversationNotes.set(input.id, note)
-            currentTurn().entries.push({ origin: 'meta', entry: note })
-          }
+          upsertConversation({ id: input.id, text: input.text, ...input.conversation }, 'delivered')
           break
         }
         currentTurn().entries.push({ origin: 'meta', entry: {
@@ -734,6 +795,17 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         !(e.origin === 'v1' && e.entry.kind === 'message' && v2Texts.has(stripDoneMarker(e.entry.text, true).trim())),
     )
     dropLegacyDeltaRuns(draft)
+  }
+
+  // Only a request the engine actually enqueued can still settle: `delegation/service.ts`
+  // enqueues when the recipient is neither destroyed nor resumable, and gives only those
+  // requests a deadline. A `continuation-required`/`destroyed` request has no obligation and
+  // no future outcome, so synthesizing "pending" for it would promise a reply nobody owes.
+  for (const entry of conversationEntries.values()) {
+    if (entry.messageKind !== 'request' || entry.outcome !== undefined) continue
+    if (entry.delivery === 'not-delivered') continue
+    if (entry.state !== undefined && entry.state !== 'accepted') continue
+    entry.outcome = { status: 'pending' }
   }
 
   return {
