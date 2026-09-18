@@ -176,6 +176,14 @@ export function offersComposerFinish(run: RunRecord, hasPendingHumanAsk = false)
   if (!runActionFlags(run).finish) return false
   if (run.status !== 'waiting') return false
   if (hasPendingHumanAsk || run.hasPendingHumanAsk) return false
+  // A root carrying a worker wait, whatever its phase. `finishBlockedReason` can block ONLY a
+  // root, and it blocks on workers whose results are not collected — which a timed-out or
+  // wake-pending wait is as likely to be as a parked one, though `deriveAttention` calls only the
+  // parked case `none`. This defers to the fact that the rule exists rather than mirroring the
+  // rule: the record cannot tell whether a worker is collected, so the wait's mere presence is
+  // what disqualifies the promotion. Those roots keep Finish in the kebab, where a 409 costs a
+  // deliberate menu trip rather than a gold button that invites the click.
+  if (run.delegation?.role === 'root' && run.delegation.wait) return false
   return deriveAttention(run, hasPendingHumanAsk).bucket === 'waiting'
 }
 

@@ -363,6 +363,55 @@ describe('offersComposerFinish — the gold primary on a Needs-you task (#281)',
     // has something better to offer: the ask card owns the reply, and a parked root owns Stop.
     { name: 'a pending human ask on the record', record: run('waiting', { hasPendingHumanAsk: true }), expected: false },
     { name: 'a pending human ask the thread knows about first', record: run('waiting'), ask: true, expected: false },
+    // Every root carrying a worker wait, whatever its phase. `finishBlockedReason` (workflows/
+    // run.ts) can only ever block a `root`, and it blocks on workers that have not been collected
+    // — a state a timed-out or wake-pending wait is exactly as likely to be in as a parked one,
+    // while `deriveAttention` calls only the parked case `none`. Promoting a gold primary onto
+    // the rest would advertise a button the server answers 409 to.
+    {
+      name: 'a root whose worker wait is registered',
+      record: run('waiting', {
+        delegation: {
+          role: 'root',
+          permissions: [],
+          receipts: [],
+          wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'registered', outcomes: [] },
+        },
+      }),
+      expected: false,
+    },
+    {
+      name: 'a root whose worker wait timed out into wake-pending',
+      record: run('waiting', {
+        delegation: {
+          role: 'root',
+          permissions: [],
+          receipts: [],
+          wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'wake-pending', outcomes: [] },
+        },
+      }),
+      expected: false,
+    },
+    // A root with no wait at all has no worker business outstanding, so the server has nothing to
+    // block on — it keeps the promotion.
+    {
+      name: 'a root with no worker wait',
+      record: run('waiting', { delegation: { role: 'root', permissions: [], receipts: [] } }),
+      expected: true,
+    },
+    // A worker is not a root, so `finishBlockedReason` returns undefined for it by its first line.
+    {
+      name: 'a worker waiting on you',
+      record: run('waiting', {
+        delegation: {
+          role: 'worker' as const,
+          permissions: [],
+          parentRunId: 'p1',
+          workspace: { ownerRunId: 'r1', resourceId: 'r1', kind: 'owned-isolated' as const, path: '/managed/w', branch: 'cez/w', baselineSha: 'a'.repeat(40) },
+        },
+      }),
+      expected: true,
+    },
     {
       name: 'a root parked on its workers — Stop is the live primary there',
       record: run('waiting', {
