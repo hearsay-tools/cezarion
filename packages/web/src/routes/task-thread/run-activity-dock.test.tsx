@@ -81,12 +81,12 @@ const EVENTS: RunEvent[] = [
 const json = (value: unknown) =>
   new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } })
 
-function renderDock(record: ApiRun, events: RunEvent[] = EVENTS) {
+function renderDock(record: ApiRun, events: RunEvent[] = EVENTS, linked: WorkerInspection[] = workers) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
-      if (path.endsWith('/relationships')) return json({ workers })
+      if (path.endsWith('/relationships')) return json({ workers: linked })
       if (path.endsWith('/runs')) {
         return json([
           { ...run({ id: doneWorkerId, title: 'auditing stale roles', status: 'done' }) },
@@ -244,5 +244,57 @@ describe('RunActivityDock — the workflow glyph', () => {
   ] as const)('renders the rail visual for a %s step, not a check mark', (status, visual) => {
     renderDock(run({ status: 'done', steps: step(status) }))
     expect(glyph()).toBe(visual)
+  })
+})
+
+
+describe('RunActivityDock — workers and the All complete claim', () => {
+  const settled: StepState[] = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+  // Its own run id: the dock's collapse memory is module-level and per run, so sharing `parentId`
+  // with the test that clicks the Workers section shut would render this block's rows closed.
+  const rootId = '10000000-0000-4000-8000-000000000004'
+  const root = (extra: Partial<ApiRun> = {}) =>
+    run({ id: rootId, status: 'done', steps: settled, delegation: { role: 'root', permissions: [], receipts: [] }, ...extra } as Partial<ApiRun>)
+  const statusText = () => document.querySelector('[data-slot="run-activity-status"]')?.textContent
+  const allDone: WorkerInspection[] = [{ workerId: doneWorkerId, parentRunId: parentId, status: 'done', workspace }]
+  /** A spawn receipt outlives a failed lookup, so the dock must judge its worker too. */
+  const receipt = (workerId: string) => ({
+    requestId: '20000000-0000-4000-8000-000000000001',
+    workerId,
+    requestHash: 'b'.repeat(64),
+  })
+
+  // The header speaks for every section it counts, Workers included: a finished parent whose
+  // worker failed, was cancelled, or is still going has not "all completed".
+  it.each(['running', 'waiting', 'review', 'failed', 'cancelled'] as const)(
+    'never claims completion while a linked worker is %s',
+    async (status) => {
+      renderDock(root(), [], [{ workerId: doneWorkerId, parentRunId: parentId, status, workspace }])
+      await waitFor(() => expect(document.querySelectorAll('[data-slot="worker-item"]')).toHaveLength(1))
+      expect(statusText()).not.toContain('All complete')
+    },
+  )
+
+  it('claims completion once every linked worker is done', async () => {
+    renderDock(root(), [], allDone)
+    await waitFor(() => expect(statusText()).toContain('All complete'))
+  })
+
+  // Unknown is not complete: saying so before the lookup lands makes the line flip under the
+  // reader, and a receipt whose inspection never arrives is a worker we cannot vouch for.
+  it('waits for the relationships lookup rather than guessing', () => {
+    renderDock(root(), [], allDone)
+    expect(statusText()).not.toContain('All complete')
+  })
+
+  it('never claims completion for a receipt with no inspection behind it', async () => {
+    renderDock(root({ delegation: { role: 'root', permissions: [], receipts: [receipt(cancelledWorkerId)] } } as Partial<ApiRun>), [], allDone)
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="worker-item"]')).toHaveLength(2))
+    expect(statusText()).not.toContain('All complete')
+  })
+
+  it('leaves an ordinary run without delegation alone', () => {
+    renderDock(run({ status: 'done', steps: settled }), [])
+    expect(statusText()).toContain('All complete')
   })
 })

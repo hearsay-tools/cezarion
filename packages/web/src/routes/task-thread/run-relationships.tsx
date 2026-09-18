@@ -33,6 +33,25 @@ function workerIdsOf(metadata: Delegation | undefined, data: RunRelationships | 
   return [...new Set([...known, ...(data?.workers ?? []).map(worker => worker.workerId)])].slice(0, 32)
 }
 
+/**
+ * The Workers section's half of the dock's "All complete" claim (#402): true only when every
+ * worker this run links has finished successfully. Unknown is deliberately NOT complete — a
+ * lookup still in flight, a failed one, or a receipt whose inspection never arrived all leave
+ * a worker we cannot vouch for, and the green line would otherwise flip under the reader.
+ *
+ * It lives here because `workerIdsOf` does: receipts outlive a failed lookup, and the dock
+ * must judge the same id set the section lists.
+ */
+export function useWorkersComplete(run: ApiRun): boolean {
+  const metadata = run.delegation
+  const delegated = metadata !== undefined && metadata.role !== 'invalid'
+  const query = useRunRelationships(run.id, { enabled: delegated })
+  if (!delegated || !metadata) return true
+  if (!query.isSuccess) return false
+  const workers = new Map(query.data.workers.map(worker => [worker.workerId, worker]))
+  return workerIdsOf(metadata, query.data).every(id => workers.get(id)?.status === 'done')
+}
+
 function Relationships({ run }: { run: ApiRun }) {
   const query = useRunRelationships(run.id)
   const desktop = useIsDesktop()

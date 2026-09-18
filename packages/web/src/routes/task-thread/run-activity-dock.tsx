@@ -18,7 +18,7 @@ import { AgentList } from './agents-dock'
 import { PlanList, planCounts } from './plan-dock'
 import { collectSubagents, subagentCounts } from './subagent-dock'
 import { StepRail, activeStepIndex, railVisual } from './step-rail'
-import { WorkerActivitySection } from './run-relationships'
+import { WorkerActivitySection, useWorkersComplete } from './run-relationships'
 import { ActivityRow, meterText } from './run-activity-row'
 import { latestPlanEntries, type ThreadState } from './thread-state'
 
@@ -67,6 +67,8 @@ export function RunActivityDock({
   // `invalid` is the contract's parking spot for unreadable delegation metadata, and
   // RunRelationshipsPanel renders nothing for it — so it is not a section to count or frame.
   const hasWorkers = run.delegation !== undefined && run.delegation.role !== 'invalid'
+  // Mounted for every run so the hook order never changes; it only fetches for a delegated one.
+  const workersComplete = useWorkersComplete(run)
   // Complete means SUCCEEDED, not merely settled: a failed or cancelled step keeps the green
   // summary away, matching `subagentCounts` (which counts only `completed`) and the danger X
   // the rail shows one click below. `skipped` stays complete — it never ran and never failed.
@@ -98,7 +100,11 @@ export function RunActivityDock({
   // run earns the green line; a run that failed or was cancelled says which, rather than
   // claiming completion or hiding behind "In progress".
   const allComplete =
-    run.status === 'done' && workflowSucceeded && agentCounts.done === agentCounts.total && planCountsValue.done === planCountsValue.total
+    run.status === 'done' &&
+    workflowSucceeded &&
+    workersComplete &&
+    agentCounts.done === agentCounts.total &&
+    planCountsValue.done === planCountsValue.total
   const summary = allComplete
     ? 'All complete'
     : run.status === 'failed'
