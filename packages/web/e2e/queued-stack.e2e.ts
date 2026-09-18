@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+import { waitForHealth, waitForStatus } from './poll'
 
 /**
  * Stacking, editing and removing a queued run's prompt (#472), end-to-end against a LIVE
@@ -40,17 +41,6 @@ function freePort(): Promise<number> {
   })
 }
 
-async function waitForHealth(url: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${url}/api/v1/health`)).ok) return
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  throw new Error(`cezar e2e: the queued-stack server never answered at ${url}`)
-}
 
 async function getRun(url: string, id: string): Promise<{ status: string; task: string; queuedMessages?: Array<{ id: string; text: string }> }> {
   let lastError: unknown
@@ -71,14 +61,6 @@ async function getRun(url: string, id: string): Promise<{ status: string; task: 
   throw lastError
 }
 
-async function waitForStatus(url: string, id: string, wanted: string[], tries = 160): Promise<string> {
-  for (let attempt = 0; attempt < tries; attempt += 1) {
-    const { status } = await getRun(url, id)
-    if (wanted.includes(status)) return status
-    await new Promise((r) => setTimeout(r, 500))
-  }
-  throw new Error(`cezar e2e: run ${id} never reached status "${wanted.join('/')}"`)
-}
 
 const startRun = async (url: string, task: string): Promise<string> => {
   const created = (await (
@@ -127,10 +109,16 @@ beforeAll(async () => {
   await waitForHealth(baseUrl)
 
   // Hold the only slot with a slow turn, then queue the run under test behind it.
+  //
+  // 160 attempts, not the shared 120: this spec chose a longer budget than the other
+  // `waitForStatus` callers before the helpers were folded into `poll.ts`, because these two
+  // waits sit behind a fresh serve boot AND an agent spawn rather than behind a settled server.
+  // Passing it here keeps the 80 s a slow CI runner may need without lengthening every other
+  // spec's failure by 20 s.
   const blockerId = await startRun(baseUrl, 'mock:slow occupy the only agent slot')
-  await waitForStatus(baseUrl, blockerId, ['running'])
+  await waitForStatus(baseUrl, blockerId, ['running'], { tries: 160 })
   queuedId = await startRun(baseUrl, 'mock:done the original prompt')
-  await waitForStatus(baseUrl, queuedId, ['queued'])
+  await waitForStatus(baseUrl, queuedId, ['queued'], { tries: 160 })
 
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)
@@ -225,7 +213,7 @@ describe('a queued run’s prompt is amendable (#472)', () => {
     browser.waitForFunction(`document.querySelectorAll('[data-slot="user-bubble"]').length >= 2`)
 
     // The blocker's slow turn ends (~25 s), the queue drains, and this run executes.
-    await waitForStatus(baseUrl, queuedId, ['done', 'review', 'failed'], 240)
+    await waitForStatus(baseUrl, queuedId, ['done', 'review', 'failed'], { tries: 240 })
 
     const record = await getRun(baseUrl, queuedId)
     expect(record.task).toBe('mock:done the original prompt')

@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+import { waitForHealth } from './poll'
 
 /**
  * #484 end-to-end: skill search must rank the (almost-)exact match to the TOP wherever it is
@@ -33,17 +34,6 @@ function freePort(): Promise<number> {
   })
 }
 
-async function waitForHealth(url: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${url}/api/v1/health`)).ok) return
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  throw new Error(`cezar e2e: the skill-search server never answered at ${url}`)
-}
 
 let browser: AgentBrowser
 let server: ChildProcess

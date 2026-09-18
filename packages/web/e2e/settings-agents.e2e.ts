@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, readTestEnv } from './agent-browser'
+import { waitForConfig } from './poll'
 
 /**
  * Settings → Agents (R6 Step 1.5) end-to-end against the shared dry-run environment: edit each
@@ -49,17 +50,6 @@ interface ConfigAnswer {
   defaultModels: Record<string, string>
 }
 
-/** The PUT behind a control is fire-and-forget from the UI's point of view — poll the additive
- *  GET /api/v1/config until the write lands rather than assume it beat this assertion. */
-async function waitForConfig(check: (config: ConfigAnswer) => boolean): Promise<ConfigAnswer> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const res = await fetch(`${baseUrl}/api/v1/config`)
-    const config = (await res.json()) as ConfigAnswer
-    if (check(config)) return config
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error('GET /api/v1/config never showed the expected knobs')
-}
 
 /** Set a native <select> the way a user would, through React's synthetic change — the native
  *  value setter defeats React's value tracker so the dispatched event is not deduped away. */
@@ -106,7 +96,7 @@ describe('settings → agents against the live dry-run server', () => {
     gotoAgents()
     browser.click('.settings-agent-picker summary')
     browser.click('[data-slot="agents-runner"] [data-value="codex"]')
-    await waitForConfig((c) => c.defaultRunner === 'codex')
+    await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.defaultRunner === 'codex', 'defaultRunner codex')
     browser.waitForFunction(`document.querySelector('[data-slot="agents-runner"] [data-value="codex"]')?.getAttribute('aria-checked') === 'true'`)
     expect(browser.count('[data-slot="agents-runner"] [data-value="codex"][aria-checked="true"]')).toBe(1)
   })
@@ -114,9 +104,9 @@ describe('settings → agents against the live dry-run server', () => {
   it('per-runner model preset: select writes the runner key, others untouched', async () => {
     gotoAgents()
     browser.waitForFunction(`document.querySelector('select[data-slot="agents-model"][data-runner="claude"]') !== null`)
-    const before = await waitForConfig(() => true)
+    const before = await waitForConfig<ConfigAnswer>(baseUrl, () => true, 'any answer')
     setSelect('[data-slot="agents-model"][data-runner="claude"]', 'opus')
-    const config = await waitForConfig((c) => c.defaultModels.claude === 'opus')
+    const config = await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.defaultModels.claude === 'opus', 'defaultModels.claude opus')
     expect(config.defaultModels).toEqual({ ...before.defaultModels, claude: 'opus' })
   })
 
@@ -127,7 +117,7 @@ describe('settings → agents against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="agents-system-prompt"]')?.value === 'Always add tests. (e2e)'`)
     browser.waitForFunction(`document.querySelector('[data-action="agents-save-prompt"]')?.disabled === false`)
     browser.evaluate(`document.querySelector('[data-action="agents-save-prompt"]').click()`)
-    await waitForConfig((c) => c.systemPrompt === 'Always add tests. (e2e)')
+    await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.systemPrompt === 'Always add tests. (e2e)', 'the e2e system prompt')
   })
 
   it('base branch: picking a real branch persists; clearing goes back to the checkout', async () => {
@@ -137,10 +127,10 @@ describe('settings → agents against the live dry-run server', () => {
     )
     expect(branch).not.toBe('')
     setSelect('[data-slot="agents-base-branch"]', branch)
-    await waitForConfig((c) => c.baseBranch === branch)
+    await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.baseBranch === branch, `baseBranch ${branch}`)
 
     setSelect('[data-slot="agents-base-branch"]', '')
-    await waitForConfig((c) => c.baseBranch === null)
+    await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.baseBranch === null, 'a cleared baseBranch')
   })
 
   it('a cold load renders the persisted knobs — the form is a view of config.json', async () => {
@@ -157,6 +147,6 @@ describe('settings → agents against the live dry-run server', () => {
     // Neutralize for the suites that follow (afterAll restores the file itself too).
     browser.click('.settings-agent-picker summary')
     browser.click('[data-slot="agents-runner"] [data-value="claude"]')
-    await waitForConfig((c) => c.defaultRunner === 'claude')
+    await waitForConfig<ConfigAnswer>(baseUrl, (c) => c.defaultRunner === 'claude', 'defaultRunner claude')
   })
 })

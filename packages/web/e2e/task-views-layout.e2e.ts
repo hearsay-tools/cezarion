@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { beforeAll, afterAll, expect, it } from 'vitest'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { waitForHealth } from './poll'
 import record from './fixtures/thread-run.record.json'
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/task-views')
@@ -32,7 +33,7 @@ beforeAll(async () => {
   const port = await new Promise<number>((done) => { const probe = createServer(); probe.listen(0, '127.0.0.1', () => { const port = (probe.address() as { port: number }).port; probe.close(() => done(port)) }) })
   base = `http://localhost:${port}`
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], { env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore' })
-  for (let attempt = 0; attempt < 60; attempt++) { try { if ((await fetch(`${base}/api/v1/health`)).ok) break } catch {} await new Promise((done) => setTimeout(done, 250)) }
+  await waitForHealth(base)
   project = await bootProjectId(base)
   const response = await fetch(`${base}/api/v1/automations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Review new pull requests', events: ['pull_request.opened'], intervalSeconds: 86400, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review {{github.url}}', workflow: 'quick-task' }, enable: false }) })
   expect(response.ok).toBe(true)
@@ -114,7 +115,7 @@ it('renders loading, retryable error, and filtered-empty states in both themes a
     }).listen(Number(port), '127.0.0.1');
   `, base, faultFile, String(port)], { stdio: 'ignore' })
   const origin = `http://localhost:${port}`
-  for (let attempt = 0; attempt < 40; attempt++) { try { if ((await fetch(origin + '/api/v1/health')).ok) break } catch {} await new Promise((done) => setTimeout(done, 100)) }
+  await waitForHealth(origin, 'the fault-injecting proxy', { tries: 40, intervalMs: 100 })
   try {
     for (const width of [1440, 402, 360]) for (const theme of ['light', 'dark']) {
       writeFileSync(faultFile, 'loading')

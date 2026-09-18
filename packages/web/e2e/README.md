@@ -53,9 +53,31 @@ line; the fix is a wait, never a baseline entry.
 3. **No `scrollIntoView` inside a `waitForFunction` predicate.** A predicate that scrolls moves
    the layout that the read after it depends on. Scroll inside a `waitForValue` expression
    instead, where the same call reads the result, or scroll once in an `evaluate` and then wait.
-4. **No sleep.** `setTimeout` stands in for a condition nobody named. Name it. The one shape
-   the scan accepts is the poll interval of a looping `waitFor…`/`poll…` helper such as the
-   specs' `waitForHealth`, which re-checks the server between sleeps and throws when it runs out.
+4. **No sleep, anywhere in a spec.** `setTimeout` stands in for a condition nobody named. Name
+   it. Waiting on the browser is `waitForFunction`/`waitForValue`; waiting on the SERVER is
+   `poll.ts` — the shared module of HTTP polls (`waitForHealth`, `waitForStatus`,
+   `waitForConfig`, `waitForServerAppearance`) built on one `pollFor` loop. It is the only file
+   under `e2e/` the scan skips, and the only place a spec-side poll sleeps. Need a condition it
+   does not cover? Call `pollFor` with your own probe; do not re-copy the loop (#416). The rule
+   used to exempt any looping function whose name began `waitFor` or `poll`, which trusted a
+   name rather than a mechanism.
+
+5. **No write into a node React rendered.** A spec that rewrites a title, a status pill or a
+   metric to reach a state is measuring something the product never produced — and `use-now.ts`
+   re-renders those rows every 30 s, so the write races a re-render that puts the real value
+   back under the measurement (#416). Build the state from fixture data: `runs.json` is cezar's documented
+   state contract and the real store parses it. Where the state genuinely has no data path,
+   stub the ROUTE the surface reads (`smoke.e2e.ts`'s nightly version, `github.e2e.ts`'s long
+   titles) or add the seam in the product — never in the rendered DOM. Provenance decides what
+   is exempt, not naming: a receiver rooted in `querySelector` is a rendered node, while
+   `document.documentElement` (theme, density, width, accent) and anything bound to
+   `document.createElement` or `.cloneNode` are the spec's own.
+6. **No positional index into a rendered list, in a spec that addresses rows by `data-run-id`.**
+   `rows[0]` and `links[1]` depend on a sort the fixture never pinned — two runs sharing a
+   `createdAt` decide the order by V8's stable sort of the read order. Address the row by its id,
+   the way the rest of the file already does; if the order itself is the subject, assert the whole
+   order outright. Only in-page code counts: indexing an array `evaluate` RETURNED is reading a
+   result, not addressing a row.
 
 One site to know about: `selection-states.e2e.ts` asserts `matches(':hover')` after
 `hoverVisiblePoint`. That is a one-shot assertion, not a wait, and it holds because that spec adds

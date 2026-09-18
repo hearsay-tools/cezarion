@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AgentBrowser, bootProjectId, fixtureServeEnv } from './agent-browser'
 import { largeThreadEvents } from './fixtures/make-large-thread'
 import record from './fixtures/thread-run.record.json'
+import { waitForHealth } from './poll'
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
 const artifactsDir = resolve(repoRoot, '.ai/qa/artifacts_e2e')
@@ -76,17 +77,6 @@ function freePort(): Promise<number> {
   })
 }
 
-async function waitForHealth(baseUrl: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${baseUrl}/api/v1/health`)).ok) return
-    } catch {
-      // Server startup is expected to race the first probes.
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
-  }
-  throw new Error(`cezar e2e: fixture server never answered at ${baseUrl}`)
-}
 
 let browser: AgentBrowser
 let server: ChildProcess

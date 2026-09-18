@@ -376,22 +376,51 @@ describe('the GitHub tab against the live dry-run server', () => {
       'Keep the shared GitHub synchronization workflow readable when several records begin with exactly the same words but end differently'
     const longAuthor = 'a-contributor-with-a-deliberately-long-github-login'
     const observations: Array<Record<string, unknown>> = []
+    // The long title and login arrive as DATA, through the route's own `/api/v1/github` query,
+    // rather than being written into the rendered row (#416): the mock catalog's first issue and
+    // first PR come back renamed, and the component lays them out itself. Writing the strings
+    // into React-owned nodes meant a re-render could restore the short ones mid-measurement —
+    // or, committing against a replaced text node, take the whole root down.
+    const relabelled = await api<GithubPayload>('/api/v1/github')
+    const stub = JSON.stringify({
+      ...relabelled,
+      issues: relabelled.issues.map((issue, index) =>
+        index === 0 ? { ...issue, title: longTitle, author: longAuthor } : issue,
+      ),
+      prs: relabelled.prs.map((pr, index) => (index === 0 ? { ...pr, title: longTitle, author: longAuthor } : pr)),
+    })
 
     for (const viewport of [REVIEW_PHONE, DESKTOP]) {
       for (const theme of ['light', 'dark'] as const) {
         for (const density of ['comfortable', 'ultra'] as const) {
           browser.setViewport(viewport.width, viewport.height)
-          await openGitHub('/github')
+          // Land somewhere else first, install the stub, then reach GitHub by a CLIENT
+          // navigation — the same order the loading/empty/error cases below use, because a
+          // `goto` would reload the page and take the stub with it.
+          await rememberGithubView('issues')
+          browser.goto(`${baseUrl}${scoped('/')}`)
+          browser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
           browser.evaluate(`(() => {
             document.documentElement.classList.toggle('light', ${theme === 'light'})
             document.documentElement.dataset.density = ${JSON.stringify(density)}
+            const nativeFetch = window.fetch;
+            window.fetch = (input, init) => {
+              const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+              if (new URL(url, location.href).pathname.endsWith('/github')) {
+                return Promise.resolve(new Response(${JSON.stringify(stub)}, { status: 200, headers: { 'content-type': 'application/json' } }));
+              }
+              return nativeFetch(input, init);
+            };
+            document.querySelector('a[href="${scoped('/github')}"]').click();
           })()`)
+          waitForGitHubSurface(scoped('/github'))
 
           for (const view of ['issues', 'prs'] as const) {
             const path: '/github' | '/github/prs' = view === 'issues' ? '/github' : '/github/prs'
             clickGitHubTab(path)
             browser.waitForFunction(
-              `document.querySelector('[data-slot="gh-row"]')?.getAttribute('href')?.includes(${JSON.stringify(view === 'issues' ? '/issues/' : '/prs/')}) === true`,
+              `document.querySelector('[data-slot="gh-row"]')?.getAttribute('href')?.includes(${JSON.stringify(view === 'issues' ? '/issues/' : '/prs/')}) === true
+                 && document.querySelector('[data-slot="gh-row"]').textContent.includes(${JSON.stringify(longAuthor)})`,
             )
             const facts = browser.evaluate(`(() => {
               const row = document.querySelector('[data-slot="gh-row"]')
@@ -400,8 +429,6 @@ describe('the GitHub tab against the live dry-run server', () => {
               const title = titleLine.children[1]
               const meta = row.children[1]
               const labels = row.children[2]
-              title.textContent = ${JSON.stringify(longTitle)}
-              meta.children[1].textContent = ${JSON.stringify(longAuthor)}
               const titleStyle = getComputedStyle(title)
               const titleRect = title.getBoundingClientRect()
               const iconRect = icon.getBoundingClientRect()
@@ -423,6 +450,8 @@ describe('the GitHub tab against the live dry-run server', () => {
                 listWidth: document.querySelector('[data-slot="gh-list"]').getBoundingClientRect().width,
                 light: document.documentElement.classList.contains('light'),
                 appliedDensity: document.documentElement.dataset.density,
+                titleText: title.textContent,
+                authorText: meta.children[1].textContent,
               }
             })()`) as {
               titleLines: number
@@ -438,9 +467,14 @@ describe('the GitHub tab against the live dry-run server', () => {
               listWidth: number
               light: boolean
               appliedDensity: string
+              titleText: string
+              authorText: string
             }
 
             observations.push({ viewport, theme, density, view, ...facts })
+            // The row really is laying out the long strings, and they came from the payload.
+            expect(facts.titleText).toBe(longTitle)
+            expect(facts.authorText).toBe(longAuthor)
             expect(facts.light).toBe(theme === 'light')
             expect(facts.appliedDensity).toBe(density)
             expect(facts.metaBelowTitle).toBe(true)

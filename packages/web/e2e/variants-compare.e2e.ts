@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { waitForHealth, waitForStatus } from './poll'
 
 /**
  * The variants compare view (R3 Step 2.3) end-to-end, against a LIVE ×2 dry run — spec 010
@@ -33,30 +34,11 @@ function freePort(): Promise<number> {
   })
 }
 
-async function waitForHealth(url: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${url}/api/v1/health`)).ok) return
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  throw new Error(`cezar e2e: the variants server never answered at ${url}`)
-}
 
 async function getRun(url: string, id: string): Promise<Record<string, unknown>> {
   return (await (await fetch(`${url}/api/v1/runs/${id}`)).json()) as Record<string, unknown>
 }
 
-async function waitForStatus(url: string, id: string, wanted: string[]): Promise<string> {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    const record = await getRun(url, id)
-    if (wanted.includes(String(record.status))) return String(record.status)
-    await new Promise((r) => setTimeout(r, 500))
-  }
-  throw new Error(`cezar e2e: run ${id} never reached status "${wanted.join('/')}"`)
-}
 
 let browser: AgentBrowser
 let server: ChildProcess

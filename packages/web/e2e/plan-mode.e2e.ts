@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
+import { waitForHealth } from './poll'
 
 /**
  * Plan mode end-to-end (R4 Step 1.2, #383 + spec 008) against a LIVE dry-run server. Under
@@ -31,17 +32,6 @@ function freePort(): Promise<number> {
   })
 }
 
-async function waitForHealth(url: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${url}/api/v1/health`)).ok) return
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  throw new Error(`cezar e2e: the plan-mode server never answered at ${url}`)
-}
 
 let browser: AgentBrowser
 let server: ChildProcess

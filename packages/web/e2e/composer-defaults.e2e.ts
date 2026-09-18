@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { waitForHealth } from './poll'
 
 const sessionId = `e2e-composer-defaults-${process.pid}`
 
@@ -27,17 +28,6 @@ function freePort(): Promise<number> {
   })
 }
 
-async function waitForHealth(url: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${url}/api/v1/health`)).ok) return
-    } catch {
-      // The fixture server is still starting.
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
-  }
-  throw new Error(`cezar e2e: the composer-defaults server never answered at ${url}`)
-}
 
 async function putDefaults(autonomous: boolean | null, worktree: boolean | null): Promise<void> {
   const response = await fetch(`${baseUrl}/api/v1/workspace/config`, {

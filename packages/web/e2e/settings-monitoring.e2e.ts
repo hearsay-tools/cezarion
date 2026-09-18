@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
+import { pollFor, waitForHealth } from './poll'
 
 /**
  * Global Resources monitoring controls against an isolated fixture server.
@@ -50,17 +51,6 @@ function freePort(): Promise<number> {
   })
 }
 
-async function waitForHealth(url: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${url}/api/v1/health`)).ok) return
-    } catch {
-      // The fixture server is still starting.
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
-  }
-  throw new Error(`cezar e2e: the monitoring-settings server never answered at ${url}`)
-}
 
 function startServer(): ChildProcess {
   return spawn(
@@ -108,13 +98,14 @@ async function waitForResources(
   check: (resources: WorkspaceResources) => boolean,
   label: string,
 ): Promise<WorkspaceConfig> {
-  let stored: WorkspaceResources | undefined
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    stored = (await workspaceConfig()).resources
-    if (check(stored)) return { resources: stored }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
-  }
-  throw new Error(mutationFailure(label, stored ?? (await workspaceConfig()).resources))
+  const stored = await pollFor(
+    async () => {
+      const resources = (await workspaceConfig()).resources
+      return check(resources) ? resources : undefined
+    },
+    async () => mutationFailure(label, (await workspaceConfig()).resources),
+  )
+  return { resources: stored }
 }
 
 function installMutationSpy(): void {
@@ -139,23 +130,26 @@ async function waitForPut(
   check: (parsed: unknown, status: number) => boolean,
   label: string,
 ): Promise<MutationRecord> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    for (const mutation of mutations()) {
-      let parsed: unknown = mutation.body
-      try {
-        parsed = JSON.parse(mutation.body) as unknown
-      } catch {
-        // Keep the raw body when the server did not answer JSON.
+  const matched = await pollFor(
+    () => {
+      for (const mutation of mutations()) {
+        let parsed: unknown = mutation.body
+        try {
+          parsed = JSON.parse(mutation.body) as unknown
+        } catch {
+          // Keep the raw body when the server did not answer JSON.
+        }
+        if (check(parsed, mutation.status)) return mutation
       }
-      if (!check(parsed, mutation.status)) continue
-      if (mutation.status < 200 || mutation.status >= 300) {
-        throw new Error(mutationFailure(`${label} PUT ${mutation.status} ${mutation.body}`, (await workspaceConfig()).resources))
-      }
-      return mutation
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+      return undefined
+    },
+    async () => mutationFailure(`${label} PUT never observed`, (await workspaceConfig()).resources),
+  )
+  // A matching PUT that failed is a failure of this spec, not something to keep polling for.
+  if (matched.status < 200 || matched.status >= 300) {
+    throw new Error(mutationFailure(`${label} PUT ${matched.status} ${matched.body}`, (await workspaceConfig()).resources))
   }
-  throw new Error(mutationFailure(`${label} PUT never observed`, (await workspaceConfig()).resources))
+  return matched
 }
 
 function choose(selector: string, value: string): void {

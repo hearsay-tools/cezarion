@@ -16,6 +16,7 @@ import {
   type ContrastSample,
 } from './contrast'
 import record from './fixtures/thread-run.record.json'
+import { waitForHealth } from './poll'
 
 /**
  * The task thread (`/tasks/:id`, R3 Steps 1.1 + 1.2) in a real browser, against a real cezar
@@ -57,17 +58,6 @@ function freePort(): Promise<number> {
   })
 }
 
-async function waitForHealth(url: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${url}/api/v1/health`)).ok) return
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  throw new Error(`cezar e2e: the fixture server never answered at ${url}`)
-}
 
 let browser: AgentBrowser
 let server: ChildProcess
