@@ -567,8 +567,34 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
     );
     assert.notEqual(stamped, classifierSrc, 'expected version-stamp stub injection');
     fs.writeFileSync(path.join(scriptsDir, 'release-bump-pr.cjs'), stamped);
+    // `git` runs as a real process on a real pipe, not a shell function: the
+    // old function stub let the `git patch-id` stage exit before `git diff`
+    // wrote, so the writer hit EPIPE, pipefail failed the substitution, and
+    // the skip failed open (#424). The stub drains stdin like real
+    // `git patch-id`, so the pipeline is deterministic: one 40-hex id on
+    // success, a failing exit on compute failure.
+    const binDir = path.join(cwd, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const gitShim = gitOk
+      ? `#!/bin/sh
+case "$1" in
+  diff|patch-id) ;;
+  *) echo "unexpected git: $*" >&2; exit 1 ;;
+esac
+if [ "$1" = patch-id ]; then
+  cat >/dev/null
+fi
+printf '%s ignored\\n' '${patchId}'
+`
+      : `#!/bin/sh
+echo 'missing objects' >&2
+exit 128
+`;
+    fs.writeFileSync(path.join(binDir, 'git'), gitShim);
+    fs.chmodSync(path.join(binDir, 'git'), 0o755);
     const env = {
       ...process.env,
+      PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
       BASH_ENV: '/dev/null',
       GITHUB_OUTPUT: output,
       GITHUB_REPOSITORY: 'owner/repo',
@@ -582,16 +608,12 @@ test('review-round skips when the three-dot patch-id matches the last posted mar
       GH_TOKEN: 'test-token',
       TEST_STAMPS_OK: '1',
     };
-    const gitStub = gitOk
-      ? `git() { printf '%s ignored\\n' '${patchId}'; }`
-      : `git() { echo 'missing objects' >&2; return 128; }`;
     const filesLiteral = filesOut.replace(/'/g, `'\\''`);
     const filesBranch = filesOk
       ? `printf '%s\\n' '${filesLiteral}'`
       : `echo 'page failed' >&2; return 1`;
     const script = [
       `gh() { case "$*" in *'.head.sha'*) echo '${liveHead}';; *'.base.sha'*) echo '${base}';; *'/files'*) ${filesBranch};; *'/reviews'*) printf '%s\\n' '${reviewsOut}';; *) echo "unexpected gh: $*" >&2; return 1;; esac; }`,
-      gitStub,
       round.run,
     ].join('\n');
     try {
