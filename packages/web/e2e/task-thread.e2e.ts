@@ -419,17 +419,24 @@ describe('task thread', () => {
     ])
 
     // #281 moved Archive out of this menu and into the composer's own action row, where a phone
-    // can reach it without scrolling the header away. `waitForValue` rather than `evaluate`: this
-    // is the first read of the composer in the spec, and the row renders from the same SSE replay
-    // the `beforeAll` bubbles wait on — a bare sample can land before the button mounts, which is
-    // the read-before-render race the wait discipline exists for.
+    // can reach it without scrolling the header away. No flake was observed here and none is
+    // claimed: this is a NEW read of a surface the spec had not touched, so it follows this
+    // directory's default — wait and read as one step (README, "Wait, then read") — rather than
+    // fixing anything. The expression withholds a sample until the Archive button itself is
+    // present, because the row mounts with its own controls and an empty `[]` would otherwise be
+    // a non-null sample the default matcher accepts and the assertion below then fails on.
     const composerActions = browser.waitForValue(
       `(() => {
         const row = document.querySelector('[data-slot="composer-actions"]')
-        return row ? JSON.stringify([...row.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))) : null
+        if (!row) return null
+        const labels = [...row.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))
+        return labels.includes('Archive task') ? JSON.stringify(labels) : null
       })()`,
     ) as string
-    expect(JSON.parse(composerActions)).toContain('Archive task')
+    // The exact pair, not a `toContain`: a finished run's row carries Archive and Continue and
+    // nothing else, which is also where #281's "one control per screen" rule would break first
+    // if Stop ever leaked back in beside them.
+    expect(JSON.parse(composerActions)).toEqual(['Archive task', 'Continue'])
 
     browser.click('[aria-label="Run actions"]')
     const actions = browser.evaluate(
