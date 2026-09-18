@@ -150,8 +150,13 @@ export function focusWithKeyboard(browser: AgentBrowser, selector: string): void
  * here), and only when it unmounts does `FocusScope` refocus the trigger, from a zero-delay
  * timer (`onCloseAutoFocus`). A wait for `content` to be `null` resolves inside that gap, so
  * a scripted `.focus()` there is undone a millisecond later: the row-rename pencil's Tab
- * started from the Columns trigger and ended on "New task" (#410, CI job 105562586371). The
- * end state is the focus, not the absence, so this waits for both.
+ * started from the Columns trigger and ended on "New task" (#410). Evidence: the
+ * `cockpit-failures-shard-3` artifact of run 35333371534 (job 105562586371), whose `probe.json`
+ * names `data-slot="new-task-inline"` as `activeElement` after Tab; and a local reproduction
+ * that replayed the spec's CLI-call order while logging `focusin` and `animationend` with
+ * `performance.now()` stamps: the trigger took focus 1 ms after the helper's `.focus()` in 2 of
+ * 13 runs without this wait, and in 0 of 10 with it. The end state is the focus, not the
+ * absence, so this waits for both.
  *
  * `focus` is where the overlay returns focus: its trigger, or whatever its `onCloseAutoFocus`
  * names instead. A dismissal that moved focus itself (an outside click, a tab away) does not
