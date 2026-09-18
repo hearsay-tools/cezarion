@@ -1,10 +1,15 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { RunStore } from '../runs/store.ts';
-import { AgentTempDirError, agentTmpDir } from '../runs/agent-tmpdir.ts';
+import {
+  AgentTempDirError,
+  MAX_SOCKET_SAFE_DIR_LENGTH,
+  agentTmpDir,
+  resolveAgentTmpDir,
+} from '../runs/agent-tmpdir.ts';
 import { registerProject } from '../workspace/projects.ts';
 import { RunManager, agentDirectories } from './run.ts';
 
@@ -60,10 +65,13 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
       steps: [{ id: 's', name: 's', kind: 'agent' }],
     });
 
-  it('hands the spawn a TMPDIR under <dataDir>/tmp/<runId>, already created', async () => {
+  it('hands the spawn the resolved per-run TMPDIR, already created', async () => {
     const run = newRun();
     const { env } = await seam().agentEnvForStep(run.id, 'claude');
-    expect(env.TMPDIR).toBe(agentTmpDir(dataDir, run.id));
+    // The exact location is `resolveAgentTmpDir`'s call — repo-local when the
+    // checkout is shallow enough for unix-socket paths (#387), a short
+    // OS-temp directory when it is not. The spawn seam pins the resolution.
+    expect(env.TMPDIR).toBe(resolveAgentTmpDir(dataDir, run.id));
     expect(env.TEMP).toBe(env.TMPDIR);
     expect(env.TMP).toBe(env.TMPDIR);
     // Created BEFORE the backend spawns — the backend roots its own scratch tree
@@ -96,11 +104,14 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
   });
 
   // The whole point of the preflight: refuse to start rather than spawn an agent
-  // whose every shell command will come back empty.
+  // whose every shell command will come back empty. The sabotage lands on the
+  // RESOLVED directory — wherever the length cap (#387) puts it — so the case
+  // stays deterministic at any checkout depth.
   it('fails before spawning when the temp directory cannot be had', async () => {
     const run = newRun();
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(join(dataDir, 'tmp'), 'not a directory', 'utf8');
+    const resolved = resolveAgentTmpDir(dataDir, run.id);
+    mkdirSync(dirname(resolved), { recursive: true });
+    writeFileSync(resolved, 'not a directory', 'utf8');
     await expect(seam().agentEnvForStep(run.id, 'claude')).rejects.toBeInstanceOf(AgentTempDirError);
   });
 
@@ -118,11 +129,20 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
 
   it('the error names the path and the way out, so the thread footer is actionable', async () => {
     const run = newRun();
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(join(dataDir, 'tmp'), 'not a directory', 'utf8');
-    await expect(seam().agentEnvForStep(run.id, 'claude')).rejects.toThrow(
-      /agent temp directory is not writable: .* — free disk space, or set CEZ_AGENT_TMPDIR=0/,
-    );
+    const resolved = resolveAgentTmpDir(dataDir, run.id);
+    mkdirSync(dirname(resolved), { recursive: true });
+    writeFileSync(resolved, 'not a directory', 'utf8');
+    let err: Error | undefined;
+    try {
+      await seam().agentEnvForStep(run.id, 'claude');
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err).toBeInstanceOf(AgentTempDirError);
+    // The path, so the thread footer can show it...
+    expect(err!.message).toContain(`agent temp directory is not writable: ${resolved} `);
+    // ...and the remedy, so the message alone is enough to act on.
+    expect(err!.message).toContain('— free disk space, or set CEZ_AGENT_TMPDIR=0');
   });
 
   describe('CEZ_AGENT_TMPDIR=0', () => {
@@ -139,7 +159,8 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
       const run = newRun();
       const { env } = await seam().agentEnvForStep(run.id, 'claude');
       expect(env.TMPDIR).toBeUndefined();
-      expect(existsSync(agentTmpDir(dataDir, run.id))).toBe(false);
+      // Nothing minted at either location the resolver may choose.
+      expect(existsSync(resolveAgentTmpDir(dataDir, run.id))).toBe(false);
       // The handoff contract is untouched by the opt-out.
       expect(env.CEZ_TASK_ID).toBe(run.id);
     });
@@ -148,8 +169,9 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     // preflight is part of what the hatch turns off, or it is not an escape.
     it('still spawns when the temp directory could not have been created', async () => {
       const run = newRun();
-      mkdirSync(dataDir, { recursive: true });
-      writeFileSync(join(dataDir, 'tmp'), 'not a directory', 'utf8');
+      const resolved = resolveAgentTmpDir(dataDir, run.id);
+      mkdirSync(dirname(resolved), { recursive: true });
+      writeFileSync(resolved, 'not a directory', 'utf8');
       await expect(seam().agentEnvForStep(run.id, 'claude')).resolves.toMatchObject({
         env: { CEZ_TASK_ID: run.id },
       });
@@ -169,5 +191,70 @@ describe('agentDirectories (#785)', () => {
 
   it('is exactly the pre-#785 list when the run has no temp directory', () => {
     expect(agentDirectories('/data/runs', {})).toEqual(['/data/runs']);
+  });
+});
+
+/**
+ * #387: a repo checked out deep enough that `<dataDir>/tmp/<runId>` crosses
+ * the kernel's unix-socket path cap must still get a working per-run temp
+ * directory at the spawn seam, and its fallback must reap like any other.
+ */
+describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)', () => {
+  const savedHome = process.env.CEZ_HOME;
+  let home: string;
+  let repoRoot: string;
+  let dataDir: string;
+  let store: RunStore;
+  let manager: RunManager;
+
+  type Seam = {
+    agentEnvForStep(
+      runId: string,
+      backend: 'claude' | 'codex' | 'opencode',
+      options?: { generateFollowups?: boolean; recordedProfileId?: string },
+    ): Promise<{ env: Record<string, string>; profileId: string }>;
+    dropActive(runId: string): void;
+  };
+  const seam = () => manager as unknown as Seam;
+
+  beforeEach(async () => {
+    home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-deep-tmp-home-'));
+    // Deep enough that the repo-local per-run path crosses the socket cap —
+    // the shape Cezar's own nested task worktrees produce.
+    repoRoot = join(realpathSync(tmpdir()), `cez-deep-tmp-${'r'.repeat(80)}`, 'repo');
+    dataDir = join(repoRoot, '.ai/cezar');
+    process.env.CEZ_HOME = home;
+    store = RunStore.open(dataDir);
+    manager = new RunManager(store, repoRoot);
+    await registerProject(repoRoot);
+  });
+
+  afterEach(() => {
+    store.flush();
+    for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
+    if (savedHome === undefined) delete process.env.CEZ_HOME;
+    else process.env.CEZ_HOME = savedHome;
+  });
+
+  const newRun = () =>
+    store.createRun({
+      title: 't',
+      workflow: 'w',
+      task: 't',
+      steps: [{ id: 's', name: 's', kind: 'agent' }],
+    });
+
+  it('hands the spawn a short TMPDIR outside the checkout and reaps the fallback', async () => {
+    const run = newRun();
+    const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    expect(env.TMPDIR).toBeTruthy();
+    expect(env.TMPDIR!.length).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
+    expect(env.TMPDIR).not.toBe(agentTmpDir(dataDir, run.id));
+    expect(existsSync(env.TMPDIR as string)).toBe(true);
+    expect(env.TEMP).toBe(env.TMPDIR);
+    expect(env.TMP).toBe(env.TMPDIR);
+    writeFileSync(join(env.TMPDIR as string, 'scratch'), 'x', 'utf8');
+    seam().dropActive(run.id);
+    expect(existsSync(env.TMPDIR as string)).toBe(false);
   });
 });

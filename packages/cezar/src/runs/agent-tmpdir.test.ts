@@ -4,20 +4,25 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { createServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   AgentTempDirError,
+  MAX_SOCKET_SAFE_DIR_LENGTH,
   agentTmpDir,
   agentTmpDirEnabled,
   agentTmpEnv,
   removeAgentTmpDir,
+  resolveAgentTmpDir,
   sweepAgentTmpDirs,
 } from './agent-tmpdir.ts';
 
@@ -202,5 +207,221 @@ describe('reaping the per-run temp directories (#785)', () => {
 
   it('is a no-op before any run has minted a directory', () => {
     expect(sweepAgentTmpDirs(dataDir, [])).toEqual([]);
+  });
+});
+
+/**
+ * #387: tools bind NAMED unix sockets under TMPDIR, and the kernel caps a
+ * socket path at `sun_path` — 108 bytes on Linux, 104 on macOS, NUL included.
+ * tsx alone builds `<tmpdir>/tsx-<uid>/<pid>.pipe` (~23 extra bytes) for its
+ * IPC server, so a per-run directory from a deep checkout (Cezar's own task
+ * worktrees land well past 100) pushed every such bind past the cap and broke
+ * `npm install`/typechecking inside the run. The directory must stay short
+ * enough that those names still fit.
+ */
+describe('socket-safe temp directory length (#387)', () => {
+  let deepPrefix: string;
+  const minted: string[] = [];
+
+  const osRoot = (): string => realpathSync(tmpdir());
+
+  /** A dataDir whose `<dataDir>/tmp/<runId>` lands far past the socket cap. */
+  const deepDataDir = (): string => {
+    deepPrefix = join(osRoot(), `cez-deep-${'d'.repeat(80)}`);
+    return join(deepPrefix, 'repo', '.ai', 'cezar');
+  };
+
+  const mint = (dir: string, runId: string): string => {
+    const tmp = agentTmpEnv(dir, runId, {}).TMPDIR as string;
+    minted.push(tmp);
+    return tmp;
+  };
+
+  afterEach(() => {
+    for (const dir of minted) rmSync(dir, { recursive: true, force: true });
+    minted.length = 0;
+    if (deepPrefix) rmSync(deepPrefix, { recursive: true, force: true });
+  });
+
+  it('resolves a per-run directory short enough for tsx’s named IPC socket', async () => {
+    const runId = '0f1e2d3c-4b5a-49f8-8a11-aabbccddeeff';
+    const dir = mint(deepDataDir(), runId);
+    expect(dir.length).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
+    // The exact name tsx binds (`tsx/dist` get-pipe-path + temporary-directory:
+    // join(tmpdir(), `tsx-${uid}`, `${pid}.pipe`), served by net.createServer).
+    const ipcDir = join(dir, `tsx-${process.getuid?.() ?? 1000}`);
+    mkdirSync(ipcDir, { recursive: true });
+    const server = createServer();
+    const bound = new Promise<void>((resolve, reject) => {
+      server.once('listening', resolve);
+      server.once('error', reject);
+    });
+    server.listen(join(ipcDir, `${process.pid}.pipe`));
+    await bound;
+    server.close();
+  });
+
+  it('moves a too-long directory under the OS temp root, still one per run', () => {
+    const root = osRoot();
+    const a = mint(deepDataDir(), '11111111-2222-4333-8444-555566667777');
+    const b = mint(deepDataDir(), '99999999-8888-4777-8666-555566667777');
+    for (const dir of [a, b]) {
+      expect(dir.startsWith(root)).toBe(true);
+      expect(basename(dir).startsWith('cez-agent-')).toBe(true);
+    }
+    expect(a).not.toBe(b);
+  });
+
+  it('stays repo-local up to the cap and falls back one byte past it', () => {
+    const root = osRoot();
+    // `join(dataDir, 'tmp', 'run-a')` = root + '/' + pad + '/' + 'tmp/run-a'.
+    const padFor = (target: number): string =>
+      'p'.repeat(target - root.length - 'tmp/run-a'.length - 2);
+    const at = join(root, padFor(78));
+    const over = join(root, 'q'.repeat(79 - root.length - 'tmp/run-a'.length - 2));
+    expect(join(at, 'tmp', 'run-a').length).toBe(78);
+    expect(join(over, 'tmp', 'run-a').length).toBe(79);
+    try {
+      expect(agentTmpEnv(at, 'run-a', {}).TMPDIR).toBe(join(at, 'tmp', 'run-a'));
+      const fell = agentTmpEnv(over, 'run-a', {}).TMPDIR as string;
+      minted.push(fell);
+      expect(fell).not.toBe(join(over, 'tmp', 'run-a'));
+      expect(fell.length).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
+    } finally {
+      rmSync(at, { recursive: true, force: true });
+      rmSync(over, { recursive: true, force: true });
+    }
+  });
+
+  it('resolveAgentTmpDir answers without minting anything', () => {
+    const dir = resolveAgentTmpDir(deepDataDir(), '22222222-3333-4444-8555-666677778888');
+    expect(dir.length).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('measures the cap in bytes, so a multibyte path cannot hide past it', () => {
+    const root = osRoot();
+    // 'é' is one JS character but two UTF-8 bytes: the kernel bounds the byte
+    // length, so a directory whose string length fits while its byte length
+    // crosses the cap must still fall back.
+    const pad = 'é'.repeat(Math.max(1, Math.floor((90 - Buffer.byteLength(root)) / 2)));
+    const dir = join(root, pad);
+    const local = join(dir, 'tmp', 'run-a');
+    expect(local.length).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
+    expect(Buffer.byteLength(local)).toBeGreaterThan(MAX_SOCKET_SAFE_DIR_LENGTH);
+    const resolved = resolveAgentTmpDir(dir, 'run-a');
+    expect(resolved).not.toBe(local);
+    expect(Buffer.byteLength(resolved)).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
+  });
+
+  it('reaps the fallback when the run ends', () => {
+    const dir = deepDataDir();
+    const runId = 'aaaa2222-bbbb-4ccc-8ddd-eeeeffff0001';
+    expect(existsSync(mint(dir, runId))).toBe(true);
+    removeAgentTmpDir(dir, runId);
+    expect(existsSync(resolveAgentTmpDir(dir, runId))).toBe(false);
+  });
+
+  it('fails loudly when no socket-safe root exists, rather than minting an overlong directory', () => {
+    // A host TMPDIR long enough that the OS-root candidate ALSO crosses the
+    // cap: minting either directory would hand the agent a temp directory
+    // that cannot serve unix sockets — the failure #387 is about — so the
+    // run must refuse to start with a named error instead.
+    const longRoot = join(osRoot(), `cez-long-${'t'.repeat(60)}`);
+    mkdirSync(longRoot, { recursive: true });
+    const restore = process.env.TMPDIR;
+    process.env.TMPDIR = longRoot;
+    try {
+      let thrown: unknown;
+      try {
+        agentTmpEnv(deepDataDir(), '77777777-8888-4999-8aaa-bbbbccccdddd', {});
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(AgentTempDirError);
+      expect((thrown as Error).message).toContain('CEZ_AGENT_TMPDIR=0');
+    } finally {
+      if (restore === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = restore;
+      rmSync(longRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to rewrite an ownership marker the directory no longer controls', () => {
+    const dir = deepDataDir();
+    const runId = '88888888-9999-4aaa-8bbb-ccccdddd0001';
+    const minted = mint(dir, runId);
+    // A Continue re-mints the marker. An agent running as the same user can
+    // replace it with a symlink first; the rewrite must not follow it.
+    const victim = join(osRoot(), 'cez-marker-victim.txt');
+    writeFileSync(victim, 'sentinel', 'utf8');
+    rmSync(join(minted, '.cez-owner'));
+    symlinkSync(victim, join(minted, '.cez-owner'));
+    try {
+      expect(() => agentTmpEnv(dir, runId, {})).toThrow(AgentTempDirError);
+      expect(readFileSync(victim, 'utf8')).toBe('sentinel');
+    } finally {
+      rmSync(victim, { force: true });
+    }
+  });
+
+  it('sweeps orphaned fallback directories and keeps the live ones', () => {
+    const dir = deepDataDir();
+    const liveId = 'aaaa2222-0000-4000-8000-000000000001';
+    const orphanId = 'aaaa2222-0000-4000-8000-000000000002';
+    const live = mint(dir, liveId);
+    const orphan = mint(dir, orphanId);
+    // Both runs resolved past the cap, so both live in the OS temp root under
+    // digest names — not in the checkout, where the old sweep would find them.
+    expect(basename(live)).toMatch(/^cez-agent-/);
+    expect(basename(orphan)).toMatch(/^cez-agent-/);
+    const reaped = sweepAgentTmpDirs(dir, [liveId]);
+    expect(existsSync(live)).toBe(true);
+    expect(existsSync(orphan)).toBe(false);
+    // The fallback name digests the dataDir, so it is not reversible to a run
+    // id — the sweep reports the directory names it removed instead.
+    expect(reaped).toContain(basename(orphan));
+  });
+
+  it('never sweeps a foreign name in the shared OS temp root', () => {
+    // The mkdtemp shape every other suite in this repo uses — prefix only.
+    const sharedPrefix = join(osRoot(), 'cez-agent-tmpdir-fixture');
+    const unrelated = join(osRoot(), 'cez-other-abcdefghijkl');
+    const notADir = join(osRoot(), 'cez-agent-abcdefghijkl');
+    // Pattern-perfect but carrying no ownership marker: never ours to remove.
+    const ownerless = join(osRoot(), 'cez-agent-000000000001');
+    mkdirSync(sharedPrefix, { recursive: true });
+    mkdirSync(unrelated, { recursive: true });
+    mkdirSync(ownerless, { recursive: true });
+    writeFileSync(notADir, 'x', 'utf8');
+    try {
+      sweepAgentTmpDirs(deepDataDir(), []);
+      expect(existsSync(sharedPrefix)).toBe(true);
+      expect(existsSync(unrelated)).toBe(true);
+      expect(existsSync(notADir)).toBe(true);
+      expect(existsSync(ownerless)).toBe(true);
+    } finally {
+      rmSync(sharedPrefix, { recursive: true, force: true });
+      rmSync(unrelated, { recursive: true, force: true });
+      rmSync(notADir, { force: true });
+      rmSync(ownerless, { recursive: true, force: true });
+    }
+  });
+
+  it('never sweeps another dataDir’s fallback directory', () => {
+    // A second checkout is a second cezar project with live runs of its own;
+    // its fallback directories sit in the SAME shared root and must survive
+    // this dataDir's startup sweep untouched.
+    const mine = deepDataDir();
+    const theirsRoot = join(osRoot(), `cez-deep-${'o'.repeat(80)}`);
+    const theirs = join(theirsRoot, 'other', '.ai', 'cezar');
+    const theirDir = mint(theirs, '33333333-4444-4555-8666-777788889999');
+    try {
+      const reaped = sweepAgentTmpDirs(mine, []);
+      expect(existsSync(theirDir)).toBe(true);
+      expect(reaped).not.toContain(basename(theirDir));
+    } finally {
+      rmSync(theirsRoot, { recursive: true, force: true });
+    }
   });
 });
