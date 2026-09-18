@@ -335,9 +335,10 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
 
 /**
  * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
- * BOTH `<repoRoot>/.claude/skills/<name>/` (claude) and
+ * `<repoRoot>/.claude/skills/<name>/` (claude),
  * `<repoRoot>/.agents/skills/<name>/` (codex/pi — the canonical dir SKILL_DIRS
- * scans first), and keep both out of the user's git via `.git/info/exclude`.
+ * scans first), and `<repoRoot>/.cursor/skills/<name>/` (Cursor), and keep all
+ * destinations out of the user's git via `.git/info/exclude`.
  * Returns false when there is nothing to materialize (not a directory skill,
  * no clone…). (#286 — writing only the claude dir left codex/pi without the
  * companion files on disk.)
@@ -355,6 +356,7 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
   const destDirs = [
     join(repoRoot, '.claude', 'skills', skill.name),
     join(repoRoot, '.agents', 'skills', skill.name),
+    join(repoRoot, '.cursor', 'skills', skill.name),
   ];
   let wrote = 0;
   for (const file of ls.stdout.split('\n').filter(Boolean)) {
@@ -373,6 +375,7 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
   if (wrote === 0) return false;
   await excludeFromGit(repoRoot, `.claude/skills/${skill.name}/`);
   await excludeFromGit(repoRoot, `.agents/skills/${skill.name}/`);
+  await excludeFromGit(repoRoot, `.cursor/skills/${skill.name}/`);
   return true;
 }
 
