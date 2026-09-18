@@ -1,4 +1,4 @@
-import type { AgentBrowser } from './agent-browser'
+import { WaitForValueError, type AgentBrowser } from './agent-browser'
 
 export interface ContrastSample {
   foreground: string
@@ -96,44 +96,72 @@ export function contrastSampleExpression(selector: string, foregroundProperty = 
   })()`
 }
 
-/** Focuses the target through a real Tab key from the preceding visible control. */
+/**
+ * Focuses the target through a real Tab key from the preceding visible control.
+ *
+ * Three steps, each waited on rather than sampled (#409). The predecessor lookup polls until the
+ * target and a focusable control before it exist, and refuses what `.focus()` refuses: an
+ * element with a box but `visibility: hidden` is skipped by the browser's tab order too, so
+ * focusing it would put the Tab that follows somewhere else. `press('Tab')` is its own CLI call,
+ * and focus can land asynchronously after it (a menu that moves focus in an effect), so the
+ * last step waits until `document.activeElement` IS the target and, when it never is, names the
+ * element that took focus instead.
+ */
 export function focusWithKeyboard(browser: AgentBrowser, selector: string): void {
-  const ready = browser.evaluate(`(() => {
-    const target = document.querySelector(${JSON.stringify(selector)})
+  const target = JSON.stringify(selector)
+  const describe = `(el) => el ? el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + [...el.classList].slice(0, 3).map((c) => '.' + c).join('') : null`
+  browser.waitForValue<{ ready: boolean; predecessor: string | null }>(
+    `(() => {
+    const describe = ${describe}
+    const target = document.querySelector(${target})
+    if (!target) return { ready: false, predecessor: null }
     const controls = [...document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-      .filter((element) => element.getClientRects().length > 0)
+      .filter((element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden')
     const index = controls.indexOf(target)
-    if (index < 1) return false
+    if (index < 1) return { ready: false, predecessor: null }
     controls[index - 1].focus()
-    return true
-  })()`)
-  if (ready !== true) throw new Error(`no visible keyboard predecessor for ${selector}`)
+    return { ready: document.activeElement === controls[index - 1], predecessor: describe(controls[index - 1]) }
+  })()`,
+    (state) => state.ready,
+    { failure: `no visible keyboard predecessor for ${selector}` },
+  )
   browser.press('Tab')
+  try {
+    browser.waitForValue<{ onTarget: boolean; active: string | null }>(
+      `(() => {
+    const describe = ${describe}
+    const target = document.querySelector(${target})
+    return { onTarget: !!target && document.activeElement === target, active: describe(document.activeElement) }
+  })()`,
+      (state) => state.onTarget,
+    )
+  } catch (error) {
+    if (!(error instanceof WaitForValueError)) throw error
+    const active = (error.lastValue as { active?: string | null } | undefined)?.active ?? 'nothing'
+    throw new Error(`focus never reached ${selector}; it is on ${active} (failure bundle: ${error.bundle})`, { cause: error })
+  }
 }
 
-/** Hovers a painted, unobstructed point of a possibly wrapping inline element. */
+/**
+ * Hovers a painted, unobstructed point of a possibly wrapping inline element.
+ *
+ * Scroll, hit-test and the point come from ONE polled expression (#409). The previous shape —
+ * a `waitForFunction` that scrolled and hit-tested, then an `evaluate` that hit-tested again —
+ * lost whenever layout moved between the two CLI calls, and failed as `no visible hover point`
+ * on `main` and on unrelated pull requests. The sample that passes the matcher is the sample
+ * the pointer moves to.
+ */
 export function hoverVisiblePoint(browser: AgentBrowser, selector: string): void {
   // A previous matrix state can leave the real pointer over a hover-triggered surface after
   // the viewport changes. Clear that state before scrolling so it cannot re-cover the target
-  // between the visibility poll and the CDP mouse move.
+  // between the sample and the CDP mouse move.
   browser.moveTo(0, 0)
-  browser.waitForFunction(`(() => {
+  type Point = { x: number; y: number }
+  const point = browser.waitForValue(
+    `(() => {
     const target = document.querySelector(${JSON.stringify(selector)})
-    if (!target) return false
+    if (!target) return null
     target.scrollIntoView({ block: 'center', inline: 'nearest' })
-    for (const rect of target.getClientRects()) {
-      for (const yPart of [0.25, 0.5, 0.75]) {
-        for (const xPart of [0.25, 0.5, 0.75]) {
-          const hit = document.elementFromPoint(rect.left + rect.width * xPart, rect.top + rect.height * yPart)
-          if (hit === target || target.contains(hit)) return true
-        }
-      }
-    }
-    return false
-  })()`)
-  const point = browser.evaluate(`(() => {
-    const target = document.querySelector(${JSON.stringify(selector)})
-    if (!target) throw new Error('hover target not found: ' + ${JSON.stringify(selector)})
     for (const rect of target.getClientRects()) {
       for (const yPart of [0.25, 0.5, 0.75]) {
         for (const xPart of [0.25, 0.5, 0.75]) {
@@ -145,8 +173,10 @@ export function hoverVisiblePoint(browser: AgentBrowser, selector: string): void
       }
     }
     return null
-  })()`) as { x: number; y: number } | null
-  if (!point) throw new Error(`no visible hover point for ${selector}`)
+  })()`,
+    (sample: Point | null): sample is Point => sample !== null,
+    { failure: `no visible hover point for ${selector}` },
+  )
   // Round to the same integers `moveTo` sends. Do not wait on CSS :hover afterwards:
   // agent-browser's CDP mouse-move does not set it on wrapping inline links (diagnosed
   // #369, timed out at 25s). Do not wait on these frozen coordinates either — a later

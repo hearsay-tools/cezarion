@@ -59,6 +59,10 @@ Manual-dispatch review runs use the full matrix and bypass docs-only skips. The 
 - Web UI changes belong under `packages/web/` and follow the accepted React 19 + Vite + Tailwind v4 + shadcn/ui architecture. Keep `packages/cezar/web/dist` reproducible from source, preserve light/dark/system themes and mobile/accessibility behavior, and add unit/component tests for changed behavior. (The legacy vanilla UI was retired in R7; the React cockpit is the only UI, and `/new` is the React composer.)
 - User-facing errors are one human-readable line (the `createDraftPr` pattern), not stack traces.
 
+### Cockpit e2e
+
+- A change that fixes or retries a flaky cockpit spec carries its evidence: the failure bundle (`.ai/qa/failures/…`, the `cockpit-failures-shard-<n>` artifact) or a local reproduction with the single-test recipe in `packages/web/e2e/README.md`. One that carries neither is a guess; request changes. The same page names the wait rules — a one-shot `expect(browser.…)` after an action, `:hover` in a wait, a scrolling predicate, a sleep — and the `e2e-wait-discipline` baseline may only shrink in a diff.
+
 ## Severity guidance
 
 - **Blocker** (request changes): data loss or corruption in `.ai/cezar/`; a degradation path turned into a hard failure; unvalidated request body on a mutating route; secret written to disk; server exposed beyond localhost or CORS widened; path traversal; breaking a surface in `BACKWARD_COMPATIBILITY.md` without the required path; typecheck/build red.

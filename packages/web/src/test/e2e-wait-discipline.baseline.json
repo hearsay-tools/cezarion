@@ -1,0 +1,491 @@
+{
+  "$comment": "Wait-discipline sites the cockpit e2e suite carried when the ratchet landed (issue 409). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run E2E_WAIT_DISCIPLINE_UPDATE=1 npm test -- e2e-wait-discipline. Rules: packages/web/e2e/README.md.",
+  "sites": [
+    {
+      "file": "automations.e2e.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 500))",
+      "count": 1
+    },
+    {
+      "file": "composer-defaults.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(",
+      "count": 1
+    },
+    {
+      "file": "composer.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`(() => { const r = document.querySelector('[aria-label=\"${label}\"]').getBoundingClientRect(); return [r.width, r.height] })()`)).toEqual([44, 44])",
+      "count": 1
+    },
+    {
+      "file": "composer.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[aria-label=\"Cancel dictation\"]').getBoundingClientRect().width`)).toBe(32)",
+      "count": 1
+    },
+    {
+      "file": "github.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"gh-custom-prompt\"]').value`)).toBe('Review this issue and keep this draft')",
+      "count": 1
+    },
+    {
+      "file": "github.e2e.ts",
+      "rule": "sleep",
+      "site": "browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')",
+      "count": 1
+    },
+    {
+      "file": "github.e2e.ts",
+      "rule": "sleep",
+      "site": "stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; document.querySelector('[data-slot=\"gh-merge-box\"]').scrollIntoView({block:'center'}); new Promise(resolve => setTimeout(resolve, 250))`)",
+      "count": 1
+    },
+    {
+      "file": "github.e2e.ts",
+      "rule": "sleep",
+      "site": "stateBrowser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; new Promise(resolve => setTimeout(resolve, 250))`)",
+      "count": 1
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.count('[data-slot=\"archive-finished\"]')).toBe(0)",
+      "count": 1
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.count('[data-slot=\"task-card\"]')).toBe(1)",
+      "count": 1
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${search}').matches(':focus-visible')`)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${search}').value`)).toBe('')",
+      "count": 1
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${search}').value`)).toBe('Needle')",
+      "count": 2
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${tab('archived')}').getAttribute('aria-pressed')`)).toBe('true')",
+      "count": 3
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.isVisible(search)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.text('[data-slot=\"task-card\"]')).toContain('Needle done')",
+      "count": 1
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.text('[data-slot=\"task-card\"]')).toContain('Needle failed')",
+      "count": 1
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.text('[data-slot=\"tasks-empty\"]')).toContain('No matching tasks')",
+      "count": 1
+    },
+    {
+      "file": "mobile-task-controls.e2e.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 250))",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate('window.hierarchyAttempts')).toBe(1)",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.activeElement.matches('${summary}')`)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.documentElement.classList.contains('light')`)).toBe(theme === 'light')",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[aria-label=\"Plan task\"]').disabled`)).toBe(false)",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[aria-label=\"Start task\"]').disabled`)).toBe(false)",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"mode-plan\"]').getAttribute('aria-checked')`)).toBe('true')",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"variants-pill\"]')?.checkVisibility()`)).toBe(false)",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"variants-pill\"]').checkVisibility()`)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${composer}').getBoundingClientRect().height`)).toBe(height)",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(false)",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${prompt}') === window.hierarchyPrompt && document.querySelector('[data-slot=\"model-pill\"]') === window.hierarchyModel`)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${prompt}').value`)).toBe('Keep this task and its attachment')",
+      "count": 1
+    },
+    {
+      "file": "new-task-hierarchy.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.text('[data-slot=\"variants-pill\"]')).toContain('×2')",
+      "count": 1
+    },
+    {
+      "file": "plan-mode.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`(() => { const sheet = document.querySelector('[data-slot=\"plan-review\"]'); return sheet.scrollWidth <= sheet.clientWidth })()`)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "plan-mode.e2e.ts",
+      "rule": "sleep",
+      "site": "await new Promise((r) => setTimeout(r, 100))",
+      "count": 1
+    },
+    {
+      "file": "plan-mode.e2e.ts",
+      "rule": "sleep",
+      "site": "browser.evaluate('new Promise((done) => setTimeout(done, 250))')",
+      "count": 1
+    },
+    {
+      "file": "progressive-history.e2e.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolveWait) => setTimeout(resolveWait, 50))",
+      "count": 1
+    },
+    {
+      "file": "progressive-history.e2e.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolveWait) => setTimeout(resolveWait, 500))",
+      "count": 1
+    },
+    {
+      "file": "queued-stack.e2e.ts",
+      "rule": "sleep",
+      "site": "await new Promise((r) => setTimeout(r, 100))",
+      "count": 1
+    },
+    {
+      "file": "selection-states.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`({",
+      "count": 1
+    },
+    {
+      "file": "selection-states.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector(${JSON.stringify(selector)}) === document.activeElement && document.activeElement.matches(':focus-visible')`)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "selection-states.e2e.ts",
+      "rule": "sleep",
+      "site": "await new Promise((done) => setTimeout(done, 250))",
+      "count": 1
+    },
+    {
+      "file": "settings-monitoring.e2e.ts",
+      "rule": "sleep",
+      "site": "const timer = setTimeout(() => child.kill('SIGKILL'), 5_000)",
+      "count": 1
+    },
+    {
+      "file": "skill-search-ranking.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.activeElement?.dataset.slot`)).toBe('command-input')",
+      "count": 1
+    },
+    {
+      "file": "skill-search-ranking.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('qz163browse')",
+      "count": 1
+    },
+    {
+      "file": "skills-update.e2e.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))",
+      "count": 2
+    },
+    {
+      "file": "smoke.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.count(DRAWER)).toBe(0)",
+      "count": 1
+    },
+    {
+      "file": "smoke.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate('document.getElementById(\"root\") !== null')).toBe(true)",
+      "count": 2
+    },
+    {
+      "file": "smoke.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.isVisible('[data-slot=\"mobile-top-bar\"]')).toBe(false)",
+      "count": 1
+    },
+    {
+      "file": "smoke.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.isVisible('[data-slot=\"sidebar\"]')).toBe(false)",
+      "count": 1
+    },
+    {
+      "file": "smoke.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.isVisible('[data-slot=\"sidebar\"]')).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "task-changes.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`getComputedStyle(document.querySelector('[data-slot=\"run-header\"]')).position`)).toBe('relative')",
+      "count": 1
+    },
+    {
+      "file": "task-changes.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(stickyTop)).toBe('16px')",
+      "count": 1
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`(() => { const el = document.querySelector('${input}'); return [el === window.__phoneTextarea, el.value, el.selectionStart, el.selectionEnd] })()`))",
+      "count": 1
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`(() => { const r = document.querySelector('[data-slot=\"dropdown-menu-content\"]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth })()`)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true)",
+      "count": 2
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[aria-label=\"Hide run details\"]').getAttribute('aria-expanded')`)).toBe('true')",
+      "count": 1
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[aria-label=\"Show run details\"]').getAttribute('aria-expanded')`)).toBe('false')",
+      "count": 1
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"composer\"] textarea').value`)).toBe('Keep these follow-up instructions')",
+      "count": 1
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('first line\\nsecond line\\nthird line')",
+      "count": 1
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.isVisible('[data-slot=\"follow-up-engine\"]')).toBe(true)",
+      "count": 2
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.isVisible('[data-slot=\"run-details\"]')).toBe(true)",
+      "count": 2
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.text('[data-slot=\"composer-submit-row\"]')).toContain('Send')",
+      "count": 1
+    },
+    {
+      "file": "task-thread.e2e.ts",
+      "rule": "sleep",
+      "site": "browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')",
+      "count": 1
+    },
+    {
+      "file": "task-views-layout.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "task-views-layout.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.text('[data-slot=\"task-card\"]:first-child')).toContain('Memory')",
+      "count": 1
+    },
+    {
+      "file": "task-views-layout.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "if (name === 'editor') expect(browser.evaluate(`document.querySelector('.automation-editor input[type=\"checkbox\"]').getBoundingClientRect().right <= innerWidth`)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "task-views-layout.e2e.ts",
+      "rule": "sleep",
+      "site": "browser.evaluate('new Promise((done) => setTimeout(done, 250))')",
+      "count": 1
+    },
+    {
+      "file": "task-views-layout.e2e.ts",
+      "rule": "sleep",
+      "site": "for (let attempt = 0; attempt < 40; attempt++) { try { if ((await fetch(origin + '/api/v1/health')).ok) break } catch {} await new Promise((done) => setTimeout(done, 100)) }",
+      "count": 1
+    },
+    {
+      "file": "task-views-layout.e2e.ts",
+      "rule": "sleep",
+      "site": "for (let attempt = 0; attempt < 60; attempt++) { try { if ((await fetch(`${base}/api/v1/health`)).ok) break } catch {} await new Promise((done) => setTimeout(done, 250)) }",
+      "count": 1
+    },
+    {
+      "file": "thread-scroll.e2e.ts",
+      "rule": "sleep",
+      "site": "const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('live append did not render')); }, 5000);",
+      "count": 1
+    },
+    {
+      "file": "thread-scroll.e2e.ts",
+      "rule": "sleep",
+      "site": "const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('textarea did not grow')); }, 5000);",
+      "count": 1
+    },
+    {
+      "file": "touch-targets.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`(() => {",
+      "count": 1
+    },
+    {
+      "file": "touch-targets.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"mode-plan\"]').getAttribute('aria-checked')`)).toBe('false')",
+      "count": 1
+    },
+    {
+      "file": "touch-targets.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"wb-yaml-toggle\"]').parentElement.open`)).toBe(false)",
+      "count": 1
+    },
+    {
+      "file": "touch-targets.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"wb-yaml-toggle\"]').parentElement.open`)).toBe(true)",
+      "count": 1
+    },
+    {
+      "file": "touch-targets.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.text('[data-slot=\"wb-copy\"]')).toContain('Copied')",
+      "count": 1
+    },
+    {
+      "file": "touch-targets.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.url()).toContain('/new')",
+      "count": 1
+    },
+    {
+      "file": "touch-targets.e2e.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 250))",
+      "count": 1
+    },
+    {
+      "file": "worker-relationships.e2e.ts",
+      "rule": "sleep",
+      "site": "await new Promise(done => setTimeout(done, 250))",
+      "count": 1
+    },
+    {
+      "file": "workflows.e2e.ts",
+      "rule": "one-shot-read",
+      "site": "expect(browser.evaluate(`(() => {",
+      "count": 1
+    }
+  ]
+}
