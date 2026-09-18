@@ -59,9 +59,14 @@ function fakeBrowser() {
   return { browser, commands, failures, dispose: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
-const fakes: Array<{ dispose: () => void }> = []
+const fakes: Array<{ browser: AgentBrowser; dispose: () => void }> = []
 afterEach(() => {
-  for (const fake of fakes.splice(0)) fake.dispose()
+  // Close before disposing: a seam left open stays on the attached stack and would be what the
+  // next test's `lastAttachedBrowser()` finds.
+  for (const fake of fakes.splice(0)) {
+    fake.browser.close()
+    fake.dispose()
+  }
   configureFailureCapture({ root: undefined, spec: undefined, test: undefined })
 })
 function open() {
@@ -167,6 +172,28 @@ describe('AgentBrowser failure bundles (#408)', () => {
     const { browser } = open()
     expect(lastAttachedBrowser()).toBe(browser)
     browser.close()
+    expect(lastAttachedBrowser()).toBeNull()
+  })
+
+  it('closing a per-test browser hands the hook back to the one the spec still holds', () => {
+    // github.e2e.ts keeps its main browser open and attaches a short-lived one per state; its
+    // `finally` closes that one before `onTestFailed` runs, so the hook must still find the
+    // main browser rather than nothing.
+    const main = open().browser
+    const perTest = open().browser
+    expect(lastAttachedBrowser()).toBe(perTest)
+    perTest.close()
+    expect(lastAttachedBrowser()).toBe(main)
+    main.close()
+    expect(lastAttachedBrowser()).toBeNull()
+  })
+
+  it('closing browsers out of order forgets only the one closed', () => {
+    const first = open().browser
+    const second = open().browser
+    first.close()
+    expect(lastAttachedBrowser()).toBe(second)
+    second.close()
     expect(lastAttachedBrowser()).toBeNull()
   })
 

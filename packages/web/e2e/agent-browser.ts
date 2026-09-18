@@ -76,12 +76,17 @@ function nextBundleDir(): string {
   }
 }
 
-let lastAttached: AgentBrowser | null = null
+/** Every seam attached and not yet closed, oldest first. */
+const attached: AgentBrowser[] = []
 
 /** The seam most recently attached and not yet closed — how `failure-setup.ts`'s
- *  `onTestFailed` hook reaches the browser a spec holds in its own module scope. */
+ *  `onTestFailed` hook reaches the browser a spec holds in its own module scope.
+ *
+ *  A stack, not a single slot: `github.e2e.ts` keeps its main browser open and attaches a
+ *  short-lived one per state, and its `finally` closes that one before `onTestFailed` runs.
+ *  Closing it must hand the hook back to the main browser, not to nothing. */
 export function lastAttachedBrowser(): AgentBrowser | null {
-  return lastAttached
+  return attached.at(-1) ?? null
 }
 
 type FailureReason =
@@ -330,9 +335,9 @@ export class AgentBrowser {
     if (!browser.installed) {
       throw new Error(`cezar e2e: the agent-browser provider is not installed (${browser.notes})`)
     }
-    const attached = new AgentBrowser(browser.command, session, browser)
-    lastAttached = attached
-    return attached
+    const seam = new AgentBrowser(browser.command, session, browser)
+    attached.push(seam)
+    return seam
   }
 
   /** The `<spec>/<test>` a bundle was last written for — how a wait failure and the
@@ -595,7 +600,8 @@ export class AgentBrowser {
 
   /** operation: close. Never throws — teardown must not mask a real failure. */
   close(): void {
-    if (lastAttached === this) lastAttached = null
+    const index = attached.indexOf(this)
+    if (index !== -1) attached.splice(index, 1)
     try {
       this.run(['close'])
     } catch {
