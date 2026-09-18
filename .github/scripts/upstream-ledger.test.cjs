@@ -203,3 +203,18 @@ test('the committed LEDGER.md is the render of the committed ledger', () => {
   const l = yaml.parse(fs.readFileSync(path.join(dir, 'ledger.yaml'), 'utf8'));
   assert.equal(fs.readFileSync(path.join(dir, 'LEDGER.md'), 'utf8'), renderLedger(l), 'run: node .github/scripts/upstream-scan.cjs render');
 });
+
+test('applyScan gives a second scan on the same date its own report file instead of overwriting the first', () => {
+  const first = { date: '2026-09-18', upstreamHead: SHA_A, since: MERGE_BASE, added: 1, report: 'scans/2026-09-18.md' };
+  const before = ledger({ scans: [first], entries: [entry()] });
+  const { ledger: after } = applyScan(before, {
+    commits: [{ sha: SHA_B, date: '2026-09-18', title: 'later the same day (#971)', pr: 971 }], hints: {}, upstreamHead: SHA_HEAD, date: '2026-09-18',
+  });
+  assert.equal(after.scans.length, 2);
+  assert.equal(after.scans[1].report, 'scans/2026-09-18-2.md');
+  assert.equal(after.scans[1].since, SHA_A);
+  const { ledger: third } = applyScan(after, {
+    commits: [{ sha: 'e'.repeat(40), date: '2026-09-18', title: 'and again', }], hints: {}, upstreamHead: 'f'.repeat(40), date: '2026-09-18',
+  });
+  assert.equal(third.scans[2].report, 'scans/2026-09-18-3.md');
+});

@@ -98,6 +98,16 @@ function scanRange(ledger) {
   return last?.upstreamHead ?? ledger.origin.mergeBase;
 }
 
+/** `scans/<date>.md`, or `scans/<date>-N.md` when an earlier scan on the same date already
+ *  owns the plain name — a second same-day run (a dispatch after the first PR merged) must
+ *  keep its own report rather than overwrite one another ledger row still points at. */
+function reportPath(scans, date) {
+  const taken = new Set(scans.map((s) => s.report));
+  let candidate = `scans/${date}.md`;
+  for (let n = 2; taken.has(candidate); n += 1) candidate = `scans/${date}-${n}.md`;
+  return candidate;
+}
+
 /** Append unseen commits as `pending` and record the scan. Pure: returns a new ledger. */
 function applyScan(ledger, { commits, hints, upstreamHead, date }) {
   const known = new Set(ledger.entries.map((e) => e.sha));
@@ -107,7 +117,7 @@ function applyScan(ledger, { commits, hints, upstreamHead, date }) {
     return e;
   });
   if (added.length === 0) return { ledger, added };
-  const scan = { date, upstreamHead, since: scanRange(ledger), added: added.length, report: `scans/${date}.md` };
+  const scan = { date, upstreamHead, since: scanRange(ledger), added: added.length, report: reportPath(ledger.scans, date) };
   return { ledger: { ...ledger, scans: [...ledger.scans, scan], entries: [...ledger.entries, ...added] }, added };
 }
 
