@@ -344,6 +344,11 @@ class CursorSession implements AgentSession {
    *  say the attempt on the transcript, and re-prompt the same session with the same content.
    *  `busy` stays true throughout, so no auto-end or queued input can land mid-retry. */
   private handleProviderRetry(retry: PendingProviderRetry): void {
+    // The failed attempt is a real turn. Complete it with the failure reason first, so the
+    // v2 stream never carries a started-but-never-completed turn across a retry (#446 review)
+    // and usage accounting keeps its started/recorded pairing balanced. On the give-up path
+    // `fail`'s own completion then finds no open turn and is a no-op — never a duplicate.
+    this.mapped(cursorTurnCompleted('error', this.state));
     if (this.providerRetryAttempts >= this.providerRetry.maxRetries) {
       this.fail(`Cursor provider request failed after ${this.providerRetryAttempts + 1} attempts: ${retry.detail}`);
       return;
