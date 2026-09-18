@@ -162,10 +162,14 @@ entries:
     pr: 972
     title: "feat(dispatch): a task may dispatch other tasks (replaces the missions experiment) (#972)"
     date: 2026-09-13
-    status: pending
+    status: diverged
     hint:
       conflicts: 18
     note: "different by design: fork built owned workers with an authenticated controller (CEZ_DELEGATION); upstream dispatch (CEZ_DISPATCH) is an incompatible model. Units specs worth reading for the escalation ladder"
+    fork:
+      pr: 138
+    decided: 2026-09-18
+    reason: "the fork built owned workers behind an authenticated controller (PRs #138, #151, #159, opt-in CEZ_DELEGATION=1) instead of upstream dispatch (cez task, default-on, budget carve-out); same primitive, incompatible control plane. Owner decision 2026-09-18: nothing borrowed"
   - sha: 7619b3328ea43f42fbe4a4e4c457c6e0180a96a1
     pr: 809
     title: "fix(composer): scroll skill menu on arrow key navigation (#809)"
@@ -377,9 +381,13 @@ entries:
     pr: 1015
     title: "fix(dispatch): tell parents --budget is optional so uncapped trees don't get invented caps (#1015)"
     date: 2026-09-17
-    status: pending
+    status: diverged
     hint:
       conflicts: 0
+    fork:
+      pr: 138
+    decided: 2026-09-18
+    reason: "dispatch prompt fix for --budget; the fork has no dispatch budget and its worker CLI is documented in PR #138"
   - sha: 52636b25f236304ed3ceda027d4bb2889aef4ade
     pr: 1009
     title: "fix(server-deploy): fail the deploy when the service did not actually restart (#1009)"
@@ -420,9 +428,13 @@ entries:
     pr: 995
     title: 'fix(runs): a turn parked on its own dispatched subagents stops reading as "needs you" (#995)'
     date: 2026-09-18
-    status: pending
+    status: diverged
     hint:
       conflicts: 1
+    fork:
+      pr: 258
+    decided: 2026-09-18
+    reason: "dispatch-specific fix; the fork keeps live worker parents out of human attention in PR #258"
   - sha: 8e59c0ac8f70fe02202d147e2aed7091459b5452
     pr: 1012
     title: "fix(attachments): file named image uploads in the attachment library too (#1012)"
