@@ -1,94 +1,37 @@
-import { BotIcon, ChevronDownIcon } from '@/components/design-icons'
-import { useState } from 'react'
-
 import type { ToolStatus } from '@open-mercato/cezar-api-client'
-import { cn } from '@/lib/utils'
 
-import { activeSubagent, subagentActivityText, subagentCounts, type SubagentSummary } from './subagent-dock'
+import { subagentActivityText, type SubagentSummary } from './subagent-dock'
 
 /**
- * The Agents dock (spec `.ai/specs/2026-07-20-grouped-subagent-display.md` §"Agents dock",
- * issue #474; mockup `assets/grouped-subagent-display/mockup-01-agents-dock.png`): the current
- * fan-out's sub-agents, pinned above the composer as a sibling of the plan dock.
+ * The sub-agent rows (spec `.ai/specs/2026-07-20-grouped-subagent-display.md` §"Agents dock",
+ * issue #474): one line per agent of the current fan-out — glyph, title, type badge, what it
+ * is doing now, tool count.
  *
- * It answers the one question the transcript cannot — *what is running right now* — because
+ * They answer the one question the transcript cannot — *what is running right now* — because
  * task cards sit at their stream position and scroll away while their agents still work.
- * Collapsed it is "Agents · 1/3 — Reviewing store layer…"; expanded it is one row per agent.
+ * Since #402 the rows no longer carry a dock of their own: they are the body of the Run
+ * activity accordion's **Subagents** section, which owns the head, the odometer and the
+ * collapse memory (`run-activity-dock.tsx`).
  *
- * Unlike the plan dock, this does NOT hide anything from the thread: sub-agent cards stay
- * where they streamed (spec Q4). The plan is state, an agent's output is transcript.
- *
- * The caller keys this component by run id, so the collapse default re-derives per task.
+ * Unlike the plan, this does NOT hide anything from the thread: sub-agent cards stay where
+ * they streamed (spec Q4). The plan is state, an agent's output is transcript.
  */
-
-/** Collapse memory per run id — the plan dock's module-level map pattern, same reasoning:
- *  the choice survives route changes for the session without inventing server persistence. */
-const openByRun = new Map<string, boolean>()
-
-/** Collapsed by default (redesign): the slim one-line head already answers "what's running now?"
- *  — `Agents · 1/3 — Reviewing store layer…` — so the dock stays out of the thread's way until
- *  the reader wants the per-agent breakdown. Their explicit expand is remembered per run. */
-const DEFAULT_OPEN = false
-
-export function AgentsDock({
-  runId,
+export function AgentList({
   agents,
   onSelect,
 }: {
-  runId: string
   agents: SubagentSummary[]
   /** Phase 2: opens the drill-down sheet. Absent ⇒ rows are static display. */
   onSelect?: (id: string) => void
 }) {
-  const [open, setOpen] = useState(() => openByRun.get(runId) ?? DEFAULT_OPEN)
   // No fan-out to show — the overwhelming majority of runs never mount this at all.
   if (agents.length === 0) return null
-
-  const { done, total } = subagentCounts(agents)
-  const active = activeSubagent(agents)
-  const toggle = () =>
-    setOpen((value) => {
-      openByRun.set(runId, !value)
-      return !value
-    })
-
   return (
-    <section
-      data-slot="agents-dock"
-      data-state={open ? 'open' : 'collapsed'}
-      className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-xs"
-    >
-      {/* The mockup's `.grad-edge` — the brand gradient as a hairline top edge. */}
-      <div aria-hidden data-slot="grad-edge" className="h-[3px]" style={{ background: 'var(--grad)' }} />
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        className={cn('flex w-full items-center gap-2 px-3.5 text-left text-[13px]', open ? 'pt-2 pb-1.5' : 'py-2')}
-      >
-        <BotIcon aria-hidden className="size-3.5 shrink-0 text-soft-foreground" />
-        <span className="shrink-0 font-semibold">Agents</span>
-        <span data-slot="agents-count" className="shrink-0 text-muted-foreground tabular-nums">
-          · {done}/{total}
-        </span>
-        {!open && active !== undefined ? (
-          <span data-slot="agents-current" className="min-w-0 truncate text-muted-foreground">
-            — {subagentActivityText(active)}
-          </span>
-        ) : null}
-        <ChevronDownIcon
-          aria-hidden
-          className={cn('ml-auto size-3.5 shrink-0 text-soft-foreground transition-transform', !open && 'rotate-180')}
-        />
-      </button>
-      {open ? (
-        <ul data-slot="agents-list" className="flex flex-col gap-[7px] px-3.5 pb-3">
-          {agents.map((agent) => (
-            <AgentRow key={agent.id} agent={agent} onSelect={onSelect} />
-          ))}
-        </ul>
-      ) : null}
-    </section>
+    <ul data-slot="agents-list" className="flex min-w-0 flex-col gap-[7px]">
+      {agents.map((agent) => (
+        <AgentRow key={agent.id} agent={agent} onSelect={onSelect} />
+      ))}
+    </ul>
   )
 }
 

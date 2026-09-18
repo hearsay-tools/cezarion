@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest'
 import type { ToolStatus, UiToolItem } from '@open-mercato/cezar-api-client'
 
 import {
-  activeSubagent,
   collectSubagents,
   findSubagent,
   subagentActivityText,
@@ -369,31 +368,13 @@ describe('subagentCounts', () => {
   })
 })
 
-describe('activeSubagent', () => {
-  it('names the first still-working agent', () => {
-    const agents = collectSubagents([
-      turn('turn-1', [task('a', 'completed'), task('b', 'running'), task('c', 'pending')]),
-    ])
-    expect(activeSubagent(agents)!.id).toBe('b')
-  })
-
-  it('falls back to the first row when every agent settled', () => {
-    const agents = collectSubagents([turn('turn-1', [task('a', 'completed'), task('b', 'completed')])])
-    expect(activeSubagent(agents)!.id).toBe('a')
-  })
-
-  it('is undefined with no agents', () => {
-    expect(activeSubagent([])).toBeUndefined()
-  })
-
-  // The head and the expanded row must never tell different stories about one agent: the row
-  // said "never finished" while the head fell back to the title. Both now read one helper.
-  it('reads a stalled agent the same way its own row does', () => {
-    const agents = collectSubagents([turn('turn-1', [task('a', 'running')])], true)
-    const active = activeSubagent(agents)!
-    expect(active.id).toBe('a')
-    expect(active.stalled).toBe(true)
-    expect(subagentActivityText(active)).toBe('never finished')
+describe('subagentActivityText', () => {
+  // A stalled agent's row must say so rather than falling back to its title: the run ended
+  // while it was still in flight, so "never finished" is the only honest line.
+  it('reads a stalled agent as never finished', () => {
+    const [stalled] = collectSubagents([turn('turn-1', [task('a', 'running')])], true)
+    expect(stalled!.stalled).toBe(true)
+    expect(subagentActivityText(stalled!)).toBe('never finished')
   })
 
   it('prefers a real activity line over either placeholder', () => {

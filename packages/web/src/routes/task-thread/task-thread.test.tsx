@@ -786,7 +786,7 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="note-line"]')?.textContent).toContain('re-queued')
   })
 
-  it('no plan → no dock, no header mirror; steps present → the rail renders in the header', () => {
+  it('groups session activity into the dock and leaves the header rail off the session tab', () => {
     renderView(
       <ThreadView
         run={run('running', {
@@ -798,17 +798,93 @@ describe('ThreadView', () => {
         thread={reduceThread(EVENTS)}
       />,
     )
+    expect(document.querySelector('[data-slot="run-activity-dock"]')).not.toBeNull()
     expect(document.querySelector('[data-slot="plan-dock"]')).toBeNull()
     expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
-    // The header shows the compact one-line summary (collapsed by default): a dot per step and
-    // the active step's name + position. The full rows only mount once it's expanded.
-    const summary = document.querySelector('[data-slot="workflow-steps"]')
-    expect(summary).not.toBeNull()
-    expect(summary!.textContent).toContain('Do the task')
-    expect(summary!.textContent).toContain('step 1 of 2')
-    const dots = [...document.querySelectorAll('[data-slot="step-dot"]')]
-    expect(dots.map((dot) => dot.getAttribute('data-visual'))).toEqual(['active', 'pending'])
-    expect(document.querySelector('[data-slot="step-row"]')).toBeNull()
+    expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
+    const dock = document.querySelector('[data-slot="run-activity-dock"]')!
+    expect(dock.textContent).toContain('Run activity')
+    // Only the workflow has anything to show in this fixture — the count is honest about it.
+    expect(dock.textContent).toContain('1 section')
+    expect(dock.textContent).toContain('Working')
+    // The workflow row is titled by the step the run is on, not by the word "Workflow".
+    expect(document.querySelector('[data-slot="run-activity-workflow"]')?.textContent).toContain('Do the task')
+  })
+
+  it('quarantined delegation metadata adds no workers section — and no dock of its own', () => {
+    // `{ role: 'invalid' }` is what the contract parks unreadable metadata as, and
+    // RunRelationshipsPanel renders nothing for it. Counting it as a section would inflate the
+    // dock's tally and leave an empty bordered panel behind.
+    renderView(<ThreadView run={run('done', { delegation: { role: 'invalid' } } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    expect(document.querySelector('[data-slot="run-activity-workers"]')).toBeNull()
+    expect(document.querySelector('[data-slot="run-activity-dock"]')).toBeNull()
+  })
+
+  it('a live run is never reported as All complete, however quiet its rows are', () => {
+    // A parent parked on its workers has no workflow, agent or plan rows at all, and a running
+    // run's visible items settle between turns — completeness is a claim about the run.
+    const delegation = { role: 'root', permissions: [], receipts: [] }
+    renderView(<ThreadView run={run('waiting', { id: 'dock-waiting', delegation } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    const status = document.querySelector('[data-slot="run-activity-status"]')?.textContent
+    expect(status).not.toContain('All complete')
+    expect(status).toContain('In progress')
+  })
+
+  it.each(['failed', 'cancelled'] as const)('a %s workflow step never reads All complete', (status) => {
+    // A terminal run is not a successful one. Failed sub-agents already keep the green summary
+    // away (`subagentCounts` counts only `completed`); a failed or cancelled STEP must too,
+    // or the card contradicts the rail's danger X one click below it.
+    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status, iterations: 1, tokensUsed: 0 }]
+    renderView(<ThreadView run={run('done', { id: `dock-${status}`, steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    const summary = document.querySelector('[data-slot="run-activity-status"]')?.textContent
+    expect(summary).not.toContain('All complete')
+    // Not "In progress" either: the run is over, so the header names an outcome (#402 feedback).
+    expect(summary).toContain('Incomplete')
+  })
+
+  it('a finished run with everything settled still reads All complete', () => {
+    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+    renderView(<ThreadView run={run('done', { id: 'dock-done', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).toContain('All complete')
+  })
+
+  it.each([
+    ['failed', 'Failed'],
+    ['cancelled', 'Cancelled'],
+  ] as const)('a %s run says so instead of All complete', (status, summary) => {
+    // `runIsTerminal` is true for every settled status, but settled is not successful: a run
+    // that failed with a finished workflow behind it was reading the green "All complete".
+    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+    renderView(<ThreadView run={run(status, { id: `dock-${status}`, steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    const status_ = document.querySelector('[data-slot="run-activity-status"]')?.textContent
+    expect(status_).not.toContain('All complete')
+    expect(status_).toContain(summary)
+  })
+
+  it('a run parked at the review gate is not complete either', () => {
+    // Parked awaiting a human, like a `review` STEP, which `railVisual` calls active.
+    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+    renderView(<ThreadView run={run('review', { id: 'dock-review', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).not.toContain('All complete')
+  })
+
+  it('the dock re-derives its collapse default per run, like the docks it replaced', () => {
+    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }]
+    const { rerender } = renderView(
+      <ThreadView run={run('running', { id: 'dock-run-a', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Run activity/ }))
+    expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
+
+    // The route does not remount between tasks: only the run prop changes.
+    rerender(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <ThreadView run={run('running', { id: 'dock-run-b', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('open')
   })
 
   it('a plan in the stream → the dock above the composer area + the compact header mirror', () => {
@@ -823,11 +899,15 @@ describe('ThreadView', () => {
       }),
     ]
     renderView(<ThreadView run={run('running')} thread={reduceThread(withPlan)} />)
-    expect(document.querySelector('[data-slot="plan-dock"]')).not.toBeNull()
-    expect(document.querySelector('[data-slot="plan-count"]')?.textContent).toBe('· 1/3')
-    expect(document.querySelector('[data-slot="plan-mirror"]')?.textContent).toBe('Plan 1/3')
-    // No steps on this run — the rail knows to stay away.
-    expect(document.querySelector('[data-slot="step-rail"]')).toBeNull()
+    expect(document.querySelector('[data-slot="run-activity-dock"]')).not.toBeNull()
+    // The plan is a section of the one dock now — its own card is gone, its meter moved.
+    expect(document.querySelector('[data-slot="plan-dock"]')).toBeNull()
+    expect(
+      document.querySelector('[data-slot="run-activity-plan"] [data-slot="run-activity-meta"]')?.textContent,
+    ).toBe('1 of 3 complete')
+    expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
+    // The workflow rail has moved into the session dock, so the header stays clear.
+    expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
   })
 
   it('plan-kind tool cards stay out of the thread — the dock is their surface (#382)', () => {
@@ -849,7 +929,7 @@ describe('ThreadView', () => {
     ]
     renderView(<ThreadView run={run('running')} thread={reduceThread(events)} />)
     expect(document.querySelector('[data-slot="tool-card"]')).toBeNull()
-    expect(document.querySelector('[data-slot="plan-dock"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="run-activity-plan"]')).not.toBeNull()
   })
 })
 

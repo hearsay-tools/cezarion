@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { AgentsDock } from './agents-dock'
+import { AgentList } from './agents-dock'
 import type { SubagentSummary } from './subagent-dock'
 
 afterEach(cleanup)
@@ -14,89 +14,34 @@ const agent = (over: Partial<SubagentSummary> = {}): SubagentSummary => ({
   ...over,
 })
 
-/** The collapse map is module-level BY DESIGN (the choice must survive route changes), so
- *  every test that toggles needs its own run id or it inherits the previous test's state. */
-let runSeq = 0
-const freshRun = () => `run-${(runSeq += 1)}`
-
-const dock = () => document.querySelector('[data-slot="agents-dock"]')
-const head = () => document.querySelector<HTMLButtonElement>('[data-slot="agents-dock"] > button')!
+/** Since #402 the rows have no head of their own: the Run activity accordion owns the title,
+ *  the odometer and the collapse (`run-activity-dock.test.tsx`). These are the rows. */
+const list = () => document.querySelector('[data-slot="agents-list"]')
 const rows = () => Array.from(document.querySelectorAll('[data-slot="agent-item"]'))
 const glyph = (row: Element) => row.querySelector('[data-slot="agent-glyph"]')!
-/** The dock is collapsed by default now — open it to inspect the per-agent rows. */
-const expand = () => fireEvent.click(head())
 
-describe('AgentsDock — visibility', () => {
+describe('AgentList — visibility', () => {
   it('renders nothing at all when there is no fan-out', () => {
-    render(<AgentsDock runId={freshRun()} agents={[]} />)
-    expect(dock()).toBeNull()
+    render(<AgentList agents={[]} />)
+    expect(list()).toBeNull()
   })
 
   it('mounts once there is at least one agent', () => {
-    render(<AgentsDock runId={freshRun()} agents={[agent()]} />)
-    expect(dock()).not.toBeNull()
+    render(<AgentList agents={[agent()]} />)
+    expect(list()).not.toBeNull()
   })
 })
 
-describe('AgentsDock — the collapsed head', () => {
-  it('is collapsed by default: the slim head carries the odometer and the working agent’s activity', () => {
-    render(
-      <AgentsDock
-        runId={freshRun()}
-        agents={[
-          agent({ id: 'a', status: 'completed' }),
-          agent({ id: 'b', status: 'running', activity: 'Reviewing store layer' }),
-          agent({ id: 'c', status: 'pending' }),
-        ]}
-      />,
-    )
-    // No click — the dock opens collapsed, so the rows are not mounted…
-    expect(head().getAttribute('aria-expanded')).toBe('false')
-    expect(rows()).toHaveLength(0)
-    // …but the one-line head still answers "what's running right now?".
-    expect(document.querySelector('[data-slot="agents-count"]')!.textContent).toContain('1/3')
-    expect(document.querySelector('[data-slot="agents-current"]')!.textContent).toContain('Reviewing store layer')
-  })
-
-  it('reads N/N once every agent settled', () => {
-    render(
-      <AgentsDock runId={freshRun()} agents={[agent({ id: 'a', status: 'completed' }), agent({ id: 'b', status: 'completed' })]} />,
-    )
-    expect(document.querySelector('[data-slot="agents-count"]')!.textContent).toContain('2/2')
-  })
-
-  it('keeps a failed agent out of the numerator but in the denominator', () => {
-    render(
-      <AgentsDock runId={freshRun()} agents={[agent({ id: 'a', status: 'completed' }), agent({ id: 'b', status: 'failed' })]} />,
-    )
-    expect(document.querySelector('[data-slot="agents-count"]')!.textContent).toContain('1/2')
-  })
-
-  it('toggles expanded/collapsed and reports it to assistive tech', () => {
-    render(<AgentsDock runId="run-toggle" agents={[agent()]} />)
-    expect(head().getAttribute('aria-expanded')).toBe('false')
-    expect(rows()).toHaveLength(0)
-    fireEvent.click(head())
-    expect(head().getAttribute('aria-expanded')).toBe('true')
-    expect(rows()).toHaveLength(1)
-    fireEvent.click(head())
-    expect(head().getAttribute('aria-expanded')).toBe('false')
-    expect(rows()).toHaveLength(0)
-  })
-})
-
-describe('AgentsDock — expanded rows', () => {
+describe('AgentList — rows', () => {
   it('shows title, type badge, activity and tool count, in stream order', () => {
     render(
-      <AgentsDock
-        runId={freshRun()}
+      <AgentList
         agents={[
           agent({ id: 'a', title: 'Audit the auth flow', agentType: 'general-purpose', activity: 'Ran npm test', toolCalls: 3 }),
           agent({ id: 'b', title: 'Review the store layer', status: 'completed', toolCalls: 1 }),
         ]}
       />,
     )
-    expand()
     const [first, second] = rows()
     expect(first!.textContent).toContain('Audit the auth flow')
     expect(first!.querySelector('[data-slot="agent-type"]')!.textContent).toBe('general-purpose')
@@ -108,21 +53,18 @@ describe('AgentsDock — expanded rows', () => {
   })
 
   it('renders "starting…" for an agent with no attributed output yet', () => {
-    render(<AgentsDock runId={freshRun()} agents={[agent({ activity: undefined })]} />)
-    expand()
+    render(<AgentList agents={[agent({ activity: undefined })]} />)
     expect(document.querySelector('[data-slot="agent-activity"]')!.textContent).toBe('starting…')
   })
 
   it('omits the type badge when the backend declares none (codex)', () => {
-    render(<AgentsDock runId={freshRun()} agents={[agent({ agentType: undefined })]} />)
-    expand()
+    render(<AgentList agents={[agent({ agentType: undefined })]} />)
     expect(document.querySelector('[data-slot="agent-type"]')).toBeNull()
   })
 
   it('distinguishes status by GLYPH SHAPE, never by color alone', () => {
     render(
-      <AgentsDock
-        runId={freshRun()}
+      <AgentList
         agents={[
           agent({ id: 'a', status: 'running' }),
           agent({ id: 'b', status: 'completed' }),
@@ -130,7 +72,6 @@ describe('AgentsDock — expanded rows', () => {
         ]}
       />,
     )
-    expand()
     const [running, completed, failed] = rows().map(glyph)
     // The running glyph is the pulsing half-disc; the other two are stroked paths.
     expect(running!.querySelector('.fill-pending')).not.toBeNull()
@@ -145,8 +86,7 @@ describe('AgentsDock — expanded rows', () => {
   })
 
   it('renders a stalled agent as interrupted — not pulsing, not a checkmark', () => {
-    render(<AgentsDock runId={freshRun()} agents={[agent({ status: 'running', stalled: true })]} />)
-    expand()
+    render(<AgentList agents={[agent({ status: 'running', stalled: true })]} />)
     const svg = glyph(rows()[0]!)
     expect(svg.getAttribute('data-stalled')).toBe('true')
     // Not the live glyph: no pulse, no amber fill — the run ended, nothing is working.
@@ -159,48 +99,29 @@ describe('AgentsDock — expanded rows', () => {
 
   it('keeps a stalled agent’s real activity line when it produced one', () => {
     render(
-      <AgentsDock runId={freshRun()} agents={[agent({ status: 'running', stalled: true, activity: 'Ran npm test' })]} />,
+      <AgentList agents={[agent({ status: 'running', stalled: true, activity: 'Ran npm test' })]} />,
     )
-    expand()
     expect(document.querySelector('[data-slot="agent-activity"]')!.textContent).toBe('Ran npm test')
   })
 
   it('exposes each status on the row for styling and tests', () => {
-    render(<AgentsDock runId={freshRun()} agents={[agent({ status: 'declined' })]} />)
-    expand()
+    render(<AgentList agents={[agent({ status: 'declined' })]} />)
     expect(rows()[0]!.getAttribute('data-status')).toBe('declined')
   })
 })
 
-describe('AgentsDock — row interaction', () => {
+describe('AgentList — row interaction', () => {
   it('rows are static display when no handler is passed (Phase 1)', () => {
-    render(<AgentsDock runId={freshRun()} agents={[agent()]} />)
-    expand()
+    render(<AgentList agents={[agent()]} />)
     expect(rows()[0]!.querySelector('button')).toBeNull()
   })
 
   it('rows become dialog-opening buttons once a handler is passed (Phase 2)', () => {
     const opened: string[] = []
-    render(<AgentsDock runId={freshRun()} agents={[agent({ id: 'agent-42' })]} onSelect={(id) => opened.push(id)} />)
-    expand()
+    render(<AgentList agents={[agent({ id: 'agent-42' })]} onSelect={(id) => opened.push(id)} />)
     const button = rows()[0]!.querySelector('button')!
     expect(button.getAttribute('aria-haspopup')).toBe('dialog')
     fireEvent.click(button)
     expect(opened).toEqual(['agent-42'])
-  })
-})
-
-describe('AgentsDock — collapse memory', () => {
-  it('remembers an explicit expand per run across remounts', () => {
-    const { unmount } = render(<AgentsDock runId="run-memory" agents={[agent()]} />)
-    fireEvent.click(head()) // expand (default is collapsed)
-    unmount()
-    render(<AgentsDock runId="run-memory" agents={[agent()]} />)
-    expect(head().getAttribute('aria-expanded')).toBe('true')
-  })
-
-  it('does not leak that choice to a different run — a fresh run opens collapsed', () => {
-    render(<AgentsDock runId="run-other" agents={[agent()]} />)
-    expect(head().getAttribute('aria-expanded')).toBe('false')
   })
 })
