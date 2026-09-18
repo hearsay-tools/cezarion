@@ -830,6 +830,17 @@ describe('ThreadView', () => {
     expect(status).toContain('In progress')
   })
 
+  it.each(['failed', 'cancelled'] as const)('a %s workflow step never reads All complete', (status) => {
+    // A terminal run is not a successful one. Failed sub-agents already keep the green summary
+    // away (`subagentCounts` counts only `completed`); a failed or cancelled STEP must too,
+    // or the card contradicts the rail's danger X one click below it.
+    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status, iterations: 1, tokensUsed: 0 }]
+    renderView(<ThreadView run={run('done', { id: `dock-${status}`, steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
+    const summary = document.querySelector('[data-slot="run-activity-status"]')?.textContent
+    expect(summary).not.toContain('All complete')
+    expect(summary).toContain('In progress')
+  })
+
   it('a finished run with everything settled still reads All complete', () => {
     const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
     renderView(<ThreadView run={run('done', { id: 'dock-done', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)

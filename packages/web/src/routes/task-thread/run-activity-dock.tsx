@@ -67,9 +67,11 @@ export function RunActivityDock({
   // `invalid` is the contract's parking spot for unreadable delegation metadata, and
   // RunRelationshipsPanel renders nothing for it — so it is not a section to count or frame.
   const hasWorkers = run.delegation !== undefined && run.delegation.role !== 'invalid'
-  const workflowComplete =
-    workflow.length === 0 ||
-    workflow.every((step) => step.status === 'done' || step.status === 'failed' || step.status === 'cancelled' || step.status === 'skipped')
+  // Complete means SUCCEEDED, not merely settled: a failed or cancelled step keeps the green
+  // summary away, matching `subagentCounts` (which counts only `completed`) and the danger X
+  // the rail shows one click below. `skipped` stays complete — it never ran and never failed.
+  const workflowSucceeded =
+    workflow.length === 0 || workflow.every((step) => step.status === 'done' || step.status === 'skipped')
   const agentCounts = subagentCounts(agents)
   const planCountsValue = planCounts(planEntries)
   const present: SectionKey[] = [
@@ -92,7 +94,7 @@ export function RunActivityDock({
   // on its workers carries no workflow, agent or plan rows at all, and a running run's visible
   // items settle between turns — both would otherwise read "All complete" mid-flight.
   const allComplete =
-    runIsTerminal && workflowComplete && agentCounts.done === agentCounts.total && planCountsValue.done === planCountsValue.total
+    runIsTerminal && workflowSucceeded && agentCounts.done === agentCounts.total && planCountsValue.done === planCountsValue.total
   const summary = allComplete ? 'All complete' : run.status === 'running' ? 'Working' : 'In progress'
 
   return (
