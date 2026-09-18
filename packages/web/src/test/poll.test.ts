@@ -71,6 +71,44 @@ describe('pollFor', () => {
   })
 })
 
+/**
+ * The budgets the 34 copies carried, now that one module owns them.
+ *
+ * This is the property the consolidation lost once already: `queued-stack`'s `waitForStatus`
+ * defaulted to 160 attempts where every other copy used 120, and folding them together silently
+ * took its two setup waits from 80 s to 60 s. A default nobody can see is a default nobody
+ * notices changing, so the numbers are pinned here and a change to them has to be deliberate.
+ * The callers that need more than the default now pass it (`queued-stack`, `{ tries: 160 }`).
+ */
+describe('the default budgets', () => {
+  const budget = async (call: (options: { intervalMs: number }) => Promise<unknown>): Promise<number> => {
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(() => {
+      calls += 1
+      return Promise.reject(new Error('never up'))
+    }))
+    await call({ intervalMs: 0 }).catch(() => undefined)
+    return calls
+  }
+
+  it('waits 60 × 250 ms for a fixture server to answer health — 15 s', async () => {
+    expect(await budget((options) => waitForHealth('http://127.0.0.1:1', 'x', options))).toBe(60)
+  })
+
+  it('waits 120 × 500 ms for a run to reach a status — 60 s, the budget 6 of the 7 copies used', async () => {
+    expect(await budget((options) => waitForStatus('http://127.0.0.1:1', 'r', ['done'], options))).toBe(120)
+  })
+
+  it('waits 40 × 250 ms by default — 10 s, what pollFor gives a caller that names no budget', async () => {
+    let probes = 0
+    await pollFor(() => {
+      probes += 1
+      return undefined
+    }, () => 'out', { intervalMs: 0 }).catch(() => undefined)
+    expect(probes).toBe(40)
+  })
+})
+
 describe('waitForStatus', () => {
   it('polls through a rejected fetch until the run reaches a wanted status', async () => {
     const answers: Array<() => Promise<Response>> = [

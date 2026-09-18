@@ -109,10 +109,16 @@ beforeAll(async () => {
   await waitForHealth(baseUrl)
 
   // Hold the only slot with a slow turn, then queue the run under test behind it.
+  //
+  // 160 attempts, not the shared 120: this spec chose a longer budget than the other
+  // `waitForStatus` callers before the helpers were folded into `poll.ts`, because these two
+  // waits sit behind a fresh serve boot AND an agent spawn rather than behind a settled server.
+  // Passing it here keeps the 80 s a slow CI runner may need without lengthening every other
+  // spec's failure by 20 s.
   const blockerId = await startRun(baseUrl, 'mock:slow occupy the only agent slot')
-  await waitForStatus(baseUrl, blockerId, ['running'])
+  await waitForStatus(baseUrl, blockerId, ['running'], { tries: 160 })
   queuedId = await startRun(baseUrl, 'mock:done the original prompt')
-  await waitForStatus(baseUrl, queuedId, ['queued'])
+  await waitForStatus(baseUrl, queuedId, ['queued'], { tries: 160 })
 
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)
