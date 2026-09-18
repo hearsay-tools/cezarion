@@ -146,6 +146,32 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
 }
 
 /**
+ * The ONE action the header lifts out of the kebab (#281) — Finish on a task that is waiting on
+ * you, Archive on one that has finished. They share a slot because they never compete for it:
+ * across the seven statuses, exactly one of them is on offer at a time. The single exception is
+ * `review`, where the record is both finishable and archivable, and there Finish wins — at the
+ * review gate it is the verdict, and filing the task away without one is the rarer intent.
+ *
+ * Derived from `runActionFlags` rather than from a second list of statuses, for the reason every
+ * rule in this module lives here: a status added to `finish` or `archive` reaches the promoted
+ * slot automatically, instead of silently keeping the old answer until someone notices the two
+ * lists disagree.
+ *
+ * `undefined` means the slot stays empty. That is running and queued, where the verb the user
+ * wants is Stop — and Stop is the composer's, not the header's.
+ *
+ * `archive` covers unarchiving too: the flag it reads already means "archive when live,
+ * unarchive when archived", so the CONTROL reads the record for its label exactly as the kebab
+ * entry does. Which action is promoted never depends on `archived`.
+ */
+export function primaryRunAction(run: RunRecord): 'finish' | 'archive' | undefined {
+  const flags = runActionFlags(run)
+  if (flags.finish) return 'finish'
+  if (flags.archive) return 'archive'
+  return undefined
+}
+
+/**
  * The prompt behind the conflict chip's "Resolve conflicts" — the words the agent receives.
  *
  * It NAMES the pull request, and that is the load-bearing part: a task can point at several (the

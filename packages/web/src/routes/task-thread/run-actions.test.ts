@@ -11,6 +11,7 @@ import {
   finishTitle,
   isRunActive,
   lastSessionId,
+  primaryRunAction,
   queuePosition,
   resolveConflictsPrompt,
   resumeCommand,
@@ -339,5 +340,56 @@ describe('unstarted continuation (#201)', () => {
     { stopping: true, steps: [] },
   ])('does not offer replay or continuation during termination: %j', (extra) => {
     expect(runActionFlags(run('cancelled', { workflowDef, ...extra })).continueRun).toBe(false)
+  })
+})
+
+describe('primaryRunAction — the one action the header lifts out of the kebab (#281)', () => {
+  // Waiting is the case the issue is about: "Needs you" is marked done far more often than it is
+  // aborted, so Finish must be one click. Archive is the same decision on a finished task — the
+  // slot is shared, only the control differs. Running and queued promote nothing: the header's
+  // verb there is Stop, and Stop lives in the composer.
+  const matrix: Array<{ status: RunStatus; expected: 'finish' | 'archive' | undefined }> = [
+    { status: 'queued', expected: undefined },
+    { status: 'running', expected: undefined },
+    { status: 'waiting', expected: 'finish' },
+    // The ONE status offering both. Finish wins: at the review gate it is the verdict, and
+    // filing the task away without one is the rarer intent, so Archive stays in the kebab.
+    { status: 'review', expected: 'finish' },
+    { status: 'done', expected: 'archive' },
+    { status: 'failed', expected: 'archive' },
+    { status: 'cancelled', expected: 'archive' },
+  ]
+
+  it.each(matrix)('$status (live) → $expected', ({ status, expected }) => {
+    expect(primaryRunAction(run(status))).toBe(expected)
+  })
+
+  // `archived` relabels the control (Archive → Unarchive) but never changes WHICH action is
+  // promoted, exactly as it never changes `runActionFlags.archive`.
+  it.each(matrix)('$status (archived) → $expected', ({ status, expected }) => {
+    expect(primaryRunAction(run(status, { archived: true }))).toBe(expected)
+  })
+
+  it('never promotes an action the flags do not offer', () => {
+    for (const { status } of matrix) {
+      for (const archived of [false, true]) {
+        const record = run(status, { archived })
+        const promoted = primaryRunAction(record)
+        if (promoted === undefined) continue
+        expect(runActionFlags(record)[promoted]).toBe(true)
+      }
+    }
+  })
+
+  it('promotes something whenever either action is available', () => {
+    // The complement of the rule above: a status offering Finish or Archive must fill the slot,
+    // or the button would vanish on a task that has a verb to offer.
+    for (const { status } of matrix) {
+      for (const archived of [false, true]) {
+        const record = run(status, { archived })
+        const flags = runActionFlags(record)
+        expect(primaryRunAction(record) !== undefined).toBe(flags.finish || flags.archive)
+      }
+    }
   })
 })
