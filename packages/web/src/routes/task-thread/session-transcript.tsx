@@ -1,5 +1,4 @@
 import { useMemo, type ReactNode } from 'react'
-import { Link } from '@/lib/project-router'
 
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 
@@ -14,6 +13,7 @@ import {
   ToolCard,
   ToolStreak,
   UserBubble,
+  WorkerConversationGroup,
 } from './thread-items'
 import { ThreadCardCache } from './thread-open-cards'
 import { threadRenderMode } from './thread-scroll'
@@ -25,6 +25,7 @@ import {
   type ThreadScrollControls,
 } from './thread-scroller'
 import type { ThreadAsk, ThreadEntry, ThreadState } from './thread-state'
+import type { TaskTitleMap } from './conversation-presentation'
 
 export interface TranscriptUserMessage {
   text: string
@@ -67,6 +68,7 @@ export interface SessionTranscriptProps {
   /** Main-document integration preserves the shell's existing dock-owned jump pill. */
   scrollControls?: ThreadScrollControls
   renderMode?: 'flat' | 'virtual'
+  taskTitles?: TaskTitleMap
 }
 
 /** The main run record plus reduced turns, without rendering or backend inspection. */
@@ -150,6 +152,7 @@ export function SessionTranscript({
   messageActions,
   scrollControls,
   renderMode,
+  taskTitles,
 }: SessionTranscriptProps) {
   const rowModels = useMemo(() => buildTranscriptRows(sections, runId), [sections, runId])
   const internalScroll = useThreadScroll(`${runId}:${viewId}`, { surface: mode })
@@ -165,10 +168,16 @@ export function SessionTranscript({
               actions={messageActions?.[row.key]}
             />
           ) : (
-            <ThreadBlockRenderer block={row.content.block} scope={row.scope} renderAsk={renderAsk} />
+            <ThreadBlockRenderer
+              block={row.content.block}
+              scope={row.scope}
+              renderAsk={renderAsk}
+              runId={runId}
+              taskTitles={taskTitles}
+            />
           ),
       })),
-    [messageActions, renderAsk, rowModels],
+    [messageActions, renderAsk, rowModels, runId, taskTitles],
   )
   const rowMode = renderMode ?? threadRenderMode('', rows.length)
 
@@ -229,14 +238,18 @@ function ThreadBlockRenderer({
   block,
   scope,
   renderAsk,
+  runId,
+  taskTitles,
 }: {
   block: ThreadBlock
   scope: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
+  runId: string
+  taskTitles?: TaskTitleMap
 }): ReactNode {
   switch (block.kind) {
     case 'entry':
-      return <ThreadEntryRenderer entry={block.entry} scope={scope} renderAsk={renderAsk} />
+      return <ThreadEntryRenderer entry={block.entry} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} />
     case 'tool-card':
       return (
         <ToolCard
@@ -244,7 +257,7 @@ function ThreadBlockRenderer({
           nested={block.children}
           cacheKey={`${scope}:${block.id}`}
           renderNested={(entries, nestedScope) => (
-            <GroupedEntries entries={entries} scope={nestedScope} renderAsk={renderAsk} />
+            <GroupedEntries entries={entries} scope={nestedScope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} />
           )}
         />
       )
@@ -254,10 +267,12 @@ function ThreadBlockRenderer({
       return (
         <ToolStreak count={block.count}>
           {block.blocks.map((inner) => (
-            <ThreadBlockRenderer key={inner.id} block={inner} scope={scope} renderAsk={renderAsk} />
+            <ThreadBlockRenderer key={inner.id} block={inner} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} />
           ))}
         </ToolStreak>
       )
+    case 'worker-conversation':
+      return <WorkerConversationGroup block={block} runId={runId} taskTitles={taskTitles} />
     default:
       return assertNever(block)
   }
@@ -267,13 +282,17 @@ function GroupedEntries({
   entries,
   scope,
   renderAsk,
+  runId,
+  taskTitles,
 }: {
   entries: readonly ThreadEntry[]
   scope: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
+  runId: string
+  taskTitles?: TaskTitleMap
 }) {
   return groupThreadItems([...entries]).map((block) => (
-    <ThreadBlockRenderer key={block.id} block={block} scope={scope} renderAsk={renderAsk} />
+    <ThreadBlockRenderer key={block.id} block={block} scope={scope} renderAsk={renderAsk} runId={runId} taskTitles={taskTitles} />
   ))
 }
 
@@ -281,10 +300,14 @@ function ThreadEntryRenderer({
   entry,
   scope,
   renderAsk,
+  runId,
+  taskTitles,
 }: {
   entry: ThreadEntry
   scope: string
   renderAsk?: (ask: ThreadAsk) => ReactNode
+  runId: string
+  taskTitles?: TaskTitleMap
 }): ReactNode {
   switch (entry.kind) {
     case 'message':
@@ -298,26 +321,31 @@ function ThreadEntryRenderer({
     case 'tool':
       return <ToolCard item={entry} cacheKey={`${scope}:${entry.id}`} />
     case 'note':
-      if (entry.conversation) {
-        const message = entry.conversation
-        const linkClass = 'inline-flex min-h-11 max-w-full items-center break-all underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-        return <div data-slot="conversation-message" className="min-w-0 rounded-md border border-border px-4 py-3 text-sm">
-          <div className="mb-2 min-w-0 space-y-1 break-all text-xs text-muted-foreground">
-            <p className="capitalize">Agent {message.kind}</p>
-            <p><Link className={linkClass} to={`/tasks/${message.senderRunId}`} aria-label={`Sender task ${message.senderRunId}`}>Sender task {message.senderRunId}</Link></p>
-            <p><Link className={linkClass} to={`/tasks/${message.recipientRunId}`} aria-label={`Recipient task ${message.recipientRunId}`}>Recipient task {message.recipientRunId}</Link></p>
-            <p>Message {message.id}{message.kind === 'request' || message.requestId ? ` · Request ${message.requestId ?? message.id}` : ''}</p>
-            <p>Delivery: {message.delivery}{message.state && message.state !== 'accepted' ? ` · ${message.state}` : ''}</p>
-          </div>
-          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"><NoteLine note={entry} /></div>
-        </div>
-      }
       return entry.attribution ? <div className="min-w-0 rounded-md border border-border px-4 py-3 text-sm">
         <p className="mb-2 break-all text-xs text-muted-foreground">{entry.attribution.source === 'agent'
           ? `Agent input from parent ${entry.attribution.parentRunId}`
           : `Worker lifecycle context for parent ${entry.attribution.parentRunId}`}</p>
         <NoteLine note={entry} />
       </div> : <NoteLine note={entry} />
+    case 'conversation':
+      return (
+        <WorkerConversationGroup
+          runId={runId}
+          taskTitles={taskTitles}
+          block={{
+            kind: 'worker-conversation',
+            id: entry.id,
+            batches: [{
+              id: entry.id,
+              kind: entry.messageKind,
+              text: entry.text,
+              senderRunId: entry.senderRunId,
+              messages: [entry],
+              related: [],
+            }],
+          }}
+        />
+      )
     case 'image':
       return <ImageItem image={entry} />
     case 'ask':

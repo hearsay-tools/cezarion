@@ -905,3 +905,54 @@ describe('reduceThread — AskUser cards (#473)', () => {
     expect(msg?.text).toBe(raw)
   })
 })
+
+describe('reduceThread — parent/worker conversation', () => {
+  const senderRunId = '11111111-1111-4111-8111-111111111111'
+  const recipientRunId = '22222222-2222-4222-8222-222222222222'
+  const id = '33333333-3333-4333-8333-333333333333'
+  const message = {
+    id,
+    senderRunId,
+    recipientRunId,
+    kind: 'request' as const,
+    text: 'Please inspect the parser',
+    createdAt: '2026-09-08T12:00:00.000Z',
+    requestHash: 'a'.repeat(64),
+    state: 'accepted' as const,
+  }
+  const outcome = { requestId: id, status: 'replied' as const, observedAt: message.createdAt, replyId: '44444444-4444-4444-8444-444444444444' }
+
+  it('attaches a later outcome onto the request and never emits a standalone outcome note', () => {
+    const { turns } = reduceThread([
+      line(1, 'conversation-message', { message, delivery: 'queued' }),
+      line(2, 'conversation-message', { message, delivery: 'queued' }),
+      line(3, 'request-outcome', { outcome }),
+      line(4, 'request-outcome', { outcome }),
+    ])
+    expect(turns[0]!.items).toHaveLength(1)
+    expect(turns[0]!.items[0]).toMatchObject({
+      kind: 'conversation',
+      messageId: id,
+      delivery: 'queued',
+      outcome: { status: 'replied', replyId: outcome.replyId },
+    })
+  })
+
+  it('attaches an outcome that arrived before the request projection', () => {
+    const { turns } = reduceThread([
+      line(1, 'request-outcome', { outcome }),
+      line(2, 'conversation-message', { message, delivery: 'delivered' }),
+    ])
+    expect(turns[0]!.items).toHaveLength(1)
+    expect(turns[0]!.items[0]).toMatchObject({
+      kind: 'conversation',
+      messageId: id,
+      outcome: { status: 'replied' },
+    })
+  })
+
+  it('marks an unanswered request pending', () => {
+    const { turns } = reduceThread([line(1, 'conversation-message', { message, delivery: 'queued' })])
+    expect(turns[0]!.items[0]).toMatchObject({ kind: 'conversation', outcome: { status: 'pending' } })
+  })
+})

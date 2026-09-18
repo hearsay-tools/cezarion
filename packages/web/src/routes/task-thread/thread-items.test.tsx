@@ -398,6 +398,15 @@ const MESSAGE_COLOR_TOKENS = [
   'message-agent-accent',
 ] as const
 
+const WORKER_MESSAGE_COLOR_TOKENS = [
+  'message-outbound-bg',
+  'message-outbound-border',
+  'message-outbound-accent',
+  'message-inbound-bg',
+  'message-inbound-border',
+  'message-inbound-accent',
+] as const
+
 describe('message color tokens', () => {
   it('defines six message color tokens for light and dark', () => {
     const css = readFileSync(
@@ -407,6 +416,20 @@ describe('message color tokens', () => {
     const rootBlock = css.slice(css.indexOf(':root {'), css.indexOf('.light {'))
     const lightBlock = css.slice(css.indexOf('.light {'), css.indexOf('@theme'))
     for (const token of MESSAGE_COLOR_TOKENS) {
+      expect(rootBlock).toContain(`--${token}:`)
+      expect(lightBlock).toContain(`--${token}:`)
+      expect(css).toContain(`--color-${token}: var(--${token})`)
+    }
+  })
+
+  it('defines inbound and outbound worker conversation tokens for light and dark', () => {
+    const css = readFileSync(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../styles/index.css'),
+      'utf8',
+    )
+    const rootBlock = css.slice(css.indexOf(':root {'), css.indexOf('.light {'))
+    const lightBlock = css.slice(css.indexOf('.light {'), css.indexOf('@theme'))
+    for (const token of WORKER_MESSAGE_COLOR_TOKENS) {
       expect(rootBlock).toContain(`--${token}:`)
       expect(lightBlock).toContain(`--${token}:`)
       expect(css).toContain(`--color-${token}: var(--${token})`)
@@ -470,15 +493,50 @@ describe('parent/worker conversation transcript', () => {
     const events = asRunEvents([{ type: 'ask.requested', requestId: 'human', questions: [{ header: 'Proceed?', question: 'Proceed?', options: [] }] }, { type: 'conversation-message', message, delivery: 'queued' }, { type: 'conversation-message', message, delivery: 'queued' }, { type: 'request-outcome', outcome }, { type: 'request-outcome', outcome }]);
     const state = reduceThread(events);
     const entries = state.turns.flatMap(turn => turn.items);
-    expect(entries.filter(entry => entry.kind === 'note')).toHaveLength(2);
+    expect(entries.filter(entry => entry.kind === 'conversation')).toHaveLength(1);
+    expect(entries.filter(entry => entry.kind === 'note')).toHaveLength(0);
     expect(entries.find(entry => entry.kind === 'ask')).toMatchObject({ resolved: false });
-    render(<MemoryRouter initialEntries={['/p/acme/tasks/current']}><SessionTranscript runId="current" viewId="main" sections={[{ id: 'conversation', entries }]} mode="document" /></MemoryRouter>);
-    expect(screen.getByRole('link', { name: `Sender task ${senderRunId}` }).getAttribute('href')).toBe(`/p/acme/tasks/${senderRunId}`);
-    expect(screen.getByRole('link', { name: `Recipient task ${recipientRunId}` }).getAttribute('href')).toBe(`/p/acme/tasks/${recipientRunId}`);
+    render(<MemoryRouter initialEntries={['/p/acme/tasks/current']}><SessionTranscript runId={senderRunId} viewId="main" sections={[{ id: 'conversation', entries }]} mode="document" taskTitles={{ [senderRunId]: 'Parent', [recipientRunId]: 'Alpha' }} /></MemoryRouter>);
+    expect(screen.getByRole('link', { name: 'SENT to Alpha' }).getAttribute('href')).toBe(`/p/acme/tasks/${recipientRunId}`);
     expect(screen.getByText(/Please inspect the parser/)).toBeTruthy();
-    expect(screen.getByText(/Request outcome: replied/)).toBeTruthy();
-    expect(screen.getByText(/Delivery: queued/)).toBeTruthy();
+    expect(screen.getByText('Replied')).toBeTruthy();
+    expect(screen.getByText('Request')).toBeTruthy();
+    expect(screen.queryByText(/Request outcome:/)).toBeNull();
+    expect(document.body.textContent).not.toContain(senderRunId);
+    expect(document.body.textContent).not.toContain(recipientRunId);
+    fireEvent.click(screen.getByRole('button', { name: /Details/ }));
+    expect(screen.getByText(id, { exact: false })).toBeTruthy();
+    expect(screen.getByText(/Queued/)).toBeTruthy();
   });
+
+  it('groups identical parallel requests and nests the matching reply', () => {
+    const parent = '11111111-1111-4111-8111-111111111111'
+    const alpha = '22222222-2222-4222-8222-222222222222'
+    const bravo = '55555555-5555-4555-8555-555555555555'
+    const reqA = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', senderRunId: parent, recipientRunId: alpha, kind: 'request', text: 'Ping both workers', createdAt: '2026-09-08T12:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' }
+    const reqB = { ...reqA, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', recipientRunId: bravo }
+    const reply = { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', senderRunId: alpha, recipientRunId: parent, kind: 'reply', requestId: reqA.id, text: 'Got it — Alpha pong', createdAt: '2026-09-08T12:01:00.000Z', requestHash: 'b'.repeat(64), state: 'accepted' }
+    const events = asRunEvents([
+      { type: 'conversation-message', message: reqA, delivery: 'delivered' },
+      { type: 'conversation-message', message: reqB, delivery: 'delivered' },
+      { type: 'request-outcome', outcome: { requestId: reqA.id, status: 'replied', observedAt: reply.createdAt, replyId: reply.id } },
+      { type: 'conversation-message', message: reply, delivery: 'delivered' },
+    ])
+    const entries = reduceThread(events).turns.flatMap(turn => turn.items)
+    render(
+      <MemoryRouter initialEntries={['/p/acme/tasks/current']}>
+        <SessionTranscript runId={parent} viewId="main" sections={[{ id: 'conversation', entries }]} mode="document" taskTitles={{ [parent]: 'Parent', [alpha]: 'Alpha', [bravo]: 'Bravo' }} />
+      </MemoryRouter>,
+    )
+    expect(document.querySelectorAll('[data-slot="worker-conversation-card"]')).toHaveLength(1)
+    expect(screen.getByRole('link', { name: 'SENT to Alpha' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Alpha — Replied' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'SENT to Bravo' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Bravo — Pending' })).toBeTruthy()
+    expect(screen.getByText('Got it — Alpha pong')).toBeTruthy()
+    expect(document.querySelector('[data-slot="conversation-related"]')?.textContent).toContain('RECEIVED from')
+    expect(document.querySelector('[data-direction="outbound"]')).not.toBeNull()
+  })
 });
 
 
@@ -491,9 +549,9 @@ describe('conversation delivery replay', () => {
     const ack = { type: 'agent-input', input: { id, source: 'agent', parentRunId: senderRunId, text: message.text, createdAt: message.createdAt, deliveredAt: message.createdAt, conversation: attribution } };
     const entries = reduceThread(asRunEvents(ackFirst ? [ack, projection, ack] : [projection, ack, projection])).turns.flatMap(turn => turn.items);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ conversation: { delivery: 'delivered', senderRunId, recipientRunId } });
+    expect(entries[0]).toMatchObject({ kind: 'conversation', delivery: 'delivered', senderRunId, recipientRunId });
     const senderEntries = reduceThread(asRunEvents([projection, { ...projection, delivery: 'delivered' }, projection])).turns.flatMap(turn => turn.items);
     expect(senderEntries).toHaveLength(1);
-    expect(senderEntries[0]).toMatchObject({ conversation: { delivery: 'delivered' } });
+    expect(senderEntries[0]).toMatchObject({ kind: 'conversation', delivery: 'delivered' });
   });
 });

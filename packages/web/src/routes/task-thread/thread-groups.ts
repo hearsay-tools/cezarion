@@ -1,6 +1,6 @@
 import type { UiToolItem } from '@open-mercato/cezar-api-client'
 
-import type { ThreadEntry } from './thread-state'
+import type { ThreadConversationMessage, ThreadEntry } from './thread-state'
 
 /**
  * Pure display grouping over one turn's reduced entries (spec §"Task thread"; the opencode
@@ -51,12 +51,28 @@ export interface StreakBlock {
   blocks: Array<ToolCardBlock | ContextGroupBlock>
 }
 
-export type ThreadBlock = EntryBlock | ToolCardBlock | ContextGroupBlock | StreakBlock
+export interface WorkerConversationBatch {
+  id: string
+  kind: ThreadConversationMessage['messageKind']
+  text: string
+  senderRunId: string
+  messages: ThreadConversationMessage[]
+  related: ThreadConversationMessage[]
+}
+
+export interface WorkerConversationBlock {
+  kind: 'worker-conversation'
+  id: string
+  batches: WorkerConversationBatch[]
+}
+
+export type ThreadBlock = EntryBlock | ToolCardBlock | ContextGroupBlock | StreakBlock | WorkerConversationBlock
 
 /** How many trailing tool blocks stay visible before older ones fold (legacy STREAK_TAIL). */
 export const STREAK_TAIL = 3
 
 const isTool = (entry: ThreadEntry): entry is UiToolItem => entry.kind === 'tool'
+const isConversation = (entry: ThreadEntry): entry is ThreadConversationMessage => entry.kind === 'conversation'
 
 /** Context-group membership: exploration tools only, and only once they finished. */
 const isGroupable = (item: UiToolItem): boolean =>
@@ -128,6 +144,10 @@ export function groupThreadItems(allEntries: ThreadEntry[]): ThreadBlock[] {
     }
   }
 
+  const conversationItems = top.filter(isConversation)
+  const conversationGroup = conversationItems.length > 0 ? groupWorkerConversation(conversationItems) : undefined
+  let conversationEmitted = false
+
   // Pass 2 — context groups over the top level.
   const blocks: ThreadBlock[] = []
   let run: UiToolItem[] = []
@@ -150,6 +170,14 @@ export function groupThreadItems(allEntries: ThreadEntry[]): ThreadBlock[] {
     run = []
   }
   for (const entry of top) {
+    if (isConversation(entry)) {
+      flushRun()
+      if (conversationGroup && !conversationEmitted) {
+        blocks.push(conversationGroup)
+        conversationEmitted = true
+      }
+      continue
+    }
     // A tool that adopted children is a container (a Task card) — never groupable away.
     if (isTool(entry) && isGroupable(entry) && !childrenOf.has(entry.id)) {
       run.push(entry)
@@ -199,3 +227,81 @@ export function groupThreadItems(allEntries: ThreadEntry[]): ThreadBlock[] {
 
   return folded
 }
+
+export function groupWorkerConversation(items: readonly ThreadConversationMessage[]): WorkerConversationBlock {
+  const assigned = new Set<string>()
+  const batches: WorkerConversationBatch[] = []
+  const batchByRequestId = new Map<string, WorkerConversationBatch>()
+
+  const attachRelated = (batch: WorkerConversationBatch, message: ThreadConversationMessage) => {
+    if (assigned.has(message.id)) return
+    batch.related.push(message)
+    assigned.add(message.id)
+  }
+
+  for (const item of items) {
+    if (assigned.has(item.id) || item.messageKind !== 'request') continue
+    const peers = items.filter(
+      (candidate) =>
+        !assigned.has(candidate.id) &&
+        candidate.messageKind === 'request' &&
+        candidate.senderRunId === item.senderRunId &&
+        candidate.text === item.text,
+    )
+    const batch: WorkerConversationBatch = {
+      id: `worker-batch:${item.messageId}`,
+      kind: 'request',
+      text: item.text,
+      senderRunId: item.senderRunId,
+      messages: peers,
+      related: [],
+    }
+    for (const peer of peers) {
+      assigned.add(peer.id)
+      batchByRequestId.set(peer.messageId, batch)
+    }
+    batches.push(batch)
+  }
+
+  for (const item of items) {
+    if (assigned.has(item.id)) continue
+    const requestId = item.requestId
+    if (requestId !== undefined) {
+      const batch = batchByRequestId.get(requestId)
+      if (batch) {
+        attachRelated(batch, item)
+        continue
+      }
+      const siblings = items.filter(
+        (candidate) => !assigned.has(candidate.id) && candidate.requestId === requestId,
+      )
+      const orphan: WorkerConversationBatch = {
+        id: `worker-batch:${item.messageId}`,
+        kind: item.messageKind,
+        text: item.text,
+        senderRunId: item.senderRunId,
+        messages: siblings,
+        related: [],
+      }
+      for (const sibling of siblings) assigned.add(sibling.id)
+      batches.push(orphan)
+      continue
+    }
+    assigned.add(item.id)
+    batches.push({
+      id: `worker-batch:${item.messageId}`,
+      kind: item.messageKind,
+      text: item.text,
+      senderRunId: item.senderRunId,
+      messages: [item],
+      related: [],
+    })
+  }
+
+  return {
+    kind: 'worker-conversation',
+    id: `worker:${items[0]!.id}`,
+    batches,
+  }
+}
+

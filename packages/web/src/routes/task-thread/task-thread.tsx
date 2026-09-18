@@ -51,6 +51,7 @@ import {
   mainTranscriptSections,
   type TranscriptMessageActions,
 } from './session-transcript'
+import { titlesFromRuns } from './conversation-presentation'
 import {
   reduceThread,
   threadFilePaths,
@@ -178,6 +179,7 @@ export function ThreadView({
   onMarkedUnread?: (runId: string) => void
 }) {
   const projectId = useActiveProjectId()
+  const runs = useRuns()
   const hasPendingHumanAsk = history
     ? pendingHumanAsk(history.currentEvents) !== undefined
     : currentThread.turns.some(turn => turn.items.some(item => item.kind === 'ask' && !item.resolved))
@@ -269,6 +271,7 @@ export function ThreadView({
 
   const sections = useMemo(() => mainTranscriptSections(run, thread), [run, thread])
   const rows = useMemo(() => buildTranscriptRows(sections, run.id), [sections, run.id])
+  const taskTitles = useMemo(() => titlesFromRuns(run, runs.data), [run, runs.data])
   const renderAsk = useCallback((ask: ThreadAsk) => <AskCard ask={ask} run={run} />, [run])
   const messageActions = useMemo<Readonly<Record<string, TranscriptMessageActions>> | undefined>(() => {
     if (edit === undefined) return undefined
@@ -322,6 +325,7 @@ export function ThreadView({
           messageActions={messageActions}
           scrollControls={scroll}
           renderMode={mode}
+          taskTitles={taskTitles}
         />
 
         {thread.turns.length === 0 ? (
@@ -395,6 +399,7 @@ export function ThreadView({
         renderAsk={renderAsk}
         agent={openAgent}
         entries={openAgentChildren}
+        taskTitles={taskTitles}
         onClose={() => setOpenAgentId(undefined)}
       />
 

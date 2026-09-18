@@ -9,10 +9,18 @@ import { resolveApiUrl, isImageAttachmentName, type FileDiff, type ToolKind, typ
 import { cn } from '@/lib/utils'
 
 import { Markdown } from './markdown'
-import { splitToolTitle, streakLabel, type ContextGroupBlock } from './thread-groups'
+import { splitToolTitle, streakLabel, type ContextGroupBlock, type WorkerConversationBatch, type WorkerConversationBlock } from './thread-groups'
 import { useThreadCardCache } from './thread-open-cards'
 import { isNearBottom } from './thread-scroll'
-import type { ThreadEntry, ThreadImage, ThreadNote, ThreadProviderAuthRequired } from './thread-state'
+import type { ThreadConversationMessage, ThreadEntry, ThreadImage, ThreadNote, ThreadProviderAuthRequired } from './thread-state'
+import {
+  conversationDeliveryLabel,
+  conversationDirection,
+  conversationKindLabel,
+  conversationOutcomeLabel,
+  taskTitleFor,
+  type TaskTitleMap,
+} from './conversation-presentation'
 
 // The stick rule lives with the rest of the scroll math now; re-exported because this is
 // where the live tail below consumes it.
@@ -266,6 +274,200 @@ export function AssistantMessage({ text }: { text: string }) {
       <Markdown>{text}</Markdown>
     </ConversationMessage>
   )
+}
+
+const CONVERSATION_SURFACE = {
+  outbound: {
+    classes: 'border-message-outbound-border bg-message-outbound-bg',
+    accent: 'text-message-outbound-accent',
+  },
+  inbound: {
+    classes: 'border-message-inbound-border bg-message-inbound-bg',
+    accent: 'text-message-inbound-accent',
+  },
+} as const
+
+const conversationLinkClass =
+  'inline-flex min-h-11 max-w-full items-center break-words underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+
+export function WorkerConversationGroup({
+  block,
+  runId,
+  taskTitles,
+}: {
+  block: WorkerConversationBlock
+  runId: string
+  taskTitles?: TaskTitleMap
+}) {
+  return (
+    <div data-slot="worker-conversation" className="flex min-w-0 flex-col gap-2">
+      {block.batches.map((batch) => (
+        <WorkerConversationBatchCard key={batch.id} batch={batch} runId={runId} taskTitles={taskTitles} />
+      ))}
+    </div>
+  )
+}
+
+function WorkerConversationBatchCard({
+  batch,
+  runId,
+  taskTitles,
+}: {
+  batch: WorkerConversationBatch
+  runId: string
+  taskTitles?: TaskTitleMap
+}) {
+  const direction = conversationDirection(batch.messages[0] ?? { senderRunId: batch.senderRunId }, runId)
+  const surface = CONVERSATION_SURFACE[direction]
+  const counterpartIds = uniqueIds(
+    batch.messages.map((message) => (direction === 'outbound' ? message.recipientRunId : message.senderRunId)),
+  )
+  const headingPrefix = direction === 'outbound' ? 'SENT to' : 'RECEIVED from'
+  const heading = `${headingPrefix} ${counterpartIds.map((id) => taskTitleFor(id, taskTitles)).join(', ')}`
+  const requestMissing = batch.kind !== 'request' && batch.messages.some((message) => message.requestId !== undefined)
+  return (
+    <article
+      data-slot="worker-conversation-card"
+      data-direction={direction}
+      data-kind={batch.kind}
+      className={cn('flex w-full min-w-0 flex-col gap-2 rounded-[8px] border p-3 md:px-4 md:py-[14px]', surface.classes)}
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <p className={cn('m-0 flex min-w-0 flex-wrap items-center gap-x-2 text-[11px] leading-none font-semibold tracking-[0.6px] uppercase', surface.accent)}>
+          <span>{headingPrefix}</span>
+          {counterpartIds.map((id, index) => (
+            <span key={id} className="inline-flex min-w-0 items-center gap-x-2 normal-case tracking-normal">
+              {index > 0 ? <span aria-hidden>,</span> : null}
+              <Link className={conversationLinkClass} to={`/tasks/${id}`} aria-label={`${headingPrefix} ${taskTitleFor(id, taskTitles)}`}>
+                {taskTitleFor(id, taskTitles)}
+              </Link>
+            </span>
+          ))}
+        </p>
+        <span data-slot="conversation-kind" className="rounded-full bg-background/60 px-2 py-0.5 text-[10.5px] font-semibold tracking-[0.05em] text-foreground uppercase">
+          {conversationKindLabel(batch.kind)}
+        </span>
+        {batch.kind === 'request' && batch.messages.length === 1 && batch.messages[0]?.outcome ? (
+          <span data-slot="conversation-outcome" className="text-xs font-medium text-muted-foreground">
+            {conversationOutcomeLabel(batch.messages[0].outcome.status)}
+          </span>
+        ) : null}
+      </div>
+      <div className="min-w-0 break-words text-[14px] leading-[1.6] text-foreground select-text [overflow-wrap:anywhere]">
+        <Markdown breaks>{batch.text}</Markdown>
+      </div>
+      {batch.kind === 'request' && batch.messages.length > 1 ? (
+        <ul className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+          {batch.messages.map((message) => (
+            <li key={message.id} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2">
+              <Link
+                className={conversationLinkClass}
+                to={`/tasks/${message.recipientRunId}`}
+                aria-label={`${taskTitleFor(message.recipientRunId, taskTitles)}${message.outcome ? ` — ${conversationOutcomeLabel(message.outcome.status)}` : ''}`}
+              >
+                {taskTitleFor(message.recipientRunId, taskTitles)}
+              </Link>
+              {message.outcome ? (
+                <span data-slot="conversation-outcome">{conversationOutcomeLabel(message.outcome.status)}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {requestMissing ? (
+        <p data-slot="conversation-connector" className="text-xs text-muted-foreground">
+          Linked to an earlier request
+        </p>
+      ) : null}
+      {batch.related.length > 0 ? (
+        <div data-slot="conversation-related" className="flex flex-col gap-2 border-l-2 border-current/20 py-1 pl-3">
+          {batch.related.map((message) => (
+            <RelatedConversationMessage key={message.id} message={message} runId={runId} taskTitles={taskTitles} />
+          ))}
+        </div>
+      ) : null}
+      <ConversationInspectDetails batch={batch} heading={heading} />
+    </article>
+  )
+}
+
+function RelatedConversationMessage({
+  message,
+  runId,
+  taskTitles,
+}: {
+  message: ThreadConversationMessage
+  runId: string
+  taskTitles?: TaskTitleMap
+}) {
+  const direction = conversationDirection(message, runId)
+  const counterpartId = direction === 'outbound' ? message.recipientRunId : message.senderRunId
+  const headingPrefix = direction === 'outbound' ? 'SENT to' : 'RECEIVED from'
+  return (
+    <div data-slot="conversation-related-item" data-kind={message.messageKind} className="min-w-0">
+      <p className="m-0 mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold tracking-[0.6px] uppercase text-muted-foreground">
+        <span>{headingPrefix}</span>
+        <Link className={conversationLinkClass} to={`/tasks/${counterpartId}`} aria-label={`${headingPrefix} ${taskTitleFor(counterpartId, taskTitles)}`}>
+          {taskTitleFor(counterpartId, taskTitles)}
+        </Link>
+        <span data-slot="conversation-kind" className="rounded-full bg-background/60 px-2 py-0.5 text-[10.5px] font-semibold tracking-[0.05em] text-foreground uppercase">
+          {conversationKindLabel(message.messageKind)}
+        </span>
+      </p>
+      <div className="min-w-0 break-words text-[14px] leading-[1.6] text-foreground [overflow-wrap:anywhere]">
+        <Markdown breaks>{message.text}</Markdown>
+      </div>
+    </div>
+  )
+}
+
+function ConversationInspectDetails({ batch, heading }: { batch: WorkerConversationBatch; heading: string }) {
+  return (
+    <Collapsible data-slot="conversation-details" className="group/details">
+      <CollapsibleTrigger type="button" className="inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-md px-2 text-left text-xs font-medium text-muted-foreground hover:bg-background/40 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none">
+        <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 transition-transform group-data-[state=open]/details:rotate-90" />
+        Details
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <dl className="grid min-w-0 gap-1 break-all px-2 pb-1 font-mono text-[11px] text-muted-foreground">
+          <div className="sr-only">{heading}</div>
+          {batch.messages.flatMap((message) => inspectRows(message)).concat(batch.related.flatMap((message) => inspectRows(message))).map((row, index) => (
+            <div key={`${row.label}:${row.value}:${index}`}>
+              <dt className="inline font-sans font-medium text-soft-foreground">{row.label}: </dt>
+              <dd className="inline">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+function inspectRows(message: ThreadConversationMessage): Array<{ label: string; value: string }> {
+  const rows = [
+    { label: 'Message', value: message.messageId },
+    { label: 'Sender', value: message.senderRunId },
+    { label: 'Recipient', value: message.recipientRunId },
+    { label: 'Delivery', value: conversationDeliveryLabel(message.delivery) },
+  ]
+  if (message.requestId) rows.push({ label: 'Request', value: message.requestId })
+  if (message.outcome?.replyId) rows.push({ label: 'Reply', value: message.outcome.replyId })
+  if (message.state) rows.push({ label: 'State', value: message.state })
+  if (message.createdAt) rows.push({ label: 'Created', value: message.createdAt })
+  if (message.deadline) rows.push({ label: 'Deadline', value: message.deadline })
+  if (message.requestHash) rows.push({ label: 'Hash', value: message.requestHash })
+  return rows
+}
+
+function uniqueIds(ids: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const unique: string[] = []
+  for (const id of ids) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    unique.push(id)
+  }
+  return unique
 }
 
 /** A dim (lifecycle/note) or danger (error) transcript line. */
