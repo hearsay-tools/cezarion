@@ -70,6 +70,7 @@ createInterface({ input: process.stdin }).on('line', line => {
       // #383 run f192490f seq188–194: native reply, tool closes, end_turn.
       // Variants exercise documented ACP terminal/ask frames at that boundary.
       setTimeout(() => {
+        if ((pending.input ?? '').includes('mock:ask-error')) { text('\n\nError: 502 bad gateway.'); reply(pending.id, { stopReason: 'end_turn' }); return; }
         text(msg.id === 'bad-question' ? 'Malformed question skipped.' : `Answer accepted: ${JSON.stringify(msg.result)}`);
         const input = pending.input ?? '';
         resumeDone = input.includes('mock:resume-done');

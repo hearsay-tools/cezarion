@@ -69,6 +69,31 @@ it('completes the failed attempt as an error turn before the retry opens its own
     expect(completions.map(e => e.stopReason)).toEqual(['error', 'end_turn']);
   }, fastRetry());
 });
+it('retries with the answer continuation after a transient failure post-answer', async () => {
+  // #446 round 5: answering a native ask writes the response and sets answeredNativeAsk;
+  // a provider error in the resumed work must retry the answer continuation, not the
+  // original prompt, or the run loses the answer's thread and stops without processing it.
+  const dir = mkdtempSync(join(tmpdir(), 'cursor-ask-retry-'));
+  const file = join(dir, 'wire.ndjson');
+  try {
+    vi.stubEnv('CEZ_CURSOR_BIN', mock);
+    const v1: AgentEvent[] = []; const v2: UiEvent[] = [];
+    const session = fastRetry().startSession({ cwd: process.cwd(), userPrompt: 'mock:ask-error', timeoutMs: 15000, env: { CEZ_MOCK_STDIN_FILE: file } }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
+    try {
+      await waitFor(() => v2.some(e => e.type === 'ask.requested'));
+      expect(session.sendMessage([{ type: 'text', text: 'Vitest' }])).toBe(true);
+      await waitFor(() => v1.some(e => e.type === 'turn-end'));
+      expect(v1.some(e => e.type === 'error')).toBe(false);
+      expect(v2.some(e => e.type === 'session.error' && !e.fatal && e.message.includes('retrying (1/2)'))).toBe(true);
+      const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      const prompts = rows.filter((row: { method: string }) => row.method === 'session/prompt');
+      expect(prompts).toHaveLength(2);
+      const retried = prompts[1]!.params.prompt.filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('\n');
+      expect(retried).toContain('Continue using the answer just supplied');
+      expect(retried).not.toContain('mock:ask-error');
+    } finally { session.interrupt(); await session.result.catch(() => {}); vi.unstubAllEnvs(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 it('honors the injected retry options instead of silently using the defaults', async () => {
   // Pins the withSession runner seam: a scenario tuning maxRetries must see exactly that
   // cap on the transcript, not the production constants.

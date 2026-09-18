@@ -20,6 +20,9 @@ export const CURSOR_PROVIDER_RETRY_BACKOFF_MS = 2_000;
 export const CURSOR_PROVIDER_MAX_INLINE_WAIT_MS = 60_000;
 /** Fired a moment after the named instant — landing exactly on it races the provider's clock. */
 const CURSOR_PROVIDER_INSTANT_GRACE_MS = 1_000;
+/** The #383 post-answer continuation. Shared by the answered-ask auto-resume and by provider
+ *  retries of a turn whose work continued past a native answer (#446 round 5). */
+const ANSWER_CONTINUATION_PROMPT = 'Continue using the answer just supplied to the native question or plan. Respect rejection; do not treat a rejected plan as approved. If the task is complete, report completion with CEZ:DONE.';
 
 export interface CursorProviderRetryOptions {
   maxRetries?: number;
@@ -238,7 +241,7 @@ class CursorSession implements AgentSession {
       this.answeredNativeAsk = false;
       if (resume && result.stopReason === 'end_turn' && !this.pendingAsk && !this.markerAsk
         && !/CEZ:(?:DONE|MONITORING)\s*$/.test(this.turnText)) {
-        this.startTurn(this.queued.shift() ?? [{ type: 'text', text: 'Continue using the answer just supplied to the native question or plan. Respect rejection; do not treat a rejected plan as approved. If the task is complete, report completion with CEZ:DONE.' }]);
+        this.startTurn(this.queued.shift() ?? [{ type: 'text', text: ANSWER_CONTINUATION_PROMPT }]);
         return;
       }
       this.emit({ type: 'turn-end' });
@@ -387,7 +390,13 @@ class CursorSession implements AgentSession {
     this.providerRetryTimer = setTimeout(() => {
       this.providerRetryTimer = undefined;
       if (!this.open || this.closing) return;
-      this.startTurn(this.lastPrompt ?? [{ type: 'text', text: 'Continue after the provider error.' }]);
+      // Work that had already continued past a native answer retries the answer continuation,
+      // not the original prompt — the answer lives in the provider's session state, and
+      // re-prompting the task text would drop its thread (#446 round 5).
+      const answered = this.answeredNativeAsk;
+      this.startTurn(answered
+        ? [{ type: 'text', text: ANSWER_CONTINUATION_PROMPT }]
+        : this.lastPrompt ?? [{ type: 'text', text: 'Continue after the provider error.' }]);
     }, delay);
     this.providerRetryTimer.unref?.();
   }
