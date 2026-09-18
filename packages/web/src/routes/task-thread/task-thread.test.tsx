@@ -838,7 +838,8 @@ describe('ThreadView', () => {
     renderView(<ThreadView run={run('done', { id: `dock-${status}`, steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     const summary = document.querySelector('[data-slot="run-activity-status"]')?.textContent
     expect(summary).not.toContain('All complete')
-    expect(summary).toContain('In progress')
+    // Not "In progress" either: the run is over, so the header names an outcome (#402 feedback).
+    expect(summary).toContain('Incomplete')
   })
 
   it('a finished run with everything settled still reads All complete', () => {

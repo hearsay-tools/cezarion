@@ -18,7 +18,7 @@ import { AgentList } from './agents-dock'
 import { PlanList, planCounts } from './plan-dock'
 import { collectSubagents, subagentCounts } from './subagent-dock'
 import { StepRail, activeStepIndex, railVisual } from './step-rail'
-import { WorkerActivitySection, useWorkersComplete } from './run-relationships'
+import { WorkerActivitySection, useWorkersVerdict } from './run-relationships'
 import { ActivityRow, meterText } from './run-activity-row'
 import { latestPlanEntries, type ThreadState } from './thread-state'
 
@@ -68,7 +68,7 @@ export function RunActivityDock({
   // RunRelationshipsPanel renders nothing for it — so it is not a section to count or frame.
   const hasWorkers = run.delegation !== undefined && run.delegation.role !== 'invalid'
   // Mounted for every run so the hook order never changes; it only fetches for a delegated one.
-  const workersComplete = useWorkersComplete(run)
+  const workers = useWorkersVerdict(run)
   // Complete means SUCCEEDED, not merely settled: a failed or cancelled step keeps the green
   // summary away, matching `subagentCounts` (which counts only `completed`) and the danger X
   // the rail shows one click below. `skipped` stays complete — it never ran and never failed.
@@ -102,9 +102,16 @@ export function RunActivityDock({
   const allComplete =
     run.status === 'done' &&
     workflowSucceeded &&
-    workersComplete &&
+    workers === 'complete' &&
     agentCounts.done === agentCounts.total &&
     planCountsValue.done === planCountsValue.total
+  // Withholding the green line is only half the job: a run that is OVER must never be
+  // described as in progress (#402 feedback). Once the run is `done`, the only thing that can
+  // still change is a worker the lookup has not settled — the thread's own rows are final, so
+  // a stalled sub-agent, an abandoned plan entry or a failed worker leaves the run finished
+  // and `Incomplete`, a terminal word. Not "with issues": unchecked todos under a finished
+  // run are ordinary, and the failing row itself carries the red X one click below.
+  const unresolved = workers === 'pending'
   const summary = allComplete
     ? 'All complete'
     : run.status === 'failed'
@@ -113,7 +120,9 @@ export function RunActivityDock({
         ? 'Cancelled'
         : run.status === 'running'
           ? 'Working'
-          : 'In progress'
+          : run.status === 'done' && !unresolved
+            ? 'Incomplete'
+            : 'In progress'
   const failed = run.status === 'failed' || run.status === 'cancelled'
 
   return (

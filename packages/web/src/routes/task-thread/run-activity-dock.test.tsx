@@ -265,8 +265,8 @@ describe('RunActivityDock — workers and the All complete claim', () => {
   })
 
   // The header speaks for every section it counts, Workers included: a finished parent whose
-  // worker failed, was cancelled, or is still going has not "all completed".
-  it.each(['running', 'waiting', 'review', 'failed', 'cancelled'] as const)(
+  // worker failed or is still going has not "all completed".
+  it.each(['running', 'waiting', 'review', 'failed'] as const)(
     'never claims completion while a linked worker is %s',
     async (status) => {
       renderDock(root(), [], [{ workerId: doneWorkerId, parentRunId: parentId, status, workspace }])
@@ -274,6 +274,50 @@ describe('RunActivityDock — workers and the All complete claim', () => {
       expect(statusText()).not.toContain('All complete')
     },
   )
+
+  // A cancelled worker is a decision, not an unfinished job: someone stopped it and the run
+  // went on to finish. `planCounts` already leaves cancelled entries out of its total for the
+  // same reason, and a done parent whose only oddity was a cancelled worker used to sit on
+  // "In progress" forever (#402 feedback).
+  it('counts a cancelled worker as complete', async () => {
+    renderDock(root(), [], [
+      { workerId: doneWorkerId, parentRunId: parentId, status: 'done', workspace },
+      { workerId: cancelledWorkerId, parentRunId: parentId, status: 'cancelled', workspace },
+    ])
+    await waitFor(() => expect(statusText()).toContain('All complete'))
+  })
+
+  // The other half of the same defect: when the run is over, the header reports an OUTCOME.
+  // Withholding the green line is right; calling a finished run "In progress" is not.
+  it('names a finished run with a failed worker as finished, not in progress', async () => {
+    renderDock(root(), [], [{ workerId: doneWorkerId, parentRunId: parentId, status: 'failed', workspace }])
+    await waitFor(() => expect(statusText()).toContain('Incomplete'))
+    expect(statusText()).not.toContain('In progress')
+    expect(statusText()).not.toContain('All complete')
+  })
+
+  // ...and a worker that really is still going keeps the progress wording, because it is true.
+  it('still says in progress while a linked worker runs on', async () => {
+    renderDock(root(), [], [{ workerId: doneWorkerId, parentRunId: parentId, status: 'running', workspace }])
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="worker-item"]')).toHaveLength(1))
+    expect(statusText()).toContain('In progress')
+  })
+
+  // An unresolved lookup is not an issue with the run: until it lands the dock knows nothing
+  // about the workers, so it may claim neither completion nor a bad outcome.
+  it('does not call a pending lookup an issue', () => {
+    renderDock(root(), [], allDone)
+    expect(statusText()).toContain('In progress')
+    expect(statusText()).not.toContain('Incomplete')
+  })
+
+  it('drops the cleanup line from a worker whose teardown left nothing behind', async () => {
+    renderDock(root(), [], [
+      { workerId: doneWorkerId, parentRunId: parentId, status: 'done', workspace, destroy: { requestedAt: at, phase: 'complete', remaining: [] } },
+    ])
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="worker-item"]')).toHaveLength(1))
+    expect(document.querySelector('[data-slot="run-activity-workers"]')?.textContent).not.toContain('Cleanup')
+  })
 
   it('claims completion once every linked worker is done', async () => {
     renderDock(root(), [], allDone)

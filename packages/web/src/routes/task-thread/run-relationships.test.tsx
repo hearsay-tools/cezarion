@@ -56,6 +56,29 @@ it('renders complete worker status and incomplete cleanup in accessible scoped l
   expect(within(panel).getByText(/branch/)).toBeTruthy()
   expect(panel.querySelector('a a')).toBeNull()
 })
+it('says nothing about a cleanup that completed with nothing left behind', async () => {
+  // Every destroyed worker carried a "Cleanup complete" line, on every row, forever. A
+  // cleanup that left nothing behind is the expected end of a worker's life, so the line
+  // only ever told the reader what they already assumed (#402 feedback).
+  const tidy: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'complete', remaining: [] } }
+  setup(root, async () => json({ workers: [tidy] }))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  await within(panel).findByText('done')
+  expect(within(panel).queryByText(/Cleanup/)).toBeNull()
+})
+it('still reports a cleanup that completed with something left behind', async () => {
+  const leftovers: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'complete', remaining: ['worktree'] } }
+  setup(root, async () => json({ workers: [leftovers] }))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  expect(await within(panel).findByText(/Cleanup complete/)).toBeTruthy()
+  expect(within(panel).getByText(/worktree/)).toBeTruthy()
+})
+it('still reports a cleanup that is only part-way through', async () => {
+  const midway: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'cleaning', remaining: [] } }
+  setup(root, async () => json({ workers: [midway] }))
+  const panel = await screen.findByRole('region', { name: 'Task relationships' })
+  expect(await within(panel).findByText(/Cleanup cleaning/)).toBeTruthy()
+})
 it('keeps durable IDs while loading, failing and retrying instead of inventing an empty list', async () => {
   let finish!: (r: Response) => void
   let attempts = 0

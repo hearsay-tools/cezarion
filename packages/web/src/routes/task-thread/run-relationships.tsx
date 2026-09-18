@@ -34,22 +34,40 @@ function workerIdsOf(metadata: Delegation | undefined, data: RunRelationships | 
 }
 
 /**
- * The Workers section's half of the dock's "All complete" claim (#402): true only when every
- * worker this run links has finished successfully. Unknown is deliberately NOT complete — a
- * lookup still in flight, a failed one, or a receipt whose inspection never arrived all leave
- * a worker we cannot vouch for, and the green line would otherwise flip under the reader.
+ * The Workers section's verdict for the dock header (#402), in three values because the
+ * header has three things to say:
+ *
+ * - `complete` — every linked worker settled well. `cancelled` counts: someone stopped that
+ *   worker on purpose and the run carried on, exactly as `planCounts` leaves cancelled
+ *   entries out of its total. A done parent whose only oddity was a cancelled worker used to
+ *   read "In progress" forever, which is the report this split answers.
+ * - `pending` — something may still change: the lookup is in flight or failed, or a worker is
+ *   queued, running, waiting or parked at its review gate. Unknown is deliberately not
+ *   complete; claiming it would flip the green line under the reader.
+ * - `issue` — settled badly and will not change again: a worker that failed, or a receipt
+ *   whose record is gone. Not complete, but not in progress either.
  *
  * It lives here because `workerIdsOf` does: receipts outlive a failed lookup, and the dock
  * must judge the same id set the section lists.
  */
-export function useWorkersComplete(run: ApiRun): boolean {
+export type WorkersVerdict = 'complete' | 'pending' | 'issue'
+
+export function useWorkersVerdict(run: ApiRun): WorkersVerdict {
   const metadata = run.delegation
   const delegated = metadata !== undefined && metadata.role !== 'invalid'
   const query = useRunRelationships(run.id, { enabled: delegated })
-  if (!delegated || !metadata) return true
-  if (!query.isSuccess) return false
+  if (!delegated || !metadata) return 'complete'
+  if (!query.isSuccess) return 'pending'
   const workers = new Map(query.data.workers.map(worker => [worker.workerId, worker]))
-  return workerIdsOf(metadata, query.data).every(id => workers.get(id)?.status === 'done')
+  const verdicts = workerIdsOf(metadata, query.data).map(id => {
+    const status = workers.get(id)?.status
+    if (status === 'done' || status === 'cancelled') return 'complete'
+    // A record that never arrived is gone for good; a live status still moves.
+    if (status === undefined || status === 'failed') return 'issue'
+    return 'pending'
+  })
+  if (verdicts.includes('pending')) return 'pending'
+  return verdicts.includes('issue') ? 'issue' : 'complete'
 }
 
 function Relationships({ run }: { run: ApiRun }) {
@@ -262,7 +280,15 @@ function ParentLink({ id }: { id: string }) {
   </div>
 }
 
+/**
+ * Teardown, reported only when there is something to report (#402 feedback). A cleanup that
+ * reached `complete` with nothing remaining and no error is the expected end of every
+ * destroyed worker, so a line saying so appeared on every worker row and carried no
+ * information — it just pushed the rows that DO carry some off the first screen.
+ */
 function Cleanup({ state }: { state: WorkerDestroy }) {
+  const tidy = state.phase === 'complete' && state.remaining.length === 0 && state.error === undefined
+  if (tidy) return null
   return <p className="px-2 pb-2 break-words">
     {state.phase === 'incomplete' ? 'Cleanup incomplete' : state.phase === 'complete' ? 'Cleanup complete' : `Cleanup ${state.phase}`}
     {state.remaining.length ? ` — remaining: ${state.remaining.join(', ')}` : ''}

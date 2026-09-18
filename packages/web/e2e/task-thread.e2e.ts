@@ -513,7 +513,8 @@ describe('task thread', () => {
     // Phone default: the unified run-activity dock collapses to the odometer.
     expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-dock"]').dataset.state`)).toBe('collapsed')
     expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-count"]').textContent`)).toBe('· 2 sections')
-    expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-status"]').textContent`)).toContain('In progress')
+    // The fixture run is `done` with two plan entries never ticked off: finished, not complete.
+    expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-status"]').textContent`)).toContain('Incomplete')
 
     browser.screenshot(`${artifactsDir}/thread-mobile.png`)
     browser.setViewport(1440, 900)
