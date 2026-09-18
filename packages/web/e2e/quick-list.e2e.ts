@@ -89,7 +89,12 @@ const FIXTURE = [
     workflow: 'default',
     task: 'add skills autocomplete',
     status: 'review',
-    createdAt: ago(30 * 60_000),
+    // One minute behind its sibling, not the same instant (#416): `sortRuns` breaks an equal
+    // status weight on `createdAt` alone, so two runs sharing a timestamp leave the row order
+    // resting on V8's stable sort of whatever order the store happened to read them in. Every
+    // `createdAt` in this fixture is distinct for that reason, and the order they produce is
+    // asserted below rather than sorted away.
+    createdAt: ago(31 * 60_000),
     finishedAt: ago(11 * 60_000),
     tokensUsed: 41_800,
     runner: 'codex',
@@ -413,9 +418,11 @@ describe('tasks table overview', () => {
       'fix-done': 'done',
       'fix-failed': 'failed',
     })
-    // Needs-you first, history after — the sidebar's order, because it is the sidebar's sort.
-    expect(rows.slice(0, 3).map((r) => r.id).sort()).toEqual(['fix-review-pr', 'fix-var-a', 'fix-var-b'])
-    expect(rows.slice(3).map((r) => r.id)).toEqual(['fix-done', 'fix-failed'])
+    // The whole order, in one assertion and with nothing sorted first (#416): the sidebar's sort
+    // is `statusWeight` then `createdAt` descending, so review (weight 1) precedes done (5) and
+    // failed (6), and inside the review band the newest `createdAt` leads. A read like `rows[0]`
+    // means something only because this line pins what row 0 is.
+    expect(rows.map((r) => r.id)).toEqual(['fix-var-a', 'fix-var-b', 'fix-review-pr', 'fix-done', 'fix-failed'])
 
     // A spot check across the columns: tokens formatted, the PR chip numbered and pointed out —
     // and the Task cell shows the auto-summary, never the raw fixture title behind it.
@@ -433,237 +440,6 @@ describe('tasks table overview', () => {
     browser.screenshot(`${artifactsDir}/tasks-table.png`)
   })
 
-  it('allocates two contained title lines without crowding desktop metadata or actions', () => {
-    const title = 'Review shared task title prefix — documentation outcome'
-    const unbroken = `Review-shared-task-title-prefix-${'distinguishing'.repeat(18)}`
-
-    try {
-      for (const theme of ['light', 'dark'] as const) {
-        for (const density of ['comfortable', 'ultra'] as const) {
-          browser.setViewport(1440, 900)
-          browser.evaluate(`(() => {
-            document.documentElement.classList.toggle('light', ${theme === 'light'})
-            ${density === 'ultra'
-              ? "document.documentElement.dataset.density = 'ultra'"
-              : "delete document.documentElement.dataset.density"}
-            const links = [...document.querySelectorAll('${TABLE_ROW} td[data-column-id="task"] a[href*="/tasks/"]')]
-            links[0].textContent = ${JSON.stringify(title)}
-            links[0].setAttribute('title', ${JSON.stringify(title)})
-            links[1].textContent = ${JSON.stringify(unbroken)}
-            links[1].setAttribute('title', ${JSON.stringify(unbroken)})
-          })()`)
-
-          const facts = browser.evaluate(`(() => {
-            const rows = [...document.querySelectorAll('${TABLE_ROW}')]
-            const firstCell = rows[0].querySelector('td[data-column-id="task"]')
-            const firstLink = firstCell.querySelector('a[href*="/tasks/"]')
-            const secondCell = rows[1].querySelector('td[data-column-id="task"]')
-            const secondLink = secondCell.querySelector('a[href*="/tasks/"]')
-            const suffix = 'documentation outcome'
-            const textNode = firstLink.firstChild
-            const range = document.createRange()
-            range.setStart(textNode, textNode.textContent.indexOf(suffix))
-            range.setEnd(textNode, textNode.textContent.length)
-            const suffixRect = range.getBoundingClientRect()
-            const firstRect = firstLink.getBoundingClientRect()
-            const secondRect = secondLink.getBoundingClientRect()
-            const secondCellRect = secondCell.getBoundingClientRect()
-            const lineHeight = Number.parseFloat(getComputedStyle(firstLink).lineHeight)
-            const workflow = rows[0].querySelector('td[data-column-id="workflow"]')
-            workflow.textContent = 'workflow-name-that-is-deliberately-too-long-for-its-column'
-            const status = rows[0].querySelector('td[data-column-id="status"]')
-            const statusPill = status.querySelector('[data-slot="pill"]')
-            statusPill.textContent = 'waiting on workers'
-            const reference = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"] td[data-column-id="reference"]')
-            const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
-            const referenceLabel = [...referenceChip.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)
-            referenceLabel.textContent = '#1234'
-            const diff = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"] td[data-column-id="diff"]')
-            const [adds, dels] = diff.querySelectorAll('[data-slot="diff-stat"] > span')
-            adds.textContent = '+12k'
-            dels.textContent = '−1k'
-            diff.querySelector('[data-slot="diff-stat"]').setAttribute('title', '+12345 −1234 across 37 files')
-            diff.querySelector('[data-slot="diff-stat"]').setAttribute('aria-label', '+12345 −1234 across 37 files')
-            const workflowHeader = document.querySelector('th[data-column-id="workflow"]')
-            const workflowHeaderButton = workflowHeader.querySelector('button')
-            const metricsRow = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"]')
-            const cpuCell = metricsRow.querySelector('td[data-column-id="cpu"]')
-            const cpuMetric = cpuCell.firstElementChild
-            cpuMetric.textContent = '100%'
-            cpuMetric.setAttribute('title', '100%')
-            cpuMetric.setAttribute('aria-label', '100%')
-            const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
-            const secondary = secondaryIds.map((id) => {
-              const cell = metricsRow.querySelector('td[data-column-id="' + id + '"]')
-              const style = getComputedStyle(cell)
-              const rect = cell.getBoundingClientRect()
-              const target = cell.firstElementChild || cell
-              const targetRect = target.getBoundingClientRect()
-              const targetStyle = getComputedStyle(target)
-              const range = document.createRange()
-              range.selectNodeContents(target)
-              const content = range.getBoundingClientRect()
-              const textFits = content.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && content.right <= rect.right - Number.parseFloat(style.paddingRight) + 1
-              const clipsOverflow = targetStyle.overflowX === 'hidden' && target.scrollWidth > target.clientWidth
-              return {
-                id,
-                width: rect.width,
-                contained: targetRect.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && targetRect.right <= rect.right - Number.parseFloat(style.paddingRight) + 1 && (textFits || clipsOverflow),
-                right: targetRect.right,
-                clipsOverflow,
-                label: cell.textContent,
-                accessible: cell.firstElementChild?.getAttribute('aria-label') || cell.getAttribute('aria-label'),
-                title: cell.firstElementChild?.getAttribute('title') || cell.getAttribute('title'),
-              }
-            })
-            const memoryCell = metricsRow.querySelector('td[data-column-id="memory"]')
-            const workflowStyle = getComputedStyle(workflow)
-            const diffStyle = getComputedStyle(diff)
-            const diffRect = diff.getBoundingClientRect()
-            const diffRange = document.createRange()
-            diffRange.selectNodeContents(diff.querySelector('[data-slot="diff-stat"]'))
-            const diffTextRect = diffRange.getBoundingClientRect()
-            const referenceContentRect = referenceChip.getBoundingClientRect()
-            const workflowHeaderStyle = getComputedStyle(workflowHeader)
-            const workflowHeaderRect = workflowHeader.getBoundingClientRect()
-            const workflowHeaderContentRight = workflowHeaderRect.right - Number.parseFloat(workflowHeaderStyle.paddingRight)
-            const workflowHeaderChildren = [...workflowHeaderButton.children].map((child) => child.getBoundingClientRect())
-            return {
-              taskWidth: firstCell.getBoundingClientRect().width,
-              titleWidth: firstRect.width,
-              workflowWidth: workflow.getBoundingClientRect().width,
-              lineCount: Math.round(firstRect.height / lineHeight),
-              suffixRect: { left: suffixRect.left, right: suffixRect.right, bottom: suffixRect.bottom },
-              titleRect: { left: firstRect.left, right: firstRect.right, bottom: firstRect.bottom },
-              suffixVisible: suffixRect.left >= firstRect.left - 1 && suffixRect.right <= firstRect.right + 1 && suffixRect.bottom <= firstRect.bottom + 1,
-              unbrokenContained: getComputedStyle(secondLink).overflow === 'hidden' && secondLink.scrollWidth > secondLink.clientWidth && secondRect.right <= secondCellRect.right + 1,
-              workflowContained: workflowStyle.overflow === 'hidden' && workflow.scrollWidth > workflow.clientWidth,
-              statusContained: status.scrollWidth <= status.clientWidth + 1 && statusPill.getBoundingClientRect().right <= status.getBoundingClientRect().right + 1,
-              referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1 && [...referenceChip.querySelectorAll('svg')].every((glyph) => glyph.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1),
-              referenceLabel: referenceChip.textContent,
-              diffContained: diffTextRect.left >= diffRect.left + Number.parseFloat(diffStyle.paddingLeft) - 1 && diffTextRect.right <= diffRect.right - Number.parseFloat(diffStyle.paddingRight) + 1 && diffTextRect.right < referenceContentRect.left,
-              workflowHeaderContained: workflowHeaderChildren.every((rect) => rect.left >= workflowHeaderRect.left + Number.parseFloat(workflowHeaderStyle.paddingLeft) - 1 && rect.right <= workflowHeaderContentRight + 1),
-              memoryLabel: memoryCell.textContent,
-              metricsBeforeNeighbors: secondary.slice(0, -1).every((metric, index) => {
-                const nextCell = metricsRow.querySelector('td[data-column-id="' + secondaryIds[index + 1] + '"]')
-                const nextStyle = getComputedStyle(nextCell)
-                return metric.right < nextCell.getBoundingClientRect().left + Number.parseFloat(nextStyle.paddingLeft)
-              }),
-              secondary,
-              pageContained: document.documentElement.scrollWidth <= window.innerWidth,
-            }
-          })()`) as {
-            taskWidth: number
-            titleWidth: number
-            workflowWidth: number
-            lineCount: number
-            suffixRect: { left: number; right: number; bottom: number }
-            titleRect: { left: number; right: number; bottom: number }
-            suffixVisible: boolean
-            unbrokenContained: boolean
-            workflowContained: boolean
-            statusContained: boolean
-            referenceContained: boolean
-            referenceLabel: string
-            diffContained: boolean
-            workflowHeaderContained: boolean
-            memoryLabel: string
-            metricsBeforeNeighbors: boolean
-            secondary: Array<{ id: string; width: number; contained: boolean; right: number; clipsOverflow: boolean; label: string; accessible: string | null; title: string | null }>
-            pageContained: boolean
-          }
-
-          expect(facts.taskWidth, `${theme}/${density}: task width`).toBeGreaterThanOrEqual(315)
-          expect(facts.taskWidth, `${theme}/${density}: task vs workflow`).toBeGreaterThan(facts.workflowWidth * 2.5)
-          expect(facts.lineCount, `${theme}/${density}: title lines`).toBe(2)
-          expect(facts.suffixVisible, `${theme}/${density}: distinguishing suffix; ${JSON.stringify(facts)}`).toBe(true)
-          expect(facts.unbrokenContained, `${theme}/${density}: unbroken title`).toBe(true)
-          expect(facts.workflowContained, `${theme}/${density}: workflow ellipsis`).toBe(true)
-          expect.soft(facts.statusContained, `${theme}/${density}: status pill`).toBe(true)
-          expect.soft(facts.referenceContained, `${theme}/${density}: reference chip`).toBe(true)
-          expect(facts.referenceLabel, `${theme}/${density}: compact reference label`).toBe('#1234')
-          expect.soft(facts.diffContained, `${theme}/${density}: diff stat`).toBe(true)
-          expect.soft(facts.workflowHeaderContained, `${theme}/${density}: workflow header`).toBe(true)
-          expect(facts.memoryLabel, `${theme}/${density}: persisted memory metric`).toBe('peak 1023 MB')
-          expect.soft(facts.metricsBeforeNeighbors, `${theme}/${density}: metrics before neighboring content`).toBe(true)
-          expect(facts.secondary.slice(0, -1).every(({ width, contained }) => width > 0 && contained), `${theme}/${density}: ${JSON.stringify(facts.secondary)}`).toBe(true)
-          expect(facts.secondary.filter(({ clipsOverflow }) => clipsOverflow).map(({ id }) => id)).toEqual(['tokens'])
-          expect(facts.secondary.slice(0, -1).map(({ id, label, accessible, title }) => ({ id, label, accessible, title }))).toEqual([
-            { id: 'tokens', label: '999.9k / 888.8k', accessible: 'Input tokens: 999,900; output tokens: 888,800', title: 'Input tokens: 999,900; output tokens: 888,800' },
-            { id: 'cost', label: '$123', accessible: '$123.45', title: '$123.45' },
-            { id: 'cpu', label: '100%', accessible: '100%', title: '100%' },
-            { id: 'memory', label: 'peak 1023 MB', accessible: 'peak 1023 MB; peak — run finished', title: 'peak 1023 MB; peak — run finished' },
-          ])
-          expect(facts.pageContained, `${theme}/${density}: page overflow`).toBe(true)
-
-          const row = `${TABLE_ROW}[data-run-id="fix-review-pr"]`
-          focusWithKeyboard(browser, `${row} [data-slot="row-rename"]`)
-          // The pencil is `opacity-0 transition-opacity focus-visible:opacity-100`. Tab is not
-          // the same tick as :focus-visible, and that class — not a computed-style poll alone —
-          // is what starts the fade. Wait on both so we do not sample mid-transition.
-          browser.waitForFunction(
-            `(() => {
-              const button = document.querySelector('${row} [data-slot="row-rename"]')
-              return !!button && button === document.activeElement && button.matches(':focus-visible') && getComputedStyle(button).opacity === '1'
-            })()`,
-          )
-          const actions = browser.evaluate(`(() => {
-            const cell = document.querySelector('${row} td[data-column-id="task"]')
-            const bounds = cell.getBoundingClientRect()
-            return [...cell.querySelectorAll('button')].map((button) => {
-              const rect = button.getBoundingClientRect()
-              return {
-                label: button.getAttribute('aria-label'),
-                active: document.activeElement === button,
-                focusVisible: button.matches(':focus-visible'),
-                opacity: getComputedStyle(button).opacity,
-                contained: rect.left >= bounds.left && rect.right <= bounds.right,
-              }
-            })
-          })()`) as Array<{ label: string; active: boolean; focusVisible: boolean; opacity: string; contained: boolean }>
-          expect(actions.map(({ label }) => label)).toEqual(['Rename task', 'Pin task'])
-          expect(actions.every(({ opacity, contained }) => opacity === '1' && contained), JSON.stringify(actions)).toBe(true)
-
-          browser.screenshot(`${artifactsDir}/issue-167-tasks-1440-${theme}-${density}.png`, { viewport: true })
-        }
-      }
-
-      const widthBeforeFold = Number(browser.evaluate(
-        `document.querySelector('${TABLE_ROW} td[data-column-id="task"]').getBoundingClientRect().width`,
-      ))
-      browser.click('button[aria-label="Fold Workflow column"]')
-      browser.waitForFunction(`document.querySelector('button[aria-label="Expand Workflow column"]') !== null`)
-      const widthAfterFold = Number(browser.evaluate(
-        `document.querySelector('${TABLE_ROW} td[data-column-id="task"]').getBoundingClientRect().width`,
-      ))
-      expect(widthAfterFold).toBeGreaterThanOrEqual(widthBeforeFold)
-      browser.click('button[aria-label="Expand Workflow column"]')
-      browser.waitForFunction(`document.querySelector('button[aria-label="Fold Workflow column"]') !== null`)
-
-      browser.evaluate(`localStorage.setItem('cez-sidebar-width', '360')`)
-      browser.goto(`${baseUrl}${scoped('/')}`)
-      browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
-      showResourceTable()
-      const resized = browser.evaluate(`({
-        preference: localStorage.getItem('cez-sidebar-width'),
-        sidebarWidth: document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width,
-        taskWidth: document.querySelector('${TABLE_ROW} td[data-column-id="task"]').getBoundingClientRect().width,
-      })`) as { preference: string; sidebarWidth: number; taskWidth: number }
-      expect(resized.preference).toBe('360')
-      expect(resized.sidebarWidth).toBe(360)
-      // The fixed table can distribute spare width beyond the task column's 320px minimum.
-      expect(resized.taskWidth).toBeGreaterThanOrEqual(320)
-    } finally {
-      browser.evaluate(`(() => {
-        localStorage.removeItem('cez-sidebar-width')
-        document.documentElement.classList.remove('light')
-        delete document.documentElement.dataset.density
-      })()`)
-      browser.setViewport(1440, 900)
-      browser.goto(`${baseUrl}${scoped('/')}`)
-      browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
-    }
-  })
 
   it('fills the ± column where a run recorded a diff, and keeps the honest dash where none exists', () => {
     // Column 5 is ± (Status | Task | Workflow | Branch | ±) — read it for every row at once.
@@ -830,6 +606,375 @@ describe('tasks table overview', () => {
 
     browser.screenshot(`${artifactsDir}/tasks-cards-mobile.png`)
     browser.setViewport(1440, 900)
+  })
+})
+
+/**
+ * The tasks table under worst-case content (#167), from a fixture rather than from writes.
+ *
+ * Its own fixture server, for the reason the width-contention suite below gives: these are
+ * deliberately extreme records — a wrapping title, an unbroken one, an overlong workflow name,
+ * a four-digit PR, a five-digit diff pair and a run parked on its workers — and dropping them
+ * into the shared fixture would rewrite every ordering, count and screenshot assertion above.
+ *
+ * This test used to build those states by writing into nodes React owns: `links[0].textContent`,
+ * the workflow cell, the status pill's text, the PR chip's label text node, both halves of the
+ * diff pair and the CPU metric (#416). `use-now.ts` re-renders these rows every 30 s, so a
+ * commit against a replaced text node could unmount the root — and with no error boundary the
+ * page went blank, which every wait in this suite reports exactly as a slow page. Every state
+ * below now comes from `runs.json`, which the real store parses and the real API serves.
+ *
+ * One state does NOT: a live CPU reading. `usageCells` believes a sample only while the run's
+ * process tree can exist, the sample arrives on the usage SSE stream from the server's own
+ * sampler, and a recovered fixture run owns no process — so the CPU cell is honestly empty here
+ * and its content is pinned in the jsdom suite instead. Faking `100%` into the cell was the one
+ * write that bought coverage nothing else does, and inventing a server-side injection seam for
+ * it would put a test-only route in the product.
+ */
+describe('the tasks table under worst-case row content', () => {
+  const TABLE_ROW = '[data-slot="task-table-row"]'
+  const WRAPPING = 'Review shared task title prefix — documentation outcome'
+  const UNBROKEN = `Review-shared-task-title-prefix-${'distinguishing'.repeat(18)}`
+  const wrappingRow = `${TABLE_ROW}[data-run-id="worst-wrapping"]`
+  const unbrokenRow = `${TABLE_ROW}[data-run-id="worst-unbroken"]`
+
+  let worstServer: ChildProcess
+  let worstRoot: string
+  let worstUrl: string
+  let worstProject: string
+
+  /**
+   * One record carrying every column's worst case at once, because the question is whether they
+   * fit BESIDE each other. `status: 'waiting'` plus a root delegation parked on a worker is the
+   * longest status label the cockpit can print (`delegationWaitLabel` → "waiting on workers"),
+   * and a serve boot keeps it: `RunManager.recover()` re-parks a run that owns a worker wait
+   * rather than settling it, which is what makes a non-terminal status reachable from a fixture
+   * at all.
+   */
+  const WORST = [
+    {
+      id: 'worst-wrapping',
+      title: WRAPPING,
+      workflow: 'workflow-name-that-is-deliberately-too-long-for-its-column',
+      task: 'review the shared prefix',
+      status: 'waiting',
+      createdAt: ago(50 * 60_000),
+      inputTokens: 999_900,
+      outputTokens: 888_800,
+      tokensUsed: 1_888_700,
+      costUsd: 123.45,
+      diffStat: { adds: 12_345, dels: 1_234, files: 37 },
+      peakRssBytes: 1023 * 1024 ** 2,
+      pullRequestUrl: 'https://github.com/open-mercato/cezar/pull/1234',
+      delegation: {
+        role: 'root',
+        permissions: [],
+        receipts: [],
+        wait: {
+          id: '11111111-1111-4111-8111-111111111111',
+          workerIds: ['22222222-2222-4222-8222-222222222222'],
+          deadline: new Date(now + 3_600_000).toISOString(),
+          mode: 'all',
+          phase: 'parked',
+          outcomes: [],
+        },
+      },
+      archived: false,
+      steps: [],
+    },
+    {
+      id: 'worst-unbroken',
+      title: UNBROKEN,
+      workflow: 'default',
+      task: 'review the shared prefix',
+      status: 'review',
+      createdAt: ago(45 * 60_000),
+      finishedAt: ago(40 * 60_000),
+      tokensUsed: 4_000,
+      archived: false,
+      steps: [],
+    },
+  ]
+
+  function showResourceTable() {
+    if (!browser.count('[data-slot="tasks-table"]')) return
+    if (browser.evaluate(`document.querySelector('[data-slot="tasks-table"]').checkVisibility()`)) return
+    browser.click('[data-slot="task-columns-trigger"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="popover-content"]')?.textContent.includes('Resource columns') === true`)
+    browser.click('[data-slot="popover-content"] button:last-child')
+    browser.press('Escape')
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-table"]').getBoundingClientRect().width > 0`)
+  }
+
+  beforeAll(async () => {
+    worstRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-worst-'))
+    mkdirSync(join(worstRoot, '.ai/cezar'), { recursive: true })
+    writeFileSync(join(worstRoot, '.ai/cezar/runs.json'), JSON.stringify(WORST, null, 2), 'utf8')
+
+    const port = await freePort()
+    worstUrl = `http://localhost:${port}`
+    worstServer = spawn(
+      process.execPath,
+      [cezarCli, 'serve', '--repo', worstRoot, '--port', String(port), '--no-open'],
+      { env: fixtureServeEnv(worstRoot), stdio: 'ignore' }
+    )
+    await waitForHealth(worstUrl, 'the worst-case fixture server')
+    worstProject = await bootProjectId(worstUrl)
+
+    browser.setViewport(1440, 900)
+    browser.goto(`${worstUrl}/p/${worstProject}/`)
+    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
+    showResourceTable()
+  }, 90_000)
+
+  afterAll(() => {
+    browser.evaluate(`(() => {
+      localStorage.removeItem('cez-sidebar-width')
+      document.documentElement.classList.remove('light')
+      delete document.documentElement.dataset.density
+    })()`)
+    worstServer?.kill()
+    if (worstRoot) rmSync(worstRoot, { recursive: true, force: true })
+    browser.setViewport(1440, 900)
+    browser.goto(`${baseUrl}${scoped('/')}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
+  })
+
+  it('serves the worst case as data the real store parsed', async () => {
+    // If a record here were wrong, zod would have dropped the index and every measurement below
+    // would be measuring an empty table that "passes" nothing. The parked delegation is the one
+    // worth reading back: it is the only field a serve boot could have rewritten.
+    const runs = (await fetch(`${worstUrl}/api/v1/runs`).then((r) => r.json())) as Array<{
+      id: string
+      status: string
+      workflow: string
+      delegation?: { role: string; wait?: { phase: string } }
+    }>
+    expect(runs.map((r) => r.id).sort()).toEqual(['worst-unbroken', 'worst-wrapping'])
+    const parked = runs.find((r) => r.id === 'worst-wrapping')
+    expect(parked?.status).toBe('waiting')
+    expect(parked?.delegation?.role).toBe('root')
+    expect(parked?.delegation?.wait?.phase).toBe('parked')
+    expect(parked?.workflow).toBe('workflow-name-that-is-deliberately-too-long-for-its-column')
+  })
+
+  it('allocates two contained title lines without crowding desktop metadata or actions', () => {
+    for (const theme of ['light', 'dark'] as const) {
+      for (const density of ['comfortable', 'ultra'] as const) {
+        browser.setViewport(1440, 900)
+        browser.evaluate(`(() => {
+          document.documentElement.classList.toggle('light', ${theme === 'light'})
+          ${density === 'ultra'
+            ? "document.documentElement.dataset.density = 'ultra'"
+            : "delete document.documentElement.dataset.density"}
+        })()`)
+        // The density switch relays out the whole table; measure the settled layout, not the
+        // frame between the class change and it.
+        browser.waitForFunction(
+          `document.documentElement.dataset.density === ${density === 'ultra' ? "'ultra'" : 'undefined'}
+             && document.querySelector('${wrappingRow} td[data-column-id="cpu"]') !== null`,
+        )
+
+        const facts = browser.evaluate(`(() => {
+          const metricsRow = document.querySelector('${wrappingRow}')
+          const firstCell = metricsRow.querySelector('td[data-column-id="task"]')
+          const firstLink = firstCell.querySelector('a[href*="/tasks/"]')
+          const secondCell = document.querySelector('${unbrokenRow} td[data-column-id="task"]')
+          const secondLink = secondCell.querySelector('a[href*="/tasks/"]')
+          const suffix = 'documentation outcome'
+          const textNode = firstLink.firstChild
+          const range = document.createRange()
+          range.setStart(textNode, textNode.textContent.indexOf(suffix))
+          range.setEnd(textNode, textNode.textContent.length)
+          const suffixRect = range.getBoundingClientRect()
+          const firstRect = firstLink.getBoundingClientRect()
+          const secondRect = secondLink.getBoundingClientRect()
+          const secondCellRect = secondCell.getBoundingClientRect()
+          const lineHeight = Number.parseFloat(getComputedStyle(firstLink).lineHeight)
+          const workflow = metricsRow.querySelector('td[data-column-id="workflow"]')
+          const status = metricsRow.querySelector('td[data-column-id="status"]')
+          const statusPill = status.querySelector('[data-slot="pill"]')
+          const reference = metricsRow.querySelector('td[data-column-id="reference"]')
+          const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
+          const diff = metricsRow.querySelector('td[data-column-id="diff"]')
+          const workflowHeader = document.querySelector('th[data-column-id="workflow"]')
+          const workflowHeaderButton = workflowHeader.querySelector('button')
+          const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
+          const secondary = secondaryIds.map((id) => {
+            const cell = metricsRow.querySelector('td[data-column-id="' + id + '"]')
+            const style = getComputedStyle(cell)
+            const rect = cell.getBoundingClientRect()
+            const target = cell.firstElementChild || cell
+            const targetRect = target.getBoundingClientRect()
+            const targetStyle = getComputedStyle(target)
+            const range = document.createRange()
+            range.selectNodeContents(target)
+            const content = range.getBoundingClientRect()
+            const textFits = content.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && content.right <= rect.right - Number.parseFloat(style.paddingRight) + 1
+            const clipsOverflow = targetStyle.overflowX === 'hidden' && target.scrollWidth > target.clientWidth
+            return {
+              id,
+              width: rect.width,
+              contained: targetRect.left >= rect.left + Number.parseFloat(style.paddingLeft) - 1 && targetRect.right <= rect.right - Number.parseFloat(style.paddingRight) + 1 && (textFits || clipsOverflow),
+              right: targetRect.right,
+              clipsOverflow,
+              label: cell.textContent,
+              accessible: cell.firstElementChild?.getAttribute('aria-label') || cell.getAttribute('aria-label'),
+              title: cell.firstElementChild?.getAttribute('title') || cell.getAttribute('title'),
+            }
+          })
+          const memoryCell = metricsRow.querySelector('td[data-column-id="memory"]')
+          const workflowStyle = getComputedStyle(workflow)
+          const diffStyle = getComputedStyle(diff)
+          const diffRect = diff.getBoundingClientRect()
+          const diffRange = document.createRange()
+          diffRange.selectNodeContents(diff.querySelector('[data-slot="diff-stat"]'))
+          const diffTextRect = diffRange.getBoundingClientRect()
+          const referenceContentRect = referenceChip.getBoundingClientRect()
+          const workflowHeaderStyle = getComputedStyle(workflowHeader)
+          const workflowHeaderRect = workflowHeader.getBoundingClientRect()
+          const workflowHeaderContentRight = workflowHeaderRect.right - Number.parseFloat(workflowHeaderStyle.paddingRight)
+          const workflowHeaderChildren = [...workflowHeaderButton.children].map((child) => child.getBoundingClientRect())
+          const [adds, dels] = diff.querySelectorAll('[data-slot="diff-stat"] > span')
+          return {
+            taskWidth: firstCell.getBoundingClientRect().width,
+            titleWidth: firstRect.width,
+            workflowWidth: workflow.getBoundingClientRect().width,
+            lineCount: Math.round(firstRect.height / lineHeight),
+            suffixRect: { left: suffixRect.left, right: suffixRect.right, bottom: suffixRect.bottom },
+            titleRect: { left: firstRect.left, right: firstRect.right, bottom: firstRect.bottom },
+            suffixVisible: suffixRect.left >= firstRect.left - 1 && suffixRect.right <= firstRect.right + 1 && suffixRect.bottom <= firstRect.bottom + 1,
+            unbrokenContained: getComputedStyle(secondLink).overflow === 'hidden' && secondLink.scrollWidth > secondLink.clientWidth && secondRect.right <= secondCellRect.right + 1,
+            workflowContained: workflowStyle.overflow === 'hidden' && workflow.scrollWidth > workflow.clientWidth,
+            statusLabel: statusPill.textContent,
+            statusContained: status.scrollWidth <= status.clientWidth + 1 && statusPill.getBoundingClientRect().right <= status.getBoundingClientRect().right + 1,
+            referenceContained: reference.scrollWidth <= reference.clientWidth + 1 && referenceChip.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1 && [...referenceChip.querySelectorAll('svg')].every((glyph) => glyph.getBoundingClientRect().right <= reference.getBoundingClientRect().right + 1),
+            referenceLabel: referenceChip.textContent,
+            diffPair: { adds: adds.textContent, dels: dels.textContent, title: diff.querySelector('[data-slot="diff-stat"]').getAttribute('title') },
+            diffContained: diffTextRect.left >= diffRect.left + Number.parseFloat(diffStyle.paddingLeft) - 1 && diffTextRect.right <= diffRect.right - Number.parseFloat(diffStyle.paddingRight) + 1 && diffTextRect.right < referenceContentRect.left,
+            workflowHeaderContained: workflowHeaderChildren.every((rect) => rect.left >= workflowHeaderRect.left + Number.parseFloat(workflowHeaderStyle.paddingLeft) - 1 && rect.right <= workflowHeaderContentRight + 1),
+            memoryLabel: memoryCell.textContent,
+            metricsBeforeNeighbors: secondary.slice(0, -1).every((metric, index) => {
+              const nextCell = metricsRow.querySelector('td[data-column-id="' + secondaryIds[index + 1] + '"]')
+              const nextStyle = getComputedStyle(nextCell)
+              return metric.right < nextCell.getBoundingClientRect().left + Number.parseFloat(nextStyle.paddingLeft)
+            }),
+            secondary,
+            pageContained: document.documentElement.scrollWidth <= window.innerWidth,
+          }
+        })()`) as {
+          taskWidth: number
+          titleWidth: number
+          workflowWidth: number
+          lineCount: number
+          suffixRect: { left: number; right: number; bottom: number }
+          titleRect: { left: number; right: number; bottom: number }
+          suffixVisible: boolean
+          unbrokenContained: boolean
+          workflowContained: boolean
+          statusLabel: string
+          statusContained: boolean
+          referenceContained: boolean
+          referenceLabel: string
+          diffPair: { adds: string; dels: string; title: string | null }
+          diffContained: boolean
+          workflowHeaderContained: boolean
+          memoryLabel: string
+          metricsBeforeNeighbors: boolean
+          secondary: Array<{ id: string; width: number; contained: boolean; right: number; clipsOverflow: boolean; label: string; accessible: string | null; title: string | null }>
+          pageContained: boolean
+        }
+
+        expect(facts.taskWidth, `${theme}/${density}: task width`).toBeGreaterThanOrEqual(315)
+        expect(facts.taskWidth, `${theme}/${density}: task vs workflow`).toBeGreaterThan(facts.workflowWidth * 2.5)
+        expect(facts.lineCount, `${theme}/${density}: title lines`).toBe(2)
+        expect(facts.suffixVisible, `${theme}/${density}: distinguishing suffix; ${JSON.stringify(facts)}`).toBe(true)
+        expect(facts.unbrokenContained, `${theme}/${density}: unbroken title`).toBe(true)
+        expect(facts.workflowContained, `${theme}/${density}: workflow ellipsis`).toBe(true)
+        // The longest label the status column can be asked to print, and it comes from the
+        // record's own parked delegation rather than from a rewritten pill.
+        expect(facts.statusLabel, `${theme}/${density}: parked status label`).toBe('waiting on workers')
+        expect.soft(facts.statusContained, `${theme}/${density}: status pill`).toBe(true)
+        expect.soft(facts.referenceContained, `${theme}/${density}: reference chip`).toBe(true)
+        expect(facts.referenceLabel, `${theme}/${density}: compact reference label`).toBe('#1234')
+        expect(facts.diffPair, `${theme}/${density}: compacted diff pair`).toEqual({
+          adds: '+12k',
+          dels: '−1k',
+          title: '+12345 −1234 across 37 files',
+        })
+        expect.soft(facts.diffContained, `${theme}/${density}: diff stat`).toBe(true)
+        expect.soft(facts.workflowHeaderContained, `${theme}/${density}: workflow header`).toBe(true)
+        expect(facts.memoryLabel, `${theme}/${density}: persisted memory metric`).toBe('peak 1023 MB')
+        expect.soft(facts.metricsBeforeNeighbors, `${theme}/${density}: metrics before neighboring content`).toBe(true)
+        expect(facts.secondary.slice(0, -1).every(({ width, contained }) => width > 0 && contained), `${theme}/${density}: ${JSON.stringify(facts.secondary)}`).toBe(true)
+        expect(facts.secondary.filter(({ clipsOverflow }) => clipsOverflow).map(({ id }) => id)).toEqual(['tokens'])
+        expect(facts.secondary.slice(0, -1).map(({ id, label, accessible, title }) => ({ id, label, accessible, title }))).toEqual([
+          { id: 'tokens', label: '999.9k / 888.8k', accessible: 'Input tokens: 999,900; output tokens: 888,800', title: 'Input tokens: 999,900; output tokens: 888,800' },
+          { id: 'cost', label: '$123', accessible: '$123.45', title: '$123.45' },
+          // Honestly empty: no process, so no usage sample, so no live CPU. See this suite's note.
+          { id: 'cpu', label: '—', accessible: null, title: null },
+          { id: 'memory', label: 'peak 1023 MB', accessible: 'peak 1023 MB; peak — run finished', title: 'peak 1023 MB; peak — run finished' },
+        ])
+        expect(facts.pageContained, `${theme}/${density}: page overflow`).toBe(true)
+
+        focusWithKeyboard(browser, `${wrappingRow} [data-slot="row-rename"]`)
+        // The pencil is `opacity-0 transition-opacity focus-visible:opacity-100`. Tab is not
+        // the same tick as :focus-visible, and that class — not a computed-style poll alone —
+        // is what starts the fade. Wait on both so we do not sample mid-transition.
+        browser.waitForFunction(
+          `(() => {
+            const button = document.querySelector('${wrappingRow} [data-slot="row-rename"]')
+            return !!button && button === document.activeElement && button.matches(':focus-visible') && getComputedStyle(button).opacity === '1'
+          })()`,
+        )
+        const actions = browser.evaluate(`(() => {
+          const cell = document.querySelector('${wrappingRow} td[data-column-id="task"]')
+          const bounds = cell.getBoundingClientRect()
+          return [...cell.querySelectorAll('button')].map((button) => {
+            const rect = button.getBoundingClientRect()
+            return {
+              label: button.getAttribute('aria-label'),
+              active: document.activeElement === button,
+              focusVisible: button.matches(':focus-visible'),
+              opacity: getComputedStyle(button).opacity,
+              contained: rect.left >= bounds.left && rect.right <= bounds.right,
+            }
+          })
+        })()`) as Array<{ label: string; active: boolean; focusVisible: boolean; opacity: string; contained: boolean }>
+        expect(actions.map(({ label }) => label)).toEqual(['Rename task', 'Pin task'])
+        expect(actions.every(({ opacity, contained }) => opacity === '1' && contained), JSON.stringify(actions)).toBe(true)
+
+        browser.screenshot(`${artifactsDir}/issue-167-tasks-1440-${theme}-${density}.png`, { viewport: true })
+      }
+    }
+  })
+
+  it('gives the task column the width the Workflow fold releases, and remembers a resized sidebar', () => {
+    const taskWidth = () =>
+      Number(browser.evaluate(
+        `document.querySelector('${wrappingRow} td[data-column-id="task"]').getBoundingClientRect().width`,
+      ))
+
+    const widthBeforeFold = taskWidth()
+    browser.click('button[aria-label="Fold Workflow column"]')
+    browser.waitForFunction(`document.querySelector('button[aria-label="Expand Workflow column"]') !== null`)
+    expect(taskWidth()).toBeGreaterThanOrEqual(widthBeforeFold)
+    browser.click('button[aria-label="Expand Workflow column"]')
+    browser.waitForFunction(`document.querySelector('button[aria-label="Fold Workflow column"]') !== null`)
+
+    browser.evaluate(`localStorage.setItem('cez-sidebar-width', '360')`)
+    browser.goto(`${worstUrl}/p/${worstProject}/`)
+    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
+    showResourceTable()
+    const resized = browser.evaluate(`({
+      preference: localStorage.getItem('cez-sidebar-width'),
+      sidebarWidth: document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width,
+      taskWidth: document.querySelector('${wrappingRow} td[data-column-id="task"]').getBoundingClientRect().width,
+    })`) as { preference: string; sidebarWidth: number; taskWidth: number }
+    expect(resized.preference).toBe('360')
+    expect(resized.sidebarWidth).toBe(360)
+    // The fixed table can distribute spare width beyond the task column's 320px minimum.
+    expect(resized.taskWidth).toBeGreaterThanOrEqual(320)
   })
 })
 
