@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -131,6 +131,21 @@ describe('AgentBrowser failure bundles (#408)', () => {
     const probeEval = commands().find(([action]) => action === 'eval')
     expect(probeEval?.[1]).not.toContain('.click()')
     expect(probeEval?.[1]).not.toContain('eval(')
+  })
+
+  it('a bundle that cannot be created still surfaces the wait error', () => {
+    if (process.getuid?.() === 0) return // root ignores directory modes; nothing to prove here
+    const { browser, failures } = open()
+    const specDir = join(failures, 'quick-list')
+    mkdirSync(specDir, { recursive: true })
+    chmodSync(specDir, 0o555)
+    try {
+      expect(() => browser.waitForFunction('false')).toThrow(
+        /predicate never became truthy: false \(failure bundle: <none: .*EACCES/,
+      )
+    } finally {
+      chmodSync(specDir, 0o755)
+    }
   })
 
   it('a second capture in the same test gets the next bundle number', () => {

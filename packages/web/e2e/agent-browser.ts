@@ -376,7 +376,7 @@ export class AgentBrowser {
       page,
       ...(captureErrors.length ? { captureErrors } : {}),
     }
-    writeFileSync(join(dir, 'probe.json'), JSON.stringify(probe, null, 2))
+    attempt('probe.json', () => writeFileSync(join(dir, 'probe.json'), JSON.stringify(probe, null, 2)))
     this.capturedFor = `${failureCapture.spec}/${failureCapture.test}`
     return dir
   }
