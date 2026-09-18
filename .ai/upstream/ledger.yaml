@@ -1,0 +1,390 @@
+upstream:
+  repo: open-mercato/cezar
+  branch: main
+fork:
+  repo: hearsay-tools/cezarion
+origin:
+  mergeBase: feb856667e489c0b4d9973e5b23eaa9aee0fa924
+  date: 2026-08-31
+scans:
+  - date: 2026-09-16
+    upstreamHead: 0e9dfd76456e0abf44fd0037d4d1b52b43b9e8f7
+    since: feb856667e489c0b4d9973e5b23eaa9aee0fa924
+    added: 32
+    report: scans/2026-09-16.md
+  - date: 2026-09-18
+    upstreamHead: 4763447f36b05e0c3934c77798335827f4398de4
+    since: 0e9dfd76456e0abf44fd0037d4d1b52b43b9e8f7
+    added: 12
+    report: scans/2026-09-18.md
+entries:
+  - sha: 3c8657688d48b7391d985560e1b0acda28e5ad9e
+    pr: 943
+    title: "fix(composer): stop the Alt quick replies from eating typed characters (#943)"
+    date: 2026-09-01
+    status: ported
+    hint:
+      conflicts: 2
+    fork:
+      pr: 95
+    decided: 2026-09-05
+  - sha: 4f860bf1c51663678cc72bbe835ad0fa811755ee
+    pr: 946
+    title: "fix(runs): stop a task adopting another repository's PR/issue as its reference (#945) (#946)"
+    date: 2026-09-03
+    status: ported
+    hint:
+      conflicts: 6
+    fork:
+      pr: 94
+    decided: 2026-09-06
+    note: "follow-ups #105 (cold workspace references) and #106 (repository identity recovery)"
+  - sha: ff9c44ed191955e53931331e83b5c2751a81c60f
+    pr: 951
+    title: "feat(composer): accept PDF, TXT and MD attachments, not just images (#951)"
+    date: 2026-09-03
+    status: ported
+    hint:
+      conflicts: 12
+    fork:
+      pr: 101
+    decided: 2026-09-06
+  - sha: f5e935614f3bf62c6ecd04b6cb1ec81b3ff8767d
+    pr: 947
+    title: "fix(workflows): expand /skill in a fresh run's opening prompt (#947)"
+    date: 2026-09-03
+    status: ported
+    hint:
+      conflicts: 2
+    fork:
+      pr: 96
+    decided: 2026-09-05
+  - sha: 2c5522a81774fbbb4837cc218b61b5d08e170b2b
+    pr: 764
+    title: "fix(web): reclaim mobile task history space (#764)"
+    date: 2026-09-04
+    status: ported
+    hint:
+      conflicts: 6
+    fork:
+      pr: 103
+    decided: 2026-09-06
+  - sha: 32881e15790051e090eac93dd37de76302afbbe2
+    pr: 732
+    title: "fix(github): find issues and PRs in any state from the tab's search (#730) (#732)"
+    date: 2026-09-04
+    status: ported
+    hint:
+      conflicts: 11
+    fork:
+      pr: 100
+    decided: 2026-09-06
+  - sha: 44a8dbba932fce142d5cffa2f3a73cd2a00dd626
+    pr: 938
+    title: 'feat(tasks): pin tasks to the top of the list — a per-project "Pinned" group (#938)'
+    date: 2026-09-04
+    status: ported
+    hint:
+      conflicts: 17
+    fork:
+      pr: 104
+    decided: 2026-09-06
+  - sha: aa8d6b2f3410186b9193e27e70b08ffe33d9c63e
+    pr: 937
+    title: "fix(ask): recover a CEZ:ASK payload that is only missing its closing brackets (#937)"
+    date: 2026-09-04
+    status: ported
+    hint:
+      conflicts: 5
+    fork:
+      pr: 98
+    decided: 2026-09-05
+  - sha: 3669ae287737da7be5d8963f13efdb4fb88f717e
+    pr: 841
+    title: "fix(models): discover Claude models from the host CLI instead of fixed presets (#841)"
+    date: 2026-09-04
+    status: ported
+    hint:
+      conflicts: 13
+    fork:
+      pr: 99
+    decided: 2026-09-05
+  - sha: 1a2b8882d613c5ce4c0355d1bfa6bc2d730df178
+    pr: 873
+    title: "fix(ui): collapse dense run metadata at phone width (#765) (#873)"
+    date: 2026-09-04
+    status: ported
+    hint:
+      conflicts: 1
+    fork:
+      pr: 103
+    decided: 2026-09-06
+  - sha: e8c95f3a6e665e64605239daf303ad218a6c51ce
+    pr: 962
+    title: "chore(release): bump main to 0.10.1 and cut the changelog entry (#962)"
+    date: 2026-09-04
+    status: n/a
+    hint:
+      conflicts: 6
+    reason: upstream release bump; the fork has its own version line (cezarion 0.11+)
+    decided: 2026-09-18
+  - sha: 9ea303eb584f8502f504ced2434b744ab695a1b1
+    pr: 967
+    title: "fix(runs): make the autonomous auto-continue nudge reachable on both turn-end paths (#967)"
+    date: 2026-09-12
+    status: pending
+    hint:
+      conflicts: 1
+    note: "bug present here: runContinuation never sets state.autonomous and runAgentStep has no nudge, so #autonomous parks after the first turn; 1 conflicting file, 4 hunks in run.ts"
+  - sha: 9ee4283782e5de31d0379fc2fe8cf30275e1a704
+    pr: 954
+    title: "feat(tasks): switch runners with persisted context (#954)"
+    date: 2026-09-13
+    status: pending
+    hint:
+      conflicts: 2
+    note: fork still switches runners through the handoff file; 3 hunks in run.ts
+  - sha: 85acfbf1c884b6e21cf29c6d0cde5ed1d67a719c
+    pr: 966
+    title: "fix(web): improve task detail rendering performance (#966)"
+    date: 2026-09-13
+    status: diverged
+    hint:
+      conflicts: 9
+    fork:
+      pr: 140
+    reason: "the fork did its own transcript virtualization and anchor work in #140, #162, #306 and #333; upstream patch is not applicable, ideas only"
+    decided: 2026-09-18
+  - sha: af7e828963cca1a2825af3df7421c8509ce0f6d6
+    pr: 972
+    title: "feat(dispatch): a task may dispatch other tasks (replaces the missions experiment) (#972)"
+    date: 2026-09-13
+    status: pending
+    hint:
+      conflicts: 18
+    note: "different by design: fork built owned workers with an authenticated controller (CEZ_DELEGATION); upstream dispatch (CEZ_DISPATCH) is an incompatible model. Units specs worth reading for the escalation ladder"
+  - sha: 7619b3328ea43f42fbe4a4e4c457c6e0180a96a1
+    pr: 809
+    title: "fix(composer): scroll skill menu on arrow key navigation (#809)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 0
+    note: absent here, applies clean
+  - sha: d37b21cf407df5442a8a6ef49b049cbb7693b4be
+    pr: 839
+    title: "docs(specs): a task remembers every PR it has been associated with (#839)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 0
+    note: docs only, applies clean
+  - sha: d279ba029194a91192a42e4cc73463e97a858369
+    pr: 861
+    title: "fix(ui): keep CPU/Mem folded on queued task rows (#821) (#861)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 0
+    note: pre-fix code still present at tasks-overview.tsx (queue note reopens folded CPU/Mem); applies clean
+  - sha: 14226c4aa894dc31a525a8db004ebc39aecc8289
+    pr: 963
+    title: "docs(changelog): one-line entries for every release, in 0.9.0's format (#963)"
+    date: 2026-09-14
+    status: n/a
+    hint:
+      conflicts: 1
+    reason: reformats the upstream CHANGELOG only; the fork keeps its own changelog
+    decided: 2026-09-18
+  - sha: 9cddf1069e48dac60a71624aa84fc7e806a70fd1
+    pr: 956
+    title: "feat(tasks): copy branch name from task header (#956)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 2
+    note: "absent here; run header was redesigned in #235, 2 hunks to re-place"
+  - sha: d15a8bef98ed3c52215071ac6a403f5dfc136432
+    pr: 942
+    title: "feat(thread): per-message timestamps in the task conversation (#942)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 2
+    note: absent here; new files apply clean, 1 hunk in thread-items
+  - sha: 2b5411e479c63870f857d12314a87572f2cc2ec0
+    pr: 953
+    title: "feat(sidebar): drag project groups to set their order, shared across devices (#952) (#953)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 3
+    note: absent here; needs the contract field plus 4 hunks in project-groups
+  - sha: ce4fa20b3580fc999294d2e1ae00828e9900ff9e
+    pr: 973
+    title: "feat(ui): filter the new-task base branch picker (#973)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 2
+    note: absent here; 3 hunks in picker-pill
+  - sha: 3871db4778bbf350cd94fe9253cc23eb538530c9
+    pr: 984
+    title: "fix(workflows): park intermediate asks for input (#984)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 3
+    note: "bug present here: resolveAskTurn is gated on interactive, so a CEZ:ASK from a non-final workflow step is dropped and the next step runs; upstream patch references dispatch code that must be stripped"
+  - sha: 77d3f2f5ae0e91d8f555bde922598fef712eec7e
+    pr: 965
+    title: "fix(ui): keep the task thread readable on a phone while an agent works (#965)"
+    date: 2026-09-14
+    status: diverged
+    hint:
+      conflicts: 6
+    fork:
+      pr: 303
+    reason: "mobile thread jumps were fixed differently in #303; the throttling helpers here would conflict with the fork virtualizer"
+    decided: 2026-09-18
+  - sha: d988258f1e569efaad24cfc9ddae73a27f79ad6b
+    pr: 968
+    title: "fix(clone): recover from GitHub organization SAML auth (#968)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 1
+    note: absent here; server side applies clean, 1 hunk in the clone dialog
+  - sha: 00b77b40cbbc98b2284ef3e11c9649196a06178c
+    pr: 940
+    title: "feat(tasks): in-task drafts survive leaving the task (#940)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 9
+    note: fork keeps in-task drafts in memory only; new drafts store + contract, 9 conflicting hunks
+  - sha: dac506f0a93eda59f8585e630da48307fae6a27b
+    pr: 957
+    title: "feat(attachments): per-project attachment library (#957)"
+    date: 2026-09-14
+    status: pending
+    hint:
+      conflicts: 7
+    note: "fork stores attachments per run under runs/<id>-images; depends on #940 drafts"
+  - sha: fbfb492493058acd8ddfca1a311c92f107c24386
+    pr: 985
+    title: "feat(automations): scheduled triggers, default-on, redesigned surface, creation from a prompt (#985)"
+    date: 2026-09-15
+    status: pending
+    hint:
+      conflicts: 20
+    note: "different by design today: fork automations are GitHub-poll only and opt-in; upstream adds schedule triggers, calendars and default-on. A project, not a port"
+  - sha: 67fc941f0cc79c2aca3c77ed7d0f953afadf8f5e
+    pr: 990
+    title: "chore(release): bump main to 0.11.0 and cut the changelog entry (#990)"
+    date: 2026-09-15
+    status: n/a
+    hint:
+      conflicts: 6
+    reason: upstream release bump; the fork has its own version line (cezarion 0.11+)
+    decided: 2026-09-18
+  - sha: 1deb1663a73f830fbdebe46023f66edf740e2044
+    pr: 774
+    title: "feat(workspace): register the boot folder only while the registry is empty (#774)"
+    date: 2026-09-15
+    status: pending
+    hint:
+      conflicts: 5
+    note: fork registers the boot folder unconditionally; backend applies clean, settings UI conflicts with the redesign
+  - sha: 0e9dfd76456e0abf44fd0037d4d1b52b43b9e8f7
+    pr: 986
+    title: "fix(thread): a reply typed into a task that looks done, but is running, lands (#986)"
+    date: 2026-09-15
+    status: pending
+    hint:
+      conflicts: 7
+    note: "partially present: ask-answer.ts already refetches on 409 and run-reconcile heals one direction; missing the workspace-stream watchdog and the reverse healing direction"
+  - sha: c682b9fc984791a4df6a2c78ba0f0372316f1e84
+    pr: 1013
+    title: "docs(readme): shorter README with demo video, screenshots and mobile shots (#1013)"
+    date: 2026-09-16
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: c45d45edbc40d961f7ea9e892aa5c0966a74ff74
+    pr: 993
+    title: "fix(automations): a stale poll lock no longer silences every project for ten minutes (#993)"
+    date: 2026-09-16
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 13e727c2e4dde4c4afa6fe3a845407490ddd3b1c
+    pr: 1005
+    title: "fix(opencode): a turn longer than five minutes no longer parks the run under Needs you (#1005)"
+    date: 2026-09-16
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: 97d269bd806caa0fcb6968ae3cb2efa69afae3f8
+    pr: 1014
+    title: "fix(providers): a runtime auth rejection verifies itself before it sticks (#1014)"
+    date: 2026-09-17
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: ea7f3489650e511f92529c6c22edfd63fd77b301
+    pr: 1015
+    title: "fix(dispatch): tell parents --budget is optional so uncapped trees don't get invented caps (#1015)"
+    date: 2026-09-17
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 52636b25f236304ed3ceda027d4bb2889aef4ade
+    pr: 1009
+    title: "fix(server-deploy): fail the deploy when the service did not actually restart (#1009)"
+    date: 2026-09-17
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 7fd4221f5f8abea3774814ece822a70fcc720a07
+    pr: 1022
+    title: "docs(readme): fix the mobile layout of the link row and screenshots (#1022)"
+    date: 2026-09-18
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 30a49a854161f1a8f60bbbaebe062ce8a5e3214b
+    pr: 1016
+    title: "feat(automations): PR review triggers, agent account and skill pickers (#1016)"
+    date: 2026-09-18
+    status: pending
+    hint:
+      conflicts: 5
+  - sha: 447aa3dafc30b6c3aadfef2b750413e4fc75a4cd
+    pr: 994
+    title: "fix(server-install): ubuntu-vps vhost emits a standalone http2 directive nginx < 1.25.1 rejects (#994)"
+    date: 2026-09-18
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 456859a499dc3f87ec9f938fbac12727956f428c
+    pr: 995
+    title: 'fix(runs): a turn parked on its own dispatched subagents stops reading as "needs you" (#995)'
+    date: 2026-09-18
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 8e59c0ac8f70fe02202d147e2aed7091459b5452
+    pr: 1012
+    title: "fix(attachments): file named image uploads in the attachment library too (#1012)"
+    date: 2026-09-18
+    status: pending
+    hint:
+      conflicts: 10
+  - sha: 4763447f36b05e0c3934c77798335827f4398de4
+    pr: 1023
+    title: "chore(release): bump main to 0.11.1 and cut the changelog entry (#1023)"
+    date: 2026-09-18
+    status: pending
+    hint:
+      conflicts: 6
