@@ -21,6 +21,7 @@ import {
   agentTmpDir,
   agentTmpDirEnabled,
   agentTmpEnv,
+  firstSocketSafeDir,
   removeAgentTmpDir,
   resolveAgentTmpDir,
   sweepAgentTmpDirs,
@@ -299,6 +300,19 @@ describe('socket-safe temp directory length (#387)', () => {
     expect(existsSync(dir)).toBe(false);
   });
 
+  // The nothing-fits branch of resolveAgentTmpDir cannot be built through the
+  // public API on a real host — the platform root is always short — so the
+  // selection it hangs off is a pure function, pinned here against synthetic
+  // candidates (#440).
+  it('firstSocketSafeDir returns the first candidate that fits, or undefined when none does', () => {
+    const over1 = join(osRoot(), 'a'.repeat(100));
+    const over2 = join(osRoot(), 'b'.repeat(100));
+    const fits = join(osRoot(), 'c'.repeat(20));
+    expect(firstSocketSafeDir([over1, fits, over2])).toBe(fits);
+    expect(firstSocketSafeDir([over1, over2])).toBeUndefined();
+    expect(firstSocketSafeDir([])).toBeUndefined();
+  });
+
   it('measures the cap in bytes, so a multibyte path cannot hide past it', () => {
     const root = osRoot();
     // 'é' is one JS character but two UTF-8 bytes: the kernel bounds the byte
@@ -322,30 +336,40 @@ describe('socket-safe temp directory length (#387)', () => {
     expect(existsSync(resolveAgentTmpDir(dir, runId))).toBe(false);
   });
 
-  it('fails loudly when no socket-safe root exists, rather than minting an overlong directory', () => {
-    // A host TMPDIR long enough that the OS-root candidate ALSO crosses the
-    // cap: minting either directory would hand the agent a temp directory
-    // that cannot serve unix sockets — the failure #387 is about — so the
-    // run must refuse to start with a named error instead.
-    const longRoot = join(osRoot(), `cez-long-${'t'.repeat(60)}`);
-    mkdirSync(longRoot, { recursive: true });
-    const restore = process.env.TMPDIR;
-    process.env.TMPDIR = longRoot;
-    try {
-      let thrown: unknown;
+  // #440: #785 gives every cezar task session a TMPDIR as deep as the
+  // checkout's own scratch tree, so a CLI booted inside that session (an e2e
+  // fixture, or cezar run by the agent itself) finds the env-honouring root's
+  // candidate over the cap too. The loud branch is right only when NO
+  // socket-safe directory exists — and the platform default root is one.
+  it.skipIf(process.platform === 'win32')(
+    'falls back to the platform temp root when the ambient TMPDIR itself is over budget (#440)',
+    () => {
+      const longRoot = join(osRoot(), `cez-long-${'t'.repeat(60)}`);
+      mkdirSync(longRoot, { recursive: true });
+      const restore = process.env.TMPDIR;
+      process.env.TMPDIR = longRoot;
       try {
-        agentTmpEnv(deepDataDir(), '77777777-8888-4999-8aaa-bbbbccccdddd', {});
-      } catch (err) {
-        thrown = err;
+        const runId = '77777777-8888-4999-8aaa-bbbbccccdddd';
+        const dir = mint(deepDataDir(), runId);
+        // The platform default root — '/tmp', symlink-resolved — is the only
+        // candidate that fits, so that is where the directory must land.
+        expect(dir.startsWith(realpathSync('/tmp'))).toBe(true);
+        expect(Buffer.byteLength(dir)).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
+        expect(basename(dir).startsWith('cez-agent-')).toBe(true);
+        expect(existsSync(dir)).toBe(true);
+        // Still one directory per run, and still reaped: the digest name does
+        // not include the root, so removal finds it under any root.
+        const other = mint(deepDataDir(), '77777777-8888-4999-8aaa-bbbbccccddde');
+        expect(other).not.toBe(dir);
+        removeAgentTmpDir(deepDataDir(), runId);
+        expect(existsSync(dir)).toBe(false);
+      } finally {
+        if (restore === undefined) delete process.env.TMPDIR;
+        else process.env.TMPDIR = restore;
+        rmSync(longRoot, { recursive: true, force: true });
       }
-      expect(thrown).toBeInstanceOf(AgentTempDirError);
-      expect((thrown as Error).message).toContain('CEZ_AGENT_TMPDIR=0');
-    } finally {
-      if (restore === undefined) delete process.env.TMPDIR;
-      else process.env.TMPDIR = restore;
-      rmSync(longRoot, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   it('refuses to rewrite an ownership marker the directory no longer controls', () => {
     const dir = deepDataDir();
