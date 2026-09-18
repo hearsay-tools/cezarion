@@ -152,9 +152,9 @@ test('listRemoteSkills clones a local repo, pins the SHA, and refuses a bad ref'
   assert.deepEqual(evil, []);
 });
 
-// ---- materialization: both agent skill dirs get the directory skill (#286) ----
+// ---- materialization: every supported agent skill dir gets the directory skill ----
 
-test('materializeSkillDir seeds .claude/skills AND .agents/skills, excluding both from git', async (t) => {
+test('materializeSkillDir seeds Claude, Agents, and Cursor skill dirs and excludes them from git', async (t) => {
   const home = mkdtempSync(join(tmpdir(), 'cez-home-'));
   const srcDir = mkdtempSync(join(tmpdir(), 'cez-src-'));
   const repoRoot = mkdtempSync(join(tmpdir(), 'cez-root-'));
@@ -192,10 +192,10 @@ test('materializeSkillDir seeds .claude/skills AND .agents/skills, excluding bot
   const ok = await materializeSkillDir(repoRoot, greeter);
   assert.equal(ok, true, 'materializeSkillDir should have seeded the directory skill');
 
-  // BOTH destinations get the full directory (SKILL.md + references/) — claude
-  // reads .claude/skills, codex/pi read .agents/skills. Dropping either one is
-  // the #286 regression: the other backend loses the companion files on disk.
-  for (const agentDir of ['.claude', '.agents']) {
+  // Every destination gets the full directory (SKILL.md + references/) —
+  // Claude reads .claude/skills, codex/pi read .agents/skills, and Cursor reads
+  // .cursor/skills. Dropping one loses that backend's companion files on disk.
+  for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const destSkill = join(repoRoot, agentDir, 'skills', 'greeter');
     assert.ok(
       existsSync(join(destSkill, 'SKILL.md')),
@@ -208,12 +208,16 @@ test('materializeSkillDir seeds .claude/skills AND .agents/skills, excluding bot
     );
   }
 
-  // BOTH paths stay out of the user's git via the shared info/exclude.
+  // Every path stays out of the user's git via the shared info/exclude.
   const exclude = readFileSync(join(repoRoot, '.git', 'info', 'exclude'), 'utf8');
   assert.ok(exclude.split('\n').includes('.claude/skills/greeter/'));
   assert.ok(
     exclude.split('\n').includes('.agents/skills/greeter/'),
     'exclude must contain .agents/skills/greeter/',
+  );
+  assert.ok(
+    exclude.split('\n').includes('.cursor/skills/greeter/'),
+    'exclude must contain .cursor/skills/greeter/',
   );
 });
 

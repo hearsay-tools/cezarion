@@ -4527,11 +4527,12 @@ export class RunManager {
         // describe the work — and therefore derive a useful title (#432).
         systemPrompt = skillSystemPrompt(skill);
         // Directory team skills (SKILL.md + references/) get materialized
-        // into BOTH <cwd>/.claude/skills/<name>/ (claude) and
-        // <cwd>/.agents/skills/<name>/ (codex/pi) — the run's worktree when
+        // into <cwd>/.claude/skills/<name>/ (claude),
+        // <cwd>/.agents/skills/<name>/ (codex/pi), and
+        // <cwd>/.cursor/skills/<name>/ (Cursor) — the run's worktree when
         // there is one — so every backend sees the companion files on disk;
-        // the shared info/exclude keeps both out of git (and out of autosave
-        // commits). (#286)
+        // the shared info/exclude keeps them out of git (and out of autosave
+        // commits). (#286, #413)
         if (skill.source === 'team' && skill.team?.dir) {
           const seeded = await materializeSkillDir(state.cwd, skill).catch(() => false);
           if (seeded) {
@@ -4540,7 +4541,7 @@ export class RunManager {
               stepId: step.id,
               message:
                 `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/ ` +
-                `and .agents/skills/${skill.name}/`,
+                `.agents/skills/${skill.name}/, and .cursor/skills/${skill.name}/`,
             });
           }
         }
