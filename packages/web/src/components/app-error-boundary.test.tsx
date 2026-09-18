@@ -21,6 +21,22 @@ describe('AppErrorBoundary', () => {
     vi.restoreAllMocks()
   })
 
+  /**
+   * The reproduction, not a narrative: this is the blank page the boundary exists to replace,
+   * made runnable. Render the same throwing tree with no boundary above it and the container
+   * ends up EMPTY — React 19 unmounts the root rather than leaving a partial document — which
+   * is what a cockpit e2e wait reports as a selector that never appeared, exactly as a slow
+   * page does. Deleting the boundary and running this file is the whole repro.
+   */
+  it('reproduces the blank document an unguarded render error leaves behind', () => {
+    const { container } = render(<p data-slot="child">the cockpit</p>)
+    expect(container.childElementCount).toBe(1)
+
+    expect(() => render(<Boom message="unguarded" />, { container })).toThrow('unguarded')
+    expect(container.childElementCount).toBe(0)
+    expect(container.innerHTML).toBe('')
+  })
+
   it('renders its children while nothing throws', () => {
     const { container } = render(
       <AppErrorBoundary>

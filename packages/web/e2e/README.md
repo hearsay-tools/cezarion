@@ -64,8 +64,8 @@ line; the fix is a wait, never a baseline entry.
 
 5. **No write into a node React rendered.** A spec that rewrites a title, a status pill or a
    metric to reach a state is measuring something the product never produced — and `use-now.ts`
-   re-renders those rows every 30 s, so React can commit against a replaced text node and take
-   the root down (#416). Build the state from fixture data: `runs.json` is cezar's documented
+   re-renders those rows every 30 s, so the write races a re-render that puts the real value
+   back under the measurement (#416). Build the state from fixture data: `runs.json` is cezar's documented
    state contract and the real store parses it. Where the state genuinely has no data path,
    stub the ROUTE the surface reads (`smoke.e2e.ts`'s nightly version, `github.e2e.ts`'s long
    titles) or add the seam in the product — never in the rendered DOM. Provenance decides what

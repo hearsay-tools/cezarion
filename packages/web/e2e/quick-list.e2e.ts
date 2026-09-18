@@ -619,10 +619,12 @@ describe('tasks table overview', () => {
  *
  * This test used to build those states by writing into nodes React owns: `links[0].textContent`,
  * the workflow cell, the status pill's text, the PR chip's label text node, both halves of the
- * diff pair and the CPU metric (#416). `use-now.ts` re-renders these rows every 30 s, so a
- * commit against a replaced text node could unmount the root — and with no error boundary the
- * page went blank, which every wait in this suite reports exactly as a slow page. Every state
- * below now comes from `runs.json`, which the real store parses and the real API serves.
+ * diff pair and the CPU metric (#416). `use-now.ts` re-renders these rows every 30 s, so those
+ * writes were racing a re-render that would restore the real values under the measurement —
+ * which is reason enough on its own to stop making them. No failure bundle shows one of these
+ * writes taking the page down, and none is claimed: the rows measured below simply now hold
+ * what they are measured for, from `runs.json`, which the real store parses and the real API
+ * serves.
  *
  * One state does NOT: a live CPU reading. `usageCells` believes a sample only while the run's
  * process tree can exist, the sample arrives on the usage SSE stream from the server's own

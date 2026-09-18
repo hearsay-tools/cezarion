@@ -119,10 +119,10 @@ const receiverHead = /([A-Za-z_$][\w$]*)(?:\s*\??\.\s*[\w$]+|\s*\[[^\]]*\]|\s*\(
  *
  * Both were how the cockpit specs used to reach a state the fixture did not have: rewrite the
  * title, the workflow cell and the status pill, then measure. `use-now.ts` re-renders those rows
- * every 30 s, so React can commit against a replaced text node — and before #416's error boundary
- * that took the whole root down, leaving a blank page every wait in the suite reports exactly as a
- * slow one. Build the state from fixture data instead; where the product genuinely cannot reach it,
- * the seam belongs in the product.
+ * every 30 s, so the write is racing a re-render that restores the real value under the
+ * measurement, and the row being measured is not the row the product produced. Build the state
+ * from fixture data instead; where the product genuinely cannot reach it, the seam belongs in
+ * the product.
  *
  * Provenance, not names, decides what is exempt. A receiver rooted in `querySelector` — directly,
  * or through a variable bound to one earlier in the same in-page expression — is a rendered node.
