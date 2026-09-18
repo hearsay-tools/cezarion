@@ -75,6 +75,19 @@ describe('parseUsageLimit', () => {
       .toBe('2026-08-03T12:00:30.000Z');
   });
 
+  it('reads whitespace-separated "rate limited" forms, tabs included', () => {
+    // #446 round 4: the two-word alternative carries the same whitespace family as the
+    // single-word one above it — a tab between the words must not drop the phrase.
+    expect(parseUsageLimit('rate\tlimited — try again in 42 minutes', NOW)?.evidence).toBe('delay');
+  });
+
+  it('keeps reading a tab-separated "rate limit" through the single-word alternative', () => {
+    // Guard: the first alternative's [\s-]? already covered "rate\tlimit" before the
+    // two-word alternative was widened — pin that it stays covered.
+    expect(parseUsageLimit('rate\tlimit exceeded, try again at 2026-08-03T12:00:30Z', NOW)?.resetAt.toISOString())
+      .toBe('2026-08-03T12:00:30.000Z');
+  });
+
   it('clamps an already-elapsed reset to now — the limit has lifted, resume as soon as allowed', () => {
     const hit = parseUsageLimit(`Claude AI usage limit reached|${(NOW - 60_000) / 1_000}`, NOW);
     expect(hit?.resetAt.getTime()).toBe(NOW);
