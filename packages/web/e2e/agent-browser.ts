@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync, statSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 /**
  * The agent-browser provider seam. Every e2e spec drives the app through this module and
@@ -25,6 +25,149 @@ const descriptorPath = resolve(repoRoot, '.ai/qa/test-env.json')
  * package (`packages/cezar/dist`), not into a root-level `dist/`.
  */
 export const cezarCli = resolve(repoRoot, 'packages/cezar/dist/index.js')
+
+/**
+ * Failure bundles (#408). A red cockpit shard used to leave nothing behind but
+ * `Wait timed out after 25000ms`, so #369 and #393 closed on guesses. Now the seam — the only
+ * module that knows the browser session — writes what the page looked like at the moment a
+ * wait gave up, under `.ai/qa/failures/<spec>/<test>-<n>/`:
+ *
+ *   screenshot.png   the viewport (never full-page: stitching scrolls the document and would
+ *                    move the very state being captured)
+ *   snapshot.txt     `snapshot -i`, the accessibility tree
+ *   probe.json       the URL, the selector or predicate that timed out, and a page probe —
+ *                    the focused element's path, the target's count, rect, computed style and
+ *                    the element under its centre
+ *
+ * The spec and test names come from `failure-setup.ts`, which registers them per test from
+ * vitest's context; the seam itself imports nothing from vitest so a unit test can drive it
+ * through a stand-in binary. The root is overridable for the same reason.
+ */
+const defaultFailureRoot = resolve(repoRoot, '.ai/qa/failures')
+const failureCapture: { root: string; spec: string; test: string } = {
+  root: defaultFailureRoot,
+  spec: 'unknown-spec',
+  test: 'unknown-test',
+}
+
+export function configureFailureCapture(next: { root?: string; spec?: string; test?: string }): void {
+  if ('root' in next) failureCapture.root = next.root ?? defaultFailureRoot
+  if ('spec' in next) failureCapture.spec = next.spec ?? 'unknown-spec'
+  if ('test' in next) failureCapture.test = next.test ?? 'unknown-test'
+}
+
+/** A filesystem-safe segment: vitest test names carry spaces, quotes and slashes. */
+function bundleSegment(name: string): string {
+  const safe = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+  return (safe || 'unnamed').slice(0, 80)
+}
+
+/** The next free `<spec>/<test>-<n>` under the root — free on disk, not in memory, so bundles
+ *  from an earlier local run are never overwritten. */
+function nextBundleDir(): string {
+  const specDir = join(failureCapture.root, bundleSegment(failureCapture.spec))
+  const test = bundleSegment(failureCapture.test)
+  for (let n = 1; ; n += 1) {
+    const dir = join(specDir, `${test}-${n}`)
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true })
+      return dir
+    }
+  }
+}
+
+/** Every seam attached and not yet closed, oldest first. */
+const attached: AgentBrowser[] = []
+
+/** The seam most recently attached and not yet closed — how `failure-setup.ts`'s
+ *  `onTestFailed` hook reaches the browser a spec holds in its own module scope.
+ *
+ *  A stack, not a single slot: `github.e2e.ts` keeps its main browser open and attaches a
+ *  short-lived one per state, and its `finally` closes that one before `onTestFailed` runs.
+ *  Closing it must hand the hook back to the main browser, not to nothing. */
+export function lastAttachedBrowser(): AgentBrowser | null {
+  return attached.at(-1) ?? null
+}
+
+type FailureReason =
+  | { kind: 'wait-selector'; action: 'click' | 'hover' | 'fill'; selector: string }
+  | { kind: 'wait-fn'; predicate: string }
+  | { kind: 'test' }
+
+/**
+ * The in-page probe. Built as one expression so a single `eval` fetches everything, and
+ * every branch is wrapped so a selector the CSS engine rejects (agent-browser also accepts
+ * `text=` and `@ref`) records the rejection instead of failing the probe.
+ *
+ * A timed-out predicate is recorded in `probe.json`, never re-run here: specs put side effects
+ * in predicates (`thread-scroll.e2e.ts` clicks a button inside one), and a capture that fired
+ * them again would alter the session the spec's remaining tests share. The probe only reads.
+ */
+function probeScript(reason: FailureReason): string {
+  const selector = reason.kind === 'wait-selector' ? JSON.stringify(reason.selector) : 'null'
+  return `(() => {
+    const path = (el) => {
+      const parts = []
+      for (let node = el; node && node.nodeType === 1 && parts.length < 12; node = node.parentElement) {
+        let part = node.tagName.toLowerCase()
+        if (node.id) part += '#' + node.id
+        else {
+          const cls = [...node.classList].slice(0, 3).join('.')
+          if (cls) part += '.' + cls
+          const parent = node.parentElement
+          if (parent) {
+            const siblings = [...parent.children].filter((c) => c.tagName === node.tagName)
+            if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(node) + 1) + ')'
+          }
+        }
+        parts.unshift(part)
+      }
+      return parts.join(' > ')
+    }
+    const describe = (el) => {
+      const r = el.getBoundingClientRect()
+      const cs = getComputedStyle(el)
+      const cx = r.left + r.width / 2
+      const cy = r.top + r.height / 2
+      const under = document.elementFromPoint(cx, cy)
+      return {
+        path: path(el),
+        rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+        inViewport: r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth,
+        style: {
+          display: cs.display, visibility: cs.visibility, opacity: cs.opacity,
+          pointerEvents: cs.pointerEvents, position: cs.position, zIndex: cs.zIndex,
+          transform: cs.transform, transition: cs.transition,
+        },
+        attributes: Object.fromEntries([...el.attributes].slice(0, 12).map((a) => [a.name, a.value.slice(0, 120)])),
+        text: (el.textContent || '').trim().slice(0, 120),
+        elementUnderCentre: under
+          ? { path: path(under), coversTarget: under !== el && !el.contains(under) }
+          : null,
+      }
+    }
+    const out = {
+      url: location.href,
+      title: document.title,
+      readyState: document.readyState,
+      viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY },
+      activeElement: document.activeElement && document.activeElement !== document.body
+        ? describe(document.activeElement)
+        : null,
+      openDialogs: [...document.querySelectorAll('[role="dialog"], dialog[open]')].map(path),
+    }
+    const selector = ${selector}
+    if (selector !== null) {
+      try {
+        const nodes = [...document.querySelectorAll(selector)]
+        out.target = { count: nodes.length, matches: nodes.slice(0, 5).map(describe) }
+      } catch (error) {
+        out.target = { count: null, selectorError: String(error) }
+      }
+    }
+    return out
+  })()`
+}
 
 type EnvDescriptor = {
   baseUrl: string
@@ -187,7 +330,66 @@ export class AgentBrowser {
     if (!browser.installed) {
       throw new Error(`cezar e2e: the agent-browser provider is not installed (${browser.notes})`)
     }
-    return new AgentBrowser(browser.command, session, browser)
+    const seam = new AgentBrowser(browser.command, session, browser)
+    attached.push(seam)
+    return seam
+  }
+
+  /** The `<spec>/<test>` a bundle was last written for — how a wait failure and the
+   *  `onTestFailed` hook that follows it agree on writing one bundle, not two. */
+  private capturedFor: string | null = null
+
+  /**
+   * Write a failure bundle and return its directory. Never throws: a capture step that failed
+   * is recorded inside the bundle (`probe.json` → `captureErrors`), and a bundle that could not
+   * be created at all comes back as a `<none: …>` marker, because the wait that triggered it is
+   * the failure worth reporting and a second error would mask it.
+   */
+  private captureFailure(reason: FailureReason, error: unknown): string {
+    let dir: string
+    try {
+      dir = nextBundleDir()
+    } catch (cause) {
+      // No directory, no bundle — but the wait that brought us here is still the failure to
+      // report, so hand back a marker the error message can carry instead of throwing.
+      return `<none: ${describeError(cause)}>`
+    }
+    const captureErrors: string[] = []
+    const attempt = (step: string, fn: () => void) => {
+      try {
+        fn()
+      } catch (cause) {
+        captureErrors.push(`${step}: ${describeError(cause)}`)
+      }
+    }
+    let page: unknown = null
+    attempt('screenshot', () => this.screenshot(join(dir, 'screenshot.png'), { viewport: true }))
+    attempt('snapshot', () => writeFileSync(join(dir, 'snapshot.txt'), this.snapshot()))
+    attempt('probe', () => { page = this.evaluate(probeScript(reason)) })
+    const probe = {
+      ...reason,
+      spec: failureCapture.spec,
+      test: failureCapture.test,
+      session: this.session,
+      capturedAt: new Date().toISOString(),
+      error: describeError(error),
+      page,
+      ...(captureErrors.length ? { captureErrors } : {}),
+    }
+    attempt('probe.json', () => writeFileSync(join(dir, 'probe.json'), JSON.stringify(probe, null, 2)))
+    this.capturedFor = `${failureCapture.spec}/${failureCapture.test}`
+    return dir
+  }
+
+  /**
+   * The bundle for a test that failed on something other than a wait — a plain `expect`.
+   * Called by `failure-setup.ts`'s `onTestFailed` hook. Returns `null` when this test already
+   * has a bundle from a wait that timed out inside it, since that bundle is the page at the
+   * moment of failure and a second one taken after the test unwound would only add noise.
+   */
+  captureTestFailure(errors: readonly unknown[]): string | null {
+    if (this.capturedFor === `${failureCapture.spec}/${failureCapture.test}`) return null
+    return this.captureFailure({ kind: 'test' }, errors.length === 1 ? errors[0] : errors)
   }
 
   /** One agent-browser invocation. `--json` on every call so results are parsed, not scraped. */
@@ -255,7 +457,12 @@ export class AgentBrowser {
    *  tap that opened it, it is mounted, "visible", and still entirely off-screen — sampling it in
    *  that window answers every question wrong. */
   waitForFunction(js: string): void {
-    this.run(['wait', '--fn', js])
+    try {
+      this.run(['wait', '--fn', js])
+    } catch (cause) {
+      const bundle = this.captureFailure({ kind: 'wait-fn', predicate: js }, cause)
+      throw new Error(`cezar e2e: predicate never became truthy: ${js} (failure bundle: ${bundle})`, { cause })
+    }
   }
 
   /** operation: interact (`press`) — a key press against whatever currently has focus. */
@@ -283,7 +490,8 @@ export class AgentBrowser {
     try {
       this.run(['wait', selector])
     } catch (cause) {
-      throw new Error(`cezar e2e: ${action} target never appeared: ${selector}`, { cause })
+      const bundle = this.captureFailure({ kind: 'wait-selector', action, selector }, cause)
+      throw new Error(`cezar e2e: ${action} target never appeared: ${selector} (failure bundle: ${bundle})`, { cause })
     }
   }
 
@@ -387,10 +595,40 @@ export class AgentBrowser {
 
   /** operation: close. Never throws — teardown must not mask a real failure. */
   close(): void {
+    const index = attached.indexOf(this)
+    if (index !== -1) attached.splice(index, 1)
     try {
       this.run(['close'])
     } catch {
       /* already closed */
     }
+  }
+}
+
+/** An error's message with its cause chain, one line each — `run()` wraps the CLI's
+ *  `Wait timed out after 25000ms` as a cause, and that line is the one worth keeping. */
+function describeError(error: unknown): string {
+  if (Array.isArray(error)) return error.map(describeError).join('\n---\n')
+  const lines: string[] = []
+  for (let current: unknown = error, depth = 0; current !== undefined && current !== null && depth < 5; depth += 1) {
+    lines.push(errorLine(current))
+    current = typeof current === 'object' && 'cause' in current ? (current as { cause?: unknown }).cause : undefined
+  }
+  return lines.join('\n  caused by: ')
+}
+
+/** One line for an Error, or for the plain `{ name, message }` object vitest serializes a test's
+ *  errors into by the time `onTestFailed` sees them — not an Error instance, and with no
+ *  prototype `String()` could fall back on. */
+function errorLine(value: unknown): string {
+  if (typeof value === 'object' && value !== null && 'message' in value) {
+    const { name, message } = value as { name?: unknown; message?: unknown }
+    return `${typeof name === 'string' ? name : 'Error'}: ${String(message)}`
+  }
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value) ?? Object.prototype.toString.call(value)
+  } catch {
+    return Object.prototype.toString.call(value)
   }
 }
