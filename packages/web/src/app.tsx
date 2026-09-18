@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router'
 
 import { GlobalEventsProvider } from './api/global-events'
 import { createQueryClient } from './api/query-client'
+import { AppErrorBoundary } from './components/app-error-boundary'
 import { AppShellContainer } from './components/app-shell-container'
 import { AppearanceProvider } from './components/appearance-provider'
 import { LastLocationController } from './components/last-location-controller'
@@ -32,34 +33,38 @@ export function App() {
   const [queryClient] = useState(createQueryClient)
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <GlobalEventsProvider>
-        {/* Beside the stream on purpose: it watches the run-list cache the stream patches
-            (and reconciliation refetches), turning attention transitions into browser
-            notifications when the tab is hidden (R6 1.7). Renders nothing. */}
-        <RunNotifications />
-        <ThemeProvider>
-          {/* Beside ThemeProvider on purpose: appearance (accent/density) is the ui-state.json
-              half of the same boot contract — mirror pre-paints, server truth reconciles. */}
-          <AppearanceProvider>
-            <BrowserRouter>
-              <LastLocationController />
-              {/* At the root for the same reason the event stream is: the sidebar, the task table
-                  and an open run header all paint PR/issue chips, often the SAME ones, and each
-                  asking for itself was several round trips and a staggered wave of colour. They
-                  register what they are painting here instead, and it goes out as one request per
-                  project. */}
-              <ReferenceStatusRegistry>
-                <AppShellContainer>
-                  <AppRoutes />
-                </AppShellContainer>
-              </ReferenceStatusRegistry>
-              {/* One toast outlet for the whole app — `toast()` is a module-level call. */}
-              <Toaster />
-            </BrowserRouter>
-          </AppearanceProvider>
-        </ThemeProvider>
-      </GlobalEventsProvider>
-    </QueryClientProvider>
+    // Outermost, above every provider: a render error anywhere below leaves a failure surface
+    // instead of an unmounted root and a blank page (#416).
+    <AppErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <GlobalEventsProvider>
+          {/* Beside the stream on purpose: it watches the run-list cache the stream patches
+              (and reconciliation refetches), turning attention transitions into browser
+              notifications when the tab is hidden (R6 1.7). Renders nothing. */}
+          <RunNotifications />
+          <ThemeProvider>
+            {/* Beside ThemeProvider on purpose: appearance (accent/density) is the ui-state.json
+                half of the same boot contract — mirror pre-paints, server truth reconciles. */}
+            <AppearanceProvider>
+              <BrowserRouter>
+                <LastLocationController />
+                {/* At the root for the same reason the event stream is: the sidebar, the task table
+                    and an open run header all paint PR/issue chips, often the SAME ones, and each
+                    asking for itself was several round trips and a staggered wave of colour. They
+                    register what they are painting here instead, and it goes out as one request per
+                    project. */}
+                <ReferenceStatusRegistry>
+                  <AppShellContainer>
+                    <AppRoutes />
+                  </AppShellContainer>
+                </ReferenceStatusRegistry>
+                {/* One toast outlet for the whole app — `toast()` is a module-level call. */}
+                <Toaster />
+              </BrowserRouter>
+            </AppearanceProvider>
+          </ThemeProvider>
+        </GlobalEventsProvider>
+      </QueryClientProvider>
+    </AppErrorBoundary>
   )
 }
