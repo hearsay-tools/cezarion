@@ -353,3 +353,21 @@ it('keeps a request and its outcome together at the newest-page item boundary', 
   expect(page.events.map(event => event.seq)).toContain(2);
   expect(page.events.map(event => event.seq)).toContain(3);
 });
+
+it('retains an out-of-scan outcome without spending a visible page item on it', async () => {
+  const senderRunId='11111111-1111-4111-8111-111111111111', recipientRunId='22222222-2222-4222-8222-222222222222', id='33333333-3333-4333-8333-333333333333';
+  const createdAt='2026-09-08T12:00:00.000Z';
+  const events = [
+    { seq: 1, type: 'conversation-message', message: { id, senderRunId, recipientRunId, kind: 'request', text: 'Please review', createdAt, requestHash: 'a'.repeat(64), state: 'accepted' }, delivery: 'delivered' },
+    ...Array.from({ length: 100 }, (_, index) => ({ seq: index + 2, type: 'note', message: `earlier item ${index} ${'x'.repeat(300)}` })),
+    { seq: 102, type: 'turn.started', turnId: 'later-turn' },
+    ...Array.from({ length: 100 }, (_, index) => ({ seq: index + 103, type: 'note', message: `later item ${index} ${'x'.repeat(300)}` })),
+    { seq: 203, type: 'request-outcome', outcome: { requestId: id, status: 'replied', observedAt: createdAt } },
+  ];
+  const page = await readRunHistoryPage(fixture(events));
+  expect(page.itemCount).toBe(100);
+  expect(page.events.map(event => event.seq)).not.toContain(1);
+  expect(page.events.map(event => event.seq)).not.toContain(101);
+  expect(page.events.map(event => event.seq)).toContain(103);
+  expect(page.events.map(event => event.seq)).toContain(203);
+});
