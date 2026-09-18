@@ -62,6 +62,23 @@ line; the fix is a wait, never a baseline entry.
    used to exempt any looping function whose name began `waitFor` or `poll`, which trusted a
    name rather than a mechanism.
 
+5. **No write into a node React rendered.** A spec that rewrites a title, a status pill or a
+   metric to reach a state is measuring something the product never produced — and `use-now.ts`
+   re-renders those rows every 30 s, so React can commit against a replaced text node and take
+   the root down (#416). Build the state from fixture data: `runs.json` is cezar's documented
+   state contract and the real store parses it. Where the state genuinely has no data path,
+   stub the ROUTE the surface reads (`smoke.e2e.ts`'s nightly version, `github.e2e.ts`'s long
+   titles) or add the seam in the product — never in the rendered DOM. Provenance decides what
+   is exempt, not naming: a receiver rooted in `querySelector` is a rendered node, while
+   `document.documentElement` (theme, density, width, accent) and anything bound to
+   `document.createElement` or `.cloneNode` are the spec's own.
+6. **No positional index into a rendered list, in a spec that addresses rows by `data-run-id`.**
+   `rows[0]` and `links[1]` depend on a sort the fixture never pinned — two runs sharing a
+   `createdAt` decide the order by V8's stable sort of the read order. Address the row by its id,
+   the way the rest of the file already does; if the order itself is the subject, assert the whole
+   order outright. Only in-page code counts: indexing an array `evaluate` RETURNED is reading a
+   result, not addressing a row.
+
 One site to know about: `selection-states.e2e.ts` asserts `matches(':hover')` after
 `hoverVisiblePoint`. That is a one-shot assertion, not a wait, and it holds because that spec adds
 `--blink-settings=primaryHoverType=2` to `AGENT_BROWSER_ARGS` before it attaches. Rule 1

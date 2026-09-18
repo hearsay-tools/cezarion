@@ -231,29 +231,68 @@ describe('cockpit app shell', () => {
     expect(dark.headerOverflow).toBeLessThanOrEqual(0)
   })
 
-  it('keeps the footer controls inside the 264px column even on a nightly-length version', () => {
+  it('keeps the footer controls inside the 264px column even on a nightly-length version', async () => {
+    const NIGHTLY = '0.9.2-nightly.20260813.1'
+    // The e2e server reports this checkout's own (short) semver, which never overflowed. The
+    // string that DID is the nightly dist-tag of #876, and the CLI reads its version from its own
+    // `package.json` at boot — so no fixture server can report it. The nightly version therefore
+    // arrives as DATA, through the route the chip actually reads: `GET /api/v1/health`, stubbed,
+    // and then re-read because a `visibilitychange` runs the stream's own reconcile, which
+    // invalidates the health query (`api/global-events.tsx`). The chip renders it itself.
+    //
+    // This used to write the string into the chip's label instead (#416). Every control in the
+    // row but the chip is `shrink-0`, so before the chip could give, a long version pushed the
+    // gear and the theme toggle bodily outside the sidebar's right edge instead of clipping.
+    const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as { version: string }
     browser.goto(baseUrl + scoped('/'))
     browser.waitForFunction(`document.querySelector('[data-slot="version-chip"]') !== null`)
+    browser.evaluate(`(() => {
+      const nativeFetch = window.fetch;
+      window.fetch = (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+        if (new URL(url, location.href).pathname.endsWith('/health')) {
+          return nativeFetch(input, init).then(async (res) => {
+            const body = await res.json();
+            return new Response(JSON.stringify({ ...body, version: ${JSON.stringify(NIGHTLY)} }), {
+              status: res.status, headers: { 'content-type': 'application/json' },
+            });
+          });
+        }
+        return nativeFetch(input, init);
+      };
+      // The stream's reconcile path, the same one a phone returning from a pocket takes.
+      document.dispatchEvent(new Event('visibilitychange'));
+    })()`)
+    browser.waitForFunction(
+      `document.querySelector('[data-slot="version-chip"]')?.textContent === ${JSON.stringify(`v${NIGHTLY}`)}`,
+    )
 
-    // The e2e server reports this checkout's own (short) semver, which never overflowed. The
-    // string that DID is the nightly dist-tag of #876 — so write it into the chip and measure
-    // what the real layout engine does with it. Every control in the row but the chip is
-    // `shrink-0`, so before the chip could give, this pushed the gear and the theme toggle
-    // bodily outside the sidebar's right edge instead of clipping anything.
     const overflow = browser.evaluate(`(() => {
       const chip = document.querySelector('[data-slot="version-chip"]')
       const label = chip.querySelector('span:not([data-slot])')
-      label.textContent = 'v0.9.2-nightly.20260813.1'
       const sidebarRight = document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().right
       const escaped = [...document.querySelectorAll('[data-slot="sidebar-footer-controls"] > *')]
         .filter((el) => el.getBoundingClientRect().right > sidebarRight)
         .map((el) => el.dataset.slot)
-      return { escaped, truncated: label.scrollWidth > Math.ceil(label.getBoundingClientRect().width) }
-    })()`) as { escaped: string[]; truncated: boolean }
+      return {
+        label: label.textContent,
+        title: chip.getAttribute('title'),
+        escaped,
+        truncated: label.scrollWidth > Math.ceil(label.getBoundingClientRect().width),
+      }
+    })()`) as { label: string; title: string; escaped: string[]; truncated: boolean }
 
+    expect(overflow.label).toBe(`v${NIGHTLY}`)
     expect(overflow.escaped).toEqual([])
     // …and the chip absorbed it by clipping its own label, which is where the `title` earns its keep.
     expect(overflow.truncated).toBe(true)
+    expect(overflow.title).toBe(`v${NIGHTLY}`)
+
+    // Back to the server's own version, so nothing after this measures a stubbed page.
+    browser.goto(baseUrl + scoped('/'))
+    browser.waitForFunction(
+      `document.querySelector('[data-slot="version-chip"]')?.textContent === ${JSON.stringify(`v${health.version}`)}`,
+    )
   })
 
   it('fills the repo and version chips from the live /api/v1/health', async () => {

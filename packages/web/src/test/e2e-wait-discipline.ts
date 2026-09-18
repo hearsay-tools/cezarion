@@ -2,17 +2,24 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 /**
- * A source scan of the cockpit e2e specs for the four ways a spec samples instead of waiting
- * (#409). It is a heuristic over lines and call spans, not a parser: the specs are regular
- * enough that a rule fits in a regex, and a false positive costs one wait — the thing the rule
- * asks for anyway. The rules are spelled out for authors in `packages/web/e2e/README.md`.
+ * A source scan of the cockpit e2e specs for the ways a spec fakes a state or samples instead of
+ * waiting (#409, #416). It is a heuristic over lines and call spans, not a parser: the specs are
+ * regular enough that a rule fits in a regex, and a false positive costs one wait or one fixture
+ * record — the thing the rule asks for anyway. The rules are spelled out for authors in
+ * `packages/web/e2e/README.md`.
  *
  * `e2e-wait-discipline.test.ts` runs it against every spec and compares the tally with a
  * checked-in baseline that can only shrink, so today's sites stay where they are and no new
  * one lands without a wait.
  */
 
-export type Rule = 'one-shot-read' | 'hover-in-wait' | 'mutating-predicate' | 'sleep'
+export type Rule =
+  | 'one-shot-read'
+  | 'hover-in-wait'
+  | 'mutating-predicate'
+  | 'sleep'
+  | 'product-dom-write'
+  | 'positional-row-index'
 
 export interface Site {
   file: string
@@ -78,12 +85,111 @@ export function scanSource(file: string, source: string): Site[] {
     if (sleep.test(line)) sites.push(at('sleep', i))
   })
 
+  // Rules 5 and 6 — what a spec does to the page it is measuring. Both only look inside in-page
+  // code, so a node-side `rows[0]` on an array `evaluate` RETURNED is untouched: reading a result
+  // by index is not addressing a row by index.
+  for (const call of callSpans(source, inPage)) {
+    for (const site of productDomSites(call, source)) sites.push(at(site.rule, site.line))
+  }
+
   return sites.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule))
+}
+
+/** The calls whose argument is code that runs IN the page. */
+const inPage = /\b(evaluate|waitForFunction|waitForValue)\(/g
+
+/** A mutation of a DOM node. `classList`/`dataset` are here because theme and density are set
+ *  that way, and the receiver is what tells those apart from a write into a rendered row. */
+const writeOp =
+  /\.(?:textContent|innerHTML|innerText)\s*=(?!=)|\.dataset\.[\w$]+\s*=(?!=)|\.(?:setAttribute|removeAttribute|replaceChildren|appendChild|append|prepend|insertBefore|replaceWith|remove)\s*\(|\.classList\.(?:add|remove|toggle)\s*\(/
+/** A node the SPEC made, not React: writing to it is the point of a probe. */
+const specOwned = /\b(?:const|let|var)\s+([\w$]+)\s*=\s*[^\n]*?(?:document\.createElement\(|\.cloneNode\()/g
+/** The names a binding introduces — `const [adds, dels] = …` introduces both. */
+const boundNames = /\b(?:const|let|var)\s+(\[[^\]]*\]|\{[^}]*\}|[\w$]+)\s*=/
+/** A positional read of a live node list. */
+const positional = /(?:querySelectorAll\([^\n]*?\)\s*\]?|\b[\w$]+)\s*\[\s*\d+\s*\]/g
+
+/** The identifier a trailing expression starts from — `links` in `links[0].firstChild`, and
+ *  `clone` in `clone.querySelector('…')?`. Optional chaining is part of the expression, so the
+ *  trailing `?` of a `?.remove()` must not be what decides a receiver's provenance. */
+const receiverHead = /([A-Za-z_$][\w$]*)(?:\s*\??\.\s*[\w$]+|\s*\[[^\]]*\]|\s*\([^()]*\))*\??$/
+
+/**
+ * A spec that writes into a node React rendered, or addresses a rendered row by its position.
+ *
+ * Both were how the cockpit specs used to reach a state the fixture did not have: rewrite the
+ * title, the workflow cell and the status pill, then measure. `use-now.ts` re-renders those rows
+ * every 30 s, so React can commit against a replaced text node — and before #416's error boundary
+ * that took the whole root down, leaving a blank page every wait in the suite reports exactly as a
+ * slow one. Build the state from fixture data instead; where the product genuinely cannot reach it,
+ * the seam belongs in the product.
+ *
+ * Provenance, not names, decides what is exempt. A receiver rooted in `querySelector` — directly,
+ * or through a variable bound to one earlier in the same in-page expression — is a rendered node.
+ * A variable bound to `document.createElement` or `.cloneNode` is the spec's own and is masked,
+ * whatever it is called, and so is `document.documentElement`, which is where theme, density,
+ * width and accent legitimately live.
+ *
+ * The positional rule only applies to a spec that also addresses rows by `data-run-id`: mixing the
+ * two is the inconsistency worth catching, because the file has already said which row it means.
+ */
+function productDomSites(call: CallSpan, source: string): { rule: Rule; line: number }[] {
+  const found: { rule: Rule; line: number }[] = []
+  const owned = new Set<string>()
+  for (const match of call.text.matchAll(specOwned)) owned.add(match[1] as string)
+  const rooted = new Set<string>()
+  // Two passes, so `const cell = row.querySelector(…)` then `const link = cell.firstChild` both
+  // land. A third would buy nothing the specs actually write.
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (const line of call.text.split('\n')) {
+      const bound = boundNames.exec(line)
+      if (!bound) continue
+      const names = (bound[1] as string).replace(/[[\]{}.]/g, ' ').split(/[,\s]+/).filter(Boolean)
+      const rhs = line.slice((bound.index ?? 0) + bound[0].length)
+      const head = receiverHead.exec(rhs.trim())?.[1]
+      // Rooted when the right-hand side reaches into the page: through `querySelector`, through
+      // a name already known to be rooted at its head, or — for `[...chip.childNodes].find(…)` —
+      // anywhere inside it. Looser than the head test on purpose: a binding that MENTIONS a
+      // rendered node is one, and the cost of being wrong is one fixture record.
+      const fromRooted = [...rooted].some((name) => new RegExp(`\\b${name}\\b`).test(rhs))
+      if (!(rhs.includes('querySelector') || (head !== undefined && rooted.has(head)) || fromRooted)) continue
+      for (const name of names) if (!owned.has(name)) rooted.add(name)
+    }
+  }
+
+  const isRendered = (before: string): boolean => {
+    const trimmed = before.trimEnd()
+    if (trimmed.endsWith('document.documentElement')) return false
+    const head = receiverHead.exec(trimmed)?.[1]
+    if (head !== undefined && owned.has(head)) return false
+    return trimmed.includes('querySelector') || (head !== undefined && rooted.has(head))
+  }
+
+  for (const match of call.text.matchAll(new RegExp(writeOp.source, 'g'))) {
+    const lineStart = call.text.lastIndexOf('\n', match.index) + 1
+    if (isRendered(call.text.slice(lineStart, match.index))) {
+      found.push({ rule: 'product-dom-write', line: lineOf(source, call.textStart + match.index) })
+    }
+  }
+
+  if (source.includes('data-run-id')) {
+    for (const match of call.text.matchAll(positional)) {
+      const name = /^[\w$]+/.exec(match[0])?.[0]
+      if (match[0].includes('querySelectorAll') || (name !== undefined && rooted.has(name) && !owned.has(name))) {
+        found.push({ rule: 'positional-row-index', line: lineOf(source, call.textStart + match.index) })
+      }
+    }
+  }
+
+  return found
 }
 
 interface CallSpan {
   name: string
+  /** Offset of the call in the source. */
   start: number
+  /** Offset of `text` in the source, so a match inside it can be given a real line number. */
+  textStart: number
   text: string
 }
 
@@ -97,7 +203,7 @@ function callSpans(source: string, pattern: RegExp): CallSpan[] {
   for (const match of source.matchAll(pattern)) {
     const open = match.index + match[0].length - 1
     const close = matchingParen(source, open)
-    spans.push({ name: match[1] ?? '', start: match.index, text: source.slice(open + 1, close) })
+    spans.push({ name: match[1] ?? '', start: match.index, textStart: open + 1, text: source.slice(open + 1, close) })
   }
   return spans
 }

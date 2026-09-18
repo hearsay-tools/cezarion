@@ -160,6 +160,84 @@ describe('a sleep', () => {
   })
 })
 
+describe('a write into a node React rendered', () => {
+  it('flags a write reached through querySelector, directly or through a bound name', () => {
+    const src = [
+      "browser.evaluate(`(() => {",
+      "  const row = document.querySelector('[data-slot=\"task-table-row\"]')",
+      "  const [adds, dels] = row.querySelectorAll('[data-slot=\"diff-stat\"] > span')",
+      "  adds.textContent = '+12k'",
+      "  dels.textContent = '-1k'",
+      "  row.querySelector('[data-column-id=\"cpu\"]').setAttribute('title', '100%')",
+      "  document.querySelector('[data-slot=\"pill\"]').remove()",
+      "})()`)",
+    ].join('\n')
+    const sites = scanSource('x.e2e.ts', src)
+    expect(rules(sites)).toEqual(['product-dom-write', 'product-dom-write', 'product-dom-write', 'product-dom-write'])
+    expect(lines(sites)).toEqual([4, 5, 6, 7])
+  })
+
+  it('leaves theme, density and the spec\'s own probes and clones alone', () => {
+    const src = [
+      "browser.evaluate(`(() => {",
+      "  document.documentElement.classList.toggle('light', true)",
+      "  document.documentElement.dataset.density = 'ultra'",
+      "  delete document.documentElement.dataset.width",
+      "  const probe = document.createElement('span')",
+      "  probe.style.color = 'var(--foreground)'",
+      "  document.body.appendChild(probe)",
+      "  probe.remove()",
+      "  const clone = document.querySelector('nav a').cloneNode(true)",
+      "  clone.querySelector('[data-slot=\"nav-badge\"]')?.remove()",
+      "  return clone.textContent",
+      "})()`)",
+    ].join('\n')
+    expect(scanSource('x.e2e.ts', src)).toEqual([])
+  })
+
+  it('only looks at in-page code, not at what the node side does with the result', () => {
+    const src = [
+      "const rows = browser.evaluate('x') as Array<{ title: string }>",
+      "rows[0].title = 'edited on the node side'",
+    ].join('\n')
+    expect(scanSource('x.e2e.ts', src)).toEqual([])
+  })
+})
+
+describe('a rendered row addressed by position', () => {
+  const runIdSpec = (body: string) => ['// data-run-id', body].join('\n')
+
+  it('flags a positional read of a live node list', () => {
+    const src = runIdSpec(
+      [
+        "browser.evaluate(`(() => {",
+        "  const rows = [...document.querySelectorAll('[data-slot=\"task-table-row\"]')]",
+        "  const cell = rows[0].querySelector('td')",
+        "  const link = document.querySelectorAll('a')[1]",
+        "  return [cell, link]",
+        "})()`)",
+      ].join('\n'),
+    )
+    const sites = scanSource('x.e2e.ts', src)
+    expect(rules(sites)).toEqual(['positional-row-index', 'positional-row-index'])
+    expect(lines(sites)).toEqual([4, 5])
+  })
+
+  it('leaves a spec that never addresses a row by id, and a node-side index, alone', () => {
+    const inPage = [
+      "browser.evaluate(`(() => {",
+      "  const rows = [...document.querySelectorAll('li')]",
+      "  return rows[0].textContent",
+      "})()`)",
+    ].join('\n')
+    // No `data-run-id` anywhere: this spec has not claimed to address rows by identity.
+    expect(scanSource('x.e2e.ts', inPage)).toEqual([])
+    // With one, the in-page index is flagged but the node-side read of the RESULT is not.
+    const nodeSide = ['// data-run-id', 'const rows = browser.evaluate("x") as string[]', 'expect(rows[0]).toBe("a")'].join('\n')
+    expect(scanSource('x.e2e.ts', nodeSide)).toEqual([])
+  })
+})
+
 describe('the baseline', () => {
   it('tallies sites by file, rule and site text, sorted', () => {
     const sites: Site[] = [
