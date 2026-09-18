@@ -143,6 +143,33 @@ export function focusWithKeyboard(browser: AgentBrowser, selector: string): void
 }
 
 /**
+ * Dismisses a Radix overlay with Escape and waits for the focus that comes back with it.
+ *
+ * Escape closes the content, but the trigger gets focus back one task LATER. Radix keeps the
+ * content mounted through its exit animation (`Presence` waits for `animationend`, 150ms
+ * here), and only when it unmounts does `FocusScope` refocus the trigger, from a zero-delay
+ * timer (`onCloseAutoFocus`). A wait for `content` to be `null` resolves inside that gap, so
+ * a scripted `.focus()` there is undone a millisecond later: the row-rename pencil's Tab
+ * started from the Columns trigger and ended on "New task" (#410). Evidence: the
+ * `cockpit-failures-shard-3` artifact of run 35333371534 (job 105562586371), whose `probe.json`
+ * names `data-slot="new-task-inline"` as `activeElement` after Tab; and a local reproduction
+ * that replayed the spec's CLI-call order while logging `focusin` and `animationend` with
+ * `performance.now()` stamps: the trigger took focus 1 ms after the helper's `.focus()` in 2 of
+ * 13 runs without this wait, and in 0 of 10 with it. The end state is the focus, not the
+ * absence, so this waits for both.
+ *
+ * `focus` is where the overlay returns focus: its trigger, or whatever its `onCloseAutoFocus`
+ * names instead. A dismissal that moved focus itself (an outside click, a tab away) does not
+ * return it, and is not this helper's case.
+ */
+export function dismissWithEscape(browser: AgentBrowser, { content, focus }: { content: string; focus: string }): void {
+  browser.press('Escape')
+  browser.waitForFunction(
+    `document.querySelector(${JSON.stringify(content)}) === null && document.activeElement === document.querySelector(${JSON.stringify(focus)})`,
+  )
+}
+
+/**
  * Hovers a painted, unobstructed point of a possibly wrapping inline element.
  *
  * Scroll, hit-test and the point come from ONE polled expression (#409). The previous shape —

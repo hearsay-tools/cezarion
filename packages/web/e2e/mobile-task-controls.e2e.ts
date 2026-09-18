@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
-import { focusWithKeyboard } from './contrast'
+import { dismissWithEscape, focusWithKeyboard } from './contrast'
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -162,9 +162,8 @@ describe('mobile Tasks controls', () => {
           settle(item)
           expect(browser.evaluate(`document.activeElement.textContent`)).toContain('Archive finished')
           expect(browser.evaluate(`document.querySelector('${item}').getBoundingClientRect().height`)).toBeGreaterThanOrEqual(44)
-          browser.press('Escape')
-          browser.waitForFunction(`document.querySelector('${item}') === null`)
-          expect(browser.evaluate(`document.activeElement.getAttribute('aria-label')`)).toBe('Task actions')
+          // The menu returns focus to its trigger one task after it unmounts (#410): wait for it.
+          dismissWithEscape(browser, { content: item, focus: actions })
         }
       }
     })

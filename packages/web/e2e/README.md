@@ -31,6 +31,16 @@ expression throws (`querySelector(...)` was `null`) is a miss and is retried. On
 fails through the failure bundle described below, with the expression and the last sample in
 `probe.json`.
 
+An overlay closed with Escape is not settled when its content is gone. Radix keeps a popover,
+menu or dialog mounted through its exit animation and refocuses the trigger from a
+`setTimeout(0)` scheduled when the content finally unmounts, so
+`waitForFunction(\`querySelector(content) === null\`)` resolves one task BEFORE focus moves.
+A scripted `.focus()` in that gap is undone a millisecond later, which is how the row-rename
+pencil's Tab started from the Columns trigger and landed on "New task" (#410).
+`dismissWithEscape(browser, { content, focus })` in `contrast.ts` presses Escape and waits for
+both the absence and the returned focus; use it wherever a keyboard step or a focus assertion
+follows a dismissal.
+
 ## The rules the ratchet enforces
 
 `packages/web/src/test/e2e-wait-discipline.test.ts` scans every `.ts` file here (the seam and
@@ -42,7 +52,8 @@ line; the fix is a wait, never a baseline entry.
 1. **No one-shot read right after an action.** An `expect(browser.evaluate|count|isVisible|
    text|url(...))` within two lines after `click`, `hover`, `fill`, `press`, `goto`,
    `setViewport`, `moveTo`, `dragTo`, `tapAt`, `wheel`, `applyContrastQaVariant`,
-   `focusWithKeyboard` or `hoverVisiblePoint`, with no `waitFor…`/`settle…` call between
+   `dismissWithEscape`, `focusWithKeyboard` or `hoverVisiblePoint`, with no `waitFor…`/`settle…`
+   call between
    them, is a sample of a page that is still loading. Put a `waitForFunction` on the state the
    assertion depends on, or read the value through `waitForValue` and assert on what it returns.
 2. **No `:hover` inside a wait.** agent-browser moves the pointer over CDP, and that move does
