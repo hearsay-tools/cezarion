@@ -392,10 +392,12 @@ class CursorSession implements AgentSession {
       if (!this.open || this.closing) return;
       // Work that had already continued past a native answer retries the answer continuation,
       // not the original prompt — the answer lives in the provider's session state, and
-      // re-prompting the task text would drop its thread (#446 round 5).
+      // re-prompting the task text would drop its thread (#446 round 5). Queued input —
+      // a free-text native answer, worker input — outranks the synthesized continuation,
+      // matching the successful answered-ask path (#446 round 6).
       const answered = this.answeredNativeAsk;
       this.startTurn(answered
-        ? [{ type: 'text', text: ANSWER_CONTINUATION_PROMPT }]
+        ? this.queued.shift() ?? [{ type: 'text', text: ANSWER_CONTINUATION_PROMPT }]
         : this.lastPrompt ?? [{ type: 'text', text: 'Continue after the provider error.' }]);
     }, delay);
     this.providerRetryTimer.unref?.();
