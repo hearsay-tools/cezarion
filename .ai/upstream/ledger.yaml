@@ -132,10 +132,13 @@ entries:
     pr: 967
     title: "fix(runs): make the autonomous auto-continue nudge reachable on both turn-end paths (#967)"
     date: 2026-09-12
-    status: pending
+    status: planned
     hint:
       conflicts: 1
     note: "bug present here: runContinuation never sets state.autonomous and runAgentStep has no nudge, so #autonomous parks after the first turn; 1 conflicting file, 4 hunks in run.ts"
+    fork:
+      issue: 426
+    decided: 2026-09-18
   - sha: 9ee4283782e5de31d0379fc2fe8cf30275e1a704
     pr: 954
     title: "feat(tasks): switch runners with persisted context (#954)"
@@ -167,26 +170,34 @@ entries:
     pr: 809
     title: "fix(composer): scroll skill menu on arrow key navigation (#809)"
     date: 2026-09-14
-    status: pending
+    status: planned
     hint:
       conflicts: 0
     note: absent here, applies clean
+    fork:
+      issue: 433
+    decided: 2026-09-18
   - sha: d37b21cf407df5442a8a6ef49b049cbb7693b4be
     pr: 839
     title: "docs(specs): a task remembers every PR it has been associated with (#839)"
     date: 2026-09-14
-    status: pending
+    status: n/a
     hint:
       conflicts: 0
     note: docs only, applies clean
+    decided: 2026-09-18
+    reason: upstream-only spec document; nothing to ship here
   - sha: d279ba029194a91192a42e4cc73463e97a858369
     pr: 861
     title: "fix(ui): keep CPU/Mem folded on queued task rows (#821) (#861)"
     date: 2026-09-14
-    status: pending
+    status: planned
     hint:
       conflicts: 0
     note: pre-fix code still present at tasks-overview.tsx (queue note reopens folded CPU/Mem); applies clean
+    fork:
+      issue: 432
+    decided: 2026-09-18
   - sha: 14226c4aa894dc31a525a8db004ebc39aecc8289
     pr: 963
     title: "docs(changelog): one-line entries for every release, in 0.9.0's format (#963)"
@@ -200,42 +211,57 @@ entries:
     pr: 956
     title: "feat(tasks): copy branch name from task header (#956)"
     date: 2026-09-14
-    status: pending
+    status: planned
     hint:
       conflicts: 2
     note: "absent here; run header was redesigned in #235, 2 hunks to re-place"
+    fork:
+      issue: 434
+    decided: 2026-09-18
   - sha: d15a8bef98ed3c52215071ac6a403f5dfc136432
     pr: 942
     title: "feat(thread): per-message timestamps in the task conversation (#942)"
     date: 2026-09-14
-    status: pending
+    status: planned
     hint:
       conflicts: 2
     note: absent here; new files apply clean, 1 hunk in thread-items
+    fork:
+      issue: 435
+    decided: 2026-09-18
   - sha: 2b5411e479c63870f857d12314a87572f2cc2ec0
     pr: 953
     title: "feat(sidebar): drag project groups to set their order, shared across devices (#952) (#953)"
     date: 2026-09-14
-    status: pending
+    status: planned
     hint:
       conflicts: 3
     note: absent here; needs the contract field plus 4 hunks in project-groups
+    fork:
+      issue: 438
+    decided: 2026-09-18
   - sha: ce4fa20b3580fc999294d2e1ae00828e9900ff9e
     pr: 973
     title: "feat(ui): filter the new-task base branch picker (#973)"
     date: 2026-09-14
-    status: pending
+    status: planned
     hint:
       conflicts: 2
     note: absent here; 3 hunks in picker-pill
+    fork:
+      issue: 436
+    decided: 2026-09-18
   - sha: 3871db4778bbf350cd94fe9253cc23eb538530c9
     pr: 984
     title: "fix(workflows): park intermediate asks for input (#984)"
     date: 2026-09-14
-    status: pending
+    status: planned
     hint:
       conflicts: 3
     note: "bug present here: resolveAskTurn is gated on interactive, so a CEZ:ASK from a non-final workflow step is dropped and the next step runs; upstream patch references dispatch code that must be stripped"
+    fork:
+      issue: 427
+    decided: 2026-09-18
   - sha: 77d3f2f5ae0e91d8f555bde922598fef712eec7e
     pr: 965
     title: "fix(ui): keep the task thread readable on a phone while an agent works (#965)"
@@ -251,10 +277,13 @@ entries:
     pr: 968
     title: "fix(clone): recover from GitHub organization SAML auth (#968)"
     date: 2026-09-14
-    status: pending
+    status: planned
     hint:
       conflicts: 1
     note: absent here; server side applies clean, 1 hunk in the clone dialog
+    fork:
+      issue: 437
+    decided: 2026-09-18
   - sha: 00b77b40cbbc98b2284ef3e11c9649196a06178c
     pr: 940
     title: "feat(tasks): in-task drafts survive leaving the task (#940)"
@@ -308,30 +337,42 @@ entries:
     pr: 1013
     title: "docs(readme): shorter README with demo video, screenshots and mobile shots (#1013)"
     date: 2026-09-16
-    status: pending
+    status: n/a
     hint:
       conflicts: 1
+    decided: 2026-09-18
+    reason: upstream README rewrite; the fork keeps its own README
   - sha: c45d45edbc40d961f7ea9e892aa5c0966a74ff74
     pr: 993
     title: "fix(automations): a stale poll lock no longer silences every project for ten minutes (#993)"
     date: 2026-09-16
-    status: pending
+    status: planned
     hint:
       conflicts: 3
+    fork:
+      issue: 428
+    decided: 2026-09-18
   - sha: 13e727c2e4dde4c4afa6fe3a845407490ddd3b1c
     pr: 1005
     title: "fix(opencode): a turn longer than five minutes no longer parks the run under Needs you (#1005)"
     date: 2026-09-16
-    status: pending
+    status: diverged
     hint:
       conflicts: 4
+    fork:
+      pr: 24
+    decided: 2026-09-18
+    reason: "the fork already takes the OpenCode turn end from session.idle instead of the 300 s undici long-poll (PR #24, 2026-09-01), which is the same fix"
   - sha: 97d269bd806caa0fcb6968ae3cb2efa69afae3f8
     pr: 1014
     title: "fix(providers): a runtime auth rejection verifies itself before it sticks (#1014)"
     date: 2026-09-17
-    status: pending
+    status: planned
     hint:
       conflicts: 0
+    fork:
+      issue: 431
+    decided: 2026-09-18
   - sha: ea7f3489650e511f92529c6c22edfd63fd77b301
     pr: 1015
     title: "fix(dispatch): tell parents --budget is optional so uncapped trees don't get invented caps (#1015)"
@@ -343,16 +384,21 @@ entries:
     pr: 1009
     title: "fix(server-deploy): fail the deploy when the service did not actually restart (#1009)"
     date: 2026-09-17
-    status: pending
+    status: planned
     hint:
       conflicts: 0
+    fork:
+      issue: 430
+    decided: 2026-09-18
   - sha: 7fd4221f5f8abea3774814ece822a70fcc720a07
     pr: 1022
     title: "docs(readme): fix the mobile layout of the link row and screenshots (#1022)"
     date: 2026-09-18
-    status: pending
+    status: n/a
     hint:
       conflicts: 1
+    decided: 2026-09-18
+    reason: upstream README layout fix; the fork keeps its own README
   - sha: 30a49a854161f1a8f60bbbaebe062ce8a5e3214b
     pr: 1016
     title: "feat(automations): PR review triggers, agent account and skill pickers (#1016)"
@@ -364,9 +410,12 @@ entries:
     pr: 994
     title: "fix(server-install): ubuntu-vps vhost emits a standalone http2 directive nginx < 1.25.1 rejects (#994)"
     date: 2026-09-18
-    status: pending
+    status: planned
     hint:
       conflicts: 2
+    fork:
+      issue: 429
+    decided: 2026-09-18
   - sha: 456859a499dc3f87ec9f938fbac12727956f428c
     pr: 995
     title: 'fix(runs): a turn parked on its own dispatched subagents stops reading as "needs you" (#995)'
@@ -385,6 +434,8 @@ entries:
     pr: 1023
     title: "chore(release): bump main to 0.11.1 and cut the changelog entry (#1023)"
     date: 2026-09-18
-    status: pending
+    status: n/a
     hint:
       conflicts: 6
+    decided: 2026-09-18
+    reason: upstream release bump; the fork has its own version line (cezarion 0.11+)
