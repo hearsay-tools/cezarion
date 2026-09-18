@@ -111,6 +111,8 @@ export function RunActivityDock({
   // a stalled sub-agent, an abandoned plan entry or a failed worker leaves the run finished
   // and `Incomplete`, a terminal word. Not "with issues": unchecked todos under a finished
   // run are ordinary, and the failing row itself carries the red X one click below.
+  // ...and a lookup that FAILED is not one still running: nothing further arrives on its own,
+  // so a finished run says what it cannot see rather than blaming itself with `Incomplete`.
   const unresolved = workers === 'pending'
   const summary = allComplete
     ? 'All complete'
@@ -120,9 +122,13 @@ export function RunActivityDock({
         ? 'Cancelled'
         : run.status === 'running'
           ? 'Working'
-          : run.status === 'done' && !unresolved
-            ? 'Incomplete'
-            : 'In progress'
+          : run.status !== 'done'
+            ? 'In progress'
+            : workers === 'unknown'
+              ? 'Workers unavailable'
+              : unresolved
+                ? 'In progress'
+                : 'Incomplete'
   const failed = run.status === 'failed' || run.status === 'cancelled'
 
   return (

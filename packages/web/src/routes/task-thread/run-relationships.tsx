@@ -41,23 +41,26 @@ function workerIdsOf(metadata: Delegation | undefined, data: RunRelationships | 
  *   worker on purpose and the run carried on, exactly as `planCounts` leaves cancelled
  *   entries out of its total. A done parent whose only oddity was a cancelled worker used to
  *   read "In progress" forever, which is the report this split answers.
- * - `pending` — something may still change: the lookup is in flight or failed, or a worker is
- *   queued, running, waiting or parked at its review gate. Unknown is deliberately not
- *   complete; claiming it would flip the green line under the reader.
+ * - `pending` — an answer is on its way: the lookup is in flight, or a worker is queued,
+ *   running, waiting or parked at its review gate. Unknown is deliberately not complete;
+ *   claiming it would flip the green line under the reader.
+ * - `unknown` — no answer is coming: the lookup failed, or it is paused offline with nothing
+ *   cached. Distinct from `pending` because nothing further arrives on its own, so a header
+ *   that read "In progress" for a pending lookup would keep saying it after the run ended.
  * - `issue` — settled badly and will not change again: a worker that failed, or a receipt
  *   whose record is gone. Not complete, but not in progress either.
  *
  * It lives here because `workerIdsOf` does: receipts outlive a failed lookup, and the dock
  * must judge the same id set the section lists.
  */
-export type WorkersVerdict = 'complete' | 'pending' | 'issue'
+export type WorkersVerdict = 'complete' | 'pending' | 'unknown' | 'issue'
 
 export function useWorkersVerdict(run: ApiRun): WorkersVerdict {
   const metadata = run.delegation
   const delegated = metadata !== undefined && metadata.role !== 'invalid'
   const query = useRunRelationships(run.id, { enabled: delegated })
   if (!delegated || !metadata) return 'complete'
-  if (!query.isSuccess) return 'pending'
+  if (!query.isSuccess) return query.isError || query.fetchStatus === 'paused' ? 'unknown' : 'pending'
   const workers = new Map(query.data.workers.map(worker => [worker.workerId, worker]))
   const verdicts = workerIdsOf(metadata, query.data).map(id => {
     const status = workers.get(id)?.status

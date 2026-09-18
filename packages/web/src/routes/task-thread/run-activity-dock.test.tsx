@@ -78,15 +78,22 @@ const EVENTS: RunEvent[] = [
   }),
 ]
 
-const json = (value: unknown) =>
-  new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } })
+const json = (value: unknown, status = 200) =>
+  new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
 
-function renderDock(record: ApiRun, events: RunEvent[] = EVENTS, linked: WorkerInspection[] = workers) {
+function renderDock(
+  record: ApiRun,
+  events: RunEvent[] = EVENTS,
+  linked: WorkerInspection[] = workers,
+  relationships: 'ok' | 'error' = 'ok',
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
-      if (path.endsWith('/relationships')) return json({ workers: linked })
+      if (path.endsWith('/relationships')) {
+        return relationships === 'error' ? json({ error: 'offline' }, 503) : json({ workers: linked })
+      }
       if (path.endsWith('/runs')) {
         return json([
           { ...run({ id: doneWorkerId, title: 'auditing stale roles', status: 'done' }) },
@@ -309,6 +316,23 @@ describe('RunActivityDock — workers and the All complete claim', () => {
     renderDock(root(), [], allDone)
     expect(statusText()).toContain('In progress')
     expect(statusText()).not.toContain('Incomplete')
+    expect(statusText()).not.toContain('Workers unavailable')
+  })
+
+  // A lookup that FAILED is not a lookup still running: nothing further arrives on its own,
+  // so "In progress" outlives the run. The header says what it cannot see instead of
+  // inventing either verdict — `Incomplete` would blame the run for a fetch that fell over.
+  it('names a finished run whose worker lookup failed, rather than claiming progress', async () => {
+    renderDock(root(), [], allDone, 'error')
+    await waitFor(() => expect(statusText()).toContain('Workers unavailable'))
+    expect(statusText()).not.toContain('In progress')
+    expect(statusText()).not.toContain('All complete')
+  })
+
+  it('keeps the progress wording when the failed lookup belongs to a live run', async () => {
+    renderDock(root({ status: 'running' } as Partial<ApiRun>), [], allDone, 'error')
+    await waitFor(() => expect(document.querySelector('[data-slot="run-activity-workers"]')).not.toBeNull())
+    expect(statusText()).toContain('Working')
   })
 
   it('drops the cleanup line from a worker whose teardown left nothing behind', async () => {
