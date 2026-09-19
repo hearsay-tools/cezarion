@@ -359,10 +359,24 @@ describe('offersComposerFinish — the gold primary on a Needs-you task (#281)',
     { name: 'done', record: run('done'), expected: false },
     { name: 'failed', record: run('failed'), expected: false },
     { name: 'cancelled', record: run('cancelled'), expected: false },
-    // Both of these would 409 out of `finishBlockedReason`, and both are cases where the composer
-    // has something better to offer: the ask card owns the reply, and a parked root owns Stop.
-    { name: 'a pending human ask on the record', record: run('waiting', { hasPendingHumanAsk: true }), expected: false },
-    { name: 'a pending human ask the thread knows about first', record: run('waiting'), ask: true, expected: false },
+    // A pending question is the CANONICAL Needs-you task — an agent stopped to ask you something —
+    // and dismissing it as done instead of answering is the whole of what #281 is for. It is not
+    // blocked either: `finishBlockedReason` returns undefined for anything that is not a `root`
+    // by its first line, so `finish()` reaches the open session and ends it.
+    { name: 'a pending human ask on the record', record: run('waiting', { hasPendingHumanAsk: true }), expected: true },
+    { name: 'a pending human ask the thread knows about first', record: run('waiting'), ask: true, expected: true },
+    // On a ROOT the same ask genuinely is blocked, by the branch above the worker check.
+    {
+      name: 'a root with a pending human ask — blocked server-side',
+      record: run('waiting', { hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [] } }),
+      expected: false,
+    },
+    {
+      name: 'a root whose pending ask the thread knows about first',
+      record: run('waiting', { delegation: { role: 'root', permissions: [], receipts: [] } }),
+      ask: true,
+      expected: false,
+    },
     // Every root carrying a worker wait, whatever its phase. `finishBlockedReason` (workflows/
     // run.ts) can only ever block a `root`, and it blocks on workers that have not been collected
     // — a state a timed-out or wake-pending wait is exactly as likely to be in as a parked one,

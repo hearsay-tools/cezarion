@@ -175,15 +175,25 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
 export function offersComposerFinish(run: RunRecord, hasPendingHumanAsk = false): boolean {
   if (!runActionFlags(run).finish) return false
   if (run.status !== 'waiting') return false
-  if (hasPendingHumanAsk || run.hasPendingHumanAsk) return false
-  // A root carrying a worker wait, whatever its phase. `finishBlockedReason` can block ONLY a
-  // root, and it blocks on workers whose results are not collected — which a timed-out or
-  // wake-pending wait is as likely to be as a parked one, though `deriveAttention` calls only the
-  // parked case `none`. This defers to the fact that the rule exists rather than mirroring the
-  // rule: the record cannot tell whether a worker is collected, so the wait's mere presence is
-  // what disqualifies the promotion. Those roots keep Finish in the kebab, where a 409 costs a
-  // deliberate menu trip rather than a gold button that invites the click.
-  if (run.delegation?.role === 'root' && run.delegation.wait) return false
+  // Everything `finishBlockedReason` (workflows/run.ts) can refuse — and NOTHING else. Its first
+  // line returns undefined for anything that is not a `root`, so both of its blocking rules are
+  // scoped here the same way:
+  //
+  //  - a pending human ask, which blocks a root and no one else. On an ordinary task a pending
+  //    question is the CANONICAL Needs-you state and `finish()` reaches the open session and ends
+  //    it, so excluding it would lock the promotion out of the very case #281 exists for;
+  //  - a worker wait in any phase, because the rule blocks on workers whose results are not
+  //    collected, and a timed-out or wake-pending wait is as likely to be in that state as a
+  //    parked one — though `deriveAttention` calls only the parked case `none`.
+  //
+  // The wait is read for its PRESENCE, not interpreted: the record cannot tell whether a worker
+  // was collected, so this defers to the fact that a blocking rule exists there rather than
+  // mirroring the rule itself. A blocked root keeps Finish in the kebab, where a 409 costs a
+  // deliberate menu trip instead of a gold button that invites the click.
+  if (run.delegation?.role === 'root') {
+    if (hasPendingHumanAsk || run.hasPendingHumanAsk) return false
+    if (run.delegation.wait) return false
+  }
   return deriveAttention(run, hasPendingHumanAsk).bucket === 'waiting'
 }
 

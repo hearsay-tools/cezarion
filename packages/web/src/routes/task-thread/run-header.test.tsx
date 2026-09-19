@@ -1523,9 +1523,18 @@ describe('the promoted actions, per tab (#281)', () => {
     expect(actionBar().getByRole('menuitem', { name: 'Finish' })).not.toBeNull()
   })
 
-  it('a waiting task with a pending ask keeps Finish in the kebab — the composer declined it', () => {
+  it('an ordinary waiting task with a pending ask has Finish promoted, so the kebab drops it', () => {
     stubFetch()
     renderTab(run('waiting', { hasPendingHumanAsk: true }), 'session')
+    expect(actionBar().queryByRole('menuitem', { name: 'Finish' })).toBeNull()
+  })
+
+  it('a ROOT with a pending ask keeps Finish in the kebab — the server refuses the promotion', () => {
+    stubFetch()
+    renderTab(run('waiting', {
+      hasPendingHumanAsk: true,
+      delegation: { role: 'root', permissions: [], receipts: [] },
+    }), 'session')
     expect(actionBar().getByRole('menuitem', { name: 'Finish' })).not.toBeNull()
   })
 })

@@ -1456,8 +1456,19 @@ describe('the composer action row (#281)', () => {
     )
   })
 
-  it('a pending human ask keeps Finish away — the ask card owns the reply, and /finish would 409', () => {
+  it('a pending human ask still offers Finish — dismissing instead of answering is the point', () => {
+    // The canonical Needs-you task: an agent stopped to ask you something. `finishBlockedReason`
+    // refuses this only on a `root`, so an ordinary task finishes straight through its open
+    // session — and locking the promotion out of it would miss the case #281 was filed about.
     renderThread(run('waiting', { hasPendingHumanAsk: true }))
+    expect((finishButton() as HTMLButtonElement)?.disabled).toBe(false)
+  })
+
+  it('a root with a pending human ask keeps Finish in the kebab — the server refuses it', () => {
+    renderThread(run('waiting', {
+      hasPendingHumanAsk: true,
+      delegation: { role: 'root', permissions: [], receipts: [] },
+    }))
     expect(finishButton()).toBeNull()
   })
 
