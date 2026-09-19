@@ -87,6 +87,7 @@ function stubFetch(overrides: Record<string, () => Response> = {}): SentRequest[
 function renderHeader(
   record: ApiRun,
   onMarkedUnread?: () => void,
+  tab: 'session' | 'changes' | 'commits' | 'files' = 'session',
 ) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
@@ -94,7 +95,7 @@ function renderHeader(
         <Routes>
           <Route
             path="/tasks/:id"
-            element={<RunHeader run={record} onMarkedUnread={onMarkedUnread} />}
+            element={<RunHeader run={record} tab={tab} onMarkedUnread={onMarkedUnread} />}
           />
           <Route path="/" element={<div data-slot="home-probe" />} />
         </Routes>
@@ -201,15 +202,19 @@ describe('editable title (#389)', () => {
 describe('action bar visibility per status (the legacy rules, rendered)', () => {
   // Pin (#935) is in every row: unlike every other action here it asks nothing of the engine,
   // so it is offered whatever the run is doing — only archiving takes it away.
+  // These rows are the SESSION tab, where #281 moved two actions out of this menu: Archive to the
+  // composer on every row that had it, and Finish on `waiting`, whose composer promotes it. The
+  // per-tab describe at the bottom of this file pins where each one went, and `review` keeps
+  // Finish here because its composer primary is Continue.
   const matrix: Array<{ status: RunStatus; visible: string[] }> = [
     { status: 'queued', visible: ['Notes / handoff', 'Pin task'] },
     { status: 'running', visible: ['Notes / handoff', 'Pin task'] },
-    { status: 'waiting', visible: ['Notes / handoff', 'Finish', 'Pin task'] },
+    { status: 'waiting', visible: ['Notes / handoff', 'Pin task'] },
     // Terminal folded into the Open in… menu — it shows whenever the session can be resumed.
-    { status: 'review', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Finish', 'Pin task', 'Archive task', 'Delete task…'] },
-    { status: 'done', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Archive task', 'Delete task…'] },
-    { status: 'failed', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Archive task', 'Delete task…'] },
-    { status: 'cancelled', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Archive task', 'Delete task…'] },
+    { status: 'review', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Finish', 'Pin task', 'Delete task…'] },
+    { status: 'done', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
+    { status: 'failed', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
+    { status: 'cancelled', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
   ]
 
   it.each(matrix)('$status → $visible', ({ status, visible }) => {
@@ -220,11 +225,11 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
     expect(names).toEqual(visible)
   })
 
-  it('an archived run offers Unarchive instead of Archive', () => {
+  it('the menu offers neither Archive nor Unarchive — both moved to a control (#281)', () => {
     stubFetch()
     renderHeader(run('done', { archived: true }))
     expect(actionBar().queryByRole('menuitem', { name: 'Archive task' })).toBeNull()
-    expect(actionBar().getByRole('menuitem', { name: 'Unarchive' })).not.toBeNull()
+    expect(actionBar().queryByRole('menuitem', { name: 'Unarchive' })).toBeNull()
   })
 
   it('VS Code is absent everywhere — the open-in-editor endpoint does not exist yet (R5)', () => {
@@ -247,12 +252,12 @@ describe('Mark unread (#775)', () => {
   const readDone = (extra: Partial<ApiRun> = {}) =>
     run('done', { finishedAt: FINISHED_AT, seenAt: SEEN_AT, ...extra })
 
-  it('offers the control for a read, finished run — next to Archive', () => {
+  it('offers the control for a read, finished run — between Open in… and Pin', () => {
     stubFetch()
     renderHeader(readDone())
     actionBar()
     const names = [...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map(el => el.textContent?.trim())
-    expect(names).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive task', 'Delete task…'])
+    expect(names).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Delete task…'])
   })
 
   it.each([
@@ -316,7 +321,9 @@ describe('Mark unread (#775)', () => {
 describe('actions hit their endpoints', () => {
   it('Finish → POST /finish', async () => {
     const sent = stubFetch()
-    renderHeader(run('waiting'))
+    // A git tab: no composer there, so the menu still owns Finish and its confirm (#281). The
+    // Session tab's one-click path is pinned in task-thread.test.tsx.
+    renderHeader(run('waiting'), undefined, 'changes')
     fireEvent.click(actionBar().getByRole('menuitem', { name: 'Finish' }))
     expect(sent.some((r) => r.path.endsWith('/finish'))).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Review and finish' }))
@@ -336,8 +343,8 @@ describe('actions hit their endpoints', () => {
 
   it('Archive → POST /archive with the flipped flag', async () => {
     const sent = stubFetch()
-    renderHeader(run('done', { archived: true }))
-    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Unarchive' }))
+    renderHeader(run('done', { archived: true }), undefined, 'changes')
+    fireEvent.click(document.querySelector('[data-slot="archive-action"]') as HTMLElement)
     await waitFor(() => {
       expect(sent.find((r) => r.path === '/api/v1/runs/r1/archive')?.body).toEqual({ archived: false })
     })
@@ -418,10 +425,8 @@ describe('actions hit their endpoints', () => {
     stubFetch({
       '/api/v1/runs/r1/archive': () => jsonResponse({ error: 'run is still active' }, 409),
     })
-    renderHeader(run('done'))
-    const button = actionBar().getByRole('menuitem', { name: 'Archive task' })
-    await waitFor(() => expect(button.getAttribute('aria-disabled')).not.toBe('true'))
-    fireEvent.click(button)
+    renderHeader(run('done'), undefined, 'changes')
+    fireEvent.click(document.querySelector('[data-slot="archive-action"]') as HTMLElement)
     fireEvent.click(screen.getByRole('button', { name: 'Archive task' }))
     const item = await screen.findByRole('status')
     expect(item.textContent).toBe('run is still active')
@@ -1434,8 +1439,8 @@ it('uses one actions menu and omits the legacy action and resume rows', () => {
 
 it('confirms archive before retiring an active-list task', async () => {
   const sent = stubFetch()
-  renderHeader(run('done'))
-  fireEvent.click(actionBar().getByRole('menuitem', { name: 'Archive task' }))
+  renderHeader(run('done'), undefined, 'changes')
+  fireEvent.click(document.querySelector('[data-slot="archive-action"]') as HTMLElement)
   expect(sent.some(r => r.path.endsWith('/archive'))).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: 'Archive task' }))
   await waitFor(() => expect(sent.find(r => r.path.endsWith('/archive'))?.body).toEqual({ archived: true }))
@@ -1449,4 +1454,87 @@ it('copies the resumable command directly from the task actions menu', async () 
   renderHeader(run('done'))
   fireEvent.click(actionBar().getByRole('menuitem', { name: 'Copy resume command' }))
   await waitFor(() => expect(writeText).toHaveBeenCalledWith('claude --resume sess-1'))
+})
+
+/**
+ * #281 — who owns Finish and Archive on each tab. The composer holds both on Session, where it is
+ * thumb-reachable; the three git tabs have no composer, so the header carries Archive there and
+ * the kebab keeps Finish. Exactly one surface offers each action on any given screen, which is
+ * what keeps one mutation from growing two pending states.
+ */
+describe('the promoted actions, per tab (#281)', () => {
+  const renderTab = (record: ApiRun, tab: 'session' | 'changes' | 'commits' | 'files') =>
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter initialEntries={[`/tasks/${record.id}`]}>
+          <Routes>
+            <Route path="/tasks/:id" element={<RunHeader run={record} tab={tab} />} />
+            <Route path="/" element={<div data-slot="home-probe" />} />
+          </Routes>
+          <Toaster />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+  const headerArchive = () => document.querySelector('[data-slot="archive-action"]')
+
+  it.each(['changes', 'commits', 'files'] as const)('%s — the header carries Archive, the kebab drops it', (tab) => {
+    stubFetch()
+    renderTab(run('done'), tab)
+    expect(headerArchive()?.textContent).toContain('Archive task')
+    expect(actionBar().queryByRole('menuitem', { name: 'Archive task' })).toBeNull()
+  })
+
+  it('Session — the composer carries Archive, so the header shows none', () => {
+    stubFetch()
+    renderTab(run('done'), 'session')
+    expect(headerArchive()).toBeNull()
+    expect(actionBar().queryByRole('menuitem', { name: 'Archive task' })).toBeNull()
+  })
+
+  it.each(['running', 'waiting', 'queued'] as const)('%s offers no Archive anywhere — it is still active', (status) => {
+    stubFetch()
+    renderTab(run(status), 'changes')
+    expect(headerArchive()).toBeNull()
+    expect(actionBar().queryByRole('menuitem', { name: 'Archive task' })).toBeNull()
+  })
+
+  it('an archived run offers Unarchive in the header slot', () => {
+    stubFetch()
+    renderTab(run('done', { archived: true }), 'changes')
+    expect(headerArchive()?.textContent).toContain('Unarchive')
+  })
+
+  it('Session — the kebab drops Finish, because the composer promoted it', () => {
+    stubFetch()
+    renderTab(run('waiting'), 'session')
+    expect(actionBar().queryByRole('menuitem', { name: 'Finish' })).toBeNull()
+  })
+
+  it.each(['changes', 'commits', 'files'] as const)('%s — the kebab keeps Finish, there being no composer', (tab) => {
+    stubFetch()
+    renderTab(run('waiting'), tab)
+    expect(actionBar().getByRole('menuitem', { name: 'Finish' })).not.toBeNull()
+  })
+
+  it('review keeps Finish in the kebab on every tab — its composer primary is Continue', () => {
+    stubFetch()
+    renderTab(run('review'), 'session')
+    expect(actionBar().getByRole('menuitem', { name: 'Finish' })).not.toBeNull()
+  })
+
+  it('an ordinary waiting task with a pending ask has Finish promoted, so the kebab drops it', () => {
+    stubFetch()
+    renderTab(run('waiting', { hasPendingHumanAsk: true }), 'session')
+    expect(actionBar().queryByRole('menuitem', { name: 'Finish' })).toBeNull()
+  })
+
+  it('a ROOT with a pending ask keeps Finish in the kebab — the server refuses the promotion', () => {
+    stubFetch()
+    renderTab(run('waiting', {
+      hasPendingHumanAsk: true,
+      delegation: { role: 'root', permissions: [], receipts: [] },
+    }), 'session')
+    expect(actionBar().getByRole('menuitem', { name: 'Finish' })).not.toBeNull()
+  })
 })

@@ -1203,7 +1203,11 @@ describe('composer execution actions (#201)', () => {
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
     const textarea = screen.getByRole('textbox', { name: 'Reply to the agent' })
     if (status === 'waiting') {
-      expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
+      // This assertion used to read "Send exists and is disabled" — the dead primary #281
+      // reclaims. Finish holds the slot now; what has NOT changed is that an empty draft submits
+      // nothing, and the lines below still prove typing hands the slot straight back to Send.
+      expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Finish' }).hasAttribute('disabled')).toBe(false)
     }
     fireEvent.change(textarea, { target: { value: 'next instructions' } })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false))
@@ -1349,4 +1353,163 @@ it.each(['root', 'worker'] as const)('shows the actual dependency in a parked %s
   expect(document.querySelector('[data-slot="pill"]')?.textContent).toContain(role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies')
   expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
   expect(screen.getAllByRole('button', { name: 'Stop' }).some(button => !button.hasAttribute('disabled'))).toBe(true)
+})
+
+/**
+ * #281 — the composer action row. Finish claims the gold primary on a Needs-you task, where it
+ * was previously a DISABLED Send; Archive claims the outline slot Stop leaves empty the moment a
+ * run stops being active. Both are thumb-reachable on a phone, which the header is not — it
+ * scrolls away there by design.
+ */
+describe('the composer action row (#281)', () => {
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+  function renderThread(record: ApiRun, claudeStatus = 'connected') {
+    const sent: Array<{ path: string; method: string; body: unknown }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init: RequestInit = {}) => {
+        const path = String(input)
+        const method = init.method ?? 'GET'
+        sent.push({ path, method, body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined })
+        const body =
+          path === '/api/v1/providers/status'
+            ? {
+                providers: [
+                  { provider: 'claude', status: claudeStatus, enabled: true },
+                  { provider: 'codex', status: 'not-installed', enabled: true },
+                  { provider: 'opencode', status: 'not-installed', enabled: true },
+                ],
+              }
+            : path === '/api/v1/health' ? {}
+            : path.endsWith('/relationships') ? { workers: [] }
+            : []
+        return Promise.resolve(jsonResponse(body))
+      }),
+    )
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <ThreadView run={record} thread={reduceThread(EVENTS)} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    return sent
+  }
+
+  const composerActions = () => document.querySelector('[data-slot="composer-actions"]') as HTMLElement
+  const finishButton = () => composerActions().querySelector('[data-slot="composer-finish"]')
+  const archiveButton = () => composerActions().querySelector('[data-slot="archive-action"]')
+
+  it('a Needs-you task offers Finish as the gold primary', () => {
+    renderThread(run('waiting'))
+    const finish = finishButton()
+    expect(finish?.textContent).toContain('Finish')
+    // Gold, per the design decision: Finish is the terminal verdict, so it carries the CTA weight
+    // the disabled Send was wasting.
+    expect(finish?.getAttribute('data-variant')).toBe('primary')
+    expect((finish as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('Finish posts straight to /finish — no confirmation on the waiting gate', async () => {
+    const sent = renderThread(run('waiting'))
+    fireEvent.click(finishButton() as HTMLElement)
+    await waitFor(() =>
+      expect(sent.some((r) => r.method === 'POST' && r.path === '/api/v1/runs/r1/finish')).toBe(true),
+    )
+    // The review-gate dialog belongs to review. Dismissing a Needs-you task is one click.
+    expect(document.querySelector('[data-slot="task-confirmation"]')).toBeNull()
+  })
+
+  it('typing turns the primary back into Send — a typed draft is not an intent to finish', () => {
+    renderThread(run('waiting'))
+    expect(finishButton()).not.toBeNull()
+    fireEvent.change(screen.getByLabelText('Reply to the agent'), { target: { value: 'one more thing' } })
+    expect(finishButton()).toBeNull()
+    expect(composerActions().querySelector('[aria-label="Send"]')).not.toBeNull()
+  })
+
+  it('Stop stays reachable beside it, still an abort', () => {
+    renderThread(run('waiting'))
+    const stop = composerActions().querySelector('[aria-label="Stop"]')
+    expect(stop).not.toBeNull()
+    expect(stop?.getAttribute('title')).toBe('Stop execution; keep existing work')
+  })
+
+  it('a blocked provider disables the message, never Finish — finishing needs no credentials', async () => {
+    // The composer's `disabled` gate is about SENDING: a disconnected provider cannot carry a
+    // message. Finishing only settles the run the engine already owns, so gating it on the
+    // provider would strand a Needs-you task with no way out on this tab — the kebab no longer
+    // carries Finish here. Stop has always been independent of that gate for the same reason;
+    // Finish now matches it.
+    const sent = renderThread(run('waiting'), 'not-installed')
+    await waitFor(() =>
+      expect((screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement).disabled).toBe(true),
+    )
+    const finish = finishButton() as HTMLButtonElement
+    expect(finish).not.toBeNull()
+    expect(finish.disabled).toBe(false)
+    fireEvent.click(finish)
+    await waitFor(() =>
+      expect(sent.some((r) => r.method === 'POST' && r.path === '/api/v1/runs/r1/finish')).toBe(true),
+    )
+  })
+
+  it('a pending human ask still offers Finish — dismissing instead of answering is the point', () => {
+    // The canonical Needs-you task: an agent stopped to ask you something. `finishBlockedReason`
+    // refuses this only on a `root`, so an ordinary task finishes straight through its open
+    // session — and locking the promotion out of it would miss the case #281 was filed about.
+    renderThread(run('waiting', { hasPendingHumanAsk: true }))
+    expect((finishButton() as HTMLButtonElement)?.disabled).toBe(false)
+  })
+
+  it('a root with a pending human ask keeps Finish in the kebab — the server refuses it', () => {
+    renderThread(run('waiting', {
+      hasPendingHumanAsk: true,
+      delegation: { role: 'root', permissions: [], receipts: [] },
+    }))
+    expect(finishButton()).toBeNull()
+  })
+
+  it.each(['running', 'queued', 'review', 'done'] as const)('%s does not promote Finish', (status) => {
+    renderThread(run(status))
+    expect(finishButton()).toBeNull()
+  })
+
+  it('a finished task offers Archive where Stop used to sit', () => {
+    renderThread(run('done'))
+    const archive = archiveButton()
+    expect(archive?.textContent).toContain('Archive task')
+    // Housekeeping, not a CTA — the gold in this row belongs to Continue.
+    expect(archive?.getAttribute('data-variant')).toBe('outline')
+    expect(composerActions().querySelector('[aria-label="Stop"]')).toBeNull()
+  })
+
+  it('Archive confirms first, then posts the flipped flag', async () => {
+    const sent = renderThread(run('done'))
+    fireEvent.click(archiveButton() as HTMLElement)
+    expect(sent.some((r) => r.path.endsWith('/archive'))).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Archive task' }))
+    await waitFor(() =>
+      expect(sent.find((r) => r.method === 'POST' && r.path === '/api/v1/runs/r1/archive')?.body).toEqual({
+        archived: true,
+      }),
+    )
+  })
+
+  it('an archived task offers Unarchive, and restoring needs no confirmation', async () => {
+    const sent = renderThread(run('done', { archived: true }))
+    fireEvent.click(archiveButton() as HTMLElement)
+    await waitFor(() =>
+      expect(sent.find((r) => r.path === '/api/v1/runs/r1/archive')?.body).toEqual({ archived: false }),
+    )
+    expect(document.querySelector('[data-slot="task-confirmation"]')).toBeNull()
+  })
+
+  it.each(['running', 'queued', 'waiting'] as const)('%s keeps Stop in the slot, not Archive', (status) => {
+    renderThread(run(status))
+    expect(archiveButton()).toBeNull()
+    expect(composerActions().querySelector('[aria-label="Stop"]')).not.toBeNull()
+  })
 })
