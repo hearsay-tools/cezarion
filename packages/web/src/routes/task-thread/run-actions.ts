@@ -175,25 +175,23 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
 export function offersComposerFinish(run: RunRecord, hasPendingHumanAsk = false): boolean {
   if (!runActionFlags(run).finish) return false
   if (run.status !== 'waiting') return false
-  // Everything `finishBlockedReason` (workflows/run.ts) can refuse — and NOTHING else. Its first
-  // line returns undefined for anything that is not a `root`, so both of its blocking rules are
-  // scoped here the same way:
+  // No delegation ROOT, ever. `finishBlockedReason` (workflows/run.ts) is the server's whole
+  // refusal rule for `POST /finish`, and its first line makes that rule exclusive to a root:
+  // every other run gets `undefined`. So the promotion takes the guard verbatim instead of
+  // reproducing what it guards.
   //
-  //  - a pending human ask, which blocks a root and no one else. On an ordinary task a pending
-  //    question is the CANONICAL Needs-you state and `finish()` reaches the open session and ends
-  //    it, so excluding it would lock the promotion out of the very case #281 exists for;
-  //  - a worker wait in any phase, because the rule blocks on workers whose results are not
-  //    collected, and a timed-out or wake-pending wait is as likely to be in that state as a
-  //    parked one — though `deriveAttention` calls only the parked case `none`.
+  // Earlier cuts of this tried to be cleverer and kept being wrong, each time in a way only the
+  // engine could have told us: first excluding any pending human ask (which blocks a root alone,
+  // so it locked the promotion out of the ordinary Needs-you task #281 is about), then excluding
+  // a root carrying a `delegation.wait` (but a completion wait can be withdrawn while worker
+  // results stay uncollected, and `parentCompletionBlockers` reads the workers, not the wait).
+  // The record simply does not carry enough to decide a root's finishability, and approximating
+  // it is the mirrored-server-rule hazard AGENTS.md names around `SAFE_SESSION_ID`.
   //
-  // The wait is read for its PRESENCE, not interpreted: the record cannot tell whether a worker
-  // was collected, so this defers to the fact that a blocking rule exists there rather than
-  // mirroring the rule itself. A blocked root keeps Finish in the kebab, where a 409 costs a
-  // deliberate menu trip instead of a gold button that invites the click.
-  if (run.delegation?.role === 'root') {
-    if (hasPendingHumanAsk || run.hasPendingHumanAsk) return false
-    if (run.delegation.wait) return false
-  }
+  // A root therefore keeps Finish in the kebab, which is the fallback for a blocked state: a 409
+  // costs a deliberate menu trip rather than a gold button that invited the click. Making a root
+  // eligible again needs authoritative finishability on the record, not a better guess here.
+  if (run.delegation?.role === 'root') return false
   return deriveAttention(run, hasPendingHumanAsk).bucket === 'waiting'
 }
 

@@ -406,12 +406,13 @@ describe('offersComposerFinish — the gold primary on a Needs-you task (#281)',
       }),
       expected: false,
     },
-    // A root with no wait at all has no worker business outstanding, so the server has nothing to
-    // block on — it keeps the promotion.
+    // No root is promoted, wait or no wait. A completion wait can be WITHDRAWN while worker
+    // results are still uncollected, so the wait's presence was never a sound proxy for
+    // finishability — `parentCompletionBlockers` reads the workers, not the wait.
     {
-      name: 'a root with no worker wait',
+      name: 'a root with no worker wait — still not promoted',
       record: run('waiting', { delegation: { role: 'root', permissions: [], receipts: [] } }),
-      expected: true,
+      expected: false,
     },
     // A worker is not a root, so `finishBlockedReason` returns undefined for it by its first line.
     {
