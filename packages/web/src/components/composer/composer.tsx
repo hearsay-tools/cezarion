@@ -219,6 +219,11 @@ export function Composer({
   // host only passes `onFinish` for a status whose empty-draft primary would otherwise be a
   // disabled Send. The `!hasContent` guard is the whole affordance — a typed draft means Send.
   const primaryFinish = !hasContent && !primaryStop && onFinish !== undefined
+  // Stop wears its word whenever the control beside it does (#281). Next to the bare arrow Send it
+  // reads fine as an icon — two icons, one row — but next to a labelled Finish or Continue it read
+  // as an unexplained square beside a verb. The condition follows the PRIMARY's own label rule
+  // rather than naming Finish, so a future promoted primary cannot reintroduce the mismatch.
+  const labelledStop = primaryStop || primaryFinish || (!hasContent && emptySubmitLabel !== undefined)
   const submitLabel = !hasContent && emptySubmitLabel ? emptySubmitLabel : sendAriaLabel
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
@@ -609,11 +614,11 @@ export function Composer({
       aria-busy={stopPending || undefined}
       title={stopPending ? 'Waiting for execution to stop' : 'Stop execution; keep existing work'}
       disabled={busy || stopPending}
-      className={cn('h-11 min-w-11 active:opacity-80', primaryStop ? 'w-auto px-3' : 'w-11')}
+      className={cn('h-11 min-w-11 active:opacity-80', labelledStop ? 'w-auto px-3' : 'w-11')}
       onClick={() => void stop()}
     >
       <SquareIcon aria-hidden="true" className="size-3 fill-current" />
-      {primaryStop ? (stopPending ? 'Stopping…' : 'Stop') : null}
+      {labelledStop ? (stopPending ? 'Stopping…' : 'Stop') : null}
     </Button>
   ) : null
 

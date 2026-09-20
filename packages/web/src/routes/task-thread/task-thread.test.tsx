@@ -1430,11 +1430,20 @@ describe('the composer action row (#281)', () => {
     expect(composerActions().querySelector('[aria-label="Send"]')).not.toBeNull()
   })
 
-  it('Stop stays reachable beside it, still an abort', () => {
+  it('Stop stays reachable beside it, still an abort, and wears its word', () => {
     renderThread(run('waiting'))
     const stop = composerActions().querySelector('[aria-label="Stop"]')
     expect(stop).not.toBeNull()
     expect(stop?.getAttribute('title')).toBe('Stop execution; keep existing work')
+    // A bare square beside a labelled Finish reads as an unexplained icon. Stop is icon-only
+    // only when the control beside it is also an icon — the arrow Send.
+    expect(stop?.textContent).toContain('Stop')
+  })
+
+  it('Stop goes back to an icon once typing restores the arrow Send', () => {
+    renderThread(run('waiting'))
+    fireEvent.change(screen.getByLabelText('Reply to the agent'), { target: { value: 'a reply' } })
+    expect(composerActions().querySelector('[aria-label="Stop"]')?.textContent).toBe('')
   })
 
   it('a blocked provider disables the message, never Finish — finishing needs no credentials', async () => {
