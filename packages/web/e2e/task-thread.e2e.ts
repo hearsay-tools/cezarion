@@ -418,11 +418,33 @@ describe('task thread', () => {
       { text: 'Files', href: scoped(`/tasks/${RUN_ID}/files`), current: null },
     ])
 
+    // #281 moved Archive out of this menu and into the composer's own action row, where a phone
+    // can reach it without scrolling the header away. No flake was observed here and none is
+    // claimed: this is a NEW read of a surface the spec had not touched, so it follows this
+    // directory's default — wait and read as one step (README, "Wait, then read") — rather than
+    // fixing anything. The expression withholds a sample until the Archive button itself is
+    // present. It withholds it until BOTH labels are, because the two arrive from different
+    // sources: Archive renders straight from the record, while Continue is the primary's label
+    // only once the async provider query has made the run continuable — before that the primary
+    // reads `Send`. Waiting on Archive alone would hand back a sample the exact assertion below
+    // then fails on, which is the same wait-narrower-than-the-read mistake one step along.
+    const composerActions = browser.waitForValue(
+      `(() => {
+        const row = document.querySelector('[data-slot="composer-actions"]')
+        if (!row) return null
+        const labels = [...row.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))
+        return labels.includes('Archive task') && labels.includes('Continue') ? JSON.stringify(labels) : null
+      })()`,
+    ) as string
+    // The wait proves both are present; this proves there is nothing else and in that order —
+    // where #281's "one control per screen" rule would break first if Stop leaked back in.
+    expect(JSON.parse(composerActions)).toEqual(['Archive task', 'Continue'])
+
     browser.click('[aria-label="Run actions"]')
     const actions = browser.evaluate(
       `[...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map((b) => b.textContent.trim())`,
     ) as string[]
-    expect(actions).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive task', 'Delete task…'])
+    expect(actions).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Delete task…'])
 
     browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent === 'Open in…').click()`)
     // The take-over command remains in the worktree chooser.

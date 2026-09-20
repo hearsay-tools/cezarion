@@ -1,11 +1,11 @@
 import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArchiveRestoreIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
-import { ArchiveIcon, BotIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
+import { FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
+import { BotIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
 import { Fragment, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
 
-import { ApiError, archiveRun, deleteRun, openRunIn, openRunInCli } from '@/api/client'
+import { ApiError, deleteRun, openRunIn, openRunInCli } from '@/api/client'
 import {
   queryKeys,
   useAgentProfiles,
@@ -67,8 +67,9 @@ import {
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { cn, isHttpUrl } from '@/lib/utils'
 
+import { ArchiveButton } from './archive-action'
 import { Markdown } from './markdown'
-import { cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
+import { cliTargetResumes, cliTargetRunner, lastSessionBackend, offersComposerFinish, resumeHint, runActionFlags } from './run-actions'
 import { RunRelationshipsPanel } from './run-relationships'
 import { WorkflowSteps } from './step-rail'
 import { useFinishRun } from './use-finish-run'
@@ -120,6 +121,11 @@ export function RunHeader({
   onMarkedUnread?: () => void
 }) {
   const attention = deriveAttention(run, hasPendingHumanAsk)
+  const flags = runActionFlags(run)
+  // Whether the Session tab's composer took Finish for its gold primary (#281). Only that tab has
+  // a composer, so on the git tabs the kebab keeps Finish exactly as before — and so it does for a
+  // review gate or a parked run, whose composer primaries are Continue and Stop.
+  const finishPromoted = tab === 'session' && offersComposerFinish(run, hasPendingHumanAsk)
   const [notesOpen, setNotesOpen] = useState(false)
   const [openChooser, setOpenChooser] = useState(false)
   const actions = useRunActions(run, onMarkedUnread)
@@ -182,7 +188,18 @@ export function RunHeader({
                 className={cn('transition-transform motion-reduce:transition-none', detailsOpen && 'rotate-180')}
               />
             </Button>
-            <ActionsKebab run={run} actions={actions} onOpenChooser={() => setOpenChooser(true)} onToggleNotes={() => setNotesOpen((open) => !open)} />
+            {/* #281: Archive out of the kebab. The Session tab's composer carries it — within a
+                thumb's reach, which this header is not on a phone, where it scrolls away by
+                design. The three git tabs have no composer, so the header carries it there, and
+                exactly one surface offers it on any given screen. */}
+            {tab !== 'session' && flags.archive ? <ArchiveButton run={run} /> : null}
+            <ActionsKebab
+              run={run}
+              actions={actions}
+              finishPromoted={finishPromoted}
+              onOpenChooser={() => setOpenChooser(true)}
+              onToggleNotes={() => setNotesOpen((open) => !open)}
+            />
           </span>
         </div>
 
@@ -333,7 +350,7 @@ function OpenInMenuForRun({
 function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const [confirming, setConfirming] = useState<'delete' | 'finish' | 'archive' | null>(null)
+  const [confirming, setConfirming] = useState<'delete' | 'finish' | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
   const onError = (error: Error) => toast(error.message, { tone: 'danger' })
@@ -341,11 +358,6 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
   // Shared with the review panel's ✓ Accept (use-finish-run.ts) — the review-accept semantics
   // must be ONE implementation, not two buttons that happen to agree today.
   const finish = useFinishRun(run.id)
-  const archive = useMutation({
-    mutationFn: () => archiveRun(run.id, !run.archived),
-    onSuccess: invalidate,
-    onError,
-  })
   // Pin/unpin (#935) — the shared hook rather than a local mutation, because the sidebar and the
   // Tasks table drive the same action and the cache rule belongs in one place. Toggling off the
   // record, exactly like archive above.
@@ -392,7 +404,6 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
 
   return {
     finish,
-    archive,
     pin,
     markUnread,
     delete: deleteMutation,
@@ -797,11 +808,14 @@ function AgentBadge({ run }: { run: ApiRun }) {
 function ActionsKebab({
   run,
   actions,
+  finishPromoted,
   onToggleNotes,
   onOpenChooser,
 }: {
   run: ApiRun
   actions: RunActions
+  /** The composer took Finish for this screen (#281), so the menu must not offer it twice. */
+  finishPromoted: boolean
   onToggleNotes: () => void
   onOpenChooser: () => void
 }) {
@@ -823,7 +837,7 @@ function ActionsKebab({
         {command ? <DropdownMenuItem onSelect={() => void copyToClipboard(command, 'Command copied to clipboard.')}>
           <CopyIcon aria-hidden="true" /> Copy resume command
         </DropdownMenuItem> : null}
-        {flags.finish ? (
+        {flags.finish && !finishPromoted ? (
           <DropdownMenuItem disabled={actions.finish.isPending} onSelect={() => actions.setConfirming('finish')}>
             <CheckIcon aria-hidden="true" /> Finish
           </DropdownMenuItem>
@@ -848,12 +862,6 @@ function ActionsKebab({
             {run.pinned ? 'Unpin task' : 'Pin task'}
           </DropdownMenuCheckboxItem>
         ) : null}
-        {flags.archive ? (
-          <DropdownMenuItem disabled={actions.archive.isPending} onSelect={() => run.archived ? actions.archive.mutate() : actions.setConfirming('archive')}>
-            {run.archived ? <ArchiveRestoreIcon aria-hidden="true" /> : <ArchiveIcon aria-hidden="true" />}
-            {run.archived ? 'Unarchive' : 'Archive task'}
-          </DropdownMenuItem>
-        ) : null}
         {flags.deleteRun ? <DropdownMenuSeparator /> : null}
         {flags.deleteRun ? (
           <DropdownMenuItem variant="destructive" onSelect={() => actions.setConfirming('delete')}>
@@ -871,8 +879,8 @@ function ConfirmDialog({ run, actions }: { run: ApiRun; actions: RunActions }) {
   const lastKind = useRef(confirming)
   if (confirming !== null) lastKind.current = confirming
   const kind = confirming ?? lastKind.current
-  const title = kind === 'finish' ? 'Finish task?' : kind === 'archive' ? 'Archive task?' : 'Delete task permanently?'
-  const label = kind === 'finish' ? 'Review and finish' : kind === 'archive' ? 'Archive task' : 'Delete task'
+  const title = kind === 'finish' ? 'Finish task?' : 'Delete task permanently?'
+  const label = kind === 'finish' ? 'Review and finish' : 'Delete task'
   return (
     <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && actions.setConfirming(null)}>
       <AlertDialogContent data-slot="task-confirmation" className="sm:max-w-[660px]">
@@ -880,13 +888,11 @@ function ConfirmDialog({ run, actions }: { run: ApiRun; actions: RunActions }) {
           <AlertDialogTitle className={kind === 'delete' ? 'text-danger' : undefined}>{title}</AlertDialogTitle>
           <AlertDialogDescription>
               <>
-                {kind === 'finish' ? 'Finish “' : kind === 'archive' ? 'Move “' : 'Delete “'}
+                {kind === 'finish' ? 'Finish “' : 'Delete “'}
                 <span className="font-medium text-foreground" title={runTitle(run)}>{runTitle(run)}</span>
                 {kind === 'finish'
                   ? '”. Continue through the existing change-review gate before finalizing.'
-                  : kind === 'archive'
-                    ? '” out of Active tasks. You can restore it from Archived.'
-                    : '” and its transcript, worktree and branch. This cannot be undone.'}
+                  : '” and its transcript, worktree and branch. This cannot be undone.'}
               </>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -896,7 +902,6 @@ function ConfirmDialog({ run, actions }: { run: ApiRun; actions: RunActions }) {
             className={kind === 'delete' ? 'bg-danger text-danger-foreground hover:brightness-[0.96]' : 'bg-accent-strong text-accent-strong-foreground hover:brightness-[0.96]'}
             onClick={() => {
               if (kind === 'finish') actions.finish.mutate()
-              else if (kind === 'archive') actions.archive.mutate()
               else actions.delete.mutate()
               actions.setConfirming(null)
             }}

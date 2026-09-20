@@ -65,6 +65,22 @@ export interface ComposerProps {
   onStop?: () => Promise<unknown>
   stopOnEmpty?: boolean
   stopping?: boolean
+  /**
+   * Finish, as the gold primary on an EMPTY draft (#281). Passed only where the host has decided
+   * the slot is free — `offersComposerFinish` — so this component never has to arbitrate between
+   * Finish, Stop and Continue: whoever is handed the slot owns it. Typing anything hands it
+   * straight back to Send, because a draft is an intent to say something, not to close the task.
+   * Keyboard submission never invokes it, exactly as it never invokes Stop.
+   */
+  onFinish?: () => Promise<unknown>
+  finishing?: boolean
+  /**
+   * The outline control beside the primary, for a host whose run offers no Stop (#281). Stop and
+   * Archive partition the statuses — `cancel` is active, `archive` is not — so the slot holds one
+   * or the other and is never contested. A node rather than a callback because the composer has
+   * no business knowing what archiving is, the same seam `footerEnd` and `sessionControls` use.
+   */
+  secondaryAction?: ReactNode
   emptySubmitLabel?: string
   compactFeedback?: boolean
   /** Idle guidance occupies the already-reserved submission status space. */
@@ -141,6 +157,9 @@ export function Composer({
   onSubmit,
   retainDraftUntilSuccess = false,
   onStop,
+  onFinish,
+  finishing = false,
+  secondaryAction,
   stopOnEmpty = false,
   stopping = false,
   emptySubmitLabel,
@@ -196,6 +215,15 @@ export function Composer({
   stopPendingRef.current = stopPending
   const hasContent = text.trim() !== '' || images.length > 0
   const primaryStop = !hasContent && ((onStop !== undefined && stopOnEmpty) || stopPending)
+  // Never displaces a live primary (#281): Stop keeps the slot wherever it already had it, and a
+  // host only passes `onFinish` for a status whose empty-draft primary would otherwise be a
+  // disabled Send. The `!hasContent` guard is the whole affordance — a typed draft means Send.
+  const primaryFinish = !hasContent && !primaryStop && onFinish !== undefined
+  // Stop wears its word whenever the control beside it does (#281). Next to the bare arrow Send it
+  // reads fine as an icon — two icons, one row — but next to a labelled Finish or Continue it read
+  // as an unexplained square beside a verb. The condition follows the PRIMARY's own label rule
+  // rather than naming Finish, so a future promoted primary cannot reintroduce the mismatch.
+  const labelledStop = primaryStop || primaryFinish || (!hasContent && emptySubmitLabel !== undefined)
   const submitLabel = !hasContent && emptySubmitLabel ? emptySubmitLabel : sendAriaLabel
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
@@ -555,6 +583,28 @@ export function Composer({
     </Button>
   ) : null
 
+  const finishControl = primaryFinish ? (
+    <Button
+      type="button"
+      data-slot="composer-finish"
+      aria-label={finishing ? 'Finishing…' : 'Finish'}
+      aria-busy={finishing || undefined}
+      title="Close the session and mark this task done"
+      // Deliberately NOT gated on `disabled`, which is the SENDING gate — a disconnected or
+      // disabled provider cannot carry a message, but finishing only settles the run the engine
+      // already owns and needs no credentials. `stopControl` above has always been independent of
+      // it for exactly that reason. Gating Finish here would strand a Needs-you task whose
+      // provider went away with no way out of the list, since the Session tab's kebab no longer
+      // carries Finish once this button has it.
+      disabled={busy || stopPending || finishing}
+      className="h-11 w-auto gap-[7px] px-5 active:opacity-80"
+      onClick={() => void onFinish?.()}
+    >
+      <CheckIcon aria-hidden="true" />
+      {finishing ? 'Finishing…' : 'Finish'}
+    </Button>
+  ) : null
+
   const stopControl = onStop || stopPending ? (
     <Button
       type="button"
@@ -564,11 +614,11 @@ export function Composer({
       aria-busy={stopPending || undefined}
       title={stopPending ? 'Waiting for execution to stop' : 'Stop execution; keep existing work'}
       disabled={busy || stopPending}
-      className={cn('h-11 min-w-11 active:opacity-80', primaryStop ? 'w-auto px-3' : 'w-11')}
+      className={cn('h-11 min-w-11 active:opacity-80', labelledStop ? 'w-auto px-3' : 'w-11')}
       onClick={() => void stop()}
     >
       <SquareIcon aria-hidden="true" className="size-3 fill-current" />
-      {primaryStop ? (stopPending ? 'Stopping…' : 'Stop') : null}
+      {labelledStop ? (stopPending ? 'Stopping…' : 'Stop') : null}
     </Button>
   ) : null
 
@@ -602,8 +652,11 @@ export function Composer({
                   </div>
                 ) : null}
                 <div className="flex min-w-[100px] items-center justify-end gap-1" data-slot="composer-actions">
-                  {stopControl}
-                  {!primaryStop ? (
+                  {/* One outline slot: Stop while the engine owns the run, the host's own control
+                      once it does not. Never both — the two flags partition the statuses. */}
+                  {stopControl ?? secondaryAction}
+                  {finishControl}
+                  {!primaryStop && !primaryFinish ? (
                     <Button
                       type="button"
                       size="icon-sm"

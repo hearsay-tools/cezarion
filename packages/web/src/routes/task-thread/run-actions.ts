@@ -1,5 +1,6 @@
 import type { ApiRun, RunRecord, RunStatus, Runner } from '@open-mercato/cezar-api-client'
 import { cliTargetRunner } from '@/components/open-in-menu'
+import { deriveAttention } from '@/lib/attention'
 import { canBeUnread, isUnread } from '@/lib/read-state'
 
 export { cliTargetRunner }
@@ -143,6 +144,55 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
     cancel: active,
     deleteRun: !active,
   }
+}
+
+/**
+ * Does this run put Finish in the composer's gold primary slot (#281)?
+ *
+ * The slot is not free on most statuses — Stop owns it on running and queued (`stopOnEmpty`),
+ * Continue owns it on a closed-but-resumable run (`emptySubmitLabel`). It renders DISABLED in
+ * exactly one place: a waiting task with an empty draft, where nothing may be submitted and there
+ * is nothing to stop that the user is likely to want. So Finish takes that slot and no other, and
+ * the rule below is the "never displace a live primary" invariant written out.
+ *
+ * What survives the filters is precisely the `waiting` attention bucket — the sidebar's "Needs
+ * you" — which is the list the issue opens by calling noisy. Two of the exclusions are also the
+ * two client-visible halves of `finishBlockedReason`, so the promoted button avoids the states
+ * where `POST /finish` would answer 409:
+ *
+ *  - a pending human ask: the ask card owns the reply, and finishing over it is blocked anyway;
+ *  - a root parked on its workers: `bucket === 'none'`, Stop is already its live primary, and
+ *    uncollected workers block the finish.
+ *
+ * `review` is deliberately out. It offers Finish too, but its composer primary is a live Continue
+ * and its review panel already carries ✓ Accept — the same `use-finish-run.ts` mutation — so the
+ * verdict is within reach there without taking anything away.
+ *
+ * `hasPendingHumanAsk` is the thread's own live view of the ask, passed for the same reason the
+ * header takes it: the record's `hasPendingHumanAsk` lags a turn behind what the transcript
+ * already shows.
+ */
+export function offersComposerFinish(run: RunRecord, hasPendingHumanAsk = false): boolean {
+  if (!runActionFlags(run).finish) return false
+  if (run.status !== 'waiting') return false
+  // No delegation ROOT, ever. `finishBlockedReason` (workflows/run.ts) is the server's whole
+  // refusal rule for `POST /finish`, and its first line makes that rule exclusive to a root:
+  // every other run gets `undefined`. So the promotion takes the guard verbatim instead of
+  // reproducing what it guards.
+  //
+  // Earlier cuts of this tried to be cleverer and kept being wrong, each time in a way only the
+  // engine could have told us: first excluding any pending human ask (which blocks a root alone,
+  // so it locked the promotion out of the ordinary Needs-you task #281 is about), then excluding
+  // a root carrying a `delegation.wait` (but a completion wait can be withdrawn while worker
+  // results stay uncollected, and `parentCompletionBlockers` reads the workers, not the wait).
+  // The record simply does not carry enough to decide a root's finishability, and approximating
+  // it is the mirrored-server-rule hazard AGENTS.md names around `SAFE_SESSION_ID`.
+  //
+  // A root therefore keeps Finish in the kebab, which is the fallback for a blocked state: a 409
+  // costs a deliberate menu trip rather than a gold button that invited the click. Making a root
+  // eligible again needs authoritative finishability on the record, not a better guess here.
+  if (run.delegation?.role === 'root') return false
+  return deriveAttention(run, hasPendingHumanAsk).bucket === 'waiting'
 }
 
 /**
