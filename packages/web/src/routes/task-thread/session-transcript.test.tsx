@@ -97,6 +97,18 @@ describe('transcript adapters and row building', () => {
     ])
   })
 
+  it('appends a late reply without moving existing messages or changing their row keys', () => {
+    const request = { kind: 'conversation', id: 'request', messageId: 'request', messageKind: 'request',
+      senderRunId: 'parent', recipientRunId: 'worker', text: 'Inspect', delivery: 'delivered' } as const
+    const work = { kind: 'message', id: 'work', role: 'assistant', text: 'Continuing independently' } as const
+    const reply = { ...request, id: 'reply', messageId: 'reply', messageKind: 'reply',
+      senderRunId: 'worker', recipientRunId: 'parent', requestId: 'request', text: 'Finished' } as const
+    const before = buildTranscriptRows([{ id: 'turn', entries: [request, work] }], 'parent')
+    const after = buildTranscriptRows([{ id: 'turn', entries: [request, work, reply] }], 'parent')
+    expect(before.map(row => row.key)).toEqual(['turn:worker:request', 'turn:work'])
+    expect(after.map(row => row.key)).toEqual(['turn:worker:request', 'turn:work', 'turn:worker:reply'])
+  })
+
   it('groups the same normalized entries for an agent section', () => {
     const entries = [tool('read-1'), tool('read-2')]
     const rows = buildTranscriptRows(agentTranscriptSections('agent-1', entries), 'r1')

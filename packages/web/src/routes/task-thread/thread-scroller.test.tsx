@@ -26,6 +26,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   cleanup()
+  document.body.replaceChildren()
   vi.unstubAllGlobals()
   clearThreadScrollCaches()
 })
@@ -138,6 +139,92 @@ describe('useThreadScroll — outside a shell scroller (jsdom, tests, storybook-
     await act(async () => { refreshed(); await refresh })
     after.unmount()
     scroller.remove()
+  })
+
+  it.each([false, true])('jumps to a correlated message without repinning to the tail (virtual: %s)', (virtual) => {
+    const { result } = renderHook(() => useThreadScroll('correlation'))
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, { clientHeight: { value: 400 }, scrollHeight: { value: 2000 } })
+    const content = document.createElement('div')
+    const row = document.createElement('div')
+    row.dataset.slot = 'thread-row'
+    row.dataset.rowKey = 'request-row'
+    row.getBoundingClientRect = () => ({ top: -1200 } as DOMRect)
+    content.append(row)
+    scroller.append(content)
+    document.body.append(scroller)
+    act(() => result.current.attachContent(content))
+    const scrollToIndex = vi.fn()
+    if (virtual) result.current.virtualizerRef.current = { scrollToIndex } as never
+    act(() => result.current.jumpToRow('request-row', 3))
+    if (virtual) expect(scrollToIndex).toHaveBeenCalledWith(3, { align: 'start' })
+    else expect(scroller.scrollTop).toBe(400)
+    expect(result.current.pillVisible).toBe(true)
+    expect(document.activeElement).toBe(row)
+    act(() => result.current.restickIfStuck())
+    if (!virtual) expect(scroller.scrollTop).toBe(400)
+    scroller.remove()
+  })
+
+  it('keeps a jumped-to message below sticky header chrome', () => {
+    const { result } = renderHook(() => useThreadScroll('sticky'))
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, { clientHeight: { value: 400 }, scrollHeight: { value: 2000 } })
+    const header = document.createElement('header')
+    header.dataset.slot = 'run-header'
+    header.style.position = 'sticky'
+    header.getBoundingClientRect = () => ({ height: 150 } as DOMRect)
+    const content = document.createElement('div')
+    const row = document.createElement('div')
+    row.dataset.rowKey = 'request'
+    row.getBoundingClientRect = () => ({ top: -1200 } as DOMRect)
+    content.append(row)
+    scroller.append(header, content)
+    act(() => result.current.attachContent(content))
+    act(() => result.current.jumpToRow('request', 0))
+    expect(scroller.scrollTop).toBeLessThanOrEqual(250)
+  })
+
+  it('waits for an unmeasured virtual row to become focusable', async () => {
+    const { result } = renderHook(() => useThreadScroll('unmeasured'))
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    const content = document.createElement('div')
+    scroller.append(content)
+    document.body.append(scroller)
+    act(() => result.current.attachContent(content))
+    result.current.virtualizerRef.current = { scrollToIndex: () => {} } as never
+    act(() => result.current.jumpToRow('request', 0))
+    const row = document.createElement('div')
+    row.dataset.rowKey = 'request'
+    row.style.visibility = 'hidden'
+    await act(async () => { content.append(row) })
+    expect(document.activeElement).not.toBe(row)
+    await act(async () => { row.style.visibility = 'visible' })
+    expect(document.activeElement).toBe(row)
+    scroller.remove()
+  })
+
+  it('does not retain pointer down-intent after a correlation jump near the tail', () => {
+    const { result } = renderHook(() => useThreadScroll('pointer-jump'))
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, { clientHeight: { value: 400 }, scrollHeight: { value: 2000 } })
+    const content = document.createElement('div')
+    const row = document.createElement('div')
+    row.dataset.rowKey = 'reply'
+    row.getBoundingClientRect = () => ({ top: 1470 } as DOMRect)
+    content.append(row)
+    scroller.append(content)
+    act(() => result.current.attachContent(content))
+    scroller.scrollTop = 100
+    fireEvent.pointerDown(content)
+    act(() => result.current.jumpToRow('reply', 0))
+    fireEvent.scroll(scroller)
+    act(() => result.current.restickIfStuck())
+    expect(scroller.scrollTop).toBe(1570)
   })
 
   it('attaches without a [data-slot=main] ancestor and stays inert', () => {

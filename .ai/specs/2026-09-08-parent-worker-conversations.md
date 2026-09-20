@@ -132,6 +132,18 @@ Audit both turn-end handlers and every ActiveRun construction site.
 Render sender/recipient links, message kind, request correlation, delivery status,
 and explicit request outcomes within existing task threads and relationship views.
 Use the current loading, empty, error, and offline surfaces. No artwork is needed.
+
+Presentation correction after #442 / #445 (2026-09-20): requests are non-blocking.
+Keep every request, follow-up, progress update, and reply at its chronological
+position among thinking, tools, and assistant messages. Only adjacent identical
+requests from one sender to distinct recipients may batch. Outcomes remain current
+summaries on request cards; they do not move reply bodies back in time. Link loaded
+requests/replies with keyboard-accessible navigation (including virtual rows and
+cross-turn links); identify unloaded targets honestly without a broken jump.
+Use blue outbound and purple inbound surfaces, distinct from human-message yellow,
+matching the original two-worker screenshot. Verify delayed replies with intervening
+work, not only adjacent request/reply fixtures.
+
 Preserve keyboard navigation, reduced motion, narrow-screen wrapping, and 44px
 interactive targets; verify light/dark at 360x640 and desktop widths.
 
