@@ -434,6 +434,19 @@ describe('message color tokens', () => {
       expect(lightBlock).toContain(`--${token}:`)
       expect(css).toContain(`--color-${token}: var(--${token})`)
     }
+    // Reference screenshot: blue sends, purple receives, never human-message amber.
+    for (const block of [rootBlock, lightBlock]) {
+      const rgb = (role: string) => {
+        const hex = block.match(new RegExp(`--message-${role}-bg: #([0-9a-f]{6})`))![1]!
+        return [0, 2, 4].map(offset => Number.parseInt(hex.slice(offset, offset + 2), 16)) as [number, number, number]
+      }
+      const [sendR, sendG, sendB] = rgb('outbound')
+      const [receiveR, receiveG, receiveB] = rgb('inbound')
+      expect(sendB).toBeGreaterThan(sendG)
+      expect(sendG).toBeGreaterThan(sendR)
+      expect(receiveB).toBeGreaterThan(receiveR)
+      expect(receiveR).toBeGreaterThan(receiveG)
+    }
   })
 })
 
@@ -509,7 +522,7 @@ describe('parent/worker conversation transcript', () => {
     expect(screen.getByText(/Queued/)).toBeTruthy();
   });
 
-  it('groups identical parallel requests and nests the matching reply', () => {
+  it('batches adjacent sends but preserves delayed replies as independent inbound cards', () => {
     const parent = '11111111-1111-4111-8111-111111111111'
     const alpha = '22222222-2222-4222-8222-222222222222'
     const bravo = '55555555-5555-4555-8555-555555555555'
@@ -519,23 +532,75 @@ describe('parent/worker conversation transcript', () => {
     const events = asRunEvents([
       { type: 'conversation-message', message: reqA, delivery: 'delivered' },
       { type: 'conversation-message', message: reqB, delivery: 'delivered' },
+      { type: 'note', message: 'Continuing independent work while Alpha responds' },
       { type: 'request-outcome', outcome: { requestId: reqA.id, status: 'replied', observedAt: reply.createdAt, replyId: reply.id } },
       { type: 'conversation-message', message: reply, delivery: 'delivered' },
     ])
     const entries = reduceThread(events).turns.flatMap(turn => turn.items)
     render(
       <MemoryRouter initialEntries={['/p/acme/tasks/current']}>
-        <SessionTranscript runId={parent} viewId="main" sections={[{ id: 'conversation', entries }]} mode="document" taskTitles={{ [parent]: 'Parent', [alpha]: 'Alpha', [bravo]: 'Bravo' }} />
+        <main data-slot="main">
+          <SessionTranscript runId={parent} viewId="main" sections={[
+            { id: 'send-turn', entries: entries.slice(0, -1) },
+            { id: 'reply-turn', entries: entries.slice(-1) },
+          ]} mode="document" taskTitles={{ [parent]: 'Parent', [alpha]: 'Alpha', [bravo]: 'Bravo' }} />
+        </main>
       </MemoryRouter>,
     )
-    expect(document.querySelectorAll('[data-slot="worker-conversation-card"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-slot="worker-conversation-card"]')).toHaveLength(2)
     expect(screen.getByRole('link', { name: 'SENT to Alpha' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Alpha — Replied' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'SENT to Bravo' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Bravo — Pending' })).toBeTruthy()
     expect(screen.getByText('Got it — Alpha pong')).toBeTruthy()
-    expect(document.querySelector('[data-slot="conversation-related"]')?.textContent).toContain('RECEIVED from')
-    expect(document.querySelector('[data-direction="outbound"]')).not.toBeNull()
+    expect(document.querySelector('[data-direction="inbound"]')?.textContent).toContain('Got it — Alpha pong')
+    expect(document.querySelector('[data-direction="outbound"]')?.textContent).not.toContain('Got it — Alpha pong')
+    expect(screen.getByRole('button', { name: 'View request to Alpha' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'View reply from Alpha' })).toBeTruthy()
+    const rows = [...document.querySelectorAll('[data-slot="thread-row"]')]
+    expect(rows).toHaveLength(3)
+    expect(rows[0]?.textContent).toContain('Ping both workers')
+    expect(rows[1]?.textContent).toContain('Continuing independent work')
+    expect(rows[2]?.textContent).toContain('Got it — Alpha pong')
+    fireEvent.click(screen.getByRole('button', { name: 'View request to Alpha' }))
+    expect(document.activeElement).toBe(rows[0])
+    fireEvent.click(screen.getByRole('button', { name: 'View reply from Alpha' }))
+    expect(document.activeElement).toBe(rows[2])
+  })
+
+  it.each(['timed-out', 'cancelled'])('links a late reply without rewriting a %s outcome', (status) => {
+    const parent = '11111111-1111-4111-8111-111111111111'
+    const alpha = '22222222-2222-4222-8222-222222222222'
+    const request = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', senderRunId: parent, recipientRunId: alpha,
+      kind: 'request', text: 'Inspect', createdAt: '2026-09-20T12:00:00Z', requestHash: 'a'.repeat(64), state: 'accepted' }
+    const reply = { ...request, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', senderRunId: alpha, recipientRunId: parent,
+      kind: 'reply', requestId: request.id, text: 'Late answer' }
+    const entries = reduceThread(asRunEvents([
+      { type: 'conversation-message', message: request, delivery: 'delivered' },
+      { type: 'request-outcome', outcome: { requestId: request.id, status, observedAt: request.createdAt } },
+      { type: 'conversation-message', message: reply, delivery: 'delivered' },
+    ])).turns.flatMap(turn => turn.items)
+    render(<MemoryRouter><SessionTranscript runId={parent} viewId="main" sections={[{ id: 'turn', entries }]}
+      mode="document" taskTitles={{ [alpha]: 'Alpha' }} /></MemoryRouter>)
+    expect(screen.getByRole('button', { name: 'View reply from Alpha' })).toBeTruthy()
+    expect(screen.getByText(status === 'timed-out' ? 'Timed out' : 'Cancelled')).toBeTruthy()
+    expect(screen.queryByText('Replied')).toBeNull()
+  })
+
+  it('does not offer a broken request link when only the reply is loaded', () => {
+    const entries = reduceThread(asRunEvents([
+      { type: 'conversation-message', delivery: 'delivered', message: {
+        id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', senderRunId: '22222222-2222-4222-8222-222222222222',
+        recipientRunId: '11111111-1111-4111-8111-111111111111', kind: 'reply',
+        requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', text: 'Delayed response',
+        createdAt: '2026-09-20T12:05:00Z', requestHash: 'a'.repeat(64), state: 'accepted',
+      } },
+    ])).turns.flatMap(turn => turn.items)
+    render(<MemoryRouter><SessionTranscript runId="11111111-1111-4111-8111-111111111111" viewId="main"
+      sections={[{ id: 'tail', entries }]} mode="document" /></MemoryRouter>)
+    expect(screen.getByText('Linked request is outside loaded history.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /View request/ })).toBeNull()
+    expect(screen.getByText('Delayed response')).toBeTruthy()
   })
 
   // A recipient under review or already destroyed never receives the request, so the card

@@ -28,3 +28,46 @@ Date: 2026-09-18. A temporary replay fixture drove the production build through 
 - Keyboard focus plus Enter opened Details, where request IDs and delivery/debug fields remained inspectable.
 
 Validation: the temporary real-browser QA spec passed all four viewport/theme cases.
+
+## Chronology correction after #445
+
+Date: 2026-09-20. Read the original screenshot attached to task
+`b9e13434-318b-4f3a-bf7f-f5fc81953748`: blue sends and purple receives, with
+thinking between sends and reply. The earlier QA fixture above wrongly accepted
+nesting a later reply under the request; it did not prove chronological fidelity.
+
+Permanent regression: `packages/web/e2e/worker-conversation.e2e.ts`. A real
+RunStore/history replay fixture contains adjacent requests to Alpha/Bravo, then
+thinking, a completed tool, an assistant message, a follow-up, and a delayed reply.
+A second fixture has 70 intervening notes to exercise an unmounted virtual target.
+This verifies presentation and replay, not live provider execution.
+
+Observed in Chrome through agent-browser (all five cases passed):
+
+- At 1440×900 and 360×640, light and dark: blue outbound requests/follow-ups,
+  purple inbound replies, separate from human yellow and ordinary assistant teal.
+- Exactly one batched request, then thinking → tool → assistant → follow-up → reply.
+  Replaying the reply projection does not duplicate its card.
+- Request-specific Replied/Pending summaries stay on the request. Reply body stays
+  after the intervening work, never nested into or recoloring the request.
+- Keyboard Tab + Enter on both correlation controls moves focus to the related
+  row. Verified flat and virtual navigation, including a request absent from the
+  virtual DOM. Desktop jumps leave the target below the sticky header.
+- No horizontal overflow at 360 px; participant links, correlation controls and
+  Details are ≥44 px tall. Direction heading contrast is ≥4.5:1 in both themes.
+- Details still exposes IDs. Jumps are immediate, with no added motion.
+
+Screenshot inspection found the initial jump hid the request heading behind the
+sticky desktop header. A stronger browser assertion reproduced it against that
+build; the corrected build passed it. Unit regressions additionally pin late
+replies without changing timed-out/cancelled outcomes, cross-turn navigation,
+focus after virtual measurement, and no accidental tail-following after a jump.
+
+Evidence (request/reply views preserve visible keyboard focus):
+
+| View | Request and intervening work | Reply |
+| --- | --- | --- |
+| Desktop light | [request](chronology/desktop-light-comfortable-request.png) | [reply](chronology/desktop-light-comfortable-reply.png) |
+| Desktop dark | [request](chronology/desktop-dark-comfortable-request.png) | [reply](chronology/desktop-dark-comfortable-reply.png) |
+| Mobile light | [request](chronology/mobile-light-comfortable-request.png) | [reply](chronology/mobile-light-comfortable-reply.png) |
+| Mobile dark | [request](chronology/mobile-dark-comfortable-request.png) | [reply](chronology/mobile-dark-comfortable-reply.png) |

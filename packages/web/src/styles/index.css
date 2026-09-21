@@ -107,12 +107,12 @@
   --message-agent-bg: #10201f;
   --message-agent-border: #29423f;
   --message-agent-accent: #5eead4;
-  --message-outbound-bg: #1c1710;
-  --message-outbound-border: #5a4a2a;
-  --message-outbound-accent: #e8c07a;
-  --message-inbound-bg: #101820;
-  --message-inbound-border: #2a3f55;
-  --message-inbound-accent: #83baff;
+  --message-outbound-bg: #101820;
+  --message-outbound-border: #2a4f75;
+  --message-outbound-accent: #83baff;
+  --message-inbound-bg: #1b1528;
+  --message-inbound-border: #534078;
+  --message-inbound-accent: #c4a5ff;
 
   /* Existing semantic names remain the compatibility layer for every screen. */
   --background: var(--surface-base);
@@ -229,12 +229,12 @@
   --message-agent-bg: #f1f8f7;
   --message-agent-border: #c9deda;
   --message-agent-accent: #0f766e;
-  --message-outbound-bg: #fff6e8;
-  --message-outbound-border: #e0c48a;
-  --message-outbound-accent: #8a5a00;
-  --message-inbound-bg: #eef4fb;
-  --message-inbound-border: #b7c9de;
-  --message-inbound-accent: #2366b1;
+  --message-outbound-bg: #eff6ff;
+  --message-outbound-border: #b8d5ff;
+  --message-outbound-accent: #245bcc;
+  --message-inbound-bg: #f5f3ff;
+  --message-inbound-border: #d9ccff;
+  --message-inbound-accent: #7040c0;
 
   --background: var(--surface-base);
   --foreground: var(--text-primary);

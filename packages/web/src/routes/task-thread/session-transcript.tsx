@@ -26,6 +26,7 @@ import {
 } from './thread-scroller'
 import type { ThreadAsk, ThreadEntry, ThreadState } from './thread-state'
 import type { TaskTitleMap } from './conversation-presentation'
+import { ConversationNavigation, type ConversationTarget } from './conversation-navigation'
 
 export interface TranscriptUserMessage {
   text: string
@@ -157,6 +158,24 @@ export function SessionTranscript({
   const rowModels = useMemo(() => buildTranscriptRows(sections, runId), [sections, runId])
   const internalScroll = useThreadScroll(`${runId}:${viewId}`, { surface: mode })
   const controls = scrollControls ?? internalScroll
+  const navigation = useMemo(() => {
+    const targets = new Map<string, ConversationTarget>()
+    rowModels.forEach((row, rowIndex) => {
+      if (row.content.kind !== 'block' || row.content.block.kind !== 'worker-conversation') return
+      for (const batch of row.content.block.batches) {
+        for (const message of batch.messages) targets.set(message.messageId, { message, rowKey: row.key, rowIndex })
+      }
+    })
+    const replies = new Map<string, ConversationTarget[]>()
+    for (const target of targets.values()) {
+      const { message } = target
+      if (message.messageKind !== 'reply' || !message.requestId) continue
+      const siblings = replies.get(message.requestId) ?? []
+      siblings.push(target)
+      replies.set(message.requestId, siblings)
+    }
+    return { targets, replies, navigate: (target: ConversationTarget) => controls.jumpToRow(target.rowKey, target.rowIndex) }
+  }, [rowModels, controls.jumpToRow])
   const rows = useMemo<ThreadRow[]>(
     () =>
       rowModels.map((row) => ({
@@ -190,6 +209,7 @@ export function SessionTranscript({
 
   return (
     <ThreadCardCache runId={runId}>
+      <ConversationNavigation.Provider value={navigation}>
       {mode === 'panel' ? (
         <div
           data-slot="transcript-viewport"
@@ -210,6 +230,7 @@ export function SessionTranscript({
       ) : (
         transcript
       )}
+      </ConversationNavigation.Provider>
     </ThreadCardCache>
   )
 }
@@ -341,7 +362,6 @@ function ThreadEntryRenderer({
               text: entry.text,
               senderRunId: entry.senderRunId,
               messages: [entry],
-              related: [],
             }],
           }}
         />

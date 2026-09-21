@@ -307,7 +307,7 @@ describe('groupThreadItems — worker conversation', () => {
     ...(extra.outcome !== undefined ? { outcome: extra.outcome } : {}),
   })
 
-  it('collects worker traffic at the first conversation position and batches identical requests', () => {
+  it('keeps delayed replies and separated sends after intervening work', () => {
     const reqA = conversation('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', { recipientRunId: alpha, outcome: { status: 'replied' } })
     const reqB = conversation('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', { recipientRunId: bravo, outcome: { status: 'pending' } })
     const reply = conversation('cccccccc-cccc-4ccc-8ccc-cccccccccccc', {
@@ -324,12 +324,35 @@ describe('groupThreadItems — worker conversation', () => {
       reqB,
       reply,
     ])
-    expect(shape(blocks)).toEqual(['entry', 'worker-conversation', 'entry'])
-    const group = blocks[1]
-    if (group?.kind !== 'worker-conversation') throw new Error('expected worker conversation')
-    expect(group.batches).toHaveLength(1)
-    expect(group.batches[0]?.messages.map((message) => message.recipientRunId)).toEqual([alpha, bravo])
-    expect(group.batches[0]?.related.map((message) => message.text)).toEqual(['Alpha pong'])
+    expect(shape(blocks)).toEqual(['entry', 'worker-conversation', 'entry', 'worker-conversation', 'worker-conversation'])
+    expect(blocks.flatMap(block => block.kind === 'worker-conversation'
+      ? block.batches.flatMap(batch => batch.messages.map(message => message.text))
+      : block.kind === 'entry' ? [block.entry.kind] : [])).toEqual([
+      'reasoning', 'Ping both workers', 'note', 'Ping both workers', 'Alpha pong',
+    ])
+  })
+
+  it('batches only adjacent identical requests to different recipients', () => {
+    const reqA = conversation('req-a', { recipientRunId: alpha })
+    const reqB = conversation('req-b', { recipientRunId: bravo })
+    const retry = conversation('req-again', { recipientRunId: alpha })
+    const progress = conversation('progress', { recipientRunId: alpha, messageKind: 'progress', text: 'Still working' })
+    const later = conversation('later', { recipientRunId: bravo })
+    const blocks = groupThreadItems([reqA, reqB, retry, progress, later])
+    expect(blocks.filter(block => block.kind === 'worker-conversation').map(block =>
+      block.batches.flatMap(batch => batch.messages.map(message => message.messageId)),
+    )).toEqual([['req-a', 'req-b'], ['req-again'], ['progress'], ['later']])
+  })
+
+  it('does not collapse follow-ups and replies to an unloaded request or reorder them after new requests', () => {
+    const followUp = conversation('follow', { recipientRunId: alpha, messageKind: 'follow-up', requestId: 'old', text: 'Check this too' })
+    const progress = conversation('progress', { recipientRunId: parent, senderRunId: alpha, messageKind: 'progress', text: 'Working' })
+    const request = conversation('new', { recipientRunId: bravo })
+    const reply = conversation('reply', { recipientRunId: parent, senderRunId: alpha, messageKind: 'reply', requestId: 'old', text: 'Done' })
+    const blocks = groupThreadItems([followUp, progress, request, reply])
+    expect(blocks.flatMap(block => block.kind === 'worker-conversation'
+      ? block.batches.flatMap(batch => batch.messages.map(message => message.text)) : [],
+    )).toEqual(['Check this too', 'Working', 'Ping both workers', 'Done'])
   })
 
   it('keeps an orphan reply as a linked batch when its request is outside the turn', () => {
