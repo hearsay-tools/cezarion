@@ -195,6 +195,23 @@ describe('a resumed session keeps its workflow step tools', () => {
     await settled(id);
   });
 
+  it('Continue treats an explicit auto step effort as an override of the run effort', async () => {
+    const autoEffortDef: WorkflowDef = {
+      ...SINGLE_DEF,
+      steps: SINGLE_DEF.steps.map((step) => ({ ...step, effort: 'auto' })),
+    };
+    const id = terminalRun({
+      def: autoEffortDef,
+      steps: [{ id: 'work', sessionId: 'sess-1', backend: 'claude' }],
+      effort: 'high',
+    });
+
+    expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    const spec = await specAt(0);
+    expect(spec.effort).toBeUndefined();
+    await settled(id);
+  });
+
   it('Continue inherits the run effort when the owning step does not set one', async () => {
     const id = terminalRun({
       def: SINGLE_DEF,

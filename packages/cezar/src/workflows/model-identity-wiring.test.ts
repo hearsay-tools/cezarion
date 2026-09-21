@@ -143,6 +143,17 @@ describe('model identity wiring (dry run)', () => {
     expect(capturedFlag('--effort')).toBe('high');
   }, 30_000);
 
+  it('an explicit auto step effort clears the run effort on the runner wire', async () => {
+    const stepEffortWorkflow: WorkflowDef = {
+      ...workflow,
+      steps: workflow.steps.map((step) => step.id === 'work' ? { ...step, effort: 'auto' } : step),
+    };
+
+    await runToEnd({ task: 'do the thing', effort: 'high' }, stepEffortWorkflow);
+
+    expect(capturedFlag('--effort')).toBeUndefined();
+  }, 30_000);
+
   it('rejects a workflow step effort outside the canonical vocabulary', async () => {
     const invalidEffortWorkflow: WorkflowDef = {
       ...workflow,
@@ -159,6 +170,32 @@ describe('model identity wiring (dry run)', () => {
     const lockedEffortWorkflow: WorkflowDef = {
       ...workflow,
       steps: workflow.steps.map((step) => step.id === 'work' ? { ...step, effort: 'high' } : step),
+    };
+    writeFileSync(
+      join(repoRoot, '.ai/cezar', 'config.json'),
+      JSON.stringify({ maxParallel: 1, modelsLocked: true }),
+      'utf8',
+    );
+
+    try {
+      const id = await runToEnd({ task: 'do the thing' }, lockedEffortWorkflow);
+      expect(store.getRun(id)?.status).toBe('failed');
+      expect(store.getRun(id)?.error).toContain(
+        'agent models are locked — configure the model in the native coding-agent settings',
+      );
+    } finally {
+      writeFileSync(
+        join(repoRoot, '.ai/cezar', 'config.json'),
+        JSON.stringify({ maxParallel: 1 }),
+        'utf8',
+      );
+    }
+  }, 30_000);
+
+  it('rejects an explicit auto per-step effort with the existing models-locked error', async () => {
+    const lockedEffortWorkflow: WorkflowDef = {
+      ...workflow,
+      steps: workflow.steps.map((step) => step.id === 'work' ? { ...step, effort: 'auto' } : step),
     };
     writeFileSync(
       join(repoRoot, '.ai/cezar', 'config.json'),

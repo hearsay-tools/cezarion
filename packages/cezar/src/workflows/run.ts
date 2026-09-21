@@ -3945,10 +3945,13 @@ export class RunManager {
     };
     let continueEffort: string | undefined;
     try {
-      const stepEffort = parseDelegationEffort(toolsStep?.effort);
       const modelsLocked = agentModelsLocked(this.repoRoot);
-      if (modelsLocked && stepEffort !== undefined) throw new Error(AGENT_MODELS_LOCKED_ERROR);
-      continueEffort = modelsLocked ? undefined : stepEffort ?? record?.effort;
+      const authoredStepEffort = toolsStep?.effort !== undefined;
+      if (modelsLocked && toolsStep?.effort?.trim()) throw new Error(AGENT_MODELS_LOCKED_ERROR);
+      const stepEffort = parseDelegationEffort(toolsStep?.effort);
+      continueEffort = modelsLocked
+        ? undefined
+        : authoredStepEffort ? stepEffort : record?.effort;
     } catch (err) {
       failBeforeSpawn(err instanceof Error ? err.message : String(err));
       return;
@@ -4727,11 +4730,12 @@ export class RunManager {
     let effectiveEffort: string | undefined;
     try {
       const modelsLocked = agentModelsLocked(this.repoRoot);
+      const authoredStepEffort = step.effort !== undefined;
+      if (modelsLocked && step.effort?.trim()) return AGENT_MODELS_LOCKED_ERROR;
       const stepEffort = parseDelegationEffort(step.effort);
-      if (modelsLocked && stepEffort !== undefined) return AGENT_MODELS_LOCKED_ERROR;
       effectiveEffort = modelsLocked
         ? undefined
-        : stepEffort ?? this.store.getRun(runId)?.effort ?? input.effort;
+        : authoredStepEffort ? stepEffort : this.store.getRun(runId)?.effort ?? input.effort;
       const normalized = normalizeModelForBackend(
         stepBackend,
         modelsLocked ? undefined : step.model ?? input.model,
