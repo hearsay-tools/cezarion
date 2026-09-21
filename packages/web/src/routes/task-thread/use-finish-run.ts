@@ -7,7 +7,7 @@ import { toast } from '@/components/ui/toaster'
 /**
  * THE finish action (`POST /api/runs/:id/finish`) — one implementation for its two meanings
  * (run-actions.ts `finishTitle`): waiting → close the session; review → accept the changes
- * without a PR. The header's Finish button and the review panel's ✓ Accept both sit on this
+ * without a PR. The composer's Finish button and the review panel's ✓ Accept both sit on this
  * hook so the review-gate semantics can never fork between the two surfaces.
  */
 export function useFinishRun(runId: string) {

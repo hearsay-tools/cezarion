@@ -70,7 +70,7 @@ describe('workspace runs index API', () => {
   });
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over });
+    createApp({ repoRoot, store, manager: { finishBlockedReason: () => 'no open session' } as unknown as RunManager, version: '0.0.0-test', ...over });
 
   const getIndex = async (over: Partial<ServerDeps> = {}): Promise<RunsIndexResponse> => {
     const res = await apiRequest(makeApp(over), '/api/v1/workspace/runs-index');

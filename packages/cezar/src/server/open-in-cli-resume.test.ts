@@ -95,7 +95,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     createApp({
       repoRoot,
       store,
-      manager: {} as RunManager,
+      manager: { finishBlockedReason: () => 'no open session' } as unknown as RunManager,
       version: '0.0.0-test',
       providerAuth: providerAuth(options.disconnected),
       workspaceConfig: workspaceConfig(options.disabled),

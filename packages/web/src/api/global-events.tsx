@@ -221,6 +221,17 @@ function applyStampedRunList(queryClient: QueryClient, project: string, event: G
   queryClient.setQueryData<ApiRun[]>(key, (list) => applyRunDeleted(list, event.id))
 }
 
+/** Cancel even the first detail fetch: invalidation alone reuses an in-flight request
+ * without cached data, allowing a pre-event verdict to arrive after the event. */
+function refreshRunDetail(queryClient: QueryClient, id: string): void {
+  const key = queryKeys.runs.detail(id)
+  if (!queryClient.getQueryState(key)) return
+  // Do not revert cancellation to the previously allowed verdict.
+  void queryClient.cancelQueries({ queryKey: key }, { revert: false }).then(() =>
+    queryClient.invalidateQueries({ queryKey: key }),
+  )
+}
+
 /** Fold one stream message into the cache. The reducers it calls are pure and table-tested in
  *  events.ts; this is only the wiring from an event to the cache it belongs in. */
 function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: GlobalEvent): void {
@@ -239,12 +250,17 @@ function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: Gl
       const key = queryKeys.runs.detail(event.run.id)
       if (queryClient.getQueryData(key) !== undefined) {
         queryClient.setQueryData<ApiRun>(key, (previous) => mergeRun(previous, event.run))
-        // Stored run events omit host-derived commands. Fetch the new session's command
-        // once it can be copied; never retain a command for a previous session.
-        const sessionBackend = [...event.run.steps].reverse().find(step => step.sessionId)?.backend ?? event.run.runner
-        if (sessionBackend === 'cursor' && !['running', 'queued', 'waiting'].includes(event.run.status)) {
-          void queryClient.invalidateQueries({ queryKey: key })
-        }
+        // The stream drops the old verdict; only a fresh detail response may permit Finish.
+      }
+      refreshRunDetail(queryClient, event.run.id)
+      if (event.run.delegation?.role === 'worker') {
+        const parentKey = queryKeys.runs.detail(event.run.delegation.parentRunId)
+        queryClient.setQueryData<ApiRun>(parentKey, previous => {
+          if (!previous) return previous
+          const { finishBlocked: _stale, ...run } = previous
+          return run
+        })
+        refreshRunDetail(queryClient, event.run.delegation.parentRunId)
       }
       // The Changes tab stops polling once a run leaves the active set (queries.ts:
       // refetchInterval only lives while active), so end-of-run writes would otherwise wait

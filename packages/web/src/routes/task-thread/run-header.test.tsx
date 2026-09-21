@@ -202,16 +202,13 @@ describe('editable title (#389)', () => {
 describe('action bar visibility per status (the legacy rules, rendered)', () => {
   // Pin (#935) is in every row: unlike every other action here it asks nothing of the engine,
   // so it is offered whatever the run is doing — only archiving takes it away.
-  // These rows are the SESSION tab, where #281 moved two actions out of this menu: Archive to the
-  // composer on every row that had it, and Finish on `waiting`, whose composer promotes it. The
-  // per-tab describe at the bottom of this file pins where each one went, and `review` keeps
-  // Finish here because its composer primary is Continue.
+  // Finish belongs only to the composer; Archive stays outside this menu on every tab.
   const matrix: Array<{ status: RunStatus; visible: string[] }> = [
     { status: 'queued', visible: ['Notes / handoff', 'Pin task'] },
     { status: 'running', visible: ['Notes / handoff', 'Pin task'] },
     { status: 'waiting', visible: ['Notes / handoff', 'Pin task'] },
     // Terminal folded into the Open in… menu — it shows whenever the session can be resumed.
-    { status: 'review', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Finish', 'Pin task', 'Delete task…'] },
+    { status: 'review', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
     { status: 'done', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
     { status: 'failed', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
     { status: 'cancelled', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
@@ -319,19 +316,6 @@ describe('Mark unread (#775)', () => {
 })
 
 describe('actions hit their endpoints', () => {
-  it('Finish → POST /finish', async () => {
-    const sent = stubFetch()
-    // A git tab: no composer there, so the menu still owns Finish and its confirm (#281). The
-    // Session tab's one-click path is pinned in task-thread.test.tsx.
-    renderHeader(run('waiting'), undefined, 'changes')
-    fireEvent.click(actionBar().getByRole('menuitem', { name: 'Finish' }))
-    expect(sent.some((r) => r.path.endsWith('/finish'))).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: 'Review and finish' }))
-    await waitFor(() => {
-      expect(sent.some((r) => r.method === 'POST' && r.path === '/api/v1/runs/r1/finish')).toBe(true)
-    })
-  })
-
   it.each(['done', 'running'] as const)('does not duplicate composer execution actions on desktop or mobile (%s)', async (status) => {
     const sent = stubFetch()
     renderHeader(run(status))
@@ -1459,7 +1443,7 @@ it('copies the resumable command directly from the task actions menu', async () 
 /**
  * #281 — who owns Finish and Archive on each tab. The composer holds both on Session, where it is
  * thumb-reachable; the three git tabs have no composer, so the header carries Archive there and
- * the kebab keeps Finish. Exactly one surface offers each action on any given screen, which is
+ * Finish is absent from the kebab. Exactly one surface offers each action on any given screen, which is
  * what keeps one mutation from growing two pending states.
  */
 describe('the promoted actions, per tab (#281)', () => {
@@ -1511,16 +1495,16 @@ describe('the promoted actions, per tab (#281)', () => {
     expect(actionBar().queryByRole('menuitem', { name: 'Finish' })).toBeNull()
   })
 
-  it.each(['changes', 'commits', 'files'] as const)('%s — the kebab keeps Finish, there being no composer', (tab) => {
+  it.each(['changes', 'commits', 'files'] as const)('%s — the kebab never offers Finish', (tab) => {
     stubFetch()
     renderTab(run('waiting'), tab)
-    expect(actionBar().getByRole('menuitem', { name: 'Finish' })).not.toBeNull()
+    expect(actionBar().queryByRole('menuitem', { name: 'Finish' })).toBeNull()
   })
 
-  it('review keeps Finish in the kebab on every tab — its composer primary is Continue', () => {
+  it('review has no Finish in the kebab', () => {
     stubFetch()
     renderTab(run('review'), 'session')
-    expect(actionBar().getByRole('menuitem', { name: 'Finish' })).not.toBeNull()
+    expect(actionBar().queryByRole('menuitem', { name: 'Finish' })).toBeNull()
   })
 
   it('an ordinary waiting task with a pending ask has Finish promoted, so the kebab drops it', () => {
@@ -1529,12 +1513,12 @@ describe('the promoted actions, per tab (#281)', () => {
     expect(actionBar().queryByRole('menuitem', { name: 'Finish' })).toBeNull()
   })
 
-  it('a ROOT with a pending ask keeps Finish in the kebab — the server refuses the promotion', () => {
+  it('a blocked root offers no Finish in the kebab', () => {
     stubFetch()
     renderTab(run('waiting', {
       hasPendingHumanAsk: true,
       delegation: { role: 'root', permissions: [], receipts: [] },
     }), 'session')
-    expect(actionBar().getByRole('menuitem', { name: 'Finish' })).not.toBeNull()
+    expect(actionBar().queryByRole('menuitem', { name: 'Finish' })).toBeNull()
   })
 })

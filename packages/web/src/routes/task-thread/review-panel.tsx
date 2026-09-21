@@ -192,7 +192,7 @@ function ReviewActions({ run }: { run: ApiRun }) {
             Draft PR
           </Button>
         )}
-        <Button
+        {run.finishBlocked === null ? <Button
           data-slot="review-accept"
           variant="primary"
           size="sm"
@@ -203,7 +203,7 @@ function ReviewActions({ run }: { run: ApiRun }) {
         >
           <CheckIcon aria-hidden="true" />
           Accept
-        </Button>
+        </Button> : null}
       </div>
       {manual !== null ? <ManualMergeLine command={manual} /> : null}
     </div>
@@ -249,7 +249,7 @@ const CELEBRATION_MS = 1500
 /**
  * The brief twinkle moment when a review is accepted (spec §"Design system": lifecycle
  * surfaces may twinkle): watches the run's status and, on the review → done transition —
- * however it was triggered: the panel's ✓ Accept, the header's Finish, a Draft PR — shows a
+ * however it was triggered: the panel's ✓ Accept, the composer's Finish, a Draft PR — shows a
  * one-shot ~1.5s overlay of the brand scatter. Purely decorative (`aria-hidden`,
  * pointer-transparent); the status pill is the accessible record of what happened.
  */

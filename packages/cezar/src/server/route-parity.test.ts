@@ -81,7 +81,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
       store,
       // Only routes that never reach the manager are exercised, plus
       // `isActive` guards on 404-paths — a stub keeps the suite hermetic.
-      manager: { isActive: () => false } as unknown as RunManager,
+      manager: { isActive: () => false, finishBlockedReason: () => 'no open session' } as unknown as RunManager,
       version: '0.0.0-test',
       contexts,
     });

@@ -74,6 +74,7 @@ function renderView(
 
 const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun =>
   ({
+    finishBlocked: null,
     id: 'r1',
     title: 'do the thing plz',
     titleSummary: 'Do the thing',
@@ -1473,8 +1474,9 @@ describe('the composer action row (#281)', () => {
     expect((finishButton() as HTMLButtonElement)?.disabled).toBe(false)
   })
 
-  it('a root with a pending human ask keeps Finish in the kebab — the server refuses it', () => {
+  it('a blocked root has no Finish action', () => {
     renderThread(run('waiting', {
+      finishBlocked: 'Answer the pending human question before finishing.',
       hasPendingHumanAsk: true,
       delegation: { role: 'root', permissions: [], receipts: [] },
     }))

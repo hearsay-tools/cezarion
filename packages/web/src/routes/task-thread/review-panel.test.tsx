@@ -21,6 +21,7 @@ afterEach(() => {
 
 const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun =>
   ({
+    finishBlocked: null,
     id: 'r1',
     title: 'do the thing plz',
     titleSummary: 'Do the thing',
@@ -351,6 +352,12 @@ describe('the review gate on the thread', () => {
     const link = document.querySelector('[data-slot="pr-link"]') as HTMLAnchorElement
     expect(link.href).toBe('https://github.com/x/y/pull/9')
     expect(screen.queryByRole('button', { name: /Draft PR/ })).toBeNull()
+  })
+
+  it.each([undefined, 'Collect worker results.'])('hides Accept when Finish is not explicitly allowed: %s', finishBlocked => {
+    stubFetch()
+    renderWithProviders(<ReviewPanel run={run('review', { finishBlocked })} />)
+    expect(screen.queryByRole('button', { name: /Accept/ })).toBeNull()
   })
 
   it('✓ Accept POSTs the one shared finish action (review-accept semantics)', async () => {

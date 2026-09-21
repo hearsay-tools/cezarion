@@ -1,8 +1,8 @@
 import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
-import { BotIcon, CheckIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
-import { Fragment, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
+import { BotIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
+import { Fragment, useId, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
 
 import { ApiError, deleteRun, openRunIn, openRunInCli } from '@/api/client'
@@ -69,10 +69,9 @@ import { cn, isHttpUrl } from '@/lib/utils'
 
 import { ArchiveButton } from './archive-action'
 import { Markdown } from './markdown'
-import { cliTargetResumes, cliTargetRunner, lastSessionBackend, offersComposerFinish, resumeHint, runActionFlags } from './run-actions'
+import { cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
 import { RunRelationshipsPanel } from './run-relationships'
 import { WorkflowSteps } from './step-rail'
-import { useFinishRun } from './use-finish-run'
 
 /**
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
@@ -122,10 +121,6 @@ export function RunHeader({
 }) {
   const attention = deriveAttention(run, hasPendingHumanAsk)
   const flags = runActionFlags(run)
-  // Whether the Session tab's composer took Finish for its gold primary (#281). Only that tab has
-  // a composer, so on the git tabs the kebab keeps Finish exactly as before — and so it does for a
-  // review gate or a parked run, whose composer primaries are Continue and Stop.
-  const finishPromoted = tab === 'session' && offersComposerFinish(run, hasPendingHumanAsk)
   const [notesOpen, setNotesOpen] = useState(false)
   const [openChooser, setOpenChooser] = useState(false)
   const actions = useRunActions(run, onMarkedUnread)
@@ -196,7 +191,6 @@ export function RunHeader({
             <ActionsKebab
               run={run}
               actions={actions}
-              finishPromoted={finishPromoted}
               onOpenChooser={() => setOpenChooser(true)}
               onToggleNotes={() => setNotesOpen((open) => !open)}
             />
@@ -350,14 +344,11 @@ function OpenInMenuForRun({
 function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const [confirming, setConfirming] = useState<'delete' | 'finish' | null>(null)
+  const [confirming, setConfirming] = useState<'delete' | null>(null)
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
   const onError = (error: Error) => toast(error.message, { tone: 'danger' })
 
-  // Shared with the review panel's ✓ Accept (use-finish-run.ts) — the review-accept semantics
-  // must be ONE implementation, not two buttons that happen to agree today.
-  const finish = useFinishRun(run.id)
   // Pin/unpin (#935) — the shared hook rather than a local mutation, because the sidebar and the
   // Tasks table drive the same action and the cache rule belongs in one place. Toggling off the
   // record, exactly like archive above.
@@ -403,7 +394,6 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
   })
 
   return {
-    finish,
     pin,
     markUnread,
     delete: deleteMutation,
@@ -808,14 +798,11 @@ function AgentBadge({ run }: { run: ApiRun }) {
 function ActionsKebab({
   run,
   actions,
-  finishPromoted,
   onToggleNotes,
   onOpenChooser,
 }: {
   run: ApiRun
   actions: RunActions
-  /** The composer took Finish for this screen (#281), so the menu must not offer it twice. */
-  finishPromoted: boolean
   onToggleNotes: () => void
   onOpenChooser: () => void
 }) {
@@ -837,11 +824,6 @@ function ActionsKebab({
         {command ? <DropdownMenuItem onSelect={() => void copyToClipboard(command, 'Command copied to clipboard.')}>
           <CopyIcon aria-hidden="true" /> Copy resume command
         </DropdownMenuItem> : null}
-        {flags.finish && !finishPromoted ? (
-          <DropdownMenuItem disabled={actions.finish.isPending} onSelect={() => actions.setConfirming('finish')}>
-            <CheckIcon aria-hidden="true" /> Finish
-          </DropdownMenuItem>
-        ) : null}
         {flags.markUnread ? (
           <DropdownMenuItem
             disabled={actions.markUnread.isPending}
@@ -876,37 +858,29 @@ function ActionsKebab({
 /** Deleting history and work still requires confirmation. */
 function ConfirmDialog({ run, actions }: { run: ApiRun; actions: RunActions }) {
   const confirming = actions.confirming
-  const lastKind = useRef(confirming)
-  if (confirming !== null) lastKind.current = confirming
-  const kind = confirming ?? lastKind.current
-  const title = kind === 'finish' ? 'Finish task?' : 'Delete task permanently?'
-  const label = kind === 'finish' ? 'Review and finish' : 'Delete task'
   return (
     <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && actions.setConfirming(null)}>
       <AlertDialogContent data-slot="task-confirmation" className="sm:max-w-[660px]">
         <AlertDialogHeader>
-          <AlertDialogTitle className={kind === 'delete' ? 'text-danger' : undefined}>{title}</AlertDialogTitle>
+          <AlertDialogTitle className="text-danger">Delete task permanently?</AlertDialogTitle>
           <AlertDialogDescription>
               <>
-                {kind === 'finish' ? 'Finish “' : 'Delete “'}
+                Delete “
                 <span className="font-medium text-foreground" title={runTitle(run)}>{runTitle(run)}</span>
-                {kind === 'finish'
-                  ? '”. Continue through the existing change-review gate before finalizing.'
-                  : '” and its transcript, worktree and branch. This cannot be undone.'}
+                ” and its transcript, worktree and branch. This cannot be undone.
               </>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            className={kind === 'delete' ? 'bg-danger text-danger-foreground hover:brightness-[0.96]' : 'bg-accent-strong text-accent-strong-foreground hover:brightness-[0.96]'}
+            className="bg-danger text-danger-foreground hover:brightness-[0.96]"
             onClick={() => {
-              if (kind === 'finish') actions.finish.mutate()
-              else actions.delete.mutate()
+              actions.delete.mutate()
               actions.setConfirming(null)
             }}
           >
-            {label}
+            Delete task
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
