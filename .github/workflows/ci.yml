@@ -12,14 +12,19 @@ on:
       - develop
       - main
   # Release finalization explicitly dispatches bot-created PRs at their head branch.
-  # Without a PR event payload these run the full matrix, never a classifier skip.
+  # Resolve the optional PR through the API before allowing the release-bump skip.
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Release PR number (omit for full verification of the dispatched SHA)
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -33,11 +38,43 @@ jobs:
       surface: ${{ steps.classify.outputs.surface }}
 
     steps:
+      # Runs before checkout: metadata cannot come from release-branch code.
+      - &resolve-dispatch
+        name: Resolve dispatched release PR
+        id: resolve-dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if ! [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            exit 0
+          fi
+          if ! pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")" \
+            || ! printf '%s' "$pr" | jq -e --arg sha "$EXPECTED_HEAD_SHA" --arg repo "$GITHUB_REPOSITORY" '
+              .state == "open" and
+              .head.sha == $sha and (.head.sha | test("^[a-f0-9]{40}$")) and
+              (.head.ref | test("^release/v[0-9A-Za-z._/+\\-]+$")) and
+              .head.repo.full_name == $repo and .base.repo.full_name == $repo and
+              (.base.ref == "main" or .base.ref == "develop") and
+              (.base.sha | test("^[a-f0-9]{40}$")) and
+              .user.login == "github-actions[bot]" and
+              (.changed_files | type == "number" and . > 0 and . == floor)
+            ' >/dev/null; then
+            echo "Dispatch PR validation failed; using full matrix" >&2
+            exit 0
+          fi
+          printf '%s' "$pr" | jq -r '
+            "base_sha=\(.base.sha)", "head_ref=\(.head.ref)",
+            "changed_files=\(.changed_files)", "valid=true"
+          ' >> "$GITHUB_OUTPUT"
       - name: Check out trusted pull request base
-        if: github.event_name == 'pull_request_target'
+        if: github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha }}
           persist-credentials: false
 
       - name: Classify changed files
@@ -49,6 +86,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -o pipefail
+          # Dispatch is never docs-only; classify-pr owns its version-stamp skip.
           if [ "$EVENT_NAME" != "pull_request_target" ]; then
             echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
             exit 0
@@ -96,23 +134,42 @@ jobs:
     outputs:
       bump_pr: ${{ steps.classify.outputs.bump_pr }}
     steps:
+      - *resolve-dispatch
       # Base (or push SHA) only — never the PR merge tip, so a PR cannot rewrite
       # the classifier to force bump_pr=true and skip Vitest/E2E.
       - name: Check out trusted classifier
+        if: github.event_name != 'workflow_dispatch' || steps['resolve-dispatch'].outputs.valid == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          ref: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha || github.sha }}
           persist-credentials: false
       - id: classify
         env:
           EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_VALID: ${{ steps['resolve-dispatch'].outputs.valid }}
+          DISPATCH_HEAD_REF: ${{ steps['resolve-dispatch'].outputs.head_ref }}
+          DISPATCH_CHANGED_FILES: ${{ steps['resolve-dispatch'].outputs.changed_files }}
           HEAD_REF: ${{ github.head_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            if [ "$DISPATCH_VALID" != true ]; then
+              echo 'bump_pr=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # Feed the existing classifier the API-validated PR context.
+            export EVENT_NAME=pull_request_target HEAD_REF="$DISPATCH_HEAD_REF" PR_AUTHOR='github-actions[bot]'
+            if ! pages="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files")" \
+              || ! count="$(printf '%s' "$pages" | jq -er 'map(.[]) | length')" \
+              || [ "$count" != "$DISPATCH_CHANGED_FILES" ]; then
+              echo 'bump_pr=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
           if [ ! -f .github/scripts/release-bump-pr.cjs ]; then
             echo 'bump_pr=false' >> "$GITHUB_OUTPUT"
             exit 0
@@ -123,7 +180,12 @@ jobs:
               exit 0
             fi
             export LIVE_HEAD_SHA
-            if ! PR_FILES="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"; then
+            if [ "${DISPATCH_VALID:-}" = true ]; then
+              if ! PR_FILES="$(printf '%s' "$pages" | jq -er 'map(.[]) | .[].filename')"; then
+                echo 'bump_pr=false' >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            elif ! PR_FILES="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"; then
               echo 'bump_pr=false' >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -136,12 +198,18 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
+    permissions:
+      contents: read
+      pull-requests: read
+
     steps:
-      # Dispatch checks belong to github.sha; never verify a later moving branch tip.
+      - *resolve-dispatch
+      # PR-aware dispatch verifies the same merge result as the PR event.
+      # Bare dispatch keeps the immutable SHA receiving the check.
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
+          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
           # CI intentionally executes the PR merge result under pull_request_target;
           # opt out of checkout's fork protection for this reviewed, read-only gate.
           allow-unsafe-pr-checkout: true
@@ -197,11 +265,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
+    permissions:
+      contents: read
+      pull-requests: read
+
     steps:
+      - *resolve-dispatch
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
+          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
           allow-unsafe-pr-checkout: true
           persist-credentials: false
 
@@ -239,11 +312,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    permissions:
+      contents: read
+      pull-requests: read
+
     steps:
+      - *resolve-dispatch
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
+          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
           allow-unsafe-pr-checkout: true
           persist-credentials: false
 
