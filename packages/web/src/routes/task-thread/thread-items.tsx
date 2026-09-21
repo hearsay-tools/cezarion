@@ -1,6 +1,6 @@
 import { BrainIcon, FileTextIcon, FolderInputIcon, GlobeIcon, LoaderCircleIcon, MessageSquareIcon, SquarePenIcon, SquareTerminalIcon } from 'lucide-react'
 import { BotIcon, ChevronRightIcon, ListTodoIcon, PaperclipIcon, SearchIcon, Trash2Icon, WrenchIcon } from '@/components/design-icons'
-import { useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
+import { useContext, useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ZoomableImage } from '@/components/zoomable-image'
@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { Markdown } from './markdown'
 import { splitToolTitle, streakLabel, type ContextGroupBlock, type WorkerConversationBatch, type WorkerConversationBlock } from './thread-groups'
 import { useThreadCardCache } from './thread-open-cards'
+import { ConversationNavigation } from './conversation-navigation'
 import { isNearBottom } from './thread-scroll'
 import type { ThreadConversationMessage, ThreadEntry, ThreadImage, ThreadNote, ThreadProviderAuthRequired } from './thread-state'
 import {
@@ -324,7 +325,6 @@ function WorkerConversationBatchCard({
   )
   const headingPrefix = direction === 'outbound' ? 'SENT to' : 'RECEIVED from'
   const heading = `${headingPrefix} ${counterpartIds.map((id) => taskTitleFor(id, taskTitles)).join(', ')}`
-  const requestMissing = batch.kind !== 'request' && batch.messages.some((message) => message.requestId !== undefined)
   const soleMessage = batch.messages[0]
   const soleStatus = soleMessage ? conversationStatusLabel(soleMessage) : undefined
   return (
@@ -372,29 +372,21 @@ function WorkerConversationBatchCard({
                   {taskTitleFor(message.recipientRunId, taskTitles)}
                 </Link>
                 {status ? <span data-slot="conversation-outcome">{status}</span> : null}
+                <ConversationReference message={message} runId={runId} taskTitles={taskTitles} />
               </li>
             )
           })}
         </ul>
       ) : null}
-      {requestMissing ? (
-        <p data-slot="conversation-connector" className="text-xs text-muted-foreground">
-          Linked to an earlier request
-        </p>
-      ) : null}
-      {batch.related.length > 0 ? (
-        <div data-slot="conversation-related" className="flex flex-col gap-2 border-l-2 border-current/20 py-1 pl-3">
-          {batch.related.map((message) => (
-            <RelatedConversationMessage key={message.id} message={message} runId={runId} taskTitles={taskTitles} />
-          ))}
-        </div>
+      {batch.messages.length === 1 && soleMessage ? (
+        <ConversationReference message={soleMessage} runId={runId} taskTitles={taskTitles} />
       ) : null}
       <ConversationInspectDetails batch={batch} heading={heading} />
     </article>
   )
 }
 
-function RelatedConversationMessage({
+function ConversationReference({
   message,
   runId,
   taskTitles,
@@ -403,25 +395,29 @@ function RelatedConversationMessage({
   runId: string
   taskTitles?: TaskTitleMap
 }) {
-  const direction = conversationDirection(message, runId)
-  const counterpartId = direction === 'outbound' ? message.recipientRunId : message.senderRunId
-  const headingPrefix = direction === 'outbound' ? 'SENT to' : 'RECEIVED from'
-  return (
-    <div data-slot="conversation-related-item" data-kind={message.messageKind} className="min-w-0">
-      <p className="m-0 mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold tracking-[0.6px] uppercase text-muted-foreground">
-        <span>{headingPrefix}</span>
-        <Link className={conversationLinkClass} to={`/tasks/${counterpartId}`} aria-label={`${headingPrefix} ${taskTitleFor(counterpartId, taskTitles)}`}>
-          {taskTitleFor(counterpartId, taskTitles)}
-        </Link>
-        <span data-slot="conversation-kind" className="rounded-full bg-background/60 px-2 py-0.5 text-[10.5px] font-semibold tracking-[0.05em] text-foreground uppercase">
-          {conversationKindLabel(message.messageKind)}
-        </span>
-      </p>
-      <div className="min-w-0 break-words text-[14px] leading-[1.6] text-foreground [overflow-wrap:anywhere]">
-        <Markdown breaks>{message.text}</Markdown>
-      </div>
-    </div>
-  )
+  const { targets, replies, navigate } = useContext(ConversationNavigation)
+  const request = message.requestId ? targets.get(message.requestId) : undefined
+  // A late reply never rewrites a timed-out/cancelled outcome, so correlation
+  // comes from the reply envelope, not exclusively from outcome.replyId.
+  const linked = message.requestId ? (request ? [request] : []) : replies.get(message.messageId) ?? []
+  const kind = message.requestId ? 'request' : 'reply'
+  if (linked.length === 0) return message.requestId || message.outcome?.replyId ? (
+    <p data-slot="conversation-connector" className="text-xs text-muted-foreground">
+      Linked {kind} is outside loaded history.
+    </p>
+  ) : null
+  return linked.map(target => {
+    const outbound = conversationDirection(target.message, runId) === 'outbound'
+    const counterpart = outbound ? target.message.recipientRunId : target.message.senderRunId
+    return (
+      <button key={target.message.messageId} type="button" data-slot="conversation-connector"
+        className={cn(conversationLinkClass, 'w-fit gap-1.5 text-xs text-muted-foreground')}
+        onClick={() => navigate(target)}>
+        <span aria-hidden>↗</span>
+        View {kind} {outbound ? 'to' : 'from'} {taskTitleFor(counterpart, taskTitles)}
+      </button>
+    )
+  })
 }
 
 function ConversationInspectDetails({ batch, heading }: { batch: WorkerConversationBatch; heading: string }) {
@@ -434,7 +430,7 @@ function ConversationInspectDetails({ batch, heading }: { batch: WorkerConversat
       <CollapsibleContent>
         <dl className="grid min-w-0 gap-1 break-all px-2 pb-1 font-mono text-[11px] text-muted-foreground">
           <div className="sr-only">{heading}</div>
-          {batch.messages.flatMap((message) => inspectRows(message)).concat(batch.related.flatMap((message) => inspectRows(message))).map((row, index) => (
+          {batch.messages.flatMap((message) => inspectRows(message)).map((row, index) => (
             <div key={`${row.label}:${row.value}:${index}`}>
               <dt className="inline font-sans font-medium text-soft-foreground">{row.label}: </dt>
               <dd className="inline">{row.value}</dd>

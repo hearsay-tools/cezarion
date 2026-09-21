@@ -11,7 +11,9 @@ import type { ThreadConversationMessage, ThreadEntry } from './thread-state'
  *     move under that tool's card (one level; an orphaned parent id renders at top level).
  *  2. **Context groups** — ≥2 CONSECUTIVE completed read/search tools collapse into one
  *     "Explored N files · M searches" row. Edits and commands never group: the desktop-apps
- *     research consensus is edits/commands visible, exploration folded.
+ *     research consensus is edits/commands visible, exploration folded. Worker requests
+ *     batch only when adjacent and identical; replies/follow-ups keep their own rows in
+ *     stream order. Request correlation is navigation, never transcript reordering.
  *  3. **Tool streaks** (the legacy web/app.js behavior, kept) — within a consecutive run of
  *     folded-eligible blocks (completed tool cards and context groups), everything beyond the
  *     last `STREAK_TAIL` folds under "▸ N earlier tool calls". Running/failed/declined cards
@@ -57,7 +59,6 @@ export interface WorkerConversationBatch {
   text: string
   senderRunId: string
   messages: ThreadConversationMessage[]
-  related: ThreadConversationMessage[]
 }
 
 export interface WorkerConversationBlock {
@@ -144,10 +145,6 @@ export function groupThreadItems(allEntries: ThreadEntry[]): ThreadBlock[] {
     }
   }
 
-  const conversationItems = top.filter(isConversation)
-  const conversationGroup = conversationItems.length > 0 ? groupWorkerConversation(conversationItems) : undefined
-  let conversationEmitted = false
-
   // Pass 2 — context groups over the top level.
   const blocks: ThreadBlock[] = []
   let run: UiToolItem[] = []
@@ -169,15 +166,22 @@ export function groupThreadItems(allEntries: ThreadEntry[]): ThreadBlock[] {
     }
     run = []
   }
+  let conversationRun: ThreadConversationMessage[] = []
+  const flushConversation = () => {
+    if (conversationRun.length === 0) return
+    // One row per batch: replies keep their own scroll/virtualization position.
+    for (const batch of groupWorkerConversation(conversationRun).batches) {
+      blocks.push({ kind: 'worker-conversation', id: `worker:${batch.messages[0]!.id}`, batches: [batch] })
+    }
+    conversationRun = []
+  }
   for (const entry of top) {
     if (isConversation(entry)) {
       flushRun()
-      if (conversationGroup && !conversationEmitted) {
-        blocks.push(conversationGroup)
-        conversationEmitted = true
-      }
+      conversationRun.push(entry)
       continue
     }
+    flushConversation()
     // A tool that adopted children is a container (a Task card) — never groupable away.
     if (isTool(entry) && isGroupable(entry) && !childrenOf.has(entry.id)) {
       run.push(entry)
@@ -191,6 +195,7 @@ export function groupThreadItems(allEntries: ThreadEntry[]): ThreadBlock[] {
     }
   }
   flushRun()
+  flushConversation()
 
   // Pass 3 — streak folding.
   const foldable = (block: ThreadBlock): block is ToolCardBlock | ContextGroupBlock =>
@@ -229,73 +234,24 @@ export function groupThreadItems(allEntries: ThreadEntry[]): ThreadBlock[] {
 }
 
 export function groupWorkerConversation(items: readonly ThreadConversationMessage[]): WorkerConversationBlock {
-  const assigned = new Set<string>()
   const batches: WorkerConversationBatch[] = []
-  const batchByRequestId = new Map<string, WorkerConversationBatch>()
-
-  const attachRelated = (batch: WorkerConversationBatch, message: ThreadConversationMessage) => {
-    if (assigned.has(message.id)) return
-    batch.related.push(message)
-    assigned.add(message.id)
-  }
-
+  // Sending is non-blocking. Correlation must never reorder messages, even within
+  // one turn. Only adjacent identical requests to distinct recipients are a batch.
   for (const item of items) {
-    if (assigned.has(item.id) || item.messageKind !== 'request') continue
-    const peers = items.filter(
-      (candidate) =>
-        !assigned.has(candidate.id) &&
-        candidate.messageKind === 'request' &&
-        candidate.senderRunId === item.senderRunId &&
-        candidate.text === item.text,
-    )
-    const batch: WorkerConversationBatch = {
-      id: `worker-batch:${item.messageId}`,
-      kind: 'request',
-      text: item.text,
-      senderRunId: item.senderRunId,
-      messages: peers,
-      related: [],
-    }
-    for (const peer of peers) {
-      assigned.add(peer.id)
-      batchByRequestId.set(peer.messageId, batch)
-    }
-    batches.push(batch)
-  }
-
-  for (const item of items) {
-    if (assigned.has(item.id)) continue
-    const requestId = item.requestId
-    if (requestId !== undefined) {
-      const batch = batchByRequestId.get(requestId)
-      if (batch) {
-        attachRelated(batch, item)
-        continue
-      }
-      const siblings = items.filter(
-        (candidate) => !assigned.has(candidate.id) && candidate.requestId === requestId,
-      )
-      const orphan: WorkerConversationBatch = {
+    const previous = batches.at(-1)
+    if (item.messageKind === 'request' && previous?.kind === 'request' &&
+      previous.senderRunId === item.senderRunId && previous.text === item.text &&
+      !previous.messages.some(message => message.recipientRunId === item.recipientRunId)) {
+      previous.messages.push(item)
+    } else {
+      batches.push({
         id: `worker-batch:${item.messageId}`,
         kind: item.messageKind,
         text: item.text,
         senderRunId: item.senderRunId,
-        messages: siblings,
-        related: [],
-      }
-      for (const sibling of siblings) assigned.add(sibling.id)
-      batches.push(orphan)
-      continue
+        messages: [item],
+      })
     }
-    assigned.add(item.id)
-    batches.push({
-      id: `worker-batch:${item.messageId}`,
-      kind: item.messageKind,
-      text: item.text,
-      senderRunId: item.senderRunId,
-      messages: [item],
-      related: [],
-    })
   }
 
   return {

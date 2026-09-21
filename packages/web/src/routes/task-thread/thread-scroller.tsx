@@ -51,6 +51,8 @@ export interface ThreadScrollControls {
   pillVisible: boolean
   /** The pill's action: pin to the live tail and stick again. */
   jumpToLatest: () => void
+  /** Navigate within loaded history, through virtua when the target is unmounted. */
+  jumpToRow: (key: string, index: number) => void
   /** Load one older page while preserving the current pixel anchor. */
   loadOlder: () => void
   /** Re-pin if stuck — the keyboard-settled hook (content height didn't change, but the
@@ -87,6 +89,7 @@ export function useThreadScroll(
   const [pillVisible, setPillVisible] = useState(false)
 
   const stuckRef = useRef(true)
+  const downIntentAtRef = useRef(0)
   /** A cached offset not yet reachable (content still replaying). Cleared by user intent. */
   const pendingRestoreRef = useRef<number | null>(null)
   /** Arrival (cache restore / land at tail) happens once per view, not once per container. */
@@ -222,7 +225,49 @@ export function useThreadScroll(
 
   useEffect(() => () => clearTimeout(wheelGestureTimerRef.current), [])
 
+  const pendingFocusRef = useRef<MutationObserver | null>(null)
+  useEffect(() => () => pendingFocusRef.current?.disconnect(), [viewKey, contentEl])
+
+  const jumpToRow = useCallback((key: string, index: number) => {
+    const scroller = scrollElRef.current
+    if (!scroller || !contentEl) return
+    pendingRestoreRef.current = null
+    historyRestoreGenerationRef.current += 1
+    pendingHistoryRestoreRef.current = null
+    stuckRef.current = false
+    downIntentAtRef.current = 0
+    setPillVisible(true)
+    pendingFocusRef.current?.disconnect()
+    const findRow = () => [...contentEl.querySelectorAll<HTMLElement>('[data-row-key]')]
+      .find(row => row.dataset.rowKey === key)
+    const focusRow = () => {
+      const row = findRow()
+      if (!row || getComputedStyle(row).visibility === 'hidden') return false
+      row.tabIndex = -1
+      row.focus({ preventScroll: true })
+      if (document.activeElement !== row) return false
+      pendingFocusRef.current?.disconnect()
+      return true
+    }
+    const header = scroller.querySelector<HTMLElement>('[data-slot="run-header"]')
+    const inset = header && getComputedStyle(header).position === 'sticky' ? header.getBoundingClientRect().height : 0
+    const handle = virtualizerRef.current
+    if (handle) handle.scrollToIndex(index, { align: 'start', ...(inset > 0 ? { offset: -inset } : {}) })
+    else {
+      const row = findRow()
+      if (row) setOffset(scroller.scrollTop + row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - inset)
+    }
+    // An off-screen virtual row mounts after scrollToIndex. Focus when it exists,
+    // not after an assumed number of animation frames.
+    if (!focusRow()) {
+      pendingFocusRef.current = new MutationObserver(() => { focusRow() })
+      pendingFocusRef.current.observe(contentEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] })
+    }
+    saveThreadScroll(viewKey, { top: scroller.scrollTop, atBottom: false })
+  }, [contentEl, setOffset, viewKey])
+
   const jumpToLatest = useCallback(() => {
+    pendingFocusRef.current?.disconnect()
     const scroller = scrollElRef.current
     if (!scroller) return
     pendingRestoreRef.current = null
@@ -290,21 +335,22 @@ export function useThreadScroll(
     //    who just wheeled up. A slow scrollbar drag to the tail (>2s) misses the window,
     //    accepted — wheel and touch cover real readers.
     const RESTICK_INTENT_MS = 2000
-    let downIntentAt = 0
+    downIntentAtRef.current = 0
     let lastTouchY: number | null = null
     let pointerScrolling = false
     let previousScrollTop = scroller.scrollTop
     const unstick = () => {
+      pendingFocusRef.current?.disconnect()
       pendingRestoreRef.current = null
       historyRestoreGenerationRef.current += 1
       pendingHistoryRestoreRef.current = null
       stuckRef.current = false
-      downIntentAt = 0 // the LATEST intent wins — an up gesture voids a recent down one
+      downIntentAtRef.current = 0 // the LATEST intent wins — an up gesture voids a recent down one
     }
     const markDown = () => {
       historyRestoreGenerationRef.current += 1
       pendingHistoryRestoreRef.current = null
-      downIntentAt = Date.now()
+      downIntentAtRef.current = Date.now()
     }
     const onWheel = (event: WheelEvent) => {
       if (event.deltaY < 0) {
@@ -372,7 +418,7 @@ export function useThreadScroll(
       // growing) bottom on its way to the cached offset, and near-bottom moments there are
       // the replay's, not the reader's.
       if (near && pendingRestoreRef.current === null) {
-        if (stuckRef.current || Date.now() - downIntentAt < RESTICK_INTENT_MS) stuckRef.current = true
+        if (stuckRef.current || Date.now() - downIntentAtRef.current < RESTICK_INTENT_MS) stuckRef.current = true
       }
       setPillVisible(!near)
       // …and no overwriting the memory being restored, either — leaving again mid-restore
@@ -424,7 +470,7 @@ export function useThreadScroll(
     }
   }, [viewKey, contentEl, loadOlder, setOffset, toBottom])
 
-  return { attachContent, scrollElRef, virtualizerRef, pillVisible, jumpToLatest, loadOlder, restickIfStuck }
+  return { attachContent, scrollElRef, virtualizerRef, pillVisible, jumpToLatest, jumpToRow, loadOlder, restickIfStuck }
 }
 
 /**
