@@ -47,6 +47,56 @@ const WORKER_USAGE = { operations: [
   { name: 'wait-requests', positionals: 1, optional: ['--mode', '--timeout-seconds'] },
   { name: 'cancel-request', positionals: 1 },
 ] };
+const WORKER_HELP: Record<string, { args: string; description: string }> = {
+  spawn: { args: '"<task>" --baseline <ref> --request-id <UUID>', description: 'Create an owned worker from a committed baseline.' },
+  inspect: { args: '<worker-id>', description: 'Show worker state and input locations.' },
+  steer: { args: '<worker-id> "<text>"', description: 'Send instructions to a running worker.' },
+  stop: { args: '<worker-id>', description: 'Stop a worker.' },
+  destroy: { args: '<worker-id>', description: 'Remove owned worker resources after collecting results.' },
+  diff: { args: '<worker-id>', description: 'Show the bounded worker diff.' },
+  collect: { args: '<worker-id>', description: 'Collect the latest worker results; does not merge changes.' },
+  wait: { args: '<worker-id>... | --request <UUID> [--request <UUID>...]', description: 'Register a wait for workers or message requests, then end your turn.' },
+  'cancel-wait': { args: '<wait-id>', description: 'Cancel a wait without cancelling requests or workers.' },
+  send: { args: '<recipient-run-id> "<text>" --id <UUID> --kind <request|progress>', description: 'Send a request requiring a reply, or a progress update.' },
+  progress: { args: '<recipient-run-id> "<text>" --id <UUID>', description: 'Send an update without a reply obligation.' },
+  'follow-up': { args: '<recipient-run-id> "<text>" --id <UUID> --request-id <UUID>', description: 'Clarify an existing request.' },
+  reply: { args: '<recipient-run-id> "<text>" --id <UUID> --request-id <UUID>', description: 'Reply to an existing request.' },
+  conversation: { args: '<recipient-run-id>', description: 'Inspect conversation messages and outcomes.' },
+  'wait-requests': { args: '<request-id>...', description: 'Register a wait for message requests, then end your turn.' },
+  'cancel-request': { args: '<request-id>', description: 'Cancel a request obligation.' },
+};
+const WORKER_FLAG_HELP: Record<string, string> = {
+  '--baseline': '<ref>                 Committed ref or parent-head; excludes dirty edits.',
+  '--request-id': '<UUID>              Spawn retry ID, or request being followed up/replied to.',
+  '--backend': '<name>                 claude | codex | opencode | pi | cursor.',
+  '--model': '<model>                  Model override.',
+  '--effort': '<level>                 low | medium | high | xhigh | max | auto.',
+  '--context': '<text>                 Selected context; mutually exclusive with --context-file.',
+  '--context-file': '<path>            UTF-8 context file; mutually exclusive with --context.',
+  '--mode': '<one|any|all>             Wait mode (default any); one requires one target.',
+  '--timeout-seconds': '<1-1800>       Wait or request deadline (default 600 seconds).',
+  '--request': '<UUID>                 Request to wait for; repeat for multiple requests.',
+  '--id': '<UUID>                      Message ID; reuse only for an exact retry.',
+  '--kind': '<request|progress>        Whether the message requires an explicit reply.',
+};
+function workerHelp(operation?: string): string {
+  const operations = WORKER_USAGE.operations.filter(entry => operation === undefined || entry.name === operation);
+  const names = [...new Set(operations.map(entry => entry.name))];
+  const flags = [...new Set(operations.flatMap(entry => [...(entry.required ?? []), ...(entry.optional ?? [])]))];
+  return [
+    'cezar worker — manage owned coding workers and conversations', '', 'Usage:',
+    ...names.flatMap(name => {
+      const help = WORKER_HELP[name]!;
+      return [`  cez worker ${name} ${help.args}`, `    ${help.description}`];
+    }), '', 'Options:',
+    ...flags.map(flag => `  ${flag} ${WORKER_FLAG_HELP[flag]}`),
+    '  -h, --help                       Show help without a delegation session.', '',
+    'Required flags are shown in each synopsis. Other flags are optional.',
+    'Use cez worker <operation> --help for operation help.',
+    'Commands require an active cezar delegation session and return JSON.',
+    'Explicit help prints text and exits successfully; invalid commands return JSON errors.',
+  ].join('\n');
+}
 class WorkerCliError extends Error {}
 function cliName(path: PropertyKey[]): string {
   return CLI_FLAG[String(path[0] ?? '')] ?? String(path[0] ?? 'argument');
@@ -97,16 +147,25 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
     console.log(token ? json.replaceAll(token, '[REDACTED]') : json);
   };
   try {
-    if (argv.length === 0 || argv[0] === '-h' || argv[0] === '--help') {
+    if (argv.length === 1 && (argv[0] === '-h' || argv[0] === '--help')) {
+      console.log(workerHelp());
+      return 0;
+    }
+    if (argv.length === 0) {
       print({ code: 'invalid_input', error: 'Invalid worker command arguments', usage: WORKER_USAGE });
       return 1;
     }
     const operation = argv[0] === 'collect' ? 'collect' : argv[0] === 'cancel-wait' ? 'cancel-wait' : z.union([workerOperationSchema, conversationOperationSchema]).parse(argv[0]);
     const { values, positionals } = parseArgs({ args: argv.slice(1), allowPositionals: true, strict: true, options: {
+      help: { type: 'boolean', short: 'h' },
       ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const }, backend: { type: 'string' as const }, model: { type: 'string' as const }, effort: { type: 'string' as const }, context: { type: 'string' as const }, 'context-file': { type: 'string' as const } } : {}),
       ...(['send', 'progress', 'reply', 'follow-up'].includes(operation) ? { id: { type: 'string' as const }, kind: { type: 'string' as const }, 'request-id': { type: 'string' as const }, 'timeout-seconds': { type: 'string' as const } } : {}),
       ...(operation === 'wait' || operation === 'wait-requests' ? { request: { type: 'string' as const, multiple: true }, 'timeout-seconds': { type: 'string' as const }, mode: { type: 'string' as const } } : {}),
     } });
+    if (values.help) {
+      console.log(workerHelp(operation));
+      return 0;
+    }
     let path: string = operation;
     let body: unknown;
     if (operation === 'send' || operation === 'progress' || operation === 'reply' || operation === 'follow-up') {
