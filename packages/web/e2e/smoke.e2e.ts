@@ -253,7 +253,11 @@ describe('cockpit app shell', () => {
         if (new URL(url, location.href).pathname.endsWith('/health')) {
           return nativeFetch(input, init).then(async (res) => {
             const body = await res.json();
-            return new Response(JSON.stringify({ ...body, version: ${JSON.stringify(NIGHTLY)} }), {
+            return new Response(JSON.stringify({
+              ...body,
+              version: ${JSON.stringify(NIGHTLY)},
+              latestVersion: null,
+            }), {
               status: res.status, headers: { 'content-type': 'application/json' },
             });
           });
