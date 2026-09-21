@@ -50,6 +50,7 @@ describe('skillStack', () => {
     ['a custom prompt', { ...stackStep('a'), prompt: 'do it differently' }],
     ['a renamed step', { ...stackStep('a'), name: 'Something else' }],
     ['a per-step model', { ...stackStep('a'), model: 'opus' }],
+    ['a per-step effort', { ...stackStep('a'), effort: 'high' }],
     ['a per-step runner', { ...stackStep('a'), runner: 'codex' }],
     ['an onFail loop', { ...stackStep('a'), onFail: { retry: 'a', max: 2 } }],
     ['a plain prompt step (no skill)', { id: 'p', prompt: '{{task}}' }],
@@ -150,6 +151,17 @@ describe('workflowYaml', () => {
         { id: 'tests', name: 'Run tests', command: 'npm test', onFail: { retry: 'fix', max: 2 } },
       ],
     })
+  })
+
+  it('a per-step effort round-trips in the full steps form', () => {
+    const step = { ...stackStep('fix'), effort: 'high' }
+    const text = workflowYaml('focused-fix', '', [step])
+
+    expect(parse(text)).toEqual({
+      name: 'focused-fix',
+      steps: [{ id: 'fix', skill: 'fix', prompt: '{{task}}', effort: 'high' }],
+    })
+    expect(saveBody('focused-fix', '', [step])).toEqual({ name: 'focused-fix', steps: [step] })
   })
 
   it('quotes scalars YAML would mistype and keeps plain ones bare', () => {

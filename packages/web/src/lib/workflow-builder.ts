@@ -26,7 +26,7 @@ export function skillStack(steps: readonly WorkflowStepDef[]): string[] | null {
     if (s.command || !s.skill) return null
     if (s.prompt !== undefined && s.prompt !== '{{task}}') return null
     if (s.name !== undefined && s.name !== s.skill) return null
-    if (s.model || s.runner || s.allowedTools || s.bashAllowlist || s.onFail) return null
+    if (s.model || s.effort !== undefined || s.runner || s.allowedTools || s.bashAllowlist || s.onFail) return null
     skills.push(s.skill)
   }
   return skills.length ? skills : null
@@ -114,6 +114,7 @@ export function workflowYaml(
       if (s.skill) lines.push(`    skill: ${yamlScalar(s.skill)}`)
       if (s.prompt) lines.push(...yamlBlock('prompt', s.prompt, 4))
       if (s.model) lines.push(`    model: ${yamlScalar(s.model)}`)
+      if (s.effort !== undefined) lines.push(`    effort: ${yamlScalar(s.effort)}`)
       if (s.runner) lines.push(`    runner: ${yamlScalar(s.runner)}`)
       if (s.allowedTools) lines.push(`    allowedTools: [${s.allowedTools.map(yamlScalar).join(', ')}]`)
       if (s.bashAllowlist) lines.push(`    bashAllowlist: [${s.bashAllowlist.map(yamlScalar).join(', ')}]`)
