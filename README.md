@@ -527,6 +527,7 @@ steps:
     prompt: "{{task}}"
     skill: project-conventions   # optional — from .ai/skills or .ai/cezar/skills
     # model: opus                # optional per-step model override
+    # effort: high               # optional per-step effort: low · medium · high · xhigh · max
     # runner: codex              # optional per-step backend: claude · codex · opencode · pi
     # allowedTools: [Read, Edit, Write, Grep, Glob, Bash]
   - id: verify
@@ -713,10 +714,12 @@ steps:
     name: Implement
     prompt: "{{task}}"
     runner: codex                # one vendor writes the code…
+    effort: medium               # …with a cheaper reasoning pass
   - id: review
     name: Cross-review
     prompt: "Review the diff produced for: {{task}}. Fix real issues only."
     runner: claude               # …another one reviews it
+    effort: high                 # …with more reasoning for review
   - id: verify
     name: Verify
     command: "npm test"

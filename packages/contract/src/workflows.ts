@@ -27,6 +27,7 @@ export const workflowStepDefSchema = z
     prompt: z.string().optional(),
     skill: z.string().optional(),
     model: z.string().optional(),
+    effort: z.string().max(32).optional(),
     /** Per-step agent backend override (falls back to the task / config default). */
     runner: runnerSchema.optional(),
     allowedTools: z.array(z.string()).optional(),

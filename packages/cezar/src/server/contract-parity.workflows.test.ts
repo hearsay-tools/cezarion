@@ -22,6 +22,7 @@ import type {
   saveWorkflowResponseSchema,
   workflowsResponseSchema,
 } from '@open-mercato/cezar-contract';
+import { workflowStepDefSchema } from '@open-mercato/cezar-contract';
 import type { AppType } from './app-type.ts';
 
 /**
@@ -88,5 +89,11 @@ describe('src/contract workflows/skills/agent-config schemas match the routes ex
     const wider: Mutual<{ a: string }, { a: string; b: number }> = 'schema-is-wider';
     const narrower: Mutual<{ a: string; b: number }, { a: string }> = 'route-is-wider';
     expect([wider, narrower]).toEqual(['schema-is-wider', 'route-is-wider']);
+  });
+
+  it('keeps per-step effort in the public workflow contract', () => {
+    expect(
+      workflowStepDefSchema.parse({ id: 'review', prompt: '{{task}}', effort: 'high' }),
+    ).toMatchObject({ effort: 'high' });
   });
 });

@@ -70,6 +70,20 @@ test('only plain agent skill steps compact back to a portable stack', () => {
   );
 });
 
+test('a per-step effort loads but cannot compact into the lossless skills shorthand', () => {
+  const parsed = workflowFileSchema.parse({
+    name: 'high-effort-review',
+    steps: [{ id: 'review', skill: 'review', prompt: '{{task}}', effort: 'high' }],
+  });
+
+  assert.equal(parsed.steps?.[0]?.effort, 'high');
+  assert.equal(skillStackOf(parsed.steps ?? []), null);
+  assert.equal(
+    skillStackOf([{ id: 'review', skill: 'review', prompt: '{{task}}', effort: '' }]),
+    null,
+  );
+});
+
 // #410: a chain of 2+ skills gave every step the SAME task text and shared
 // one run-level handoff journal — a later step's fresh session had nothing
 // telling it "an earlier step's own completion doesn't cover you", so it

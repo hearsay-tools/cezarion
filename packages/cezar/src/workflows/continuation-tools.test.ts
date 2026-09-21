@@ -78,6 +78,15 @@ describe('a resumed session keeps its workflow step tools', () => {
     ],
   };
 
+  const EFFORT_CHAIN_DEF: WorkflowDef = {
+    name: 'effort-chain',
+    source: 'file',
+    steps: [
+      { id: 'implement', name: 'Implement', prompt: '{{task}}', effort: 'high' },
+      { id: 'review', name: 'Review', prompt: 'review {{task}}', effort: 'low' },
+    ],
+  };
+
   beforeEach(async () => {
     captured.specs.length = 0;
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-continue-tools-'));
@@ -114,12 +123,14 @@ describe('a resumed session keeps its workflow step tools', () => {
     status?: 'done' | 'failed';
     error?: string;
     autoResumeAt?: string;
+    effort?: string;
   }): string {
     const runner = [...input.steps].reverse().find((s) => s.backend)?.backend;
     const record = store.createRun({
       title: 't',
       workflow: input.def?.name ?? 'legacy',
       task: 'do the thing',
+      effort: input.effort,
       ...(runner ? { runner } : {}),
       steps: input.steps.map((s) => ({ id: s.id, name: s.id, kind: 'agent' as const })),
     });
@@ -168,6 +179,49 @@ describe('a resumed session keeps its workflow step tools', () => {
     expect(spec.sessionId).toBe('sess-1');
     expect(spec.allowedTools).toEqual(TOOLS);
     expect(spec.bashAllowlist).toEqual(BASH);
+    await settled(id);
+  });
+
+  it("Continue rebuilds the session with the owning step's effort instead of the run effort", async () => {
+    const id = terminalRun({
+      def: EFFORT_CHAIN_DEF,
+      steps: [{ id: 'implement', sessionId: 'sess-1', backend: 'claude' }],
+      effort: 'medium',
+    });
+
+    expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    const spec = await specAt(0);
+    expect(spec.effort).toBe('high');
+    await settled(id);
+  });
+
+  it('Continue treats an explicit auto step effort as an override of the run effort', async () => {
+    const autoEffortDef: WorkflowDef = {
+      ...SINGLE_DEF,
+      steps: SINGLE_DEF.steps.map((step) => ({ ...step, effort: 'auto' })),
+    };
+    const id = terminalRun({
+      def: autoEffortDef,
+      steps: [{ id: 'work', sessionId: 'sess-1', backend: 'claude' }],
+      effort: 'high',
+    });
+
+    expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    const spec = await specAt(0);
+    expect(spec.effort).toBeUndefined();
+    await settled(id);
+  });
+
+  it('Continue inherits the run effort when the owning step does not set one', async () => {
+    const id = terminalRun({
+      def: SINGLE_DEF,
+      steps: [{ id: 'work', sessionId: 'sess-1', backend: 'claude' }],
+      effort: 'xhigh',
+    });
+
+    expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    const spec = await specAt(0);
+    expect(spec.effort).toBe('xhigh');
     await settled(id);
   });
 
