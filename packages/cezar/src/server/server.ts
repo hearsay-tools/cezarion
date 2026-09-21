@@ -3471,13 +3471,14 @@ export function createApp(deps: ServerDeps) {
   // Additive `usage` field (#348): the latest CPU/RSS/proc-count sample of the
   // run's live process tree — absent for finished runs and when `ps` yields
   // nothing. The stored record itself is never touched.
-  const withUsage = (run: RunRecord): ApiRun => {
+  const withUsage = (run: RunRecord, finishBlocked?: string | null): ApiRun => {
     const usage = currentUsage(run.id);
     const sessionStep = [...run.steps].reverse().find(step => step.sessionId);
     const sessionId = sessionStep?.sessionId;
     const backend = sessionStep?.backend ?? run.runner ?? 'claude';
     const command = backend === 'cursor' && sessionId ? resumeCommand(backend, sessionId) : null;
-    return { ...run, ...(usage ? { usage } : {}), ...(command ? { cliResumeCommand: command } : {}) };
+    return { ...run, ...(usage ? { usage } : {}), ...(command ? { cliResumeCommand: command } : {}),
+      ...(finishBlocked !== undefined ? { finishBlocked } : {}) };
   };
 
   // The inbox half of a composer launch (#374). Since the cockpit's "▶ Run"
@@ -3503,7 +3504,7 @@ export function createApp(deps: ServerDeps) {
   // ---- chained family: runs lifecycle + artifacts (project-scoped) ----
   const delegationService = deps.delegation?.service ?? new DelegationService();
   const runsRoutes = new Hono<ProjectApiEnv>()
-    .get('/runs', (c) => c.json(c.get('project').store.listRuns().map(withUsage)))
+    .get('/runs', (c) => c.json(c.get('project').store.listRuns().map(run => withUsage(run))))
     .get('/runs/:id/relationships', paramZodValidator(runIdParamSchema), queryZodValidator(workerEmptyRequestSchema), (c) => {
       const { store } = c.get('project');
       const run = store.getRun(c.req.valid('param').id);
@@ -3669,9 +3670,9 @@ export function createApp(deps: ServerDeps) {
     })
 
     .get('/runs/:id', (c) => {
-      const { store } = c.get('project');
+      const { store, manager } = c.get('project');
       const run = store.getRun(c.req.param('id'));
-      return run ? c.json(withUsage(run)) : c.json({ error: 'not found' }, 404);
+      return run ? c.json(withUsage(run, manager.finishBlockedReason(run.id) ?? null)) : c.json({ error: 'not found' }, 404);
     })
 
     .get(

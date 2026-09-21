@@ -2561,12 +2561,36 @@ export class RunManager {
     });
   }
 
-  finishBlockedReason(runId: string): string | undefined {
+  private delegationFinishBlockedReason(runId: string): string | undefined {
     const parent = this.store.getRun(runId);
     if (parent?.delegation?.role !== 'root') return undefined;
     if (this.hasPendingHumanAsk(runId) || this.active.get(runId)?.pendingHumanAsk) return 'Answer the pending human question before finishing.';
     const blockers = this.parentCompletionBlockers(runId);
     return blockers.length ? `Workers must finish or be stopped, prove termination, and have their latest results collected before finishing: ${blockers.map(b => `${b.workerId} (${b.reason})`).join(', ')}` : undefined;
+  }
+
+  /** The read-only verdict and explicit Finish share this decision. Operational failures
+   * (for example a failed durable write) are still handled at execution time. */
+  private finishDecision(runId: string):
+    { action: 'session' | 'root' | 'waiting' | 'review' } | { reason: string; warn?: boolean } {
+    const blocked = this.delegationFinishBlockedReason(runId);
+    if (blocked) return { reason: blocked, warn: true };
+    if (this.active.get(runId)?.session?.open) return { action: 'session' };
+    const run = this.store.getRun(runId);
+    if (run?.status === 'waiting' && !hasRegisteredRunProcess(runId) && !this.isActive(runId) &&
+      (run.delegation?.role === 'root' || run.delegation === undefined)) {
+      if (this.waitingBeforeFinalWorkflowStep(run)) {
+        return { reason: 'Continue the remaining workflow steps before finishing.' };
+      }
+      return { action: run.delegation?.role === 'root' ? 'root' : 'waiting' };
+    }
+    if (run?.status === 'review' && !this.isActive(runId)) return { action: 'review' };
+    return { reason: 'no open session' };
+  }
+
+  finishBlockedReason(runId: string): string | undefined {
+    const decision = this.finishDecision(runId);
+    return 'reason' in decision ? decision.reason : undefined;
   }
 
   /** One durable automatic worker wait per cycle. Further premature DONEs with
@@ -3251,10 +3275,13 @@ export class RunManager {
    *  over), "Finish" is the third review exit: accept the changes without a
    *  PR and flip straight to `done`. */
   finish(runId: string): boolean {
+    const decision = this.finishDecision(runId);
+    if ('reason' in decision) {
+      if (decision.warn) this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: decision.reason });
+      return false;
+    }
     const state = this.active.get(runId);
-    const blocked = this.finishBlockedReason(runId);
-    if (blocked) { this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: blocked }); return false; }
-    if (state?.session?.open) {
+    if (decision.action === 'session' && state?.session) {
       try { this.withdrawWorkerWait(runId); } catch { return false; }
       state.finishRequested = true;
       this.clearIdleTimer(state);
@@ -3263,15 +3290,13 @@ export class RunManager {
       return true;
     }
     const run = this.store.getRun(runId);
-    if (run?.status === 'waiting' && !hasRegisteredRunProcess(runId) && run.delegation?.role === 'root' && !this.isActive(runId) &&
-      !this.waitingBeforeFinalWorkflowStep(run)) {
+    if (decision.action === 'root') {
       try { this.store.commitRootFinishIntent(runId); }
       catch { return false; }
       void this.settleRequestedRootFinish(runId);
       return true;
     }
-    if (run?.status === 'waiting' && !hasRegisteredRunProcess(runId) && run.delegation === undefined && !this.isActive(runId) &&
-      !this.waitingBeforeFinalWorkflowStep(run)) {
+    if (decision.action === 'waiting' && run) {
       const finishedAt = new Date().toISOString();
       for (const step of run.steps) {
         if (step.status === 'waiting' || step.status === 'running') {
@@ -3281,7 +3306,7 @@ export class RunManager {
       void this.settleSuccess(runId);
       return true;
     }
-    if (run?.status === 'review' && !this.isActive(runId)) {
+    if (decision.action === 'review') {
       this.store.updateRun(runId, { status: 'done' });
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'review accepted — finished without a PR' });
       return true;

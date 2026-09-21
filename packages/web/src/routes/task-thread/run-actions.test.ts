@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
+import type { ApiRun, RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 
 import { isUnread } from '@/lib/read-state'
 
@@ -29,7 +29,8 @@ const step = (extra: Partial<StepState> = {}): StepState => ({
   ...extra,
 })
 
-const run = (status: RunStatus, extra: Partial<RunRecord> = {}): RunRecord => ({
+const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun => ({
+  finishBlocked: null,
   id: 'r1',
   title: 'Do the thing',
   workflow: 'quick-task',
@@ -344,101 +345,18 @@ describe('unstarted continuation (#201)', () => {
 })
 
 describe('offersComposerFinish — the gold primary on a Needs-you task (#281)', () => {
-  // The composer's empty-draft primary is already spoken for on most statuses: Stop owns it on
-  // running/queued, Continue on a closed-but-resumable run. The one place it renders DISABLED is a
-  // waiting task with nothing typed — dead pixels on exactly the runs the "Needs you" list is
-  // complaining about. Finish claims that slot and no other, which is why every row below that is
-  // not plain needs-you answers false.
-  const cases: Array<{ name: string; record: RunRecord; ask?: boolean; expected: boolean }> = [
-    { name: 'a waiting task that needs you', record: run('waiting'), expected: true },
-    // Review keeps Continue in the composer and ✓ Accept in the review panel — it is a verdict
-    // surface already, and displacing a live primary is the one thing this rule must not do.
-    { name: 'review — the panel already carries ✓ Accept', record: run('review'), expected: false },
-    { name: 'running', record: run('running'), expected: false },
-    { name: 'queued', record: run('queued'), expected: false },
-    { name: 'done', record: run('done'), expected: false },
-    { name: 'failed', record: run('failed'), expected: false },
-    { name: 'cancelled', record: run('cancelled'), expected: false },
-    // A pending question is the CANONICAL Needs-you task — an agent stopped to ask you something —
-    // and dismissing it as done instead of answering is the whole of what #281 is for. It is not
-    // blocked either: `finishBlockedReason` returns undefined for anything that is not a `root`
-    // by its first line, so `finish()` reaches the open session and ends it.
-    { name: 'a pending human ask on the record', record: run('waiting', { hasPendingHumanAsk: true }), expected: true },
-    { name: 'a pending human ask the thread knows about first', record: run('waiting'), ask: true, expected: true },
-    // On a ROOT the same ask genuinely is blocked, by the branch above the worker check.
-    {
-      name: 'a root with a pending human ask — blocked server-side',
-      record: run('waiting', { hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [] } }),
-      expected: false,
-    },
-    {
-      name: 'a root whose pending ask the thread knows about first',
-      record: run('waiting', { delegation: { role: 'root', permissions: [], receipts: [] } }),
-      ask: true,
-      expected: false,
-    },
-    // Every root carrying a worker wait, whatever its phase. `finishBlockedReason` (workflows/
-    // run.ts) can only ever block a `root`, and it blocks on workers that have not been collected
-    // — a state a timed-out or wake-pending wait is exactly as likely to be in as a parked one,
-    // while `deriveAttention` calls only the parked case `none`. Promoting a gold primary onto
-    // the rest would advertise a button the server answers 409 to.
-    {
-      name: 'a root whose worker wait is registered',
-      record: run('waiting', {
-        delegation: {
-          role: 'root',
-          permissions: [],
-          receipts: [],
-          wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'registered', outcomes: [] },
-        },
-      }),
-      expected: false,
-    },
-    {
-      name: 'a root whose worker wait timed out into wake-pending',
-      record: run('waiting', {
-        delegation: {
-          role: 'root',
-          permissions: [],
-          receipts: [],
-          wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'wake-pending', outcomes: [] },
-        },
-      }),
-      expected: false,
-    },
-    // No root is promoted, wait or no wait. A completion wait can be WITHDRAWN while worker
-    // results are still uncollected, so the wait's presence was never a sound proxy for
-    // finishability — `parentCompletionBlockers` reads the workers, not the wait.
-    {
-      name: 'a root with no worker wait — still not promoted',
-      record: run('waiting', { delegation: { role: 'root', permissions: [], receipts: [] } }),
-      expected: false,
-    },
-    // A worker is not a root, so `finishBlockedReason` returns undefined for it by its first line.
-    {
-      name: 'a worker waiting on you',
-      record: run('waiting', {
-        delegation: {
-          role: 'worker' as const,
-          permissions: [],
-          parentRunId: 'p1',
-          workspace: { ownerRunId: 'r1', resourceId: 'r1', kind: 'owned-isolated' as const, path: '/managed/w', branch: 'cez/w', baselineSha: 'a'.repeat(40) },
-        },
-      }),
-      expected: true,
-    },
-    {
-      name: 'a root parked on its workers — Stop is the live primary there',
-      record: run('waiting', {
-        delegation: {
-          role: 'root',
-          permissions: [],
-          receipts: [],
-          wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] },
-        },
-      }),
-      expected: false,
-    },
+  const root = { role: 'root' as const, permissions: [], receipts: [] }
+  const cases: Array<{ name: string; record: ApiRun; ask?: boolean; expected: boolean }> = [
+    { name: 'clear waiting task', record: run('waiting'), expected: true },
+    { name: 'clear root', record: run('waiting', { delegation: root }), expected: true },
+    { name: 'blocked root', record: run('waiting', { delegation: root, finishBlocked: 'Collect worker results.' }), expected: false },
+    { name: 'inactive mid-workflow run', record: run('waiting', { finishBlocked: 'Continue the remaining workflow steps before finishing.' }), expected: false },
+    { name: 'unknown eligibility', record: run('waiting', { finishBlocked: undefined }), expected: false },
+    { name: 'ordinary pending ask', record: run('waiting', { hasPendingHumanAsk: true }), expected: true },
+    { name: 'live ordinary pending ask', record: run('waiting'), ask: true, expected: true },
+    ...(['running', 'queued', 'review', 'done', 'failed', 'cancelled'] as const).map(status => ({
+      name: status, record: run(status), expected: false,
+    })),
   ]
 
   it.each(cases)('$name → $expected', ({ record, ask, expected }) => {

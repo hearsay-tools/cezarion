@@ -7,7 +7,7 @@ import { createUsageStore, type UsageStore } from './events'
 import { GlobalEventsProvider, useGlobalEvents, useRunUsage, useUsage } from './global-events'
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import { createQueryClient } from './query-client'
-import { queryKeys, useProviderStatus, workspaceQueryKeys } from './queries'
+import { queryKeys, useRun, useProviderStatus, workspaceQueryKeys } from './queries'
 import type { ApiRun, ProviderStatusResponse, RunRecord } from '@open-mercato/cezar-api-client'
 
 /**
@@ -262,6 +262,90 @@ describe('useGlobalEvents — run events', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
+  it.each(['own', 'worker'])('coalesces %s detail updates and keeps stale permission hidden during a burst', async kind => {
+    vi.useFakeTimers()
+    try {
+      const run = { ...runRecord('r1', { status: 'waiting' }), finishBlocked: null }
+      client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), run)
+      vi.mocked(fetch).mockImplementation(async () => json(run))
+      renderHook(() => useRun('r1'), { wrapper })
+      const { source } = mount()
+      for (let i = 0; i < 20; i++) {
+        source.emit('run', stampedRun(kind === 'own' ? runRecord('r1', { status: 'waiting' }) : runRecord('worker', {
+          delegation: { role: 'worker', parentRunId: 'r1', permissions: [],
+            workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
+        })))
+        await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+        expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeUndefined()
+      }
+      expect(fetch).not.toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels pending detail refreshes when the event provider unmounts', async () => {
+    vi.useFakeTimers()
+    try {
+      client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), { ...runRecord('r1'), finishBlocked: null })
+      const invalidate = vi.spyOn(client, 'invalidateQueries')
+      const { source, unmount } = mount()
+      source.emit('run', stampedRun(runRecord('r1')))
+      unmount()
+      invalidate.mockClear()
+      await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+      expect(invalidate).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['own', 'worker'])('an %s event during initial loading replaces the stale in-flight verdict', async kind => {
+    const stale = deferredResponse()
+    const fresh = deferredResponse()
+    vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValue(fresh.promise)
+    renderHook(() => useRun('r1'), { wrapper })
+    const { source } = mount()
+    source.emit('run', stampedRun(kind === 'own' ? runRecord('r1', { status: 'waiting' }) : runRecord('worker', {
+      delegation: { role: 'worker', parentRunId: 'r1', permissions: [],
+        workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
+    })))
+    stale.resolve(json({ ...runRecord('r1', { status: 'waiting' }), finishBlocked: null }))
+    fresh.resolve(json({ ...runRecord('r1', { status: 'waiting' }), finishBlocked: 'Answer the pending human question.' }))
+    await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBe('Answer the pending human question.'))
+  })
+
+  it('clears stale Finish permission and refreshes the mounted parent on a worker update', async () => {
+    const parent = { ...runRecord('parent', { status: 'waiting' }), finishBlocked: null }
+    client.setQueryData<ApiRun>(queryKeys.runs.detail('parent'), parent)
+    const response = deferredResponse()
+    vi.mocked(fetch).mockReturnValue(response.promise)
+    renderHook(() => useRun('parent'), { wrapper })
+    const { source } = mount()
+    source.emit('run', stampedRun(runRecord('worker', {
+      delegation: { role: 'worker', parentRunId: 'parent', permissions: [],
+        workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
+    })))
+    expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('parent'))?.finishBlocked).toBeUndefined()
+    response.resolve(json({ ...parent, finishBlocked: 'Collect the latest worker result.' }))
+    await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('parent'))?.finishBlocked).toBe('Collect the latest worker result.'))
+  })
+
+  it('refreshes the mounted run after its own event without refetching the list', async () => {
+    client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), { ...runRecord('r1'), finishBlocked: 'no open session' })
+    const response = deferredResponse()
+    vi.mocked(fetch).mockReturnValue(response.promise)
+    renderHook(() => useRun('r1'), { wrapper })
+    const { source } = mount()
+    source.emit('run', stampedRun(runRecord('r1', { status: 'waiting' })))
+    response.resolve(json({ ...runRecord('r1', { status: 'waiting' }), finishBlocked: null }))
+    await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeNull())
+    expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).endsWith('/runs/r1'))).toBe(true)
+  })
+
   it('updates in place on a second event for the same run — no duplicate row', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
@@ -291,12 +375,12 @@ describe('useGlobalEvents — run events', () => {
     expect(client.getQueryData(queryKeys.runs.detail('r2'))).toBeUndefined()
   })
 
-  it('refreshes an opened Cursor detail for its server-resolved resume command', () => {
+  it('refreshes an opened Cursor detail for its server-resolved resume command', async () => {
     client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), runRecord('r1', { runner: 'claude' }))
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
     source.emit('run', stampedRun(runRecord('r1', { runner: 'claude', status: 'done', steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, backend: 'cursor', sessionId: 's1' }] })))
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.detail('r1') })
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.detail('r1') }))
   })
 
   it('invalidates the changes cache on a run event so an ended run’s final writes appear (#488)', () => {
