@@ -18,7 +18,7 @@ describe('bundled worker CLI', () => {
   });
   afterEach(async () => { await transport?.close(); await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const json = () => JSON.parse(String(output.mock.calls.at(-1)?.[0]));
-  it('prints the same JSON usage for no args, -h, and --help', async () => {
+  it('preserves JSON usage for no args', async () => {
     expect(await runWorkerCommand([], env)).toBe(1);
     const help = json();
     expect(help.code).toBe('invalid_input');
@@ -33,10 +33,54 @@ describe('bundled worker CLI', () => {
     expect(send.required).toEqual(expect.arrayContaining(['--id', '--kind']));
     expect(send.optional ?? []).not.toContain('--request-id');
     expect(help.usage.operations.find((op: { name: string }) => op.name === 'reply').required).toEqual(expect.arrayContaining(['--request-id']));
-    for (const argv of [['-h'], ['--help']]) {
-      expect(await runWorkerCommand(argv, env)).toBe(1);
-      expect(json()).toEqual(help);
+
+  });
+  it.each(['-h', '--help'])('prints human family help for %s without a delegation session', async (flag) => {
+    expect(await runWorkerCommand([flag], {})).toBe(0);
+    const help = String(output.mock.calls.at(-1)?.[0]);
+    expect(help).toContain('Usage:');
+    expect(help).toContain('cez worker');
+    expect(help).toContain('spawn');
+    expect(help).toContain('collect');
+    expect(help).toContain('--baseline');
+    expect(help).toContain('--request-id');
+    expect(help).not.toContain('invalid_input');
+  });
+  it.each(['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'collect', 'wait',
+    'cancel-wait', 'send', 'progress', 'follow-up', 'reply', 'conversation', 'wait-requests', 'cancel-request'])(
+    'prints human %s help before validating required arguments or accessing transport', async (operation) => {
+      for (const flag of ['-h', '--help']) {
+        expect(await runWorkerCommand([operation, flag], {})).toBe(0);
+        const help = String(output.mock.calls.at(-1)?.[0]);
+        expect(help).toContain(`cez worker ${operation}`);
+        expect(help).toContain('Usage:');
+        expect(help).not.toContain('invalid_input');
+      }
+    },
+  );
+  it('documents required spawn flags and both wait forms', async () => {
+    await runWorkerCommand(['spawn', '--help'], {});
+    const spawnHelp = String(output.mock.calls.at(-1)?.[0]);
+    expect(spawnHelp).toContain('--baseline');
+    expect(spawnHelp).toContain('--request-id');
+    expect(spawnHelp).toContain('--context-file');
+    await runWorkerCommand(['wait', '--help'], {});
+    const waitHelp = String(output.mock.calls.at(-1)?.[0]);
+    expect(waitHelp).toContain('<worker-id>');
+    expect(waitHelp).toContain('--request');
+    expect(waitHelp).toContain('--mode');
+    expect(waitHelp).toContain('--timeout-seconds');
+  });
+  it('does not interpret literal help text as a help request', async () => {
+    for (const args of [
+      ['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--', '--help'],
+      ['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--context=--help', 'task'],
+    ]) {
+      expect(await runWorkerCommand(args, {})).toBe(1);
+      expect(json().code).toBe('unavailable_transport');
     }
+    expect(await runWorkerCommand(['unknown', '--help'], {})).toBe(1);
+    expect(json().code).toBe('invalid_input');
   });
   it('names a missing spawn --request-id instead of a generic parse error', async () => {
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', 'work'], env)).toBe(1);

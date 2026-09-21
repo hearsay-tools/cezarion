@@ -60,6 +60,18 @@ test('the release tarball installs and runs the dry-run CLI workflow', { timeout
     });
     assert.match(help.stdout, /cezar — local cockpit/);
     assert.match(help.stdout, /cez run "<task>"/);
+    assert.match(help.stdout, /cez worker/);
+    for (const args of [['worker', '--help'], ['worker', 'spawn', '--help']]) {
+      const workerHelp = await execFile(process.execPath, [cliPath, ...args], {
+        cwd: consumerDir,
+        env: { ...process.env, CEZ_DELEGATION_URL: '', CEZ_DELEGATION_TOKEN: '' },
+      });
+      assert.match(workerHelp.stdout, /Usage:/);
+      assert.match(workerHelp.stdout, /cez worker/);
+      assert.match(workerHelp.stdout, /--baseline/);
+      assert.equal(workerHelp.stderr, '');
+    }
+
 
     const fixtureRepo = join(root, 'fixture-repo');
     await mkdir(fixtureRepo);
