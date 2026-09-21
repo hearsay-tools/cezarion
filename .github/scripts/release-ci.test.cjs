@@ -44,7 +44,7 @@ test('dispatch identifies an actual CI run on the expected SHA, without a checko
   assert.equal(result.status, 'dispatched');
   assert.equal(result.sha, 'a'.repeat(40));
   assert.equal(result.url, 'https://github.com/example/project/actions/runs/123');
-  assert.deepEqual(f.state.dispatches, [{ owner: 'example', repo: 'project', workflow_id: 'ci.yml', ref: 'release/v1.2.3' }]);
+  assert.deepEqual(f.state.dispatches, [{ owner: 'example', repo: 'project', workflow_id: 'ci.yml', ref: 'release/v1.2.3', inputs: { pr_number: '42' } }]);
 });
 
 test('unrelated revisions, branches, and events cannot substitute for release verification', async () => {
@@ -165,4 +165,37 @@ test('CLI reports gh HTTP errors without mistaking its process exit code for an 
   assert.match(result.stderr, /Resource not accessible by integration \(HTTP 403\)/);
   assert.doesNotMatch(result.stderr, /HTTP 1\)/);
   assert.match(result.stderr, /Recovery: node .github\/scripts\/release-ci.cjs example\/project 42 a{40}/);
+});
+
+test('recovery CLI sends pr_number through the gh dispatch adapter', (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-ci-dispatch-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dispatchPath = path.join(dir, 'dispatch.json');
+  fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"commonjs"}');
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2), endpoint = args[1];
+const sha = 'a'.repeat(40);
+let value;
+if (endpoint.endsWith('/dispatches')) {
+  fs.writeFileSync(process.env.DISPATCH_PATH, JSON.stringify(args)); process.exit(0);
+} else if (endpoint.includes('/pulls/')) value = {state:'open',head:{sha,ref:'release/v1.2.3',repo:{full_name:'example/project'}},base:{repo:{full_name:'example/project'}}};
+else if (endpoint.includes('/git/ref/')) value = {object:{sha}};
+else if (endpoint.includes('/runs?')) value = [{workflow_runs:fs.existsSync(process.env.DISPATCH_PATH) ? [{id:1,head_sha:sha,head_branch:'release/v1.2.3',event:'workflow_dispatch',status:'queued',html_url:'https://example/run'}] : []}];
+else throw new Error('Unexpected endpoint: '+endpoint);
+console.log(JSON.stringify(value));
+`, { mode: 0o755 });
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'release-ci.cjs'), 'example/project', '42', 'a'.repeat(40)], {
+    env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, DISPATCH_PATH: dispatchPath }, encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).status, 'dispatched');
+  assert.deepEqual(JSON.parse(fs.readFileSync(dispatchPath, 'utf8')), [
+    'api', 'repos/example/project/actions/workflows/ci.yml/dispatches', '--method', 'POST',
+    '-f', 'ref=release/v1.2.3', '-f', 'inputs[pr_number]=42',
+  ]);
 });

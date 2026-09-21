@@ -211,7 +211,7 @@ test('new bump PR starts CI and an existing-PR retry reuses active verification'
   const f = await fixture(t);
   await f.run(bumpStep);
   assert.equal(f.state.dispatches.length, 1, 'a bot-created PR must explicitly start CI');
-  assert.deepEqual(f.state.dispatches[0], { owner: 'example', repo: 'project', workflow_id: 'ci.yml', ref: 'release/v0.12.1' });
+  assert.deepEqual(f.state.dispatches[0], { owner: 'example', repo: 'project', workflow_id: 'ci.yml', ref: 'release/v0.12.1', inputs: { pr_number: '1' } });
   assert.equal(f.outputs.bump_pr.ci_status, 'dispatched');
   f.reset();
   await f.run(bumpStep);

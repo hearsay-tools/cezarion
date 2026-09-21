@@ -142,13 +142,23 @@ The release job needs `actions: write` for this step. Verification keeps read-on
 permissions and the required check name **Unit, build, E2E, and package**.
 
 Dispatch runs at the release branch, so GitHub attaches its checks to that head
-commit. The verification jobs check out the immutable `github.sha`, not a moving
-branch or an input-supplied revision. Dispatch has no PR payload and deliberately
-runs the full matrix; PR-event manifest-only classification and its safeguards
-are unchanged. Dispatch never publishes npm packages or PR snapshots.
+commit. The helper passes `pr_number`, and CI resolves that PR through the API.
+The live head must equal `github.sha`, belong to this repository, use a
+`release/v*` branch, target `main` or `develop`, and have `github-actions[bot]`
+as its author. CI loads the classifier from the API-reported base SHA and skips
+Vitest and cockpit E2E only after the complete file list and version-stamp checks
+pass. Missing inputs, API errors, or mismatches retain the full matrix.
+
+Verification rechecks dispatch metadata before checkout. Valid PR-aware
+verification checks out `refs/pull/<N>/merge`, matching the PR-event run. Rejected
+metadata or dispatch without `pr_number` verifies the immutable `github.sha` with
+the full matrix. Dispatch and PR events share a concurrency group for that PR, so a
+later run cancels the earlier one. No close/reopen is needed to reach the bump
+skip. Dispatch never publishes npm packages or PR snapshots.
 
 From a checkout containing this recovery helper, use the PR number and the exact
-head SHA you intend to verify. For the blocked `0.13.6` PR #374:
+head SHA you intend to verify. This was the recovery command for the blocked
+`0.13.6` PR #374 (with the helper version shipped at that time):
 
 ```bash
 node .github/scripts/release-ci.cjs hearsay-tools/cezarion 374 95a6d5193a19ef8baa7a063695f2ac003f644442
@@ -182,8 +192,11 @@ release summary, reports the API error, and prints the recovery command. For a
 Actions policy. For a 404/422, check the repository, release branch, active
 `ci.yml` workflow, and its `workflow_dispatch` declaration. Re-running an old
 release retains its old workflow code: recover CI directly instead of publishing
-another version. Older release branches also retain their old checkout logic;
-confirm their job checkout SHA matches the run's head SHA before relying on the
+another version. Older release branches may lack the `pr_number` dispatch input; those reject
+the current helper with 422. For those branches, use a bare
+`gh workflow run ci.yml --repo hearsay-tools/cezarion --ref release/vX.Y.Z`
+as in the historical example above; it retains full verification. They also
+retain their old checkout logic; confirm their job checkout SHA matches the run's head SHA before relying on the
 result. Recovery does not edit those branches or weaken merge protection.
 
 See GitHub's [workflow triggering rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)

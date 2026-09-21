@@ -25,7 +25,7 @@ test('dispatched verification checks out the attributed SHA even after its branc
     const expression = checkout.with.ref.slice(3, -2).trim();
     const ref = runInNewContext(expression, { github: {
       event: { pull_request: {} }, ref: 'refs/heads/release/v0.13.6', sha: 'a'.repeat(40),
-    } });
+    }, inputs: {}, steps: { 'resolve-dispatch': { outputs: {} } } });
     assert.equal(ref, 'a'.repeat(40), `${name} must verify the commit receiving the check`);
     assert.equal(checkout.with['persist-credentials'], false);
     assert.equal(ci.jobs[name].permissions?.contents ?? ci.permissions.contents, 'read');
@@ -124,8 +124,8 @@ test('CI classifies pull request changes from a trusted base checkout', () => {
   assert.equal(job.outputs.surface, '${{ steps.classify.outputs.surface }}');
   const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'));
   assert.ok(checkout, 'expected a checkout step');
-  assert.equal(checkout.if, "github.event_name == 'pull_request_target'");
-  assert.equal(checkout.with.ref, '${{ github.event.pull_request.base.sha }}');
+  assert.equal(checkout.if, "github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'");
+  assert.equal(checkout.with.ref, "${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha }}");
   assert.equal(checkout.with['persist-credentials'], false);
   const classify = job.steps.find((step) => step.id === 'classify');
   assert.ok(classify, 'expected an output-producing classify step');
@@ -141,7 +141,7 @@ test('PR jobs check out the merge ref when CI runs from the trusted target workf
   const ci = workflow();
   for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
     const checkout = ci.jobs[name].steps.find((step) => step.uses?.startsWith('actions/checkout@'));
-    assert.match(checkout?.with?.ref || '', /format\('refs\/pull\/\{0\}\/merge', github\.event\.pull_request\.number\)/);
+    assert.match(checkout?.with?.ref || '', /format\('refs\/pull\/\{0\}\/merge', github\.event\.pull_request\.number \|\| inputs\.pr_number\)/);
     assert.equal(checkout?.with?.['allow-unsafe-pr-checkout'], true, `${name} must opt in to fork PR merge checkout explicitly`);
     assert.equal(checkout?.with?.['persist-credentials'], false, `${name} must not persist GITHUB_TOKEN into a PR checkout`);
   }
@@ -233,7 +233,7 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   assert.deepEqual(classify.permissions, { contents: 'read', 'pull-requests': 'read' });
   assert.equal(classify.outputs.bump_pr, '${{ steps.classify.outputs.bump_pr }}');
   const checkout = classify.steps.find((step) => step.name === 'Check out trusted classifier');
-  assert.equal(checkout.with.ref, '${{ github.event.pull_request.base.sha || github.sha }}');
+  assert.equal(checkout.with.ref, "${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha || github.sha }}");
   assert.equal(checkout.with['persist-credentials'], false);
   const classifyStep = classify.steps.find((step) => step.id === 'classify');
   assert.match(classifyStep.run, /release-bump-pr\.cjs/);
@@ -245,7 +245,7 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   assert.match(classifyStep.run, /bump_pr=false/);
   assert.equal(classifyStep.env.EVENT_NAME, '${{ github.event_name }}');
   assert.equal(classifyStep.env.PR_AUTHOR, '${{ github.event.pull_request.user.login }}');
-  assert.equal(classifyStep.env.EXPECTED_HEAD_SHA, '${{ github.event.pull_request.head.sha }}');
+  assert.equal(classifyStep.env.EXPECTED_HEAD_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.deepEqual(ci.jobs.vitest.needs, ['change-surface', 'classify-pr']);
   assert.deepEqual(ci.jobs['cockpit-browser'].needs, ['change-surface', 'classify-pr']);
   assert.match(ci.jobs.vitest.if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
@@ -262,7 +262,7 @@ test('CI runs on push to main and still does not publish snapshots from main', (
   const ci = workflow();
   assert.ok(ci.on.push.branches.includes('main'));
   assert.ok(ci.on.push.branches.includes('develop'));
-  assert.equal(ci.concurrency.group, 'ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}');
+  assert.equal(ci.concurrency.group, 'ci-${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}');
   assert.equal(ci.concurrency['cancel-in-progress'], true);
   const publishIf = ci.jobs['publish-snapshot'].if;
   assert.match(publishIf, /github\.ref == 'refs\/heads\/develop'/);
@@ -330,9 +330,40 @@ test('event routing keeps one PR verifier and preserves push/manual publication 
     assert.equal(runInNewContext(ci.jobs['publish-snapshot'].if, { github }), publish);
   }
   const group = (pr, sha) => ci.concurrency.group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => runInNewContext(expression, {
-    github: { workflow: 'CI', sha, ref: 'refs/heads/main', event: { pull_request: { number: pr } } },
+    github: { workflow: 'CI', sha, ref: 'refs/heads/main', event: { pull_request: { number: pr } } }, inputs: {},
   }));
   assert.equal(group(7, 'old'), group(7, 'new'), 'superseded heads must compete');
   assert.notEqual(group(7, 'new'), group(8, 'new'), 'different PRs must not compete');
   assert.equal(ci.concurrency['cancel-in-progress'], true);
+});
+
+test('PR dispatch and PR event share concurrency and verification merge refs', () => {
+  const { runInNewContext } = require('node:vm');
+  const HEAD = 'a'.repeat(40);
+  const evaluate = (value, context) => runInNewContext(value.slice(3, -2), context);
+  const config = workflow();
+  assert.equal(config.on.workflow_dispatch.inputs.pr_number.required, false);
+  function context(number, input, valid = 'true') {
+    return { github: { workflow: 'CI', ref: 'refs/heads/release/v1.2.3', sha: HEAD, event: { pull_request: { number } } },
+      inputs: { pr_number: input }, steps: { 'resolve-dispatch': { outputs: { valid: input ? valid : '' } } }, format: (s, n) => s.replace('{0}', n) };
+  }
+  const group = ctx => config.concurrency.group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => runInNewContext(expression, ctx));
+  assert.equal(group(context(42, '')), group(context(undefined, '42')));
+  assert.notEqual(group(context(42, '')), group(context(undefined, '43')));
+  for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
+    const ref = config.jobs[name].steps.find(s => s.uses?.startsWith('actions/checkout@')).with.ref;
+    assert.equal(evaluate(ref, context(undefined, '42')), 'refs/pull/42/merge');
+    assert.equal(evaluate(ref, context(42, '')), 'refs/pull/42/merge');
+    assert.equal(evaluate(ref, context(undefined, '')), HEAD);
+    assert.equal(evaluate(ref, context(undefined, '42', '')), HEAD);
+  }
+});
+
+test('no workflow declares both pull_request and pull_request_target', () => {
+  const dir = path.join(repoRoot, '.github/workflows');
+  for (const name of fs.readdirSync(dir).filter(n => /\.ya?ml$/.test(n))) {
+    const on = yaml.parse(fs.readFileSync(path.join(dir, name), 'utf8')).on;
+    const events = typeof on === 'string' ? [on] : Array.isArray(on) ? on : Object.keys(on || {});
+    assert.ok(!(events.includes('pull_request') && events.includes('pull_request_target')), name);
+  }
 });

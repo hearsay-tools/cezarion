@@ -77,9 +77,18 @@ Bot-authored `release/v*` version-bump PRs skip Vitest, cockpit browser E2E, and
 Release finalization explicitly dispatches `ci.yml` for new or reused open bump
 PRs, because `GITHUB_TOKEN` PR creation does not trigger `pull_request_target`.
 It reuses active verification for the same head and reports trigger failures
-separately from publication and PR creation. Dispatch runs the full matrix without
-PR classification shortcuts, checks out the run's immutable SHA, and keeps the
-required aggregate name and read-only verification permissions. Only the release
+separately from publication and PR creation. The dispatch carries `pr_number`.
+Both classification jobs resolve the live PR before checkout: its head must match
+`github.sha`, use a same-repository `release/v*` branch, target `main` or `develop`,
+and be authored by `github-actions[bot]`. The classifier comes from the
+API-reported base SHA. Only a complete manifest-only file list with valid version
+stamps allows the bump skip; dispatch never takes the docs-only shortcut.
+Missing input, API errors, or mismatches keep the full matrix.
+
+Verification rechecks dispatch metadata before checkout. Valid PR-aware dispatch
+verifies `refs/pull/<N>/merge` and shares the PR-event concurrency group, removing
+the need to close/reopen a bump PR. Rejected metadata or bare dispatch still verifies `github.sha` with the full matrix. The required aggregate name
+and read-only verification permissions stay unchanged. Only the release
 job gains `actions: write`. The same helper validates an expected PR head before
 manual recovery; see [version-bump CI recovery](../publishing.md#recovering-missing-version-bump-ci).
 

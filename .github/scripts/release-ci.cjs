@@ -50,7 +50,7 @@ async function ensureReleaseCi({ github, repo, prNumber, expectedSha, sleep = de
     }
     // GitHub dispatch accepts a branch/tag, not a checkout override. Dispatch at
     // the release branch so the check belongs to its commit, never main's SHA.
-    await github.rest.actions.createWorkflowDispatch({ ...repo, workflow_id: 'ci.yml', ref: branch });
+    await github.rest.actions.createWorkflowDispatch({ ...repo, workflow_id: 'ci.yml', ref: branch, inputs: { pr_number: String(prNumber) } });
     const priorIds = new Set(runs.map((run) => run.id));
     for (let attempt = 0; attempt < 12; attempt++) {
       if ((await readPr()).head.sha !== expectedSha) {
@@ -89,7 +89,7 @@ function githubViaGh() {
       git: { getRef: async (a) => ({ data: api(`${path(a)}/git/ref/${a.ref}`) }) },
       actions: {
         listWorkflowRuns, listJobsForWorkflowRun,
-        createWorkflowDispatch: async (a) => api(`${path(a)}/actions/workflows/ci.yml/dispatches`, ['--method', 'POST', '-f', `ref=${a.ref}`]),
+        createWorkflowDispatch: async (a) => api(`${path(a)}/actions/workflows/ci.yml/dispatches`, ['--method', 'POST', '-f', `ref=${a.ref}`, '-f', `inputs[pr_number]=${a.inputs.pr_number}`]),
       },
     },
   };
