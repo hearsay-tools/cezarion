@@ -93,23 +93,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - provider: github
-            runner: ubuntu-latest
-            repetition: 1
-          - provider: blacksmith
+          - provider: blacksmith-4vcpu
             runner: blacksmith-4vcpu-ubuntu-2404
             repetition: 1
-          - provider: github
-            runner: ubuntu-latest
-            repetition: 2
-          - provider: blacksmith
+          - provider: blacksmith-8vcpu
+            runner: blacksmith-8vcpu-ubuntu-2404
+            repetition: 1
+          - provider: blacksmith-4vcpu
             runner: blacksmith-4vcpu-ubuntu-2404
             repetition: 2
-          - provider: github
-            runner: ubuntu-latest
+          - provider: blacksmith-8vcpu
+            runner: blacksmith-8vcpu-ubuntu-2404
+            repetition: 2
+          - provider: blacksmith-4vcpu
+            runner: blacksmith-4vcpu-ubuntu-2404
             repetition: 3
-          - provider: blacksmith
-            runner: blacksmith-4vcpu-ubuntu-2404
+          - provider: blacksmith-8vcpu
+            runner: blacksmith-8vcpu-ubuntu-2404
             repetition: 3
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
@@ -121,7 +121,7 @@ jobs:
       - name: Check out fixed application baseline
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 252b749d464a8f630f7446a6ff29e6f8fa076b10
+          ref: 33d96193a6e9869d9886be64ac9026c052b9942f
           path: application
           fetch-depth: 0
       - name: Set up Node.js
