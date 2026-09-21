@@ -18,6 +18,7 @@ export const workflowStepSchema = z
     prompt: z.string().optional(),
     skill: z.string().optional(),
     model: z.string().optional(),
+    effort: z.string().max(32).optional(),
     /** Per-step agent backend override (falls back to the task / config default).
      *
      *  Deliberately NOT widened to the legacy `claude-cli` the way the run store's
@@ -115,7 +116,7 @@ export function skillStackOf(steps: WorkflowStepDef[]): string[] | null {
     if (stepKind(s) !== 'agent' || !s.skill) return null;
     if (s.prompt !== undefined && s.prompt !== '{{task}}') return null;
     if (s.name !== undefined && s.name !== s.skill) return null;
-    if (s.model || s.runner || s.allowedTools || s.bashAllowlist || s.onFail) return null;
+    if (s.model || s.effort !== undefined || s.runner || s.allowedTools || s.bashAllowlist || s.onFail) return null;
     skills.push(s.skill);
   }
   return skills.length ? skills : null;

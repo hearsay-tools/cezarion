@@ -3943,6 +3943,16 @@ export class RunManager {
     const grants = this.workerIdentity(runId)?.grants ?? {
       allowedTools: allowedToolsForStep(toolsStep, continueBackend), bashAllowlist: toolsStep?.bashAllowlist,
     };
+    let continueEffort: string | undefined;
+    try {
+      const stepEffort = parseDelegationEffort(toolsStep?.effort);
+      const modelsLocked = agentModelsLocked(this.repoRoot);
+      if (modelsLocked && stepEffort !== undefined) throw new Error(AGENT_MODELS_LOCKED_ERROR);
+      continueEffort = modelsLocked ? undefined : stepEffort ?? record?.effort;
+    } catch (err) {
+      failBeforeSpawn(err instanceof Error ? err.message : String(err));
+      return;
+    }
     // The temp-directory preflight (#785) rides along with the account resolution: a resumed
     // turn hits the same broken `/tmp` a fresh one would, and an agent whose shell silently
     // returns nothing is worse than a turn that refuses to start and says why.
@@ -3967,7 +3977,7 @@ export class RunManager {
     this.store.updateStep(runId, stepId, { profileId: continueProfile.profileId });
 
     state.delegationSettings = { cwd: state.cwd, runner: continueBackend, model: continueModel,
-      effort: agentModelsLocked(this.repoRoot) ? undefined : record?.effort, agentProfile: continueProfile.profileId, accountBinding: continueProfile.accountBinding,
+      effort: continueEffort, agentProfile: continueProfile.profileId, accountBinding: continueProfile.accountBinding,
       systemPrompt: record?.systemPrompt, allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
     const runner = createRunner(continueBackend);
     state.currentStepId = stepId;
@@ -4003,7 +4013,7 @@ export class RunManager {
         env: { ...continueProfile.env, ...delegation?.env },
         ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
         model: continueModel,
-        effort: agentModelsLocked(this.repoRoot) ? undefined : record?.effort,
+        effort: continueEffort,
         sessionId,
         resume: sessionId !== undefined,
         timeoutMs: 0,
@@ -4714,10 +4724,17 @@ export class RunManager {
     // unresolvable model (e.g. a bare id on opencode) returns the step error
     // instead of letting the backend silently substitute its default.
     let backendModel: string | undefined;
+    let effectiveEffort: string | undefined;
     try {
+      const modelsLocked = agentModelsLocked(this.repoRoot);
+      const stepEffort = parseDelegationEffort(step.effort);
+      if (modelsLocked && stepEffort !== undefined) return AGENT_MODELS_LOCKED_ERROR;
+      effectiveEffort = modelsLocked
+        ? undefined
+        : stepEffort ?? this.store.getRun(runId)?.effort ?? input.effort;
       const normalized = normalizeModelForBackend(
         stepBackend,
-        agentModelsLocked(this.repoRoot) ? undefined : step.model ?? input.model,
+        modelsLocked ? undefined : step.model ?? input.model,
         { configuredProvider: await configuredModelProvider(stepBackend, state.cwd) },
       );
       backendModel = normalized?.backendModel;
@@ -4729,7 +4746,7 @@ export class RunManager {
         modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined,
       });
     } catch (err) {
-      if (err instanceof ModelIdentityError) return err.message;
+      if (err instanceof ModelIdentityError || err instanceof DelegationPolicyError) return err.message;
       throw err;
     }
     // Which agent account this step spawns under, and — recorded on the step before the spawn —
@@ -4754,7 +4771,7 @@ export class RunManager {
       allowedTools: allowedToolsForStep(step, stepBackend), bashAllowlist: step.bashAllowlist,
     };
     state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: backendModel,
-      effort: agentModelsLocked(this.repoRoot) ? undefined : this.store.getRun(runId)?.effort ?? input.effort,
+      effort: effectiveEffort,
       agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: composeSystemPrompt(systemPrompt, extraSystemPrompt),
       allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
     const runner = createRunner(stepBackend);
@@ -4787,9 +4804,7 @@ export class RunManager {
           env: { ...stepProfile.env, ...delegation?.env },
           ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
           model: backendModel,
-          effort: agentModelsLocked(this.repoRoot)
-            ? undefined
-            : this.store.getRun(runId)?.effort ?? input.effort,
+          effort: effectiveEffort,
           sessionId,
           // Interactive sessions have no wall clock — the idle timer rules.
           timeoutMs: interactive ? 0 : undefined,

@@ -82,9 +82,12 @@ describe('model identity wiring (dry run)', () => {
     }
   }
 
-  async function runToEnd(input: { task: string; model?: string; effort?: string }): Promise<string> {
+  async function runToEnd(
+    input: { task: string; model?: string; effort?: string },
+    selectedWorkflow: WorkflowDef = workflow,
+  ): Promise<string> {
     writeFileSync(argsFile, '', 'utf8'); // fresh capture per run
-    const record = manager.startRun(workflow, input);
+    const record = manager.startRun(selectedWorkflow, input);
     await settle(record.id);
     return record.id;
   }
@@ -128,6 +131,55 @@ describe('model identity wiring (dry run)', () => {
     }
     expect(capturedFlag('--effort', 1)).toBe('high');
   }, 40_000);
+
+  it('a workflow step effort overrides the run effort on the runner wire', async () => {
+    const stepEffortWorkflow: WorkflowDef = {
+      ...workflow,
+      steps: workflow.steps.map((step) => step.id === 'work' ? { ...step, effort: 'high' } : step),
+    };
+
+    await runToEnd({ task: 'do the thing', effort: 'low' }, stepEffortWorkflow);
+
+    expect(capturedFlag('--effort')).toBe('high');
+  }, 30_000);
+
+  it('rejects a workflow step effort outside the canonical vocabulary', async () => {
+    const invalidEffortWorkflow: WorkflowDef = {
+      ...workflow,
+      steps: workflow.steps.map((step) => step.id === 'work' ? { ...step, effort: 'turbo' } : step),
+    };
+
+    const id = await runToEnd({ task: 'do the thing' }, invalidEffortWorkflow);
+
+    expect(store.getRun(id)?.status).toBe('failed');
+    expect(store.getRun(id)?.error).toBe('step "work" failed: Invalid effort');
+  }, 30_000);
+
+  it('rejects a per-step effort with the existing models-locked error', async () => {
+    const lockedEffortWorkflow: WorkflowDef = {
+      ...workflow,
+      steps: workflow.steps.map((step) => step.id === 'work' ? { ...step, effort: 'high' } : step),
+    };
+    writeFileSync(
+      join(repoRoot, '.ai/cezar', 'config.json'),
+      JSON.stringify({ maxParallel: 1, modelsLocked: true }),
+      'utf8',
+    );
+
+    try {
+      const id = await runToEnd({ task: 'do the thing' }, lockedEffortWorkflow);
+      expect(store.getRun(id)?.status).toBe('failed');
+      expect(store.getRun(id)?.error).toContain(
+        'agent models are locked — configure the model in the native coding-agent settings',
+      );
+    } finally {
+      writeFileSync(
+        join(repoRoot, '.ai/cezar', 'config.json'),
+        JSON.stringify({ maxParallel: 1 }),
+        'utf8',
+      );
+    }
+  }, 30_000);
 
   it('omits --effort when unset so the harness keeps its default (#45)', async () => {
     await runToEnd({ task: 'do the thing' });
