@@ -262,6 +262,47 @@ describe('useGlobalEvents — run events', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
+  it.each(['own', 'worker'])('coalesces %s detail updates and keeps stale permission hidden during a burst', async kind => {
+    vi.useFakeTimers()
+    try {
+      const run = { ...runRecord('r1', { status: 'waiting' }), finishBlocked: null }
+      client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), run)
+      vi.mocked(fetch).mockImplementation(async () => json(run))
+      renderHook(() => useRun('r1'), { wrapper })
+      const { source } = mount()
+      for (let i = 0; i < 20; i++) {
+        source.emit('run', stampedRun(kind === 'own' ? runRecord('r1', { status: 'waiting' }) : runRecord('worker', {
+          delegation: { role: 'worker', parentRunId: 'r1', permissions: [],
+            workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
+        })))
+        await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+        expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeUndefined()
+      }
+      expect(fetch).not.toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels pending detail refreshes when the event provider unmounts', async () => {
+    vi.useFakeTimers()
+    try {
+      client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), { ...runRecord('r1'), finishBlocked: null })
+      const invalidate = vi.spyOn(client, 'invalidateQueries')
+      const { source, unmount } = mount()
+      source.emit('run', stampedRun(runRecord('r1')))
+      unmount()
+      invalidate.mockClear()
+      await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+      expect(invalidate).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each(['own', 'worker'])('an %s event during initial loading replaces the stale in-flight verdict', async kind => {
     const stale = deferredResponse()
     const fresh = deferredResponse()

@@ -221,20 +221,34 @@ function applyStampedRunList(queryClient: QueryClient, project: string, event: G
   queryClient.setQueryData<ApiRun[]>(key, (list) => applyRunDeleted(list, event.id))
 }
 
-/** Cancel even the first detail fetch: invalidation alone reuses an in-flight request
- * without cached data, allowing a pre-event verdict to arrive after the event. */
-function refreshRunDetail(queryClient: QueryClient, id: string): void {
-  const key = queryKeys.runs.detail(id)
-  if (!queryClient.getQueryState(key)) return
-  // Do not revert cancellation to the previously allowed verdict.
-  void queryClient.cancelQueries({ queryKey: key }, { revert: false }).then(() =>
-    queryClient.invalidateQueries({ queryKey: key }),
-  )
+/** Keep permission unknown immediately, but fetch only after the event burst settles.
+ * Per-mount timers retain the original scoped key and are cancelled on cleanup. */
+function createRunDetailRefresher(queryClient: QueryClient) {
+  const pending = new Map<string, ReturnType<typeof setTimeout>>()
+  return {
+    refresh(id: string): void {
+      const key = queryKeys.runs.detail(id)
+      if (!queryClient.getQueryState(key)) return
+      const cacheKey = JSON.stringify(key)
+      clearTimeout(pending.get(cacheKey))
+      // Invalidation alone reuses an initial in-flight request. Cancel it now so a
+      // pre-event response cannot restore permission during the debounce window.
+      void queryClient.cancelQueries({ queryKey: key }, { revert: false })
+      pending.set(cacheKey, setTimeout(() => {
+        pending.delete(cacheKey)
+        void queryClient.invalidateQueries({ queryKey: key })
+      }, 400))
+    },
+    cancel(): void {
+      for (const timer of pending.values()) clearTimeout(timer)
+      pending.clear()
+    },
+  }
 }
 
 /** Fold one stream message into the cache. The reducers it calls are pure and table-tested in
  *  events.ts; this is only the wiring from an event to the cache it belongs in. */
-function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: GlobalEvent): void {
+function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: GlobalEvent, refreshRunDetail: (id: string) => void): void {
   switch (event.type) {
     case 'run': {
       // A changed worker may be absent from the visible list. Refresh this project's mounted
@@ -252,7 +266,7 @@ function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: Gl
         queryClient.setQueryData<ApiRun>(key, (previous) => mergeRun(previous, event.run))
         // The stream drops the old verdict; only a fresh detail response may permit Finish.
       }
-      refreshRunDetail(queryClient, event.run.id)
+      refreshRunDetail(event.run.id)
       if (event.run.delegation?.role === 'worker') {
         const parentKey = queryKeys.runs.detail(event.run.delegation.parentRunId)
         queryClient.setQueryData<ApiRun>(parentKey, previous => {
@@ -260,7 +274,7 @@ function applyGlobalEvent(queryClient: QueryClient, usage: UsageStore, event: Gl
           const { finishBlocked: _stale, ...run } = previous
           return run
         })
-        refreshRunDetail(queryClient, event.run.delegation.parentRunId)
+        refreshRunDetail(event.run.delegation.parentRunId)
       }
       // The Changes tab stops polling once a run leaves the active set (queries.ts:
       // refetchInterval only lives while active), so end-of-run writes would otherwise wait
@@ -321,6 +335,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
 
     let source: EventSource | null = null
     const runsIndexRefresher = createRunsIndexRefresher(queryClient)
+    const runDetailRefresher = createRunDetailRefresher(queryClient)
     let reopenTimer: ReturnType<typeof setTimeout> | undefined
     let everOpened = false
     let disposed = false
@@ -383,7 +398,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           // `ping` (project null) always passes — liveness is not project-owned.
           if (parsed.project !== null) applyStampedRunList(queryClient, parsed.project, parsed.event)
           if (parsed.project !== null && parsed.project !== activeProject(queryClient)) return
-          applyGlobalEvent(queryClient, usage, parsed.event)
+          applyGlobalEvent(queryClient, usage, parsed.event, runDetailRefresher.refresh)
         })
       }
 
@@ -483,6 +498,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       disposed = true
       clearTimeout(reopenTimer)
       runsIndexRefresher.cancel()
+      runDetailRefresher.cancel()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pagehide', onPageHide)
       window.removeEventListener('pageshow', onPageShow)
