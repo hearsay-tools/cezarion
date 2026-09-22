@@ -696,30 +696,191 @@ describe('task thread', () => {
 
 })
 
-// Revised session frames 2/3/28: settings stay visible in document flow at every width.
-describe('revised session layout', () => {
-  it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ width, theme }))))('preserves labeled controls and draft at $width / $theme', ({ width, theme }) => {
-    browser.setViewport(width, 1000)
-    browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="session-controls"]') !== null`)
-    browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.dataset.width = 'wide'; delete document.documentElement.dataset.density; document.querySelector('[data-slot="composer"]').scrollIntoView({block:'end'})`)
-    const facts = browser.evaluate(`(() => {
-      const box = selector => document.querySelector(selector).getBoundingClientRect();
-      const settings = box('[data-slot="session-controls"]'), model = box('[data-slot="session-model"]');
-      return { stacked: innerWidth >= 768 ? settings.bottom <= model.top + 1 : model.bottom <= settings.top + 1, fits: model.left >= 0 && model.right <= innerWidth, overflow: document.documentElement.scrollWidth > innerWidth, position: getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).position };
-    })()`) as { stacked: boolean; fits: boolean; overflow: boolean; position: string }
-    expect(facts).toEqual({ stacked: true, fits: true, overflow: false, position: 'relative' })
-    expect(browser.evaluate(`document.querySelector('[data-slot="follow-up-model-pill"]').getBoundingClientRect().height`)).toBeGreaterThanOrEqual(44)
+type LayoutRect = { left: number; right: number; top: number; bottom: number; width: number; height: number }
+type SessionLayout = {
+  controls: Record<'runner' | 'model' | 'effort' | 'attach' | 'dictation' | 'archive' | 'continue', LayoutRect & { hit: boolean }>
+  group: LayoutRect
+  editor: LayoutRect
+  textarea: LayoutRect
+  documentOverflow: boolean
+  mainOverflow: boolean
+  modelText: string
+  modelTruncated: boolean
+  archiveLabel: string
+  archiveVisibleText: string
+  archiveWidth: number
+  bottomGap: number
+}
+
+const sessionLayoutExpression = `(() => {
+  const editor = document.querySelector('[data-slot="composer-editor"]')
+  if (!editor || editor.getBoundingClientRect().bottom > innerHeight + 1) return null
+  const select = (selector) => {
+    const el = document.querySelector(selector)
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    const under = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height, hit: !!under && el.contains(under) }
+  }
+  const controls = {
+    runner: select('[data-slot="session-controls"] [aria-label="Runner"]'),
+    model: select('[data-slot="follow-up-model-pill"]'),
+    effort: select('[data-slot="follow-up-effort-pill"]'),
+    attach: select('[data-slot="composer"] [aria-label="Attach files"]'),
+    dictation: select('[data-slot="composer"] [aria-label="Start dictation"]'),
+    archive: select('[data-slot="composer-actions"] [aria-label="Archive task"]'),
+    continue: select('[data-slot="composer-actions"] [aria-label="Continue"]'),
+  }
+  if (Object.values(controls).some(value => !value)) return null
+  const label = document.querySelector('[data-slot="follow-up-model-pill"] > span')
+  const archive = document.querySelector('[data-slot="composer-actions"] [aria-label="Archive task"]')
+  const main = document.querySelector('[data-slot="main"]')
+  const group = select('[data-slot="session-controls"]')
+  const editorRect = select('[data-slot="composer-editor"]')
+  const textarea = select('[data-slot="composer"] textarea')
+  return {
+    controls, group, editor: editorRect, textarea,
+    documentOverflow: document.documentElement.scrollWidth > innerWidth + 1,
+    mainOverflow: main.scrollWidth > main.clientWidth + 1,
+    modelText: label?.textContent ?? '',
+    modelTruncated: !!label && getComputedStyle(label).textOverflow === 'ellipsis' && label.scrollWidth > label.clientWidth + 1,
+    archiveLabel: archive.getAttribute('aria-label'), archiveVisibleText: archive.innerText.trim(), archiveWidth: controls.archive.width,
+    bottomGap: editorRect.bottom - Math.max(controls.attach.bottom, controls.dictation.bottom, controls.archive.bottom, controls.continue.bottom),
+  }
+})()`
+
+function overlaps(a: LayoutRect, b: LayoutRect): boolean {
+  return Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1
+    && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+}
+
+// #478/#460: real fixture values and real browser geometry, including the narrow action collision.
+describe('responsive session composer', () => {
+  it('ends after normal padding, without an idle band below the action row', () => {
+    browser.setViewport(390, 844)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="composer-actions"] [aria-label="Continue"]')`)
+    browser.evaluate(`document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
+    const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
+    expect(facts.bottomGap).toBeGreaterThanOrEqual(0)
+    expect(facts.bottomGap).toBeLessThanOrEqual(20)
+  }, 90_000)
+
+  it.each(['light', 'dark'])('keeps all four actions separate at 360×640 / %s', (theme) => {
+    browser.setViewport(360, 640)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="composer-actions"] [aria-label="Continue"]')`)
+    browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
+    const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
+    const actions = [facts.controls.attach, facts.controls.dictation, facts.controls.archive, facts.controls.continue]
+    for (let i = 0; i < actions.length; i += 1) {
+      const action = actions[i]!
+      expect(action.hit, `action ${i} center hit`).toBe(true)
+      for (let j = i + 1; j < actions.length; j += 1) {
+        expect(overlaps(action, actions[j]!), `actions ${i} and ${j} overlap`).toBe(false)
+      }
+    }
+    expect(facts.archiveWidth).toBeLessThanOrEqual(56)
+    expect(facts.archiveLabel).toBe('Archive task')
+  }, 90_000)
+
+  it.each([
+    { width: 360, height: 640 }, { width: 390, height: 844 }, { width: 1440, height: 900 },
+  ].flatMap(size => ['light', 'dark'].map(theme => ({ ...size, theme }))))('keeps settings and actions usable at $width×$height / $theme', ({ width, height, theme }) => {
+    browser.setViewport(width, height)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="composer-actions"] [aria-label="Continue"]')`)
+    browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
+    const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
+    const { runner, model, effort, attach, dictation, archive, continue: submit } = facts.controls
+
+    // The fixture must reach the pill, not silently resolve to the automatic model.
+    expect(facts.modelText).toContain(LONG_RUN.model)
+    expect(facts.group.left).toBeGreaterThanOrEqual(facts.editor.left - 1)
+    expect(facts.group.right).toBeLessThanOrEqual(facts.editor.right + 1)
+    if (width >= 768) {
+      expect(Math.max(runner.top, model.top, effort.top) - Math.min(runner.top, model.top, effort.top)).toBeLessThanOrEqual(2)
+      expect(runner.right).toBeLessThan(model.left)
+      expect(model.right).toBeLessThan(effort.left)
+      expect(model.width).toBeGreaterThan(runner.width)
+      expect(model.width).toBeGreaterThan(effort.width)
+      expect(runner.width).toBeLessThanOrEqual(200)
+      expect(effort.width).toBeLessThanOrEqual(200)
+      expect(facts.group.right - effort.right).toBeLessThanOrEqual(2)
+      expect(facts.archiveWidth).toBeGreaterThan(90)
+      expect(facts.archiveVisibleText).toContain('Archive task')
+    } else {
+      expect(Math.abs(runner.top - effort.top)).toBeLessThanOrEqual(2)
+      expect(model.top).toBeGreaterThanOrEqual(Math.max(runner.bottom, effort.bottom) - 1)
+      expect(Math.abs(model.width - facts.group.width)).toBeLessThanOrEqual(2)
+      expect(facts.modelTruncated).toBe(true)
+      expect(facts.archiveWidth).toBeLessThanOrEqual(56)
+    }
+    expect(Math.min(attach.top, dictation.top, archive.top, submit.top)).toBeGreaterThanOrEqual(Math.max(runner.bottom, model.bottom, effort.bottom) - 1)
+    for (const [name, rect] of Object.entries(facts.controls)) {
+      expect(rect.width, `${name} width`).toBeGreaterThanOrEqual(44)
+      expect(rect.height, `${name} height`).toBeGreaterThanOrEqual(44)
+      expect(rect.left, `${name} left edge`).toBeGreaterThanOrEqual(-1)
+      expect(rect.right, `${name} right edge`).toBeLessThanOrEqual(width + 1)
+      expect(rect.top, `${name} top edge`).toBeGreaterThanOrEqual(-1)
+      expect(rect.bottom, `${name} bottom edge`).toBeLessThanOrEqual(height + 1)
+      expect(rect.hit, `${name} center hit`).toBe(true)
+    }
+    const entries = Object.entries(facts.controls)
+    for (let i = 0; i < entries.length; i += 1) {
+      for (let j = i + 1; j < entries.length; j += 1) {
+        const [firstName, firstRect] = entries[i]!
+        const [secondName, secondRect] = entries[j]!
+        expect(overlaps(firstRect, secondRect), `${firstName} overlaps ${secondName}`).toBe(false)
+      }
+    }
+    expect(facts.textarea.left).toBeGreaterThanOrEqual(facts.editor.left - 1)
+    expect(facts.textarea.right).toBeLessThanOrEqual(facts.editor.right + 1)
+    expect(facts.editor.left).toBeGreaterThanOrEqual(-1)
+    expect(facts.editor.right).toBeLessThanOrEqual(width + 1)
+    expect(facts.documentOverflow).toBe(false)
+    expect(facts.mainOverflow).toBe(false)
+    expect(facts.bottomGap).toBeGreaterThanOrEqual(0)
+    expect(facts.bottomGap).toBeLessThanOrEqual(20)
+    expect(facts.archiveLabel).toBe('Archive task')
+
     browser.fill('[data-slot="composer"] textarea', 'Keep these follow-up instructions')
-    expect(browser.text('[data-slot="composer-submit-row"]')).toContain('Send')
-    browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')
-    browser.screenshot(`${artifactsDir}/revised-session-${width}-${theme}.png`, { viewport: true })
-    browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
+    const draft = browser.waitForValue(`document.querySelector('[data-slot="composer"] textarea')?.value === 'Keep these follow-up instructions' ? document.querySelector('[data-slot="composer"] textarea').value : null`)
+    expect(draft).toBe('Keep these follow-up instructions')
+    const sendLabel = browser.waitForValue(`document.querySelector('[data-slot="composer-submit-row"]')?.textContent?.includes('Send') ? document.querySelector('[data-slot="composer-submit-row"]').textContent : null`)
+    expect(sendLabel).toContain('Send')
     browser.click('[aria-label="Run actions"]')
-    browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]') !== null`)
-    expect(browser.text('[data-slot="run-actions-menu"]')).toContain('Notes')
-    browser.screenshot(`${artifactsDir}/revised-session-actions-${width}-${theme}.png`, { viewport: true })
+    browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]')?.textContent?.includes('Notes') === true`)
     browser.press('Escape')
-    expect(browser.evaluate(`document.querySelector('[data-slot="composer"] textarea').value`)).toBe('Keep these follow-up instructions')
+    const preservedDraft = browser.waitForValue(`document.querySelector('[data-slot="run-actions-menu"]') === null ? document.querySelector('[data-slot="composer"] textarea')?.value : null`)
+    expect(preservedDraft).toBe('Keep these follow-up instructions')
+    browser.screenshot(`${artifactsDir}/responsive-session-${width}-${theme}.png`, { viewport: true })
+  }, 90_000)
+
+  it('keeps Runner, Model and Effort together while dictation is recording', () => {
+    browser.setViewport(390, 844)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true`)
+    browser.evaluate(`(() => {
+      class FakeRecognition { start() {} stop() {} abort() {} }
+      window.SpeechRecognition = FakeRecognition
+      window.webkitSpeechRecognition = FakeRecognition
+      document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})
+      return true
+    })()`)
+    browser.click('[aria-label="Start dictation"]')
+    const recording = browser.waitForValue(`(() => {
+      const overlay = document.querySelector('[data-slot="dictation-overlay"]')
+      const groups = [...document.querySelectorAll('[data-slot="composer"] [data-slot="session-controls"]')]
+      if (!overlay || groups.length !== 1) return null
+      const group = document.querySelector('[data-slot="composer"] [data-slot="session-controls"]')
+      return { runner: !!group?.querySelector('[aria-label="Runner"]'), model: group?.querySelector('[data-slot="follow-up-model-pill"]')?.textContent ?? null, effort: !!group?.querySelector('[data-slot="follow-up-effort-pill"]') }
+    })()`) as { runner: boolean; model: string | null; effort: boolean }
+    expect(recording.runner).toBe(true)
+    expect(recording.model, 'Model stays in the recording settings group').not.toBeNull()
+    expect(recording.model ?? '').toContain(LONG_RUN.model)
+    expect(recording.effort).toBe(true)
+    browser.click('[aria-label="Cancel dictation"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="dictation-overlay"]') === null && document.querySelector('[data-slot="composer-toolbar"]') !== null`)
   }, 90_000)
 })
