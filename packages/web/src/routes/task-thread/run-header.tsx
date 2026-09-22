@@ -616,7 +616,7 @@ function MetaRow({
             {part}
           </Fragment>
         ))}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 max-md:min-w-0 max-md:max-w-full">
+        <span className="ml-auto flex min-w-0 max-w-full items-center gap-1.5">
           {usage.map((part, index) => (
             <Fragment key={index}>
               {index > 0 ? (

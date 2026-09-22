@@ -14,6 +14,24 @@
 .session-composer [data-slot='follow-up-model-pill'] > svg:last-child { margin-left: auto; }
 .session-composer [data-slot='composer-submit-row'] { grid-column: 2; grid-row: 2; margin: 0; flex: none; }
 [data-slot='run-actions-menu'] [role^='menuitem'] { min-height: 44px; }
+/* #478/#460: desktop starts at 768px, but a resized 420px sidebar can leave the dock
+ * only 348px. Query the dock itself so its insets and fixed pill tracks share one budget. */
+[data-route='task-thread'] [data-slot='thread-dock'] { container: thread-dock / inline-size; }
+@media (min-width: 768px) {
+  @container thread-dock (max-width: 640px) {
+    [data-slot='thread-dock'] > div { padding-inline: 8px; }
+    .session-engine-controls { grid-template-columns: 88px minmax(0, 1fr) 88px; }
+    .session-engine-controls :is([data-slot='runner-pill'], [data-slot='session-runner-value'], [data-slot='follow-up-effort-pill']) { gap: 6px; padding-inline: 8px; }
+    .session-engine-controls :is([data-slot='runner-pill'], [data-slot='session-runner-value'], [data-slot='follow-up-effort-pill']) > span > span,
+    .session-engine-controls :is([data-slot='runner-pill'], [data-slot='follow-up-effort-pill']) > svg:last-child { display: none; }
+  }
+  @container thread-dock (max-width: 400px) {
+    .session-engine-controls [data-slot='follow-up-model-pill'] > span > span { display: none; }
+    /* The full Archive label would sit over Dictation in a 348px dock. */
+    .session-composer [data-slot='archive-action'] { width: 44px; min-width: 44px; padding-inline: 0; }
+    .session-composer [data-slot='archive-action'] > span { display: none; }
+  }
+}
 @media (max-width: 767px) {
   [data-slot='run-title-row'] > .group { max-width: calc(100% - 52px); }
   .session-engine-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
