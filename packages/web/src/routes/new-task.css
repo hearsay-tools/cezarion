@@ -1,5 +1,14 @@
 /* New task frames 1 / 23: local geometry, without changing shared picker behavior. */
 [data-route='new'] .new-task-agent-options { gap: 10px; }
+/* Size against the composer, not the viewport: a wide sidebar can leave less than 394px. */
+[data-route='new'] [data-slot='composer-agent-options'] { container: new-task-agent-options / inline-size; }
+@container new-task-agent-options (min-width: 394px) {
+  [data-route='new'] .new-task-agent-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container new-task-agent-options (max-width: 393.99px) {
+  [data-route='new'] .new-task-agent-options { grid-template-columns: minmax(0, 1fr); }
+  [data-route='new'] .new-task-agent-options [data-slot='model-pill'] { grid-column: 1; }
+}
 [data-route='new'] .new-task-agent-options [data-slot$='pill'] { border-color: var(--border); border-radius: 9px; min-height: 44px; }
 [data-route='new'] .new-task-agent-options [data-slot='model-pill'] { height: 44px; min-height: 44px; padding: 0 12px; }
 [data-route='new'] .new-task-agent-options [data-slot='model-pill'] > svg { width: 18px; height: 18px; }
