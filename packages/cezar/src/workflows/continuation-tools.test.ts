@@ -124,6 +124,7 @@ describe('a resumed session keeps its workflow step tools', () => {
     error?: string;
     autoResumeAt?: string;
     effort?: string;
+    model?: string;
   }): string {
     const runner = [...input.steps].reverse().find((s) => s.backend)?.backend;
     const record = store.createRun({
@@ -131,6 +132,7 @@ describe('a resumed session keeps its workflow step tools', () => {
       workflow: input.def?.name ?? 'legacy',
       task: 'do the thing',
       effort: input.effort,
+      model: input.model,
       ...(runner ? { runner } : {}),
       steps: input.steps.map((s) => ({ id: s.id, name: s.id, kind: 'agent' as const })),
     });
@@ -209,6 +211,38 @@ describe('a resumed session keeps its workflow step tools', () => {
     expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     const spec = await specAt(0);
     expect(spec.effort).toBeUndefined();
+    await settled(id);
+  });
+
+  it("Continue rebuilds the session with the owning step's model instead of the run model (#464 review)", async () => {
+    // A catalog worker stores the parent's inherited model at run level while its step
+    // authored another; the first spawn ran `step.model ?? input.model`, so must Continue.
+    const modelDef: WorkflowDef = {
+      ...SINGLE_DEF,
+      steps: SINGLE_DEF.steps.map((step) => ({ ...step, model: 'haiku' })),
+    };
+    const id = terminalRun({
+      def: modelDef,
+      steps: [{ id: 'work', sessionId: 'sess-1', backend: 'claude' }],
+      model: 'opus',
+    });
+
+    expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    const spec = await specAt(0);
+    expect(spec.model).toBe('haiku');
+    await settled(id);
+  });
+
+  it('Continue inherits the run model when the owning step does not set one', async () => {
+    const id = terminalRun({
+      def: SINGLE_DEF,
+      steps: [{ id: 'work', sessionId: 'sess-1', backend: 'claude' }],
+      model: 'opus',
+    });
+
+    expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    const spec = await specAt(0);
+    expect(spec.model).toBe('opus');
     await settled(id);
   });
 

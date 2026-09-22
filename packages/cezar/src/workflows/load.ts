@@ -68,3 +68,9 @@ export async function loadWorkflows(
   workflows.sort((a, b) => a.name.localeCompare(b.name));
   return { workflows, issues };
 }
+
+/** One catalog entry by name, or null when no file or built-in carries it. */
+export async function findWorkflow(repoRoot: string, name: string): Promise<WorkflowDef | null> {
+  const { workflows } = await loadWorkflows(repoRoot);
+  return workflows.find((w) => w.name === name) ?? null;
+}

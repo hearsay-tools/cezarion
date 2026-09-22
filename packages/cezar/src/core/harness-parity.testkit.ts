@@ -32,7 +32,8 @@ import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
-import type { WorkflowDef } from '../workflows/types.ts';
+import { workerWorkflowHash } from '../delegation/execution-identity.ts';
+import { stepKind, type WorkflowDef } from '../workflows/types.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -476,6 +477,8 @@ export async function withOwnedInputRun(
     store: RunStore; manager: RunManager;
     restart: () => Promise<{ store: RunStore; manager: RunManager }>;
   }) => Promise<void>,
+  /** A persisted catalog definition the worker runs instead of quick-task (#451). */
+  options: { workflowDef?: WorkflowDef } = {},
 ): Promise<void> {
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
@@ -510,10 +513,14 @@ export async function withOwnedInputRun(
     }] });
     runId = randomUUID();
     const workspace = await planOwnedWorkspace(repoRoot, runId, sha);
-    store.createOwnedRun({ title: 'worker', task: promptFor(backend, scenario), workflow: 'quick-task', runner: backend,
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }, parent.id, randomUUID(), {
+    const workflowDef = options.workflowDef;
+    store.createOwnedRun({ title: 'worker', task: promptFor(backend, scenario), workflow: workflowDef?.name ?? 'quick-task', runner: backend,
+      ...(workflowDef ? { workflowDef } : {}),
+      steps: workflowDef
+        ? workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: stepKind(step) }))
+        : [{ id: 'task', name: 'Task', kind: 'agent' }] }, parent.id, randomUUID(), {
       role: 'worker', parentRunId: parent.id, permissions: [], workspace,
-    }, 'a'.repeat(64));
+    }, 'a'.repeat(64), { kind: 'internal', ...(workflowDef ? { workflowHash: workerWorkflowHash(workflowDef) } : {}) });
     manager = new RunManager(store, repoRoot);
     drainBookkeeping = trackTurnBookkeeping(manager);
     const restart = async () => {

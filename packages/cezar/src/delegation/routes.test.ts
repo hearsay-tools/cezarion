@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
@@ -18,6 +18,18 @@ describe('authenticated delegation HTTP family', () => {
     const response = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     expect(response.status).toBe(201); return workerSpawnResultSchema.parse(await response.json());
   }
+  it('accepts a catalog workflow on spawn and rejects a malformed one before the service (#451)', async () => {
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'review.yaml'), 'name: review\nsteps:\n  - id: inspect\n    prompt: "{{task}}"\n  - id: verify\n    command: \"true\"\n');
+    const created = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID(), workflow: 'review' });
+    expect(created.status).toBe(201);
+    const { workerId } = workerSpawnResultSchema.parse(await created.json());
+    expect(f.store.getRun(workerId)).toMatchObject({ workflow: 'review', steps: [{ kind: 'agent' }, { kind: 'check' }] });
+    expect((await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID(), workflow: '' })).status).toBe(400);
+    const unknown = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID(), workflow: 'absent' });
+    expect(unknown.status).toBe(400);
+    expect(delegationErrorResponseSchema.parse(await unknown.json())).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('absent') });
+  });
   it('validates and routes conversations while deriving sender from the authenticated credential', async () => {
     const { workerId } = await spawn();
     const input = { id: randomUUID(), recipientRunId: workerId, kind: 'request', text: 'Which file?' };
