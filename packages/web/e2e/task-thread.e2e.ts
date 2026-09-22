@@ -773,11 +773,10 @@ describe('responsive session composer', () => {
     browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
     const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
     const actions = [facts.controls.attach, facts.controls.dictation, facts.controls.archive, facts.controls.continue]
-    for (let i = 0; i < actions.length; i += 1) {
-      const action = actions[i]!
+    for (const [i, action] of actions.entries()) {
       expect(action.hit, `action ${i} center hit`).toBe(true)
-      for (let j = i + 1; j < actions.length; j += 1) {
-        expect(overlaps(action, actions[j]!), `actions ${i} and ${j} overlap`).toBe(false)
+      for (const [offset, other] of actions.slice(i + 1).entries()) {
+        expect(overlaps(action, other), `actions ${i} and ${i + offset + 1} overlap`).toBe(false)
       }
     }
     expect(facts.archiveWidth).toBeLessThanOrEqual(56)
@@ -790,7 +789,7 @@ describe('responsive session composer', () => {
     browser.setViewport(width, height)
     browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="composer-actions"] [aria-label="Continue"]')`)
-    browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
+    browser.evaluate(`document.documentElement.style.setProperty('--default-transition-duration', '0s'); document.documentElement.classList.toggle('light', ${theme === 'light'}); document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
     const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
     const { runner, model, effort, attach, dictation, archive, continue: submit } = facts.controls
 
@@ -827,10 +826,8 @@ describe('responsive session composer', () => {
       expect(rect.hit, `${name} center hit`).toBe(true)
     }
     const entries = Object.entries(facts.controls)
-    for (let i = 0; i < entries.length; i += 1) {
-      for (let j = i + 1; j < entries.length; j += 1) {
-        const [firstName, firstRect] = entries[i]!
-        const [secondName, secondRect] = entries[j]!
+    for (const [i, [firstName, firstRect]] of entries.entries()) {
+      for (const [secondName, secondRect] of entries.slice(i + 1)) {
         expect(overlaps(firstRect, secondRect), `${firstName} overlaps ${secondName}`).toBe(false)
       }
     }
@@ -843,6 +840,46 @@ describe('responsive session composer', () => {
     expect(facts.bottomGap).toBeGreaterThanOrEqual(0)
     expect(facts.bottomGap).toBeLessThanOrEqual(20)
     expect(facts.archiveLabel).toBe('Archive task')
+
+    // WCAG AA: small text 4.5:1; meaningful icons 3:1, sampled over their painted surfaces.
+    const textTargets: Array<[string, string]> = [
+      ['Runner value', '[data-slot="session-controls"] [aria-label="Runner"]'],
+      ['Runner label', '[data-slot="session-controls"] [aria-label="Runner"] .text-muted-foreground'],
+      ['Model value', '[data-slot="follow-up-model-pill"]'],
+      ['Model label', '[data-slot="follow-up-model-pill"] .text-muted-foreground'],
+      ['Effort value', '[data-slot="follow-up-effort-pill"]'],
+      ['Effort label', '[data-slot="follow-up-effort-pill"] .text-muted-foreground'],
+      ['Send', '[data-slot="composer-actions"] [aria-label="Continue"]'],
+    ]
+    if (width >= 768) textTargets.push(['Archive task', '[data-slot="composer-actions"] [aria-label="Archive task"]'])
+    const textSamples: Array<{ target: string } & ContrastSample> = []
+    for (const [name, selector] of textTargets) {
+      const sample = browser.evaluate(contrastSampleExpression(selector)) as ContrastSample
+      textSamples.push({ target: name, ...sample })
+      expect(sample.ratio, `${theme} ${width}px ${name} text contrast`).toBeGreaterThanOrEqual(4.5)
+    }
+    const iconTargets: Array<[string, string]> = [
+      ['Runner', '[data-slot="session-controls"] [aria-label="Runner"] svg:first-child'],
+      ['Model', '[data-slot="follow-up-model-pill"] svg:first-child'],
+      ['Effort', '[data-slot="follow-up-effort-pill"] svg:first-child'],
+      ['Attach files', '[data-slot="composer"] [aria-label="Attach files"] svg'],
+      ['Start dictation', '[data-slot="composer"] [aria-label="Start dictation"] svg'],
+      ['Archive task', '[data-slot="composer-actions"] [aria-label="Archive task"] svg'],
+      ['Send', '[data-slot="composer-actions"] [aria-label="Continue"] svg'],
+    ]
+    const iconSamples: Array<{ target: string } & ContrastSample> = []
+    for (const [name, selector] of iconTargets) {
+      const sample = browser.evaluate(contrastSampleExpression(selector)) as ContrastSample
+      iconSamples.push({ target: name, ...sample })
+      expect(sample.ratio, `${theme} ${width}px ${name} icon contrast`).toBeGreaterThanOrEqual(3)
+    }
+    mkdirSync(artifactsDir, { recursive: true })
+    writeFileSync(join(artifactsDir, `responsive-session-contrast-${width}-${theme}.json`), JSON.stringify({
+      viewport: { width, height }, theme,
+      minimumTextRatio: Math.min(...textSamples.map(({ ratio }) => ratio)),
+      minimumIconRatio: Math.min(...iconSamples.map(({ ratio }) => ratio)),
+      textSamples, iconSamples,
+    }, null, 2))
 
     browser.fill('[data-slot="composer"] textarea', 'Keep these follow-up instructions')
     const draft = browser.waitForValue(`document.querySelector('[data-slot="composer"] textarea')?.value === 'Keep these follow-up instructions' ? document.querySelector('[data-slot="composer"] textarea').value : null`)
