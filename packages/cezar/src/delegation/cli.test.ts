@@ -33,6 +33,7 @@ describe('bundled worker CLI', () => {
     expect(send.required).toEqual(expect.arrayContaining(['--id', '--kind']));
     expect(send.optional ?? []).not.toContain('--request-id');
     expect(help.usage.operations.find((op: { name: string }) => op.name === 'reply').required).toEqual(expect.arrayContaining(['--request-id']));
+    expect(help.usage.operations).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'inbox', positionals: 0 })]));
 
   });
   it.each(['-h', '--help'])('prints human family help for %s without a delegation session', async (flag) => {
@@ -47,7 +48,7 @@ describe('bundled worker CLI', () => {
     expect(help).not.toContain('invalid_input');
   });
   it.each(['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'collect', 'wait',
-    'cancel-wait', 'send', 'progress', 'follow-up', 'reply', 'conversation', 'wait-requests', 'cancel-request'])(
+    'cancel-wait', 'send', 'progress', 'follow-up', 'reply', 'conversation', 'inbox', 'wait-requests', 'cancel-request'])(
     'prints human %s help before validating required arguments or accessing transport', async (operation) => {
       for (const flag of ['-h', '--help']) {
         expect(await runWorkerCommand([operation, flag], {})).toBe(0);
@@ -70,6 +71,81 @@ describe('bundled worker CLI', () => {
     expect(waitHelp).toContain('--request');
     expect(waitHelp).toContain('--mode');
     expect(waitHelp).toContain('--timeout-seconds');
+  });
+  it('prints one inbox snapshot before ACK and rejects positional IDs', async () => {
+    const id = randomUUID(), receiptId = randomUUID();
+    const batch = { messages: [{ id, senderRunId: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Ready', createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [], receiptId, expiresAt: new Date(Date.now() + 120_000).toISOString() };
+    const calls: string[] = [];
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const path = String(url).split('/').at(-1)!; calls.push(path);
+      if (path === 'inbox') return new Response(JSON.stringify(batch));
+      expect(JSON.parse(String(init?.body))).toEqual({ receiptId });
+      return new Response(JSON.stringify({ receiptId, status: 'acknowledged' }));
+    });
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string, callback?: (error?: Error | null) => void) => {
+      calls.push(`stdout:${String(chunk).includes(id)}`); callback?.(); return true;
+    }) as typeof process.stdout.write);
+    expect(await runWorkerCommand(['inbox'], env)).toBe(0);
+    expect(calls).toEqual(['inbox', 'stdout:true', 'ack']);
+    expect(await runWorkerCommand(['inbox', f.parent.id], env)).toBe(1);
+    expect(json().code).toBe('invalid_input');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    write.mockRestore();
+  });
+  it('releases a receipt when stdout completion fails and never ACKs it', async () => {
+    const receiptId = randomUUID(), paths: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async url => {
+      const path = String(url).split('/').at(-1)!; paths.push(path);
+      return new Response(JSON.stringify(path === 'inbox' ? { messages: [{ id: randomUUID(), senderRunId: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Ready', createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [], receiptId, expiresAt: new Date(Date.now() + 120_000).toISOString() } : { receiptId, status: 'released' }));
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation(((_chunk: string, callback?: (error?: Error | null) => void) => { callback?.(Error('pipe closed')); return false; }) as typeof process.stdout.write);
+    expect(await runWorkerCommand(['inbox'], env)).toBe(1);
+    expect(paths).toEqual(['inbox', 'release']);
+    expect(json().code).toBe('unavailable_transport');
+  });
+  it('prints stable IDs but reports ACK failure as nonzero without claiming success', async () => {
+    const id = randomUUID(), receiptId = randomUUID(), paths: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async url => {
+      const path = String(url).split('/').at(-1)!; paths.push(path);
+      return path === 'inbox' ? new Response(JSON.stringify({ messages: [{ id, senderRunId: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Ready', createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [], receiptId, expiresAt: new Date(Date.now() + 120_000).toISOString() }))
+        : new Response(JSON.stringify({ code: 'incompatible_state', error: 'disk unavailable' }), { status: 409 });
+    });
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string, callback?: (error?: Error | null) => void) => { written.push(String(chunk)); callback?.(); return true; }) as typeof process.stdout.write);
+    expect(await runWorkerCommand(['inbox'], env)).toBe(1);
+    expect(written.join('')).toContain(id);
+    expect(paths[0]).toBe('inbox'); expect(paths.slice(1)).toEqual(['ack', 'ack']);
+    expect(json()).toMatchObject({ code: 'unavailable_transport' });
+  });
+  it('does not retry a denied ACK with a revoked session', async () => {
+    const receiptId = randomUUID(), paths: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async url => {
+      const path = String(url).split('/').at(-1)!; paths.push(path);
+      return path === 'inbox' ? new Response(JSON.stringify({ messages: [{ id: randomUUID(), senderRunId: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Ready', createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [], receiptId, expiresAt: new Date(Date.now() + 120_000).toISOString() }))
+        : new Response(JSON.stringify({ code: 'denied_scope', error: 'Worker scope denied' }), { status: 403 });
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation(((_chunk: string, callback?: (error?: Error | null) => void) => { callback?.(); return true; }) as typeof process.stdout.write);
+    expect(await runWorkerCommand(['inbox'], env)).toBe(1);
+    expect(paths).toEqual(['inbox', 'ack']);
+    expect(json().code).toBe('unavailable_transport');
+  });
+  it('can replay the same stable message after an unacknowledged receipt expires', async () => {
+    const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
+    f.store.updateRun(workerId, { status: 'running' });
+    const worker = f.credentials.authenticate(f.credentials.issue('project', workerId, randomUUID()))!;
+    const id = randomUUID();
+    await f.service.send(worker, { id, recipientRunId: f.parent.id, kind: 'progress', text: 'Replay me', timeoutSeconds: 600 });
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(((_chunk: string, callback?: (error?: Error | null) => void) => { callback?.(); return true; }) as typeof process.stdout.write);
+    const failedAck = vi.spyOn(f.service, 'ackInbox').mockRejectedValue(Error('disk unavailable'));
+    expect(await runWorkerCommand(['inbox'], env)).toBe(1);
+    expect(f.store.getRun(f.parent.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt).toBeUndefined();
+    failedAck.mockRestore();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(Date.now() + 121_000));
+      expect(await runWorkerCommand(['inbox'], env)).toBe(0);
+      expect(f.store.getRun(f.parent.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt).toBeTruthy();
+    } finally { vi.useRealTimers(); write.mockRestore(); }
   });
   it('does not interpret literal help text as a help request', async () => {
     for (const args of [

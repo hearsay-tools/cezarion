@@ -2,7 +2,7 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { ZodError } from 'zod';
 import { z } from 'zod';
-import { conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, requestWaitRequestSchema, workerCancelWaitRequestSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
+import { conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema, workerCancelWaitRequestSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
 import { jsonZodValidator, paramZodValidator, queryZodValidator } from '../server/validators.ts';
 import { isLoopbackHostHeader } from '../server/capabilities.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
@@ -51,6 +51,9 @@ export function createDelegationRoutes(service: DelegationService, credentials: 
     .post('/follow-up', jsonZodValidator(conversationSendRequestSchema, invalid), async c => c.json(await service.followUp(c.get('caller'), c.req.valid('json')), 200))
     .post('/reply', jsonZodValidator(conversationSendRequestSchema, invalid), async c => c.json(await service.reply(c.get('caller'), c.req.valid('json')), 200))
     .post('/conversation', jsonZodValidator(conversationInspectRequestSchema, invalid), async c => c.json(await service.conversation(c.get('caller'), c.req.valid('json')), 200))
+    .post('/inbox', jsonZodValidator(workerEmptyRequestSchema, invalid), async c => c.json(await service.inbox(c.get('caller')), 200))
+    .post('/inbox/ack', jsonZodValidator(inboxReceiptRequestSchema, invalid), async c => c.json(await service.ackInbox(c.get('caller'), c.req.valid('json')), 200))
+    .post('/inbox/release', jsonZodValidator(inboxReceiptRequestSchema, invalid), async c => c.json(await service.releaseInbox(c.get('caller'), c.req.valid('json')), 200))
     .post('/cancel-request', jsonZodValidator(conversationCancelRequestSchema, invalid), async c => c.json(await service.cancelRequest(c.get('caller'), c.req.valid('json')), 200))
     .get('/:workerId', paramZodValidator(workerParamsSchema, invalid), async c => c.json(await service.inspect(c.get('caller'), c.req.valid('param')), 200))
     .post('/:workerId/collect', paramZodValidator(workerParamsSchema, invalid), jsonZodValidator(workerEmptyRequestSchema, { ...invalid, absent: {}, malformed: null }), async c => c.json(await service.collect(c.get('caller'), c.req.valid('param')), 200))

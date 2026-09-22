@@ -5,8 +5,8 @@ import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, requestWaitRequestSchema,
-  type ConversationSendRequest, type ConversationSendResult, type ConversationInspectRequest, type ConversationCancelRequest, type ConversationState, type RequestWaitRequest, type RequestOutcome,
+  conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema,
+  type ConversationSendRequest, type ConversationSendResult, type ConversationInspectRequest, type ConversationInspectResult, type ConversationCancelRequest, type ConversationState, type InboxReserveResult, type InboxReceiptRequest, type InboxReceiptResult, type RequestWaitRequest, type RequestOutcome,
   workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerCancelWaitRequestSchema, type WorkerCancelWaitRequest,
   type WorkerCollectedResult, type WorkerDestroy, type WorkerDestroyResult, type WorkerInspection, type WorkerOperation,
   type WorkerParams, type WorkerSpawnRequest, type WorkerSteerRequest, type WorkerWaitRequest,
@@ -219,13 +219,70 @@ export class DelegationService {
     if (value.kind !== 'reply') throw new DelegationPolicyError('invalid_input', 'Expected reply');
     return this.send(caller, value);
   }
-  async conversation(caller: Caller, value: ConversationInspectRequest): Promise<ConversationState> {
+  async conversation(caller: Caller, value: ConversationInspectRequest): Promise<ConversationInspectResult> {
     const request = conversationInspectRequestSchema.parse(value);
     const { project, root, sender, recipient } = this.conversationPair(caller, request.recipientRunId);
     const state = this.currentConversation(project, root);
     projectConversationEvents(project.store, root);
     const messages = state.messages.filter(message => (message.senderRunId === sender.id && message.recipientRunId === recipient.id) || (message.senderRunId === recipient.id && message.recipientRunId === sender.id));
-    return { messages, outcomes: state.outcomes.filter(outcome => messages.some(message => message.id === outcome.requestId)) };
+    const inputs = project.store.getRun(caller.runId)?.agentInputs ?? [];
+    const unread = messages.some(message => message.recipientRunId === caller.runId &&
+      inputs.some(input => input.id === message.id && !input.deliveredAt));
+    return { messages, outcomes: state.outcomes.filter(outcome => messages.some(message => message.id === outcome.requestId)),
+      ...(unread ? { hint: 'This history includes unread messages. Run worker inbox to receive and mark them delivered. Inbox will show them again intentionally; after acknowledgement, Cezar will not queue them again for normal end-of-turn delivery.' } : {}) };
+  }
+  async inbox(caller: Caller): Promise<InboxReserveResult> {
+    const project = this.context(caller);
+    const run = project.store.getRun(caller.runId);
+    if (!run || (run.delegation?.role !== 'root' && run.delegation?.role !== 'worker')) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    const selected: { message: ConversationState['messages'][number]; outcome?: RequestOutcome }[] = [];
+    let characters = 0;
+    const states = new Map<string, ConversationState>();
+    for (const input of run.agentInputs ?? []) {
+      if (!input.conversation || input.conversation.recipientRunId !== run.id || !project.manager.canClaimInboxInput(run.id, input.id)) continue;
+      const senderId = input.conversation.senderRunId;
+      let pair: ReturnType<DelegationService['conversationPair']>;
+      try { pair = this.conversationPair(caller, senderId); } catch (error) {
+        if (error instanceof DelegationPolicyError && error.code === 'denied_scope') continue;
+        throw error;
+      }
+      let state = states.get(pair.root.id);
+      if (!state) { state = this.currentConversation(project, pair.root); states.set(pair.root.id, state); }
+      const message = state.messages.find(entry => entry.id === input.id && entry.state === 'accepted' && entry.senderRunId === senderId && entry.recipientRunId === run.id);
+      if (!message) continue;
+      if (selected.length >= 32 || (selected.length > 0 && characters + message.text.length > 100_000)) break;
+      characters += message.text.length;
+      selected.push({ message, outcome: state.outcomes.find(entry => entry.requestId === (message.requestId ?? message.id)) });
+    }
+    if (!selected.length) return { messages: [], outcomes: [] };
+    const receipt = project.manager.reserveInboxInputs(run.id, caller.generation, selected.map(entry => entry.message.id));
+    if (!receipt) return { messages: [], outcomes: [] };
+    const claimed = new Set(receipt.inputIds);
+    const returned = selected.filter(entry => claimed.has(entry.message.id));
+    if (!returned.length) throw new DelegationPolicyError('incompatible_state', 'Inbox claim returned no messages');
+    const outcomes = [...new Map(returned.flatMap(entry => entry.outcome ? [[entry.outcome.requestId, entry.outcome] as const] : [])).values()];
+    return { messages: returned.map(entry => entry.message), outcomes,
+      receiptId: receipt.receiptId, expiresAt: receipt.expiresAt };
+  }
+  private inboxReceipt(caller: Caller, value: InboxReceiptRequest) {
+    const { receiptId } = inboxReceiptRequestSchema.parse(value);
+    const project = this.context(caller);
+    const run = project.store.getRun(caller.runId);
+    const members = run?.agentInputs?.filter(input => input.inboxClaim?.receiptId === receiptId && input.inboxClaim.generation === caller.generation) ?? [];
+    if (!members.length || members.some(input => !input.conversation || input.conversation.recipientRunId !== caller.runId))
+      throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    for (const input of members) this.conversationPair(caller, input.conversation!.senderRunId);
+    return { project, receiptId };
+  }
+  async ackInbox(caller: Caller, value: InboxReceiptRequest): Promise<InboxReceiptResult> {
+    const { project, receiptId } = this.inboxReceipt(caller, value);
+    try { return { receiptId, status: project.manager.acknowledgeInbox(caller.runId, caller.generation, receiptId) }; }
+    catch { throw new DelegationPolicyError('incompatible_state', 'Inbox acknowledgement failed; retry the same receipt while it remains live'); }
+  }
+  async releaseInbox(caller: Caller, value: InboxReceiptRequest): Promise<InboxReceiptResult> {
+    const { project, receiptId } = this.inboxReceipt(caller, value);
+    try { return { receiptId, status: project.manager.releaseInbox(caller.runId, caller.generation, receiptId) }; }
+    catch { throw new DelegationPolicyError('incompatible_state', 'Inbox release failed'); }
   }
   private ownRequest(caller: Caller, requestId: string) {
     const project = this.context(caller); const sender = project.store.getRun(caller.runId);
