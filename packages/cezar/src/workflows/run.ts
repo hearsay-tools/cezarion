@@ -1052,14 +1052,15 @@ export class RunManager {
         run.model !== identity.model || run.effort !== identity.effort) {
       throw new WorkerIdentityError('Accepted worker execution identity does not match its run');
     }
-    boundWorkerAccountEnv(identity.account, buildChildEnv({ backend: identity.account.provider }));
-    if (stepId !== undefined) {
-      const step = workerStepIdentity(identity, stepId);
-      if (agentModelsLocked(this.repoRoot) && (step.model !== undefined || step.effort !== undefined)) {
-        throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
-      }
-      boundWorkerAccountEnv(step.account, buildChildEnv({ backend: step.account.provider }));
+    // Availability is checked for the account about to be USED: the selected step's entry when
+    // there is one, the run-level (first-step) account otherwise. A first-step login removed
+    // after its step finished must not stop a later step whose own account is intact (#465).
+    const step = stepId === undefined ? undefined : workerStepIdentity(identity, stepId);
+    const account = step?.account ?? identity.account;
+    if (step && agentModelsLocked(this.repoRoot) && (step.model !== undefined || step.effort !== undefined)) {
+      throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
     }
+    boundWorkerAccountEnv(account, buildChildEnv({ backend: account.provider }));
     return identity;
   }
 
