@@ -1053,14 +1053,17 @@ export class RunManager {
       throw new WorkerIdentityError('Accepted worker execution identity does not match its run');
     }
     // Availability is checked for the account about to be USED: the selected step's entry when
-    // there is one, the run-level (first-step) account otherwise. A first-step login removed
-    // after its step finished must not stop a later step whose own account is intact (#465).
+    // there is one, and the single run-level account only for a legacy identity that has no
+    // per-step list. A per-step identity checked without a step (the evidence-only calls in
+    // `execute`, `runContinuation` and `ownedJob`) binds nothing here — the launch resolves its
+    // step and binds that account — so a first-step login removed after its step finished never
+    // stops a later step, a Continue or a recovery whose own account is intact (#465).
     const step = stepId === undefined ? undefined : workerStepIdentity(identity, stepId);
-    const account = step?.account ?? identity.account;
     if (step && agentModelsLocked(this.repoRoot) && (step.model !== undefined || step.effort !== undefined)) {
       throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
     }
-    boundWorkerAccountEnv(account, buildChildEnv({ backend: account.provider }));
+    const account = step?.account ?? (identity.steps === undefined ? identity.account : undefined);
+    if (account) boundWorkerAccountEnv(account, buildChildEnv({ backend: account.provider }));
     return identity;
   }
 

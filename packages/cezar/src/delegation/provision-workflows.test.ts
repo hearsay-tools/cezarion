@@ -271,6 +271,30 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(sessions[2]!.spec.userPrompt).toContain('Review: child');
     expect(sessions[2]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
   });
+  // Round 2 of #465: a completed mixed chain whose FIRST step's login is gone must still Continue
+  // and recover into its LAST step's account, live and across a restart.
+  async function finishedMixedChain() {
+    const codexHome = join(f.root, 'codex-account'); mkdirSync(codexHome); vi.stubEnv('CODEX_HOME', codexHome);
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'mixed.yaml'), ['name: mixed', 'steps:',
+      '  - id: implement', '    prompt: "Implement: {{task}}"', '    runner: codex',
+      '  - id: review', '    prompt: "Review: {{task}}"', '    runner: claude'].join('\n'));
+    const a = await acceptIdentityWorker(undefined, undefined, { workflow: 'mixed' });
+    await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);
+    sessions[1]!.finish('implemented'); await until(() => sessions.length === 3);
+    sessions[2]!.emit({ type: 'session', sessionId: 'review-session' }); sessions[2]!.finish('reviewed');
+    expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    rmSync(codexHome, { recursive: true, force: true });
+    return { a, codexHome };
+  }
+  it('continues a mixed chain into its last step\'s account after the first step\'s account home is gone (#465 review)', async () => {
+    const { a } = await finishedMixedChain();
+    expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
+    await until(() => sessions.length === 4 || f.store.getRun(a.child.workerId)?.status === 'failed');
+    expect(f.store.getRun(a.child.workerId)?.error).toBeUndefined();
+    expect(sessions[3]!.spec).toMatchObject({ resume: true, sessionId: 'review-session' });
+    expect(sessions[3]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+  });
   it.each(['queued', 'restart', 'continue'] as const)('still runs a single-runner worker whose identity evidence predates per-step entries on %s (#452)', async mode => {
     const a = await acceptIdentityWorker();
     // Evidence written before #452 carries only the run-level fields.
