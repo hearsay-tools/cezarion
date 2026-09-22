@@ -208,6 +208,130 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(sessions.at(-1)!.spec.env?.CODEX_HOME).toBe(home);
     expect(sessions.at(-1)!.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN);
   });
+  it.each(['queued', 'restart', 'continue'] as const)('runs a mixed-runner chain with each agent step under its own account, model and grants on %s (#452)', async mode => {
+    const codexHome = join(f.root, 'codex-account'); mkdirSync(codexHome); vi.stubEnv('CODEX_HOME', codexHome);
+    writeFileSync(join(codexHome, 'config.toml'), 'model = "gpt-5.1-codex"');
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'mixed.yaml'), ['name: mixed', 'steps:',
+      '  - id: implement', '    prompt: "Implement: {{task}}"', '    runner: codex', '    allowedTools: [Read]',
+      '  - id: review', '    prompt: "Review: {{task}}"', '    runner: claude'].join('\n'));
+    const a = await acceptIdentityWorker(undefined, undefined, { workflow: 'mixed' });
+    const worker = f.store.getRun(a.child.workerId)!;
+    // Run-level columns follow the first agent step; the identity pins both.
+    expect(worker).toMatchObject({ runner: 'codex', model: 'gpt-5.1-codex', agentProfile: 'default' });
+    expect(worker.effort).toBeUndefined();
+    expect(f.store.readWorkerIdentity(worker.id)).toMatchObject({ account: { provider: 'codex', homePath: codexHome }, steps: [
+      { stepId: 'implement', account: { provider: 'codex', profileId: 'default', homePath: codexHome }, model: 'gpt-5.1-codex', grants: { allowedTools: ['Read'] } },
+      { stepId: 'review', account: { provider: 'claude', profileId: 'account-a', homePath: a.home }, model: 'haiku', effort: 'high' },
+    ] });
+    const { store } = await launchAccepted(a, mode === 'continue' ? 'queued' : mode);
+    await until(() => sessions.length === 2);
+    const implement = sessions[1]!.spec;
+    expect(implement.userPrompt).toContain('Implement: child');
+    expect(implement).toMatchObject({ model: 'gpt-5.1-codex', allowedTools: ['Read'] });
+    expect(implement.effort).toBeUndefined();
+    expect(implement.env?.CODEX_HOME).toBe(codexHome);
+    expect(implement.env?.CLAUDE_CONFIG_DIR).not.toBe(a.home);
+    sessions[1]!.finish('implemented');
+    await until(() => sessions.length === 3);
+    const review = sessions[2]!.spec;
+    expect(review.userPrompt).toContain('Review: child');
+    expect(review).toMatchObject({ model: 'haiku', effort: 'high' });
+    expect(review.allowedTools).toEqual(sessions[0]!.spec.allowedTools);
+    expect(review.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+    expect(review.env?.CODEX_HOME).not.toBe(codexHome);
+    expect(store.getRun(worker.id)?.steps.map(step => ({ id: step.id, backend: step.backend, profileId: step.profileId }))).toEqual([
+      { id: 'implement', backend: 'codex', profileId: 'default' }, { id: 'review', backend: 'claude', profileId: 'account-a' },
+    ]);
+    if (mode !== 'continue') return;
+    sessions[2]!.emit({ type: 'session', sessionId: 'review-session' }); sessions[2]!.finish('reviewed');
+    expect(await f.manager.awaitRunTermination(worker.id, 15000)).toBe(true);
+    // A Continue extends the LAST agent step, so it resumes under that step's identity, not the run-level codex one.
+    expect(f.manager.continueRun(worker.id, { text: 'again', runner: 'codex' })).toMatchObject({ ok: false, error: expect.stringContaining('identity') });
+    expect(f.manager.continueRun(worker.id, { text: 'again' }).ok).toBe(true);
+    await until(() => sessions.length === 4);
+    expect(sessions[3]!.spec).toMatchObject({ model: 'haiku', effort: 'high', resume: true, sessionId: 'review-session' });
+    expect(sessions[3]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+    expect(sessions[3]!.spec.env?.CODEX_HOME).not.toBe(codexHome);
+  });
+  it('launches a later step under its own account even after the first step\'s account home is gone (#465 review)', async () => {
+    const codexHome = join(f.root, 'codex-account'); mkdirSync(codexHome); vi.stubEnv('CODEX_HOME', codexHome);
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'mixed.yaml'), ['name: mixed', 'steps:',
+      '  - id: implement', '    prompt: "Implement: {{task}}"', '    runner: codex',
+      '  - id: review', '    prompt: "Review: {{task}}"', '    runner: claude'].join('\n'));
+    const a = await acceptIdentityWorker(undefined, undefined, { workflow: 'mixed' });
+    await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);
+    expect(sessions[1]!.spec.env?.CODEX_HOME).toBe(codexHome);
+    // The codex login is removed once its step is over. The claude step's own pinned account is intact.
+    rmSync(codexHome, { recursive: true, force: true });
+    sessions[1]!.finish('implemented');
+    await until(() => sessions.length === 3 || f.store.getRun(a.child.workerId)?.status === 'failed');
+    expect(f.store.getRun(a.child.workerId)?.error).toBeUndefined();
+    expect(sessions[2]!.spec.userPrompt).toContain('Review: child');
+    expect(sessions[2]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+  });
+  // Round 2 of #465: a completed mixed chain whose FIRST step's login is gone must still Continue
+  // and recover into its LAST step's account, live and across a restart.
+  async function finishedMixedChain() {
+    const codexHome = join(f.root, 'codex-account'); mkdirSync(codexHome); vi.stubEnv('CODEX_HOME', codexHome);
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'mixed.yaml'), ['name: mixed', 'steps:',
+      '  - id: implement', '    prompt: "Implement: {{task}}"', '    runner: codex',
+      '  - id: review', '    prompt: "Review: {{task}}"', '    runner: claude'].join('\n'));
+    const a = await acceptIdentityWorker(undefined, undefined, { workflow: 'mixed' });
+    await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);
+    sessions[1]!.finish('implemented'); await until(() => sessions.length === 3);
+    sessions[2]!.emit({ type: 'session', sessionId: 'review-session' }); sessions[2]!.finish('reviewed');
+    expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    rmSync(codexHome, { recursive: true, force: true });
+    return { a, codexHome };
+  }
+  it('continues a mixed chain into its last step\'s account after the first step\'s account home is gone (#465 review)', async () => {
+    const { a } = await finishedMixedChain();
+    expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
+    await until(() => sessions.length === 4 || f.store.getRun(a.child.workerId)?.status === 'failed');
+    expect(f.store.getRun(a.child.workerId)?.error).toBeUndefined();
+    expect(sessions[3]!.spec).toMatchObject({ resume: true, sessionId: 'review-session' });
+    expect(sessions[3]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+  });
+  it('recovers a queued continuation of a mixed chain onto its last step\'s runner and session (#465 review)', async () => {
+    const { a } = await finishedMixedChain();
+    // The durable shape a crash leaves behind after a continuation was accepted but not yet
+    // launched: a pending synthetic `continue-1` step and its message, on a `queued` record.
+    const worker = f.store.getRun(a.child.workerId)!;
+    f.store.addStep(worker.id, { id: 'continue-1', name: 'Continue', kind: 'agent', synthetic: 'continuation' });
+    f.store.updateRun(worker.id, { status: 'queued', finishedAt: undefined,
+      continuationMessage: { id: 'continue-1', text: 'again', origin: 'human', createdAt: new Date().toISOString() } });
+    f.manager.dispose(); sessions[0]!.finish();
+    f.store.updateRun(a.parent.id, { status: 'waiting' }); f.store.flush();
+    const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    const manager = new RunManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
+    controller.attachProject({ id: 'restarted', root: f.root, store, manager });
+    await manager.recover();
+    await until(() => sessions.length === 4 || store.getRun(worker.id)?.status === 'failed');
+    expect(store.getRun(worker.id)?.error).toBeUndefined();
+    // Reconstructed from the review step's pinned identity, not the run-level codex one: the
+    // claude session is resumed, under the claude account.
+    expect(sessions[3]!.spec).toMatchObject({ resume: true, sessionId: 'review-session' });
+    expect(sessions[3]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+    expect(sessions[3]!.spec.env?.CODEX_HOME).toBeUndefined();
+  });
+  it.each(['queued', 'restart', 'continue'] as const)('still runs a single-runner worker whose identity evidence predates per-step entries on %s (#452)', async mode => {
+    const a = await acceptIdentityWorker();
+    // Evidence written before #452 carries only the run-level fields.
+    const path = join(f.root, '.ai/cezar/runs', `${a.child.workerId}.identity.json`);
+    const { steps: _steps, ...legacy } = JSON.parse(readFileSync(path, 'utf8'));
+    expect(_steps).toHaveLength(1); writeFileSync(path, JSON.stringify(legacy));
+    expect(f.store.readWorkerIdentity(a.child.workerId)).not.toHaveProperty('steps');
+    await launchAccepted(a, mode); await until(() => sessions.length === 2);
+    if (mode === 'continue') {
+      sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+      expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true); await until(() => sessions.length === 3);
+    }
+    expect(sessions.at(-1)!.spec).toMatchObject({ model: 'haiku', effort: 'high' });
+    expect(sessions.at(-1)!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+  });
   it.each(['queued', 'restart', 'continue'] as const)('rejects lost accepted input recipes on %s', async mode => {
     const a = await acceptIdentityWorker(undefined, undefined, { context: { text: 'accepted context' } });
     if (mode === 'continue') {

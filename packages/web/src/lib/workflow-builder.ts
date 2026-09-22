@@ -17,7 +17,7 @@ export const WB_MAX_STEPS = 8
 /**
  * Client mirror of the server's `skillStackOf()`: when every step is a plain "apply this
  * skill to the task" agent step, the workflow serializes in the portable compact `skills:`
- * form. Anything richer (checks, custom prompts, per-step models/tools, loops) answers null
+ * form. Anything richer (checks, custom prompts, per-step models/accounts/tools, loops) answers null
  * and serializes as full `steps:`.
  */
 export function skillStack(steps: readonly WorkflowStepDef[]): string[] | null {
@@ -26,7 +26,7 @@ export function skillStack(steps: readonly WorkflowStepDef[]): string[] | null {
     if (s.command || !s.skill) return null
     if (s.prompt !== undefined && s.prompt !== '{{task}}') return null
     if (s.name !== undefined && s.name !== s.skill) return null
-    if (s.model || s.effort !== undefined || s.runner || s.allowedTools || s.bashAllowlist || s.onFail) return null
+    if (s.model || s.effort !== undefined || s.runner || s.agentProfile || s.allowedTools || s.bashAllowlist || s.onFail) return null
     skills.push(s.skill)
   }
   return skills.length ? skills : null
@@ -116,6 +116,7 @@ export function workflowYaml(
       if (s.model) lines.push(`    model: ${yamlScalar(s.model)}`)
       if (s.effort !== undefined) lines.push(`    effort: ${yamlScalar(s.effort)}`)
       if (s.runner) lines.push(`    runner: ${yamlScalar(s.runner)}`)
+      if (s.agentProfile) lines.push(`    agentProfile: ${yamlScalar(s.agentProfile)}`)
       if (s.allowedTools) lines.push(`    allowedTools: [${s.allowedTools.map(yamlScalar).join(', ')}]`)
       if (s.bashAllowlist) lines.push(`    bashAllowlist: [${s.bashAllowlist.map(yamlScalar).join(', ')}]`)
       if (s.command) lines.push(...yamlBlock('command', s.command, 4))

@@ -84,6 +84,16 @@ test('a per-step effort loads but cannot compact into the lossless skills shorth
   );
 });
 
+test('a per-step agentProfile loads but cannot compact into the lossless skills shorthand (#452)', () => {
+  const parsed = workflowFileSchema.parse({
+    name: 'work-account-review',
+    steps: [{ id: 'review', skill: 'review', prompt: '{{task}}', agentProfile: 'work' }],
+  });
+
+  assert.equal(parsed.steps?.[0]?.agentProfile, 'work');
+  assert.equal(skillStackOf(parsed.steps ?? []), null);
+});
+
 // #410: a chain of 2+ skills gave every step the SAME task text and shared
 // one run-level handoff journal — a later step's fresh session had nothing
 // telling it "an earlier step's own completion doesn't cover you", so it

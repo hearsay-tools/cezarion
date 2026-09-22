@@ -19,7 +19,7 @@
  * above the seam.
  */
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentInputEventSchema, type AgentInput } from '@open-mercato/cezar-contract';
@@ -37,6 +37,9 @@ import {
 } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
 import { appendTurnText } from '../workflows/run.ts';
+import { supportsProfiles } from './agent-profiles.ts';
+import type { WorkflowDef } from '../workflows/types.ts';
+import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import {
   withOwnedInputRun,
   promptFor,
@@ -639,6 +642,38 @@ describe('harness parity — owned input run tier', () => {
         if (run.delegation?.role !== 'worker') throw new Error('expected worker');
         expect(readFileSync(cwdFile, 'utf8')).toBe(run.delegation.workspace.path);
       }, { workflowDef });
+    }, 60_000);
+
+    it(`${backend} R14 runs an accepted mixed-runner chain under per-step identity, each step on its own pinned account (#452)`, async () => {
+      const other = RUNNER_IDS[(RUNNER_IDS.indexOf(backend) + 1) % RUNNER_IDS.length]!;
+      const homes = realpathSync(mkdtempSync(join(tmpdir(), 'cez-parity-accounts-')));
+      // What acceptance captures for a default account: a relocated home for the providers that
+      // have one (never the developer's real login), a bare provider marker for the rest.
+      const binding = (provider: RunnerId): WorkerAccountBinding => {
+        if (!supportsProfiles(provider)) return { provider, profileId: 'default' };
+        const homePath = join(homes, provider); mkdirSync(homePath, { recursive: true });
+        return { provider, profileId: 'default', homePath, ...(provider === 'claude' ? { claudeLayout: { kind: 'relocated' } } : {}) };
+      };
+      const workflowDef: WorkflowDef = { name: 'mixed', source: 'file', path: '.ai/cezar/workflows/mixed.yaml', steps: [
+        { id: 'first', prompt: promptFor(backend, 'done'), runner: backend, agentProfile: 'default' },
+        { id: 'second', prompt: promptFor(other, 'done'), runner: other, agentProfile: 'default' },
+      ] };
+      const identity: WorkerExecutionIdentity = { kind: 'accepted', account: binding(backend), grants: {}, workflowHash: workerWorkflowHash(workflowDef), steps: [
+        { stepId: 'first', account: binding(backend), grants: {} }, { stepId: 'second', account: binding(other), grants: {} },
+      ] };
+      try {
+        await withOwnedInputRun(backend, 'done', async ({ store, manager, runId }) => {
+          manager.enqueueOwnedRun(runId);
+          await waitFor(() => !manager.isActive(runId), 30_000);
+          const run = store.getRun(runId)!;
+          expect(run.error).toBeUndefined();
+          // Each step launched on ITS runner under ITS pinned account; the run-level runner is the first step's.
+          expect(run.steps.map(step => ({ id: step.id, status: step.status, backend: step.backend, profileId: step.profileId }))).toEqual([
+            { id: 'first', status: 'done', backend, profileId: 'default' }, { id: 'second', status: 'done', backend: other, profileId: 'default' },
+          ]);
+          expect(run.runner).toBe(backend);
+        }, { workflowDef, identity, agentProfile: 'default', extraBackends: [other] });
+      } finally { rmSync(homes, { recursive: true, force: true }); }
     }, 60_000);
 
     it(`${backend} R11 post-send checkpoint failure interrupts and reports failure without dropping input`, async () => {

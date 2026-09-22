@@ -52,6 +52,7 @@ describe('skillStack', () => {
     ['a per-step model', { ...stackStep('a'), model: 'opus' }],
     ['a per-step effort', { ...stackStep('a'), effort: 'high' }],
     ['a per-step runner', { ...stackStep('a'), runner: 'codex' }],
+    ['a per-step agentProfile', { ...stackStep('a'), agentProfile: 'work' }],
     ['an onFail loop', { ...stackStep('a'), onFail: { retry: 'a', max: 2 } }],
     ['a plain prompt step (no skill)', { id: 'p', prompt: '{{task}}' }],
   ])('anything richer — %s — forces the full steps form', (_reason, step) => {
@@ -162,6 +163,17 @@ describe('workflowYaml', () => {
       steps: [{ id: 'fix', skill: 'fix', prompt: '{{task}}', effort: 'high' }],
     })
     expect(saveBody('focused-fix', '', [step])).toEqual({ name: 'focused-fix', steps: [step] })
+  })
+
+  it('a per-step agentProfile round-trips in the full steps form (#452)', () => {
+    const step = { ...stackStep('review'), runner: 'codex' as const, agentProfile: 'work' }
+    const text = workflowYaml('work-review', '', [step])
+
+    expect(parse(text)).toEqual({
+      name: 'work-review',
+      steps: [{ id: 'review', skill: 'review', prompt: '{{task}}', runner: 'codex', agentProfile: 'work' }],
+    })
+    expect(saveBody('work-review', '', [step])).toEqual({ name: 'work-review', steps: [step] })
   })
 
   it('quotes scalars YAML would mistype and keeps plain ones bare', () => {

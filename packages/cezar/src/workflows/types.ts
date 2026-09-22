@@ -29,6 +29,9 @@ export const workflowStepSchema = z
      *  has ever been able to write the legacy id THERE either, because this same enum was
      *  the only way in: there is no legacy shape to keep parseable. */
     runner: z.enum(RUNNER_IDS).optional(),
+    /** Agent account id for this step (spec 2026-07-29-agent-profiles). An owned worker resolves
+     *  and pins it per step at spawn (#452); an id the registry does not know is refused there. */
+    agentProfile: z.string().min(1).max(64).optional(),
     allowedTools: z.array(z.string()).optional(),
     bashAllowlist: z.array(z.string()).optional(),
     // check step
@@ -108,7 +111,8 @@ export function normalizeWorkflowDoc(doc: WorkflowDoc): {
  * The inverse of `skillsToSteps`: when every step is a plain "apply this
  * skill to the task" agent step, return the skill list — the workflow can be
  * written in the portable compact form. Anything richer (checks, custom
- * prompts, per-step models/tools, loops) returns null.
+ * prompts, per-step models/accounts/tools, loops) returns null — the compact
+ * form carries skill names only, so any other field would be dropped on save.
  */
 export function skillStackOf(steps: WorkflowStepDef[]): string[] | null {
   const skills: string[] = [];
@@ -116,7 +120,7 @@ export function skillStackOf(steps: WorkflowStepDef[]): string[] | null {
     if (stepKind(s) !== 'agent' || !s.skill) return null;
     if (s.prompt !== undefined && s.prompt !== '{{task}}') return null;
     if (s.name !== undefined && s.name !== s.skill) return null;
-    if (s.model || s.effort !== undefined || s.runner || s.allowedTools || s.bashAllowlist || s.onFail) return null;
+    if (s.model || s.effort !== undefined || s.runner || s.agentProfile || s.allowedTools || s.bashAllowlist || s.onFail) return null;
     skills.push(s.skill);
   }
   return skills.length ? skills : null;

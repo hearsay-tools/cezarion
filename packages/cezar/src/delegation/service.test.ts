@@ -5,6 +5,7 @@ import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
+import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
 import { fixture } from './service.testkit.ts';
@@ -113,15 +114,75 @@ describe('delegation service durable authority', () => {
       expect(f.store.getRun(workerId)).toMatchObject({ runner: 'codex', workflowDef: { steps: [{ runner: 'codex' }] } });
       expect(f.store.readWorkerIdentity(workerId)).toMatchObject({ account: { provider: 'codex' } });
     });
-    it('rejects an unknown workflow name and a mixed-runner chain with invalid_input, creating nothing', async () => {
-      catalog('mixed', ['name: mixed', 'steps:', '  - id: a', '    prompt: "{{task}}"', '    runner: claude', '  - id: b', '    prompt: "{{task}}"', '    runner: codex'].join('\n'));
+    it('rejects an unknown workflow name with invalid_input, creating nothing', async () => {
       await expect(f.service.spawn(f.caller, { ...input(), workflow: 'nope' })).rejects.toMatchObject({ code: 'invalid_input', message: expect.stringContaining('nope') });
-      await expect(f.service.spawn(f.caller, { ...input(), workflow: 'mixed' })).rejects.toMatchObject({ code: 'invalid_input', message: expect.stringMatching(/claude.*codex|codex.*claude/) });
-      await expect(f.service.spawn(f.caller, { ...input(), workflow: 'mixed' })).rejects.toMatchObject({ message: expect.stringContaining('#452') });
-      // A spawn --backend that disagrees with an authored step runner is a mixed chain too.
-      catalog('claude-only', ['name: claude-only', 'steps:', '  - id: a', '    prompt: "{{task}}"', '    runner: claude'].join('\n'));
-      await expect(f.service.spawn(f.caller, { ...input(), workflow: 'claude-only', backend: 'codex' })).rejects.toMatchObject({ code: 'invalid_input' });
       expect(f.store.listRuns()).toHaveLength(1); expect(f.parent.delegation).toMatchObject({ receipts: [] });
+    });
+    describe('per-step worker identity (#452)', () => {
+      it('accepts a mixed-runner chain, pinning one identity entry per agent step and the first step at run level', async () => {
+        vi.stubEnv('CODEX_HOME', f.root);
+        catalog('mixed', ['name: mixed', 'steps:',
+          '  - id: implement', '    prompt: "{{task}}"', '    runner: codex',
+          '  - id: verify', '    command: "true"',
+          '  - id: review', '    prompt: "{{task}}"', '    runner: claude'].join('\n'));
+        const { workerId } = await f.service.spawn(f.caller, { ...input(), workflow: 'mixed' });
+        const worker = f.store.getRun(workerId)!;
+        // Run-level columns keep the first agent step's values; codex never inherits the parent's claude model or effort.
+        expect(worker).toMatchObject({ runner: 'codex', agentProfile: 'default', workflow: 'mixed' });
+        expect(worker.model).toBeUndefined(); expect(worker.effort).toBeUndefined();
+        expect(worker.workflowDef!.steps).toMatchObject([
+          { id: 'implement', runner: 'codex', agentProfile: 'default' },
+          { id: 'verify', command: 'true' },
+          { id: 'review', runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default' },
+        ]);
+        expect(worker.workflowDef!.steps[1]).not.toHaveProperty('runner');
+        expect(worker.workflowDef!.steps[1]).not.toHaveProperty('agentProfile');
+        expect(f.store.readWorkerIdentity(workerId)).toMatchObject({ kind: 'accepted', account: { provider: 'codex', homePath: f.root }, grants: {}, steps: [
+          { stepId: 'implement', account: { provider: 'codex', profileId: 'default', homePath: f.root }, grants: {} },
+          { stepId: 'review', account: { provider: 'claude', profileId: 'default', homePath: f.root }, model: 'opus', effort: 'high', grants: {} },
+        ] });
+        expect(f.store.readWorkerIdentity(workerId)).not.toHaveProperty('model');
+      });
+      it('lets --backend fill only the steps that leave runner unset', async () => {
+        vi.stubEnv('CODEX_HOME', f.root);
+        catalog('partly', ['name: partly', 'steps:', '  - id: a', '    prompt: "{{task}}"', '    runner: claude', '  - id: b', '    prompt: "{{task}}"'].join('\n'));
+        const { workerId } = await f.service.spawn(f.caller, { ...input(), workflow: 'partly', backend: 'codex' });
+        expect(f.store.getRun(workerId)).toMatchObject({ runner: 'claude', model: 'opus', workflowDef: { steps: [{ id: 'a', runner: 'claude' }, { id: 'b', runner: 'codex' }] } });
+        expect(f.store.readWorkerIdentity(workerId)).toMatchObject({ steps: [{ stepId: 'a', account: { provider: 'claude' } }, { stepId: 'b', account: { provider: 'codex' } }] });
+      });
+      it('narrows a step\'s authored tools to the parent\'s grants and never widens them', async () => {
+        vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default',
+          allowedTools: ['Read', 'Edit', 'Bash'], bashAllowlist: ['git status', 'git diff'], accountBinding: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } } });
+        catalog('tools', ['name: tools', 'steps:',
+          '  - id: narrow', '    prompt: "{{task}}"', '    allowedTools: [WebFetch, Read, Bash]', '    bashAllowlist: ["git diff", "rm -rf"]',
+          '  - id: inherit', '    prompt: "{{task}}"'].join('\n'));
+        const { workerId } = await f.service.spawn(f.caller, { ...input(), workflow: 'tools' });
+        const narrow = { allowedTools: ['Read', 'Bash'], bashAllowlist: ['git diff'] };
+        const inherit = { allowedTools: ['Read', 'Edit', 'Bash'], bashAllowlist: ['git status', 'git diff'] };
+        expect(f.store.readWorkerIdentity(workerId)).toMatchObject({ grants: narrow, steps: [{ stepId: 'narrow', grants: narrow }, { stepId: 'inherit', grants: inherit }] });
+        expect(f.store.getRun(workerId)?.workflowDef?.steps).toMatchObject([{ id: 'narrow', ...narrow }, { id: 'inherit', ...inherit }]);
+      });
+      it('resolves a YAML agentProfile per step and refuses an account the registry does not know', async () => {
+        const work = join(f.root, 'codex-work'); mkdirSync(work);
+        await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'work', provider: 'codex', configDir: work, label: 'Work', addedAt: '' }]; });
+        catalog('profiled', ['name: profiled', 'steps:', '  - id: a', '    prompt: "{{task}}"', '    runner: codex', '    agentProfile: work'].join('\n'));
+        const { workerId } = await f.service.spawn(f.caller, { ...input(), workflow: 'profiled' });
+        expect(f.store.getRun(workerId)).toMatchObject({ runner: 'codex', agentProfile: 'work', workflowDef: { steps: [{ id: 'a', runner: 'codex', agentProfile: 'work' }] } });
+        expect(f.store.readWorkerIdentity(workerId)).toMatchObject({ account: { provider: 'codex', profileId: 'work', homePath: work }, steps: [{ stepId: 'a', account: { profileId: 'work', homePath: work } }] });
+        catalog('unknown-account', ['name: unknown-account', 'steps:', '  - id: a', '    prompt: "{{task}}"', '    runner: codex', '    agentProfile: nope'].join('\n'));
+        await expect(f.service.spawn(f.caller, { ...input(), workflow: 'unknown-account' })).rejects.toMatchObject({ code: 'invalid_input', message: expect.stringContaining('nope') });
+        expect(f.store.listRuns()).toHaveLength(2);
+      });
+      it('applies the model lock per step', async () => {
+        // A parent with no pin of its own: only the authored step model can trip the lock.
+        vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', agentProfile: 'default', accountBinding: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } } });
+        catalog('plain', ['name: plain', 'steps:', '  - id: a', '    prompt: "{{task}}"'].join('\n'));
+        catalog('pinned', ['name: pinned', 'steps:', '  - id: a', '    prompt: "{{task}}"', '  - id: b', '    prompt: "{{task}}"', '    model: sonnet'].join('\n'));
+        vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '1');
+        await expect(f.service.spawn(f.caller, { ...input(), workflow: 'plain' })).resolves.toMatchObject({ workerId: expect.any(String) });
+        await expect(f.service.spawn(f.caller, { ...input(), workflow: 'pinned' })).rejects.toMatchObject({ code: 'invalid_input' });
+        expect(f.store.listRuns()).toHaveLength(2);
+      });
     });
     it('hashes the workflow name into the retry identity', async () => {
       review();
@@ -148,7 +209,9 @@ describe('delegation service durable authority', () => {
     const request = input(); let publishedIdentity: unknown;
     f.store.on('run', run => { if (run.delegation?.role === 'worker') publishedIdentity = f.store.readWorkerIdentity(run.id); });
     const worker = await f.service.spawn(f.caller, request);
-    expect(publishedIdentity).toEqual({ kind: 'accepted', grants: {}, account: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } }, model: 'opus', effort: 'high' });
+    const account = { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } };
+    expect(publishedIdentity).toEqual({ kind: 'accepted', grants: {}, account, model: 'opus', effort: 'high',
+      steps: [{ stepId: 'task', account, grants: {}, model: 'opus', effort: 'high' }] });
     const path = join(f.root, '.ai/cezar/runs', `${worker.workerId}.identity.json`);
     const before = readFileSync(path, 'utf8');
     vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', agentProfile: 'other', accountBinding: { provider: 'claude', profileId: 'other', homePath: '/different', claudeLayout: { kind: 'relocated' } } });
