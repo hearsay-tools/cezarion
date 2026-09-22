@@ -489,7 +489,7 @@ function MetaRow({
   )
   // `workflowLabel` so an inline chain shows its first step's name, not the bare "(planned)"
   // placeholder — which reads like a status next to the live status pill.
-  const parts: ReactNode[] = [<span key="workflow" className="max-md:max-w-full max-md:break-all">{workflowLabel(run)}</span>]
+  const parts: ReactNode[] = [<span key="workflow" className="min-w-0 max-w-full break-all">{workflowLabel(run)}</span>]
   if (run.branch) {
     parts.push(
       <span
