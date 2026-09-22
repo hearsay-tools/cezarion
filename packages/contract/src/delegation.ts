@@ -209,6 +209,11 @@ export const workerWaitRequestSchema = z.object({
 }).strict().refine(request => request.mode !== 'one' || request.workerIds.length === 1, { message: 'one mode requires exactly one worker' });
 export type WorkerWaitRequest = z.infer<typeof workerWaitRequestSchema>;
 
+export const inboxClaimSchema = z.object({
+  receiptId: z.uuid(), generation: z.uuid(), expiresAt: z.iso.datetime(), acknowledgedAt: z.iso.datetime().optional(),
+}).strict();
+export type InboxClaim = z.infer<typeof inboxClaimSchema>;
+
 export const agentInputSchema = z.object({
   conversation: conversationAttributionSchema.optional(),
   id: z.uuid(),
@@ -217,6 +222,7 @@ export const agentInputSchema = z.object({
   text: z.string().min(1).max(100_000),
   createdAt: z.iso.datetime(),
   deliveredAt: z.iso.datetime().optional(),
+  inboxClaim: inboxClaimSchema.optional(),
 }).strict();
 export type AgentInput = z.infer<typeof agentInputSchema>;
 

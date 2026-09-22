@@ -20,6 +20,23 @@ export const requestOutcomeSchema = z.object({
 export type RequestOutcome = z.infer<typeof requestOutcomeSchema>;
 export const conversationStateSchema = z.object({ messages: z.array(conversationMessageSchema).max(1024), outcomes: z.array(requestOutcomeSchema).max(1024) }).strict();
 export type ConversationState = z.infer<typeof conversationStateSchema>;
+export const conversationInspectResultSchema = conversationStateSchema.extend({ hint: z.string().optional() });
+export type ConversationInspectResult = z.infer<typeof conversationInspectResultSchema>;
+
+export const inboxReserveResultSchema = z.object({
+  messages: z.array(conversationMessageSchema).max(32), outcomes: z.array(requestOutcomeSchema).max(32),
+  receiptId: z.uuid().optional(), expiresAt: z.iso.datetime().optional(),
+}).strict().refine(value => value.messages.length > 0
+  ? value.receiptId !== undefined && value.expiresAt !== undefined
+  : value.receiptId === undefined && value.expiresAt === undefined,
+{ message: 'A nonempty inbox batch requires a receipt and expiry' });
+export type InboxReserveResult = z.infer<typeof inboxReserveResultSchema>;
+export const inboxReceiptRequestSchema = z.object({ receiptId: z.uuid() }).strict();
+export type InboxReceiptRequest = z.infer<typeof inboxReceiptRequestSchema>;
+export const inboxReceiptResultSchema = z.object({
+  receiptId: z.uuid(), status: z.enum(['acknowledged', 'already-acknowledged', 'released']),
+}).strict();
+export type InboxReceiptResult = z.infer<typeof inboxReceiptResultSchema>;
 export const conversationSendRequestSchema = z.object({
   id: z.uuid(), recipientRunId: z.uuid(), kind: conversationAttributionSchema.shape.kind,
   requestId: z.uuid().optional(), text: z.string().min(1).max(100_000).refine(text => text.trim().length > 0), timeoutSeconds: z.number().int().min(1).max(1800).default(600),

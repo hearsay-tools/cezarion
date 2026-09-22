@@ -5,6 +5,49 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
 import { projectConversationEvents } from './conversations.ts';
+import {
+  conversationInspectResultSchema, conversationStateSchema, inboxClaimSchema, inboxReceiptRequestSchema,
+  inboxReceiptResultSchema, inboxReserveResultSchema,
+} from '@open-mercato/cezar-contract';
+
+describe('worker inbox contract', () => {
+  const at = '2026-09-06T12:00:00.000Z';
+  const message = { id: randomUUID(), senderRunId: randomUUID(), recipientRunId: randomUUID(), kind: 'request',
+    text: 'Need a decision', createdAt: at, requestHash: 'a'.repeat(64), state: 'accepted' };
+  const outcome = { requestId: message.id, status: 'replied', observedAt: at, replyId: randomUUID() };
+  const receiptId = randomUUID();
+
+  it('parses bounded snapshots and requires receipt fields together only for a nonempty batch', () => {
+    const batch = { messages: [message], outcomes: [outcome], receiptId, expiresAt: '2026-09-06T12:02:00.000Z' };
+    expect(inboxReserveResultSchema.parse(batch)).toEqual(batch);
+    expect(inboxReserveResultSchema.parse({ messages: [], outcomes: [] })).toEqual({ messages: [], outcomes: [] });
+    for (const invalid of [
+      { messages: [], outcomes: [], receiptId, expiresAt: batch.expiresAt },
+      { messages: [message], outcomes: [] },
+      { messages: [message], outcomes: [], receiptId },
+      { messages: [message], outcomes: [], expiresAt: batch.expiresAt },
+      { ...batch, messages: Array.from({ length: 33 }, (_, n) => ({ ...message, id: randomUUID(), text: `message ${n}` })) },
+      { ...batch, outcomes: Array.from({ length: 33 }, () => ({ ...outcome, requestId: randomUUID() })) },
+    ]) expect(inboxReserveResultSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it('validates receipt identity, acknowledgement status and inspection hint separately from persisted state', () => {
+    const claim = { receiptId, generation: randomUUID(), expiresAt: '2026-09-06T12:02:00.000Z' };
+    expect(inboxClaimSchema.parse(claim)).toEqual(claim);
+    expect(inboxClaimSchema.parse({ ...claim, acknowledgedAt: at })).toEqual({ ...claim, acknowledgedAt: at });
+    expect(inboxClaimSchema.safeParse({ ...claim, generation: 'bad' }).success).toBe(false);
+    expect(inboxClaimSchema.safeParse({ ...claim, expiresAt: 'tomorrow' }).success).toBe(false);
+    expect(inboxReceiptRequestSchema.parse({ receiptId })).toEqual({ receiptId });
+    expect(inboxReceiptRequestSchema.safeParse({ receiptId, generation: claim.generation }).success).toBe(false);
+    for (const status of ['acknowledged', 'already-acknowledged', 'released']) {
+      expect(inboxReceiptResultSchema.parse({ receiptId, status })).toEqual({ receiptId, status });
+    }
+    expect(inboxReceiptResultSchema.safeParse({ receiptId, status: 'pending' }).success).toBe(false);
+    const inspection = { messages: [message], outcomes: [outcome], hint: 'Run worker inbox' };
+    expect(conversationInspectResultSchema.parse(inspection)).toEqual(inspection);
+    expect(conversationStateSchema.safeParse(inspection).success).toBe(false);
+  });
+});
 
 describe('durable conversations', () => {
   let f: ReturnType<typeof fixture>;
