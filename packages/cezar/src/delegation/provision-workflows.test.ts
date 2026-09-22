@@ -295,6 +295,28 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(sessions[3]!.spec).toMatchObject({ resume: true, sessionId: 'review-session' });
     expect(sessions[3]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
   });
+  it('recovers a queued continuation of a mixed chain onto its last step\'s runner and session (#465 review)', async () => {
+    const { a } = await finishedMixedChain();
+    // The durable shape a crash leaves behind after a continuation was accepted but not yet
+    // launched: a pending synthetic `continue-1` step and its message, on a `queued` record.
+    const worker = f.store.getRun(a.child.workerId)!;
+    f.store.addStep(worker.id, { id: 'continue-1', name: 'Continue', kind: 'agent', synthetic: 'continuation' });
+    f.store.updateRun(worker.id, { status: 'queued', finishedAt: undefined,
+      continuationMessage: { id: 'continue-1', text: 'again', origin: 'human', createdAt: new Date().toISOString() } });
+    f.manager.dispose(); sessions[0]!.finish();
+    f.store.updateRun(a.parent.id, { status: 'waiting' }); f.store.flush();
+    const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    const manager = new RunManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
+    controller.attachProject({ id: 'restarted', root: f.root, store, manager });
+    await manager.recover();
+    await until(() => sessions.length === 4 || store.getRun(worker.id)?.status === 'failed');
+    expect(store.getRun(worker.id)?.error).toBeUndefined();
+    // Reconstructed from the review step's pinned identity, not the run-level codex one: the
+    // claude session is resumed, under the claude account.
+    expect(sessions[3]!.spec).toMatchObject({ resume: true, sessionId: 'review-session' });
+    expect(sessions[3]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+    expect(sessions[3]!.spec.env?.CODEX_HOME).toBeUndefined();
+  });
   it.each(['queued', 'restart', 'continue'] as const)('still runs a single-runner worker whose identity evidence predates per-step entries on %s (#452)', async mode => {
     const a = await acceptIdentityWorker();
     // Evidence written before #452 carries only the run-level fields.

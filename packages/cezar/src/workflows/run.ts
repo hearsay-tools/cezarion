@@ -1553,10 +1553,18 @@ export class RunManager {
       ? [...run.steps].reverse().find((step) => step.id !== queuedContinuation.id && step.sessionId)
       : undefined;
     if (queuedContinuation && sessionStep?.sessionId) {
-      const backend = run.runner ?? 'claude';
+      // An accepted worker's continuation extends the step owning the resumed session, so its
+      // runner and account come from that step's pinned identity (#452), never the run-level
+      // first-step fields — those would re-queue a claude review's Continue as a codex turn with
+      // no session to resume (#465). Broken identity evidence is left for the launch to report.
+      let resumeIdentity: WorkerStepIdentity | undefined;
+      try { resumeIdentity = this.workerStep(run.id, this.continuationDefStep(run, sessionStep.sessionId)?.id); }
+      catch (error) { if (!(error instanceof WorkerIdentityError)) throw error; }
+      const backend = resumeIdentity?.account.provider ?? run.runner ?? 'claude';
       const sessionBackend = sessionStep.backend ?? backend;
       const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
-      const sameAccount = run.agentProfile === undefined || run.agentProfile === sessionAccount;
+      const agentProfile = resumeIdentity?.account.profileId ?? run.agentProfile;
+      const sameAccount = agentProfile === undefined || agentProfile === sessionAccount;
       this.pendingContinuations.set(run.id, {
         stepId: queuedContinuation.id,
         sessionId: sessionBackend === backend && sameAccount ? sessionStep.sessionId : undefined,
