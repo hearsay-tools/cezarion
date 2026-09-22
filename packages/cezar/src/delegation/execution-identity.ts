@@ -28,22 +28,47 @@ export const workerAccountBindingSchema = z.object({
     : binding.claudeLayout === undefined);
 export type WorkerAccountBinding = z.infer<typeof workerAccountBindingSchema>;
 
-export const acceptedWorkerIdentitySchema = z.object({
+// Required private evidence; absent properties and explicit empty grants differ.
+const workerGrantsSchema = z.object({
+  allowedTools: z.array(z.string()).optional(),
+  bashAllowlist: z.array(z.string()).optional(),
+}).strict();
+/** What one agent step of an owned worker may run under: pinned at acceptance, read at every launch. */
+const workerStepIdentityFieldsSchema = z.object({
+  account: workerAccountBindingSchema,
+  grants: workerGrantsSchema,
+  model: z.string().min(1).max(512).optional(),
+  effort: z.string().min(1).max(128).optional(),
+});
+export type WorkerStepIdentity = z.infer<typeof workerStepIdentityFieldsSchema>;
+
+export const acceptedWorkerIdentitySchema = workerStepIdentityFieldsSchema.extend({
   kind: z.literal('accepted'),
   /** Binds new input recipes; absence retains compatibility with pre-context identities. */
   contextHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
-  account: workerAccountBindingSchema,
-  // Required private evidence; absent properties and explicit empty grants differ.
-  grants: z.object({
-    allowedTools: z.array(z.string()).optional(),
-    bashAllowlist: z.array(z.string()).optional(),
-  }).strict(),
-  model: z.string().min(1).max(512).optional(),
-  effort: z.string().min(1).max(128).optional(),
   /** Binds the public `workflowDef` a catalog worker runs (#451); absent means the built-in quick-task. */
   workflowHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /**
+   * One entry per agent step of the accepted chain (#452), so a codex step and a claude step
+   * each run under their own account, model, effort and grants. The run-level fields above
+   * hold the FIRST agent step's values: evidence written before this list existed has only
+   * those, and `workerStepIdentity` answers every step from them.
+   */
+  steps: z.array(workerStepIdentityFieldsSchema.extend({ stepId: z.string().min(1) }).strict()).min(1).optional(),
 }).strict();
 export type AcceptedWorkerIdentity = z.infer<typeof acceptedWorkerIdentitySchema>;
+
+/** The identity one agent step runs under. Explicit entries are authority; a legacy identity answers with its run-level view. */
+export function workerStepIdentity(identity: AcceptedWorkerIdentity, stepId: string): WorkerStepIdentity {
+  if (identity.steps === undefined) {
+    return { account: identity.account, grants: identity.grants,
+      ...(identity.model === undefined ? {} : { model: identity.model }), ...(identity.effort === undefined ? {} : { effort: identity.effort }) };
+  }
+  const entry = identity.steps.find(step => step.stepId === stepId);
+  if (!entry) throw new WorkerIdentityError(`Accepted worker step identity is unavailable for "${stepId}"`);
+  const { stepId: _stepId, ...fields } = entry;
+  return fields;
+}
 export const workerExecutionIdentitySchema = z.union([
   acceptedWorkerIdentitySchema,
   // Only explicitly written by the internal owned-creation primitive. Absence never means legacy.

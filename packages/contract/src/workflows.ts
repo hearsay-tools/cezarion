@@ -30,6 +30,8 @@ export const workflowStepDefSchema = z
     effort: z.string().max(32).optional(),
     /** Per-step agent backend override (falls back to the task / config default). */
     runner: runnerSchema.optional(),
+    /** Agent account id for this step (spec 2026-07-29-agent-profiles); resolved per step for owned workers (#452). */
+    agentProfile: z.string().min(1).max(64).optional(),
     allowedTools: z.array(z.string()).optional(),
     bashAllowlist: z.array(z.string()).optional(),
     // check step

@@ -32,7 +32,7 @@ import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
-import { workerWorkflowHash } from '../delegation/execution-identity.ts';
+import { workerWorkflowHash, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { stepKind, type WorkflowDef } from '../workflows/types.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -477,11 +477,21 @@ export async function withOwnedInputRun(
     store: RunStore; manager: RunManager;
     restart: () => Promise<{ store: RunStore; manager: RunManager }>;
   }) => Promise<void>,
-  /** A persisted catalog definition the worker runs instead of quick-task (#451). */
-  options: { workflowDef?: WorkflowDef } = {},
+  options: {
+    /** A persisted catalog definition the worker runs instead of quick-task (#451). */
+    workflowDef?: WorkflowDef;
+    /** The private identity evidence to write instead of the internal marker (#452); its run-level
+     *  account must match `runner`/`agentProfile` on the record, as acceptance guarantees. */
+    identity?: WorkerExecutionIdentity;
+    agentProfile?: string;
+    /** Further runners a mixed chain launches; their mocks are wired for the fixture's lifetime. */
+    extraBackends?: readonly RunnerId[];
+  } = {},
 ): Promise<void> {
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
+  const savedExtraBins = (options.extraBackends ?? []).map(extra => [HARNESS_ADAPTERS[extra].binEnv, process.env[HARNESS_ADAPTERS[extra].binEnv]] as const);
+  for (const extra of options.extraBackends ?? []) process.env[HARNESS_ADAPTERS[extra].binEnv] = HARNESS_ADAPTERS[extra].mockBin;
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
   // Naming is a separate auxiliary invocation, not part of input delivery.
@@ -515,12 +525,13 @@ export async function withOwnedInputRun(
     const workspace = await planOwnedWorkspace(repoRoot, runId, sha);
     const workflowDef = options.workflowDef;
     store.createOwnedRun({ title: 'worker', task: promptFor(backend, scenario), workflow: workflowDef?.name ?? 'quick-task', runner: backend,
+      ...(options.agentProfile === undefined ? {} : { agentProfile: options.agentProfile }),
       ...(workflowDef ? { workflowDef } : {}),
       steps: workflowDef
         ? workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: stepKind(step) }))
         : [{ id: 'task', name: 'Task', kind: 'agent' }] }, parent.id, randomUUID(), {
       role: 'worker', parentRunId: parent.id, permissions: [], workspace,
-    }, 'a'.repeat(64), { kind: 'internal', ...(workflowDef ? { workflowHash: workerWorkflowHash(workflowDef) } : {}) });
+    }, 'a'.repeat(64), options.identity ?? { kind: 'internal', ...(workflowDef ? { workflowHash: workerWorkflowHash(workflowDef) } : {}) });
     manager = new RunManager(store, repoRoot);
     drainBookkeeping = trackTurnBookkeeping(manager);
     const restart = async () => {
@@ -551,6 +562,9 @@ export async function withOwnedInputRun(
     store?.flush();
     if (savedBin === undefined) delete process.env[adapter.binEnv];
     else process.env[adapter.binEnv] = savedBin;
+    for (const [name, saved] of savedExtraBins) {
+      if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    }
     if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
     if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
     else process.env.CEZ_AUTONAME = savedAutoName;

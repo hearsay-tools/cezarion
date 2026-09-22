@@ -24,6 +24,7 @@ import type {
 } from '@open-mercato/cezar-contract';
 import { workflowStepDefSchema } from '@open-mercato/cezar-contract';
 import type { AppType } from './app-type.ts';
+import { workflowStepSchema } from '../workflows/types.ts';
 
 /**
  * Same guard as `contract-parity.test.ts`, for the workflows / groups / skills / todos /
@@ -95,5 +96,13 @@ describe('src/contract workflows/skills/agent-config schemas match the routes ex
     expect(
       workflowStepDefSchema.parse({ id: 'review', prompt: '{{task}}', effort: 'high' }),
     ).toMatchObject({ effort: 'high' });
+  });
+
+  it('keeps per-step agentProfile in the public workflow contract and the service schema alike (#452)', () => {
+    const step = { id: 'review', prompt: '{{task}}', runner: 'codex', agentProfile: 'work' };
+    expect(workflowStepDefSchema.parse(step)).toMatchObject({ agentProfile: 'work' });
+    expect(workflowStepSchema.parse(step)).toMatchObject({ agentProfile: 'work' });
+    expect(workflowStepDefSchema.safeParse({ ...step, agentProfile: '' }).success).toBe(false);
+    expect(workflowStepSchema.safeParse({ ...step, agentProfile: '' }).success).toBe(false);
   });
 });

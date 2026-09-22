@@ -208,6 +208,67 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(sessions.at(-1)!.spec.env?.CODEX_HOME).toBe(home);
     expect(sessions.at(-1)!.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN);
   });
+  it.each(['queued', 'restart', 'continue'] as const)('runs a mixed-runner chain with each agent step under its own account, model and grants on %s (#452)', async mode => {
+    const codexHome = join(f.root, 'codex-account'); mkdirSync(codexHome); vi.stubEnv('CODEX_HOME', codexHome);
+    writeFileSync(join(codexHome, 'config.toml'), 'model = "gpt-5.1-codex"');
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'mixed.yaml'), ['name: mixed', 'steps:',
+      '  - id: implement', '    prompt: "Implement: {{task}}"', '    runner: codex', '    allowedTools: [Read]',
+      '  - id: review', '    prompt: "Review: {{task}}"', '    runner: claude'].join('\n'));
+    const a = await acceptIdentityWorker(undefined, undefined, { workflow: 'mixed' });
+    const worker = f.store.getRun(a.child.workerId)!;
+    // Run-level columns follow the first agent step; the identity pins both.
+    expect(worker).toMatchObject({ runner: 'codex', model: 'gpt-5.1-codex', agentProfile: 'default' });
+    expect(worker.effort).toBeUndefined();
+    expect(f.store.readWorkerIdentity(worker.id)).toMatchObject({ account: { provider: 'codex', homePath: codexHome }, steps: [
+      { stepId: 'implement', account: { provider: 'codex', profileId: 'default', homePath: codexHome }, model: 'gpt-5.1-codex', grants: { allowedTools: ['Read'] } },
+      { stepId: 'review', account: { provider: 'claude', profileId: 'account-a', homePath: a.home }, model: 'haiku', effort: 'high' },
+    ] });
+    const { store } = await launchAccepted(a, mode === 'continue' ? 'queued' : mode);
+    await until(() => sessions.length === 2);
+    const implement = sessions[1]!.spec;
+    expect(implement.userPrompt).toContain('Implement: child');
+    expect(implement).toMatchObject({ model: 'gpt-5.1-codex', allowedTools: ['Read'] });
+    expect(implement.effort).toBeUndefined();
+    expect(implement.env?.CODEX_HOME).toBe(codexHome);
+    expect(implement.env?.CLAUDE_CONFIG_DIR).not.toBe(a.home);
+    sessions[1]!.finish('implemented');
+    await until(() => sessions.length === 3);
+    const review = sessions[2]!.spec;
+    expect(review.userPrompt).toContain('Review: child');
+    expect(review).toMatchObject({ model: 'haiku', effort: 'high' });
+    expect(review.allowedTools).toEqual(sessions[0]!.spec.allowedTools);
+    expect(review.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+    expect(review.env?.CODEX_HOME).not.toBe(codexHome);
+    expect(store.getRun(worker.id)?.steps.map(step => ({ id: step.id, backend: step.backend, profileId: step.profileId }))).toEqual([
+      { id: 'implement', backend: 'codex', profileId: 'default' }, { id: 'review', backend: 'claude', profileId: 'account-a' },
+    ]);
+    if (mode !== 'continue') return;
+    sessions[2]!.emit({ type: 'session', sessionId: 'review-session' }); sessions[2]!.finish('reviewed');
+    expect(await f.manager.awaitRunTermination(worker.id, 15000)).toBe(true);
+    // A Continue extends the LAST agent step, so it resumes under that step's identity, not the run-level codex one.
+    expect(f.manager.continueRun(worker.id, { text: 'again', runner: 'codex' })).toMatchObject({ ok: false, error: expect.stringContaining('identity') });
+    expect(f.manager.continueRun(worker.id, { text: 'again' }).ok).toBe(true);
+    await until(() => sessions.length === 4);
+    expect(sessions[3]!.spec).toMatchObject({ model: 'haiku', effort: 'high', resume: true, sessionId: 'review-session' });
+    expect(sessions[3]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+    expect(sessions[3]!.spec.env?.CODEX_HOME).not.toBe(codexHome);
+  });
+  it.each(['queued', 'restart', 'continue'] as const)('still runs a single-runner worker whose identity evidence predates per-step entries on %s (#452)', async mode => {
+    const a = await acceptIdentityWorker();
+    // Evidence written before #452 carries only the run-level fields.
+    const path = join(f.root, '.ai/cezar/runs', `${a.child.workerId}.identity.json`);
+    const { steps: _steps, ...legacy } = JSON.parse(readFileSync(path, 'utf8'));
+    expect(_steps).toHaveLength(1); writeFileSync(path, JSON.stringify(legacy));
+    expect(f.store.readWorkerIdentity(a.child.workerId)).not.toHaveProperty('steps');
+    await launchAccepted(a, mode); await until(() => sessions.length === 2);
+    if (mode === 'continue') {
+      sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+      expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true); await until(() => sessions.length === 3);
+    }
+    expect(sessions.at(-1)!.spec).toMatchObject({ model: 'haiku', effort: 'high' });
+    expect(sessions.at(-1)!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
+  });
   it.each(['queued', 'restart', 'continue'] as const)('rejects lost accepted input recipes on %s', async mode => {
     const a = await acceptIdentityWorker(undefined, undefined, { context: { text: 'accepted context' } });
     if (mode === 'continue') {

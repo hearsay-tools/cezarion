@@ -68,7 +68,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `Reuse the request ID only for the exact same task/baseline/context/backend/model/effort/workflow on a retry.`,
         `Optional spawn flags: --workflow <name>, --context '<selected text>' or --context-file <local-UTF-8-file> (mutually exclusive), --backend <claude|codex|opencode|pi|cursor>, --model <model>, --effort <low|medium|high|xhigh|max>.`,
         `--workflow runs a catalog workflow (the built-in quick-task or a .ai/cezar/workflows/*.yaml name) inside the worker, agent and check steps alike; omitted means quick-task with your system prompt.`,
-        `--backend, --model and --effort fill only the steps that leave those fields unset; an unknown name fails, and every agent step must resolve to one runner (mixed-runner chains are refused until #452).`,
+        `--backend, --model and --effort fill only the steps that leave those fields unset; an unknown name fails. Agent steps may mix runners: each step is pinned to its own runner, account, model, effort and grants at spawn, and a step's agentProfile names its account explicitly.`,
         `Example: spawn --baseline parent-head --request-id <UUID> --backend codex --context 'Inspect only the parser' 'Review parser'.`,
         `Example: spawn --baseline parent-head --request-id <UUID> --workflow review 'Review the parser change'.`,
         `Task plus context text is limited to 100,000 characters.`,

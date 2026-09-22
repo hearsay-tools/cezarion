@@ -1,4 +1,4 @@
-import { workerContextHash, workerWorkflowHash, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
+import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding, type WorkerExecutionIdentity, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
@@ -1030,8 +1030,12 @@ export class RunManager {
    * spawning a CLI. Never throws: an unreadable home degrades to the default profile, which is
    * exactly the behaviour that predates profiles.
    */
-  /** Ordinary runs retain mutable discovery; owned runs require explicit durable evidence. */
-  private workerIdentity(runId: string) {
+  /**
+   * Ordinary runs retain mutable discovery; owned runs require explicit durable evidence. With a
+   * `stepId`, the step's own pinned entry is checked too (#452): its account must still be
+   * available and its model/effort must clear the lock, exactly as the run-level fields must.
+   */
+  private workerIdentity(runId: string, stepId?: string) {
     const run = this.store.getRun(runId);
     if (run?.delegation?.role !== 'worker') return undefined;
     const identity = this.store.readWorkerIdentity(runId);
@@ -1049,20 +1053,66 @@ export class RunManager {
       throw new WorkerIdentityError('Accepted worker execution identity does not match its run');
     }
     boundWorkerAccountEnv(identity.account, buildChildEnv({ backend: identity.account.provider }));
+    if (stepId !== undefined) {
+      const step = workerStepIdentity(identity, stepId);
+      if (agentModelsLocked(this.repoRoot) && (step.model !== undefined || step.effort !== undefined)) {
+        throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
+      }
+      boundWorkerAccountEnv(step.account, buildChildEnv({ backend: step.account.provider }));
+    }
     return identity;
+  }
+
+  /** The pinned identity one agent step of an owned worker runs under; undefined for ordinary and internal runs. */
+  private workerStep(runId: string, stepId: string | undefined): WorkerStepIdentity | undefined {
+    const identity = this.workerIdentity(runId, stepId);
+    if (!identity) return undefined;
+    return stepId === undefined
+      ? { account: identity.account, grants: identity.grants, ...(identity.model === undefined ? {} : { model: identity.model }), ...(identity.effort === undefined ? {} : { effort: identity.effort }) }
+      : workerStepIdentity(identity, stepId);
+  }
+
+  /**
+   * The steps a continuation may extend. An accepted worker's public `workflowDef` is authority
+   * only while its identity binds it: a catalog chain through `ownedWorkflow`, and the default
+   * quick-task from the built-in constant, exactly the definition `ownedJob` launches — a salvaged
+   * or edited public record never picks which pinned identity a turn runs under.
+   */
+  private continuationDefSteps(record: RunRecord | undefined): WorkflowStepDef[] | undefined {
+    if (record?.delegation?.role === 'worker') {
+      const identity = this.store.readWorkerIdentity(record.id);
+      if (identity?.kind === 'accepted') return (this.ownedWorkflow(record, identity) ?? QUICK_TASK_WORKFLOW).steps;
+    }
+    return record?.workflowDef?.steps;
+  }
+
+  /**
+   * The definition step a continuation extends: the one owning the resumed session, else the
+   * chain's last agent step — a synthetic `continue-N` owner and a fresh-session continuation
+   * both extend the run's tail. Shared by `continueRun` (which identity to hold the override
+   * against) and `runContinuation` (which tools, model, effort and account the turn gets).
+   */
+  private continuationDefStep(record: RunRecord | undefined, sessionId: string | undefined): WorkflowStepDef | undefined {
+    const defSteps = this.continuationDefSteps(record);
+    if (defSteps === undefined) return undefined;
+    const owningStep = sessionId === undefined ? undefined : record?.steps.find((s) => s.sessionId === sessionId);
+    if (sessionId !== undefined && owningStep === undefined) return undefined;
+    return defSteps.find((s) => s.id === owningStep?.id) ?? [...defSteps].reverse().find((s) => stepKind(s) === 'agent');
   }
 
   private async agentEnvForStep(
     runId: string,
     backend: RunnerId,
-    options: { generateFollowups?: boolean; recordedProfileId?: string } = {},
+    options: { generateFollowups?: boolean; recordedProfileId?: string; stepId?: string } = {},
   ): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding }> {
-    const identity = this.workerIdentity(runId);
-    if (identity) {
-      if (backend !== identity.account.provider) throw new WorkerIdentityError('Accepted worker provider identity cannot change');
+    // An owned worker binds the account its identity pinned for THIS step (#452); a legacy identity
+    // answers every step with its single run-level account, so the one-provider rule still holds there.
+    const step = this.workerStep(runId, options.stepId);
+    if (step) {
+      if (backend !== step.account.provider) throw new WorkerIdentityError('Accepted worker provider identity cannot change');
       const env = this.agentEnv(runId, options.generateFollowups);
-      return { env: { ...env, ...boundWorkerAccountEnv(identity.account, buildChildEnv({ backend, extraEnv: env })) },
-        profileId: identity.account.profileId, accountBinding: identity.account };
+      return { env: { ...env, ...boundWorkerAccountEnv(step.account, buildChildEnv({ backend, extraEnv: env })) },
+        profileId: step.account.profileId, accountBinding: step.account };
     }
     const run = this.store.getRun(runId);
     const profileId = options.recordedProfileId
@@ -1099,8 +1149,15 @@ export class RunManager {
     return structuredClone(state.delegationSettings);
   }
 
-  /** Resolve caller selection once, before acceptance; permission grants always come from the parent. */
-  async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId; model?: string; effort?: string }): Promise<DelegationExecutionSettings> {
+  /**
+   * Resolve one agent step's selection before acceptance; permission grants always come from the
+   * parent. Called once per agent step of the accepted chain (#452): a same-backend step inherits
+   * the parent's account, model and effort, another runner resolves its own project/default
+   * account, and an explicit `agentProfile` names the account for either — an id the registry
+   * does not know is refused rather than degraded to the default, because a worker silently
+   * running on another login is a billing boundary crossed without anyone choosing it.
+   */
+  async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId; model?: string; effort?: string; agentProfile?: string }): Promise<DelegationExecutionSettings> {
     const parent = this.delegationExecutionSettings(runId);
     const runner = selection.backend ?? parent.runner;
     const sameBackend = runner === parent.runner;
@@ -1112,8 +1169,11 @@ export class RunManager {
       }
       let accountBinding = parent.accountBinding;
       let env = buildChildEnv({ backend: runner });
-      if (!sameBackend) {
-        const resolved = await resolveProfileEnvForRoot(this.repoRoot, runner);
+      if (!sameBackend || selection.agentProfile !== undefined) {
+        const resolved = await resolveProfileEnvForRoot(this.repoRoot, runner, selection.agentProfile);
+        if (selection.agentProfile !== undefined && resolved.profile.id !== selection.agentProfile) {
+          throw new Error(`Unknown ${runner} account "${selection.agentProfile}"`);
+        }
         env = buildChildEnv({ backend: runner, extraEnv: resolved.env });
         accountBinding = captureWorkerAccount(resolved.profile, env);
       }
@@ -3399,12 +3459,16 @@ export class RunManager {
     if (run.delegation?.role === 'worker' && this.store.getRun(run.delegation.parentRunId)?.status === 'review') {
       return { ok: false, error: 'Continue the reviewing parent before continuing its worker' };
     }
+    // Held against the identity of the step this continuation extends (#452), which for a mixed
+    // chain is not the run-level (first-step) one; `runContinuation` resolves the same step.
+    let resumeIdentity: WorkerStepIdentity | undefined;
     try {
-      const identity = this.workerIdentity(runId);
-      if (identity && ((opts.runner !== undefined && opts.runner !== identity.account.provider) ||
-          (opts.agentProfile !== undefined && opts.agentProfile !== identity.account.profileId) ||
-          (opts.model !== undefined && opts.model !== identity.model) ||
-          (opts.effort !== undefined && opts.effort !== identity.effort))) {
+      const resumeSession = [...run.steps].reverse().find((s) => s.sessionId)?.sessionId;
+      resumeIdentity = this.workerStep(runId, this.continuationDefStep(run, resumeSession)?.id);
+      if (resumeIdentity && ((opts.runner !== undefined && opts.runner !== resumeIdentity.account.provider) ||
+          (opts.agentProfile !== undefined && opts.agentProfile !== resumeIdentity.account.profileId) ||
+          (opts.model !== undefined && opts.model !== resumeIdentity.model) ||
+          (opts.effort !== undefined && opts.effort !== resumeIdentity.effort))) {
         return { ok: false, error: 'Accepted worker execution identity cannot change' };
       }
     } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
@@ -3436,7 +3500,9 @@ export class RunManager {
     // have changed the repository. Only the untouched original workflow may restart.
     const untouched = isUntouchedCancelledRun(run);
     if (!sessionStep?.sessionId && !untouched) return { ok: false, error: 'no agent session to resume' };
-    const originalRunner = run.runner ?? (untouched ? opts.originalRunner : undefined) ?? 'claude';
+    // An accepted worker continues under the identity of the step it extends, whatever the
+    // run-level (first-step) runner says.
+    const originalRunner = resumeIdentity?.account.provider ?? run.runner ?? (untouched ? opts.originalRunner : undefined) ?? 'claude';
     const targetRunner = opts.runner ?? originalRunner;
     // Session ids are provider-owned opaque values. New records carry explicit
     // affinity; for legacy records, the run's current runner is the conservative
@@ -3448,7 +3514,9 @@ export class RunManager {
     // open a fresh conversation while the thread claimed it had resumed. A step that recorded no
     // account predates the feature and therefore ran under the discovered one.
     const sessionAccount = sessionStep?.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
-    const accountSwitched = (opts.agentProfile ?? run.agentProfile ?? sessionAccount) !== sessionAccount;
+    // A mixed-chain worker's run-level account is its FIRST step's; the resumed step's own pinned
+    // account is what decides whether the session can be reattached (#452).
+    const accountSwitched = (opts.agentProfile ?? resumeIdentity?.account.profileId ?? run.agentProfile ?? sessionAccount) !== sessionAccount;
     const resume = sessionBackend === targetRunner && !accountSwitched;
 
     // Follow-up runner/model/account override (#401, spec 2026-07-29-agent-profiles): the composer
@@ -3458,12 +3526,15 @@ export class RunManager {
     // run's current backend — `runContinuation` reads it off the record, later continuations
     // default to it, and the header reflects the active engine. An empty model ('') clears the
     // pin, letting the runner pick the model (auto).
-    if (
+    // An accepted worker's identity is frozen, and the check above already required any override
+    // to equal the resumed step's entry, so there is nothing to persist — and writing a step-level
+    // runner onto a mixed chain's record would break the run-level identity match.
+    if (resumeIdentity === undefined && (
       opts.runner !== undefined ||
       opts.model !== undefined ||
       opts.effort !== undefined ||
       opts.agentProfile !== undefined
-    ) {
+    )) {
       // Guard the pairing before persisting anything: the model override applies to the runner
       // this continuation will actually use (`opts.runner ?? record.runner ?? 'claude'` — the
       // same resolution `runContinuation` reads off the record). A model that is recognizably
@@ -3949,6 +4020,9 @@ export class RunManager {
       ? undefined
       : record?.steps.find((s) => s.sessionId === sessionId);
     const resumedProfileId = owningStep?.profileId;
+    // An owned worker's turn runs under the identity pinned for the step it extends (#452).
+    const toolsStep = this.continuationDefStep(record, sessionId);
+    const stepIdentity = this.workerStep(runId, toolsStep?.id);
     // The owning step also names the session's tools: resolve `allowedTools`/`bashAllowlist`
     // from the persisted `workflowDef` exactly as the first spawn did (`runAgentStep`).
     // Rebuilding with the bare DEFAULT_ALLOWED_TOOLS silently revoked every per-step grant
@@ -3959,13 +4033,7 @@ export class RunManager {
     // owning session) both extend the run's tail, so they resolve from the definition's last
     // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
     // keeps today's defaults.
-    const defSteps = record?.workflowDef?.steps;
-    const toolsStep = (
-      defSteps === undefined || (sessionId !== undefined && owningStep === undefined)
-        ? undefined
-        : defSteps.find((s) => s.id === owningStep?.id)
-          ?? [...defSteps].reverse().find((s) => stepKind(s) === 'agent'));
-    const grants = this.workerIdentity(runId)?.grants ?? {
+    const grants = stepIdentity?.grants ?? {
       allowedTools: allowedToolsForStep(toolsStep, continueBackend), bashAllowlist: toolsStep?.bashAllowlist,
     };
     // The owning step's authored `model` wins over the run-level pin, exactly as the first
@@ -3975,7 +4043,7 @@ export class RunManager {
     try {
       const normalized = normalizeModelForBackend(
         continueBackend,
-        agentModelsLocked(this.repoRoot) ? undefined : toolsStep?.model ?? record?.model,
+        agentModelsLocked(this.repoRoot) ? undefined : stepIdentity ? stepIdentity.model : toolsStep?.model ?? record?.model,
         { configuredProvider: await configuredModelProvider(continueBackend, state.cwd) },
       );
       continueModel = normalized?.backendModel;
@@ -3995,7 +4063,7 @@ export class RunManager {
       const stepEffort = parseDelegationEffort(toolsStep?.effort);
       continueEffort = modelsLocked
         ? undefined
-        : authoredStepEffort ? stepEffort : record?.effort;
+        : stepIdentity ? stepIdentity.effort : authoredStepEffort ? stepEffort : record?.effort;
     } catch (err) {
       failBeforeSpawn(err instanceof Error ? err.message : String(err));
       return;
@@ -4008,6 +4076,7 @@ export class RunManager {
       continueProfile = await this.agentEnvForStep(runId, continueBackend, {
         generateFollowups,
         recordedProfileId: resumedProfileId,
+        stepId: toolsStep?.id,
       });
     } catch (err) {
       if (!(err instanceof AgentTempDirError)) throw err;
@@ -4766,6 +4835,10 @@ export class RunManager {
     };
 
     const stepBackend = step.runner ?? taskBackend;
+    // An owned worker's step runs under what its identity pinned for it (#452): model, effort,
+    // account and grants alike. The bound `workflowDef` carries the same values; the private
+    // evidence is the authority.
+    const stepIdentity = this.workerStep(runId, step.id);
     // Normalise the selected model to canonical `provider/model` and back to the
     // backend's own wire form via the ONE shared mapper (#405). Fail-loud: an
     // unresolvable model (e.g. a bare id on opencode) returns the step error
@@ -4779,10 +4852,10 @@ export class RunManager {
       const stepEffort = parseDelegationEffort(step.effort);
       effectiveEffort = modelsLocked
         ? undefined
-        : authoredStepEffort ? stepEffort : this.store.getRun(runId)?.effort ?? input.effort;
+        : stepIdentity ? stepIdentity.effort : authoredStepEffort ? stepEffort : this.store.getRun(runId)?.effort ?? input.effort;
       const normalized = normalizeModelForBackend(
         stepBackend,
-        modelsLocked ? undefined : step.model ?? input.model,
+        modelsLocked ? undefined : stepIdentity ? stepIdentity.model : step.model ?? input.model,
         { configuredProvider: await configuredModelProvider(stepBackend, state.cwd) },
       );
       backendModel = normalized?.backendModel;
@@ -4806,6 +4879,7 @@ export class RunManager {
     try {
       stepProfile = await this.agentEnvForStep(runId, stepBackend, {
         generateFollowups: followupsEnabled() && input.generateFollowups !== false,
+        stepId: step.id,
       });
     } catch (err) {
       if (err instanceof AgentTempDirError) return err.message;
@@ -4815,7 +4889,7 @@ export class RunManager {
     if (state.cancelled || (beforeSpawn && this.executionBlockedByRootFinish(beforeSpawn))) return null;
     this.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
 
-    const grants = this.workerIdentity(runId)?.grants ?? {
+    const grants = stepIdentity?.grants ?? {
       allowedTools: allowedToolsForStep(step, stepBackend), bashAllowlist: step.bashAllowlist,
     };
     state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: backendModel,

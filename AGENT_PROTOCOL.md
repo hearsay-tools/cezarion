@@ -589,7 +589,10 @@ on all four real runners. R6–R11 exercise durable queued/startup input, before
 after asks, restart with an unanswered ask, continuation asks, delayed native replies,
 DONE/explicit-stop precedence and post-send checkpoint failure. R13 runs a persisted
 catalog chain (an agent step plus a check step) inside the owned worker on every
-runner, proving the check executes in the worker's own worktree (#451). Echo probes use the
+runner, proving the check executes in the worker's own worktree (#451). R14 runs an
+accepted mixed-runner chain — a step on the runner under test followed by a step on
+another runner — under a per-step identity, proving each step binds its own pinned
+account and provider instead of the run-level one (#452). Echo probes use the
 same documented assistant/item and terminal frames as each mock's baseline, with
 unique item IDs across turns; no new vendor wire event is invented.
 

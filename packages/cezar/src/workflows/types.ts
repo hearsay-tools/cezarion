@@ -29,6 +29,9 @@ export const workflowStepSchema = z
      *  has ever been able to write the legacy id THERE either, because this same enum was
      *  the only way in: there is no legacy shape to keep parseable. */
     runner: z.enum(RUNNER_IDS).optional(),
+    /** Agent account id for this step (spec 2026-07-29-agent-profiles). An owned worker resolves
+     *  and pins it per step at spawn (#452); an id the registry does not know is refused there. */
+    agentProfile: z.string().min(1).max(64).optional(),
     allowedTools: z.array(z.string()).optional(),
     bashAllowlist: z.array(z.string()).optional(),
     // check step

@@ -13,8 +13,8 @@ import {
 } from '@open-mercato/cezar-contract';
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
-import type { RunManager } from '../workflows/run.ts';
-import { QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef } from '../workflows/types.ts';
+import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
+import { QUICK_TASK_WORKFLOW, allowedToolsForStep, stepKind, type WorkflowDef, type WorkflowStepDef } from '../workflows/types.ts';
 import { findWorkflow } from '../workflows/load.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import type { Caller } from './credentials.ts';
@@ -28,20 +28,64 @@ export type DelegationProject = { id: string; root: string; store: RunStore; man
 /**
  * The catalog definition a spawn runs (#451): the built-in quick-task constant when the request
  * names none — never the catalog's `quick-task` entry, so a repo file cannot change the default
- * path — else the named entry. Version one pins one accepted provider per worker, so every agent
- * step must agree on a runner; `backend` is that runner when the chain declares one, otherwise
- * the request's own selection (absent → inherit the parent).
+ * path — else the named entry. Every agent step resolves its own runner and account (#452), so a
+ * chain may mix providers; a chain with no agent step has nothing for a worker to run.
  */
-async function resolveSpawnWorkflow(root: string, request: WorkerSpawnRequest): Promise<{ workflow: WorkflowDef; backend: RunnerId | undefined }> {
-  if (request.workflow === undefined) return { workflow: QUICK_TASK_WORKFLOW, backend: request.backend };
+async function resolveSpawnWorkflow(root: string, request: WorkerSpawnRequest): Promise<WorkflowDef> {
+  if (request.workflow === undefined) return QUICK_TASK_WORKFLOW;
   const workflow = await findWorkflow(root, request.workflow);
   if (!workflow) throw new DelegationPolicyError('invalid_input', `Unknown workflow "${request.workflow}"; the catalog holds the built-in quick-task and .ai/cezar/workflows/*.yaml`);
-  const declared = new Set<RunnerId>(workflow.steps.filter(step => stepKind(step) === 'agent').flatMap(step => step.runner ? [step.runner] : []));
-  if (request.backend !== undefined) declared.add(request.backend);
-  if (declared.size > 1) {
-    throw new DelegationPolicyError('invalid_input', `Workflow "${request.workflow}" needs runners ${[...declared].sort().join(', ')}; a worker runs under one accepted provider, so mixed-runner chains wait for per-step worker identity (#452)`);
+  if (!workflow.steps.some(step => stepKind(step) === 'agent')) throw new DelegationPolicyError('invalid_input', `Workflow "${request.workflow}" has no agent step for a worker to run`);
+  return workflow;
+}
+
+type WorkerGrants = { allowedTools?: string[]; bashAllowlist?: string[] };
+/**
+ * A step's authored tools narrow the parent's grants and never widen them: the parent's
+ * permissions bound every worker session (#430). A step that authors nothing inherits the
+ * parent's grants exactly; an authored list keeps only what the parent may use, where an absent
+ * parent `allowedTools` means the backend's default set and an absent `bashAllowlist` means
+ * unrestricted Bash, which any authored allowlist is narrower than.
+ */
+function narrowGrants(parent: WorkerGrants, step: WorkflowStepDef, runner: RunnerId): WorkerGrants {
+  const parentTools = step.allowedTools === undefined ? parent.allowedTools : parent.allowedTools ?? allowedToolsForStep(undefined, runner);
+  const allowedTools = step.allowedTools === undefined ? parent.allowedTools : step.allowedTools.filter(tool => parentTools!.includes(tool));
+  const bashAllowlist = step.bashAllowlist === undefined ? parent.bashAllowlist
+    : parent.bashAllowlist === undefined ? [...step.bashAllowlist] : step.bashAllowlist.filter(command => parent.bashAllowlist!.includes(command));
+  return { ...(allowedTools === undefined ? {} : { allowedTools: [...allowedTools] }), ...(bashAllowlist === undefined ? {} : { bashAllowlist: [...bashAllowlist] }) };
+}
+
+/** One resolved agent step: what the identity pins and what the public definition carries. */
+type ResolvedSpawnStep = { step: WorkflowStepDef; settings: DelegationExecutionSettings; grants: WorkerGrants };
+
+/**
+ * Resolve every agent step of the chain once, before acceptance (#452). The spawn selection fills
+ * only what a step leaves unset; a step's own runner, model, effort and account win. Equal
+ * selections share one resolution so a ten-step single-runner chain reads the registry once.
+ */
+async function resolveSpawnSteps(manager: RunManager, parentId: string, request: WorkerSpawnRequest, workflow: WorkflowDef): Promise<ResolvedSpawnStep[]> {
+  const cache = new Map<string, Promise<DelegationExecutionSettings>>();
+  const resolved: ResolvedSpawnStep[] = [];
+  for (const step of workflow.steps) {
+    if (stepKind(step) === 'check') continue;
+    const selection = {
+      ...(step.runner ?? request.backend) === undefined ? {} : { backend: step.runner ?? request.backend },
+      ...(step.model ?? request.model) === undefined ? {} : { model: step.model ?? request.model },
+      ...(step.effort ?? request.effort) === undefined ? {} : { effort: step.effort ?? request.effort },
+      ...(step.agentProfile === undefined ? {} : { agentProfile: step.agentProfile }),
+    };
+    const key = JSON.stringify(selection);
+    let pending = cache.get(key);
+    if (!pending) { pending = manager.selectDelegationExecutionSettings(parentId, selection); cache.set(key, pending); }
+    const settings = await pending;
+    resolved.push({ step, settings, grants: narrowGrants({ ...(settings.allowedTools === undefined ? {} : { allowedTools: settings.allowedTools }),
+      ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: settings.bashAllowlist }) }, step, settings.runner) });
   }
-  return { workflow, backend: [...declared][0] ?? request.backend };
+  return resolved;
+}
+
+function stepIdentityFields({ settings, grants }: ResolvedSpawnStep) {
+  return { account: settings.accountBinding, grants, ...(settings.model === undefined ? {} : { model: settings.model }), ...(settings.effort === undefined ? {} : { effort: settings.effort }) };
 }
 export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
 
@@ -216,10 +260,13 @@ export class DelegationService {
       }
       authorizeSpawn(caller, parent, project.id);
       const catalog = await resolveSpawnWorkflow(project.root, request);
-      const settings = await project.manager.selectDelegationExecutionSettings(parent.id, { ...request, backend: catalog.backend });
-      const identity = acceptedWorkerIdentitySchema.parse({ kind: 'accepted', account: settings.accountBinding, model: settings.model, effort: settings.effort,
-        grants: { ...(settings.allowedTools === undefined ? {} : { allowedTools: [...settings.allowedTools] }),
-          ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: [...settings.bashAllowlist] }) } });
+      const resolvedSteps = await resolveSpawnSteps(project.manager, parent.id, request, catalog);
+      // Run-level fields hold the first agent step (cockpit columns, pre-#452 evidence readers);
+      // the per-step list is what each launch binds.
+      const first = resolvedSteps[0]!;
+      const settings = first.settings;
+      const identity = acceptedWorkerIdentitySchema.parse({ kind: 'accepted', ...stepIdentityFields(first),
+        steps: resolvedSteps.map(entry => ({ stepId: entry.step.id, ...stepIdentityFields(entry) })) });
       const baselineSha = await resolveWorkerBaseline(project.root, settings.cwd, request.baseline);
       const workspace = await planOwnedWorkspace(project.root, randomUUID(), baselineSha);
       const prepared = request.context === undefined ? undefined : await prepareWorkerContext({
@@ -233,14 +280,18 @@ export class DelegationService {
         const current = this.context(caller);
         if (current !== project) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
         authorizeSpawn(caller, project.store.getRun(parent.id), project.id);
-        // Spawn selection fills only what a step leaves unset; the accepted grants replace step
-        // tools because the parent's permissions bound every worker session. Check steps run
-        // as authored. Authored `effort` already wins per step at execution, and an unset one
-        // falls through to the run-level pin, so it is not written here.
-        const workflowDef: WorkflowDef = { ...catalog.workflow, steps: catalog.workflow.steps.map(step => stepKind(step) === 'check' ? step : { ...step,
-          runner: step.runner ?? settings.runner, model: step.model ?? settings.model,
-          ...(settings.allowedTools === undefined ? {} : { allowedTools: [...settings.allowedTools] }),
-          ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: [...settings.bashAllowlist] }),
+        // The public definition carries what each agent step RESOLVED to — runner, account,
+        // model, effort and the narrowed grants — so the bound `workflowDef` and the private
+        // per-step identity describe the same launch and the manager can hold them against each
+        // other. Check steps run as authored.
+        const workflowDef: WorkflowDef = { ...catalog, steps: catalog.steps.map(step => {
+          const entry = resolvedSteps.find(candidate => candidate.step === step);
+          if (!entry) return step;
+          const { model: _model, effort: _effort, allowedTools: _tools, bashAllowlist: _bash, ...authored } = step;
+          return { ...authored, runner: entry.settings.runner, agentProfile: entry.settings.accountBinding!.profileId,
+            ...(entry.settings.model === undefined ? {} : { model: entry.settings.model }),
+            ...(entry.settings.effort === undefined ? {} : { effort: entry.settings.effort }),
+            ...entry.grants };
         }) };
         const worker = project.store.createOwnedRun({
           title: request.task.slice(0, 200), task: context ? workerContextTask(request.task, context) : request.task, workflow: workflowDef.name,
