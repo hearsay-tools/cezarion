@@ -145,11 +145,38 @@ async function boundedJson(response: Response): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks, size).toString('utf8'));
 }
 
+/** A failed Writable emits `error` as well as reporting through its callback. */
+async function writeInboxOutput(text: string): Promise<void> {
+  const stream = process.stdout;
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let callbackFailure: NodeJS.Immediate | undefined;
+    const finish = (error?: Error | null) => {
+      if (settled) return;
+      settled = true;
+      clearImmediate(callbackFailure);
+      stream.removeListener('error', onError);
+      if (error) reject(error); else resolve();
+    };
+    const onError = (error: Error) => finish(error);
+    stream.on('error', onError);
+    try {
+      stream.write(text, error => {
+        if (settled) return;
+        // Node emits the paired error after this callback. Keep its listener
+        // through that emission; callback-only streams still settle next tick.
+        if (error) callbackFailure = setImmediate(() => finish(error));
+        else finish();
+      });
+    } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
+  });
+}
+
 export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): Promise<number> {
   let token: string | undefined;
-  const print = (value: unknown) => {
+  const print = (value: unknown, stderr = false) => {
     const json = JSON.stringify(value);
-    console.log(token ? json.replaceAll(token, '[REDACTED]') : json);
+    (stderr ? console.error : console.log)(token ? json.replaceAll(token, '[REDACTED]') : json);
   };
   try {
     if (argv.length === 1 && (argv[0] === '-h' || argv[0] === '--help')) {
@@ -234,12 +261,13 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
         const snapshot = inboxReserveResultSchema.parse(await postInbox('', {}));
         try {
           const json = JSON.stringify(snapshot).replaceAll(token, '[REDACTED]');
-          await new Promise<void>((resolve, reject) => { process.stdout.write(`${json}\n`, error => error ? reject(error) : resolve()); });
+          await writeInboxOutput(`${json}\n`);
         } catch {
           if (snapshot.receiptId) {
             try { inboxReceiptResultSchema.parse(await postInbox('/release', { receiptId: snapshot.receiptId })); } catch { /* receipt expires */ }
           }
-          throw new DelegationPolicyError('unavailable_transport', 'Inbox output failed; the receipt was released or will expire');
+          print({ code: 'unavailable_transport', error: 'Inbox output failed; the receipt was released or will expire' }, true);
+          return 1;
         }
         if (snapshot.receiptId) {
           let acknowledged = false;

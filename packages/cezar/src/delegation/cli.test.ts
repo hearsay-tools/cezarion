@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runWorkerCommand } from './cli.ts';
 import { fixture } from './service.testkit.ts';
@@ -73,6 +74,7 @@ describe('bundled worker CLI', () => {
     expect(waitHelp).toContain('--timeout-seconds');
   });
   it('prints one inbox snapshot before ACK and rejects positional IDs', async () => {
+    const listeners = process.stdout.listenerCount('error');
     const id = randomUUID(), receiptId = randomUUID();
     const batch = { messages: [{ id, senderRunId: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Ready', createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [], receiptId, expiresAt: new Date(Date.now() + 120_000).toISOString() };
     const calls: string[] = [];
@@ -87,12 +89,14 @@ describe('bundled worker CLI', () => {
     }) as typeof process.stdout.write);
     expect(await runWorkerCommand(['inbox'], env)).toBe(0);
     expect(calls).toEqual(['inbox', 'stdout:true', 'ack']);
+    expect(process.stdout.listenerCount('error')).toBe(listeners);
     expect(await runWorkerCommand(['inbox', f.parent.id], env)).toBe(1);
     expect(json().code).toBe('invalid_input');
     expect(fetchMock).toHaveBeenCalledTimes(2);
     write.mockRestore();
   });
   it('releases a receipt when stdout completion fails and never ACKs it', async () => {
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
     const receiptId = randomUUID(), paths: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async url => {
       const path = String(url).split('/').at(-1)!; paths.push(path);
@@ -101,7 +105,39 @@ describe('bundled worker CLI', () => {
     vi.spyOn(process.stdout, 'write').mockImplementation(((_chunk: string, callback?: (error?: Error | null) => void) => { callback?.(Error('pipe closed')); return false; }) as typeof process.stdout.write);
     expect(await runWorkerCommand(['inbox'], env)).toBe(1);
     expect(paths).toEqual(['inbox', 'release']);
-    expect(json().code).toBe('unavailable_transport');
+    expect(JSON.parse(String(stderr.mock.calls.at(-1)?.[0])).code).toBe('unavailable_transport');
+  });
+  it.each(['callback', 'destroy'] as const)('releases an inbox receipt on a real stdout %s error and reports via stderr', async failure => {
+    const receiptId = randomUUID(), paths: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async url => {
+      const path = String(url).split('/').at(-1)!; paths.push(path);
+      return new Response(JSON.stringify(path === 'inbox' ? { messages: [{ id: randomUUID(), senderRunId: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Ready', createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [], receiptId, expiresAt: new Date(Date.now() + 120_000).toISOString() } : { receiptId, status: 'released' }));
+    });
+    const stream = new Writable({ write(_chunk, _encoding, callback) {
+      if (failure === 'callback') callback(Error('pipe closed'));
+      else this.destroy(Error('pipe closed'));
+    } });
+    // Observe the actual emitted error without letting a regression kill Vitest itself.
+    const errors: Error[] = [];
+    const handlersAtError: number[] = [];
+    stream.on('error', error => { errors.push(error); handlersAtError.push(stream.listenerCount('error')); });
+    const listeners = stream.listenerCount('error');
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const stdout = vi.spyOn(process, 'stdout', 'get').mockReturnValue(stream as typeof process.stdout);
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      const result = await Promise.race([
+        runWorkerCommand(['inbox'], env),
+        new Promise(resolve => { timeout = setTimeout(() => resolve('output error was not handled'), 1_000); }),
+      ]);
+      expect(result).toBe(1);
+      expect(errors.map(error => error.message)).toEqual(['pipe closed']);
+      expect(handlersAtError[0]).toBeGreaterThan(listeners);
+      expect(paths).toEqual(['inbox', 'release']);
+      expect(output).not.toHaveBeenCalled();
+      expect(JSON.parse(String(stderr.mock.calls.at(-1)?.[0]))).toMatchObject({ code: 'unavailable_transport', error: expect.stringContaining('Inbox output failed') });
+      expect(stream.listenerCount('error')).toBe(listeners);
+    } finally { clearTimeout(timeout); stdout.mockRestore(); stream.destroy(); }
   });
   it('prints stable IDs but reports ACK failure as nonzero without claiming success', async () => {
     const id = randomUUID(), receiptId = randomUUID(), paths: string[] = [];
