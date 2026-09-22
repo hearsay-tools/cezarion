@@ -1,3 +1,6 @@
+import { ciWaitRequestSchema, ciWaitResultSchema, type CiWait, type CiWaitRequest, type CiWaitResult } from '@open-mercato/cezar-contract';
+import { acquireCiResources } from '../ci-wait/resources.ts';
+import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding, type WorkerExecutionIdentity, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
@@ -273,6 +276,10 @@ export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model
 interface ActiveRun {
   delegationSettings?: DelegationExecutionSettings;
   revokeDelegation?: () => void;
+  revokeCiTools?: () => void;
+  ciGeneration?: string;
+  ciTurnId?: string;
+  ciWakeTurn?: AgentSession;
   cancelled: boolean;
   /** Explicit human Finish survives disposal; shutdown-only result callbacks do not settle. */
   finishRequested?: boolean;
@@ -710,6 +717,9 @@ export class RunManager {
     }
     if (this.executions.get(runId) === execution) this.executions.delete(runId);
     execution.resolve();
+    if (!this.disposed) {
+      try { this.queueCiWake(runId); } catch { this.retryCiAdmission(runId); }
+    }
     if (!this.disposed && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
     if (!this.disposed) this.releaseSlot();
   }
@@ -806,6 +816,13 @@ export class RunManager {
   /** Durable monitoring subset. Only the configured number receives the waiting-slot exemption. */
   private readonly monitoring = new Set<string>();
   /** Separate from human waiting: these resumes MUST reacquire scheduler capacity. */
+  private readonly ciWakeQueuedAt = new Map<string, number>();
+  private readonly ciWakeAdmitted = new Set<string>();
+  private readonly ciWatches = new Map<string, { id: string; abort: AbortController }>();
+  private readonly ciRegistrations = new Map<string, { abort: AbortController; pr: string; seconds: number; promise: Promise<CiWait> }>();
+  private readonly ciRetries = new Map<string, NodeJS.Timeout>();
+  private readonly ciResources: ReturnType<typeof acquireCiResources>;
+  private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   private readonly workerWaiting = new Set<string>();
   private readonly workerWakeAdmitted = new Set<string>();
   private readonly workerWakeQueuedAt = new Map<string, number>();
@@ -814,6 +831,7 @@ export class RunManager {
   private recovering = false;
   private disposed = false;
   private readonly onDelegationRun = (run: RunRecord): void => {
+    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status)) this.withdrawCiWait(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     if (this.disposed || this.recovering || this.reconcilingWorkers) return;
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.reconcileWorkerWaits();
@@ -889,6 +907,8 @@ export class RunManager {
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
+    this.ciResources = acquireCiResources(this.semaphore);
+    this.ciSupervisor = this.ciResources.supervisor;
     this.offSemaphore = this.semaphore.register({
       busySlots: () => this.busySlots(),
       pump: () => this.pump(),
@@ -915,6 +935,13 @@ export class RunManager {
    */
   dispose(): void {
     this.disposed = true;
+    for (const task of this.ciWatches.values()) task.abort.abort();
+    this.ciWatches.clear();
+    for (const task of this.ciRegistrations.values()) task.abort.abort();
+    this.ciRegistrations.clear();
+    for (const timer of this.ciRetries.values()) clearTimeout(timer);
+    this.ciRetries.clear();
+    this.ciResources.release();
     this.delegationProvisioner = undefined;
     this.finalizedWorkers.clear();
     for (const settle of this.terminationWaiters) settle();
@@ -928,6 +955,7 @@ export class RunManager {
     this.offSemaphore();
     clearInterval(this.queueWatchdog);
     for (const [runId, state] of this.active) {
+      state.revokeCiTools?.(); state.revokeCiTools = undefined;
       state.revokeDelegation?.(); state.revokeDelegation = undefined;
       this.clearIdleTimer(state);
       this.clearMonitoringWakeTimer(state, runId);
@@ -1149,6 +1177,155 @@ export class RunManager {
     return session;
   }
 
+  /** Provision the same capability and descriptor on every start, Continue and recovered launch. */
+  private async provisionCiSession(runId: string, state: ActiveRun) {
+    state.revokeCiTools?.();
+    state.revokeCiTools = undefined;
+    state.ciGeneration = randomUUID();
+    state.ciTurnId = randomUUID();
+    const generation = state.ciGeneration;
+    const controller = await this.ciResources.controller();
+    if (!controller || this.disposed || state.cancelled || this.active.get(runId) !== state) return;
+    const provisioned = controller.provision((request, signal) => this.registerCiWait(runId, request, generation, signal));
+    state.revokeCiTools = provisioned.revoke;
+    return provisioned;
+  }
+
+  /** Trusted capability callbacks supply run identity; the model supplies only a PR and deadline. */
+  async registerCiWait(runId: string, request: CiWaitRequest, generation: string, capabilitySignal?: AbortSignal): Promise<CiWait> {
+    const parsed = ciWaitRequestSchema.parse(request);
+    const state = this.active.get(runId);
+    const authorized = () => {
+      const run = this.store.getRun(runId);
+      return !this.disposed && !capabilitySignal?.aborted && !!run && ['running', 'waiting'].includes(run.status) && !run.stopping &&
+        this.active.get(runId) === state && !!state?.session?.open && !state.cancelled && !state.finishRequested &&
+        state.ciGeneration === generation && !state.pendingHumanAsk && !this.hasUnansweredHumanAsk(runId) &&
+        !this.workerWait(runId) && !this.workerExecutionStopped(runId) && !this.executionBlockedByRootFinish(run);
+    };
+    if (!authorized() || !state) throw Object.assign(new Error('Run cannot register a CI wait in its current state'), { code: 'unauthorized' });
+    const current = this.store.getRun(runId)?.ciWait;
+    if (current) {
+      if (current.prUrl.toLowerCase() === parsed.pr.replace(/\/$/, '').toLowerCase() && current.timeoutSeconds === parsed.timeout_seconds) return current;
+      throw Object.assign(new Error('wait_conflict: a different CI wait is already registered'), { code: 'wait_conflict' });
+    }
+    const pending = this.ciRegistrations.get(runId);
+    if (pending) {
+      if (pending.pr === parsed.pr && pending.seconds === parsed.timeout_seconds) return pending.promise;
+      throw Object.assign(new Error('wait_conflict: a different CI registration is already in progress'), { code: 'wait_conflict' });
+    }
+    const turnId = state.ciTurnId ??= randomUUID();
+    const abort = new AbortController();
+    const signal = capabilitySignal ? AbortSignal.any([abort.signal, capabilitySignal]) : abort.signal;
+    const promise = (async () => {
+      const identity = await this.ciSupervisor.resolve(parsed.pr, signal);
+      if (signal.aborted || !authorized() || state.ciTurnId !== turnId) throw Object.assign(new Error('Run cannot register a CI wait after interruption'), { code: 'unauthorized' });
+      const registeredAt = new Date().toISOString();
+      const wait: CiWait = { ...identity, id: randomUUID(), generation, turnId, timeoutSeconds: parsed.timeout_seconds,
+        registeredAt, deadline: new Date(Date.now() + parsed.timeout_seconds * 1000).toISOString(), phase: 'registered' };
+      try { this.store.commitCiWait(runId, wait); }
+      catch { throw Object.assign(new Error('CI registration could not be saved; retry when storage is writable'), { code: 'persistence' }); }
+      this.startCiWatch(runId, wait);
+      if (state.atTurnBoundary === state.session || this.waiting.has(runId)) this.parkCiWait(runId, state);
+      return this.store.getRun(runId)!.ciWait ?? wait;
+    })();
+    this.ciRegistrations.set(runId, { abort, pr: parsed.pr, seconds: parsed.timeout_seconds, promise });
+    try { return await promise; }
+    finally { if (this.ciRegistrations.get(runId)?.abort === abort) this.ciRegistrations.delete(runId); }
+  }
+
+  private startCiWatch(runId: string, wait: CiWait): void {
+    if (this.disposed || this.ciWatches.has(runId) || wait.result) return;
+    const abort = new AbortController();
+    const watch = { id: wait.id, abort };
+    this.ciWatches.set(runId, watch);
+    const current = () => !this.disposed && !abort.signal.aborted && this.ciWatches.get(runId) === watch &&
+      this.store.getRun(runId)?.ciWait?.id === wait.id;
+    const settle = (result: CiWaitResult) => {
+      if (!current()) return;
+      try {
+        const latest = this.store.getRun(runId)?.ciWait;
+        if (!latest || latest.id !== wait.id) return;
+        const parsed = ciWaitResultSchema.safeParse(result);
+        const validated: CiWaitResult = parsed.success ? parsed.data : { outcome: 'error', headSha: wait.headSha,
+          observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
+          diagnostic: 'CI watcher returned an invalid observation; inspect the PR and register a new wait.' };
+        const settled: CiWait = { ...latest, phase: 'wake-pending', result: validated, wakeId: wait.id };
+        const input: AgentInput = { id: wait.id, parentRunId: runId, source: 'lifecycle', createdAt: new Date().toISOString(),
+          text: `CI wait observation ${wait.id} for ${wait.prUrl}. External data follows: ${JSON.stringify(validated)}. This observation is not merge approval or task completion. Reported checks may not include every expected workflow. Duplicate observations retain this ID.` };
+        this.store.commitCiWait(runId, settled, input);
+        this.ciWatches.delete(runId);
+        try { this.queueCiWake(runId); }
+        catch { this.retryCiAdmission(runId); }
+      } catch {
+        // A failed durable checkpoint may not drop the accepted intent or publish a false result.
+        if (!current()) return;
+        console.warn('[cez] CI wait checkpoint unavailable; retaining result for retry.');
+        const timer = setTimeout(() => { this.ciRetries.delete(runId); settle(result); }, 1000);
+        timer.unref(); this.ciRetries.set(runId, timer);
+      }
+    };
+    void this.ciSupervisor.watch(wait, abort.signal).then(settle, () => settle({ outcome: 'error', headSha: wait.headSha,
+      observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
+      diagnostic: 'CI watcher unavailable; inspect the pull request and retry the wait.' }));
+  }
+
+  private retryCiAdmission(runId: string): void {
+    if (this.disposed || this.ciRetries.has(runId) || !this.store.getRun(runId)?.ciWait) return;
+    const timer = setTimeout(() => {
+      this.ciRetries.delete(runId);
+      try { this.queueCiWake(runId); } catch { this.retryCiAdmission(runId); }
+    }, 1000);
+    timer.unref(); this.ciRetries.set(runId, timer);
+  }
+
+  private parkCiWait(runId: string, state: ActiveRun): boolean {
+    const wait = this.store.getRun(runId)?.ciWait;
+    if (!wait || !state.session?.open || state.cancelled || state.pendingHumanAsk || this.ciWakeAdmitted.has(runId)) return false;
+    if (wait.phase === 'registered') this.store.commitCiWait(runId, { ...wait, phase: 'parked' });
+    this.clearIdleTimer(state); this.clearMonitoringWakeTimer(state, runId);
+    this.waiting.add(runId); this.monitoring.add(runId);
+    this.store.updateRun(runId, { status: 'running', activity: 'monitoring', monitoringWakeAt: undefined });
+    if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'running' });
+    this.queueCiWake(runId);
+    this.releaseSlot();
+    return true;
+  }
+
+  private queueCiWake(runId: string): void {
+    const run = this.store.getRun(runId);
+    const wait = run?.ciWait;
+    if (this.disposed || this.recovering || !run || !wait?.result || !wait.wakeId || this.ciWakeQueuedAt.has(runId) ||
+      this.ciWakeAdmitted.has(runId) || !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
+      this.hasPendingHumanAsk(runId) || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
+    const state = this.active.get(runId);
+    if (state) {
+      if (!this.monitoring.has(runId) || state.atTurnBoundary !== state.session || state.pendingHumanAsk) return;
+      this.ciWakeQueuedAt.set(runId, Date.now());
+      if (!this.queue.includes(runId)) this.queue.push(runId);
+    } else if (!this.isActive(runId)) {
+      // No live session: create a scheduler-owned continuation, never a direct provider call.
+      this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+      const resumed = this.continueRun(runId, { text: 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.' }, true);
+      if (!resumed.ok) {
+        this.store.appendEvent(runId, { type: 'note', message: `CI result retained; continuation unavailable: ${resumed.error ?? 'unknown'}` });
+        return;
+      }
+      this.ciWakeQueuedAt.set(runId, Date.now());
+    }
+    this.releaseSlot();
+  }
+
+  private withdrawCiWait(runId: string, message?: QueuedMessage): void {
+    this.ciRegistrations.get(runId)?.abort.abort(); this.ciRegistrations.delete(runId);
+    this.store.commitCiWaitWithdrawal(runId, message);
+    this.ciWatches.get(runId)?.abort.abort(); this.ciWatches.delete(runId);
+    const timer = this.ciRetries.get(runId); if (timer) clearTimeout(timer); this.ciRetries.delete(runId);
+    if (this.ciWakeQueuedAt.delete(runId) && this.active.has(runId)) {
+      const index = this.queue.indexOf(runId); if (index >= 0) this.queue.splice(index, 1);
+    }
+    this.ciWakeAdmitted.delete(runId);
+  }
+
   /** Snapshot of the actual active session, never guessed from partial run settings. */
   delegationExecutionSettings(runId: string): DelegationExecutionSettings {
     const state = this.active.get(runId);
@@ -1356,7 +1533,7 @@ export class RunManager {
   private oldestQueuedAt(): number | null {
     const head = this.queue[0];
     if (!head) return null;
-    const wakeQueuedAt = this.workerWakeQueuedAt.get(head);
+    const wakeQueuedAt = this.workerWakeQueuedAt.get(head) ?? this.ciWakeQueuedAt.get(head);
     if (wakeQueuedAt !== undefined) return wakeQueuedAt;
     const createdAt = this.store.getRun(head)?.createdAt;
     const ms = createdAt ? Date.parse(createdAt) : Number.NaN;
@@ -1436,13 +1613,16 @@ export class RunManager {
         // Only pay for the config read when something is actually held: a queued record may name
         // no runner, and then the account it would use is the configured default.
         const defaultRunner = anyHold ? (await loadConfig(this.repoRoot)).defaultRunner : undefined;
-        while (this.queue.length > 0 && capacity()) {
+        // Removing one monitor above the exemption cap needs no new slot: it already holds one.
+        const chargedCiWake = (id: string) => this.ciWakeQueuedAt.has(id) && this.monitoring.has(id) &&
+          this.monitoring.size > this.semaphore.maxMonitoringSessions();
+        while (this.queue.length > 0) {
           // FIFO among the runs that CAN start; a held one keeps its place in the queue rather
           // than being dequeued and re-queued (which would churn its position and its record).
           const next = this.queue.findIndex((id) => {
             const queued = this.store.getRun(id);
-            return !queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
-              (!anyHold || !accountHeldFor(queued, holds, defaultRunner ?? 'claude')));
+            return (capacity() || chargedCiWake(id)) && (!queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
+              (!anyHold || !accountHeldFor(queued, holds, defaultRunner ?? 'claude'))));
           });
           if (next === -1) break; // every queued run has a durable reason to remain held
           const candidate = this.queue[next]!;
@@ -1457,6 +1637,17 @@ export class RunManager {
           }
           const runId = this.queue.splice(next, 1)[0];
           if (!runId) break;
+          if (this.ciWakeQueuedAt.has(runId) && this.active.has(runId)) {
+            this.ciWakeQueuedAt.delete(runId);
+            const state = this.active.get(runId)!;
+            if (!state.pendingHumanAsk && this.store.getRun(runId)?.ciWait?.result && state.atTurnBoundary === state.session) {
+              this.ciWakeAdmitted.add(runId);
+              this.waiting.delete(runId); this.monitoring.delete(runId);
+              this.flushAgentInputs(runId);
+            }
+            continue;
+          }
+          if (this.ciWakeQueuedAt.delete(runId)) this.ciWakeAdmitted.add(runId);
           if (this.workerWakeQueuedAt.has(runId) && this.active.has(runId)) {
             this.workerWakeQueuedAt.delete(runId);
             const state = this.active.get(runId)!;
@@ -1698,6 +1889,13 @@ export class RunManager {
         if (run.continuationMessage?.origin === 'human') this.continueRun(run.id, {}, true);
         continue;
       }
+      if (run.ciWait && !this.hasPendingHumanAsk(run.id)) {
+        if (run.ciWait.phase === 'registered') this.store.commitCiWait(run.id, { ...run.ciWait, phase: 'parked' });
+        this.store.updateRun(run.id, { status: 'running', activity: 'monitoring', monitoringWakeAt: undefined });
+        this.startCiWatch(run.id, this.store.getRun(run.id)!.ciWait!);
+        continue;
+      }
+      if (run.ciWait) this.withdrawCiWait(run.id);
       if (run.status === 'queued') {
         await this.reviveQueuedRun(run, 'cezar restarted');
         continue;
@@ -1793,6 +1991,10 @@ export class RunManager {
     // one — see `reconcileAutoResumes`.
     } finally { this.recovering = false; }
     this.reconcileWorkerWaits();
+    for (const run of this.store.listRuns()) {
+      if (run.ciWait && !['running', 'waiting', 'queued'].includes(run.status)) this.withdrawCiWait(run.id);
+      else if (run.ciWait) this.queueCiWake(run.id);
+    }
     this.reconcileAutoResumes();
     void this.pump();
   }
@@ -1810,7 +2012,7 @@ export class RunManager {
 
   private isDisposedDelegatedRun(runId: string): boolean {
     const role = this.store.getRun(runId)?.delegation?.role;
-    return this.disposed && (role === 'root' || role === 'worker');
+    return this.disposed && (role === 'root' || role === 'worker' || !!this.store.getRun(runId)?.ciWait);
   }
 
   /** Shutdown is not completion. Explicit terminal controls retain their precedence. */
@@ -1822,6 +2024,7 @@ export class RunManager {
   private dropActive(runId: string): void {
     const state = this.active.get(runId);
     state?.releaseRepoRoot?.();
+    state?.revokeCiTools?.();
     if (state) {
       state.releaseRepoRoot = undefined;
       this.clearIdleTimer(state);
@@ -1831,8 +2034,13 @@ export class RunManager {
     this.monitoring.delete(runId);
     this.workerWaiting.delete(runId);
     this.workerWakeAdmitted.delete(runId);
+    this.ciWakeAdmitted.delete(runId);
+    if (this.ciWakeQueuedAt.delete(runId)) {
+      const index = this.queue.indexOf(runId); if (index >= 0) this.queue.splice(index, 1);
+    }
     if (state) this.clearMonitoringWakeTimer(state, runId);
     this.active.delete(runId);
+    if (!this.disposed && this.store.getRun(runId)?.ciWait) this.queueCiWake(runId);
     if (!this.executions.has(runId) && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
     this.memoryPausing.delete(runId);
     this.lastNamerKey.delete(runId);
@@ -2274,6 +2482,8 @@ export class RunManager {
         this.store.commitWorkerExecutionComplete(runId, proof.generation);
       }
     }
+    const hadCiWait = !!this.store.getRun(runId)?.ciWait;
+    this.withdrawCiWait(runId);
     const cancelledFinish = this.store.commitRootFinishCancellation(runId);
     this.withdrawWorkerWait(runId);
     // Still waiting in the queue: just drop it there.
@@ -2297,7 +2507,7 @@ export class RunManager {
       }
       if (cancelledFinish) return true;
       const run = this.store.getRun(runId);
-      if (run?.delegation && ['queued', 'running', 'waiting'].includes(run.status)) {
+      if (run && (run.delegation || hadCiWait) && ['queued', 'running', 'waiting'].includes(run.status)) {
         this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
         return true;
       }
@@ -2306,6 +2516,7 @@ export class RunManager {
     state.cancelled = true;
     this.store.updateRun(runId, { stopping: true });
     this.store.flush();
+    state.revokeCiTools?.(); state.revokeCiTools = undefined;
     state.revokeDelegation?.(); state.revokeDelegation = undefined;
     this.clearIdleTimer(state);
     state.interrupt();
@@ -2481,7 +2692,8 @@ export class RunManager {
     const run = this.store.getRun(runId);
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return null;
     const message = this.toQueuedMessage(runId, content);
-    if (this.workerWait(runId)) this.withdrawWorkerWait(runId, message);
+    if (run.ciWait) this.withdrawCiWait(runId, message);
+    else if (this.workerWait(runId)) this.withdrawWorkerWait(runId, message);
     else this.store.updateRun(runId, { queuedMessages: [...(run.queuedMessages ?? []), message] });
     return message;
   }
@@ -2604,8 +2816,9 @@ export class RunManager {
     if (!startingUp) return false;
     // The pending maps were removed only AFTER hydration. This entry therefore
     // needs live delivery, never a second fold into the already-created opening.
-    const message = this.workerWait(runId) ? this.toQueuedMessage(runId, content) : undefined;
-    if (message) this.withdrawWorkerWait(runId, message);
+    const message = this.workerWait(runId) || run.ciWait ? this.toQueuedMessage(runId, content) : undefined;
+    if (run.ciWait) this.withdrawCiWait(runId, message);
+    else if (message) this.withdrawWorkerWait(runId, message);
     const pending = this.deferredMessages.get(runId) ?? [];
     pending.push({ content, ...(message ? { messageId: message.id } : {}) });
     this.deferredMessages.set(runId, pending);
@@ -2769,6 +2982,7 @@ export class RunManager {
     if (this.historyDeletionPending(runId)) refuse('History deletion is pending; finish deletion before registering a wait');
     if (this.executionBlockedByRootFinish(run!)) refuse('Parent finish is pending; a finishing parent cannot register a wait');
     if (state?.pendingHumanAsk || this.hasUnansweredHumanAsk(runId)) refuse('A human question is pending; answer it before registering a wait');
+    if (run?.ciWait) refuse('A CI wait is already active; finish or withdraw it before registering a worker wait');
     const wait = this.workerWait(runId);
     if (wait) refuse(`Wait ${wait.id} is already active; keep it or run worker cancel-wait ${wait.id} before registering another`);
     if (!['running', 'waiting'].includes(run!.status) || !state?.session?.open || state.cancelled) {
@@ -2822,6 +3036,9 @@ export class RunManager {
     if (!run?.delegation || run.delegation.role === 'invalid' || this.historyDeletionPending(runId) ||
       this.executionBlockedByRootFinish(run) || !['queued', 'running', 'waiting'].includes(run.status) ||
       this.workerExecutionStopped(runId) || this.hasPendingHumanAsk(runId)) return;
+    // Retain conversation input until the registered CI wait receives scheduler admission.
+    // Converting this monitor into a worker wake would strand both admission paths.
+    if (run.ciWait) { this.queueCiWake(runId); return; }
     const input = run.agentInputs?.find(entry => entry.conversation && !entry.deliveredAt);
     if (!input) return;
     const state = this.active.get(runId);
@@ -3204,9 +3421,17 @@ export class RunManager {
         if (inputIds.length) {
           const queue = this.store.getRun(runId)?.agentInputs ?? [];
           if (!queue.some(input => inputIds.includes(input.id) && !input.deliveredAt)) return;
-          const deliveredAt = new Date().toISOString();
-          this.store.commitAgentInputs(runId, queue.map(input => inputIds.includes(input.id) && !input.deliveredAt
-            ? { ...input, deliveredAt } : input));
+          const ciWakeId = this.store.getRun(runId)?.ciWait?.wakeId;
+          if (ciWakeId && inputIds.includes(ciWakeId)) {
+            // CI lifecycle input owns its turn; never retire a conversation batch with it.
+            if (inputIds.length !== 1) throw new Error('CI observation must be delivered separately');
+            this.store.commitCiWaitDelivery(runId, ciWakeId);
+            this.ciWakeAdmitted.delete(runId);
+          } else {
+            const deliveredAt = new Date().toISOString();
+            this.store.commitAgentInputs(runId, queue.map(input => inputIds.includes(input.id) && !input.deliveredAt
+              ? { ...input, deliveredAt } : input));
+          }
           if (inputIds.includes(this.workerWait(runId)?.wakeId ?? '')) this.withdrawWorkerWait(runId);
           this.reconcileWorkerWaits();
         }
@@ -3217,7 +3442,7 @@ export class RunManager {
       state.agentInputFlight = undefined;
       if (!authorized || !session.open || state.agentSessionError || state.agentInputError) return;
       if (this.flushAgentInputs(runId)) return;
-      if (state.atTurnBoundary !== session || state.pendingHumanAsk || this.workerWait(runId) || this.hasQueuedAgentInputs(runId)) return;
+      if (state.atTurnBoundary !== session || state.pendingHumanAsk || this.workerWait(runId) || this.store.getRun(runId)?.ciWait || this.hasQueuedAgentInputs(runId)) return;
       if (state.doneAtBoundary === session) {
         if (this.deferParentCompletion(runId)) return;
         this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed' });
@@ -3251,6 +3476,7 @@ export class RunManager {
     void flight.settled.then(() => deliveries?.delete(flight.settled!));
     this.resumeParkedRun(runId, state);
     if (inputIds.includes(this.workerWait(runId)?.wakeId ?? '')) state.workerWakeTurn = session;
+    if (inputIds.includes(this.store.getRun(runId)?.ciWait?.wakeId ?? '')) state.ciWakeTurn = session;
     return true;
   }
 
@@ -3267,6 +3493,12 @@ export class RunManager {
     // The opening prompt already carries this input. It must not be resubmitted
     // by a readiness callback before the first successful turn checkpoints it.
     if (state.openingAgentInputId) return false;
+    if (run.ciWait) {
+      if (!this.ciWakeAdmitted.has(runId) || state.atTurnBoundary !== state.session) return false;
+      // Preserve CI admission and atomic retirement; conversations batch on the next turn.
+      const input = run.agentInputs?.find(entry => entry.id === run.ciWait?.wakeId && !entry.deliveredAt);
+      return !!input && this.submitAgentInput(runId, state, [{ type: 'text', text: this.formatAgentInput(runId, input) }], [input.id]);
+    }
     const batch = agentInputBatch(run.agentInputs ?? [], input => this.formatAgentInput(runId, input));
     return !!batch && this.submitAgentInput(runId, state, [{ type: 'text', text: batch.text }], batch.inputs.map(input => input.id));
   }
@@ -3359,6 +3591,7 @@ export class RunManager {
     const run = this.store.getRun(runId);
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
 
+    if (!userAuthored && run.ciWait) return false;
     const text = content
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
@@ -3368,7 +3601,10 @@ export class RunManager {
     // these as user attachments (vs. agent tool screenshots) on disk (#357).
     const persisted = userAuthored ? this.persistPastedAttachments(runId, content) : [];
     const images = persisted.map((saved) => saved.url);
+    const ciHumanMessage: QueuedMessage | undefined = userAuthored && run.ciWait
+      ? { id: randomUUID(), text, images, createdAt: new Date().toISOString() } : undefined;
     if (userAuthored) {
+      this.withdrawCiWait(runId, ciHumanMessage);
       this.withdrawWorkerWait(runId);
       this.store.appendEvent(runId, {
         type: 'user-message',
@@ -3392,6 +3628,7 @@ export class RunManager {
       : this.submitAgentInput(runId, state, deliverable);
     if (delivered) {
       if (userAuthored) {
+        if (ciHumanMessage) this.store.commitQueuedMessageDelivery(runId, ciHumanMessage.id);
         if (answeringAskSeq !== undefined) {
           this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answeringAskSeq });
         }
@@ -3415,7 +3652,7 @@ export class RunManager {
     }
     const state = this.active.get(runId);
     if (decision.action === 'session' && state?.session) {
-      try { this.withdrawWorkerWait(runId); } catch { return false; }
+      try { this.withdrawCiWait(runId); this.withdrawWorkerWait(runId); } catch { return false; }
       state.finishRequested = true;
       this.clearIdleTimer(state);
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'session closed by user' });
@@ -3549,11 +3786,13 @@ export class RunManager {
       !answers.some(answer => answer?.text?.trim() || answer?.images?.length))) {
       return { ok: false, error: 'pending human question requires an explicit answer' };
     }
+    // A disconnected CI monitor has durable intent but no live session to receive human input.
+    const disconnectedCiWait = !!run.ciWait && !this.isActive(runId) && !hasRegisteredRunProcess(runId);
     // `review` is continuable too — that's the "Send back" path (spec 009).
-    if (!['done', 'failed', 'cancelled', 'review'].includes(run.status) && !(pendingHumanAsk && run.status === 'waiting') &&
+    if (!disconnectedCiWait && !['done', 'failed', 'cancelled', 'review'].includes(run.status) && !(pendingHumanAsk && run.status === 'waiting') &&
       !(run.status === 'waiting' && !this.isActive(runId) && ((!hasRegisteredRunProcess(runId) &&
         (run.delegation === undefined || run.delegation.role === 'root')) ||
-        (deferForCapacity && run.delegation?.role === 'worker' && !!this.workerWait(runId))))) {
+        (deferForCapacity && run.delegation?.role === 'worker' && (!!this.workerWait(runId) || !!run.ciWait))))) {
       return { ok: false, error: `cannot continue a ${run.status} run` };
     }
     const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
@@ -3678,7 +3917,7 @@ export class RunManager {
     // human got there first — and then the counter starts over, because the cap only exists to
     // bound UNATTENDED resumes.
     this.clearAutoResume(runId);
-    if (!deferForCapacity) { this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); }
+    if (!deferForCapacity) { this.withdrawCiWait(runId); this.withdrawWorkerWait(runId); this.resetParentCompletion(runId); }
 
     let continuationNumber = 1;
     while (run.steps.some(step => step.id === `continue-${continuationNumber}`)) continuationNumber++;
@@ -3938,7 +4177,9 @@ export class RunManager {
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
         state.workerWakeTurn = undefined;
+        state.ciWakeTurn = undefined;
         state.atTurnBoundary = state.session;
+        state.ciTurnId = randomUUID();
         // A completed turn acknowledges the opening payload. Until then a restart
         // must replay it, including a crash after startSession but before delivery.
         if (!state.cancelled) {
@@ -3992,8 +4233,9 @@ export class RunManager {
         for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', ...note, stepId });
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
         if (ask) this.prepareHumanAsk(runId, state);
-        const completionBlocked = !!done && this.deferParentCompletion(runId);
-        const workerWaitParked = completionBlocked || (!!sessionOpen && this.parkWorkerWait(runId, state));
+        const ciWaitParked = !!sessionOpen && this.parkCiWait(runId, state);
+        const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
+        const workerWaitParked = ciWaitParked || completionBlocked || (!!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
         state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring: !!monitoring } : undefined;
         const agentInputDelivered = !ask && !workerWaitParked && this.flushAgentInputs(runId);
@@ -4193,6 +4435,7 @@ export class RunManager {
     let session: AgentSession | undefined;
     if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
     const delegation = this.provisionSession(runId, state);
+    const ciTools = await this.provisionCiSession(runId, state);
     try {
     session = runner.startSession(
       {
@@ -4212,7 +4455,8 @@ export class RunManager {
         allowedTools: grants.allowedTools,
         bashAllowlist: grants.bashAllowlist,
         additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), continueProfile.env),
-        env: { ...continueProfile.env, ...delegation?.env },
+        env: { ...continueProfile.env, ...delegation?.env, ...ciTools?.env },
+        ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
         ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
         model: continueModel,
         effort: continueEffort,
@@ -4229,7 +4473,7 @@ export class RunManager {
         onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
       },
     );
-    } catch (error) { delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
+    } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
     const sessionClosed = this.trackWorkerSessionResult(runId, session);
     state.session = session;
     state.sessionEverOpened = true;
@@ -4244,6 +4488,10 @@ export class RunManager {
       const result = await session.result.finally(() => state.agentInputFlight?.settled);
       if (this.preserveRunAfterDisposal(runId, state)) return;
       this.persistWorkerAssistantResult(runId, stepId, result.text);
+      if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
+        this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
+        return;
+      }
       if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
       if (!state.cancelled) {
         this.store.updateRun(runId, { continuationMessage: undefined });
@@ -4303,6 +4551,10 @@ export class RunManager {
       }
       if (this.preserveRunAfterDisposal(runId, state)) return;
       // Keep the provider failure that triggered teardown, even if teardown rejects.
+      if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
+        this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
+        return;
+      }
       const message = sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
       sink.sessionEnded('error', message);
       this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: finishedAt() });
@@ -4315,6 +4567,7 @@ export class RunManager {
       });
       this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
     } finally {
+      ciTools?.revoke(); state.revokeCiTools = undefined;
       delegation?.revoke(); state.revokeDelegation = undefined;
       this.recordUsagePeaks(runId);
       this.clearIdleTimer(state);
@@ -4624,6 +4877,11 @@ export class RunManager {
           this.requeueWhileHeld(runId, workflow, input, taskBackend, state, i);
           return;
         }
+        if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
+          this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
+          this.dropActive(runId);
+          return;
+        }
         if (failure) {
           this.finishStep(runId, step.id, 'failed', failure, emit);
           runError = `step "${step.id}" failed: ${failure}`;
@@ -4840,7 +5098,9 @@ export class RunManager {
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
         state.workerWakeTurn = undefined;
+        state.ciWakeTurn = undefined;
         state.atTurnBoundary = state.session;
+        state.ciTurnId = randomUUID();
         // v2 `turn.completed` already flushed the coalescers; the v1 turn
         // boundary flushes again (idempotent) as a backstop.
         sink.flushAll();
@@ -4849,7 +5109,7 @@ export class RunManager {
         const done = interactive && sessionOpen && DONE_MARKER_RE.test(turnText.trimEnd());
         // `CEZ:ASK` → the user is blocked; wins over `CEZ:MONITORING`, loses to
         // `CEZ:DONE` (#473).
-        const askTurn = resolveAskTurn(turnText, completedAssistantText, Boolean((interactive || this.workerWait(runId)) && sessionOpen) && !done);
+        const askTurn = resolveAskTurn(turnText, completedAssistantText, Boolean((interactive || this.workerWait(runId) || this.store.getRun(runId)?.ciWait) && sessionOpen) && !done);
         const { ask, notes: askNotes } = askTurn;
         discardQueuedMessagesOnAsk(state.session, askTurn);
         const monitoring =
@@ -4866,8 +5126,9 @@ export class RunManager {
         for (const note of askNotes) emit({ type: 'note', stepId: step.id, ...note });
         this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
         if (ask) this.prepareHumanAsk(runId, state);
-        const completionBlocked = !!done && this.deferParentCompletion(runId);
-        const workerWaitParked = completionBlocked || (!!sessionOpen && this.parkWorkerWait(runId, state));
+        const ciWaitParked = !!sessionOpen && this.parkCiWait(runId, state);
+        const completionBlocked = !ciWaitParked && !!done && this.deferParentCompletion(runId);
+        const workerWaitParked = ciWaitParked || completionBlocked || (!!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
         state.parkAfterAck = interactive && sessionOpen && state.session ? { session: state.session, monitoring: !!monitoring } : undefined;
         const agentInputDelivered = !ask && !workerWaitParked && this.flushAgentInputs(runId);
@@ -4988,6 +5249,7 @@ export class RunManager {
     state.currentStepId = step.id;
     this.beginUsageInvocation(runId, state, step.id);
     const delegation = this.provisionSession(runId, state);
+    const ciTools = await this.provisionCiSession(runId, state);
     try {
       if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
       session = runner.startSession(
@@ -5009,7 +5271,8 @@ export class RunManager {
           bashAllowlist: grants.bashAllowlist,
           // The handoff file lives outside the worktree — grant access.
           additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), stepProfile.env),
-          env: { ...stepProfile.env, ...delegation?.env },
+          env: { ...stepProfile.env, ...delegation?.env, ...ciTools?.env },
+          ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
           ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
           model: backendModel,
           effort: effectiveEffort,
@@ -5021,7 +5284,7 @@ export class RunManager {
         {
           autoEndAfterFirstTurn: !interactive,
           shouldAutoEnd: () => this.active.get(runId) !== state || state.session !== session ||
-            (!this.workerWait(runId) && !this.parentCompletionPending(runId) && state.workerWakeTurn !== session && !state.agentInputFlight),
+            (!this.workerWait(runId) && !this.store.getRun(runId)?.ciWait && !this.parentCompletionPending(runId) && state.workerWakeTurn !== session && state.ciWakeTurn !== session && !state.agentInputFlight),
           onUiEvent: (event) => {
             completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
             this.handleRunnerUiEvent(runId, state, sink, event);
@@ -5030,6 +5293,7 @@ export class RunManager {
         },
       );
     } catch (err) {
+      ciTools?.revoke(); state.revokeCiTools = undefined;
       delegation?.revoke(); state.revokeDelegation = undefined;
       state.currentStepId = undefined;
       return err instanceof Error ? err.message : String(err);
@@ -5070,6 +5334,7 @@ export class RunManager {
       sink.sessionEnded('error', message); // alongside v1's fatal `error`
       return message;
     } finally {
+      ciTools?.revoke(); state.revokeCiTools = undefined;
       delegation?.revoke(); state.revokeDelegation = undefined;
       this.recordUsagePeaks(runId);
       this.clearIdleTimer(state);
@@ -5082,6 +5347,7 @@ export class RunManager {
         const at = this.queue.indexOf(runId); if (at >= 0) this.queue.splice(at, 1);
       }
       state.workerWakeTurn = undefined;
+      state.ciWakeTurn = undefined;
       state.atTurnBoundary = undefined;
       state.doneAtBoundary = undefined;
       state.parkAfterAck = undefined;
@@ -5123,6 +5389,7 @@ export class RunManager {
   /** Ask precedence also releases an admitted but not yet delivered worker wake.
    * Its durable input/wait remain queued until an actual human answer. */
   private prepareHumanAsk(runId: string, state: ActiveRun): void {
+    this.withdrawCiWait(runId);
     state.pendingHumanAsk = true;
     this.workerWaiting.delete(runId);
     this.workerWakeAdmitted.delete(runId);
@@ -5577,6 +5844,7 @@ export class RunManager {
     if (this.parentCompletionAttention(runId)) { this.clearMonitoringWakeTimer(state, runId); return; }
     const run = this.store.getRun(runId);
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
+    if (run.ciWait) { this.clearMonitoringWakeTimer(state, runId); return; }
     const minutes = this.semaphore.monitoringWakeIntervalMinutes();
     if (minutes === null) {
       this.clearMonitoringWakeTimer(state, runId);

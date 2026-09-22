@@ -37,6 +37,8 @@ export function isRunnerId(value: string): value is RunnerId {
 export interface AgentRunSpec {
   /** Appended to the CLI's default system prompt (`--append-system-prompt`). */
   systemPrompt?: string;
+  /** Private bundled tool server; capability values belong only in env. */
+  cezarTools?: { name: string; command: string; args: string[] };
   userPrompt: string;
   /** Image blocks delivered with the first user message — screenshots pasted
    *  into the new-task form (spec 002's paste path, at task start). */
@@ -86,6 +88,7 @@ export interface AgentRunSpec {
  */
 const AGENT_RUN_SPEC_FIELD_SET: Readonly<Record<keyof AgentRunSpec, true>> = {
   systemPrompt: true,
+  cezarTools: true,
   userPrompt: true,
   images: true,
   cwd: true,

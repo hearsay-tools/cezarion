@@ -363,7 +363,9 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    expect(runs.slice(0, 4).every((run) => store.getRun(run.id)?.status === 'running')).toBe(true);
+    expect(runs.slice(0, 4).every((run) => store.getRun(run.id)?.status === 'running'),
+      JSON.stringify(runs.map(run => ({ status: store.getRun(run.id)?.status, error: store.getRun(run.id)?.error }))),
+    ).toBe(true);
     expect(store.getRun(runs[4]!.id)?.status).toBe('queued');
     expect(semaphore.busy()).toBe(4);
   }, 45_000);

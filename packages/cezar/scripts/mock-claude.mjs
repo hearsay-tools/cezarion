@@ -22,6 +22,7 @@ if (process.env.CEZ_MOCK_ARGS_FILE) {
   }
 }
 
+if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('claude', process.argv.slice(2)); }
 emit({ type: 'system', subtype: 'init' });
 
 let turn = 0;
@@ -75,6 +76,13 @@ function writeHandoffAndTodo() {
 }
 
 async function respond(userText, imageCount) {
+  if (userText.includes('mock:ci-wait')) {
+    const { ciPrompt } = await import('./mock-ci-tool.mjs');
+    const text = await ciPrompt('claude', process.argv.slice(2), userText);
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+    emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
+    return;
+  }
   turn += 1;
   await sleep(250);
   // `mock:done` anywhere in the message → the reply ends with the CEZ:DONE

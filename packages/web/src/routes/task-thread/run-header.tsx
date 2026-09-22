@@ -216,6 +216,7 @@ export function RunHeader({
         </div>
         {/* Outside the disclosure on purpose: "this run wakes itself up at 14:20" is status, not
             metadata — it belongs with the pill above, not behind a tap with the diff stats. */}
+        <CiWaitStatus run={run} />
         <MonitoringSchedule run={run} />
 
         <div data-slot="run-tabs" className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:[&>a]:min-h-11">
@@ -634,8 +635,70 @@ function MetaRow({
   )
 }
 
+/** Snapshot-only status: CI registration never starts a browser watcher or changes the run pill. */
+function activeCiWait(run: ApiRun) {
+  const wait = run.ciWait
+  return ['running', 'queued', 'waiting'].includes(run.status) && wait && wait.phase !== 'delivered' && wait.phase !== 'withdrawn'
+    ? wait
+    : undefined
+}
+
+function CiWaitStatus({ run }: { run: ApiRun }) {
+  const active = activeCiWait(run)
+  const wait = active ?? run.lastCiWait
+  if (!active && run.lastCiWaitError) return (
+    <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
+      className="mt-1 min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+      {run.lastCiWaitError}
+    </div>
+  )
+  if (!wait) return null
+  const result = wait.result
+  const outcomes = {
+    passed: 'CI checks passed — observed checks only; not merge approval',
+    failed: 'CI checks failed — inspect the PR checks',
+    cancelled: 'CI wait cancelled',
+    skipped: 'CI checks skipped — inspect the PR checks',
+    no_checks: 'No CI checks found — inspect the PR workflows',
+    deadline: 'CI wait timed out — inspect the PR checks',
+    error: 'CI wait unavailable — inspect access and the PR checks',
+    head_changed: `CI head changed — ${result?.headSha.slice(0, 7)} → ${result?.observedHeadSha?.slice(0, 7) ?? 'unknown'}`,
+  }
+  const label = active
+    ? wait.phase === 'wake-pending'
+      ? run.status !== 'running' || run.activity === 'monitoring'
+        ? 'CI result ready — waiting for capacity'
+        : 'CI result ready — current turn still working'
+      : 'Waiting for CI'
+    : result ? outcomes[result.outcome] : wait.phase === 'withdrawn' ? 'CI wait cancelled' : 'CI wait unavailable'
+  const timestamp = active ? wait.deadline : result?.observedAt
+  const date = timestamp ? new Date(timestamp) : undefined
+  const dateLabel = date && Number.isFinite(date.getTime())
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(date)
+    : undefined
+  const prLabel = `${wait.repository}#${wait.prNumber}`
+  return (
+    <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
+      className="mt-1 min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-1">
+        <span>{label}</span>
+        <span aria-hidden="true">—</span>
+        {isHttpUrl(wait.prUrl) ? (
+          <a href={wait.prUrl} target="_blank" rel="noopener noreferrer"
+            className="inline-flex min-h-11 min-w-11 max-w-full items-center rounded-sm px-1 font-medium text-foreground underline underline-offset-2 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none">
+            {prLabel}
+          </a>
+        ) : <span>{prLabel}</span>}
+      </div>
+      {dateLabel ? (
+        <p>{active ? 'Deadline' : 'Observed'}{' '}<time dateTime={timestamp}>{dateLabel}</time></p>
+      ) : active ? <p>CI deadline unavailable</p> : null}
+    </div>
+  )
+}
+
 function MonitoringSchedule({ run }: { run: ApiRun }) {
-  if (run.status !== 'running' || run.activity !== 'monitoring') return null
+  if (activeCiWait(run) || run.status !== 'running' || run.activity !== 'monitoring') return null
   if (run.monitoringWakeCapReached) {
     return (
       <p data-slot="monitoring-schedule" role="status" className="mt-1 text-xs text-muted-foreground">

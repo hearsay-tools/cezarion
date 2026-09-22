@@ -996,6 +996,7 @@ const PROBE_IMAGE: ContentBlock = {
 
 /** One probe per field — the `Record` fails to compile when `AgentRunSpec` grows. */
 const SPEC_FIELD_PROBES: Readonly<Record<AgentRunSpecField, SpecFieldProbe>> = {
+  cezarTools: { kind: 'boundary', without: {}, with: { cezarTools: { name: 'cezar_ci_probe', command: 'node', args: ['/installed/ci-wait/mcp.js'] } } },
   systemPrompt: { kind: 'boundary', without: {}, with: { systemPrompt: 'parity probe system prompt' } },
   // Markerless on purpose, so every mock still answers with its default turn.
   userPrompt: { kind: 'boundary', without: {}, with: { userPrompt: 'inspect the working tree, then report' } },

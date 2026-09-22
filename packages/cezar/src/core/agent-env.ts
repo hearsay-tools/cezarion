@@ -320,6 +320,8 @@ export function buildChildEnv(opts: BuildChildEnvOptions): NodeJS.ProcessEnv {
     ...Object.keys(extra),
     // Session authority may only come from controller-generated spec.env, never
     // inherited from a parent agent — even through passthrough or full-env mode.
+    'CEZ_TOOL_TOKEN',
+    'CEZ_TOOL_SOCKET',
     'CEZ_DELEGATION_TOKEN',
     'CEZ_DELEGATION_URL',
   ]);

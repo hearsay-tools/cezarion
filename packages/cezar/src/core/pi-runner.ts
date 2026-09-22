@@ -42,6 +42,7 @@ export interface PiRunnerOptions {
  * and RPC prompt by the harness parity matrix.
  */
 export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
+  cezarTools: { honored: true, via: 'explicit CI --extension and selected tool admission' },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'RPC prompt message' },
   images: { honored: true, via: 'RPC prompt images' },
@@ -429,6 +430,7 @@ export class PiRunner implements AgentRunner {
 
 export function buildPiArgs(spec: AgentRunSpec): string[] {
   const args = ['--mode', 'rpc', '--extension', piDegradedServiceRetryExtensionPath()];
+  if (spec.cezarTools) args.push('--extension', fileURLToPath(new URL('../../scripts/pi-ci-wait.mjs', import.meta.url)));
   if (spec.sessionId) args.push(spec.resume ? '--session' : '--session-id', spec.sessionId);
   if (spec.systemPrompt) args.push('--append-system-prompt', spec.systemPrompt);
   if (spec.model) args.push('--model', spec.model);
@@ -438,7 +440,10 @@ export function buildPiArgs(spec: AgentRunSpec): string[] {
   // custom delegation tool names have no discoverable capability (D1 exemption).
   if (spec.restrictNativeDelegation) args.push('--exclude-tools', 'subagent');
   const tools = piTools(spec.allowedTools ?? [], spec.bashAllowlist);
-  if (tools.length > 0) args.push('--tools', tools.join(','));
+  if (tools.length > 0) {
+    if (spec.cezarTools) tools.push('cezar_wait_for_ci');
+    args.push('--tools', tools.join(','));
+  }
   return args;
 }
 

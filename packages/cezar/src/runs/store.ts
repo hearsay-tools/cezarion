@@ -4,11 +4,11 @@ import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, 
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
-  agentInputSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
+  ciWaitSchema, agentInputSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
   continuationMessageSchema,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
-import type { ConversationState, AgentInput, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
+import type { CiWait, ConversationState, AgentInput, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
@@ -155,6 +155,10 @@ export const runRecordSchema = z.object({
   delegation: storedDelegationStateSchema,
   /** Non-human input must retain attribution through restart, separately from human answers. */
   agentInputs: z.array(agentInputSchema).optional(),
+  ciWait: ciWaitSchema.optional(),
+  lastCiWait: ciWaitSchema.optional(),
+  /** Retained recovery observation when previous CI metadata cannot be trusted. */
+  lastCiWaitError: z.string().max(256).optional(),
   /** URLs of images attached to the initial task prompt, for the thread's first bubble
    *  (#image-display) — persisted like agent screenshots, served from `/images/`. */
   taskImages: z.array(z.string()).optional(),
@@ -335,6 +339,25 @@ export const runRecordSchema = z.object({
    *  queued runs rather than degrading them. */
   workflowDef: workflowDefSchema.optional().catch(undefined),
 });
+
+/** Salvage CI state identically for live stores and the read-only workspace index. */
+export function parseRunRecords(raw: unknown) {
+  if (Array.isArray(raw)) for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    if (row.ciWait !== undefined && !ciWaitSchema.safeParse(row.ciWait).success) {
+      delete row.ciWait;
+      if (['running', 'queued', 'waiting'].includes(row.status)) {
+        row.status = 'failed'; delete row.activity;
+        row.error = 'CI wait state is unreadable; continue the task to register a new wait.';
+      }
+    }
+    if (row.lastCiWait !== undefined && !ciWaitSchema.safeParse(row.lastCiWait).success) {
+      delete row.lastCiWait;
+      row.lastCiWaitError = 'CI wait unavailable — saved observation is unreadable; register a new wait.';
+    }
+  }
+  return z.array(runRecordSchema).safeParse(raw);
+}
 
 export type StepState = z.infer<typeof stepStateSchema>;
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
@@ -761,7 +784,7 @@ export class RunStore extends EventEmitter {
     if (existsSync(indexPath)) {
       try {
         const raw = JSON.parse(readFileSync(indexPath, 'utf8'));
-        const parsed = z.array(runRecordSchema).safeParse(raw);
+        const parsed = parseRunRecords(raw);
         if (parsed.success) {
           for (const run of parsed.data) {
             if (run.delegation?.role === 'root' && (run.status === 'waiting' || run.delegation.wait !== undefined)) {
@@ -913,6 +936,45 @@ export class RunStore extends EventEmitter {
       !agentInputs.some(input => input.id === openingContinuationInputId && input.deliveredAt))) throw new Error('opening agent input checkpoint changed');
     const proposed = new Map(this.runs);
     proposed.set(id, { ...run, agentInputs, ...(openingContinuationInputId ? { continuationMessage: undefined } : {}) });
+    this.commitIndex(proposed, new Set([id]));
+  }
+
+  /** CI intent and its wake entry share one atomic index replacement. */
+  commitCiWait(id: string, wait: CiWait, input?: AgentInput): void {
+    const run = this.runs.get(id);
+    if (!run) throw new Error('missing CI wait target');
+    const ciWait = ciWaitSchema.parse(wait);
+    const entry = input ? agentInputSchema.parse(input) : undefined;
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...run, ciWait, lastCiWaitError: undefined, ...(entry ? { agentInputs: run.agentInputs?.some(row => row.id === entry.id)
+      ? run.agentInputs : [...(run.agentInputs ?? []), entry] } : {}) });
+    this.commitIndex(proposed, new Set([id]));
+  }
+
+  /** Retire the wait and precisely its pending wake, optionally accepting human input. */
+  commitCiWaitWithdrawal(id: string, acceptedHumanMessage?: QueuedMessage): void {
+    const run = this.runs.get(id);
+    if (!run?.ciWait) return;
+    const { ciWait, ...rest } = run;
+    const lastCiWait: CiWait = { ...ciWait, phase: 'withdrawn' };
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...rest, ciWait: undefined, lastCiWait,
+      ...(run.agentInputs ? { agentInputs: run.agentInputs.filter(input => input.id !== ciWait.wakeId || input.deliveredAt) } : {}),
+      ...(acceptedHumanMessage ? { queuedMessages: [...(run.queuedMessages ?? []), queuedMessageSchema.parse(acceptedHumanMessage)] } : {}),
+    });
+    this.commitIndex(proposed, new Set([id]));
+  }
+
+  /** Provider acceptance and receipt retirement have one delivery checkpoint. */
+  commitCiWaitDelivery(id: string, inputId: string): void {
+    const run = this.runs.get(id);
+    if (!run?.ciWait || run.ciWait.wakeId !== inputId) return;
+    const { ciWait, ...rest } = run;
+    const deliveredAt = new Date().toISOString();
+    const proposed = new Map(this.runs);
+    proposed.set(id, { ...rest, ciWait: undefined, lastCiWait: { ...ciWait, phase: 'delivered', deliveredAt },
+      agentInputs: (run.agentInputs ?? []).map(input => input.id === inputId ? { ...input, deliveredAt } : input),
+    });
     this.commitIndex(proposed, new Set([id]));
   }
 

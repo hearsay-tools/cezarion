@@ -69,6 +69,7 @@ export function resolveClaudeExecutable(override?: string): string {
  * the harness parity matrix; change a row only with the mapping in `buildArgs`.
  */
 export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
+  cezarTools: { honored: true, via: '--mcp-config and generated --allowedTools name' },
   systemPrompt: { honored: true, via: '--append-system-prompt' },
   userPrompt: { honored: true, via: 'text block of the first stream-json user message on stdin' },
   images: { honored: true, via: 'image blocks ahead of the text in the first stdin message' },
@@ -457,6 +458,14 @@ export function buildClaudeArgs(
   // remains the name in older harnesses/recorded fixtures. Never widen grants.
   if (spec.restrictNativeDelegation) args.push('--disallowedTools', 'Agent,Task');
   const allowed = buildAllowedTools(spec.allowedTools ?? [], spec.bashAllowlist);
+  if (spec.cezarTools) {
+    const { name, command, args: toolArgs } = spec.cezarTools;
+    args.push('--mcp-config', JSON.stringify({ mcpServers: { [name]: {
+      command, args: toolArgs,
+      env: { CEZ_TOOL_TOKEN: '${CEZ_TOOL_TOKEN}', CEZ_TOOL_SOCKET: '${CEZ_TOOL_SOCKET}' },
+    } } }));
+    if (allowed.length > 0) allowed.push(`mcp__${name}__cezar_wait_for_ci`);
+  }
   if (allowed.length > 0) {
     args.push('--allowedTools', allowed.join(','));
   }

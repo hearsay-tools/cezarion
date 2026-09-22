@@ -2,7 +2,7 @@
 // Offline Cursor ACP wire. Shapes: cursor.com/docs/cli/acp; ACP v1 schema.
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
-const record = (file, value) => { if (file) appendFileSync(file, `${JSON.stringify(value)}\n`); };
+const record = (file, value) => { if (file) appendFileSync(file, `${JSON.stringify(value, (key, value) => key === 'env' && Array.isArray(value) ? value.map(item => item.name?.startsWith('CEZ_TOOL_') ? { ...item, value: '[redacted]' } : item) : value)}\n`); };
 record(process.env.CEZ_MOCK_ARGS_FILE, process.argv.slice(2));
 const emit = value => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...value })}\n`);
 const reply = (id, result) => emit({ id, result });
@@ -18,6 +18,7 @@ const configOptions = () => [
 ];
 const configuration = () => process.env.CEZ_MOCK_CURSOR_LEGACY === '1' ? {} : { configOptions: configOptions() };
 let pendingAsk;
+let ciWire;
 let resumeDone = false;
 let prompts = 0;
 const update = (value, id = sessionId) => emit({ method: 'session/update', params: { sessionId: id, update: value } });
@@ -27,6 +28,7 @@ const question = { id: 'tests', prompt: 'Which test runner?', options: [{ id: 'v
 async function prompt(id, content) {
   const input = content.filter(b => b.type === 'text').map(b => b.text).join('\n');
   prompts += 1;
+  if (input.includes('mock:ci-wait')) { const { ciPrompt } = await import('./mock-ci-tool.mjs'); text(await ciPrompt('cursor', ciWire, input)); complete(id); return; }
   if (resumeDone) { resumeDone = false; text('Resumed work finished.\nCEZ:DONE'); complete(id); return; }
   if (input.includes('mock:hold')) await new Promise(r => setTimeout(r, 500));
   if (input.includes('mock:rpc-error')) { emit({ id, error: { code: -32603, message: 'Provider rejected request' } }); return; }
@@ -60,7 +62,7 @@ async function prompt(id, content) {
   text('Cursor inspected the workspace.');
   complete(id);
 }
-createInterface({ input: process.stdin }).on('line', line => {
+createInterface({ input: process.stdin }).on('line', async line => {
   let msg; try { msg = JSON.parse(line); } catch { return; }
   record(process.env.CEZ_MOCK_ARGS_FILE, msg);
   record(process.env.CEZ_MOCK_STDIN_FILE, msg);
@@ -82,6 +84,8 @@ createInterface({ input: process.stdin }).on('line', line => {
     }
     return;
   }
+  if (process.env.CEZ_MOCK_CI_PR && ['session/new', 'session/load'].includes(msg.method)) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('cursor', msg.params); }
+  if (['session/new', 'session/load'].includes(msg.method)) ciWire = msg.params;
   switch (msg.method) {
     case 'initialize': reply(msg.id, { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: true } } }); break;
     case 'cursor/list_available_models': reply(msg.id, { models: [{ value: model, name: model, configOptions: configOptions().filter(option => option.id !== 'model') }] }); break;

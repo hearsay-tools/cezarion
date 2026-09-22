@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
@@ -13,6 +14,7 @@ import type {
 import type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
+import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
 import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
 import { formatModelIdentity, parseModelIdentity } from './model-identity.ts';
@@ -66,6 +68,7 @@ export const KILL_GRACE_MS = 4_000;
  * requests by the harness parity matrix.
  */
 export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
+  cezarTools: { honored: true, via: 'merged OPENCODE_CONFIG_CONTENT local mcp entry' },
   systemPrompt: { honored: true, via: 'prepended to the opening prompt_async text through prependSystemPrompt' },
   userPrompt: { honored: true, via: 'prompt_async text part' },
   images: { honored: false, reason: 'the adapter posts text parts only; image blocks are dropped' },
@@ -90,7 +93,8 @@ export class OpencodeServerRunner implements AgentRunner {
   private lastSession: OpencodeSession | null = null;
 
   constructor(opts: OpencodeRunnerOptions = {}) {
-    this.bin = opts.bin ?? process.env.CEZ_OPENCODE_BIN ?? 'opencode';
+    this.bin = opts.bin ?? process.env.CEZ_OPENCODE_BIN ?? (process.env.CEZ_DRY_RUN === '1'
+      ? fileURLToPath(new URL('../../scripts/mock-opencode-serve.mjs', import.meta.url)) : 'opencode');
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
   }
 
@@ -199,7 +203,7 @@ class OpencodeSession implements AgentSession {
     try {
       this.child = nodeSpawn(bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
         cwd: spec.cwd,
-        env: buildChildEnv({ backend: 'opencode', extraEnv: spec.env }),
+        env: buildChildEnv({ backend: 'opencode', extraEnv: ciOpenCodeEnv(spec) }),
       });
     } catch (err) {
       throw wrapSpawnError(err, bin);
