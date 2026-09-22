@@ -211,6 +211,8 @@ export type WorkerWaitRequest = z.infer<typeof workerWaitRequestSchema>;
 
 export const inboxClaimSchema = z.object({
   receiptId: z.uuid(), generation: z.uuid(), expiresAt: z.iso.datetime(), acknowledgedAt: z.iso.datetime().optional(),
+  /** Optional on read for receipts persisted before member manifests existed. */
+  memberIds: z.array(z.uuid()).min(1).max(32).refine(ids => new Set(ids).size === ids.length).optional(),
 }).strict();
 export type InboxClaim = z.infer<typeof inboxClaimSchema>;
 

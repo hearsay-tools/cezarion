@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -932,6 +933,15 @@ export class RunStore extends EventEmitter {
     const run = this.runs.get(id);
     if (!run) throw new Error('missing agent input target');
     const agentInputs = inputs.map(input => agentInputSchema.parse(input));
+    const now = new Date().toISOString();
+    for (const input of run.agentInputs ?? []) {
+      const claim = input.inboxClaim;
+      if (!claim || claim.acknowledgedAt || claim.expiresAt <= now) continue;
+      const matching = agentInputs.filter(next => next.id === input.id);
+      if (matching.length !== 1 || !isDeepStrictEqual(matching[0]!.inboxClaim, claim)) {
+        throw new Error('live inbox receipt changed');
+      }
+    }
     if (openingContinuationInputId && (run.continuationMessage?.agentInputId !== openingContinuationInputId ||
       !agentInputs.some(input => input.id === openingContinuationInputId && input.deliveredAt))) throw new Error('opening agent input checkpoint changed');
     const proposed = new Map(this.runs);
@@ -944,7 +954,7 @@ export class RunStore extends EventEmitter {
     const run = this.runs.get(runId);
     if (!run) throw new Error('missing inbox recipient');
     const selected = z.array(z.uuid()).min(1).max(32).refine(values => new Set(values).size === values.length).parse(ids);
-    const receipt = inboxClaimSchema.parse(claim);
+    const receipt = inboxClaimSchema.parse({ ...claim, memberIds: selected });
     if (receipt.acknowledgedAt || receipt.expiresAt <= new Date().toISOString()) throw new Error('inbox claim is not live');
     const inputs = run.agentInputs ?? [];
     if (inputs.some(input => input.inboxClaim?.receiptId === receipt.receiptId)) throw new Error('inbox receipt already exists');
@@ -970,7 +980,12 @@ export class RunStore extends EventEmitter {
     inboxClaimSchema.shape.generation.parse(generation);
     inboxClaimSchema.shape.expiresAt.parse(at);
     const matching = (run.agentInputs ?? []).filter(input => input.inboxClaim?.receiptId === receiptId);
-    if (!matching.length || matching.some(input => input.inboxClaim?.generation !== generation ||
+    const receipt = matching[0]?.inboxClaim;
+    const memberIds = receipt?.memberIds;
+    if (!memberIds || matching.length !== memberIds.length ||
+      !memberIds.every(id => matching.some(input => input.id === id)) ||
+      matching.some(input => !isDeepStrictEqual(input.inboxClaim, receipt)) ||
+      matching.some(input => input.inboxClaim?.generation !== generation ||
       input.source !== 'agent' || !input.conversation)) throw new Error('inbox receipt changed');
     if (matching.every(input => input.inboxClaim?.acknowledgedAt && input.deliveredAt === input.inboxClaim.acknowledgedAt)) {
       return 'already-acknowledged';

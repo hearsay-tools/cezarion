@@ -33,7 +33,11 @@ describe('worker inbox contract', () => {
 
   it('validates receipt identity, acknowledgement status and inspection hint separately from persisted state', () => {
     const claim = { receiptId, generation: randomUUID(), expiresAt: '2026-09-06T12:02:00.000Z' };
+    const memberIds = [randomUUID(), randomUUID()];
     expect(inboxClaimSchema.parse(claim)).toEqual(claim);
+    expect(inboxClaimSchema.parse({ ...claim, memberIds })).toEqual({ ...claim, memberIds });
+    expect(inboxClaimSchema.safeParse({ ...claim, memberIds: [] }).success).toBe(false);
+    expect(inboxClaimSchema.safeParse({ ...claim, memberIds: [memberIds[0], memberIds[0]] }).success).toBe(false);
     expect(inboxClaimSchema.parse({ ...claim, acknowledgedAt: at })).toEqual({ ...claim, acknowledgedAt: at });
     expect(inboxClaimSchema.safeParse({ ...claim, generation: 'bad' }).success).toBe(false);
     expect(inboxClaimSchema.safeParse({ ...claim, expiresAt: 'tomorrow' }).success).toBe(false);

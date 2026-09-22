@@ -186,15 +186,49 @@ describe('RunStore durable delegation', () => {
     const run = parent(); const { first, second } = conversationInputs(run.id);
     const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
     store.claimInboxInputs(run.id, [first.id], claim);
-    expect(store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim).toEqual(claim);
+    const storedClaim = { ...claim, memberIds: [first.id] };
+    expect(store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim).toEqual(storedClaim);
     expect(store.getRun(run.id)?.agentInputs?.[1]?.inboxClaim).toBeUndefined();
-    expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.agentInputs?.[0]?.inboxClaim).toEqual(claim);
+    expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.agentInputs?.[0]?.inboxClaim).toEqual(storedClaim);
     expect(store.ackInboxInputs(run.id, claim.receiptId, claim.generation, ackTime)).toBe('acknowledged');
     expect(store.ackInboxInputs(run.id, claim.receiptId, claim.generation, afterExpiry)).toBe('already-acknowledged');
-    expect(store.getRun(run.id)?.agentInputs?.[0]).toMatchObject({ deliveredAt: ackTime, inboxClaim: { ...claim, acknowledgedAt: ackTime } });
+    expect(store.getRun(run.id)?.agentInputs?.[0]).toMatchObject({ deliveredAt: ackTime, inboxClaim: { ...storedClaim, acknowledgedAt: ackTime } });
     expect(store.getRun(run.id)?.agentInputs?.[1]).toEqual(second);
     expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.agentInputs?.[0]?.deliveredAt).toBe(ackTime);
     expect(() => store.releaseInboxInputs(run.id, claim.receiptId, claim.generation)).toThrow();
+  });
+
+  it('refuses queue replacement that drops a member or claim from a live receipt atomically', () => {
+    const run = parent(); const { first, second } = conversationInputs(run.id);
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
+    store.claimInboxInputs(run.id, [first.id, second.id], claim);
+    const claimed = structuredClone(store.getRun(run.id)!);
+    for (const replacement of [
+      [claimed.agentInputs![0]!],
+      [claimed.agentInputs![0]!, { ...claimed.agentInputs![1]!, inboxClaim: undefined }],
+    ]) {
+      expect(() => store.commitAgentInputs(run.id, replacement)).toThrow();
+      expect(store.getRun(run.id)).toEqual(claimed);
+      expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)).toEqual(claimed);
+    }
+  });
+
+  it('refuses to acknowledge a damaged receipt missing a member or its claim', () => {
+    const run = parent(); const { first, second } = conversationInputs(run.id);
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
+    store.claimInboxInputs(run.id, [first.id, second.id], claim);
+    const claimed = structuredClone(store.getRun(run.id)!.agentInputs!);
+    const damaged = store.getRun(run.id)!;
+    for (const broken of [
+      [claimed[0]!],
+      [claimed[0]!, { ...claimed[1]!, inboxClaim: undefined }],
+    ]) {
+      damaged.agentInputs = broken;
+      const beforeAck = structuredClone(damaged);
+      expect(() => store.ackInboxInputs(run.id, claim.receiptId, claim.generation, ackTime)).toThrow();
+      expect(store.getRun(run.id)).toEqual(beforeAck);
+      expect(store.getRun(run.id)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
+    }
   });
 
   it('rejects invalid, duplicate, delivered and live-claimed input IDs without partial claims', () => {
@@ -208,6 +242,7 @@ describe('RunStore durable delegation', () => {
     store.claimInboxInputs(run.id, [first.id], claim);
     expect(() => store.claimInboxInputs(run.id, [first.id, second.id], { ...claim, receiptId: randomUUID() })).toThrow();
     expect(store.getRun(run.id)?.agentInputs?.[1]).toEqual(second);
+    store.releaseInboxInputs(run.id, claim.receiptId, claim.generation);
     store.commitAgentInputs(run.id, [first, { ...second, deliveredAt: now }]);
     expect(() => store.claimInboxInputs(run.id, [second.id], claim)).toThrow();
     store.commitAgentInputs(run.id, [{ ...first, conversation: undefined }, second]);
@@ -252,14 +287,14 @@ describe('RunStore durable delegation', () => {
     expect(store.getRun(run.id)?.agentInputs?.[0]).toEqual(first);
     store.claimInboxInputs(run.id, [first.id], claim);
     store.clearExpiredInboxClaims(run.id, ackTime);
-    expect(store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim).toEqual(claim);
+    expect(store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim).toEqual({ ...claim, memberIds: [first.id] });
     store.clearExpiredInboxClaims(run.id, claim.expiresAt);
     expect(store.getRun(run.id)?.agentInputs).toEqual([first, second]);
     expect(() => store.ackInboxInputs(run.id, claim.receiptId, claim.generation, ackTime)).toThrow();
     const replacement = { ...claim, receiptId: randomUUID() };
     store.claimInboxInputs(run.id, [first.id], replacement);
     expect(store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim?.receiptId).not.toBe(claim.receiptId);
-    store.commitAgentInputs(run.id, [{ ...first, inboxClaim: replacement, deliveredAt: now }, second]);
+    store.commitAgentInputs(run.id, [{ ...first, inboxClaim: store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim, deliveredAt: now }, second]);
     store.clearExpiredInboxClaims(run.id, replacement.expiresAt);
     expect(store.getRun(run.id)?.agentInputs?.[0]).toEqual({ ...first, deliveredAt: now });
   });
