@@ -189,6 +189,19 @@ describe('bundled worker CLI', () => {
       expect(await runWorkerCommand(args, env)).toBe(1); expect(json().code).toBe('invalid_input');
     }
   });
+
+  it('passes explicit --resume intent and returns a refused delivery as nonzero with its instruction', async () => {
+    const recipientRunId = randomUUID(), id = randomUUID();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ message: { id: body.id, recipientRunId, senderRunId: f.parent.id,
+        kind: 'progress', text: body.text, createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64),
+        state: 'continuation-required', instruction: 'Worker finished; send a new message with --resume' }, delivery: 'not-delivered' }));
+    });
+    expect(await runWorkerCommand(['send', recipientRunId, 'Fix the result', '--id', id, '--kind', 'progress', '--resume'], env)).toBe(1);
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ resume: true });
+    expect(json().message.instruction).toContain('--resume');
+  });
   it('routes both request wait forms through the real private wait endpoint', async () => {
     const requestId = randomUUID();
     const waitRequests = vi.spyOn(f.service, 'waitRequests').mockResolvedValue({ wait: { id: randomUUID(), workerIds: [], requestIds: [requestId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [] }, instruction: 'End your turn' });

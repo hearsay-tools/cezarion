@@ -47,7 +47,7 @@ describe('conversation presentation titles', () => {
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued', outcome: { status: 'pending' } })).toBe('Pending')
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'not-delivered', outcome: { status: 'sender-closed' } })).toBe('Sender closed')
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'not-delivered' })).toBe('Not delivered')
-    expect(conversationStatusLabel({ messageKind: 'progress', delivery: 'not-delivered' })).toBeUndefined()
+    expect(conversationStatusLabel({ messageKind: 'progress', delivery: 'not-delivered' })).toBe('Not delivered')
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued' })).toBeUndefined()
   })
 })

@@ -61,6 +61,10 @@ export interface ThreadConversationMessage {
   messageKind: ConversationMessage['kind']
   requestId?: string
   delivery: ThreadConversationDelivery
+  deliveredAt?: string
+  recordedAt?: string
+  instruction?: string
+  resumed?: true
   state?: ConversationMessage['state']
   createdAt?: string
   requestHash?: string
@@ -421,8 +425,11 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       createdAt?: string
       requestHash?: string
       deadline?: string
+      instruction?: string
+      resumed?: true
     },
     delivery: ThreadConversationDelivery,
+    timing?: { deliveredAt?: string; recordedAt?: string },
   ): ThreadConversationMessage => {
     const existing = conversationEntries.get(message.id)
     if (existing) {
@@ -433,6 +440,10 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       if (message.requestHash !== undefined) existing.requestHash = message.requestHash
       if (message.deadline !== undefined) existing.deadline = message.deadline
       if (message.requestId !== undefined) existing.requestId = message.requestId
+      if (message.instruction !== undefined) existing.instruction = message.instruction
+      if (message.resumed !== undefined) existing.resumed = message.resumed
+      if (timing?.deliveredAt !== undefined) existing.deliveredAt = timing.deliveredAt
+      if (timing?.recordedAt !== undefined && (delivery === 'delivered' || existing.delivery !== 'delivered')) existing.recordedAt = timing.recordedAt
       attachOutcome(existing)
       return existing
     }
@@ -445,6 +456,9 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       recipientRunId: message.recipientRunId,
       messageKind: message.kind,
       delivery,
+      ...timing,
+      ...(message.instruction !== undefined ? { instruction: message.instruction } : {}),
+      ...(message.resumed !== undefined ? { resumed: message.resumed } : {}),
       ...(message.requestId !== undefined ? { requestId: message.requestId } : {}),
       ...(message.state !== undefined ? { state: message.state } : {}),
       ...(message.createdAt !== undefined ? { createdAt: message.createdAt } : {}),
@@ -462,7 +476,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       case 'conversation-message': {
         const parsed = conversationMessageEventSchema.safeParse(event)
         if (!parsed.success) break
-        upsertConversation(parsed.data.message, parsed.data.delivery)
+        upsertConversation(parsed.data.message, parsed.data.delivery, { deliveredAt: parsed.data.deliveredAt, recordedAt: parsed.data.ts })
         break
       }
       case 'request-outcome': {
@@ -481,7 +495,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         if (seenInputs.has(input.id)) break
         seenInputs.add(input.id)
         if (input.conversation) {
-          upsertConversation({ id: input.id, text: input.text, ...input.conversation }, 'delivered')
+          upsertConversation({ id: input.id, text: input.text, createdAt: input.createdAt, ...input.conversation }, 'delivered', { deliveredAt: input.deliveredAt, recordedAt: parsed.data.ts })
           break
         }
         currentTurn().entries.push({ origin: 'meta', entry: {

@@ -124,6 +124,8 @@ export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 /** Optional for legacy records; only explicit human origin can acknowledge a delegated ask. */
 export const continuationMessageSchema = queuedMessageSchema.extend({
   origin: z.enum(['human', 'lifecycle']).optional(),
+  /** An attributed parent message used as the opening prompt, never a human answer. */
+  agentInputId: z.uuid().optional(),
 });
 
 /** One aggregated sample of a run's live process tree (`src/core/process-usage.ts`). */

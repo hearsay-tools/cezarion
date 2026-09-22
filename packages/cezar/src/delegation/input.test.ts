@@ -7,7 +7,19 @@ import type { AgentInput } from '@open-mercato/cezar-contract';
 import { RunManager } from '../workflows/run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { enqueueAgentInput, nextAgentInput } from './input.ts';
+import { enqueueAgentInput, nextAgentInput, agentInputBatch } from './input.ts';
+
+it('bounds batches without splitting messages or crossing lifecycle inputs', () => {
+  const make = (text: string): AgentInput => ({ id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text, createdAt: new Date().toISOString(),
+    conversation: { senderRunId: randomUUID(), recipientRunId: randomUUID(), kind: 'progress' } });
+  const a = make('a'.repeat(60_000)); const b = make('b'.repeat(60_000)); const c = make('small');
+  const lifecycle: AgentInput = { ...make('lifecycle'), source: 'lifecycle', conversation: undefined };
+  expect(agentInputBatch([a, b, c], entry => entry.text)?.inputs).toEqual([a]);
+  expect(agentInputBatch([b, c], entry => entry.text)?.inputs).toEqual([b, c]);
+  expect(agentInputBatch([c, lifecycle, c], entry => entry.text)?.inputs).toEqual([c]);
+  expect(agentInputBatch([lifecycle, c], entry => entry.text)?.inputs).toEqual([lifecycle]);
+  expect(agentInputBatch([{ ...a, deliveredAt: a.createdAt }, c], entry => entry.text)?.inputs).toEqual([c]);
+});
 
 const input: AgentInput = { id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text: '/skill mock:agent-echo steering', createdAt: '2026-09-06T12:00:00.000Z' };
 const run = (patch: Partial<RunRecord> = {}): RunRecord => ({ id: randomUUID(), title: 'task', task: 'task', workflow: 'quick-task', status: 'running', createdAt: input.createdAt, tokensUsed: 0, archived: false, steps: [], ...patch });

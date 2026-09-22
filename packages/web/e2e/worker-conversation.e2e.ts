@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
+import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 import record from './fixtures/thread-run.record.json'
 import { waitForHealth } from './poll'
 
@@ -16,6 +16,7 @@ const parent = '11111111-1111-4111-8111-111111111111'
 const alpha = '22222222-2222-4222-8222-222222222222'
 const bravo = '33333333-3333-4333-8333-333333333333'
 const large = '44444444-4444-4444-8444-444444444444'
+const diagnostics = '55555555-5555-4555-8555-555555555555'
 const reqA = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', senderRunId: parent, recipientRunId: alpha, kind: 'request', text: 'Inspect the parser and report findings.', createdAt: '2026-09-20T12:00:00Z', state: 'accepted', requestHash: 'a'.repeat(64) }
 const reqB = { ...reqA, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', recipientRunId: bravo }
 const reply = { ...reqA, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', senderRunId: alpha, recipientRunId: parent, kind: 'reply', requestId: reqA.id, text: 'Alpha found one parser edge case.', createdAt: '2026-09-20T12:05:00Z' }
@@ -48,13 +49,21 @@ beforeAll(async () => {
   mkdirSync(join(root, '.ai/cezar/runs'), { recursive: true })
   mkdirSync(artifacts, { recursive: true })
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([
-    [parent, 'Parent coordinator'], [alpha, 'Alpha'], [bravo, 'Bravo'], [large, 'Long conversation'],
+    [parent, 'Parent coordinator'], [alpha, 'Alpha'], [bravo, 'Bravo'], [large, 'Long conversation'], [diagnostics, 'Delivery feedback'],
   ].map(([id, title]) => ({ ...record, id, title, titleSummary: title, task: 'Coordinate the workers.', pullRequestUrl: undefined }))))
   for (const [id, padding] of [[parent, 0], [large, 70]] as const) {
     const lines = events(padding).map((event, n) => ({ seq: n + 1, ts: '2026-09-20T12:05:00Z', ...event }))
     // The long transcript has its own sender identity, keeping direction truthful.
     writeFileSync(join(root, '.ai/cezar/runs', `${id}.ndjson`), lines.map(line => JSON.stringify(line).replaceAll(parent, id)).join('\n') + '\n')
   }
+  const diagnosticEvents = [
+    { ...projection(reqA), deliveredAt: '2026-09-20T12:04:00Z' },
+    { type: 'conversation-message', delivery: 'queued', message: { ...reqB, kind: 'progress', text: 'Latest worker update' } },
+    { type: 'conversation-message', delivery: 'not-delivered', message: { ...follow, kind: 'progress', requestId: undefined,
+      text: 'Correct the returned result', state: 'continuation-required', instruction: `Not delivered: worker is done. To resume it with a new instruction, run worker send ${alpha} "<instruction>" --kind request --resume --id <new-message-UUID>; use a new message ID.` } },
+  ]
+  writeFileSync(join(root, '.ai/cezar/runs', `${diagnostics}.ndjson`), diagnosticEvents.map((event, n) =>
+    JSON.stringify({ seq: n + 1, ts: '2026-09-20T12:05:00Z', ...event }).replaceAll(parent, diagnostics)).join('\n') + '\n')
   const port = await new Promise<number>((done, fail) => {
     const probe = createServer()
     probe.once('error', fail)
@@ -91,6 +100,34 @@ function waitForFocusedCard(selector: string) {
 
 describe('chronological worker conversation', () => {
   for (const variant of contrastQaVariants.filter(v => v.density === 'comfortable')) {
+    it(`shows actionable delivery feedback and distinct clocks: ${variant.id}`, () => {
+      browser.goto(`${base}/p/${project}/tasks/${diagnostics}?thread=flat`)
+      browser.waitForFunction(`document.querySelectorAll('${card}').length === 3`)
+      applyContrastQaVariant(browser, variant)
+      const explanations = browser.waitForValue<string[]>(`[...document.querySelectorAll('[data-slot="conversation-delivery-explanation"]')].map(el => el.textContent)`, value => value.length === 2)
+      expect(explanations.some(text => text.includes('Queued for the next safe turn'))).toBe(true)
+      expect(explanations.some(text => text.includes('Not delivered: worker is done') && text.includes('--resume'))).toBe(true)
+      const rejected = browser.waitForValue<string>(`[...document.querySelectorAll('${card}')].find(el => el.textContent.includes('Correct the returned result'))?.textContent`)
+      expect(rejected).toContain('Not delivered')
+      hoverVisiblePoint(browser, `${request} [data-slot="collapsible-trigger"]`)
+      browser.click(`${request} [data-slot="collapsible-trigger"]`)
+      const detail = browser.waitForValue<string>(`document.querySelector('${request}').textContent`, value => value.includes('Delivery acknowledged'))
+      expect(detail).toContain('2026-09-20T12:00:00Z')
+      expect(detail).toContain('2026-09-20T12:04:00Z')
+      expect(detail).toContain('2026-09-20T12:05:00Z')
+      const bounds = browser.waitForValue<{ overflow: boolean; targets: number[] }>(`(() => ({
+        overflow: document.documentElement.scrollWidth > innerWidth || [...document.querySelectorAll('${card}')].some(el => el.scrollWidth > el.clientWidth),
+        targets: [...document.querySelectorAll('${card} button, ${card} a')].map(el => el.getBoundingClientRect().height)
+      }))()`)
+      expect(bounds.overflow).toBe(false)
+      expect(bounds.targets.every(height => height >= 44)).toBe(true)
+      const contrast = browser.waitForValue<ContrastSample>(contrastSampleExpression('[data-slot="conversation-delivery-explanation"]'))
+      expect(contrast.ratio).toBeGreaterThanOrEqual(4.5)
+      browser.screenshot(join(artifacts, `${variant.id}-delivery-feedback.png`), { viewport: true })
+      hoverVisiblePoint(browser, `${card}[data-kind="progress"]:has(a[href$="/${alpha}"]) [data-slot="conversation-delivery-explanation"]`)
+      browser.screenshot(join(artifacts, `${variant.id}-rejected-delivery.png`), { viewport: true })
+    })
+
     it(`keeps direction and interleaved work visible: ${variant.id}`, () => {
       browser.goto(`${base}/p/${project}/tasks/${parent}?thread=flat`)
       browser.waitForFunction(`document.querySelector('${replyCard}') !== null`)
