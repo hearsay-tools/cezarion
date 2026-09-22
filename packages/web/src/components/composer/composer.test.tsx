@@ -916,7 +916,9 @@ describe('unified execution actions (#201)', () => {
     expect(textarea.value).toBe('keep this')
     expect(onSubmit).not.toHaveBeenCalled()
     await act(async () => reject(new Error('Network unavailable. Retry Stop.')))
-    expect(screen.getByRole('alert').textContent).toContain('Retry Stop')
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('Retry Stop')
+    expect(alert.parentElement?.className).not.toContain('h-0')
     expect(textarea.value).toBe('keep this')
     expect(screen.getByRole('button', { name: /remove shot.png/i }).hasAttribute('disabled')).toBe(false)
     expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('disabled')).toBe(false)
@@ -953,10 +955,46 @@ it('retains an attachment already being read when Stop is requested (#201)', asy
 
 
 describe('session control layout', () => {
-  it('labels the send action after typing and exposes both session control rows', async () => {
+  it('keeps an idle compact status mounted without its reserved feedback height', async () => {
+    let resolve!: () => void
+    const { textarea } = renderComposer({
+      compactFeedback: true,
+      retainDraftUntilSuccess: true,
+      pendingLabel: 'Sending…',
+      onSubmit: () => new Promise<void>((done) => { resolve = done }),
+    })
+    const status = screen.getByRole('status')
+    expect(status.parentElement?.className).toContain('h-0')
+    type(textarea, 'keep me')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(status.textContent).toContain('Sending')
+    expect(status.parentElement?.className).not.toContain('h-0')
+    expect(textarea.value).toBe('keep me')
+    await act(async () => resolve())
+    expect(status.parentElement?.className).toContain('h-0')
+  })
+
+  it('keeps session settings visible once while dictation records', () => {
+    vi.stubGlobal('SpeechRecognition', class {
+      onresult = null
+      onerror = null
+      onend = null
+      start() {}
+      stop() {}
+      abort() {}
+    })
+    renderComposer({
+      sessionControls: <div><button>Runner setting</button><button>Model setting</button><button>Effort setting</button></div>,
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+    expect(screen.getAllByRole('button', { name: 'Runner setting' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Model setting' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Effort setting' })).toHaveLength(1)
+  })
+
+  it('labels the send action after typing and keeps settings in one group', async () => {
     const { textarea, onSubmit } = renderComposer({
-      sessionControls: <button>Runner setting</button>,
-      sessionModel: <button>Model setting</button>,
+      sessionControls: <div><button>Runner setting</button><button>Model setting</button></div>,
       allowEmptySubmit: true,
       emptySubmitLabel: 'Continue',
     })
@@ -970,12 +1008,11 @@ describe('session control layout', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('Follow up', []))
   })
 
-  it('does not wrap sessionModel with an extra Model field word (#272)', () => {
+  it('does not wrap the Model setting with an extra field word (#272)', () => {
     renderComposer({
-      sessionControls: <button>Runner setting</button>,
-      sessionModel: <button aria-label="Model">sonnet</button>,
+      sessionControls: <button aria-label="Model">sonnet</button>,
     })
-    const slot = document.querySelector('[data-slot="session-model"]')
+    const slot = document.querySelector('[data-slot="session-controls"]')
     expect(slot).not.toBeNull()
     expect(slot!.textContent).toBe('sonnet')
     expect(slot!.querySelector('[data-design-icon="cpu"]')).toBeNull()

@@ -1497,6 +1497,14 @@ describe('the composer action row (#281)', () => {
     expect(composerActions().querySelector('[aria-label="Stop"]')).toBeNull()
   })
 
+  it('keeps Archive named when its composer label hides on mobile', () => {
+    renderThread(run('done'))
+    const archive = archiveButton() as HTMLButtonElement
+    expect(archive.getAttribute('aria-label')).toBe('Archive task')
+    expect(archive.className).toContain('max-md:size-11')
+    expect(archive.querySelector('span')?.className).toContain('max-md:sr-only')
+  })
+
   it('Archive confirms first, then posts the flipped flag', async () => {
     const sent = renderThread(run('done'))
     fireEvent.click(archiveButton() as HTMLElement)

@@ -30,9 +30,8 @@ export interface ContinueAction {
   /** True while provider status is still loading. */
   providerPending: boolean
   startsNewConversation: boolean
-  /** The runner + model pills — which backend and model the reopened session runs on. */
+  /** The runner, model and effort pills for the reopened session. */
   pills: ReactNode
-  modelPicker: ReactNode
   /**
    * Reopen the session, starting it on this prompt. An empty draft is the legacy one-click
    * Continue: the engine opens with its own "Continue.". REJECTS with the server's message
@@ -207,25 +206,6 @@ export function useContinueAction(run: ApiRun): ContinueAction {
           />
         )}
         <PickerPill
-          icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
-          fieldLabel
-          slot="follow-up-effort-pill"
-          ariaLabel="Effort"
-          label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
-          value={effort}
-          readOnly={modelsLocked}
-          disabledHint="Effort selection is locked to native coding-agent settings."
-          onPick={(next) => setPickedEffort(next)}
-          options={effortOptions.map((option) => ({
-            value: option.value,
-            label: option.label,
-            desc: option.desc,
-          }))}
-        />
-      </div>
-    ),
-    modelPicker: (
-        <PickerPill
           icon={<CpuIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
           fieldLabel
           slot="follow-up-model-pill"
@@ -242,6 +222,23 @@ export function useContinueAction(run: ApiRun): ContinueAction {
           options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
           status={modelCatalogStatus(runner, catalog.data, catalog.isError, catalog.isFetching)}
         />
+        <PickerPill
+          icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+          fieldLabel
+          slot="follow-up-effort-pill"
+          ariaLabel="Effort"
+          label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
+          value={effort}
+          readOnly={modelsLocked}
+          disabledHint="Effort selection is locked to native coding-agent settings."
+          onPick={(next) => setPickedEffort(next)}
+          options={effortOptions.map((option) => ({
+            value: option.value,
+            label: option.label,
+            desc: option.desc,
+          }))}
+        />
+      </div>
     ),
     continueWith: (text, images) => mutation.mutateAsync({ text, images }),
   }

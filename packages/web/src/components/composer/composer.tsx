@@ -106,9 +106,8 @@ export interface ComposerProps {
   footerStart?: ReactNode
   /** Rendered between Dictation and the send button — the /new mode segment + kbd hint. */
   footerEnd?: ReactNode
-  /** Session runner/effort row and model control, owned by the continuation hook. */
+  /** Session runner/model/effort settings, owned by the continuation hook. */
   sessionControls?: ReactNode
-  sessionModel?: ReactNode
   /** New-task settings below a dedicated submission row; replies keep their compact footer. */
   agentOptions?: ReactNode
   executionOptions?: ReactNode
@@ -177,7 +176,6 @@ export function Composer({
   footerStart,
   footerEnd,
   sessionControls,
-  sessionModel,
   executionOptions,
   agentOptions,
   sendAriaLabel = 'Send',
@@ -622,9 +620,14 @@ export function Composer({
     </Button>
   ) : null
 
+  const hasCompactFeedback = stopPending || busy || submissionError !== null || idleFeedback != null
   const feedback = <>
           {retainDraftUntilSuccess || onStop || stopping ? (
-            <div className={cn("overflow-y-auto px-3 pb-2 text-xs leading-5 text-muted-foreground md:px-4", compactFeedback ? "min-h-6" : "h-24 md:h-20")}>
+            <div className={cn(
+              'overflow-y-auto text-xs leading-5 text-muted-foreground',
+              compactFeedback && !hasCompactFeedback ? 'h-0' : 'px-3 pb-2 md:px-4',
+              compactFeedback ? hasCompactFeedback && 'min-h-6' : 'h-24 md:h-20',
+            )}>
               <div
                 id={`${textareaId}-submission`}
                 role={submissionError === null ? 'status' : 'alert'}
@@ -807,7 +810,6 @@ export function Composer({
                 <div className="contents" inert={readOnly || undefined}>{footerStart}</div>
                 {executionOptions || sessionControls ? <div>{dictationButton}</div> : null}
               </div>
-              {sessionModel ? <div data-slot="session-model" inert={readOnly || undefined}>{sessionModel}</div> : null}
               {executionOptions ? null : submissionControls}
 
             </div>

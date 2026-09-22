@@ -2,26 +2,23 @@
  * The shared --measure preference remains independent of density and theme. */
 .session-composer [data-slot='composer-editor'] { border-color: var(--ring); border-radius: 12px; }
 .session-composer [data-slot='session-controls'] { padding: 0 12px 10px; }
-.session-engine-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.session-engine-controls { display: grid; grid-template-columns: 168px minmax(0, 1fr) 136px; gap: 8px; min-width: 0; }
 .session-engine-controls [data-slot$='pill'] { width: 100%; min-width: 0; }
 .session-engine-controls [data-slot$='pill'] > svg:last-child { margin-left: auto; }
 .session-engine-controls [data-slot='session-runner-value'] { width: 100%; min-width: 0; }
-.session-composer [data-slot='composer-toolbar'] { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 0 12px 12px; }
-.session-composer [data-slot='composer-toolbar'] > [data-slot='session-controls'] { grid-column: 1 / -1; grid-row: 1; padding: 0 0 2px; }
-.session-composer [data-slot='composer-footer-start'] { flex-wrap: nowrap; gap: 8px; }
+.session-composer [data-slot='composer-toolbar'] { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 0 12px 12px; }
+.session-composer [data-slot='composer-toolbar'] > [data-slot='session-controls'] { grid-column: 1 / -1; grid-row: 1; min-width: 0; padding: 0; }
+.session-composer [data-slot='composer-footer-start'] { grid-column: 1; grid-row: 2; flex-wrap: nowrap; gap: 8px; }
 .session-composer [aria-label='Attach files'], .session-composer [aria-label='Start dictation'] { width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 9px; }
-.session-composer [data-slot='session-model'] { min-width: 0; flex: 1; display: flex; align-items: center; min-height: 44px; }
-.session-composer [data-slot='follow-up-model-pill'] { width: 100%; min-width: 0; flex: 1; min-height: 44px; }
+.session-composer [data-slot='follow-up-model-pill'] { min-height: 44px; }
 .session-composer [data-slot='follow-up-model-pill'] > svg:last-child { margin-left: auto; }
-.session-composer [data-slot='composer-submit-row'] { margin: 0; flex: none; }
+.session-composer [data-slot='composer-submit-row'] { grid-column: 2; grid-row: 2; margin: 0; flex: none; }
 [data-slot='run-actions-menu'] [role^='menuitem'] { min-height: 44px; }
 @media (max-width: 767px) {
   [data-slot='run-title-row'] > .group { max-width: calc(100% - 52px); }
-  .session-composer [data-slot='composer-toolbar'] { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-  .session-composer [data-slot='session-model'] { grid-column: 1 / -1; grid-row: 1; }
-  .session-composer [data-slot='composer-toolbar'] > [data-slot='session-controls'] { grid-row: 2; }
-  .session-composer [data-slot='composer-footer-start'] { grid-column: 1; grid-row: 3; }
-  .session-composer [data-slot='composer-submit-row'] { grid-column: 2; grid-row: 3; }
+  .session-engine-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .session-engine-controls [data-slot='follow-up-model-pill'] { grid-column: 1 / -1; grid-row: 2; }
+  .session-engine-controls [data-slot='follow-up-effort-pill'] { grid-column: 2; grid-row: 1; }
 }
 @media (max-width: 767px) {
   .task-open-targets { align-items: flex-start; flex-direction: column; }
