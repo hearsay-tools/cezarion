@@ -45,7 +45,7 @@ function valueAtPath(value: unknown, path: string): unknown {
   }, value);
 }
 
-function parseConfigContent(content: string, format: ConfigFormat): unknown {
+export function parseConfigContent(content: string, format: ConfigFormat): unknown {
   return format === 'toml'
     ? parseToml(content)
     : JSON.parse(format === 'jsonc' ? stripJsonTrailingCommas(stripJsonComments(content)) : content);

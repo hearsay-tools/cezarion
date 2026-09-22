@@ -6,6 +6,7 @@ if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FIL
 // Pi handles SIGTERM and reports 128 + signal, rather than a null exit code.
 process.on('SIGTERM', () => process.exit(143));
 
+if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('pi', process.argv.slice(2)); }
 const sessionId = '00000000-0000-4000-8000-0000000000pi';
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -61,6 +62,12 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
         pendingMessageCount: 0,
       },
     });
+  } else if (command.type === 'prompt' && command.message.includes('mock:ci-wait')) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' }); send({ type: 'turn_start' });
+    const { ciPrompt } = await import('./mock-ci-tool.mjs');
+    sendText([await ciPrompt('pi', process.argv.slice(2), command.message)]);
+    sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:agent-echo')) {
     // rpc-lifecycle.ndjson's normal prompt/assistant/settled sequence.
     send({ id: command.id, type: 'response', command: 'prompt', success: true });

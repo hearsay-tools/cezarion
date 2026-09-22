@@ -1,3 +1,4 @@
+import { ciWaitSchema } from './ci-wait.ts';
 import { z } from 'zod';
 import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema } from './delegation.ts';
 import { runnerSchema } from './health.ts';
@@ -167,6 +168,10 @@ export const runRecordSchema = z.object({
   delegation: delegationStateSchema.optional(),
   /** Durable non-human input, kept separate from human prompt/answer queues. */
   agentInputs: z.array(agentInputSchema).optional(),
+  ciWait: ciWaitSchema.optional(),
+  lastCiWait: ciWaitSchema.optional(),
+  /** Retained recovery observation when previous CI metadata cannot be trusted. */
+  lastCiWaitError: z.string().max(256).optional(),
   /** URLs of images and document attachments on the initial task prompt; branch on isImageAttachmentName. */
   taskImages: z.array(z.string()).optional(),
   model: z.string().optional(),

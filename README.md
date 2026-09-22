@@ -463,6 +463,38 @@ segment.
 
 ---
 
+## Waiting for PR checks
+
+An agent can call `cezar_wait_for_ci` with a GitHub PR URL to ask Cezar to watch CI
+outside the model. The optional `timeout_seconds` defaults to 1,800 and accepts
+1–7,200. No authored configuration or worker delegation permission is needed.
+Registration requires `gh`, access to the repository, and a supported GitHub host;
+GitHub Enterprise hosts must already be recognized by the forge/auth configuration.
+Tool startup itself makes no GitHub request.
+
+A successful registration returns a durable receipt and an absolute deadline. The
+agent ends its turn to wait, with no marker required. The header keeps the active
+run status during registration, then shows Monitoring with **Waiting for CI —
+owner/repo#N**, a PR link and the deadline. **CI result ready — waiting for capacity**
+means the observation is queued for the agent to resume. Ordinary monitoring keeps
+its existing automatic-check schedule when no CI wait is registered.
+
+Cezar reports passed, failed, cancelled or skipped checks, no checks, changed head,
+timeout or an operational error. It watches the registered commit: a new PR head
+is reported separately, and the agent decides whether to wait again. Four watchers
+run concurrently; queued waits retain their original deadline. Results are bounded
+observations, not merge approval or evidence that every expected workflow appeared.
+The agent still decides its next action; CI success never completes the task or
+accepts review. A human message cancels the current wait, and CI never answers a
+pending human question. Controller recovery can replay an observation after an
+ambiguous delivery checkpoint, identified by its stable lifecycle input ID.
+
+The adapters are bundled for Claude (including `claude-cli`), Codex, OpenCode,
+Cursor and Pi. Internal socket/capability environment values are runtime wiring,
+not settings to create or share. If the tool is unavailable or denied, its error
+is surfaced while ordinary tasks continue. See [the CI-wait protocol](AGENT_PROTOCOL.md#ci-wait-tool-contract-474)
+for limits and the executable harness verification required before release.
+
 ## Owned workers (opt-in)
 
 Start the cockpit or a headless task with `CEZ_DELEGATION=1`. Each eligible parent session receives the absolute bundled Node/CLI invocation and its own environment credentials; no `cez` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the private listener cannot start, ordinary tasks keep working without delegation tools. `.env` is never loaded automatically.
@@ -579,7 +611,7 @@ Useful environment variables:
 |---|---|
 | `CEZ_DELEGATION=1` | Enable owned workers and the private loopback listener for this controller. Off by default; works with the cockpit and headless `cez run`. Session instructions and credentials are automatic. |
 | `CEZ_DELEGATION_URL`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
-| `CEZ_DRY_RUN=1` | Use the bundled mock instead of the real `claude` CLI — the entire cockpit works offline, for demos and development. |
+| `CEZ_DRY_RUN=1` | Use bundled mocks for all five agent backends — the cockpit works offline for demos and development. Explicit backend binary overrides still win. |
 | `CEZ_AGENT_MODELS_LOCKED=1` | Globally lock each runner to the model configured in its native Claude/Codex/OpenCode settings while keeping runner selection available. Exact `1` also delegates authentication and provider enablement to those native agents, so Cezar skips its credential probes and provider-disable preferences. Existing Cezar presets are preserved but ignored, and an environment change requires a restart. The config-file equivalent is `"modelsLocked": true` in global `~/.cezar/config.json` or one repository's `.ai/cezar/config.json`; config-file locks do not disable provider checks. |
 | `CEZ_APPROVAL_GATE=1` | Opt into Claude's interactive approval UI; by default, unapproved tools are denied without interrupting the run. Ignored when `CEZ_CLAUDE_PERMISSION_MODE` is a recognized value (`dontAsk`, `acceptEdits`, or `bypass`). |
 | `CEZ_CLAUDE_PERMISSION_MODE` | Claude agent-run permission flag: `dontAsk` (default), `acceptEdits`, or `bypass`. `bypass` passes `--dangerously-skip-permissions` and omits `--permission-mode`. Unset or unknown keeps today's `dontAsk` / `CEZ_APPROVAL_GATE` path. Provider verification commands are never given this flag. |

@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
@@ -17,7 +18,8 @@ interface PendingRequest {
 }
 
 export function resolveCodexExecutable(override?: string): string {
-  return override ?? process.env.CEZ_CODEX_BIN ?? 'codex';
+  return override ?? process.env.CEZ_CODEX_BIN ?? (process.env.CEZ_DRY_RUN === '1'
+    ? fileURLToPath(new URL('../../scripts/mock-codex-app-server.mjs', import.meta.url)) : 'codex');
 }
 
 export function buildCodexAppServerEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {

@@ -1,8 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { z } from 'zod';
 
-import { reconcileLoadedRun, rescopeRun, runRecordSchema, type RepoHandle, type RunRecord } from './store.ts';
+import { reconcileLoadedRun, rescopeRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 
 /**
@@ -27,7 +26,7 @@ export function readRunIndexFromDisk(dataDir: string, handle?: RepoHandle | null
   if (!existsSync(indexPath)) return [];
   try {
     const raw = JSON.parse(readFileSync(indexPath, 'utf8'));
-    const parsed = z.array(runRecordSchema).safeParse(raw);
+    const parsed = parseRunRecords(raw);
     if (!parsed.success) return [];
     // `reconcileLoadedRun` mutates, which is safe here in a way it is not in the store: these
     // records were just parsed into fresh objects that nothing else holds a reference to.

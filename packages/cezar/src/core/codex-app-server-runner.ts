@@ -69,6 +69,7 @@ export interface CodexRunnerOptions {
  * recorded JSON-RPC by the harness parity matrix.
  */
 export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
+  cezarTools: { honored: true, via: 'thread/start and thread/resume dotted mcp_servers config with env_vars' },
   systemPrompt: { honored: true, via: 'prepended to the opening turn/start input through prependSystemPrompt' },
   userPrompt: { honored: true, via: 'turn/start input text' },
   images: { honored: false, reason: 'the adapter sends text input items only; image blocks are dropped' },
@@ -412,7 +413,10 @@ class CodexSession implements AgentSession {
       sandbox: process.env.CEZ_CODEX_NETWORK === '0' ? 'workspace-write' : 'danger-full-access',
       // ThreadStartParams AND ThreadResumeParams accept dotted config overrides.
       // Both feature generations exist in Codex 0.153.4; no global config write.
-      ...(this.spec.restrictNativeDelegation ? { config: { 'features.multi_agent': false, 'features.multi_agent_v2': false } } : {}),
+      ...((this.spec.restrictNativeDelegation || this.spec.cezarTools) ? { config: {
+        ...(this.spec.restrictNativeDelegation ? { 'features.multi_agent': false, 'features.multi_agent_v2': false } : {}),
+        ...(this.spec.cezarTools ? { [`mcp_servers.${this.spec.cezarTools.name}`]: { command: this.spec.cezarTools.command, args: this.spec.cezarTools.args, env_vars: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET'] } } : {}),
+      } } : {}),
     };
     if (this.spec.resume && this.spec.sessionId) {
       await this.rpc.request('thread/resume', { threadId: this.spec.sessionId, ...clean(overrides) });

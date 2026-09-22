@@ -565,6 +565,102 @@ a wire gap.
 That covers what a mapper EMITS. The other half of the same requirement — what a
 runner DOES — is §7, and a new backend has to satisfy both.
 
+## CI-wait tool contract (#474)
+
+`cezar_wait_for_ci` registers an external CI observation; it never grants merge,
+review acceptance, or task-completion authority. Its request, receipt, durable
+wait and result types come from `packages/contract/src/ci-wait.ts`. There is no
+CI marker and no delegation prerequisite. `claude-cli` uses the Claude adapter.
+
+The request contains `pr` (an HTTPS GitHub PR URL, at most 2,048 characters,
+positive PR number, no userinfo, port, query or fragment) and optional
+`timeout_seconds` (integer 1–7,200, default 1,800). Unknown keys are rejected.
+Only github.com is currently accepted; the forge has no enterprise-host resolver. Registration resolves canonical repository, PR and
+head with a ten-second metadata budget, persists the intent before acknowledging,
+and returns immediately without waiting for checks. Invalid, unauthorized,
+conflicting or unpersisted requests create no durable wait. Identical canonical
+PR and effective timeout reuse the current receipt without extending its deadline;
+a duplicate from the originating turn can still retrieve an early-settled receipt.
+After acknowledged delivery, an explicit call on a later turn is a new wait.
+
+The agent ends its turn after registration; no completion or monitoring marker is
+needed. Registration keeps the current turn active. The shared turn boundary
+parks the run as `running` with `activity: monitoring`, suspends ordinary wakeups
+and nudges for that wait, and preserves the existing bounded monitoring resource
+exemption. Ordinary monitoring without a CI wait retains its timer and cap.
+Early settlement queues an observation without interrupting the active turn.
+A parked result requests scheduler admission before `sendAgentMessage`; a monitor
+already charged for capacity must not wait for its own slot. Provider acknowledgement
+checkpoints delivery and retires `ciWait` into bounded `lastCiWait` history.
+
+Human input withdraws the wait and removes its undelivered lifecycle input. A
+pending human question takes precedence and must never be answered with CI data.
+Stop, finish, review and deletion retire the wait without waking the agent.
+Project disposal aborts owned processes while retaining durable intent for recovery.
+Recovery preserves the absolute deadline and stable lifecycle input ID;
+a terminal run never reopens. A crash after provider acceptance but before the
+acknowledgement checkpoint can replay that ID: delivery is **not exactly once**.
+The resumed agent must treat it as an observation, not a new instruction.
+
+The shared supervisor captures the registered head and checks attribution before
+and after final structured observations. Outcomes are `passed`, `failed`,
+`cancelled`, `skipped`, `no_checks`, `head_changed`, `deadline` and `error`.
+Changed-head observations carry original and observed SHAs. No checks never means
+passed, and `gh` exit status alone cannot distinguish check failure from command
+failure. Mixed final outcomes prioritize failure, cancellation, skips, then pass.
+Even passed observed checks do not prove every expected workflow has appeared or
+that the PR is merge-ready.
+
+Bounds are implementation constants: four concurrent watchers and four short
+queries per shared supervisor; ten seconds per metadata/head/snapshot command,
+always bounded by the remaining deadline; at most 60 seconds discovering absent
+checks; three transient retries at 1/5/15 seconds within the original deadline.
+Registered watcher queues retain their original deadlines. Capture is bounded to
+64 KiB per subprocess, with watch redraws discarded. Results contain at most 100
+rows (256-character names, 2,048-character links), 4 KiB sanitized diagnostics and
+32 KiB serialized data, with total counts and truncation reported. Compute the
+aggregate before row truncation; structured-output overflow is an error. Teardown
+stops the owned process tree with a two-second force-kill bound, including controller
+pipe closure after a hard exit. Never recover ownership from a stale PID alone.
+
+### Private transport and required harness evidence
+
+The tool is provisioned through `AgentRunSpec.cezarTools` independently of worker
+permissions. Claude, Codex, OpenCode and Cursor use the bundled stdio MCP adapter;
+Pi uses a bundled extension over the same shared client. The private chained Hono
+family accepts `POST /api/v1/tools/ci-wait` over a Unix-domain socket or Windows
+named pipe; authenticated GET holds the adapter lifetime connection. It is **not** a cockpit HTTP route or network listener. Middleware
+validates the shared schema. A memory-only session capability binds project, run
+and generation; the model supplies neither a run ID nor a filesystem path.
+`CEZ_TOOL_TOKEN` and `CEZ_TOOL_SOCKET` are internal child-environment wiring, never
+prompts, persisted records, descriptor snapshots or user-authored settings.
+Capabilities are revoked on session replacement, stop and controller disposal.
+This is cooperative same-user authorization, not isolation from unrestricted shell.
+
+Startup and tool listing do no GitHub work. IPC failure preserves ordinary boot
+and execution, surfaces a bounded unavailable diagnostic, and never substitutes
+model polling. Explicit tool denial remains denial. Preserve existing MCP servers,
+extensions and permissions when adding a collision-resistant per-session tool name:
+
+| Harness | Injection and evidence required before shipping |
+| --- | --- |
+| Claude / `claude-cli` | Add `--mcp-config` without `--strict-mcp-config`; admit only the added tool when tools are restricted; exercise fresh and resumed argv. |
+| Codex | Merge `mcp_servers` for both `thread/start` and `thread/resume`; forward internal environment names with `env_vars`; verify discovery and invocation on both paths. |
+| OpenCode | Merge the local MCP entry into parsed runtime configuration without discarding supplied config or replacing unrelated servers; malformed configuration fails explicitly. |
+| Cursor | Supply the supported ACP descriptor and environment on `session/new` and `session/load`; verify invocation and existing permission routing. |
+| Pi | Add an explicit CI extension alongside the retry extension; exercise actual tool registration and calls without replacing discovered extensions or tool settings. |
+
+These are **release requirements**, not a claim that a configuration fixture alone
+proves tool discovery. Every `RUNNER_IDS` backend needs named executable parity
+coverage, installed upstream interface/version evidence, and real bundled
+`tools/list`/`tools/call` transport (Pi registration/call for Pi) over its offline
+wire on fresh, Continue and recovery paths. A wire limitation requires owner
+review before shipping; there is no silent skip, permission widening or marker
+fallback. Pack/install and `CEZ_DRY_RUN=1` checks must exercise the bundled helpers
+without downloads, credentials or live GitHub, in both headless and cockpit paths.
+The integration verification ledger must record actual outcomes separately from
+this normative contract.
+
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
@@ -820,6 +916,11 @@ To be first-class:
    route the next human answer through the same state back to the provider. Harness rows R3
    and R4 pin valid and malformed asks; R6 and R7 pin human-answer routing, queued agent
    input, and recovery with an unanswered ask.
+   CI-wait exposure must also satisfy the CI-wait contract above: declare
+   `cezarTools` in `specSupport`, preserve user configuration, prove discovery and
+   actual invocation on fresh/resumed/recovered sessions, and verify the installed
+   adapter with deterministic dry-run fixtures. Do not treat argv/config snapshots
+   as transport proof or add a silent exemption for an unsupported CI tool.
 9. **Plumbing** — the run-store `runner` enum, workflow step schema, the
    `POST /api/runs` / `PUT /api/config` bodies, `resumeCommand()`, the web
    `Runner` type, composer pills/presets, and Settings → Agents. Keep additive
