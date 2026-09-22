@@ -156,7 +156,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     const f = await conversationPair();
     const engine = manager as unknown as { pump(): Promise<void> };
     const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
-    const submissions = vi.spyOn(manager as unknown as { submitAgentInput(runId: string, state: unknown, content: Array<{ type: string; text: string }>, id: string): boolean }, 'submitAgentInput');
+    const submissions = vi.spyOn(manager as unknown as { submitAgentInput(runId: string, state: unknown, content: Array<{ type: string; text: string }>, ids: string[]): boolean }, 'submitAgentInput');
     try {
       const requestIds = Array.from({ length: 32 }, () => randomUUID());
       for (const id of requestIds) await f.service.send(f.parentCaller, { id, recipientRunId: f.w.id, kind: 'request', text: 'Batch question mock:hold', timeoutSeconds: 600 });
@@ -179,7 +179,8 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       }, { timeout: 60_000, interval: 20 });
       expect(store.getRun(f.p.id)?.delegation).toMatchObject({ lastWait: { id: wait.id, reason: 'outcome', requestOutcomes: expect.arrayContaining(requestIds.map(requestId => expect.objectContaining({ requestId, status: 'replied' }))) } });
       const delivered = submissions.mock.calls.filter((call, index) => call[0] === f.p.id && submissions.mock.results[index]?.value === true);
-      expect(delivered.map(call => call[3])).toEqual(replyIds);
+      expect(delivered).toHaveLength(1);
+      expect(delivered.flatMap(call => call[3])).toEqual(replyIds);
       expect(delivered.at(-1)?.[2][0]?.text).toContain(`Wait ${wait.id} (outcome); request outcomes:`);
       expect(delivered.at(-1)?.[2][0]?.text).toContain('Batch answer mock:hold');
     } finally { pump.mockRestore(); submissions.mockRestore(); f.close(); }

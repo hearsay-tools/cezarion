@@ -8,6 +8,9 @@ export const conversationMessageSchema = conversationAttributionSchema.extend({
   id: z.uuid(), text: z.string().min(1).max(100_000), createdAt: z.iso.datetime(), deadline: z.iso.datetime().optional(),
   requestHash: z.string().regex(/^[0-9a-f]{64}$/),
   state: z.enum(['accepted', 'continuation-required', 'destroyed', 'late']),
+  /** A parent-authorized new execution; retained on exact message retries. */
+  resumed: z.literal(true).optional(),
+  instruction: z.string().max(2048).optional(),
 });
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
 export const requestOutcomeSchema = z.object({
@@ -20,7 +23,9 @@ export type ConversationState = z.infer<typeof conversationStateSchema>;
 export const conversationSendRequestSchema = z.object({
   id: z.uuid(), recipientRunId: z.uuid(), kind: conversationAttributionSchema.shape.kind,
   requestId: z.uuid().optional(), text: z.string().min(1).max(100_000).refine(text => text.trim().length > 0), timeoutSeconds: z.number().int().min(1).max(1800).default(600),
-}).strict().refine(value => (value.kind === 'reply' || value.kind === 'follow-up') === (value.requestId !== undefined), { message: 'Replies and follow-ups require a request ID; new messages must omit it' });
+  resume: z.boolean().optional(),
+}).strict().refine(value => (value.kind === 'reply' || value.kind === 'follow-up') === (value.requestId !== undefined), { message: 'Replies and follow-ups require a request ID; new messages must omit it' })
+  .refine(value => !value.resume || value.kind === 'request' || value.kind === 'progress', { message: '--resume requires a new request or progress instruction' });
 export type ConversationSendRequest = z.infer<typeof conversationSendRequestSchema>;
 export const conversationSendResultSchema = z.object({ message: conversationMessageSchema, delivery: z.enum(['queued', 'delivered', 'not-delivered']), outcome: requestOutcomeSchema.optional() }).strict();
 export type ConversationSendResult = z.infer<typeof conversationSendResultSchema>;

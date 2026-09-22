@@ -67,7 +67,7 @@ export function conversationStatusLabel(
   message: Pick<ThreadConversationMessage, 'messageKind' | 'delivery' | 'outcome'>,
 ): string | undefined {
   if (message.outcome) return conversationOutcomeLabel(message.outcome.status)
-  if (message.messageKind === 'request' && message.delivery === 'not-delivered') {
+  if (message.delivery === 'not-delivered') {
     return conversationDeliveryLabel('not-delivered')
   }
   return undefined

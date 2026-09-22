@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AgentSession } from '../core/agent-runner.ts';
 import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
 import { controlledWire, manager, parent, root, restart, semaphore, store, until, worker, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 
@@ -181,6 +182,33 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(first.deadline).toBe(second.deadline);
   });
 
+  it('accepts CI during an executing approval but still rejects a newer human ask', async () => {
+    github(); const release = join(root, 'ci-answer');
+    const wire = controlledWire({ humanAnswerGate: release });
+    const p = await parent('mock:ask');
+    await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
+    await restart();
+    expect(manager.continueRun(p.id, { text: 'human answer mock:hold' }).ok).toBe(true);
+    await until(() => wire.received() === 1);
+    try {
+      const wait = await register(p.id);
+      expect(wait.phase).toBe('registered');
+      expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
+      store.appendEvent(p.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{ header: 'New', question: 'Approve?', options: [{ label: 'Yes' }, { label: 'No' }] }] });
+      await expect(register(p.id)).rejects.toThrow(/cannot register/);
+    } finally { writeFileSync(release, 'go'); }
+  });
+
+  it('rejects worker and request waits while CI is registered after the shared admission refactor', async () => {
+    github(); const p = await parent();
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id);
+    await register(p.id);
+    expect(() => manager.registerWorkerWait(p.id, { workerIds: [w.id], timeoutSeconds: 30 })).toThrow(/CI wait/);
+    expect(() => manager.registerRequestWait(p.id, { requestIds: [randomUUID()], timeoutSeconds: 30 })).toThrow(/CI wait/);
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+  });
+
   it('a human ask at turn-end withdraws CI and remains unanswered by its result', async () => {
     const external = github();
     const gate = join(root, 'ask-boundary'); controlledWire({ firstResultGate: gate });
@@ -224,21 +252,30 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['done', 'done']);
   });
 
-  it('retains worker conversation behind the CI observation without losing admission', async () => {
+  it('batches worker conversations after the separate CI observation without losing admission', async () => {
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const wait = await register(run.id);
-    const messageId = randomUUID();
-    store.commitAgentInputs(run.id, [{ id: messageId, parentRunId: run.id, source: 'agent', text: 'worker update',
-      createdAt: new Date().toISOString(), conversation: { senderRunId: randomUUID(), recipientRunId: run.id, kind: 'progress' } }]);
+    const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(run.id)!.session;
+    const send = vi.spyOn(session, 'sendAgentMessage');
+    const messages = Array.from({ length: 3 }, (_, n) => ({ id: randomUUID(), parentRunId: run.id, source: 'agent' as const, text: `worker update ${n}`,
+      createdAt: new Date().toISOString(), conversation: { senderRunId: randomUUID(), recipientRunId: run.id, kind: 'progress' as const } }));
+    store.commitAgentInputs(run.id, messages);
     manager.deliverConversationInput(run.id);
     expect(store.getRun(run.id)?.activity).toBe('monitoring');
     expect(waitOf(store.getRun(run.id))).toBeUndefined();
     external.settle(success());
     await until(() => !!store.getRun(run.id)?.lastCiWait?.deliveredAt);
-    await until(() => !!store.getRun(run.id)?.agentInputs?.find(input => input.id === messageId)?.deliveredAt);
+    await until(() => messages.every(message => store.getRun(run.id)?.agentInputs?.find(input => input.id === message.id)?.deliveredAt));
     const delivered = store.getRun(run.id)!.agentInputs!;
     expect(delivered.find(input => input.id === wait.id)?.deliveredAt).toBeTruthy();
+    const accepted = send.mock.calls.filter((_, i) => send.mock.results[i]?.value !== false);
+    expect(accepted).toHaveLength(2);
+    for (const message of messages) {
+      expect(JSON.stringify(accepted[0])).not.toContain(message.id);
+      expect(JSON.stringify(accepted[1])).toContain(message.id);
+    }
+    expect(new Set(delivered.filter(input => !!input.conversation).map(input => input.deliveredAt)).size).toBe(1);
   });
 
   it('reconciles a settled CI wake after an owned worker execution finalizes', async () => {

@@ -36,7 +36,8 @@ export function projectConversationEvents(store: import('../runs/store.ts').RunS
       const input = store.getRun(message.recipientRunId)?.agentInputs?.find(input => input.id === message.id);
       const delivery = input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered';
       const projectionId = `conversation-message:${message.id}:${delivery}`;
-      if (!ids.has(projectionId)) { store.appendEvent(runId, { type: 'conversation-message', projectionId, message, delivery }); ids.add(projectionId); }
+      if (!ids.has(projectionId)) { store.appendEvent(runId, { type: 'conversation-message', projectionId, message, delivery,
+        ...(input?.deliveredAt ? { deliveredAt: input.deliveredAt } : {}) }); ids.add(projectionId); }
       const outcome = outcomes.get(message.id);
       if (outcome && !ids.has(`request-outcome:${outcome.requestId}`)) {
         store.appendEvent(runId, { type: 'request-outcome', projectionId: `request-outcome:${outcome.requestId}`, outcome });

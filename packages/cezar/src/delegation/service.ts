@@ -153,6 +153,9 @@ export class DelegationService {
     const initial = this.conversationPair(caller, request.recipientRunId, true);
     return this.serialized(`conversation:${initial.project.id}:${initial.root.id}`, async () => {
       const { project, root, sender, recipient } = this.conversationPair(caller, request.recipientRunId, true);
+      if (request.resume && (sender.id !== root.id || recipient.delegation?.role !== 'worker')) {
+        throw new DelegationPolicyError('denied_scope', 'Only an active parent may use --resume for its owned worker');
+      }
       if (project.store.containsSessionSecret(JSON.stringify(request))) throw new DelegationPolicyError('invalid_input', 'Credentials cannot be included in delegated input');
       const requestHash = createHash('sha256').update(JSON.stringify({ senderRunId: sender.id, ...request })).digest('hex');
       const state = this.currentConversation(project, root);
@@ -171,19 +174,37 @@ export class DelegationService {
       const settled = state.outcomes.find(outcome => outcome.requestId === request.requestId);
       const now = new Date().toISOString();
       const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
-      const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy);
+      const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy);
+      const resume = !!request.resume && resumable;
+      if (resume && (destroyed || recipient.delegation?.role !== 'worker' || recipient.delegation.destroy ||
+        recipient.status === 'cancelled' || recipient.stopping)) throw new DelegationPolicyError('incompatible_state',
+          `Worker is ${destroyed ? 'destroyed' : 'stopped or being destroyed'}; --resume cannot restart it. Spawn a new worker with the follow-up instruction`);
+      const stopped = recipient.delegation?.role === 'worker' && (recipient.status === 'cancelled' || recipient.stopping || recipient.delegation.destroy);
+      const instruction = destroyed ? 'Not delivered: this worker was destroyed. Spawn a new worker for further work.'
+        : stopped ? 'Not delivered: this worker was stopped or is being destroyed. Spawn a new worker for further work.'
+        : resumable && !resume ? sender.id === root.id
+          ? `Not delivered: worker is ${recipient.status}. To resume it with a new instruction, run worker send ${recipient.id} "<instruction>" --kind request --resume --id <new-message-UUID>; use a new message ID. Retrying this rejected ID will not deliver it.`
+          : `Not delivered: parent is ${recipient.status}. A worker cannot resume its parent; the parent must be continued by its owner.`
+        : undefined;
       const message: ConversationSendResult['message'] = { id: request.id, senderRunId: sender.id, recipientRunId: recipient.id,
         kind: request.kind, ...(request.requestId ? { requestId: request.requestId } : {}), text: project.store.redactText(request.text), createdAt: now, requestHash,
-        ...(request.kind === 'request' && !destroyed && !resumable ? { deadline: new Date(Date.parse(now) + request.timeoutSeconds * 1000).toISOString() } : {}),
-        state: request.kind === 'reply' && settled ? 'late' : destroyed ? 'destroyed' : resumable ? 'continuation-required' : 'accepted' };
-      const enqueue = !destroyed && !resumable;
+        ...(request.kind === 'request' && !destroyed && (!resumable || resume) ? { deadline: new Date(Date.parse(now) + request.timeoutSeconds * 1000).toISOString() } : {}),
+        ...(resume ? { resumed: true as const } : {}), ...(instruction ? { instruction } : {}),
+        state: request.kind === 'reply' && settled ? 'late' : destroyed ? 'destroyed' : resumable && !resume ? 'continuation-required' : 'accepted' };
+      const enqueue = !destroyed && (!resumable || resume);
       if (state.messages.length >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
         (enqueue && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
       const outcomes = [...state.outcomes];
       if (request.kind === 'reply' && !settled) outcomes.push({ requestId: request.requestId!, status: 'replied', observedAt: now, replyId: request.id });
-      project.store.commitConversation(root.id, { messages: [...state.messages, message], outcomes }, enqueue ? { recipientRunId: recipient.id,
-        input: { id: message.id, source: 'agent', parentRunId: root.id, text: message.text, createdAt: now,
-          conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}) } } } : undefined);
+      const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
+        conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}) } };
+      const next = { messages: [...state.messages, message], outcomes };
+      if (resume) {
+        const result = project.manager.continueRun(recipient.id, {
+          text: `Your parent resumed this worker with a new instruction.\nAgent conversation ${JSON.stringify({ id: input.id, ...input.conversation })}\n${input.text}`,
+        }, true, { rootId: root.id, state: next, input });
+        if (!result.ok) throw new DelegationPolicyError('incompatible_state', `Worker was not resumed: ${result.error}. No message was accepted; resolve this condition and retry the same command`);
+      } else project.store.commitConversation(root.id, next, enqueue ? { recipientRunId: recipient.id, input } : undefined);
       projectConversationEvents(project.store, root);
       project.manager.reconcileWorkerWaits();
       if (enqueue) project.manager.deliverConversationInput(recipient.id);

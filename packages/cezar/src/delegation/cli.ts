@@ -39,8 +39,8 @@ const WORKER_USAGE = { operations: [
   { name: 'wait', positionals: 1, optional: ['--mode', '--timeout-seconds'] },
   { name: 'wait', positionals: 0, required: ['--request'], optional: ['--mode', '--timeout-seconds'] },
   { name: 'cancel-wait', positionals: 1 },
-  { name: 'send', positionals: 2, required: ['--id', '--kind'], optional: ['--timeout-seconds'] },
-  { name: 'progress', positionals: 2, required: ['--id'], optional: ['--timeout-seconds'] },
+  { name: 'send', positionals: 2, required: ['--id', '--kind'], optional: ['--timeout-seconds', '--resume'] },
+  { name: 'progress', positionals: 2, required: ['--id'], optional: ['--timeout-seconds', '--resume'] },
   { name: 'follow-up', positionals: 2, required: ['--id', '--request-id'], optional: ['--timeout-seconds'] },
   { name: 'reply', positionals: 2, required: ['--id', '--request-id'], optional: ['--timeout-seconds'] },
   { name: 'conversation', positionals: 1 },
@@ -79,6 +79,7 @@ const WORKER_FLAG_HELP: Record<string, string> = {
   '--request': '<UUID>                 Request to wait for; repeat for multiple requests.',
   '--id': '<UUID>                      Message ID; reuse only for an exact retry.',
   '--kind': '<request|progress>        Whether the message requires an explicit reply.',
+  '--resume': '                         Resume an owned finished worker with this new instruction.',
 };
 function workerHelp(operation?: string): string {
   const operations = WORKER_USAGE.operations.filter(entry => operation === undefined || entry.name === operation);
@@ -161,6 +162,7 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       help: { type: 'boolean', short: 'h' },
       ...(operation === 'spawn' ? { baseline: { type: 'string' as const }, 'request-id': { type: 'string' as const }, workflow: { type: 'string' as const }, backend: { type: 'string' as const }, model: { type: 'string' as const }, effort: { type: 'string' as const }, context: { type: 'string' as const }, 'context-file': { type: 'string' as const } } : {}),
       ...(['send', 'progress', 'reply', 'follow-up'].includes(operation) ? { id: { type: 'string' as const }, kind: { type: 'string' as const }, 'request-id': { type: 'string' as const }, 'timeout-seconds': { type: 'string' as const } } : {}),
+      ...(operation === 'send' || operation === 'progress' ? { resume: { type: 'boolean' as const } } : {}),
       ...(operation === 'wait' || operation === 'wait-requests' ? { request: { type: 'string' as const, multiple: true }, 'timeout-seconds': { type: 'string' as const }, mode: { type: 'string' as const } } : {}),
     } });
     if (values.help) {
@@ -175,6 +177,7 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       const timeout = values['timeout-seconds'];
       if (timeout !== undefined && !/^\d+$/.test(String(timeout))) throw new WorkerCliError(`${operation} has invalid --timeout-seconds`);
       body = conversationSendRequestSchema.parse({ id: values.id, recipientRunId: positionals[0], text: positionals[1], kind: operation === 'send' ? values.kind : operation,
+        ...(values.resume === undefined ? {} : { resume: values.resume }),
         ...(values['request-id'] === undefined ? {} : { requestId: values['request-id'] }), ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }) });
       if (operation === 'progress') path = 'send';
     } else if (operation === 'conversation' || operation === 'cancel-request') {
@@ -223,7 +226,9 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
         if (incomplete.success && incomplete.data.state === 'incomplete') { print(incomplete.data); return 1; }
       }
       if (!response.ok) { print(delegationErrorResponseSchema.parse(data)); return 1; }
-      print(responseSchemas[operation].parse(data)); return 0;
+      const result = responseSchemas[operation].parse(data);
+      print(result);
+      return 'delivery' in result && result.delivery === 'not-delivered' ? 1 : 0;
     } catch { throw new DelegationPolicyError('unavailable_transport', 'Delegation transport failed or returned an invalid response'); }
   } catch (error) {
     print(error instanceof DelegationPolicyError ? { code: error.code, error: error.message } : { code: 'invalid_input', error: formatWorkerCliError(error, argv[0]) });

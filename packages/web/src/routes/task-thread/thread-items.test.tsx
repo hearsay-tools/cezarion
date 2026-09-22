@@ -519,7 +519,7 @@ describe('parent/worker conversation transcript', () => {
     expect(document.body.textContent).not.toContain(recipientRunId);
     fireEvent.click(screen.getByRole('button', { name: /Details/ }));
     expect(screen.getByText(id, { exact: false })).toBeTruthy();
-    expect(screen.getByText(/Queued/)).toBeTruthy();
+    expect(screen.getByText('Queued', { exact: true })).toBeTruthy();
   });
 
   it('batches adjacent sends but preserves delayed replies as independent inbound cards', () => {
@@ -605,10 +605,10 @@ describe('parent/worker conversation transcript', () => {
 
   // A recipient under review or already destroyed never receives the request, so the card
   // reports that terminal delivery rather than a reply that will never come.
-  it('reports an undelivered request as not delivered instead of pending', () => {
+  it.each(['request', 'progress', 'reply', 'follow-up'])('reports an undelivered %s with an actionable explanation', kind => {
     const parent = '11111111-1111-4111-8111-111111111111'
     const alpha = '22222222-2222-4222-8222-222222222222'
-    const request = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', senderRunId: parent, recipientRunId: alpha, kind: 'request', text: 'Ping the parked worker', createdAt: '2026-09-08T12:00:00.000Z', requestHash: 'a'.repeat(64), state: 'continuation-required' }
+    const request = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', senderRunId: parent, recipientRunId: alpha, kind, text: 'Ping the parked worker', createdAt: '2026-09-08T12:00:00.000Z', requestHash: 'a'.repeat(64), state: 'continuation-required', instruction: 'Worker finished. Send a new instruction with --resume.' }
     const entries = reduceThread(asRunEvents([
       { type: 'conversation-message', message: request, delivery: 'not-delivered' },
     ])).turns.flatMap(turn => turn.items)
@@ -619,11 +619,20 @@ describe('parent/worker conversation transcript', () => {
     )
     expect(screen.queryByText('Pending')).toBeNull()
     expect(document.querySelector('[data-slot="conversation-outcome"]')?.textContent).toBe('Not delivered')
+    expect(screen.getByText('Worker finished. Send a new instruction with --resume.')).toBeTruthy()
   })
 });
 
 
 describe('conversation delivery replay', () => {
+  it('retains creation, delivery and event recording times across stale projection replay', () => {
+    const message = { id: '33333333-3333-4333-8333-333333333333', senderRunId: '11111111-1111-4111-8111-111111111111', recipientRunId: '22222222-2222-4222-8222-222222222222', kind: 'progress', text: 'Result', createdAt: '2026-09-22T13:45:02.697Z', state: 'accepted', requestHash: 'a'.repeat(64) };
+    const deliveredAt = '2026-09-22T14:32:54.554Z', recordedAt = '2026-09-22T14:32:54.648Z';
+    const queued = { type: 'conversation-message', message, delivery: 'queued' };
+    const entries = reduceThread(asRunEvents([queued, { ...queued, delivery: 'delivered', deliveredAt, ts: recordedAt }, queued])).turns.flatMap(turn => turn.items);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ createdAt: message.createdAt, deliveredAt, recordedAt });
+  });
   it.each([false, true])('merges delivery ACK and stale projection in either order (ACK first: %s)', ackFirst => {
     const id = '33333333-3333-4333-8333-333333333333', senderRunId = '11111111-1111-4111-8111-111111111111', recipientRunId = '22222222-2222-4222-8222-222222222222';
     const attribution = { senderRunId, recipientRunId, kind: 'progress' };

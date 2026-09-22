@@ -21,3 +21,18 @@ export function enqueueAgentInput(run: RunRecord, input: AgentInput): AgentInput
 export function nextAgentInput(queue: readonly AgentInput[], pendingHumanAsk: boolean): AgentInput | undefined {
   return pendingHumanAsk ? undefined : queue.find(input => !input.deliveredAt);
 }
+
+/** Drain a bounded FIFO snapshot of conversations into one provider turn. Lifecycle
+ * inputs remain barriers, and an individually valid large message is never split. */
+export function agentInputBatch(queue: readonly AgentInput[], format: (input: AgentInput) => string): { inputs: AgentInput[]; text: string } | undefined {
+  const inputs: AgentInput[] = []; const parts: string[] = []; let length = 0;
+  for (const input of queue) {
+    if (input.deliveredAt) continue;
+    if (inputs.length && (!inputs[0]!.conversation || !input.conversation)) break;
+    const text = format(input);
+    if (inputs.length && length + 2 + text.length > 100_000) break;
+    inputs.push(input); parts.push(text); length += text.length + (parts.length > 1 ? 2 : 0);
+    if (inputs.length === 32) break;
+  }
+  return inputs.length ? { inputs, text: parts.join('\n\n') } : undefined;
+}
