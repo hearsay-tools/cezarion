@@ -912,6 +912,7 @@ describe('responsive session composer', () => {
     const sendLabel = browser.waitForValue(`document.querySelector('[data-slot="composer-submit-row"]')?.textContent?.includes('Send') ? document.querySelector('[data-slot="composer-submit-row"]').textContent : null`)
     expect(sendLabel).toContain('Send')
     browser.screenshot(`${artifactsDir}/responsive-session-${width}-${theme}.png`, { viewport: true })
+    browser.evaluate(`document.querySelector('[aria-label="Run actions"]').scrollIntoView({block:'center'})`)
     browser.click('[aria-label="Run actions"]')
     browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]')?.textContent?.includes('Notes') === true`)
     browser.press('Escape')
