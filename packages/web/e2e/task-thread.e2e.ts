@@ -944,6 +944,7 @@ describe('responsive session composer', () => {
       expect(facts.group.left).toBeGreaterThanOrEqual(facts.editor.left - 1)
       expect(facts.group.right).toBeLessThanOrEqual(facts.editor.right + 1)
       expectUsableSessionControls(facts, 800, 900)
+      expect(facts.archiveLabel).toBe('Archive task')
       browser.screenshot(`${artifactsDir}/responsive-session-800-wide-sidebar.png`, { viewport: true })
     } finally {
       const end = handlePoint()
