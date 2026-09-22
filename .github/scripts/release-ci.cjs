@@ -1,7 +1,7 @@
 'use strict';
 
 // Start the existing, read-only CI workflow at a release PR's head. No synthetic
-// check is posted: only CI's real aggregate can satisfy branch protection.
+// check is posted. Dispatch verifies code but cannot satisfy PR branch protection.
 const { execFileSync } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 const CHECK_NAME = 'Unit, build, E2E, and package';
@@ -10,7 +10,7 @@ function recoveryCommand(repo, prNumber, expectedSha) {
   return `node .github/scripts/release-ci.cjs ${repo.owner}/${repo.repo} ${prNumber} ${expectedSha}`;
 }
 
-async function ensureReleaseCi({ github, repo, prNumber, expectedSha, sleep = delay }) {
+async function ensureReleaseCi({ github, repo, prNumber, expectedSha, sleep = delay, native = false }) {
   const recovery = recoveryCommand(repo, prNumber, expectedSha);
   try {
     if (!/^[a-f0-9]{40}$/.test(expectedSha ?? '') || !Number.isSafeInteger(prNumber) || prNumber < 1) {
@@ -30,9 +30,32 @@ async function ensureReleaseCi({ github, repo, prNumber, expectedSha, sleep = de
       ...repo, workflow_id: 'ci.yml', branch, head_sha: expectedSha, per_page: 100,
     })).filter((run) => run.head_sha === expectedSha && run.head_branch === branch
       && ['workflow_dispatch', 'pull_request_target', 'pull_request'].includes(run.event));
+    if (native) {
+      // Creating a PR with an installation token emits the native event. Never
+      // dispatch in this path: the shared concurrency group would cancel it.
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const current = await readPr();
+        if (current.head.sha !== expectedSha || current.state !== 'open') {
+          throw new Error('Release PR changed while waiting for native CI.');
+        }
+        const run = (await listRuns()).find(r => r.event !== 'workflow_dispatch');
+        if (run) {
+          if (run.status !== 'completed') return { status: 'active', mergeEligible: true, sha: expectedSha, url: run.html_url };
+          const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+            ...repo, run_id: run.id, filter: 'latest', per_page: 100,
+          });
+          if (run.conclusion === 'success' && jobs.some(j => j.name === CHECK_NAME && j.conclusion === 'success')) {
+            return { status: 'passed', mergeEligible: true, sha: expectedSha, url: run.html_url };
+          }
+          throw new Error(`Native CI did not pass. Inspect and rerun failed jobs: ${run.html_url}`);
+        }
+        if (attempt < 11) await sleep(5000);
+      }
+      throw new Error('No native PR CI appeared within 55 seconds. Check the release App installation and ci.yml base-branch triggers. A legacy GITHUB_TOKEN-created PR needs a maintainer close/reopen once; dispatch cannot satisfy required checks.');
+    }
     const runs = await listRuns();
     const active = runs.find((run) => run.status !== 'completed');
-    if (active) return { status: 'active', sha: expectedSha, url: active.html_url };
+    if (active) return { status: 'active', mergeEligible: active.event !== 'workflow_dispatch', sha: expectedSha, url: active.html_url };
     // The API lists newest runs first. An old success cannot hide a newer
     // failure, and a workflow without the required job is not verified CI.
     const run = runs[0];
@@ -41,7 +64,7 @@ async function ensureReleaseCi({ github, repo, prNumber, expectedSha, sleep = de
         ...repo, run_id: run.id, filter: 'latest', per_page: 100,
       });
       if (jobs.some((job) => job.name === CHECK_NAME && job.conclusion === 'success')) {
-        return { status: 'passed', sha: expectedSha, url: run.html_url };
+        return { status: run.event === 'workflow_dispatch' ? 'verified-only' : 'passed', mergeEligible: run.event !== 'workflow_dispatch', sha: expectedSha, url: run.html_url };
       }
     }
     const ref = (await github.rest.git.getRef({ ...repo, ref: `heads/${branch}` })).data;
@@ -57,7 +80,7 @@ async function ensureReleaseCi({ github, repo, prNumber, expectedSha, sleep = de
         throw new Error('Release PR moved during dispatch; inspect CI and recover the new head explicitly.');
       }
       const run = (await listRuns()).find((entry) => !priorIds.has(entry.id));
-      if (run) return { status: 'dispatched', sha: expectedSha, url: run.html_url };
+      if (run) return { status: 'dispatched', mergeEligible: run.event !== 'workflow_dispatch', sha: expectedSha, url: run.html_url };
       if (attempt < 11) await sleep(5000);
     }
     throw new Error('Dispatch accepted, but no CI run appeared for the expected commit within 55 seconds. Inspect Actions before retrying; the recovery command reuses active runs.');
@@ -66,7 +89,7 @@ async function ensureReleaseCi({ github, repo, prNumber, expectedSha, sleep = de
     const reason = String(error.message ?? error).replace(/[\r\n]+/g, ' ').slice(0, 1000);
     // Octokit uses status for HTTP; execFileSync uses it for the process exit.
     const httpStatus = Number.isInteger(error.status) && error.status >= 100 && error.status <= 599;
-    throw new Error(`CI trigger failed${httpStatus ? ` (HTTP ${error.status})` : ''}: ${reason}. Check actions: write permission, Actions policy, and ci.yml workflow_dispatch on the release branch. Recovery: ${recovery}`, { cause: error });
+    throw new Error(`CI trigger failed${httpStatus ? ` (HTTP ${error.status})` : ''}: ${reason}. ${native ? 'Native CI recovery: inspect the PR Checks tab; rerun its eligible CI or have a maintainer close/reopen a legacy PR once.' : `Check actions: write permission, Actions policy, and ci.yml workflow_dispatch on the release branch. Dispatch is verification-only, not merge-eligible. Recovery: ${recovery}`}`, { cause: error });
   }
 }
 

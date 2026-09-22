@@ -159,3 +159,19 @@ test('classifyFromEnv requires matching event/live head SHAs, file list, and ver
   assert.equal(classifyFromEnv({ ...base, PR_FILES: '' }, stampsOk), false);
   assert.equal(classifyFromEnv({ ...base, BASE_SHA: 'short' }, stampsOk), false);
 });
+
+
+test('configured release App author is exact and keeps every version-stamp guard', () => {
+  const env = { EVENT_NAME: 'pull_request_target', HEAD_REF: 'release/v1.2.3',
+    PR_AUTHOR: 'cezar-release[bot]', RELEASE_APP_BOT_LOGIN: 'cezar-release[bot]',
+    EXPECTED_HEAD_SHA: 'a'.repeat(40), LIVE_HEAD_SHA: 'a'.repeat(40), BASE_SHA: 'b'.repeat(40),
+    GITHUB_REPOSITORY: 'example/project', PR_FILES_OK: '1', PR_FILES: 'packages/cezar/package.json' };
+  const ok = { filesAreVersionStampsOnly: () => true };
+  assert.equal(classifyFromEnv(env, ok), true);
+  for (const change of [
+    { RELEASE_APP_BOT_LOGIN: '' }, { RELEASE_APP_BOT_LOGIN: 'other[bot]' },
+    { PR_AUTHOR: 'human', RELEASE_APP_BOT_LOGIN: 'human' },
+    { PR_FILES: 'src/code.ts' }, { LIVE_HEAD_SHA: 'c'.repeat(40) }, { PR_FILES_OK: '0' },
+  ]) assert.equal(classifyFromEnv({ ...env, ...change }, ok), false);
+  assert.equal(classifyFromEnv(env, { filesAreVersionStampsOnly: () => false }), false);
+});

@@ -117,7 +117,7 @@ test('CI classifies pull request changes from a trusted base checkout', () => {
   const ci = workflow();
   assert.ok(ci.on.pull_request_target, 'CI must use the trusted pull_request_target trigger');
   assert.equal(ci.on.pull_request, undefined, 'one authoritative PR event, including during migration');
-  assert.deepEqual(ci.on.pull_request_target.branches, ['main', 'develop']);
+  assert.deepEqual(ci.on.pull_request_target.branches, ['main', 'develop', 'release/**']);
   const job = ci.jobs['change-surface'];
   assert.ok(job, 'expected a change-surface job');
   assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read' });

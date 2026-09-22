@@ -84,8 +84,8 @@ jobs:
     permissions:
       contents: write # create the release tag + GitHub Release via the API
       id-token: write # npm trusted publishing (OIDC) + provenance
-      pull-requests: write # open the version-bump PR for patch/minor/major releases
-      actions: write # explicitly start CI for GITHUB_TOKEN-created release PRs
+      pull-requests: read # inspect/reuse bump PRs; the App token creates them
+      actions: read # observe native PR CI; never dispatch over it
 
     steps:
       - name: Check out repository
@@ -106,6 +106,44 @@ jobs:
       - name: Build application
         run: npm run build
 
+      # Validate and mint before npm publication; missing credentials must not
+      # leave a published version without an App-authored bump PR.
+      - name: Validate release App settings
+        id: validate_release_app
+        if: inputs.bump != 'existing'
+        env:
+          RELEASE_APP_ID: ${{ vars.RELEASE_APP_ID }}
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+          HAS_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+        run: |
+          if ! [[ "$RELEASE_APP_ID" =~ ^[1-9][0-9]*$ ]] \
+            || ! [[ "$RELEASE_APP_BOT_LOGIN" =~ ^[a-z0-9][a-z0-9-]*\[bot\]$ ]] \
+            || [ "$HAS_PRIVATE_KEY" != true ]; then
+            echo '::error::Configure RELEASE_APP_ID and RELEASE_APP_BOT_LOGIN variables and RELEASE_APP_PRIVATE_KEY secret. See docs/publishing.md#release-app-setup.'
+            exit 1
+          fi
+
+      - name: Create release PR token
+        id: release_app
+        if: inputs.bump != 'existing'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+
+      - name: Check release App identity
+        if: inputs.bump != 'existing'
+        env:
+          APP_SLUG: ${{ steps.release_app.outputs.app-slug }}
+          EXPECTED_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+        run: |
+          if [ "$APP_SLUG[bot]" != "$EXPECTED_LOGIN" ]; then
+            echo '::error::RELEASE_APP_BOT_LOGIN does not match the installed App slug.'
+            exit 1
+          fi
+
       - name: Publish release
         id: release
         # No npm credential in this job. npm authenticates via OIDC trusted
@@ -124,9 +162,11 @@ jobs:
         env:
           VERSION: ${{ steps.release.outputs.version }}
           BASE_BRANCH: ${{ github.ref_name }}
+          RELEASE_PR_TOKEN: ${{ steps.release_app.outputs.token }}
         with:
           script: |
-            await require('./.github/scripts/release-finalization.cjs').bumpPr({ github, context, core });
+            const prGithub = getOctokit(process.env.RELEASE_PR_TOKEN);
+            await require('./.github/scripts/release-finalization.cjs').bumpPr({ github, prGithub, context, core, nativeCi: true });
 
       - name: Create GitHub Release
         id: github_release

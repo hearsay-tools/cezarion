@@ -19,13 +19,13 @@ function evaluate(value, context) {
   return typeof value === 'string' && value.startsWith('${{')
     ? runInNewContext(value.slice(3, -2), context) : value;
 }
-function classify(jobName, { pr = prFixture(), number = '42', apiFails = false,
+function classify(jobName, { pr = prFixture(), number = '42', apiFails = false, appLogin = '',
   files = [{ filename: 'packages/cezar/package.json' }], after = { version: '1.2.3' } } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-dispatch-'));
   fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"commonjs"}');
   const context = { github: { event_name: 'workflow_dispatch', sha: HEAD,
     repository: 'owner/repo', token: '', head_ref: '', event: { pull_request: { head: {}, base: {}, user: {} } } },
-    inputs: { pr_number: number }, steps: {}, format: (s, n) => s.replace('{0}', n) };
+    vars: { RELEASE_APP_BOT_LOGIN: appLogin }, inputs: { pr_number: number }, steps: {}, format: (s, n) => s.replace('{0}', n) };
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_WORKSPACE: dir,
     GITHUB_REPOSITORY: 'owner/repo', GITHUB_SHA: HEAD, FIXTURE: JSON.stringify({ pr, files, after, apiFails }) };
   fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
@@ -117,4 +117,13 @@ test('verification uses a PR merge ref only after validating dispatch attributio
       assert.equal(classify(job, options), HEAD, `${job}: ${JSON.stringify(options)}`);
     }
   }
+});
+
+
+test('dispatch uses the configured App author without normalizing arbitrary users to a bot', () => {
+  const pr = prFixture(); pr.user.login = 'cezar-release[bot]';
+  assert.equal(classify('classify-pr', { pr, appLogin: pr.user.login }).bump_pr, 'true');
+  assert.equal(classify('classify-pr', { pr, appLogin: 'other[bot]' }).bump_pr, 'false');
+  pr.user.login = 'human';
+  assert.equal(classify('classify-pr', { pr, appLogin: 'human' }).bump_pr, 'false');
 });

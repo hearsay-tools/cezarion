@@ -402,3 +402,16 @@ test('trusted recovery workflow listens to completions and never executes PR cod
   assert.equal(result.recovered, true, result.reason);
   assert.equal(h.writes.length, 1);
 });
+
+test('human rerun of an App-authored manifest bump still skips review recovery', async () => {
+  const h = harness();
+  h.options.releaseAppBotLogin = 'cezar-release[bot]';
+  h.state.ci.head_branch = h.state.review.head_branch = 'release/v1.0.1';
+  h.state.pulls[0].head.ref = 'release/v1.0.1';
+  h.state.pulls[0].base.sha = 'b'.repeat(40);
+  h.state.pulls[0].user = { login: 'cezar-release[bot]' };
+  h.state.pullFiles = [{ filename: 'packages/cezar/package.json' }];
+  const result = await recover(h);
+  assert.equal(result.reason, 'bot release version-bump PR');
+  assert.equal(h.writes.length, 0);
+});
