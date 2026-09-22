@@ -168,6 +168,8 @@ export const runRecordSchema = z.object({
   agentInputs: z.array(agentInputSchema).optional(),
   ciWait: ciWaitSchema.optional(),
   lastCiWait: ciWaitSchema.optional(),
+  /** Retained recovery observation when previous CI metadata cannot be trusted. */
+  lastCiWaitError: z.string().max(256).optional(),
   /** URLs of images and document attachments on the initial task prompt; branch on isImageAttachmentName. */
   taskImages: z.array(z.string()).optional(),
   model: z.string().optional(),

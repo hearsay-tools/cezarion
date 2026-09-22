@@ -201,6 +201,14 @@ describe('CI wait status', () => {
     expect(screen.getByRole('link', { name: 'owner/repo#474' })).not.toBeNull()
   })
 
+  it('shows unreadable retained CI history without inventing a PR link or changing task status', () => {
+    stubFetch()
+    renderHeader(run('done', { lastCiWaitError: 'CI wait unavailable — saved observation is unreadable; register a new wait.' }))
+    expect(screen.getByText(/saved observation is unreadable/)).not.toBeNull()
+    expect(document.querySelector('[data-slot="ci-wait-status"]')?.getAttribute('role')).toBe('status')
+    expect(screen.queryByRole('link', { name: 'owner/repo#474' })).toBeNull()
+  })
+
   it('keeps the last snapshot visible offline and falls back for an invalid deadline', () => {
     stubFetch()
     vi.stubGlobal('navigator', { ...navigator, onLine: false })

@@ -116,4 +116,15 @@ describe('CI header browser accessibility', () => {
     expect(browser.count(link)).toBe(1)
     expect(browser.count('[data-slot="monitoring-schedule"]')).toBe(0)
   })
+  it('retains a readable recovery error without fabricating a PR link', () => {
+    const recovered = { ...run, status: 'done', activity: undefined, ciWait: undefined,
+      lastCiWaitError: 'CI wait unavailable — saved observation is unreadable; register a new wait.' }
+    browser.setViewport(360, 640)
+    browser.evaluate(`document.documentElement.style.zoom = '1'; window.setCiRun(${JSON.stringify(recovered)})`)
+    browser.waitForFunction(`document.querySelector('${status}').textContent.includes('saved observation is unreadable')`)
+    expect(browser.count(link)).toBe(0)
+    expect(browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`)).toBe(true)
+    browser.screenshot(resolve(artifacts, 'recovery-error-360.png'), { viewport: true })
+  })
+
 })

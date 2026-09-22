@@ -646,6 +646,12 @@ function activeCiWait(run: ApiRun) {
 function CiWaitStatus({ run }: { run: ApiRun }) {
   const active = activeCiWait(run)
   const wait = active ?? run.lastCiWait
+  if (!active && run.lastCiWaitError) return (
+    <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
+      className="mt-1 min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+      {run.lastCiWaitError}
+    </div>
+  )
   if (!wait) return null
   const result = wait.result
   const outcomes = {

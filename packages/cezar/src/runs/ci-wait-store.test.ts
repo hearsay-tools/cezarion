@@ -81,4 +81,24 @@ describe('atomic CI wait checkpoints', () => {
     expect(reopened.getRun(id)).toMatchObject({ status: 'failed', error: expect.stringContaining('CI wait state is unreadable') });
     expect(reopened.getRun(id)?.ciWait).toBeUndefined();
   });
+  it.each(['running', 'done'] as const)('retains an unreadable previous observation for %s runs across repeated reads', (status) => {
+    store.updateRun(id, { status }); store.flush();
+    const records = JSON.parse(readFileSync(join(directory, 'runs.json'), 'utf8'));
+    records[0].lastCiWait = { ...wait, phase: 'delivered', result: { outcome: 'passed' } };
+    writeFileSync(join(directory, 'runs.json'), JSON.stringify(records));
+    const reopened = RunStore.open(directory, { keepLive: true });
+    expect(reopened.getRun(id)?.status).toBe(status);
+    // The read-only index intentionally marks orphan running records failed.
+    expect(readRunIndexFromDisk(directory)[0]?.status).toBe(status === 'running' ? 'failed' : status);
+    for (const record of [readRunIndexFromDisk(directory)[0], reopened.getRun(id)]) {
+      expect(record).toMatchObject({ lastCiWaitError: expect.stringContaining('saved observation is unreadable') });
+      expect(record?.lastCiWait).toBeUndefined();
+    }
+    reopened.flush();
+    expect(RunStore.open(directory, { keepLive: true }).getRun(id)?.lastCiWaitError).toContain('unreadable');
+    reopened.commitCiWait(id, wait);
+    expect(reopened.getRun(id)?.lastCiWaitError).toBeUndefined();
+    expect(RunStore.open(directory, { keepLive: true }).getRun(id)?.lastCiWaitError).toBeUndefined();
+  });
+
 });

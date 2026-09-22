@@ -157,6 +157,8 @@ export const runRecordSchema = z.object({
   agentInputs: z.array(agentInputSchema).optional(),
   ciWait: ciWaitSchema.optional(),
   lastCiWait: ciWaitSchema.optional(),
+  /** Retained recovery observation when previous CI metadata cannot be trusted. */
+  lastCiWaitError: z.string().max(256).optional(),
   /** URLs of images attached to the initial task prompt, for the thread's first bubble
    *  (#image-display) — persisted like agent screenshots, served from `/images/`. */
   taskImages: z.array(z.string()).optional(),
@@ -349,7 +351,10 @@ export function parseRunRecords(raw: unknown) {
         row.error = 'CI wait state is unreadable; continue the task to register a new wait.';
       }
     }
-    if (row.lastCiWait !== undefined && !ciWaitSchema.safeParse(row.lastCiWait).success) delete row.lastCiWait;
+    if (row.lastCiWait !== undefined && !ciWaitSchema.safeParse(row.lastCiWait).success) {
+      delete row.lastCiWait;
+      row.lastCiWaitError = 'CI wait unavailable — saved observation is unreadable; register a new wait.';
+    }
   }
   return z.array(runRecordSchema).safeParse(raw);
 }
@@ -939,7 +944,7 @@ export class RunStore extends EventEmitter {
     const ciWait = ciWaitSchema.parse(wait);
     const entry = input ? agentInputSchema.parse(input) : undefined;
     const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, ciWait, ...(entry ? { agentInputs: run.agentInputs?.some(row => row.id === entry.id)
+    proposed.set(id, { ...run, ciWait, lastCiWaitError: undefined, ...(entry ? { agentInputs: run.agentInputs?.some(row => row.id === entry.id)
       ? run.agentInputs : [...(run.agentInputs ?? []), entry] } : {}) });
     this.commitIndex(proposed, new Set([id]));
   }
