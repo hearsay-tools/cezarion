@@ -302,6 +302,8 @@ interface ActiveRun {
   workerWakeTurn?: AgentSession;
   /** Last completed boundary belongs to exactly this still-open session. */
   atTurnBoundary?: AgentSession;
+  /** Resume a nonfinal step whose auto-end window was held by an inbox receipt. */
+  resumeInboxAutoEnd?: () => void;
   currentStepId?: string;
   idleTimer?: NodeJS.Timeout;
   /** The inactivity timer closed the wire; resource teardown must not imply task success. */
@@ -3078,6 +3080,7 @@ export class RunManager {
     this.armInboxClaimExpiry(runId);
     this.reconcileWorkerWaits();
     this.deliverConversationInput(runId);
+    this.active.get(runId)?.resumeInboxAutoEnd?.();
     this.releaseSlot();
     return result;
   }
@@ -5355,6 +5358,10 @@ export class RunManager {
     const runner = createRunner(stepBackend);
     state.agentSessionError = undefined;
     let session: AgentSession | undefined;
+    const shouldAutoEnd = () => this.active.get(runId) !== state || state.session !== session ||
+      (!this.workerWait(runId) && !this.store.getRun(runId)?.ciWait && !this.parentCompletionPending(runId) &&
+        state.workerWakeTurn !== session && state.ciWakeTurn !== session && !state.agentInputFlight &&
+        !this.hasQueuedAgentInputs(runId));
     state.currentStepId = step.id;
     this.beginUsageInvocation(runId, state, step.id);
     const delegation = this.provisionSession(runId, state);
@@ -5392,8 +5399,8 @@ export class RunManager {
         onEvent,
         {
           autoEndAfterFirstTurn: !interactive,
-          shouldAutoEnd: () => this.active.get(runId) !== state || state.session !== session ||
-            (!this.workerWait(runId) && !this.store.getRun(runId)?.ciWait && !this.parentCompletionPending(runId) && state.workerWakeTurn !== session && state.ciWakeTurn !== session && !state.agentInputFlight),
+          // Unread inbox claims must survive this window so release/expiry can replay them.
+          shouldAutoEnd,
           onUiEvent: (event) => {
             completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
             this.handleRunnerUiEvent(runId, state, sink, event);
@@ -5409,6 +5416,13 @@ export class RunManager {
     }
     const sessionClosed = this.trackWorkerSessionResult(runId, session);
     state.session = session;
+    state.resumeInboxAutoEnd = interactive ? undefined : () => {
+      // ACK may consume the last input after the runner's one-shot close timer fired.
+      // Release/expiry instead submit a provider turn through normal admission.
+      if (this.active.get(runId) === state && state.session === session && session?.open &&
+        state.atTurnBoundary === session && !state.cancelled && !state.pendingHumanAsk &&
+        !this.hasPendingHumanAsk(runId) && shouldAutoEnd()) session.end();
+    };
     state.sessionEverOpened = true;
     state.currentStepId = step.id;
     state.interrupt = () => session?.interrupt();
@@ -5455,6 +5469,7 @@ export class RunManager {
       if (this.workerWakeQueuedAt.delete(runId)) {
         const at = this.queue.indexOf(runId); if (at >= 0) this.queue.splice(at, 1);
       }
+      state.resumeInboxAutoEnd = undefined;
       state.workerWakeTurn = undefined;
       state.ciWakeTurn = undefined;
       state.atTurnBoundary = undefined;
