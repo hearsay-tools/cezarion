@@ -128,9 +128,16 @@ Human `sendMessage` keeps its existing synchronous semantics. The `agent-input` 
 carries `{input: {id, source: 'agent'|'lifecycle', parentRunId, text, createdAt,
 deliveredAt?, conversation?: {senderRunId, recipientRunId, kind, requestId?}}}`; it is not a `user-message`, does not resolve an ask card, and
 never expands registry slash skills. The queue cap is 32 **undelivered** inputs, including the in-flight reservation.
-Only one exact current state/session/input can be in flight. ACK merges into the
+At a safe boundary the manager batches pending conversations in FIFO order into
+one submission, up to 32 messages and 100,000 formatted characters. An individually
+valid message may exceed the aggregate limit by its attribution overhead; it is
+sent alone, never split. Non-conversation inputs remain barriers. The snapshot
+keeps every message ID, sender and request outcome; settled requests are labelled
+without reviving them. New arrivals wait for the next safe boundary.
+Only one exact current state/session/batch can be in flight. ACK merges into the
 current durable queue, preserving concurrent enqueues; duplicate readiness hints
-cannot submit it again. Synchronous steer reports queued until that checkpoint.
+cannot submit it again. All inputs in the batch receive the same acknowledgement
+timestamp in one atomic checkpoint. Synchronous steer reports queued until that checkpoint.
 Finish, cancellation, disposal and replacement revoke callback authority; a late
 ACK cannot stamp a replacement generation or reopen a stopped run. Pending delivery
 bookkeeping settles before execution finalization; it is never process-exit proof.
@@ -143,10 +150,13 @@ with the answered `askSeq`. Live sends checkpoint only on true; continuation ope
 answers checkpoint at their first successful, open-session turn boundary (never
 a fatal, cancelled or shutdown boundary). A checkpoint for an older
 ask cannot clear a newer question; absent checkpoints retain the ask conservatively.
+While that exact opening answer is executing, it does not block registering a
+worker or request wait. A newer question still does. Wait refusals explain the
+condition and remedy; registration releases capacity only when the turn ends.
 
 Parent/worker conversations use the same `sendAgentInput` seam in both directions.
 The root's durable conversation ledger is authoritative; `conversation-message`
-`{message, delivery}` and `request-outcome` `{outcome}` events are replayable projections in
+`{message, delivery, deliveredAt?}` and `request-outcome` `{outcome}` events are replayable projections in
 both participants' transcripts, keyed by message/request identity. Agent-input ACK
 updates delivery display without creating a second conversation row. Replayed
 projections never enqueue input or resolve a human ask. Attribution carries actual
@@ -160,13 +170,28 @@ are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
 sender-closed. Late replies remain recorded without replacing a first settlement.
 Both roles can wait on their own requests using the existing bounded scheduler wake
 queue. An incoming message can interrupt that wait with reason `message`, retaining
-unresolved obligations; there is no automatic re-wait or terminal continuation.
+unresolved obligations; there is no automatic re-wait.
 
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire
 in 600 seconds by default (1–1,800 seconds accepted). One active wait per run.
-Review/terminal delivery requires explicit human Continue; destroyed recipients
-receive no input. Only a human can answer an outstanding human ask. Durable queue
+Ordinary sends to review/terminal recipients return `not-delivered` with an
+actionable `message.instruction`; `continuation-required` means no input was
+queued. The CLI exits 1 for these receipts. An active owning parent can explicitly
+send a new request or progress instruction with `resume: true` (`worker send
+--resume`). A settled done/review/failed worker is continued through the existing
+capacity scheduler with its accepted identity and a new execution revision.
+Acceptance atomically records the ledger, input and continuation checkpoint.
+Exact retries return the existing receipt without another continuation; retrying
+a rejected ID with changed flags is a conflict, so a corrected send needs a new ID.
+The opening instruction is attributed agent input, never a human answer. Its
+delivery is confirmed conservatively at the first successful open-session turn
+boundary, atomically with retiring the opening replay prompt. Until then the
+receipt remains queued. The cockpit distinguishes that confirmation from normal
+transport ACK time and from the later event projection timestamp.
+Stopped/destroyed workers cannot be resumed by messages; workers cannot resume
+their parent. Parent review and genuine human questions still require a human.
+Only a human can answer an outstanding human ask. Durable queue
 insertion is atomic with acceptance, while provider acceptance and the local ACK
 checkpoint retain the documented crash ambiguity below.
 

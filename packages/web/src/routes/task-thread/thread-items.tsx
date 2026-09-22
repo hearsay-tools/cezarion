@@ -349,7 +349,7 @@ function WorkerConversationBatchCard({
         <span data-slot="conversation-kind" className="rounded-full bg-background/60 px-2 py-0.5 text-[10.5px] font-semibold tracking-[0.05em] text-foreground uppercase">
           {conversationKindLabel(batch.kind)}
         </span>
-        {batch.kind === 'request' && batch.messages.length === 1 && soleStatus ? (
+        {batch.messages.length === 1 && soleStatus ? (
           <span data-slot="conversation-outcome" className="text-xs font-medium text-muted-foreground">
             {soleStatus}
           </span>
@@ -358,6 +358,13 @@ function WorkerConversationBatchCard({
       <div className="min-w-0 break-words text-[14px] leading-[1.6] text-foreground select-text [overflow-wrap:anywhere]">
         <Markdown breaks>{batch.text}</Markdown>
       </div>
+      {[...new Set(batch.messages.map(message =>
+        message.instruction ?? (message.delivery === 'queued'
+          ? 'Queued for the next safe turn. Pending messages are delivered together within the batch size limit; human questions and scheduler capacity can delay delivery.'
+          : message.state === 'continuation-required'
+            ? 'Not delivered. The recipient needs a new instruction to resume. A parent can resume its owned worker with --resume; workers cannot resume parents.'
+            : message.state === 'destroyed' ? 'Not delivered. This worker was destroyed.' : undefined)
+      ))].map(explanation => explanation ? <p key={explanation} data-slot="conversation-delivery-explanation" className="min-w-0 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{explanation}</p> : null)}
       {batch.kind === 'request' && batch.messages.length > 1 ? (
         <ul className="grid min-w-0 gap-1 text-xs text-muted-foreground">
           {batch.messages.map((message) => {
@@ -453,6 +460,9 @@ function inspectRows(message: ThreadConversationMessage): Array<{ label: string;
   if (message.outcome?.replyId) rows.push({ label: 'Reply', value: message.outcome.replyId })
   if (message.state) rows.push({ label: 'State', value: message.state })
   if (message.createdAt) rows.push({ label: 'Created', value: message.createdAt })
+  if (message.deliveredAt) rows.push({ label: message.resumed ? 'Opening turn completed' : 'Delivery acknowledged', value: message.deliveredAt })
+  if (message.recordedAt) rows.push({ label: 'Event recorded', value: message.recordedAt })
+  if (message.resumed) rows.push({ label: 'Continuation', value: 'Requested by parent with this instruction' })
   if (message.deadline) rows.push({ label: 'Deadline', value: message.deadline })
   if (message.requestHash) rows.push({ label: 'Hash', value: message.requestHash })
   return rows

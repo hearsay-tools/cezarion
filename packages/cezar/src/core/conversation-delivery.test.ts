@@ -56,6 +56,9 @@ for (const backend of RUNNER_IDS) {
         expect(String(echoed[0]!.text)).toContain(JSON.stringify({ id: input.id, ...input.conversation }));
       }
       const checkpoints = store.getRun(runId)!.agentInputs;
+      expect(new Set(checkpoints!.map(input => input.deliveredAt)).size).toBe(1);
+      expect(store.readEvents(runId).filter(event => event.type === 'text' &&
+        inputs.every(input => String(event.text).includes(input.text)))).toHaveLength(1);
       replay(); replay();
       // A genuine human follow-up is a transport barrier after repeated replay:
       // no correlated turn should have been re-enqueued by observing the ledger.

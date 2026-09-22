@@ -4,16 +4,105 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
+import { projectConversationEvents } from './conversations.ts';
 
 describe('durable conversations', () => {
   let f: ReturnType<typeof fixture>;
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(async () => {
+    for (const run of f.store.listRuns()) if (f.manager.isActive(run.id)) f.manager.cancel(run.id);
+    await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
+  });
   async function worker() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     f.store.updateRun(workerId, { status: 'running' });
     return { id: workerId, caller: f.credentials.authenticate(f.credentials.issue('project', workerId, randomUUID()))! };
   }
+  async function completedWorker(status: 'done' | 'review' = 'done') {
+    const w = await worker();
+    // This service fixture holds the scheduler; remove its original queued job
+    // before publishing a completed execution with a resumable provider session.
+    f.manager.cancel(w.id);
+    await f.manager.awaitRunTermination(w.id, 5_000);
+    f.store.updateStep(w.id, 'task', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
+    const generation = f.store.commitWorkerExecutionStart(w.id);
+    f.store.updateRun(w.id, { status });
+    f.store.commitWorkerExecutionComplete(w.id, generation);
+    return w;
+  }
+  it('keeps provider acknowledgement time separate from a later repaired projection', async () => {
+    const w = await worker();
+    const message = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Result', timeoutSeconds: 600 });
+    const deliveredAt = '2026-09-22T14:32:54.554Z';
+    f.store.commitAgentInputs(w.id, f.store.getRun(w.id)!.agentInputs!.map(input => ({ ...input, deliveredAt })));
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-22T15:00:00.000Z'));
+    try {
+      projectConversationEvents(f.store, f.store.getRun(f.parent.id)!);
+      for (const id of [f.parent.id, w.id]) expect(f.store.readEvents(id).find(event => event.type === 'conversation-message' && event.delivery === 'delivered'))
+        .toMatchObject({ message: { id: message.message.id }, deliveredAt, ts: '2026-09-22T15:00:00.000Z' });
+    } finally { vi.useRealTimers(); }
+  });
+  it.each(['done', 'review'] as const)('parent --resume atomically queues one attributed continuation of a %s worker', async status => {
+    const w = await completedWorker(status);
+    const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'Correct the returned result', timeoutSeconds: 600, resume: true };
+    const [a, b] = await Promise.all([f.service.send(f.caller, request), f.service.send(f.caller, request)]);
+    expect(a).toEqual(b);
+    expect(a).toMatchObject({ delivery: 'queued', message: { state: 'accepted', resumed: true } });
+    expect(f.store.getRun(w.id)).toMatchObject({ status: 'queued', delegation: { executionRevision: 1 },
+      continuationMessage: { origin: 'lifecycle', agentInputId: request.id, text: expect.stringContaining(request.text) },
+      agentInputs: [{ id: request.id, conversation: { senderRunId: f.parent.id, recipientRunId: w.id } }] });
+    expect(f.store.getRun(w.id)?.steps.filter(step => step.synthetic === 'continuation')).toHaveLength(1);
+    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    expect(reopened.getRun(w.id)?.continuationMessage).toEqual(f.store.getRun(w.id)?.continuationMessage);
+    expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ conversation: { messages: [a.message] } }); reopened.flush();
+  });
+  it('explains rejection with a parent-operated resume command and preserves that receipt on retry', async () => {
+    const w = await completedWorker();
+    const request = { id: randomUUID(), recipientRunId: w.id, kind: 'progress' as const, text: 'Correct this', timeoutSeconds: 600 };
+    const rejected = await f.service.send(f.caller, request);
+    expect(rejected).toMatchObject({ delivery: 'not-delivered', message: { instruction: expect.stringContaining(`worker send ${w.id}`) } });
+    expect(rejected.message.instruction).toMatch(/--resume.*new.*ID/i);
+    await expect(f.service.send(f.caller, { ...request, resume: true })).rejects.toMatchObject({ code: 'invalid_input' });
+    await f.service.send(f.caller, { ...request, id: randomUUID(), resume: true });
+    expect(await f.service.send(f.caller, request)).toEqual(rejected);
+  });
+  it('checkpoints the resumed opening input and retires its replay prompt atomically', async () => {
+    const w = await completedWorker();
+    const request = { id: randomUUID(), recipientRunId: w.id, kind: 'progress' as const, text: 'New instruction', timeoutSeconds: 600, resume: true };
+    await f.service.send(f.caller, request);
+    const before = structuredClone(f.store.getRun(w.id));
+    const inputs = before!.agentInputs!.map(input => ({ ...input, deliveredAt: new Date().toISOString() }));
+    const fault = vi.spyOn(f.store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
+    expect(() => f.store.commitAgentInputs(w.id, inputs, request.id)).toThrow('disk unavailable');
+    expect(f.store.getRun(w.id)).toEqual(before);
+    fault.mockRestore();
+    f.store.commitAgentInputs(w.id, inputs, request.id);
+    expect(f.store.getRun(w.id)?.continuationMessage).toBeUndefined();
+    expect(f.store.getRun(w.id)?.agentInputs).toEqual(inputs);
+    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    expect(reopened.getRun(w.id)?.continuationMessage).toBeUndefined(); reopened.flush();
+  });
+  it('uses the new instruction when explicitly resuming a failed continuation', async () => {
+    const w = await completedWorker();
+    f.store.updateRun(w.id, { status: 'failed', continuationMessage: { id: 'old', text: 'Old failed prompt', origin: 'lifecycle', createdAt: new Date().toISOString() } });
+    await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Correct the failed task', timeoutSeconds: 600, resume: true });
+    expect(f.store.getRun(w.id)?.continuationMessage?.text).toContain('Correct the failed task');
+  });
+  it('accepts neither a message nor a continuation when the atomic index write fails', async () => {
+    const w = await completedWorker();
+    const before = structuredClone(f.store.getRun(w.id));
+    vi.spyOn(f.store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
+    await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Retry work', timeoutSeconds: 600, resume: true })).rejects.toThrow(/checkpoint/);
+    expect(f.store.getRun(w.id)).toEqual(before);
+    expect(f.store.getRun(f.parent.id)?.delegation).not.toHaveProperty('conversation');
+  });
+  it('does not let --resume answer a human question or allow a worker to resume its parent', async () => {
+    const w = await completedWorker();
+    f.store.appendEvent(w.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{ header: 'Approval', question: 'May I proceed?', options: [{ label: 'Yes' }, { label: 'No' }] }] });
+    await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Work', timeoutSeconds: 600, resume: true })).rejects.toThrow(/human question/);
+    f.store.updateRun(w.id, { status: 'running' });
+    await expect(f.service.send(w.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Work', timeoutSeconds: 600, resume: true })).rejects.toMatchObject({ code: 'denied_scope' });
+  });
   it('atomically accepts one obligation and input across concurrent retries and restart', async () => {
     const w = await worker(); const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'Which file?', timeoutSeconds: 600 };
     const [a, b] = await Promise.all([f.service.send(f.caller, request), f.service.send(f.caller, request)]);
@@ -52,7 +141,7 @@ describe('durable conversations', () => {
   });
   it('publishes neither ledger nor input when atomic persistence fails', async () => {
     const w = await worker();
-    vi.spyOn(f.store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementation(() => { throw Error('disk unavailable'); });
+    vi.spyOn(f.store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
     await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'request', text: 'question', timeoutSeconds: 600 })).rejects.toThrow('disk unavailable');
     expect(f.store.getRun(f.parent.id)?.delegation).not.toHaveProperty('conversation');
     expect(f.store.getRun(w.id)?.agentInputs ?? []).toEqual([]);

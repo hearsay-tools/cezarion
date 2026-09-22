@@ -905,12 +905,14 @@ export class RunStore extends EventEmitter {
   }
 
   /** Observable atomic input checkpoint: a failed write publishes nothing. */
-  commitAgentInputs(id: string, inputs: readonly AgentInput[]): void {
+  commitAgentInputs(id: string, inputs: readonly AgentInput[], openingContinuationInputId?: string): void {
     const run = this.runs.get(id);
     if (!run) throw new Error('missing agent input target');
     const agentInputs = inputs.map(input => agentInputSchema.parse(input));
+    if (openingContinuationInputId && (run.continuationMessage?.agentInputId !== openingContinuationInputId ||
+      !agentInputs.some(input => input.id === openingContinuationInputId && input.deliveredAt))) throw new Error('opening agent input checkpoint changed');
     const proposed = new Map(this.runs);
-    proposed.set(id, { ...run, agentInputs });
+    proposed.set(id, { ...run, agentInputs, ...(openingContinuationInputId ? { continuationMessage: undefined } : {}) });
     this.commitIndex(proposed, new Set([id]));
   }
 
@@ -1003,7 +1005,8 @@ export class RunStore extends EventEmitter {
   }
 
   /** Accepted execution revision is public lifecycle identity, separate from process generations. */
-  commitWorkerContinuation(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps' | 'delegation'>>, step?: Pick<StepState, 'id' | 'name' | 'kind' | 'synthetic'>): void {
+  commitWorkerContinuation(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps' | 'delegation'>>, step?: Pick<StepState, 'id' | 'name' | 'kind' | 'synthetic'>,
+    conversation?: { rootId: string; state: ConversationState; input: AgentInput }): void {
     const run = this.runs.get(id);
     if (run?.delegation?.role !== 'worker') throw new Error('missing worker continuation target');
     const delegation = delegationStateSchema.parse({ ...run.delegation,
@@ -1014,7 +1017,18 @@ export class RunStore extends EventEmitter {
     proposed.set(id, { ...run, ...this.redactPatch(patch), delegation,
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
     });
-    this.commitIndex(proposed, new Set([id]));
+    const changed = new Set([id]);
+    if (conversation) {
+      const root = this.runs.get(conversation.rootId);
+      if (root?.delegation?.role !== 'root' || run.delegation.parentRunId !== root.id) throw new Error('missing conversation ownership');
+      proposed.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation.state,
+        messages: conversation.state.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
+      } }) });
+      const input = agentInputSchema.parse({ ...conversation.input, text: this.redactText(conversation.input.text) });
+      proposed.set(id, { ...proposed.get(id)!, agentInputs: [...(run.agentInputs ?? []), input] });
+      changed.add(root.id);
+    }
+    this.commitIndex(proposed, changed);
   }
 
   private workerResultsDir(parentId: string): string {
