@@ -56,8 +56,8 @@ beforeAll(async () => {
   mkdirSync(join(dataRoot, '.ai/skills'), { recursive: true })
   writeFileSync(
     join(dataRoot, '.ai/skills/auto-review-pr.md'),
-    // The two rare tokens let the multi-keyword spec assert a UNIQUE match that the machine's
-    // global om-* skills (also listed in the picker) cannot accidentally satisfy.
+    // These tokens match only auto-review-pr among our fixture skills. Global skills
+    // may also fuzzy-match them, so assertions below scope membership to the fixture.
     '---\ndescription: Open and merge a pull request zebratoken quokkatoken\n---\n\nReview and merge.\n',
     'utf8',
   )
@@ -142,7 +142,8 @@ describe('#484 skill search ranks the (almost-)exact match first', () => {
     // Both rare tokens live only in auto-review-pr's description — the ranker must keep the
     // multi-word "every word must match somewhere" rule (a query missing either word drops it).
     searchPicker('zebratoken quokkatoken', 'auto-review-pr')
-    expect(pickerSkillRefs()).toEqual(['auto-review-pr'])
+    const fixtureRefs = pickerSkillRefs().filter(ref => ['auto-review-pr', 'review', 'ship'].includes(ref))
+    expect(fixtureRefs).toEqual(['auto-review-pr'])
 
     // Close the picker so it does not overlay the composer in the next spec.
     browser.press('Escape')

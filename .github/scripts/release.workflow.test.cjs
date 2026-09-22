@@ -81,3 +81,43 @@ test('snapshots, nightlies, and dist-tag cleanup still pass NPM_TOKEN', () => {
 
 // Branch contents and published release metadata are exercised through the actual
 // workflow steps in release-finalization.test.cjs.
+
+
+test('release App setup is checked before publish and token only reaches PR creation', async () => {
+  const { parse } = await import('yaml');
+  const w = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const steps = w.jobs.release.steps;
+  const app = steps.find(s => s.id === 'release_app');
+  assert.ok(app, 'release needs a short-lived App token');
+  assert.match(app.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
+  assert.equal(app.with['permission-pull-requests'], 'write');
+  assert.equal(app.with.repositories, '${{ github.event.repository.name }}');
+  assert.ok(steps.indexOf(app) < steps.findIndex(s => s.name === 'Publish release'));
+  const validate = steps.find(s => s.id === 'validate_release_app');
+  assert.ok(validate && steps.indexOf(validate) < steps.indexOf(app));
+  assert.match(validate.if, /inputs.bump != 'existing'/);
+  const consumers = steps.filter(s => JSON.stringify(s).includes('steps.release_app.outputs.token'));
+  assert.equal(consumers.length, 1);
+  assert.equal(consumers[0].id, 'bump_pr');
+  assert.match(consumers[0].with.script, /prGithub/);
+  assert.match(consumers[0].with.script, /nativeCi: true/);
+});
+
+test('release App preflight rejects missing setup and mismatched identity before publishing', async () => {
+  const { parse } = await import('yaml');
+  const { spawnSync } = require('node:child_process');
+  const steps = parse(fs.readFileSync(workflowPath, 'utf8')).jobs.release.steps;
+  const validate = steps.find(s => s.id === 'validate_release_app');
+  const valid = { RELEASE_APP_ID: '12345', RELEASE_APP_BOT_LOGIN: 'cezar-release[bot]', HAS_PRIVATE_KEY: 'true' };
+  const run = (step, env) => spawnSync('bash', ['-e', '-c', step.run], { env: { ...process.env, ...env }, encoding: 'utf8' });
+  assert.equal(run(validate, valid).status, 0);
+  for (const change of [{RELEASE_APP_ID:''}, {RELEASE_APP_ID:'bad'}, {HAS_PRIVATE_KEY:'false'}, {RELEASE_APP_BOT_LOGIN:'human'}]) {
+    const result = run(validate, { ...valid, ...change });
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /docs\/publishing.md#release-app-setup/);
+  }
+  const identity = steps.find(s => s.name === 'Check release App identity');
+  assert.ok(steps.indexOf(identity) < steps.findIndex(s => s.name === 'Publish release'));
+  assert.equal(run(identity, { APP_SLUG: 'cezar-release', EXPECTED_LOGIN: valid.RELEASE_APP_BOT_LOGIN }).status, 0);
+  assert.equal(run(identity, { APP_SLUG: 'another', EXPECTED_LOGIN: valid.RELEASE_APP_BOT_LOGIN }).status, 1);
+});

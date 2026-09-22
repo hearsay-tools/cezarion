@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - develop
+      - release/**
   push:
     branches:
       - develop
@@ -45,6 +46,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
           EXPECTED_HEAD_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -53,14 +55,15 @@ jobs:
             exit 0
           fi
           if ! pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")" \
-            || ! printf '%s' "$pr" | jq -e --arg sha "$EXPECTED_HEAD_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            || ! printf '%s' "$pr" | jq -e --arg sha "$EXPECTED_HEAD_SHA" --arg repo "$GITHUB_REPOSITORY" --arg app "$RELEASE_APP_BOT_LOGIN" '
               .state == "open" and
               .head.sha == $sha and (.head.sha | test("^[a-f0-9]{40}$")) and
               (.head.ref | test("^release/v[0-9A-Za-z._/+\\-]+$")) and
               .head.repo.full_name == $repo and .base.repo.full_name == $repo and
               (.base.ref == "main" or .base.ref == "develop") and
               (.base.sha | test("^[a-f0-9]{40}$")) and
-              .user.login == "github-actions[bot]" and
+              (.user.login == "github-actions[bot]" or
+                (($app | test("^[a-z0-9][a-z0-9-]*\\[bot\\]$")) and .user.login == $app)) and
               (.changed_files | type == "number" and . > 0 and . == floor)
             ' >/dev/null; then
             echo "Dispatch PR validation failed; using full matrix" >&2
@@ -68,7 +71,7 @@ jobs:
           fi
           printf '%s' "$pr" | jq -r '
             "base_sha=\(.base.sha)", "head_ref=\(.head.ref)",
-            "changed_files=\(.changed_files)", "valid=true"
+            "changed_files=\(.changed_files)", "pr_author=\(.user.login)", "valid=true"
           ' >> "$GITHUB_OUTPUT"
       - name: Check out trusted pull request base
         if: github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'
@@ -148,9 +151,11 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           DISPATCH_VALID: ${{ steps['resolve-dispatch'].outputs.valid }}
           DISPATCH_HEAD_REF: ${{ steps['resolve-dispatch'].outputs.head_ref }}
+          DISPATCH_PR_AUTHOR: ${{ steps['resolve-dispatch'].outputs.pr_author }}
           DISPATCH_CHANGED_FILES: ${{ steps['resolve-dispatch'].outputs.changed_files }}
           HEAD_REF: ${{ github.head_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha }}
@@ -162,7 +167,7 @@ jobs:
               exit 0
             fi
             # Feed the existing classifier the API-validated PR context.
-            export EVENT_NAME=pull_request_target HEAD_REF="$DISPATCH_HEAD_REF" PR_AUTHOR='github-actions[bot]'
+            export EVENT_NAME=pull_request_target HEAD_REF="$DISPATCH_HEAD_REF" PR_AUTHOR="$DISPATCH_PR_AUTHOR"
             if ! pages="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files")" \
               || ! count="$(printf '%s' "$pages" | jq -er 'map(.[]) | length')" \
               || [ "$count" != "$DISPATCH_CHANGED_FILES" ]; then

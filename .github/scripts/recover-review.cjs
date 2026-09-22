@@ -24,7 +24,7 @@ function oneJob(jobs, name) {
 // deliberately bypasses the normal round cap). Original PR concurrency and the
 // provider/context/posting guards remain in force on that same workflow run.
 async function recoverReview({
-  github, owner, repo, event, maxRounds = '', log = console.log, readJsonFile,
+  github, owner, repo, event, maxRounds = '', releaseAppBotLogin = '', log = console.log, readJsonFile,
 } = {}) {
   const roundsRaw = maxRounds === '' ? '3' : String(maxRounds);
   const rounds = Number(roundsRaw);
@@ -73,6 +73,7 @@ async function recoverReview({
       isBotReleaseBumpPr({
         headRef: pull.head?.ref,
         prAuthor: pull.user?.login,
+        releaseAppBotLogin,
         files: fileNames,
       })
       && headShasMatch(headSha, headSha)

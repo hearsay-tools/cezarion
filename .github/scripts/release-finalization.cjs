@@ -24,10 +24,10 @@ function failed(core, error) {
   core.setFailed(reason);
 }
 
-async function bumpPr({ github, context, core }) {
+async function bumpPr({ github, prGithub, context, core, nativeCi = false, sleep }) {
   const startCi = async (pr, sha) => {
     try {
-      const result = await ensureReleaseCi({ github, repo: context.repo, prNumber: pr.number, expectedSha: sha });
+      const result = await ensureReleaseCi({ github, repo: context.repo, prNumber: pr.number, expectedSha: sha, native: nativeCi, ...(sleep ? { sleep } : {}) });
       core.setOutput('ci_status', result.status);
       core.setOutput('ci_url', result.url);
     } catch (error) {
@@ -108,12 +108,12 @@ async function bumpPr({ github, context, core }) {
     }
     let pr;
     try {
-      pr = (await github.rest.pulls.create({
+      pr = (await (prGithub || github).rest.pulls.create({
         ...context.repo, base, head: branch, title: `chore(release): v${version}`,
         body: `Record the \`v${version}\` version bump that the Release workflow published to npm \`latest\`. Merge to keep \`${base}\`'s manifests in sync with the published version.`,
       })).data;
     } catch (error) {
-      throw new Error(`${message(error)}. PR creation requires pull-requests: write and Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests (${repoUrl(context)}/settings/actions); an organization policy may also need administrator approval. Open the PR manually: ${recovery}`);
+      throw new Error(`${message(error)}. PR creation requires the release App installed on this repository with Pull requests: write. For legacy GITHUB_TOKEN callers, check pull-requests: write and Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests (${repoUrl(context)}/settings/actions); an organization policy may also need administrator approval. Open the PR manually: ${recovery}`);
     }
     core.setOutput('status', 'created');
     core.setOutput('url', pr.html_url);

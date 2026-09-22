@@ -133,74 +133,100 @@ timestamp. A matching open or merged PR is reused; a deleted branch belonging to
 a matching merged PR stays deleted. A matching GitHub Release and source tag are
 also reused. The `existing` input needs no bump PR.
 
+### Release App setup
+
+Stable patch/minor/major releases create the version-bump PR with a short-lived
+GitHub App installation token. This emits `pull_request_target`, so the real CI
+aggregate appears in the PR and satisfies the existing branch ruleset. This is
+maintainer infrastructure; Cezar users do not configure an App.
+
+An organization owner (or someone permitted to manage and install GitHub Apps)
+performs this setup once:
+
+1. Open [the organization's new App form](https://github.com/organizations/hearsay-tools/settings/apps/new).
+   Choose a unique name, such as `cezarion-release`, and use this repository's URL
+   as the homepage. Disable **Webhook → Active**. No callback, webhook server,
+   or user authorization is needed. Select **Only on this account**.
+2. Grant **Repository permissions → Pull requests → Read and write**. Metadata
+   read is automatic. Leave other permissions unset; this App does not push
+   commits, publish packages, post checks, or bypass branch rules.
+3. Install the App on `hearsay-tools`, selecting only `cezarion`.
+4. In [Actions repository variables](https://github.com/hearsay-tools/cezarion/settings/variables/actions),
+   add `RELEASE_APP_ID` using the numeric App ID and `RELEASE_APP_BOT_LOGIN`
+   using the exact App slug plus `[bot]` (for example, `cezarion-release[bot]`).
+   The slug is the final component of the App's public `/apps/<slug>` URL,
+   not its display name. The workflow checks it against the minted token's App.
+5. Generate a private key on the App settings page. Put the entire PEM, including
+   its BEGIN/END lines, in repository secret `RELEASE_APP_PRIVATE_KEY` under
+   [Actions repository secrets](https://github.com/hearsay-tools/cezarion/settings/secrets/actions).
+   Do not put the key in chat, source control, or a repository variable.
+
+The release job validates the settings and mints a repository-scoped token before
+npm publication. Missing settings, failed token creation, or a mismatched bot
+login stop the job before publishing. The `existing` release mode needs no App,
+because it opens no bump PR. Keep the key in GitHub Secrets and rotate it there
+when needed; the token action revokes each installation token at job completion.
+
+Only `pulls.create` uses the App client. Branch pushes, PR lookups, CI lookups,
+tags, and GitHub Releases retain the normal workflow credentials. The App token
+is never passed to checkout, build commands, or CI verification. The release
+job needs only Actions read permission to observe native CI. Both CI and review
+recognize the exact configured bot while preserving the existing manifest-only,
+live-head, and version-stamp guards. Legacy `github-actions[bot]` bumps remain
+recognized. An arbitrary bot or a configured human login gets no skip.
+
+After this workflow change merges, run the next intended patch/minor/major
+release from the updated branch. Its PR should be authored by the App; CI should
+start with event `pull_request_target`, skip Vitest/cockpit only for a verified
+bump, and show **Unit, build, E2E, and package** passing in the PR Checks tab.
+Confirm with `gh pr checks PR_NUMBER --required`. A successful Actions run alone
+is insufficient evidence. This final live check requires the App setup and the
+merged trusted CI classifier; a pre-merge PR still uses the old base workflow.
+
 ### Recovering missing version-bump CI
 
-Release finalization explicitly dispatches `ci.yml` for both new and reused open
-version-bump PRs. PRs created with `GITHUB_TOKEN` do not trigger
-`pull_request_target`; an explicit `workflow_dispatch` does trigger Actions.
-The release job needs `actions: write` for this step. Verification keeps read-only
-permissions and the required check name **Unit, build, E2E, and package**.
+Release finalization waits up to 55 seconds for native PR CI on the exact bump
+head. It reuses active native CI, accepts success only when the required aggregate
+passed, and reports failed runs with their URL so a maintainer can rerun them.
+It never dispatches over native CI: the two events share a concurrency group,
+so a dispatch could cancel the eligible run. A retry reuses the original PR and
+branch without editing or reopening either.
 
-Dispatch runs at the release branch, so GitHub attaches its checks to that head
-commit. The helper passes `pr_number`, and CI resolves that PR through the API.
-The live head must equal `github.sha`, belong to this repository, use a
-`release/v*` branch, target `main` or `develop`, and have `github-actions[bot]`
-as its author. CI loads the classifier from the API-reported base SHA and skips
-Vitest and cockpit E2E only after the complete file list and version-stamp checks
-pass. Missing inputs, API errors, or mismatches retain the full matrix.
+If native CI never appears, check the App installation, token permissions, and
+CI base-branch filter (`main`, `develop`, or `release/**` maintenance branches).
+Re-running an old release retains its old workflow code. A PR created with
+`GITHUB_TOKEN` before this change still needs a maintainer close/reopen once to
+emit the eligible event. Do not publish another version to recover that PR.
 
-Verification rechecks dispatch metadata before checkout. Valid PR-aware
-verification checks out `refs/pull/<N>/merge`, matching the PR-event run. Rejected
-metadata or dispatch without `pr_number` verifies the immutable `github.sha` with
-the full matrix. Dispatch and PR events share a concurrency group for that PR, so a
-later run cancels the earlier one. No close/reopen is needed to reach the bump
-skip. Dispatch never publishes npm packages or PR snapshots.
-
-From a checkout containing this recovery helper, use the PR number and the exact
-head SHA you intend to verify. This was the recovery command for the blocked
-`0.13.6` PR #374 (with the helper version shipped at that time):
+The legacy diagnostic helper remains available:
 
 ```bash
-node .github/scripts/release-ci.cjs hearsay-tools/cezarion 374 95a6d5193a19ef8baa7a063695f2ac003f644442
+node .github/scripts/release-ci.cjs OWNER/REPO PR_NUMBER EXPECTED_HEAD_SHA
 ```
 
-The command uses your existing `gh` authentication. It rejects a changed head or
-foreign repository, reuses active CI for that commit, and only accepts completed
-CI when the required aggregate passed. Otherwise it dispatches and waits up to
-55 seconds for a run attributed to that exact SHA. Its JSON result links the run:
-`dispatched` and `active` mean verification is still pending, not passed. Watch
-that run with `gh run watch RUN_ID --repo hearsay-tools/cezarion --exit-status`.
-If GitHub accepted a dispatch but the run is not visible yet, inspect Actions
-before retrying; the same command checks again for active verification.
+It validates the current head, reuses active verification, or dispatches `ci.yml`
+with `pr_number`. A completed successful dispatch returns `verified-only` with
+`mergeEligible: false`; it does **not** unblock merging. `active` and `dispatched`
+are also pending verification, not success. Native run results carry
+`mergeEligible: true`. The eligibility flag describes the event, not whether
+other merge requirements are satisfied.
 
-The underlying recovery dispatch for #374 was accepted on 2026-09-17:
-`gh workflow run ci.yml --repo hearsay-tools/cezarion --ref release/v0.13.6`
-started [run 35211101741](https://github.com/hearsay-tools/cezarion/actions/runs/35211101741)
-at `95a6d5193a19ef8baa7a063695f2ac003f644442`. The reported dispatch rejection did
-not reproduce. That run correctly failed the required aggregate on a test cleanup
-error. The helper recovered it with [run 35211503672](https://github.com/hearsay-tools/cezarion/actions/runs/35211503672),
-which passed every verification job. All seven build/test job checkout logs and
-the required GitHub Actions check recorded that same head SHA. Repeating the helper
-during the run returned `active`, and after completion returned `passed`, without
-another dispatch. Prefer the helper above: it validates the expected commit
-and avoids repeating active verification. Do not dispatch on `main` and merely
-override checkout to the release commit: that attaches the check to the wrong SHA.
+A PR-aware diagnostic dispatch checks the live repository, head, base, configured
+bot, complete file list, and version stamps before skipping Vitest/cockpit. It
+loads the classifier from the trusted base and verifies `refs/pull/<N>/merge`.
+Missing or invalid metadata keeps the full matrix on `github.sha`. Older release
+branches without the `pr_number` input may reject the helper with 422; a bare
+`gh workflow run ci.yml --ref release/vX.Y.Z` runs their full verification but
+still cannot satisfy the PR's required check.
 
-A failed trigger leaves PR creation and npm publication outcomes visible in the
-release summary, reports the API error, and prints the recovery command. For a
-403, check the caller's Actions write permission and repository/organization
-Actions policy. For a 404/422, check the repository, release branch, active
-`ci.yml` workflow, and its `workflow_dispatch` declaration. Re-running an old
-release retains its old workflow code: recover CI directly instead of publishing
-another version. Older release branches may lack the `pr_number` dispatch input; those reject
-the current helper with 422. For those branches, use a bare
-`gh workflow run ci.yml --repo hearsay-tools/cezarion --ref release/vX.Y.Z`
-as in the historical example above; it retains full verification. They also
-retain their old checkout logic; confirm their job checkout SHA matches the run's head SHA before relying on the
-result. Recovery does not edit those branches or weaken merge protection.
-
-See GitHub's [workflow triggering rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)
-and [dispatch API](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event).
+PR #463 demonstrated the distinction: dispatch
+[35653389412](https://github.com/hearsay-tools/cezarion/actions/runs/35653389412)
+passed with the intended skips but was excluded from required checks. The
+reopened PR's native [35704415743](https://github.com/hearsay-tools/cezarion/actions/runs/35704415743)
+passed and unblocked it. A Checks API probe using `GITHUB_TOKEN` was also excluded,
+so no synthetic publisher is used. See GitHub's
+[required-check event restrictions](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks#checks-from-some-workflow-jobs-are-not-evaluated)
+and [workflow triggering rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
 
 ### Release finalization conflicts
 

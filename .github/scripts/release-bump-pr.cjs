@@ -19,10 +19,18 @@ function isManifestOnlyFiles(files) {
   return Array.isArray(files) && files.length > 0 && files.every(isReleaseBumpFile);
 }
 
-function isBotReleaseBumpPr({ headRef, prAuthor, files } = {}) {
+// The configured identity comes from a repository variable, never PR content.
+function isReleaseBot(prAuthor, releaseAppBotLogin) {
+  return prAuthor === 'github-actions[bot]'
+    || (typeof releaseAppBotLogin === 'string'
+      && /^[a-z0-9][a-z0-9-]*\[bot\]$/.test(releaseAppBotLogin)
+      && prAuthor === releaseAppBotLogin);
+}
+
+function isBotReleaseBumpPr({ headRef, prAuthor, files, releaseAppBotLogin } = {}) {
   return typeof headRef === 'string'
     && headRef.startsWith('release/v')
-    && prAuthor === 'github-actions[bot]'
+    && isReleaseBot(prAuthor, releaseAppBotLogin)
     && isManifestOnlyFiles(files);
 }
 
@@ -172,7 +180,7 @@ function classifyFromEnv(env = process.env, deps = {}) {
   }
   const headRef = env.HEAD_REF || '';
   const prAuthor = env.PR_AUTHOR || '';
-  if (!headRef.startsWith('release/v') || prAuthor !== 'github-actions[bot]') {
+  if (!headRef.startsWith('release/v') || !isReleaseBot(prAuthor, env.RELEASE_APP_BOT_LOGIN)) {
     return false;
   }
   if (!headShasMatch(env.EXPECTED_HEAD_SHA, env.LIVE_HEAD_SHA)) {
@@ -182,7 +190,7 @@ function classifyFromEnv(env = process.env, deps = {}) {
     return false;
   }
   const files = env.PR_FILES.split('\n').map((line) => line.trim()).filter(Boolean);
-  if (!isBotReleaseBumpPr({ headRef, prAuthor, files })) return false;
+  if (!isBotReleaseBumpPr({ headRef, prAuthor, files, releaseAppBotLogin: env.RELEASE_APP_BOT_LOGIN })) return false;
   const baseRef = env.BASE_SHA || '';
   const headSha = env.EXPECTED_HEAD_SHA || '';
   if (!/^[a-f0-9]{40}$/i.test(baseRef) || !env.GITHUB_REPOSITORY) return false;

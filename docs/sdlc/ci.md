@@ -1,7 +1,8 @@
 # Continuous integration
 
 `.github/workflows/ci.yml` uses only `pull_request_target` for PR verification on
-`main` and `develop`. Pushes to those branches and manual dispatch still run CI.
+`main`, `develop`, and `release/**` maintenance branches. Pushes to `main` and
+`develop`, and manual dispatch, still run CI.
 The trusted base defines classification and the required checks; PR code runs
 with read-only repository permissions and no publishing credentials. Each PR
 has one concurrency group, so a new head cancels its predecessor without a
@@ -70,27 +71,32 @@ The push-only `.github/workflows/ci-benchmark.yml` workflow runs controlled expe
 
 Both Codex and Claude automated review wait for the **Unit, build, E2E, and package** verification job in the `ci.yml` pull-request run for the exact head SHA. The selected provider starts only when that job succeeds, while npm snapshot publication can continue independently. Failed, timed-out, cancelled, skipped or inconclusive verification blocks the model job. Standalone CI context collection still reports verification's actual conclusion and failed verification jobs; individual completed-job logs avoid waiting for the whole workflow archive. Missing or unfinished verification stays pending until the bounded wait expires, and ambiguous jobs or job-query errors fail the wait. The context-fetch step rechecks success immediately before model work, so a same-SHA rerun cannot turn a prior successful wait into permission to review a pending or failed build. The wait and both context-fetch scripts still execute from the trusted base checkout. The required CI check and the publication gate are unchanged.
 
-Bot-authored `release/v*` version-bump PRs skip Vitest, cockpit browser E2E, and automated code review only when all of these hold: PR author is `github-actions[bot]`, head is `release/v*`, the live file list matches the release-finalization allowlist (`packages/*/package.json`, `alias-cezarion/package.json`, `package-lock.json`), the event head SHA still matches the live PR head, the file-list fetch succeeded in full, and base→head JSON for every listed file differs only by one shared old→new semver pair (optional caret; same keys/structure — no added scripts, deps, or arbitrary retargets).
+Bot-authored `release/v*` version-bump PRs skip Vitest, cockpit browser E2E, and automated code review only when all of these hold: PR author is `github-actions[bot]` or the exact bot configured in `RELEASE_APP_BOT_LOGIN`, head is `release/v*`, the live file list matches the release-finalization allowlist (`packages/*/package.json`, `alias-cezarion/package.json`, `package-lock.json`), the event head SHA still matches the live PR head, the file-list fetch succeeded in full, and base→head JSON for every listed file differs only by one shared old→new semver pair (optional caret; same keys/structure — no added scripts, deps, or arbitrary retargets).
 
  The shared check lives in `.github/scripts/release-bump-pr.cjs` (loaded from the trusted base checkout) and feeds CI `classify-pr`, automated review `can_review`, and recovery. The required CI aggregate still runs `build-and-package` and accepts `skipped` for Vitest/cockpit only on that verified shape. Automated review keeps the named **Automated Code Review** check green without a model round when it skips. A human-authored `release/v*` PR still runs the full matrix and review. Manual `workflow_dispatch` of automated review is unchanged.
 
-Release finalization explicitly dispatches `ci.yml` for new or reused open bump
-PRs, because `GITHUB_TOKEN` PR creation does not trigger `pull_request_target`.
-It reuses active verification for the same head and reports trigger failures
-separately from publication and PR creation. The dispatch carries `pr_number`.
-Both classification jobs resolve the live PR before checkout: its head must match
+Release finalization creates bump PRs with a repository-scoped GitHub App token,
+which emits native `pull_request_target` CI. It waits for that run and never
+starts a competing dispatch. The App client only creates the PR; verification
+keeps read-only permissions and the required aggregate name stays unchanged.
+CI, review, and review recovery recognize the configured `RELEASE_APP_BOT_LOGIN`
+as well as legacy `github-actions[bot]` bumps, with the same file and version
+checks. See [release App setup](../publishing.md#release-app-setup).
+
+Manual dispatch remains diagnostic verification. When `pr_number` is supplied,
+both classification jobs resolve the live PR before checkout: its head must match
 `github.sha`, use a same-repository `release/v*` branch, target `main` or `develop`,
-and be authored by `github-actions[bot]`. The classifier comes from the
+and be authored by one of those trusted bots. The classifier comes from the
 API-reported base SHA. Only a complete manifest-only file list with valid version
 stamps allows the bump skip; dispatch never takes the docs-only shortcut.
 Missing input, API errors, or mismatches keep the full matrix.
 
-Verification rechecks dispatch metadata before checkout. Valid PR-aware dispatch
-verifies `refs/pull/<N>/merge` and shares the PR-event concurrency group, removing
-the need to close/reopen a bump PR. Rejected metadata or bare dispatch still verifies `github.sha` with the full matrix. The required aggregate name
-and read-only verification permissions stay unchanged. Only the release
-job gains `actions: write`. The same helper validates an expected PR head before
-manual recovery; see [version-bump CI recovery](../publishing.md#recovering-missing-version-bump-ci).
+Valid PR-aware dispatch verifies `refs/pull/<N>/merge`; rejected metadata or bare
+dispatch verifies `github.sha`. Dispatch shares the PR-event concurrency group,
+but its job checks **do not satisfy PR required checks**, even when green on the
+right SHA. The legacy helper reports those results as `verified-only` with
+`mergeEligible: false`. Use native PR CI to unblock merging; see
+[version-bump CI recovery](../publishing.md#recovering-missing-version-bump-ci).
 
 The worker-wait tests are split into three scenario suites with a shared fixture, so the longest indivisible suite no longer constrains shard balance. Case-preservation evidence, the refreshed duration weights and comparative benchmark results are in the [shard-balance report](../benchmarks/shard-balance.md).
 

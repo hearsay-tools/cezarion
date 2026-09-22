@@ -33,7 +33,7 @@ function fixture() {
       },
     },
   };
-  return { state, run, execute: () => ensureReleaseCi({ github, repo, prNumber: 42, expectedSha: sha,
+  return { state, run, execute: (options = {}) => ensureReleaseCi({ ...options, github, repo, prNumber: 42, expectedSha: sha,
     sleep: async (ms) => { state.waits.push(ms); if (state.waits.length === state.appearAfter) state.runs.push(run); },
   }) };
 }
@@ -75,7 +75,7 @@ test('successful workflow only counts when its required aggregate actually passe
     const f = fixture();
     f.state.runs = [{ ...f.run, id: 9, status: 'completed', conclusion: 'success' }];
     f.state.jobs = [{ name: 'Unit, build, E2E, and package', conclusion }];
-    assert.equal((await f.execute()).status, conclusion === 'success' ? 'passed' : 'dispatched');
+    assert.equal((await f.execute()).status, conclusion === 'success' ? 'verified-only' : 'dispatched');
   }
 });
 
@@ -198,4 +198,48 @@ console.log(JSON.stringify(value));
     'api', 'repos/example/project/actions/workflows/ci.yml/dispatches', '--method', 'POST',
     '-f', 'ref=release/v1.2.3', '-f', 'inputs[pr_number]=42',
   ]);
+});
+
+
+test('native release CI ignores dispatch success and waits for the eligible PR event', async () => {
+  const f = fixture();
+  f.state.runs = [{ ...f.run, id: 99, status: 'completed', conclusion: 'success' }];
+  f.state.jobs = [{ name: 'Unit, build, E2E, and package', conclusion: 'success' }];
+  f.run.event = 'pull_request_target';
+  f.state.appearAfter = 2;
+  const result = await f.execute({ native: true });
+  assert.equal(result.status, 'active');
+  assert.equal(result.mergeEligible, true);
+  assert.equal(f.state.dispatches.length, 0);
+  assert.equal(f.state.waits.length, 2);
+});
+
+test('native CI never cancels real checks by dispatching, including failure and timeout', async () => {
+  for (const runs of [[], [{ status: 'completed', conclusion: 'failure' }]]) {
+    const f = fixture();
+    f.state.runs = runs.map(r => ({ ...f.run, ...r, event: 'pull_request_target' }));
+    await assert.rejects(() => f.execute({ native: true }), /native|Native/);
+    assert.equal(f.state.dispatches.length, 0);
+    assert.ok(f.state.waits.length <= 11);
+  }
+});
+
+test('legacy dispatch success is verification-only, never merge-eligible', async () => {
+  const f = fixture();
+  f.state.runs = [{ ...f.run, status: 'completed', conclusion: 'success' }];
+  f.state.jobs = [{ name: 'Unit, build, E2E, and package', conclusion: 'success' }];
+  const result = await f.execute();
+  assert.equal(result.status, 'verified-only');
+  assert.equal(result.mergeEligible, false);
+});
+
+
+test('native aggregate success is eligible and newer failed runs cannot reuse old success', async () => {
+  const f = fixture();
+  f.state.runs = [{ ...f.run, event: 'pull_request_target', status: 'completed', conclusion: 'success' }];
+  f.state.jobs = [{ name: 'Unit, build, E2E, and package', conclusion: 'success' }];
+  assert.equal((await f.execute({ native: true })).status, 'passed');
+  f.state.runs.unshift({ ...f.run, id: 124, event: 'pull_request_target', status: 'completed', conclusion: 'failure' });
+  await assert.rejects(() => f.execute({ native: true }), /Native CI did not pass/);
+  assert.equal(f.state.dispatches.length, 0);
 });

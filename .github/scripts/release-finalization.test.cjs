@@ -44,7 +44,7 @@ async function fixture(t, base = 'main') {
     }
   };
   stamp();
-  const state = { prs: [], runs: [], dispatches: [], release: null, tag: null, denyPr: false, denyRelease: false, denyRead: false };
+  const state = { appPrCreates: 0, prs: [], runs: [], dispatches: [], release: null, tag: null, denyPr: false, denyRelease: false, denyRead: false };
   const repo = { owner: 'example', repo: 'project' };
   const url = 'https://github.com/example/project';
   const github = {
@@ -73,7 +73,7 @@ async function fixture(t, base = 'main') {
         },
       },
       actions: {
-        listWorkflowRuns: async () => ({ data: state.runs }),
+        listWorkflowRuns: async () => { if (state.denyCiRead) throw Object.assign(new Error(state.ciMessage ?? 'Resource not accessible'), { status: 403 }); return { data: state.runs }; },
         createWorkflowDispatch: async (args) => {
           if (state.denyDispatch) throw Object.assign(new Error(state.dispatchMessage ?? 'Resource not accessible by integration'), { status: 403 });
           state.dispatches.push(args);
@@ -115,6 +115,9 @@ async function fixture(t, base = 'main') {
   };
   const { parse } = await import('yaml');
   const workflow = parse(fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8'));
+  const ci = parse(fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8'));
+  const nativeCiEnabled = ci.on.pull_request_target.branches.some(pattern =>
+    pattern === base || (pattern === 'release/**' && base.startsWith('release/')));
   const outputs = { release: { version: '0.12.1', published: 'true', publishedNames: '@wjarka/cezarion,cezarion', aliasName: 'cezarion' } };
   const errors = [];
   const summary = path.join(dir, 'summary.md');
@@ -165,7 +168,22 @@ process.exit(out.status ?? 1);
         ...Object.fromEntries(Object.entries(step.env ?? {}).map(([key, value]) => [key, resolve(value)])),
       });
       if (step.run) execFileSync('bash', ['-e', '-c', resolve(step.run)], { cwd, env: process.env, stdio: 'pipe' });
-      else await new AsyncFunction('github', 'context', 'core', 'require', step.with.script)(github, { repo, sha, serverUrl: 'https://github.com' }, core, createRequire(path.join(root, 'package.json')));
+      else {
+        const originalRequire = createRequire(path.join(root, 'package.json'));
+        const getOctokit = () => ({ rest: { pulls: { create: async (args) => {
+            state.appPrCreates++;
+            const result = await github.rest.pulls.create(args);
+            if (!state.noNativeCi && nativeCiEnabled) state.runs.push({ id: 321, event: 'pull_request_target', head_branch: args.head,
+              head_sha: result.data.head.sha, status: 'queued', html_url: `${url}/actions/runs/321` });
+            return result;
+          } } } });
+        const testRequire = (name) => {
+          const loaded = originalRequire(name);
+          return name.endsWith('/release-finalization.cjs') ? { ...loaded,
+            bumpPr: (args) => loaded.bumpPr({ ...args, sleep: async () => {} }) } : loaded;
+        };
+        await new AsyncFunction('github', 'context', 'core', 'require', 'getOctokit', step.with.script)(github, { repo, sha, serverUrl: 'https://github.com' }, core, testRequire, getOctokit);
+      }
     } finally {
       if (step.id) outputs[step.id] = current;
       process.chdir(prior);
@@ -207,52 +225,52 @@ test('retry after a pushed branch and denied PR reuses the original commit', asy
   assert.equal(f.git('ls-remote', 'origin', 'refs/heads/main').split(/\s/)[0], f.sha);
 });
 
-test('new bump PR starts CI and an existing-PR retry reuses active verification', async (t) => {
+test('App client only creates the PR; native CI and retries use the normal client', async (t) => {
   const f = await fixture(t);
   await f.run(bumpStep);
-  assert.equal(f.state.dispatches.length, 1, 'a bot-created PR must explicitly start CI');
-  assert.deepEqual(f.state.dispatches[0], { owner: 'example', repo: 'project', workflow_id: 'ci.yml', ref: 'release/v0.12.1', inputs: { pr_number: '1' } });
-  assert.equal(f.outputs.bump_pr.ci_status, 'dispatched');
+  assert.equal(f.state.appPrCreates, 1);
+  assert.equal(f.state.dispatches.length, 0);
+  assert.equal(f.outputs.bump_pr.ci_status, 'active');
+  assert.match(f.outputs.bump_pr.ci_url, /321$/);
   f.reset();
   await f.run(bumpStep);
-  assert.equal(f.state.prs.length, 1);
-  assert.equal(f.state.dispatches.length, 1, 'retry must not duplicate active CI');
+  assert.equal(f.state.appPrCreates, 1, 'retry must reuse PR');
+  assert.equal(f.state.dispatches.length, 0, 'never cancel native CI with dispatch');
   assert.equal(f.outputs.bump_pr.ci_status, 'active');
 });
 
-test('existing bump PR with missing CI starts verification on retry', async (t) => {
+test('existing bump PR missing native CI reports manual recovery without dispatch', async (t) => {
   const f = await fixture(t);
   await f.run(bumpStep);
   f.state.runs = [];
-  f.state.dispatches = [];
   f.reset();
   await f.run(bumpStep);
-  assert.equal(f.state.prs.length, 1);
   assert.equal(f.outputs.bump_pr.status, 'reused');
-  assert.equal(f.state.dispatches.length, 1);
+  assert.equal(f.outputs.bump_pr.ci_status, 'failed');
+  assert.match(f.outputs.bump_pr.ci_reason, /maintainer close\/reopen/);
+  assert.equal(f.state.dispatches.length, 0);
 });
 
-test('dispatch rejection reports recovery without preventing GitHub Release creation', async (t) => {
+test('native CI lookup failure does not prevent GitHub Release creation', async (t) => {
   const f = await fixture(t);
-  f.state.denyDispatch = true;
+  f.state.denyCiRead = true;
   await f.run(bumpStep);
-  assert.equal(f.outputs.bump_pr.status, 'created', 'PR creation succeeded independently');
+  assert.equal(f.outputs.bump_pr.status, 'created');
   assert.equal(f.outputs.bump_pr.ci_status, 'failed');
   assert.match(f.errors.join('\n'), /403.*Resource not accessible/);
-  assert.match(f.errors.join('\n'), /actions: write/);
-  assert.match(f.errors.join('\n'), /node .github\/scripts\/release-ci.cjs example\/project 1 [a-f0-9]{40}/);
+  assert.equal(f.state.dispatches.length, 0);
   await f.run(releaseStep);
   await f.run(summaryStep);
   assert.equal(f.outputs.github_release.status, 'created');
   assert.match(fs.readFileSync(f.summary, 'utf8'), /CI.*failed/);
 });
 
-test('verbose dispatch failures keep recovery in the bounded release summary', async (t) => {
+test('verbose native CI failure keeps recovery in the bounded summary', async (t) => {
   const f = await fixture(t);
-  f.state.denyDispatch = true;
-  f.state.dispatchMessage = 'Denied '.repeat(1000);
+  f.state.denyCiRead = true;
+  f.state.ciMessage = 'Denied '.repeat(1000);
   await f.run(bumpStep);
-  assert.match(f.outputs.bump_pr.ci_reason, /Recovery: node .github\/scripts\/release-ci.cjs example\/project 1 [a-f0-9]{40}/);
+  assert.match(f.outputs.bump_pr.ci_reason, /Native CI recovery:/);
   assert.ok(f.outputs.bump_pr.ci_reason.length <= 2000);
 });
 
@@ -351,6 +369,8 @@ test('maintenance release PR targets the dispatched branch', async (t) => {
   const f = await fixture(t, 'release/0.12.x');
   await f.run(bumpStep);
   assert.equal(f.state.prs[0].base.ref, 'release/0.12.x');
+  assert.equal(f.outputs.bump_pr.ci_status, 'active', f.outputs.bump_pr.ci_reason);
+  assert.equal(f.state.dispatches.length, 0);
   assert.equal(f.git('ls-remote', 'origin', 'refs/heads/release/0.12.x').split(/\s/)[0], f.sha);
 });
 
