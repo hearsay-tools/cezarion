@@ -849,12 +849,12 @@ describe('responsive session composer', () => {
     expect(draft).toBe('Keep these follow-up instructions')
     const sendLabel = browser.waitForValue(`document.querySelector('[data-slot="composer-submit-row"]')?.textContent?.includes('Send') ? document.querySelector('[data-slot="composer-submit-row"]').textContent : null`)
     expect(sendLabel).toContain('Send')
+    browser.screenshot(`${artifactsDir}/responsive-session-${width}-${theme}.png`, { viewport: true })
     browser.click('[aria-label="Run actions"]')
     browser.waitForFunction(`document.querySelector('[data-slot="run-actions-menu"]')?.textContent?.includes('Notes') === true`)
     browser.press('Escape')
     const preservedDraft = browser.waitForValue(`document.querySelector('[data-slot="run-actions-menu"]') === null ? document.querySelector('[data-slot="composer"] textarea')?.value : null`)
     expect(preservedDraft).toBe('Keep these follow-up instructions')
-    browser.screenshot(`${artifactsDir}/responsive-session-${width}-${theme}.png`, { viewport: true })
   }, 90_000)
 
   it('keeps Runner, Model and Effort together while dictation is recording', () => {
