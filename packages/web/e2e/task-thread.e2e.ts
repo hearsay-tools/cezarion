@@ -699,6 +699,7 @@ describe('task thread', () => {
 type LayoutRect = { left: number; right: number; top: number; bottom: number; width: number; height: number }
 type SessionLayout = {
   controls: Record<'runner' | 'model' | 'effort' | 'attach' | 'dictation' | 'archive' | 'continue', LayoutRect & { hit: boolean }>
+  modelChrome: Record<'icon' | 'label' | 'chevron', LayoutRect>
   group: LayoutRect
   editor: LayoutRect
   textarea: LayoutRect
@@ -732,6 +733,12 @@ const sessionLayoutExpression = `(() => {
     continue: select('[data-slot="composer-actions"] [aria-label="Continue"]'),
   }
   if (Object.values(controls).some(value => !value)) return null
+  const modelChrome = {
+    icon: select('[data-slot="follow-up-model-pill"] > svg:first-child'),
+    label: select('[data-slot="follow-up-model-pill"] > span'),
+    chevron: select('[data-slot="follow-up-model-pill"] > svg:last-child'),
+  }
+  if (Object.values(modelChrome).some(value => !value)) return null
   const label = document.querySelector('[data-slot="follow-up-model-pill"] > span')
   const archive = document.querySelector('[data-slot="composer-actions"] [aria-label="Archive task"]')
   const main = document.querySelector('[data-slot="main"]')
@@ -739,7 +746,7 @@ const sessionLayoutExpression = `(() => {
   const editorRect = select('[data-slot="composer-editor"]')
   const textarea = select('[data-slot="composer"] textarea')
   return {
-    controls, group, editor: editorRect, textarea,
+    controls, modelChrome, group, editor: editorRect, textarea,
     documentOverflow: document.documentElement.scrollWidth > innerWidth + 1,
     mainOverflow: main.scrollWidth > main.clientWidth + 1,
     modelText: label?.textContent ?? '',
@@ -752,6 +759,40 @@ const sessionLayoutExpression = `(() => {
 function overlaps(a: LayoutRect, b: LayoutRect): boolean {
   return Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1
     && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+}
+
+function expectUsableSessionControls(facts: SessionLayout, width: number, height: number): void {
+  const { runner, model, effort, attach, dictation, archive, continue: submit } = facts.controls
+  expect(Math.min(attach.top, dictation.top, archive.top, submit.top)).toBeGreaterThanOrEqual(Math.max(runner.bottom, model.bottom, effort.bottom) - 1)
+  for (const [name, rect] of Object.entries(facts.controls)) {
+    expect(rect.width, `${name} width`).toBeGreaterThanOrEqual(44)
+    expect(rect.height, `${name} height`).toBeGreaterThanOrEqual(44)
+    expect(rect.left, `${name} left edge`).toBeGreaterThanOrEqual(-1)
+    expect(rect.right, `${name} right edge`).toBeLessThanOrEqual(width + 1)
+    expect(rect.top, `${name} top edge`).toBeGreaterThanOrEqual(-1)
+    expect(rect.bottom, `${name} bottom edge`).toBeLessThanOrEqual(height + 1)
+    expect(rect.hit, `${name} center hit`).toBe(true)
+  }
+  const entries = Object.entries(facts.controls)
+  for (const [i, [firstName, firstRect]] of entries.entries()) {
+    for (const [secondName, secondRect] of entries.slice(i + 1)) {
+      expect(overlaps(firstRect, secondRect), `${firstName} overlaps ${secondName}`).toBe(false)
+    }
+  }
+  for (const [name, rect] of Object.entries(facts.modelChrome)) {
+    expect(rect.left, `Model ${name} left edge`).toBeGreaterThanOrEqual(model.left - 1)
+    expect(rect.right, `Model ${name} right edge`).toBeLessThanOrEqual(model.right + 1)
+  }
+  expect(facts.modelChrome.label.width, 'Model label remains visible').toBeGreaterThan(0)
+  expect(overlaps(facts.modelChrome.icon, facts.modelChrome.label), 'Model icon overlaps label').toBe(false)
+  expect(overlaps(facts.modelChrome.label, facts.modelChrome.chevron), 'Model label overlaps chevron').toBe(false)
+  expect(overlaps(facts.modelChrome.icon, facts.modelChrome.chevron), 'Model icons overlap').toBe(false)
+  expect(facts.textarea.left).toBeGreaterThanOrEqual(facts.editor.left - 1)
+  expect(facts.textarea.right).toBeLessThanOrEqual(facts.editor.right + 1)
+  expect(facts.editor.left).toBeGreaterThanOrEqual(-1)
+  expect(facts.editor.right).toBeLessThanOrEqual(width + 1)
+  expect(facts.documentOverflow).toBe(false)
+  expect(facts.mainOverflow).toBe(false)
 }
 
 // #478/#460: real fixture values and real browser geometry, including the narrow action collision.
@@ -784,14 +825,15 @@ describe('responsive session composer', () => {
   }, 90_000)
 
   it.each([
-    { width: 360, height: 640 }, { width: 390, height: 844 }, { width: 1440, height: 900 },
+    { width: 360, height: 640 }, { width: 390, height: 844 },
+    { width: 768, height: 900 }, { width: 800, height: 900 }, { width: 1440, height: 900 },
   ].flatMap(size => ['light', 'dark'].map(theme => ({ ...size, theme }))))('keeps settings and actions usable at $width×$height / $theme', ({ width, height, theme }) => {
     browser.setViewport(width, height)
     browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="composer-actions"] [aria-label="Continue"]')`)
     browser.evaluate(`document.documentElement.style.setProperty('--default-transition-duration', '0s'); document.documentElement.classList.toggle('light', ${theme === 'light'}); document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
     const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
-    const { runner, model, effort, attach, dictation, archive, continue: submit } = facts.controls
+    const { runner, model, effort } = facts.controls
 
     // The fixture must reach the pill, not silently resolve to the automatic model.
     expect(facts.modelText).toContain(LONG_RUN.model)
@@ -801,8 +843,12 @@ describe('responsive session composer', () => {
       expect(Math.max(runner.top, model.top, effort.top) - Math.min(runner.top, model.top, effort.top)).toBeLessThanOrEqual(2)
       expect(runner.right).toBeLessThan(model.left)
       expect(model.right).toBeLessThan(effort.left)
-      expect(model.width).toBeGreaterThan(runner.width)
-      expect(model.width).toBeGreaterThan(effort.width)
+      if (width >= 1024) {
+        expect(model.width).toBeGreaterThan(runner.width)
+        expect(model.width).toBeGreaterThan(effort.width)
+      } else {
+        expect(facts.modelTruncated).toBe(true)
+      }
       expect(runner.width).toBeLessThanOrEqual(200)
       expect(effort.width).toBeLessThanOrEqual(200)
       expect(facts.group.right - effort.right).toBeLessThanOrEqual(2)
@@ -815,28 +861,7 @@ describe('responsive session composer', () => {
       expect(facts.modelTruncated).toBe(true)
       expect(facts.archiveWidth).toBeLessThanOrEqual(56)
     }
-    expect(Math.min(attach.top, dictation.top, archive.top, submit.top)).toBeGreaterThanOrEqual(Math.max(runner.bottom, model.bottom, effort.bottom) - 1)
-    for (const [name, rect] of Object.entries(facts.controls)) {
-      expect(rect.width, `${name} width`).toBeGreaterThanOrEqual(44)
-      expect(rect.height, `${name} height`).toBeGreaterThanOrEqual(44)
-      expect(rect.left, `${name} left edge`).toBeGreaterThanOrEqual(-1)
-      expect(rect.right, `${name} right edge`).toBeLessThanOrEqual(width + 1)
-      expect(rect.top, `${name} top edge`).toBeGreaterThanOrEqual(-1)
-      expect(rect.bottom, `${name} bottom edge`).toBeLessThanOrEqual(height + 1)
-      expect(rect.hit, `${name} center hit`).toBe(true)
-    }
-    const entries = Object.entries(facts.controls)
-    for (const [i, [firstName, firstRect]] of entries.entries()) {
-      for (const [secondName, secondRect] of entries.slice(i + 1)) {
-        expect(overlaps(firstRect, secondRect), `${firstName} overlaps ${secondName}`).toBe(false)
-      }
-    }
-    expect(facts.textarea.left).toBeGreaterThanOrEqual(facts.editor.left - 1)
-    expect(facts.textarea.right).toBeLessThanOrEqual(facts.editor.right + 1)
-    expect(facts.editor.left).toBeGreaterThanOrEqual(-1)
-    expect(facts.editor.right).toBeLessThanOrEqual(width + 1)
-    expect(facts.documentOverflow).toBe(false)
-    expect(facts.mainOverflow).toBe(false)
+    expectUsableSessionControls(facts, width, height)
     expect(facts.bottomGap).toBeGreaterThanOrEqual(0)
     expect(facts.bottomGap).toBeLessThanOrEqual(20)
     expect(facts.archiveLabel).toBe('Archive task')
@@ -892,6 +917,38 @@ describe('responsive session composer', () => {
     browser.press('Escape')
     const preservedDraft = browser.waitForValue(`document.querySelector('[data-slot="run-actions-menu"]') === null ? document.querySelector('[data-slot="composer"] textarea')?.value : null`)
     expect(preservedDraft).toBe('Keep these follow-up instructions')
+  }, 90_000)
+
+  it('keeps the composer usable at 800px after widening the sidebar through its resize handle', () => {
+    browser.setViewport(800, 900)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${LONG_RUN.id}`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.textContent?.includes('${LONG_RUN.model}') === true && !!document.querySelector('[data-slot="sidebar-resize-handle"]')`)
+    const sidebarWidth = () => browser.evaluate(`document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width`) as number
+    const handlePoint = () => browser.waitForValue(`(() => {
+      const r = document.querySelector('[data-slot="sidebar-resize-handle"]')?.getBoundingClientRect()
+      return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null
+    })()`) as { x: number; y: number }
+    expect(sidebarWidth()).toBe(264)
+    const start = handlePoint()
+    browser.dragTo(start, { x: start.x + 156, y: start.y })
+    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width === 420`)
+    try {
+      browser.evaluate(`document.querySelector('[data-slot="composer-editor"]').scrollIntoView({block:'end'})`)
+      const facts = browser.waitForValue(sessionLayoutExpression) as SessionLayout
+      const { runner, model, effort } = facts.controls
+      expect(facts.modelText).toContain(LONG_RUN.model)
+      expect(Math.max(runner.top, model.top, effort.top) - Math.min(runner.top, model.top, effort.top)).toBeLessThanOrEqual(2)
+      expect(runner.right).toBeLessThan(model.left)
+      expect(model.right).toBeLessThan(effort.left)
+      expect(facts.group.left).toBeGreaterThanOrEqual(facts.editor.left - 1)
+      expect(facts.group.right).toBeLessThanOrEqual(facts.editor.right + 1)
+      expectUsableSessionControls(facts, 800, 900)
+      browser.screenshot(`${artifactsDir}/responsive-session-800-wide-sidebar.png`, { viewport: true })
+    } finally {
+      const end = handlePoint()
+      browser.dragTo(end, { x: end.x - 156, y: end.y })
+      browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width === 264`)
+    }
   }, 90_000)
 
   it('keeps Runner, Model and Effort together while dictation is recording', () => {
