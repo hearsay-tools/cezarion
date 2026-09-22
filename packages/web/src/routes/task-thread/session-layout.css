@@ -2,7 +2,8 @@
  * The shared --measure preference remains independent of density and theme. */
 .session-composer [data-slot='composer-editor'] { border-color: var(--ring); border-radius: 12px; }
 .session-composer [data-slot='session-controls'] { padding: 0 12px 10px; }
-.session-engine-controls { display: grid; grid-template-columns: 168px minmax(0, 1fr) 136px; gap: 8px; min-width: 0; }
+/* The full Effort label, icon and chevron need 160px for values such as xhigh. */
+.session-engine-controls { display: grid; grid-template-columns: 168px minmax(0, 1fr) 160px; gap: 8px; min-width: 0; }
 .session-engine-controls [data-slot$='pill'] { width: 100%; min-width: 0; }
 .session-engine-controls [data-slot$='pill'] > svg:last-child { margin-left: auto; }
 .session-engine-controls [data-slot='session-runner-value'] { width: 100%; min-width: 0; }
