@@ -3942,21 +3942,6 @@ export class RunManager {
     // instead of `opus`). Fail loud here too rather than let the backend pick a default.
     let continueModel: string | undefined;
     let resumeWorkflow: { workflow: WorkflowDef; input: StartRunInput; startAt: number } | undefined;
-    try {
-      const normalized = normalizeModelForBackend(
-        continueBackend,
-        agentModelsLocked(this.repoRoot) ? undefined : record?.model,
-        { configuredProvider: await configuredModelProvider(continueBackend, state.cwd) },
-      );
-      continueModel = normalized?.backendModel;
-      this.store.updateRun(runId, {
-        modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined,
-      });
-    } catch (err) {
-      if (!(err instanceof ModelIdentityError)) throw err;
-      failBeforeSpawn(err.message);
-      return;
-    }
     // Resuming reattaches to a session that lives inside ONE account's config dir, so the
     // continuation must run under the account that created it — not whatever the project has
     // been switched to since. The owning step is the one carrying this session id.
@@ -3983,6 +3968,25 @@ export class RunManager {
     const grants = this.workerIdentity(runId)?.grants ?? {
       allowedTools: allowedToolsForStep(toolsStep, continueBackend), bashAllowlist: toolsStep?.bashAllowlist,
     };
+    // The owning step's authored `model` wins over the run-level pin, exactly as the first
+    // spawn resolved `step.model ?? input.model` (#464 review): a catalog worker keeps the
+    // parent's inherited model at run level, so reading only the record silently switched a
+    // step authored for another model on Continue.
+    try {
+      const normalized = normalizeModelForBackend(
+        continueBackend,
+        agentModelsLocked(this.repoRoot) ? undefined : toolsStep?.model ?? record?.model,
+        { configuredProvider: await configuredModelProvider(continueBackend, state.cwd) },
+      );
+      continueModel = normalized?.backendModel;
+      this.store.updateRun(runId, {
+        modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined,
+      });
+    } catch (err) {
+      if (!(err instanceof ModelIdentityError)) throw err;
+      failBeforeSpawn(err.message);
+      return;
+    }
     let continueEffort: string | undefined;
     try {
       const modelsLocked = agentModelsLocked(this.repoRoot);
