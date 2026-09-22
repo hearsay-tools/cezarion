@@ -617,6 +617,30 @@ describe('harness parity — owned input run tier', () => {
       }
     }, 60_000);
 
+    it(`${backend} R13 runs a persisted catalog chain inside the owned worker, check step included (#451)`, async () => {
+      const workflowDef = { name: 'review', source: 'file' as const, path: '.ai/cezar/workflows/review.yaml', steps: [
+        { id: 'inspect', name: 'Inspect', prompt: '{{task}}', runner: backend },
+        // Runs in the worker's own worktree, never the parent checkout.
+        { id: 'verify', command: 'test -f a.txt && test "$(git rev-parse --show-toplevel)" = "$PWD" && printf %s "$PWD" > "$CEZ_PARITY_CWD"' },
+      ] };
+      await withOwnedInputRun(backend, 'done', async ({ store, manager, repoRoot, runId }) => {
+        const cwdFile = join(repoRoot, 'check-cwd.txt');
+        process.env.CEZ_PARITY_CWD = cwdFile;
+        try {
+          manager.enqueueOwnedRun(runId);
+          await waitFor(() => !manager.isActive(runId), 30_000);
+        } finally { delete process.env.CEZ_PARITY_CWD; }
+        const run = store.getRun(runId)!;
+        expect(run.error).toBeUndefined();
+        expect(run.steps.map(step => ({ id: step.id, kind: step.kind, status: step.status }))).toEqual([
+          { id: 'inspect', kind: 'agent', status: 'done' }, { id: 'verify', kind: 'check', status: 'done' },
+        ]);
+        expect(store.readEvents(runId).filter(e => e.type === 'check-output')).toMatchObject([{ stepId: 'verify', exitCode: 0 }]);
+        if (run.delegation?.role !== 'worker') throw new Error('expected worker');
+        expect(readFileSync(cwdFile, 'utf8')).toBe(run.delegation.workspace.path);
+      }, { workflowDef });
+    }, 60_000);
+
     it(`${backend} R11 post-send checkpoint failure interrupts and reports failure without dropping input`, async () => {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, repoRoot, runId, parentRunId }) => {
         manager.enqueueOwnedRun(runId);

@@ -55,7 +55,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     await controller.close(); sessions.length = 0; await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
   });
   // Real acceptance/store/manager and account registry; only the external agent wire is fake.
-  async function acceptIdentityWorker(settings: { model?: string; effort?: string } = { model: 'haiku', effort: 'high' }, grants?: { allowedTools: string[]; bashAllowlist: string[] }, spawnInputs: Pick<WorkerSpawnRequest, 'context' | 'backend' | 'model'> = {}, prepare?: (parentId: string) => void) {
+  async function acceptIdentityWorker(settings: { model?: string; effort?: string } = { model: 'haiku', effort: 'high' }, grants?: { allowedTools: string[]; bashAllowlist: string[] }, spawnInputs: Pick<WorkerSpawnRequest, 'context' | 'backend' | 'model' | 'workflow'> = {}, prepare?: (parentId: string) => void) {
     const home = join(f.root, 'account-a'); mkdirSync(home);
     await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'account-a', provider: 'claude', configDir: home, label: 'A', addedAt: '' }]; });
     const workflow = grants ? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, ...grants }] } : QUICK_TASK_WORKFLOW;
@@ -106,6 +106,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       expect(spec.restrictNativeDelegation).toBe(true);
       expect(spec.systemPrompt).toContain('cezar');
       expect(spec.systemPrompt).toContain('--effort');
+      expect(spec.systemPrompt).toContain('--workflow');
       expect(controller.credentials.authenticate(spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: run.id });
     }
     // These mocked roots still finish asynchronously after cancellation. Wait before
@@ -113,6 +114,55 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     f.manager.cancel(run.id);
     for (const session of sessions) session.finish();
     await until(() => !f.manager.isActive(run.id));
+  });
+  it('executes a catalog workflow in the worker: a failing check loops back once, then the chain settles (#451)', async () => {
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    // The check fails on its first invocation only, from inside the worker's own worktree.
+    writeFileSync(join(dir, 'review.yaml'), [
+      'name: review', 'steps:',
+      '  - id: inspect', '    name: Inspect', '    prompt: "Review: {{task}}"',
+      '  - id: verify', '    command: test -f .verified || { touch .verified; echo first-run-fails; exit 1; }',
+      '    onFail: { retry: inspect, max: 2 }',
+    ].join('\n'));
+    const parent = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false });
+    await until(() => sessions.length === 1);
+    const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const child = await controller.service.spawn(caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID(), workflow: 'review' });
+    await until(() => sessions.length === 2);
+    expect(sessions[1]!.spec.userPrompt).toContain('Review: child');
+    expect(sessions[1]!.spec.cwd).not.toBe(f.root);
+    sessions[1]!.finish('first attempt');
+    // The check fails, so the agent step runs again with the failing output appended.
+    await until(() => sessions.length === 3);
+    expect(sessions[2]!.spec.userPrompt).toContain('first-run-fails');
+    sessions[2]!.finish('second attempt');
+    // No committed diff and no review gate in this fixture: the chain settles as done.
+    await until(() => f.store.getRun(child.workerId)?.status === 'done');
+    const worker = f.store.getRun(child.workerId)!;
+    expect(worker.steps.map(step => ({ id: step.id, kind: step.kind, status: step.status, iterations: step.iterations }))).toEqual([
+      { id: 'inspect', kind: 'agent', status: 'done', iterations: 2 }, { id: 'verify', kind: 'check', status: 'done', iterations: 2 },
+    ]);
+    expect(f.store.readEvents(child.workerId).filter(event => event.type === 'check-output')).toHaveLength(2);
+    expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ role: 'root' });
+  });
+  it.each(['queued', 'restart', 'continue'] as const)('refuses a catalog worker whose public workflow definition was edited after acceptance on %s (#451)', async mode => {
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'review.yaml'), 'name: review\nsteps:\n  - id: inspect\n    prompt: "Review: {{task}}"\n  - id: verify\n    command: "true"\n');
+    const a = await acceptIdentityWorker(undefined, undefined, { workflow: 'review' });
+    expect(f.store.readWorkerIdentity(a.child.workerId)).toMatchObject({ workflowHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    if (mode === 'continue') {
+      await launchAccepted(a, mode); await until(() => sessions.length === 2);
+      sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    }
+    const worker = f.store.getRun(a.child.workerId)!;
+    f.store.updateRun(worker.id, { workflowDef: { ...worker.workflowDef!, steps: [{ id: 'inspect', prompt: 'injected {{task}}' }, { id: 'verify', command: 'exit 99' }] } });
+    if (mode === 'continue') expect(f.manager.continueRun(worker.id, { text: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('workflow') });
+    else {
+      const { store } = await launchAccepted(a, mode);
+      await until(() => store.getRun(worker.id)?.status === 'failed' || sessions.length > 1);
+      expect(store.getRun(worker.id)).toMatchObject({ status: 'failed', error: expect.stringContaining('workflow') });
+    }
+    expect(sessions).toHaveLength(mode === 'continue' ? 2 : 1);
   });
   it('refuses a failed continuation checkpoint without advancing revision or opening another session', async () => {
     const a = await acceptIdentityWorker(); await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);

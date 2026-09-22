@@ -1,4 +1,4 @@
-import { workerContextHash, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding } from '../delegation/execution-identity.ts';
+import { workerContextHash, workerWorkflowHash, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
@@ -1040,6 +1040,7 @@ export class RunManager {
     if (identity.contextHash !== undefined && (!run.delegation.context || workerContextHash(run.delegation.context) !== identity.contextHash)) {
       throw new WorkerIdentityError('Accepted worker context recipe is unavailable or changed');
     }
+    this.ownedWorkflow(run, identity);
     if (agentModelsLocked(this.repoRoot) && (identity.model !== undefined || identity.effort !== undefined)) {
       throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
     }
@@ -1222,7 +1223,7 @@ export class RunManager {
     const grants = this.workerIdentity(run.id)?.grants
       ?? run.workflowDef?.steps.find(step => step.id === QUICK_TASK_WORKFLOW.steps[0]!.id);
     return {
-      workflow: { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
+      workflow: this.ownedWorkflow(run, this.store.readWorkerIdentity(run.id)) ?? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
         ...(grants?.allowedTools === undefined ? {} : { allowedTools: [...grants.allowedTools] }),
         ...(grants?.bashAllowlist === undefined ? {} : { bashAllowlist: [...grants.bashAllowlist] }),
       }] },
@@ -1232,6 +1233,20 @@ export class RunManager {
         autonomous: run.autonomous, generateFollowups: run.generateFollowups, worktree: true,
       },
     };
+  }
+
+  /**
+   * The catalog chain an owned worker runs (#451), or undefined for the built-in quick-task.
+   * The public `workflowDef` is mutable state, so it is authority only while the private
+   * identity's hash binds it — the same shape as the context recipe. A tampered or lost
+   * definition refuses execution instead of quietly running quick-task or the edit.
+   */
+  private ownedWorkflow(run: RunRecord, identity: WorkerExecutionIdentity | undefined): WorkflowDef | undefined {
+    if (identity?.workflowHash === undefined) return undefined;
+    if (!run.workflowDef || workerWorkflowHash(run.workflowDef) !== identity.workflowHash) {
+      throw new WorkerIdentityError('Accepted worker workflow definition is unavailable or changed');
+    }
+    return run.workflowDef;
   }
 
   /**

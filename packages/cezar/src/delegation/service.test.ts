@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
@@ -78,6 +79,70 @@ describe('delegation service durable authority', () => {
     vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '1');
     await expect(f.service.spawn(f.caller, { ...input(), model: 'sonnet' })).rejects.toMatchObject({ code: 'invalid_input' });
     expect(f.store.listRuns()).toHaveLength(1);
+  });
+  describe('catalog workflow on spawn (#451)', () => {
+    const catalog = (name: string, yaml: string) => {
+      const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${name}.yaml`), yaml);
+    };
+    const review = () => catalog('review', [
+      'name: review', 'steps:',
+      '  - id: inspect', '    name: Inspect', '    prompt: "Review: {{task}}"',
+      '  - id: verify', '    command: npm test', '    onFail: { retry: inspect, max: 1 }',
+    ].join('\n'));
+    it('runs the resolved catalog steps, filling only unset agent fields from the spawn selection', async () => {
+      review();
+      const { workerId } = await f.service.spawn(f.caller, { ...input(), workflow: 'review' });
+      const worker = f.store.getRun(workerId)!;
+      expect(worker.workflow).toBe('review');
+      expect(worker.steps.map(step => ({ id: step.id, kind: step.kind, name: step.name }))).toEqual([
+        { id: 'inspect', kind: 'agent', name: 'Inspect' }, { id: 'verify', kind: 'check', name: 'verify' },
+      ]);
+      expect(worker.workflowDef).toMatchObject({ name: 'review', source: 'file', steps: [
+        { id: 'inspect', prompt: 'Review: {{task}}', runner: 'claude', model: 'opus' },
+        { id: 'verify', command: 'npm test', onFail: { retry: 'inspect', max: 1 } },
+      ] });
+      expect(worker.workflowDef!.steps[1]).not.toHaveProperty('runner');
+      expect(worker.workflowDef!.steps[1]).not.toHaveProperty('model');
+      expect(worker).toMatchObject({ runner: 'claude', model: 'opus', effort: 'high' });
+    });
+    it('keeps an authored step runner and model, and adopts the chain runner as the worker identity', async () => {
+      vi.stubEnv('CODEX_HOME', f.root);
+      catalog('codex-review', ['name: codex-review', 'steps:', '  - id: inspect', '    prompt: "{{task}}"', '    runner: codex'].join('\n'));
+      const { workerId } = await f.service.spawn(f.caller, { ...input(), workflow: 'codex-review' });
+      expect(f.store.getRun(workerId)).toMatchObject({ runner: 'codex', workflowDef: { steps: [{ runner: 'codex' }] } });
+      expect(f.store.readWorkerIdentity(workerId)).toMatchObject({ account: { provider: 'codex' } });
+    });
+    it('rejects an unknown workflow name and a mixed-runner chain with invalid_input, creating nothing', async () => {
+      catalog('mixed', ['name: mixed', 'steps:', '  - id: a', '    prompt: "{{task}}"', '    runner: claude', '  - id: b', '    prompt: "{{task}}"', '    runner: codex'].join('\n'));
+      await expect(f.service.spawn(f.caller, { ...input(), workflow: 'nope' })).rejects.toMatchObject({ code: 'invalid_input', message: expect.stringContaining('nope') });
+      await expect(f.service.spawn(f.caller, { ...input(), workflow: 'mixed' })).rejects.toMatchObject({ code: 'invalid_input', message: expect.stringMatching(/claude.*codex|codex.*claude/) });
+      await expect(f.service.spawn(f.caller, { ...input(), workflow: 'mixed' })).rejects.toMatchObject({ message: expect.stringContaining('#452') });
+      // A spawn --backend that disagrees with an authored step runner is a mixed chain too.
+      catalog('claude-only', ['name: claude-only', 'steps:', '  - id: a', '    prompt: "{{task}}"', '    runner: claude'].join('\n'));
+      await expect(f.service.spawn(f.caller, { ...input(), workflow: 'claude-only', backend: 'codex' })).rejects.toMatchObject({ code: 'invalid_input' });
+      expect(f.store.listRuns()).toHaveLength(1); expect(f.parent.delegation).toMatchObject({ receipts: [] });
+    });
+    it('hashes the workflow name into the retry identity', async () => {
+      review();
+      const request = { ...input(), workflow: 'review' };
+      const accepted = await f.service.spawn(f.caller, request);
+      expect(await f.service.spawn(f.caller, request)).toEqual(accepted);
+      await expect(f.service.spawn(f.caller, { ...input(), requestId: request.requestId })).rejects.toMatchObject({ code: 'invalid_input' });
+      await expect(f.service.spawn(f.caller, { ...request, workflow: 'quick-task' })).rejects.toMatchObject({ code: 'invalid_input' });
+      const plain = input(); await f.service.spawn(f.caller, plain);
+      expect(f.store.getRun(f.parent.id)?.delegation).toMatchObject({ receipts: expect.arrayContaining([
+        expect.objectContaining({ requestId: plain.requestId, requestHash: createHash('sha256').update(JSON.stringify({ task: plain.task, baseline: plain.baseline })).digest('hex') }),
+      ]) });
+    });
+    it('without a workflow keeps the built-in quick-task definition even when the catalog shadows the name', async () => {
+      catalog('quick-task', ['name: quick-task', 'steps:', '  - id: shadow', '    prompt: "{{task}}"'].join('\n'));
+      const { workerId } = await f.service.spawn(f.caller, input());
+      expect(f.store.getRun(workerId)).toMatchObject({ workflow: 'quick-task', workflowDef: { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, runner: 'claude', model: 'opus' }] } });
+      expect(f.store.getRun(workerId)!.steps.map(step => step.id)).toEqual(['task']);
+      const shadowed = await f.service.spawn(f.caller, { ...input(), workflow: 'quick-task' });
+      expect(f.store.getRun(shadowed.workerId)!.steps.map(step => step.id)).toEqual(['shadow']);
+    });
   });
   it('publishes concrete private identity before worker events/enqueue and never rewrites it on replay', async () => {
     const request = input(); let publishedIdentity: unknown;

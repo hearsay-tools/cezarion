@@ -587,7 +587,9 @@ the v2 fallback uses the same parent-only guard.
 Owned-input rows S11/S12 pin ask separation and false/retry/closed-session delivery
 on all four real runners. R6–R11 exercise durable queued/startup input, before/during/
 after asks, restart with an unanswered ask, continuation asks, delayed native replies,
-DONE/explicit-stop precedence and post-send checkpoint failure. Echo probes use the
+DONE/explicit-stop precedence and post-send checkpoint failure. R13 runs a persisted
+catalog chain (an agent step plus a check step) inside the owned worker on every
+runner, proving the check executes in the worker's own worktree (#451). Echo probes use the
 same documented assistant/item and terminal frames as each mock's baseline, with
 unique item IDs across turns; no new vendor wire event is invented.
 

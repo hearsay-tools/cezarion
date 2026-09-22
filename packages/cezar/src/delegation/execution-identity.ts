@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
 import type { ResolvedAgentProfile } from '../workspace/agent-profiles.ts';
 import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
+import { workflowDefSchema, type WorkflowDef } from '../workflows/types.ts';
 
 const absolutePathSchema = z.string().min(1).max(4096).refine(isAbsolute).refine(path => !/[\u0000-\u001f\u007f]/.test(path));
 
@@ -39,12 +40,14 @@ export const acceptedWorkerIdentitySchema = z.object({
   }).strict(),
   model: z.string().min(1).max(512).optional(),
   effort: z.string().min(1).max(128).optional(),
+  /** Binds the public `workflowDef` a catalog worker runs (#451); absent means the built-in quick-task. */
+  workflowHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 }).strict();
 export type AcceptedWorkerIdentity = z.infer<typeof acceptedWorkerIdentitySchema>;
 export const workerExecutionIdentitySchema = z.union([
   acceptedWorkerIdentitySchema,
   // Only explicitly written by the internal owned-creation primitive. Absence never means legacy.
-  z.object({ kind: z.literal('internal') }).strict(),
+  z.object({ kind: z.literal('internal'), workflowHash: z.string().regex(/^[0-9a-f]{64}$/).optional() }).strict(),
 ]);
 export type WorkerExecutionIdentity = z.infer<typeof workerExecutionIdentitySchema>;
 export class WorkerIdentityError extends Error {}
@@ -82,4 +85,9 @@ export function boundWorkerAccountEnv(binding: WorkerAccountBinding, env: NodeJS
 /** Canonical schema order makes equivalent persisted object ordering immaterial. */
 export function workerContextHash(context: WorkerInputRecipe): string {
   return createHash('sha256').update(JSON.stringify(workerInputRecipeSchema.parse(context))).digest('hex');
+}
+
+/** Canonical schema order, as for the context recipe: key order in the persisted record is immaterial. */
+export function workerWorkflowHash(workflow: WorkflowDef): string {
+  return createHash('sha256').update(JSON.stringify(workflowDefSchema.parse(workflow))).digest('hex');
 }

@@ -62,6 +62,17 @@ describe('delegation schemas', () => {
     expect(workerSpawnRequestSchema.safeParse({ ...spawn, effort: 'x'.repeat(33) }).success).toBe(false);
   });
 
+  it('accepts an optional trimmed catalog workflow name on spawn (#451)', () => {
+    const spawn = { task: 'review it', requestId, baseline: 'parent-head' };
+    expect(workerSpawnRequestSchema.parse(spawn)).not.toHaveProperty('workflow');
+    expect(workerSpawnRequestSchema.parse({ ...spawn, workflow: ' review ' })).toEqual({ ...spawn, workflow: 'review' });
+    for (const workflow of ['', '   ', 'x'.repeat(201), 42, { name: 'review' }]) {
+      expect(workerSpawnRequestSchema.safeParse({ ...spawn, workflow }).success).toBe(false);
+    }
+    // The catalog is the only source in version one: inline chains are not a spawn field.
+    expect(workerSpawnRequestSchema.safeParse({ ...spawn, steps: [{ id: 'a', prompt: '{{task}}' }] }).success).toBe(false);
+  });
+
   it('accepts only nonempty bounded steering, not human answers or attachments', () => {
     expect(workerSteerRequestSchema.parse({ text: 'use the unit test' })).toEqual({ text: 'use the unit test' });
     for (const body of [{ text: '' }, { text: '   ' }, { text: 'x'.repeat(100001) }, { text: 'ok', images: [] }, { text: 'ok', parentRunId }]) {

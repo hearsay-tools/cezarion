@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -129,6 +129,18 @@ describe('bundled worker CLI', () => {
     expect(f.store.getRun(json().workerId)).toMatchObject({ effort: 'high' });
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--effort', 'nope', 'work'], env)).toBe(1);
     expect(json().code).toBe('invalid_input');
+  });
+  it('spawns a catalog workflow with --workflow and names the flag on an invalid value (#451)', async () => {
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'review.yaml'), 'name: review\nsteps:\n  - id: inspect\n    prompt: "{{task}}"\n  - id: verify\n    command: \"true\"\n');
+    expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--workflow', 'review', 'work'], env)).toBe(0);
+    expect(f.store.getRun(json().workerId)).toMatchObject({ workflow: 'review', steps: [{ id: 'inspect', kind: 'agent' }, { id: 'verify', kind: 'check' }] });
+    expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--workflow', '', 'work'], env)).toBe(1);
+    expect(json()).toMatchObject({ code: 'invalid_input', error: 'spawn has invalid --workflow' });
+    expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--workflow', 'missing', 'work'], env)).toBe(1);
+    expect(json()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('missing') });
+    await runWorkerCommand(['spawn', '--help'], {});
+    expect(String(output.mock.calls.at(-1)?.[0])).toContain('--workflow');
   });
   it('sends explicit wait modes and cancels a wait by ID using the provisioned transport', async () => {
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), 'work'], env)).toBe(0);

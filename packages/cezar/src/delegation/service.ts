@@ -2,7 +2,7 @@ import { reconcileConversationState, projectConversationEvents } from './convers
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
 import { join } from 'node:path';
 import { prepareWorkerContext, workerContextTask } from './context.ts';
-import { acceptedWorkerIdentitySchema, workerContextHash } from './execution-identity.ts';
+import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, requestWaitRequestSchema,
@@ -14,7 +14,9 @@ import {
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import type { RunManager } from '../workflows/run.ts';
-import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
+import { QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef } from '../workflows/types.ts';
+import { findWorkflow } from '../workflows/load.ts';
+import type { RunnerId } from '../core/agent-runner.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
@@ -22,6 +24,25 @@ import { authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelW
 import { planOwnedWorkspace, readOwnedDiff, removeOwnedWorkspace, resolveWorkerBaseline } from './workspace.ts';
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
+
+/**
+ * The catalog definition a spawn runs (#451): the built-in quick-task constant when the request
+ * names none — never the catalog's `quick-task` entry, so a repo file cannot change the default
+ * path — else the named entry. Version one pins one accepted provider per worker, so every agent
+ * step must agree on a runner; `backend` is that runner when the chain declares one, otherwise
+ * the request's own selection (absent → inherit the parent).
+ */
+async function resolveSpawnWorkflow(root: string, request: WorkerSpawnRequest): Promise<{ workflow: WorkflowDef; backend: RunnerId | undefined }> {
+  if (request.workflow === undefined) return { workflow: QUICK_TASK_WORKFLOW, backend: request.backend };
+  const workflow = await findWorkflow(root, request.workflow);
+  if (!workflow) throw new DelegationPolicyError('invalid_input', `Unknown workflow "${request.workflow}"; the catalog holds the built-in quick-task and .ai/cezar/workflows/*.yaml`);
+  const declared = new Set<RunnerId>(workflow.steps.filter(step => stepKind(step) === 'agent').flatMap(step => step.runner ? [step.runner] : []));
+  if (request.backend !== undefined) declared.add(request.backend);
+  if (declared.size > 1) {
+    throw new DelegationPolicyError('invalid_input', `Workflow "${request.workflow}" needs runners ${[...declared].sort().join(', ')}; a worker runs under one accepted provider, so mixed-runner chains wait for per-step worker identity (#452)`);
+  }
+  return { workflow, backend: [...declared][0] ?? request.backend };
+}
 export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
 
 /** A single controller's shared policy adapter; managers retain scheduling and lifecycle ownership. */
@@ -184,6 +205,7 @@ export class DelegationService {
         ...(request.backend === undefined ? {} : { backend: request.backend }),
         ...(request.model === undefined ? {} : { model: request.model }),
         ...(effortPin === undefined ? {} : { effort: effortPin }),
+        ...(request.workflow === undefined ? {} : { workflow: request.workflow }),
       })).digest('hex');
       const receipt = parent.delegation.receipts.find(r => r.requestId === request.requestId);
       if (receipt) {
@@ -193,7 +215,8 @@ export class DelegationService {
         return { workerId: worker.id, baselineSha: worker.delegation.workspace.baselineSha };
       }
       authorizeSpawn(caller, parent, project.id);
-      const settings = await project.manager.selectDelegationExecutionSettings(parent.id, request);
+      const catalog = await resolveSpawnWorkflow(project.root, request);
+      const settings = await project.manager.selectDelegationExecutionSettings(parent.id, { ...request, backend: catalog.backend });
       const identity = acceptedWorkerIdentitySchema.parse({ kind: 'accepted', account: settings.accountBinding, model: settings.model, effort: settings.effort,
         grants: { ...(settings.allowedTools === undefined ? {} : { allowedTools: [...settings.allowedTools] }),
           ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: [...settings.bashAllowlist] }) } });
@@ -210,18 +233,26 @@ export class DelegationService {
         const current = this.context(caller);
         if (current !== project) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
         authorizeSpawn(caller, project.store.getRun(parent.id), project.id);
-        const workflowDef = { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
-          runner: settings.runner, model: settings.model,
+        // Spawn selection fills only what a step leaves unset; the accepted grants replace step
+        // tools because the parent's permissions bound every worker session. Check steps run
+        // as authored. Authored `effort` already wins per step at execution, and an unset one
+        // falls through to the run-level pin, so it is not written here.
+        const workflowDef: WorkflowDef = { ...catalog.workflow, steps: catalog.workflow.steps.map(step => stepKind(step) === 'check' ? step : { ...step,
+          runner: step.runner ?? settings.runner, model: step.model ?? settings.model,
           ...(settings.allowedTools === undefined ? {} : { allowedTools: [...settings.allowedTools] }),
           ...(settings.bashAllowlist === undefined ? {} : { bashAllowlist: [...settings.bashAllowlist] }),
-        }] };
+        }) };
         const worker = project.store.createOwnedRun({
-          title: request.task.slice(0, 200), task: context ? workerContextTask(request.task, context) : request.task, workflow: QUICK_TASK_WORKFLOW.name,
+          title: request.task.slice(0, 200), task: context ? workerContextTask(request.task, context) : request.task, workflow: workflowDef.name,
           runner: settings.runner, model: settings.model, effort: settings.effort, agentProfile: identity.account.profileId,
           systemPrompt: settings.systemPrompt, workflowDef,
           autonomous: parent.autonomous, generateFollowups: parent.generateFollowups,
-          steps: workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: 'agent' as const })),
-        }, parent.id, request.requestId, { role: 'worker', permissions: [], parentRunId: parent.id, workspace, ...(context ? { context } : {}) }, requestHash, context ? { ...identity, contextHash: workerContextHash(context) } : identity);
+          steps: workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: stepKind(step) })),
+        }, parent.id, request.requestId, { role: 'worker', permissions: [], parentRunId: parent.id, workspace, ...(context ? { context } : {}) }, requestHash, {
+          ...identity, ...(context ? { contextHash: workerContextHash(context) } : {}),
+          // A named catalog chain is bound like the context recipe; the default quick-task leaves the identity as before.
+          ...(request.workflow === undefined ? {} : { workflowHash: workerWorkflowHash(workflowDef) }),
+        });
         accepted = true;
         project.manager.enqueueOwnedRun(worker.id);
         return { workerId: worker.id, baselineSha };
