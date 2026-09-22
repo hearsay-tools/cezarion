@@ -43,7 +43,10 @@ beforeAll(async () => {
     import { createQueryClient } from './src/api/query-client';
     import { RunHeader } from './src/routes/task-thread/run-header';
     import './src/styles/index.css';
-    window.fetch = async () => new Response('{}', {headers: {'content-type': 'application/json'}});
+    window.fetch = async input => {
+      const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;
+      return new Response(JSON.stringify(path.endsWith('/runs') ? [] : {}), {headers: {'content-type': 'application/json'}});
+    };
     const client = createQueryClient();
     function Fixture() {
       const [run, setRun] = useState(${JSON.stringify(run)});
@@ -116,6 +119,15 @@ describe('CI header browser accessibility', () => {
     expect(browser.count(link)).toBe(1)
     expect(browser.count('[data-slot="monitoring-schedule"]')).toBe(0)
   })
+  it('keeps a settled result linked while continuation admission is queued or waiting', () => {
+    for (const runStatus of ['queued', 'waiting']) {
+      browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, status: runStatus, activity: undefined,
+        ciWait: { ...wait, phase: 'wake-pending' } })})`)
+      browser.waitForFunction(`document.querySelector('${status}').textContent.includes('CI result ready — waiting for capacity')`)
+      expect(browser.count(link)).toBe(1)
+    }
+  })
+
   it('retains a readable recovery error without fabricating a PR link', () => {
     const recovered = { ...run, status: 'done', activity: undefined, ciWait: undefined,
       lastCiWaitError: 'CI wait unavailable — saved observation is unreadable; register a new wait.' }

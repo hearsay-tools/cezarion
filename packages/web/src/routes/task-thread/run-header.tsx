@@ -638,7 +638,7 @@ function MetaRow({
 /** Snapshot-only status: CI registration never starts a browser watcher or changes the run pill. */
 function activeCiWait(run: ApiRun) {
   const wait = run.ciWait
-  return run.status === 'running' && wait && wait.phase !== 'delivered' && wait.phase !== 'withdrawn'
+  return ['running', 'queued', 'waiting'].includes(run.status) && wait && wait.phase !== 'delivered' && wait.phase !== 'withdrawn'
     ? wait
     : undefined
 }
@@ -666,7 +666,7 @@ function CiWaitStatus({ run }: { run: ApiRun }) {
   }
   const label = active
     ? wait.phase === 'wake-pending'
-      ? run.activity === 'monitoring'
+      ? run.status !== 'running' || run.activity === 'monitoring'
         ? 'CI result ready — waiting for capacity'
         : 'CI result ready — current turn still working'
       : 'Waiting for CI'

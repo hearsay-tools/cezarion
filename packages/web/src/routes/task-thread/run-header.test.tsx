@@ -181,6 +181,13 @@ describe('CI wait status', () => {
     expect(screen.queryByText(/Next automatic check/)).toBeNull()
   })
 
+  it.each(['queued', 'waiting'] as const)('retains the pending CI result and PR during %s admission', (status) => {
+    stubFetch()
+    renderHeader(run(status, { ciWait: ciWait({ phase: 'wake-pending' }) }))
+    expect(screen.getByText('CI result ready — waiting for capacity')).not.toBeNull()
+    expect(screen.getByRole('link', { name: 'owner/repo#474' })).not.toBeNull()
+  })
+
   it.each([
     ['passed', 'CI checks passed — observed checks only; not merge approval'],
     ['failed', 'CI checks failed — inspect the PR checks'],
