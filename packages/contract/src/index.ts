@@ -19,3 +19,4 @@ export * from './agent-profiles.ts';
 export * from './automations.ts';
 
 export * from './conversations.ts';
+export * from './ci-wait.ts';

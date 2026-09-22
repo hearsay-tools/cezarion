@@ -31,6 +31,7 @@ export interface CursorProviderRetryOptions {
 }
 
 export const CURSOR_SPEC_SUPPORT: AgentRunSpecSupport = {
+  cezarTools: { honored: true, via: 'session/new and session/load mcpServers with narrowly forwarded env' },
   systemPrompt: { honored: true, via: 'prependSystemPrompt in opening ACP prompt' },
   userPrompt: { honored: true, via: 'session/prompt text content' },
   images: { honored: true, via: 'ACP image content blocks' },
@@ -180,7 +181,15 @@ class CursorSession implements AgentSession {
     if (this.spec.resume && this.spec.sessionId && object(init.agentCapabilities).loadSession !== true) throw new Error('Cursor CLI does not support session resume');
     const resume = this.spec.resume && this.spec.sessionId;
     const response = await this.request(resume ? 'session/load' : 'session/new', {
-      cwd: this.spec.cwd, mcpServers: [], ...(resume ? { sessionId: this.spec.sessionId } : {}),
+      cwd: this.spec.cwd,
+      // ACP stdio uses an SDK environment allowlist that excludes CEZ_ vars.
+      // Forward only this capability; the descriptor itself remains secret-free.
+      mcpServers: this.spec.cezarTools ? [{
+        ...this.spec.cezarTools,
+        env: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET'].flatMap(name =>
+          this.spec.env?.[name] ? [{ name, value: this.spec.env[name] }] : []),
+      }] : [],
+      ...(resume ? { sessionId: this.spec.sessionId } : {}),
     });
     if (!this.open) return;
     this.sessionId = resume ? this.spec.sessionId : typeof response.sessionId === 'string' ? response.sessionId : undefined;

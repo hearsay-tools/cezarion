@@ -94,6 +94,19 @@ What is protected now: **the shape of each route under `/api/v1`**, the three-wa
 
 Breaking: removing/renaming a route; making a previously optional body field required; removing a response field; changing an SSE event name (`run`, `run-event`, `run-deleted`, `todos`, `usage`, `ping` — or, on the workspace stream, `project-added`, `project-removed`, `checkout-progress`, `provider-status`) or the `seq` dedup contract; breaking the three-way alias parity (an unscoped `/api/v1/*` answer diverging in status, content type or body from its `/api/v1/p/<boot>`/`/api/v1/p/default` spellings); changing the scoped 404/409 project-resolution contract or the meaning of the `default` alias; stamping or widening the boot-project `/api/v1/events` stream; narrowing `/api/v1/health` CORS or its fields; changing `/new` query parameters (breaks saved bookmarklets); **dropping the legacy-flat → `/p/<boot>` page redirect** — or letting it lose the query/hash, which is the same break one step quieter; changing the meaning of the `default` page alias; moving a settings section without leaving its old URL redirecting to the new one. Required path: additive first; if removal is unavoidable, keep the old route/field answering for one minor release and note it in the CHANGELOG. `/new` deserves extra caution — it lives in users' browsers (saved bookmarklets), not in this repo.
 
+### Private CI tool IPC (#474)
+
+`GET` and `POST /api/v1/tools/ci-wait` belong to a separate, chained, typed Hono family on
+local IPC (Unix-domain socket / Windows named pipe), not the cockpit server's
+route table. It has no `/p/:projectId` alias and must never become an unauthenticated
+network route. Middleware validates the strict shared `CiWaitRequest`; a
+memory-only capability determines project, run and session generation. No caller
+run ID or path is accepted. `CEZ_TOOL_TOKEN` / `CEZ_TOOL_SOCKET` are internal
+provisioned environment values, not authored configuration or delegation grants.
+The MCP tool name `cezar_wait_for_ci` and its default 1,800-second timeout (range
+1–7,200) are model-facing compatibility surfaces. Preserve user MCP configuration
+and explicit denials when provisioning a session.
+
 ## 3. `.ai/cezar/` state files (`packages/cezar/src/runs/store.ts` and friends)
 
 Written by one version, read by the next, and hand-editable by design:
@@ -112,6 +125,18 @@ Written by one version, read by the next, and hand-editable by design:
 - **`.gitignore`** — maintained by `ensureDataGitignore` in `packages/cezar/src/index.ts`; any new run-data file must be added there in the same PR.
 
 Breaking: any change that makes an existing file unparseable, silently discarded, or rewritten into a new shape without reading the old one. Required path: read old + new shapes for at least one minor release (a lazy upgrade-on-read is fine since writes go through the schema), or ship an explicit migration; never require the user to delete `.ai/cezar/`.
+
+CI waiting adds optional `ciWait` and bounded `lastCiWait` run fields using the
+shared `CiWait` schema, outside delegation. Old records without them retain
+ordinary monitoring behavior. Invalid CI state must degrade to a visible
+unavailable observation, never success. CI phases (`registered`, `parked`,
+`wake-pending`, `delivered`, `withdrawn`) do not add or rename run statuses:
+parking uses `running` / `activity: monitoring` with the existing capped resource
+exemption. Early results wait for turn-end and scheduler admission. Retain the
+absolute deadline, deterministic lifecycle input ID and delivery checkpoint across
+restarts; replay after ambiguous provider acceptance remains possible, so no
+exactly-once guarantee is made. Human asks, completion/review authority and ordinary
+monitoring timers remain independent. No new marker or browser polling API is added.
 
 ## 4. Workflow YAML format (`packages/cezar/src/workflows/types.ts`)
 

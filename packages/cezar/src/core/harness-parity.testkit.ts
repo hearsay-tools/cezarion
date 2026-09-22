@@ -77,8 +77,8 @@ export interface HarnessAdapter {
 /** Resolved from this file, not the cwd, so the paths hold wherever vitest runs. */
 const CLAUDE_MOCK = join(HERE, '..', '..', 'scripts', 'mock-claude.mjs');
 const PI_MOCK = join(HERE, '..', '..', 'scripts', 'mock-pi-rpc.mjs');
-const CODEX_MOCK = join(HERE, '__fixtures__', 'codex', 'mock-codex-app-server.mjs');
-const OPENCODE_MOCK = join(HERE, '__fixtures__', 'opencode', 'mock-opencode-serve.mjs');
+const CODEX_MOCK = join(HERE, '..', '..', 'scripts', 'mock-codex-app-server.mjs');
+const OPENCODE_MOCK = join(HERE, '..', '..', 'scripts', 'mock-opencode-serve.mjs');
 
 /** No marker: every mock's default branch answers this with its scripted turn. */
 const BASELINE_PROMPT = 'inspect the working tree';

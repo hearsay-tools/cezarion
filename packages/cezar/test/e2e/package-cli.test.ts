@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFile = promisify(execFileCallback);
@@ -30,7 +30,7 @@ test('the release tarball installs and runs the dry-run CLI workflow', { timeout
     assert.ok(record, 'npm pack should describe the generated tarball');
 
     const packagedPaths = new Set(record.files.map((file) => file.path));
-    for (const requiredPath of ['dist/index.js', 'web/dist/index.html', 'scripts/mock-claude.mjs', 'README.md']) {
+    for (const requiredPath of ['dist/index.js', 'web/dist/index.html', 'scripts/mock-claude.mjs', 'scripts/mock-codex-app-server.mjs', 'scripts/mock-opencode-serve.mjs', 'dist/ci-wait/controller.js', 'dist/ci-wait/client.js', 'dist/ci-wait/mcp.js', 'scripts/pi-ci-wait.mjs', 'README.md']) {
       assert.ok(packagedPaths.has(requiredPath), `release tarball should contain ${requiredPath}`);
     }
     assert.equal(packagedPaths.has('src/index.ts'), false, 'release tarball should not contain TypeScript sources');
@@ -53,6 +53,54 @@ test('the release tarball installs and runs the dry-run CLI workflow', { timeout
     assert.equal(manifest.bin.cezarion, 'dist/index.js');
     assert.equal(manifest.bin.cez, 'dist/index.js');
     const cliPath = join(packageRoot, manifest.bin.cezarion);
+
+    // Installed adapters must resolve their SDK and inlined contract without
+    // workspace symlinks, tsx, npx, GitHub credentials, or TypeScript sources.
+    const smoke = join(consumerDir, 'ci-smoke.mjs');
+    await writeFile(smoke, `
+import assert from 'node:assert/strict';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { CiToolController } from ${JSON.stringify(pathToFileURL(join(packageRoot, 'dist/ci-wait/controller.js')).href)};
+import { createRunner } from ${JSON.stringify(pathToFileURL(join(packageRoot, 'dist/core/runner-factory.js')).href)};
+import piExtension from ${JSON.stringify(pathToFileURL(join(packageRoot, 'scripts/pi-ci-wait.mjs')).href)};
+const controller = await CiToolController.start();
+let count = 0;
+const wait = { id:'11111111-1111-4111-8111-111111111111', generation:'generation', turnId:'turn', timeoutSeconds:1800, prUrl:'https://github.com/owner/repo/pull/1', repository:'owner/repo', prNumber:1, headSha:'a'.repeat(40), registeredAt:'2026-09-22T00:00:00.000Z', deadline:'2026-09-22T00:30:00.000Z', phase:'registered' };
+const session = controller.provision(async () => { count++; return wait; });
+assert.equal(session.descriptor.args.length, 1);
+assert.match(session.descriptor.args[0], /mcp\\.js$/);
+const client = new Client({ name:'installed-ci-smoke', version:'1' });
+try {
+ await client.connect(new StdioClientTransport({ ...session.descriptor, env:session.env, stderr:'pipe' }));
+ const tools = await client.listTools();
+ assert.deepEqual(tools.tools.map(tool => tool.name), ['cezar_wait_for_ci']);
+ assert.equal(count, 0);
+ const result = await client.callTool({ name:'cezar_wait_for_ci', arguments:{pr:wait.prUrl} });
+ assert.notEqual(result.isError, true);
+ assert.match(JSON.stringify(result), new RegExp(wait.id));
+ Object.assign(process.env, session.env);
+ const registered = [];
+ piExtension({ registerTool(tool) { registered.push(tool); } });
+ assert.equal(registered.length, 1);
+ const piResult = await registered[0].execute('pi-call', {pr:wait.prUrl});
+ assert.notEqual(piResult.isError, true);
+ assert.equal(count, 2);
+ process.env.CEZ_DRY_RUN = '1';
+ delete process.env.CEZ_CODEX_BIN;
+ delete process.env.CEZ_OPENCODE_BIN;
+ for (const backend of ['codex', 'opencode']) {
+   const events = [];
+   await createRunner(backend).run({ cwd:process.cwd(), userPrompt:'mock:ci-wait ' + wait.prUrl, cezarTools:session.descriptor, env:session.env, timeoutMs:10_000 }, event => events.push(event));
+   assert.ok(!events.some(event => event.type === 'error'), JSON.stringify(events));
+ }
+ assert.equal(count, 4);
+ console.log('installed CI adapters passed');
+} finally { await client.close(); await controller.close(); }
+`);
+    const ciSmoke = await execFile(process.execPath, [smoke], { cwd: consumerDir, timeout: 20_000 });
+    assert.match(ciSmoke.stdout, /installed CI adapters passed/);
+
 
     const help = await execFile(process.execPath, [cliPath, '--help'], {
       cwd: consumerDir,
