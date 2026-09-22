@@ -41,6 +41,7 @@ import { todosPath } from '../todos.ts';
 // wire and the disk can never disagree about what counts as an image (#950).
 import {
   type AgentInput,
+  type InboxClaim,
   type WorkerStopResult,
   type WorkerWait,
   type WorkerWaitRequest,
@@ -63,7 +64,7 @@ import { autosaveCommit, createWorktree, resolveBaseRef, worktreeDiff, worktreeS
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace, type WorkerNoMaterializationProof } from '../delegation/workspace.ts';
 import { verifyWorkerContext } from '../delegation/context.ts';
-import { enqueueAgentInput, agentInputBatch } from '../delegation/input.ts';
+import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delegation/input.ts';
 import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
@@ -827,6 +828,7 @@ export class RunManager {
   private readonly workerWakeAdmitted = new Set<string>();
   private readonly workerWakeQueuedAt = new Map<string, number>();
   private readonly workerWaitTimers = new Map<string, NodeJS.Timeout>();
+  private readonly inboxClaimTimers = new Map<string, NodeJS.Timeout>();
   private reconcilingWorkers = false;
   private recovering = false;
   private disposed = false;
@@ -948,6 +950,8 @@ export class RunManager {
     this.store.off('run', this.onDelegationRun);
     for (const timer of this.workerWaitTimers.values()) clearTimeout(timer);
     this.workerWaitTimers.clear();
+    for (const timer of this.inboxClaimTimers.values()) clearTimeout(timer);
+    this.inboxClaimTimers.clear();
     this.workerWaiting.clear();
     this.workerWakeAdmitted.clear();
     this.workerWakeQueuedAt.clear();
@@ -1621,6 +1625,13 @@ export class RunManager {
           // than being dequeued and re-queued (which would churn its position and its record).
           const next = this.queue.findIndex((id) => {
             const queued = this.store.getRun(id);
+            // An inbox claim may arrive after a wake was queued but before admission.
+            // Preserve its place and slot exemption until ACK/release/expiry re-pumps.
+            if (this.workerWakeQueuedAt.has(id)) {
+              const first = queued?.agentInputs?.find(input => !input.deliveredAt);
+              const wake = queued?.agentInputs?.find(input => input.id === this.workerWait(id)?.wakeId);
+              if ((first && hasLiveInboxClaim(first)) || (wake && hasLiveInboxClaim(wake))) return false;
+            }
             return (capacity() || chargedCiWake(id)) && (!queued || this.historyDeletionPending(id) || ((!this.executions.get(id)?.admitted || this.active.has(id)) && !this.executionBlockedByRootFinish(queued) &&
               (!anyHold || !accountHeldFor(queued, holds, defaultRunner ?? 'claude'))));
           });
@@ -1849,6 +1860,10 @@ export class RunManager {
     if (this.disposed || this.recovering) return;
     this.recovering = true;
     try {
+    for (const run of this.store.listRuns()) {
+      this.store.clearExpiredInboxClaims(run.id, new Date().toISOString());
+      this.armInboxClaimExpiry(run.id);
+    }
     this.reconcileWorkerWaits();
     const live = this.store
       .listRuns()
@@ -1914,7 +1929,8 @@ export class RunManager {
       // runs. A worker reaches here only when it has neither a recoverable ask
       // nor a worker wait; preserving that record would strand both it and its
       // parent because workers cannot accept an ordinary inactive Continue.
-      if (run.status === 'waiting' && run.delegation?.role !== 'worker') continue;
+      if (run.status === 'waiting' && (run.delegation?.role !== 'worker' ||
+        run.agentInputs?.some(input => !input.deliveredAt && hasLiveInboxClaim(input)))) continue;
       if (run.status === 'waiting') {
         const finishedAt = new Date().toISOString();
         if (run.invalidAsk) {
@@ -3029,6 +3045,85 @@ export class RunManager {
     return registered;
   }
 
+  /** A wait wake is only a pointer. Only provider submission/opening prompts own delivery. */
+  private providerOwnsInboxInput(runId: string, id: string): boolean {
+    const state = this.active.get(runId);
+    return !!state?.agentInputFlight?.inputIds.includes(id) || state?.openingAgentInputId === id ||
+      this.store.getRun(runId)?.continuationMessage?.agentInputId === id;
+  }
+
+  canClaimInboxInput(runId: string, id: string): boolean {
+    const run = this.store.getRun(runId);
+    const input = run?.agentInputs?.find(entry => entry.id === id);
+    return !this.disposed && !!run && ['queued', 'running', 'waiting'].includes(run.status) &&
+      !this.historyDeletionPending(runId) && !this.executionBlockedByRootFinish(run) && !this.workerExecutionStopped(runId) &&
+      !!input && input.source === 'agent' && !!input.conversation && !input.deliveredAt &&
+      !hasLiveInboxClaim(input) && !this.providerOwnsInboxInput(runId, id);
+  }
+
+  /** The service supplies authorized, bounded IDs; claim and flight reservations are synchronous. */
+  reserveInboxInputs(runId: string, generation: string, ids: readonly string[]): { receiptId: string; expiresAt: string; inputIds: string[] } | undefined {
+    if (!ids.length || ids.some(id => !this.canClaimInboxInput(runId, id)) ||
+      this.store.getRun(runId)?.agentInputs?.some(input => !input.deliveredAt && hasLiveInboxClaim(input))) return undefined;
+    const claim: InboxClaim = { receiptId: randomUUID(), generation, expiresAt: new Date(Date.now() + 120_000).toISOString() };
+    this.store.claimInboxInputs(runId, ids, claim);
+    this.armInboxClaimExpiry(runId);
+    return { receiptId: claim.receiptId, expiresAt: claim.expiresAt, inputIds: [...ids] };
+  }
+
+  acknowledgeInbox(runId: string, generation: string, receiptId: string): 'acknowledged' | 'already-acknowledged' {
+    if (this.disposed || this.store.getRun(runId)?.agentInputs?.some(input => input.inboxClaim?.receiptId === receiptId &&
+      !input.deliveredAt && this.providerOwnsInboxInput(runId, input.id))) throw new Error('inbox receipt displaced');
+    const result = this.store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
+    this.armInboxClaimExpiry(runId);
+    this.reconcileWorkerWaits();
+    this.deliverConversationInput(runId);
+    this.releaseSlot();
+    return result;
+  }
+
+  releaseInbox(runId: string, generation: string, receiptId: string): 'released' {
+    if (this.disposed) throw new Error('inbox manager disposed');
+    const result = this.store.releaseInboxInputs(runId, receiptId, generation);
+    this.armInboxClaimExpiry(runId);
+    this.reconcileWorkerWaits();
+    this.deliverConversationInput(runId);
+    this.releaseSlot();
+    return result;
+  }
+
+  /** Expiry is an independent wake source, including after the provider's last turn. */
+  private armInboxClaimExpiry(runId: string): void {
+    const previous = this.inboxClaimTimers.get(runId);
+    if (previous) clearTimeout(previous);
+    this.inboxClaimTimers.delete(runId);
+    if (this.disposed) return;
+    const deadlines = (this.store.getRun(runId)?.agentInputs ?? []).flatMap(input =>
+      input.inboxClaim && !input.inboxClaim.acknowledgedAt ? [Date.parse(input.inboxClaim.expiresAt)] : []);
+    if (!deadlines.length) return;
+    let warned = false;
+    const expire = () => {
+      this.inboxClaimTimers.delete(runId);
+      if (this.disposed || !this.store.getRun(runId)) return;
+      try {
+        this.store.clearExpiredInboxClaims(runId, new Date().toISOString());
+        this.reconcileWorkerWaits();
+        this.deliverConversationInput(runId);
+        this.armInboxClaimExpiry(runId);
+        this.releaseSlot();
+      } catch {
+        if (!warned) console.warn('[cez] inbox expiry checkpoint failed; retrying in 1 second');
+        warned = true;
+        if (!this.disposed) arm(1_000);
+      }
+    };
+    const arm = (delay: number) => {
+      const timer = setTimeout(expire, delay);
+      timer.unref?.(); this.inboxClaimTimers.set(runId, timer);
+    };
+    arm(Math.max(0, Math.min(...deadlines) - Date.now()));
+  }
+
   /** Accepted conversation input uses the existing scheduler admission for idle recipients. */
   deliverConversationInput(runId: string): void {
     if (this.disposed) return;
@@ -3039,7 +3134,7 @@ export class RunManager {
     // Retain conversation input until the registered CI wait receives scheduler admission.
     // Converting this monitor into a worker wake would strand both admission paths.
     if (run.ciWait) { this.queueCiWake(runId); return; }
-    const input = run.agentInputs?.find(entry => entry.conversation && !entry.deliveredAt);
+    const input = run.agentInputs?.find(entry => entry.conversation && !entry.deliveredAt && !hasLiveInboxClaim(entry));
     if (!input) return;
     const state = this.active.get(runId);
     if (this.workerWait(runId)) { this.reconcileWorkerWaits(); return; }
@@ -3165,14 +3260,24 @@ export class RunManager {
         if (this.executionBlockedByRootFinish(parent)) continue;
         const wait = parent.delegation.wait;
         if (!wait) continue;
-        const delivered = wait.wakeId && parent.agentInputs?.find(input => input.id === wait.wakeId)?.deliveredAt;
+        const delivered = parent.agentInputs?.find(input => input.id === wait.wakeId && input.deliveredAt);
         if (delivered) {
           // Receipt persistence precedes the live status update. After a crash
           // this is interrupted execution, not generic waiting-run success.
-          if (this.recovering && parent.status === 'waiting' && !this.hasPendingHumanAsk(parent.id)) {
+          if (this.recovering && !delivered.inboxClaim?.acknowledgedAt && parent.status === 'waiting' && !this.hasPendingHumanAsk(parent.id)) {
             this.store.updateRun(parent.id, { status: 'running', activity: undefined });
           }
+          const state = this.active.get(parent.id);
+          const inboxParked = delivered.inboxClaim?.acknowledgedAt &&
+            (this.workerWaiting.has(parent.id) || this.workerWakeAdmitted.has(parent.id)) &&
+            state?.session?.open && state.atTurnBoundary === state.session;
           this.withdrawWorkerWait(parent.id);
+          // Inbox ACK starts no provider turn. Retain the completed turn's slot
+          // exemption if its registered wait parked while that ACK was in transit.
+          if (inboxParked && state) {
+            this.waiting.add(parent.id);
+            this.armIdleTimer(parent.id, state);
+          }
           continue;
         }
         const now = new Date().toISOString();
@@ -3214,15 +3319,16 @@ export class RunManager {
         // already being processed. Their delayed receipts cannot interrupt a wait
         // registered by that very turn. Only inputs still awaiting a turn can.
         const flight = this.active.get(parent.id)?.agentInputFlight;
-        const pendingInputs = parent.agentInputs?.filter(input => !input.deliveredAt &&
-          input.id !== parent.continuationMessage?.agentInputId && !flight?.inputIds.includes(input.id)) ?? [];
+        const pendingInputs = parent.agentInputs?.filter(input => !input.deliveredAt && !hasLiveInboxClaim(input) &&
+          input.id !== this.active.get(parent.id)?.openingAgentInputId && input.id !== parent.continuationMessage?.agentInputId && !flight?.inputIds.includes(input.id)) ?? [];
         const incoming = pendingInputs.find(input => input.conversation &&
           !(input.conversation.kind === 'reply' && input.conversation.requestId && wait.requestIds?.includes(input.conversation.requestId)));
         if (incoming && next.phase !== 'wake-pending') next = { ...next, phase: 'wake-pending', reason: 'message', wakeId: incoming.id };
         // A full queue of selected replies still needs admission. Use the last
         // already accepted input as the checkpoint rather than adding a 33rd input.
         // Its content is preserved; delivery includes the wait receipt separately.
-        if (next.phase === 'wake-pending' && pendingInputs.length >= 32 &&
+        if (next.phase === 'wake-pending' && pendingInputs.length &&
+          (parent.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32 &&
           !parent.agentInputs?.some(input => input.id === next.wakeId)) {
           next = { ...next, wakeId: pendingInputs.at(-1)!.id };
         }
@@ -3277,7 +3383,7 @@ export class RunManager {
     if (this.disposed || this.historyDeletionPending(parentId) || this.rootFinishRequested(parentId) || !run || !wait?.wakeId || wait.phase !== 'wake-pending' ||
       !['queued', 'running', 'waiting'].includes(run.status)) return;
     const existing = run.agentInputs?.find(input => input.id === wait.wakeId);
-    if (existing?.deliveredAt) return;
+    if (existing?.deliveredAt || (existing && hasLiveInboxClaim(existing))) return;
     // 32 summaries, including worst-case JSON escaping, must fit the ordinary
     // input bound. Full 4k summaries remain in durable outcomes and events.
     const contextOutcomes = wait.outcomes.map(outcome => ({ ...outcome,
@@ -3294,6 +3400,9 @@ export class RunManager {
     if (wait.reason === 'message' || (existing && wait.wakeId !== wait.id)) {
       if (!existing) return;
     } else if (!existing) {
+      // A full inbox snapshot can temporarily own every reply. ACK/expiry will
+      // reconcile again when a lifecycle input can fit or adopt an unread reply.
+      if ((run.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32) return;
       this.store.commitAgentInputs(parentId, enqueueAgentInput(run, input));
       this.store.appendEvent(parentId, { type: 'agent-input', input });
     } else if (existing.text !== text) {

@@ -22,12 +22,17 @@ export function nextAgentInput(queue: readonly AgentInput[], pendingHumanAsk: bo
   return pendingHumanAsk ? undefined : queue.find(input => !input.deliveredAt);
 }
 
+export function hasLiveInboxClaim(input: AgentInput, now = Date.now()): boolean {
+  return !!input.inboxClaim && !input.inboxClaim.acknowledgedAt && Date.parse(input.inboxClaim.expiresAt) > now;
+}
+
 /** Drain a bounded FIFO snapshot of conversations into one provider turn. Lifecycle
  * inputs remain barriers, and an individually valid large message is never split. */
-export function agentInputBatch(queue: readonly AgentInput[], format: (input: AgentInput) => string): { inputs: AgentInput[]; text: string } | undefined {
+export function agentInputBatch(queue: readonly AgentInput[], format: (input: AgentInput) => string, now = Date.now()): { inputs: AgentInput[]; text: string } | undefined {
   const inputs: AgentInput[] = []; const parts: string[] = []; let length = 0;
   for (const input of queue) {
     if (input.deliveredAt) continue;
+    if (hasLiveInboxClaim(input, now)) break;
     if (inputs.length && (!inputs[0]!.conversation || !input.conversation)) break;
     const text = format(input);
     if (inputs.length && length + 2 + text.length > 100_000) break;
