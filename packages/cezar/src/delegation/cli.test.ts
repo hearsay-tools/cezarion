@@ -117,6 +117,20 @@ describe('bundled worker CLI', () => {
     expect(paths[0]).toBe('inbox'); expect(paths.slice(1)).toEqual(['ack', 'ack']);
     expect(json()).toMatchObject({ code: 'unavailable_transport' });
   });
+  it('preserves the receipt and replay warning when inbox acknowledgement fails', async () => {
+    const receiptId = randomUUID();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async url => {
+      const path = String(url).split('/').at(-1)!;
+      return path === 'inbox'
+        ? new Response(JSON.stringify({ messages: [{ id: randomUUID(), senderRunId: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Ready', createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [], receiptId, expiresAt: new Date(Date.now() + 120_000).toISOString() }))
+        : new Response(JSON.stringify({ code: 'incompatible_state', error: 'disk unavailable' }), { status: 409 });
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation(((_chunk: string, callback?: (error?: Error | null) => void) => { callback?.(); return true; }) as typeof process.stdout.write);
+    expect(await runWorkerCommand(['inbox'], env)).toBe(1);
+    expect(json()).toMatchObject({ code: 'unavailable_transport' });
+    expect(json().error).toContain(receiptId);
+    expect(json().error).toContain('messages may reappear after expiry');
+  });
   it('does not retry a denied ACK with a revoked session', async () => {
     const receiptId = randomUUID(), paths: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async url => {

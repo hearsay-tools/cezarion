@@ -269,7 +269,10 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       const result = responseSchemas[operation].parse(data);
       print(result);
       return 'delivery' in result && result.delivery === 'not-delivered' ? 1 : 0;
-    } catch { throw new DelegationPolicyError('unavailable_transport', 'Delegation transport failed or returned an invalid response'); }
+    } catch (error) {
+      if (error instanceof DelegationPolicyError) throw error;
+      throw new DelegationPolicyError('unavailable_transport', 'Delegation transport failed or returned an invalid response');
+    }
   } catch (error) {
     print(error instanceof DelegationPolicyError ? { code: error.code, error: error.message } : { code: 'invalid_input', error: formatWorkerCliError(error, argv[0]) });
     return 1;
