@@ -170,7 +170,7 @@ function Harness({ run, draft = '' }: { run: ApiRun; draft?: string }) {
   }
   return (
     <>
-      {action.pills}{action.modelPicker}
+      {action.pills}
       {action.startsNewConversation ? <p>Starts a new agent conversation.</p> : null}
       <button type="button" onClick={() => void action.continueWith(draft, [])}>
         Continue
@@ -194,6 +194,16 @@ const continueBody = () =>
   requests.find((r) => r.url.endsWith('/continue') && r.method === 'POST')?.body
 
 describe('follow-up ContinueAction runner/model selection (#401)', () => {
+  it('keeps Runner, Model and Effort together in settings order', async () => {
+    serve()
+    renderAction(makeRun())
+    await screen.findByRole('button', { name: 'Model' })
+    const settings = document.querySelector('[data-slot="follow-up-engine"]')
+    expect(settings).not.toBeNull()
+    expect(Array.from(settings!.querySelectorAll('[aria-label]')).map((control) => control.getAttribute('aria-label')))
+      .toEqual(['Runner', 'Model', 'Effort'])
+  })
+
   it('uses one in-pill Field · value grammar for Model, Runner, and Effort (#272)', async () => {
     serve()
     renderAction(makeRun())

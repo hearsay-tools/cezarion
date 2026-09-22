@@ -466,7 +466,7 @@ export function ThreadView({
             finishing={finishAction.isPending}
             // Stop's own slot, once the engine has let go of the run. `archive` is exactly
             // `!cancel`, so the composer is handed one control or the other and never two.
-            secondaryAction={runActionFlags(run).archive ? <ArchiveButton run={run} /> : undefined}
+            secondaryAction={runActionFlags(run).archive ? <ArchiveButton run={run} compactOnMobile /> : undefined}
             stopOnEmpty={run.status === 'queued' || run.status === 'running' || (run.status === 'waiting' && attention.bucket === 'none' && !needsAnswer)}
             stopping={stopAction.stopping}
             retainDraftUntilSuccess
@@ -474,7 +474,6 @@ export function ThreadView({
             pendingLabel={continuable ? 'Continuing…' : 'Sending…'}
             failureHint="Your draft is kept. Check the task status and connection, then retry."
             sessionControls={continuable ? continueAction.pills : undefined}
-            sessionModel={continuable ? continueAction.modelPicker : undefined}
             onSubmit={
               continuable
                 ? (text, images) => continueAction.continueWith(text, images)

@@ -89,7 +89,7 @@ export function ArchiveConfirmDialog({
  * does. `outline` rather than a CTA on purpose: filing a finished task away is housekeeping, and
  * the gold in this row belongs to the verb that moves the task forward.
  */
-export function ArchiveButton({ run, className }: { run: ApiRun; className?: string }) {
+export function ArchiveButton({ run, className, compactOnMobile = false }: { run: ApiRun; className?: string; compactOnMobile?: boolean }) {
   const [confirming, setConfirming] = useState(false)
   const archive = useArchiveRun(run.id)
   const label = archiveActionLabel(run)
@@ -102,11 +102,11 @@ export function ArchiveButton({ run, className }: { run: ApiRun; className?: str
         aria-label={label}
         title={run.archived ? 'Put this task back in Active tasks' : 'Move this task out of Active tasks'}
         disabled={archive.isPending}
-        className={cn('h-11 gap-[7px] px-3', className)}
+        className={cn('h-11 gap-[7px] px-3', compactOnMobile && 'max-md:size-11 max-md:px-0', className)}
         onClick={() => (run.archived ? archive.mutate(false) : setConfirming(true))}
       >
         {run.archived ? <ArchiveRestoreIcon aria-hidden="true" /> : <ArchiveIcon aria-hidden="true" />}
-        {label}
+        <span className={cn(compactOnMobile && 'max-md:sr-only')}>{label}</span>
       </Button>
       <ArchiveConfirmDialog
         run={run}

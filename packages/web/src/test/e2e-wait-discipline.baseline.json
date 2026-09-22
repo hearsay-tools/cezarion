@@ -352,12 +352,6 @@
     {
       "file": "task-thread.e2e.ts",
       "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"composer\"] textarea').value`)).toBe('Keep these follow-up instructions')",
-      "count": 1
-    },
-    {
-      "file": "task-thread.e2e.ts",
-      "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.querySelector('${input}').value`)).toBe('first line\\nsecond line\\nthird line')",
       "count": 1
     },
@@ -372,18 +366,6 @@
       "rule": "one-shot-read",
       "site": "expect(browser.isVisible('[data-slot=\"run-details\"]')).toBe(true)",
       "count": 2
-    },
-    {
-      "file": "task-thread.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.text('[data-slot=\"composer-submit-row\"]')).toContain('Send')",
-      "count": 1
-    },
-    {
-      "file": "task-thread.e2e.ts",
-      "rule": "sleep",
-      "site": "browser.evaluate('new Promise(resolve => setTimeout(resolve, 250))')",
-      "count": 1
     },
     {
       "file": "task-views-layout.e2e.ts",
