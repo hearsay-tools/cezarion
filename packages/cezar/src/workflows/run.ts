@@ -54,7 +54,8 @@ import {
   isImageAttachmentName,
   isImageMediaType,
 } from '@open-mercato/cezar-contract';
-import type { AgentEvent, ContentBlock } from '../core/agent-runner.ts';
+import type { AgentEvent, ContentBlock, InputDelivery } from '../core/agent-runner.ts';
+import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
 import { materializeSkillDir } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
@@ -292,6 +293,13 @@ interface ActiveRun {
   pendingHumanAsk: boolean;
   agentInputError?: string;
   agentInputFlight?: { session: AgentSession; inputIds: readonly string[]; settled?: Promise<void> };
+  /** The current session's declared input delivery (#505). */
+  inputDelivery?: InputDelivery;
+  /** Accepted by this session's harness, not yet reported read (observable backends only).
+   * The harness still owes a turn for them, so they count as pending work (#505). */
+  unreadInputIds?: Set<string>;
+  /** Read before the acceptance checkpoint landed; applied when it does. */
+  consumedBeforeAck?: Set<string>;
   /** Only this older ask is being answered by the current continuation's opening turn. */
   openingAnswerAskSeq?: number;
   openingAgentInputId?: string;
@@ -3493,7 +3501,24 @@ export class RunManager {
     const run = this.store.getRun(runId);
     return !!run && ['queued', 'running', 'waiting'].includes(run.status) &&
       !(run.delegation?.role === 'worker' && run.delegation.destroy) &&
-      !!run.agentInputs?.some(input => !input.deliveredAt);
+      (!!run.agentInputs?.some(input => !input.deliveredAt) || this.harnessOwesInput(this.active.get(runId)));
+  }
+
+  /** Only the current session's observation writes consumedAt (#505). An ID reported
+   * before its acceptance checkpoint lands is applied when that checkpoint commits. */
+  private handleAgentInputConsumed(runId: string, state: ActiveRun, session: AgentSession | undefined, ids: readonly string[]): void {
+    if (!session || this.active.get(runId) !== state || state.session !== session) return;
+    const inFlight = state.agentInputFlight?.inputIds ?? [];
+    for (const id of ids) if (inFlight.includes(id)) state.consumedBeforeAck?.add(id);
+    const read = ids.filter(id => !inFlight.includes(id));
+    for (const id of read) state.unreadInputIds?.delete(id);
+    try { if (read.length) this.store.commitAgentInputsConsumed(runId, read, new Date().toISOString()); }
+    catch (error) { console.warn(`[cez] agent input consumption checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  /** #505: the harness accepted input this session has not reported reading yet. */
+  private harnessOwesInput(state: ActiveRun | undefined): boolean {
+    return !!state?.unreadInputIds?.size;
   }
 
   /** A callback from an old/replaced/disposed session carries no authority. */
@@ -3520,7 +3545,7 @@ export class RunManager {
       }
     };
     let acknowledgement: false | Promise<void>;
-    try { acknowledgement = session.sendAgentMessage(content); }
+    try { acknowledgement = session.sendAgentMessage(content, inputIds); }
     catch (error) { fail(error, false); state.agentInputFlight = undefined; return false; }
     if (!acknowledgement) { state.agentInputFlight = undefined; return false; }
     // Attach rejection handling before any persistence/capacity work can throw.
@@ -3543,6 +3568,12 @@ export class RunManager {
             const deliveredAt = new Date().toISOString();
             this.store.commitAgentInputs(runId, queue.map(input => inputIds.includes(input.id) && !input.deliveredAt
               ? { ...input, deliveredAt } : input));
+            if (state.inputDelivery?.consumption === 'observable') {
+              const early = inputIds.filter(id => state.consumedBeforeAck?.has(id));
+              for (const id of inputIds) if (!early.includes(id)) state.unreadInputIds?.add(id);
+              for (const id of early) state.consumedBeforeAck?.delete(id);
+              if (early.length) this.store.commitAgentInputsConsumed(runId, early, deliveredAt);
+            }
           }
           if (inputIds.includes(this.workerWait(runId)?.wakeId ?? '')) this.withdrawWorkerWait(runId);
           this.reconcileWorkerWaits();
@@ -4350,7 +4381,8 @@ export class RunManager {
         const workerWaitParked = ciWaitParked || completionBlocked || (!!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
         state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring: !!monitoring } : undefined;
-        const agentInputDelivered = !ask && !workerWaitParked && this.flushAgentInputs(runId);
+        // #505: input the harness accepted but has not read yet runs as its next turn.
+        const agentInputDelivered = !ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state));
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347) — same as in runAgentStep.
@@ -4565,6 +4597,7 @@ export class RunManager {
       }
       return;
     }
+    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
     try {
     session = runner.startSession(
       {
@@ -4600,6 +4633,7 @@ export class RunManager {
           this.handleRunnerUiEvent(runId, state, sink, event);
         },
         onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
+        onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
       },
     );
     } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
@@ -5264,7 +5298,8 @@ export class RunManager {
         const workerWaitParked = ciWaitParked || completionBlocked || (!!sessionOpen && this.parkWorkerWait(runId, state));
         state.doneAtBoundary = done ? state.session : undefined;
         state.parkAfterAck = interactive && sessionOpen && state.session ? { session: state.session, monitoring: !!monitoring } : undefined;
-        const agentInputDelivered = !ask && !workerWaitParked && this.flushAgentInputs(runId);
+        // #505: input the harness accepted but has not read yet runs as its next turn.
+        const agentInputDelivered = !ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state));
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347): close the session instead
@@ -5400,6 +5435,7 @@ export class RunManager {
       state.currentStepId = undefined;
       return null;
     }
+    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
     try {
       session = runner.startSession(
         {
@@ -5439,6 +5475,7 @@ export class RunManager {
             this.handleRunnerUiEvent(runId, state, sink, event);
           },
           onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
+          onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
         },
       );
     } catch (err) {

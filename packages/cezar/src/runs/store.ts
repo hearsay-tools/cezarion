@@ -929,6 +929,14 @@ export class RunStore extends EventEmitter {
   }
 
   /** Observable atomic input checkpoint: a failed write publishes nothing. */
+  /** Model consumption observed by the current session (#505). Never un-sets deliveredAt. */
+  commitAgentInputsConsumed(id: string, ids: readonly string[], at: string): void {
+    const run = this.runs.get(id);
+    if (!run?.agentInputs || !ids.length) return;
+    this.commitAgentInputs(id, run.agentInputs.map(input => ids.includes(input.id) && input.deliveredAt && !input.consumedAt
+      ? { ...input, consumedAt: at } : input));
+  }
+
   commitAgentInputs(id: string, inputs: readonly AgentInput[], openingContinuationInputId?: string): void {
     const run = this.runs.get(id);
     if (!run) throw new Error('missing agent input target');

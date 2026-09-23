@@ -36,6 +36,7 @@ import {
   type RunnerId,
 } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
+import { inputDeliveryOf } from './agent-runner.ts';
 import { appendTurnText } from '../workflows/run.ts';
 import { supportsProfiles } from './agent-profiles.ts';
 import type { WorkflowDef } from '../workflows/types.ts';
@@ -427,12 +428,19 @@ describe('harness parity — seam tier, session control', () => {
       });
     }, 45_000);
 
-    it(`${backend} S12 non-human input refuses an unsafe turn and can retry at its boundary`, async () => {
+    // #505: a `steer` runner admits non-human input mid-turn; a `boundary` runner refuses
+    // it until the turn ends. Either way the input is eventually read, and a closed session refuses.
+    it(`${backend} S12 non-human input follows the runner's declared delivery mode`, async () => {
+      const steer = inputDeliveryOf(createRunner(backend)).mode === 'steer';
       await driveSeam(backend, 'hold', {
         whileOpen: async (session, { v1 }) => {
-          expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).toBe(false);
-          await waitFor(() => v1.some(e => e.type === 'turn-end'));
-          await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).resolves.toBeUndefined();
+          const busy = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }]);
+          if (steer) await expect(busy).resolves.toBeUndefined();
+          else {
+            expect(busy).toBe(false);
+            await waitFor(() => v1.some(e => e.type === 'turn-end'));
+            await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).resolves.toBeUndefined();
+          }
           await waitFor(() => textEvents(v1).some(text => text.includes('retried steering')));
           session.end();
           expect(session.sendAgentMessage([{ type: 'text', text: 'closed' }])).toBe(false);
@@ -523,7 +531,11 @@ describe('harness parity — owned input run tier', () => {
         expect(manager.steerWorker(runId, second)).toBe('queued');
         await new Promise(resolve => setTimeout(resolve, 150));
         expect(store.getRun(runId)?.status).toBe('waiting');
-        expect(store.getRun(runId)?.agentInputs?.every(input => !input.deliveredAt)).toBe(true);
+        // #505: input queued before the session opened steers into the opening turn on a
+        // `steer` runner; input accepted while the ask is pending never reaches the session.
+        const steer = inputDeliveryOf(createRunner(backend)).mode === 'steer';
+        expect(!!store.getRun(runId)?.agentInputs?.find(input => input.id === first.id)?.deliveredAt).toBe(steer);
+        expect(store.getRun(runId)?.agentInputs?.find(input => input.id === second.id)?.deliveredAt).toBeUndefined();
         expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
         const attributed = store.readEvents(runId).filter(e => e.type === 'agent-input').map(e => agentInputEventSchema.parse(e).input);
         expect(attributed).toEqual([first, second]);
@@ -588,6 +600,9 @@ describe('harness parity — owned input run tier', () => {
           .toEqual(['refused answer']);
         expect(recovered.manager.continueRun(runId, { text: 'Vitest' }).ok).toBe(true);
         await waitFor(() => !!recovered.store.getRun(runId)?.agentInputs?.[0]?.deliveredAt);
+        // #505: input can land mid-turn, so delivery no longer implies the answering turn
+        // ended; the answer's durable checkpoint is still that turn's end.
+        await waitFor(() => recovered.store.readEvents(runId).some(e => e.type === 'human-input-delivered'));
         const replay = recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean };
         expect(replay.hasPendingHumanAsk(runId)).toBe(false);
       });

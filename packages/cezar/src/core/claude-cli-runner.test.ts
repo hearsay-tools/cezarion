@@ -352,13 +352,15 @@ describe('ClaudeCliRunner token usage', () => {
   });
 });
 
-it('keeps non-human input out of a Claude turn already queued by a human', async () => {
+it('steers non-human input behind a queued human turn but never after its CEZ:ASK', async () => {
+  // Pre-#505 the queued human turn refused all agent input until it ended. Claude now
+  // steers a mid-turn line into the running turn; only a pending CEZ:ASK still refuses.
   const { driveSeam, waitFor } = await import('./harness-parity.testkit.ts');
   await driveSeam('claude', 'hold', {
     whileOpen: async (session, { v1 }) => {
       expect(session.sendMessage([{ type: 'text', text: 'mock:ask' }])).toBe(true);
       await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 1);
-      expect(session.sendAgentMessage([{ type: 'text', text: 'must stay queued' }])).toBe(false);
+      expect(session.sendAgentMessage([{ type: 'text', text: 'steered while busy' }])).not.toBe(false);
       await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 2);
       expect(session.sendAgentMessage([{ type: 'text', text: 'must not answer the ask' }])).toBe(false);
     },
@@ -572,5 +574,73 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
       await session.result.catch(() => undefined);
       rmSync(cwd, { force: true, recursive: true });
     }
+  });
+});
+
+describe('agent input steering (#505)', () => {
+  const mockBin = fileURLToPath(new URL('../../scripts/mock-claude.mjs', import.meta.url));
+  const waitUntil = async (cond: () => boolean) => {
+    const start = Date.now();
+    while (!cond()) { if (Date.now() - start > 10_000) throw new Error('waitUntil timed out'); await new Promise(r => setTimeout(r, 10)); }
+  };
+  const start = (opts: Parameters<ClaudeCliRunner['startSession']>[2] = {}) => {
+    const events: AgentEvent[] = [];
+    const session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
+      { userPrompt: 'mock:steer-tool', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
+      event => events.push(event), opts);
+    return { session, events };
+  };
+
+  it('steers agent input into the running turn and reports consumption by uuid', async () => {
+    const consumed: string[][] = []; const ui: UiEvent[] = [];
+    const { session, events } = start({ onAgentInputConsumed: ids => consumed.push([...ids]), onUiEvent: event => ui.push(event) });
+    await waitUntil(() => events.some(e => e.type === 'tool-call'));
+    const ack = session.sendAgentMessage([{ type: 'text', text: 'mid-turn update' }], ['in-1']);
+    expect(ack).not.toBe(false);
+    await ack;
+    expect(consumed).toEqual([]); // the pipe write is not consumption
+    await waitUntil(() => events.some(e => e.type === 'turn-end'));
+    expect(consumed).toEqual([['in-1']]);
+    expect(events.filter(e => e.type === 'turn-end')).toHaveLength(1);
+    expect(ui.filter(e => e.type === 'turn.started')).toHaveLength(1);
+    expect(events.some(e => e.type === 'text' && e.text.includes('saw: mid-turn update'))).toBe(true);
+    // One result settled both lines, so the runner is idle again.
+    expect(session.sendAgentMessage([{ type: 'text', text: 'next' }], ['in-2'])).not.toBe(false);
+    session.end(); await session.result;
+  });
+
+  it('keeps accepting agent input after a human follow-up merged into the turn', async () => {
+    // Pre-#505 pendingPromptTurns counted 2 here and agentInputReady stayed false.
+    const { session, events } = start();
+    await waitUntil(() => events.some(e => e.type === 'tool-call'));
+    expect(session.sendMessage([{ type: 'text', text: 'human follow-up' }])).toBe(true);
+    await waitUntil(() => events.some(e => e.type === 'turn-end'));
+    expect(session.sendAgentMessage([{ type: 'text', text: 'after' }], ['in-3'])).not.toBe(false);
+    session.end(); await session.result;
+  });
+
+  it('passes --replay-user-messages', () => {
+    expect(buildClaudeArgs({ userPrompt: 'x', cwd: '/tmp' }, {})).toContain('--replay-user-messages');
+  });
+});
+
+describe('agent input written after the last model call (#505)', () => {
+  const mockBin = fileURLToPath(new URL('../../scripts/mock-claude.mjs', import.meta.url));
+  it('reports a line the CLI ran as its next queued turn as consumed then', async () => {
+    const events: AgentEvent[] = []; const consumed: string[][] = []; const ui: UiEvent[] = [];
+    const session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
+      { userPrompt: 'mock:hold', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
+      event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]), onUiEvent: event => ui.push(event) });
+    // The mock answers each stdin line as its own queued turn outside mock:steer-tool.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo late line' }], ['late-1']);
+    const start = Date.now();
+    while (events.filter(e => e.type === 'turn-end').length < 2) { if (Date.now() - start > 10_000) throw new Error('no second turn-end'); await new Promise(r => setTimeout(r, 10)); }
+    const firstEnd = events.findIndex(e => e.type === 'turn-end');
+    expect(consumed).toEqual([['late-1']]);
+    expect(events.slice(firstEnd).some(e => e.type === 'text' && e.text.includes('late line'))).toBe(true);
+    // Each turn opens exactly once in v2, including the queued one.
+    expect(ui.filter(e => e.type === 'turn.started')).toHaveLength(2);
+    session.end(); await session.result;
   });
 });

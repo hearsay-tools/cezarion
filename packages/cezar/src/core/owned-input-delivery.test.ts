@@ -155,7 +155,9 @@ for (const backend of ['claude', 'codex', 'opencode', 'pi'] as const) {
       expect(manager.steerWorker(runId, input)).toBe('queued');
       await waitFor(() => !manager.isActive(runId));
       expect(store.getRun(runId)?.status).toBe('failed');
-      expect(store.getRun(runId)?.agentInputs).toEqual([{ ...input, deliveredAt: expect.any(String) }]);
+      // #505: an observable harness may also have reported reading it before the failure.
+      expect(store.getRun(runId)?.agentInputs).toEqual([{ ...input, deliveredAt: expect.any(String),
+        ...(store.getRun(runId)?.agentInputs?.[0]?.consumedAt ? { consumedAt: expect.any(String) } : {}) }]);
       expect(store.readEvents(runId).filter(event => event.type === 'agent-input')).toHaveLength(1);
     });
   }, 60_000);
