@@ -2487,3 +2487,18 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
     expect(store.getRun(worker.id)?.archived).toBe(true);
   });
 });
+
+describe('RunStore — agent input consumption receipts (#505)', () => {
+  let dataDir: string;
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), 'cez-store-consumed-')); });
+  afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
+
+  it('round-trips inputs with and without consumedAt', () => {
+    const parentRunId = randomUUID();
+    const input = (id: string, extra: Record<string, string>) => ({ id, source: 'agent', parentRunId, text: 'hello',
+      createdAt: '2026-09-23T10:00:00.000Z', deliveredAt: '2026-09-23T10:00:01.000Z', ...extra });
+    const inputs = [input(randomUUID(), {}), input(randomUUID(), { consumedAt: '2026-09-23T10:00:05.000Z' })];
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([{ ...LEGACY_RUN, agentInputs: inputs }]), 'utf8');
+    expect(RunStore.open(dataDir).getRun(LEGACY_RUN.id)?.agentInputs).toEqual(inputs);
+  });
+});

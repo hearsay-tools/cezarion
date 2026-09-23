@@ -199,7 +199,9 @@ export type AgentEvent =
    *  sessions mint their own id, so the run manager persists this to enable
    *  resume ("Continue") and "open in CLI". Claude's equals `spec.sessionId`. */
   | { type: 'session'; sessionId: string }
-  | { type: 'turn-end' }
+  /** `unconsumedInputIds`: agent input accepted in this turn that the model never
+   *  read before the turn ended idle (#505). */
+  | { type: 'turn-end'; unconsumedInputIds?: readonly string[] }
   | { type: 'note'; message: string }
   | { type: 'done' }
   | { type: 'error'; message: string };
@@ -235,6 +237,9 @@ export interface SessionOptions {
   /** Readiness hint only, not an acknowledgement or a turn completion. The
    * caller rechecks session identity, ask state and queue before retrying. */
   onAgentInputReady?: () => void;
+  /** The model received these inputs (replay echo, userMessage item, …). Fires at most
+   * once per ID and never from a transport acknowledgement (#505). */
+  onAgentInputConsumed?: (inputIds: readonly string[]) => void;
 }
 
 /**
@@ -253,9 +258,11 @@ export interface AgentSession {
   /** Write a user message into the live session. False when it is closed. */
   sendMessage(content: ContentBlock[]): boolean;
   /** Synchronous non-human reservation: false refuses without writing; a Promise
-   * confirms transport acceptance, not turn completion. Reject retains caller
-   * ownership for replay. Never fall back to the human-answer seam. */
-  sendAgentMessage(content: ContentBlock[]): false | Promise<void>;
+   * confirms the HARNESS ACCEPTED the input — mid-turn on a `steer` runner — not that
+   * the model consumed it (#505). Reject retains caller ownership for replay.
+   * `inputIds` correlate `onAgentInputConsumed` and `turn-end.unconsumedInputIds`.
+   * Never fall back to the human-answer seam. */
+  sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[]): false | Promise<void>;
   /**
    * Drop follow-ups queued while a turn was still in flight. A `CEZ:ASK` park
    * must call this so a mid-turn `sendMessage` cannot start a new turn after
@@ -271,10 +278,27 @@ export interface AgentSession {
   readonly open: boolean;
 }
 
+/** How a runner admits non-human input while a turn runs (#505). */
+export interface InputDelivery {
+  /** `steer`: accepted mid-turn, consumed inside the running turn. `boundary`: refused while busy. */
+  readonly mode: 'steer' | 'boundary';
+  /** Whether the wire tells us when the model actually received the input. */
+  readonly consumption: 'observable' | 'unobservable';
+  /** The native mechanism, for AGENT_PROTOCOL.md and the parity matrix. */
+  readonly via: string;
+}
+export const BOUNDARY_INPUT_DELIVERY: InputDelivery = { mode: 'boundary', consumption: 'unobservable', via: 'next idle turn' };
+/** Absent means the pre-#505 behavior every runner had. */
+export function inputDeliveryOf(runner: Pick<AgentRunner, 'inputDelivery'>): InputDelivery {
+  return runner.inputDelivery ?? BOUNDARY_INPUT_DELIVERY;
+}
+
 export interface AgentRunner {
   readonly backend: AgentBackend;
   /** Which `AgentRunSpec` fields this runner honors, and how — see `AgentRunSpecSupport`. */
   readonly specSupport: AgentRunSpecSupport;
+  /** How non-human input is admitted while a turn runs; absent means `boundary` (#505). */
+  readonly inputDelivery?: InputDelivery;
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult>;
   startSession(
     spec: AgentRunSpec,
