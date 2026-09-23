@@ -99,4 +99,26 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     expect(accepted.map(ids => ids.length)).toEqual([32, 8]);
     expect(accepted.flat()).toEqual(inputs.map(input => input.id));
   });
+
+  it('delivers held messages right behind a human answer, in the same submission, never as the answer', async () => {
+    const p = await parent('mock:ask');
+    await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id);
+    const send = conversation(p.id);
+    const held = ['first finding', 'second finding', 'third finding'].map(text => send(w.id, p.id, 'progress', text));
+    manager.deliverConversationInput(p.id);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(held.every(input => !inputOf(p.id, input.id)?.deliveredAt)).toBe(true); // the human question holds them
+    const write = vi.spyOn(sessionOf(p.id), 'sendMessage');
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:agent-echo use Vitest' }])).toBe(true);
+    expect(write).toHaveBeenCalledTimes(1);
+    const content = JSON.stringify(write.mock.calls[0]![0]);
+    const at = (needle: string) => content.indexOf(needle);
+    expect(at('use Vitest')).toBeGreaterThan(-1);
+    for (const input of held) expect(at(input.id)).toBeGreaterThan(at('use Vitest'));
+    expect(new Set(held.map(input => inputOf(p.id, input.id)?.deliveredAt)).size).toBe(1);
+    expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
+    await until(() => held.every(input => !!inputOf(p.id, input.id)?.consumedAt));
+  });
 });

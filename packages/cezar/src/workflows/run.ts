@@ -300,6 +300,8 @@ interface ActiveRun {
   unreadInputIds?: Set<string>;
   /** Read before the acceptance checkpoint landed; applied when it does. */
   consumedBeforeAck?: Set<string>;
+  /** Conversation input carried by a human answer's own write; read at that turn's end. */
+  bundledInputIds?: string[];
   /** Only this older ask is being answered by the current continuation's opening turn. */
   openingAnswerAskSeq?: number;
   openingAgentInputId?: string;
@@ -3546,6 +3548,36 @@ export class RunManager {
     catch (error) { console.warn(`[cez] opening input acceptance checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
+  /** The conversation messages the next submission would carry, if nothing but
+   * conversation input leads the queue (lifecycle input stays a barrier). */
+  private pendingConversationBatch(runId: string, state: ActiveRun): { inputs: AgentInput[]; text: string } | undefined {
+    const run = this.store.getRun(runId);
+    if (!run || run.ciWait || state.agentInputFlight || this.workerWait(runId)) return undefined;
+    const batch = agentInputBatch((run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId),
+      input => this.formatAgentInput(runId, input));
+    return batch?.inputs.every(input => input.conversation) ? batch : undefined;
+  }
+
+  /** Bundled messages rode the answer's own write: delivered now, read when that turn ends. */
+  private commitBundledDelivery(runId: string, state: ActiveRun, ids: readonly string[]): void {
+    const deliveredAt = new Date().toISOString();
+    const awaiting = state.inputDelivery?.consumption === 'observable' ? { awaitingRead: true as const } : {};
+    try {
+      this.store.commitAgentInputs(runId, (this.store.getRun(runId)?.agentInputs ?? []).map(input =>
+        ids.includes(input.id) && !input.deliveredAt ? { ...input, deliveredAt, ...awaiting } : input));
+      state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];
+    } catch (error) { console.warn(`[cez] bundled delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  /** The turn that carried bundled messages has ended: the model read them. */
+  private readBundledInputs(runId: string, state: ActiveRun): void {
+    const ids = state.bundledInputIds ?? [];
+    state.bundledInputIds = undefined;
+    if (!ids.length || state.cancelled) return;
+    try { this.store.commitAgentInputsConsumed(runId, ids, new Date().toISOString()); }
+    catch (error) { console.warn(`[cez] bundled read checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
   /** #505: the harness accepted input this session has not reported reading yet. */
   private harnessOwesInput(state: ActiveRun | undefined): boolean {
     return !!state?.unreadInputIds?.size;
@@ -3799,7 +3831,11 @@ export class RunManager {
       ? [...expanded, pastedAttachmentsNote(persisted)]
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];
     const answeringAskSeq = userAuthored ? this.pendingHumanAskSeq(runId) : undefined;
-    const delivered = userAuthored ? state.session.sendMessage(deliverable)
+    // #505: an answer that opens a new turn (a CEZ:ASK answer at a boundary) carries the
+    // held conversation messages in the same submission, after the answer.
+    const bundle = userAuthored && answeringAskSeq !== undefined && state.atTurnBoundary === state.session
+      ? this.pendingConversationBatch(runId, state) : undefined;
+    const delivered = userAuthored ? state.session.sendMessage(bundle ? [...deliverable, { type: 'text', text: bundle.text }] : deliverable)
       : this.submitAgentInput(runId, state, deliverable);
     if (delivered) {
       if (userAuthored) {
@@ -3808,6 +3844,9 @@ export class RunManager {
           this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answeringAskSeq });
         }
         state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
+        if (bundle) this.commitBundledDelivery(runId, state, bundle.inputs.map(input => input.id));
+        // A native answer continues the turn: held messages steer right behind it.
+        else if (answeringAskSeq !== undefined && !state.pendingHumanAsk) this.flushAgentInputs(runId);
       }
       this.resumeParkedRun(runId, state);
     }
@@ -4353,6 +4392,7 @@ export class RunManager {
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
         this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
+        this.readBundledInputs(runId, state);
         state.workerWakeTurn = undefined;
         state.ciWakeTurn = undefined;
         state.atTurnBoundary = state.session;
@@ -5302,6 +5342,7 @@ export class RunManager {
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
         this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
+        this.readBundledInputs(runId, state);
         state.workerWakeTurn = undefined;
         state.ciWakeTurn = undefined;
         state.atTurnBoundary = state.session;
