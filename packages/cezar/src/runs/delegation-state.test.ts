@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   agentInputSchema, agentInputEventSchema, delegationStateSchema, runRelationshipsSchema,
   workerDestroySchema, workerDestroyResultSchema, workerDiffSchema, workerInspectionSchema,
@@ -169,6 +169,135 @@ describe('RunStore durable delegation', () => {
     return run;
   }
   function disk() { return JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8')); }
+
+  const claimExpiry = new Date(Date.now() + 120_000).toISOString();
+  const ackTime = new Date(Date.now() + 60_000).toISOString();
+  const afterExpiry = new Date(Date.now() + 180_000).toISOString();
+
+  function conversationInputs(runId: string) {
+    const first = { id: randomUUID(), source: 'agent' as const, parentRunId: runId, text: 'first', createdAt: now,
+      conversation: { senderRunId: workerId, recipientRunId: runId, kind: 'progress' as const } };
+    const second = { ...first, id: randomUUID(), text: 'second' };
+    store.commitAgentInputs(runId, [first, second]);
+    return { first, second };
+  }
+
+  it('claims exact conversation IDs and acknowledges only those IDs across restart', () => {
+    const run = parent(); const { first, second } = conversationInputs(run.id);
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
+    store.claimInboxInputs(run.id, [first.id], claim);
+    const storedClaim = { ...claim, memberIds: [first.id] };
+    expect(store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim).toEqual(storedClaim);
+    expect(store.getRun(run.id)?.agentInputs?.[1]?.inboxClaim).toBeUndefined();
+    expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.agentInputs?.[0]?.inboxClaim).toEqual(storedClaim);
+    expect(store.ackInboxInputs(run.id, claim.receiptId, claim.generation, ackTime)).toBe('acknowledged');
+    expect(store.ackInboxInputs(run.id, claim.receiptId, claim.generation, afterExpiry)).toBe('already-acknowledged');
+    expect(store.getRun(run.id)?.agentInputs?.[0]).toMatchObject({ deliveredAt: ackTime, inboxClaim: { ...storedClaim, acknowledgedAt: ackTime } });
+    expect(store.getRun(run.id)?.agentInputs?.[1]).toEqual(second);
+    expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)?.agentInputs?.[0]?.deliveredAt).toBe(ackTime);
+    expect(() => store.releaseInboxInputs(run.id, claim.receiptId, claim.generation)).toThrow();
+  });
+
+  it('refuses queue replacement that drops a member or claim from a live receipt atomically', () => {
+    const run = parent(); const { first, second } = conversationInputs(run.id);
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
+    store.claimInboxInputs(run.id, [first.id, second.id], claim);
+    const claimed = structuredClone(store.getRun(run.id)!);
+    for (const replacement of [
+      [claimed.agentInputs![0]!],
+      [claimed.agentInputs![0]!, { ...claimed.agentInputs![1]!, inboxClaim: undefined }],
+    ]) {
+      expect(() => store.commitAgentInputs(run.id, replacement)).toThrow();
+      expect(store.getRun(run.id)).toEqual(claimed);
+      expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)).toEqual(claimed);
+    }
+  });
+
+  it('refuses to acknowledge a damaged receipt missing a member or its claim', () => {
+    const run = parent(); const { first, second } = conversationInputs(run.id);
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
+    store.claimInboxInputs(run.id, [first.id, second.id], claim);
+    const claimed = structuredClone(store.getRun(run.id)!.agentInputs!);
+    const damaged = store.getRun(run.id)!;
+    for (const broken of [
+      [claimed[0]!],
+      [claimed[0]!, { ...claimed[1]!, inboxClaim: undefined }],
+    ]) {
+      damaged.agentInputs = broken;
+      const beforeAck = structuredClone(damaged);
+      expect(() => store.ackInboxInputs(run.id, claim.receiptId, claim.generation, ackTime)).toThrow();
+      expect(store.getRun(run.id)).toEqual(beforeAck);
+      expect(store.getRun(run.id)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
+    }
+  });
+
+  it('rejects invalid, duplicate, delivered and live-claimed input IDs without partial claims', () => {
+    const run = parent(); const { first, second } = conversationInputs(run.id);
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
+    const original = structuredClone(store.getRun(run.id));
+    for (const ids of [[], [first.id, first.id], [first.id, randomUUID()]]) {
+      expect(() => store.claimInboxInputs(run.id, ids, claim)).toThrow();
+      expect(store.getRun(run.id)).toEqual(original);
+    }
+    store.claimInboxInputs(run.id, [first.id], claim);
+    expect(() => store.claimInboxInputs(run.id, [first.id, second.id], { ...claim, receiptId: randomUUID() })).toThrow();
+    expect(store.getRun(run.id)?.agentInputs?.[1]).toEqual(second);
+    store.releaseInboxInputs(run.id, claim.receiptId, claim.generation);
+    store.commitAgentInputs(run.id, [first, { ...second, deliveredAt: now }]);
+    expect(() => store.claimInboxInputs(run.id, [second.id], claim)).toThrow();
+    store.commitAgentInputs(run.id, [{ ...first, conversation: undefined }, second]);
+    expect(() => store.claimInboxInputs(run.id, [first.id], claim)).toThrow();
+  });
+
+  it('refuses wrong-generation, expired and provider-displaced acknowledgements', () => {
+    const run = parent(); const { first, second } = conversationInputs(run.id);
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
+    store.claimInboxInputs(run.id, [first.id, second.id], claim);
+    const claimed = structuredClone(store.getRun(run.id));
+    expect(() => store.ackInboxInputs(run.id, claim.receiptId, randomUUID(), ackTime)).toThrow();
+    expect(() => store.ackInboxInputs(run.id, claim.receiptId, claim.generation, claimExpiry)).toThrow();
+    expect(store.getRun(run.id)).toEqual(claimed);
+    store.commitAgentInputs(run.id, [claimed!.agentInputs![0]!, { ...claimed!.agentInputs![1]!, deliveredAt: now }]);
+    expect(() => store.ackInboxInputs(run.id, claim.receiptId, claim.generation, ackTime)).toThrow();
+    expect(store.getRun(run.id)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
+  });
+
+  it('leaves the run unchanged when claim or acknowledgement index persistence fails', () => {
+    const run = parent(); const { first } = conversationInputs(run.id);
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
+    const beforeClaim = structuredClone(store.getRun(run.id));
+    vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
+    expect(() => store.claimInboxInputs(run.id, [first.id], claim)).toThrow('disk unavailable');
+    expect(store.getRun(run.id)).toEqual(beforeClaim);
+    store.claimInboxInputs(run.id, [first.id], claim);
+    const beforeAck = structuredClone(store.getRun(run.id));
+    vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
+    expect(() => store.ackInboxInputs(run.id, claim.receiptId, claim.generation, ackTime)).toThrow('disk unavailable');
+    expect(store.getRun(run.id)).toEqual(beforeAck);
+    expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)).toEqual(beforeAck);
+    vi.restoreAllMocks();
+  });
+
+  it('releases only matching unacknowledged receipts and expires them without delivering', () => {
+    const run = parent(); const { first, second } = conversationInputs(run.id);
+    const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
+    store.claimInboxInputs(run.id, [first.id], claim);
+    expect(() => store.releaseInboxInputs(run.id, claim.receiptId, randomUUID())).toThrow();
+    expect(store.releaseInboxInputs(run.id, claim.receiptId, claim.generation)).toBe('released');
+    expect(store.getRun(run.id)?.agentInputs?.[0]).toEqual(first);
+    store.claimInboxInputs(run.id, [first.id], claim);
+    store.clearExpiredInboxClaims(run.id, ackTime);
+    expect(store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim).toEqual({ ...claim, memberIds: [first.id] });
+    store.clearExpiredInboxClaims(run.id, claim.expiresAt);
+    expect(store.getRun(run.id)?.agentInputs).toEqual([first, second]);
+    expect(() => store.ackInboxInputs(run.id, claim.receiptId, claim.generation, ackTime)).toThrow();
+    const replacement = { ...claim, receiptId: randomUUID() };
+    store.claimInboxInputs(run.id, [first.id], replacement);
+    expect(store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim?.receiptId).not.toBe(claim.receiptId);
+    store.commitAgentInputs(run.id, [{ ...first, inboxClaim: store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim, deliveredAt: now }, second]);
+    store.clearExpiredInboxClaims(run.id, replacement.expiresAt);
+    expect(store.getRun(run.id)?.agentInputs?.[0]).toEqual({ ...first, deliveredAt: now });
+  });
 
   it('withdrawing a message wake preserves accepted conversation input across restart', () => {
     const run = store.createRun(input);

@@ -29,6 +29,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
     `Use ${invocation} send <recipient-run-id> '<text>' --id <message-UUID> --kind request to request an explicit reply; use progress <recipient-run-id> '<text>' --id <message-UUID> for an update without an obligation.`,
     `Use ${invocation} follow-up <recipient-run-id> '<text>' --id <message-UUID> --request-id <request-UUID> to clarify your request, or ${invocation} reply <recipient-run-id> '<text>' --id <message-UUID> --request-id <request-UUID> to answer an incoming request.`,
     `A request's ID is its message ID. Reuse a message ID only for an exact retry, including timeout; changed payloads are rejected.`,
+    `Use ${invocation} inbox for new messages during an active turn; it acknowledges only the messages it returns. Use conversation <recipient-run-id> for history or investigation; it does not acknowledge messages.`,
     `Use conversation <recipient-run-id> to inspect messages/outcomes, cancel-request <request-UUID> to cancel your obligation, and wait --request <request-UUID> [--request <another-UUID>] --mode <one|any|all> --timeout-seconds <1-1800> to register a request wait.`,
     `Request and wait deadlines default to 600 seconds. One active wait per run; cancel-wait <wait-id> stops waiting without cancelling requests or work.`,
     `Wait returns immediately: end your turn to release capacity; incoming messages may interrupt waiting without resolving pending requests. No automatic re-wait.`,

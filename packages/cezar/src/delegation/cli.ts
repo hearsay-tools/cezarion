@@ -2,7 +2,7 @@ import { readBoundedContextFile } from './context.ts';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
-  conversationSendRequestSchema, conversationSendResultSchema, conversationStateSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, requestOutcomeSchema, requestWaitRequestSchema,
+  conversationSendRequestSchema, conversationSendResultSchema, conversationInspectResultSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema, requestWaitRequestSchema,
   workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, workerOperationSchema, workerParamsSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema,
   workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema,
   workerDiffSchema, workerWaitResultSchema, delegationErrorResponseSchema,
@@ -18,8 +18,8 @@ export function delegationEndpoint(value: string | undefined): URL {
   return url;
 }
 
-const conversationOperationSchema = z.enum(['send', 'progress', 'follow-up', 'reply', 'conversation', 'cancel-request', 'wait-requests']);
-const responseSchemas = { send: conversationSendResultSchema, progress: conversationSendResultSchema, 'follow-up': conversationSendResultSchema, reply: conversationSendResultSchema, conversation: conversationStateSchema, 'cancel-request': requestOutcomeSchema, 'wait-requests': workerWaitResultSchema, collect: workerCollectedResultSchema, spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
+const conversationOperationSchema = z.enum(['send', 'progress', 'follow-up', 'reply', 'conversation', 'inbox', 'cancel-request', 'wait-requests']);
+const responseSchemas = { send: conversationSendResultSchema, progress: conversationSendResultSchema, 'follow-up': conversationSendResultSchema, reply: conversationSendResultSchema, conversation: conversationInspectResultSchema, 'cancel-request': requestOutcomeSchema, 'wait-requests': workerWaitResultSchema, collect: workerCollectedResultSchema, spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
   stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: workerWaitResultSchema, 'cancel-wait': workerCancelWaitResultSchema };
 const RESPONSE_BYTES = 3_145_728;
 const CLI_FLAG: Record<string, string> = {
@@ -44,6 +44,7 @@ const WORKER_USAGE = { operations: [
   { name: 'follow-up', positionals: 2, required: ['--id', '--request-id'], optional: ['--timeout-seconds'] },
   { name: 'reply', positionals: 2, required: ['--id', '--request-id'], optional: ['--timeout-seconds'] },
   { name: 'conversation', positionals: 1 },
+  { name: 'inbox', positionals: 0 },
   { name: 'wait-requests', positionals: 1, optional: ['--mode', '--timeout-seconds'] },
   { name: 'cancel-request', positionals: 1 },
 ] };
@@ -62,6 +63,7 @@ const WORKER_HELP: Record<string, { args: string; description: string }> = {
   'follow-up': { args: '<recipient-run-id> "<text>" --id <UUID> --request-id <UUID>', description: 'Clarify an existing request.' },
   reply: { args: '<recipient-run-id> "<text>" --id <UUID> --request-id <UUID>', description: 'Reply to an existing request.' },
   conversation: { args: '<recipient-run-id>', description: 'Inspect conversation messages and outcomes.' },
+  inbox: { args: '', description: 'Read new messages and acknowledge only those printed successfully.' },
   'wait-requests': { args: '<request-id>...', description: 'Register a wait for message requests, then end your turn.' },
   'cancel-request': { args: '<request-id>', description: 'Cancel a request obligation.' },
 };
@@ -100,6 +102,7 @@ function workerHelp(operation?: string): string {
   ].join('\n');
 }
 class WorkerCliError extends Error {}
+class InboxHttpError extends Error { constructor(readonly status: number) { super('Inbox operation failed'); } }
 function cliName(path: PropertyKey[]): string {
   return CLI_FLAG[String(path[0] ?? '')] ?? String(path[0] ?? 'argument');
 }
@@ -142,11 +145,38 @@ async function boundedJson(response: Response): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks, size).toString('utf8'));
 }
 
+/** A failed Writable emits `error` as well as reporting through its callback. */
+async function writeInboxOutput(text: string): Promise<void> {
+  const stream = process.stdout;
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let callbackFailure: NodeJS.Immediate | undefined;
+    const finish = (error?: Error | null) => {
+      if (settled) return;
+      settled = true;
+      clearImmediate(callbackFailure);
+      stream.removeListener('error', onError);
+      if (error) reject(error); else resolve();
+    };
+    const onError = (error: Error) => finish(error);
+    stream.on('error', onError);
+    try {
+      stream.write(text, error => {
+        if (settled) return;
+        // Node emits the paired error after this callback. Keep its listener
+        // through that emission; callback-only streams still settle next tick.
+        if (error) callbackFailure = setImmediate(() => finish(error));
+        else finish();
+      });
+    } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
+  });
+}
+
 export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): Promise<number> {
   let token: string | undefined;
-  const print = (value: unknown) => {
+  const print = (value: unknown, stderr = false) => {
     const json = JSON.stringify(value);
-    console.log(token ? json.replaceAll(token, '[REDACTED]') : json);
+    (stderr ? console.error : console.log)(token ? json.replaceAll(token, '[REDACTED]') : json);
   };
   try {
     if (argv.length === 1 && (argv[0] === '-h' || argv[0] === '--help')) {
@@ -180,6 +210,9 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
         ...(values.resume === undefined ? {} : { resume: values.resume }),
         ...(values['request-id'] === undefined ? {} : { requestId: values['request-id'] }), ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }) });
       if (operation === 'progress') path = 'send';
+    } else if (operation === 'inbox') {
+      expectCount(operation, positionals, 0);
+      body = {};
     } else if (operation === 'conversation' || operation === 'cancel-request') {
       expectCount(operation, positionals, 1);
       body = operation === 'conversation' ? conversationInspectRequestSchema.parse({ recipientRunId: positionals[0] }) : conversationCancelRequestSchema.parse({ requestId: positionals[0] });
@@ -217,6 +250,41 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       token = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(env.CEZ_DELEGATION_TOKEN);
     } catch { throw new DelegationPolicyError('unavailable_transport', 'Delegation session is unavailable'); }
     try {
+      if (operation === 'inbox') {
+        const postInbox = async (action: '' | '/ack' | '/release', payload: object) => {
+          const response = await fetch(`${endpoint.href}/inbox${action}`, { method: 'POST', redirect: 'error',
+            headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(45_000) });
+          const data = await boundedJson(response);
+          if (!response.ok) throw new InboxHttpError(response.status);
+          return data;
+        };
+        const snapshot = inboxReserveResultSchema.parse(await postInbox('', {}));
+        try {
+          const json = JSON.stringify(snapshot).replaceAll(token, '[REDACTED]');
+          await writeInboxOutput(`${json}\n`);
+        } catch {
+          if (snapshot.receiptId) {
+            try { inboxReceiptResultSchema.parse(await postInbox('/release', { receiptId: snapshot.receiptId })); } catch { /* receipt expires */ }
+          }
+          print({ code: 'unavailable_transport', error: 'Inbox output failed; the receipt was released or will expire' }, true);
+          return 1;
+        }
+        if (snapshot.receiptId) {
+          let acknowledged = false;
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              const result = inboxReceiptResultSchema.parse(await postInbox('/ack', { receiptId: snapshot.receiptId }));
+              if (result.receiptId !== snapshot.receiptId || (result.status !== 'acknowledged' && result.status !== 'already-acknowledged')) throw Error('Invalid acknowledgement');
+              acknowledged = true; break;
+            } catch (error) {
+              if (error instanceof InboxHttpError && [400, 401, 403].includes(error.status)) break;
+              // A transport or server failure may have occurred after commit. Retry this receipt only.
+            }
+          }
+          if (!acknowledged) throw new DelegationPolicyError('unavailable_transport', `Inbox acknowledgement failed for receipt ${snapshot.receiptId}; messages may reappear after expiry`);
+        }
+        return 0;
+      }
       const response = await fetch(`${endpoint.href}/${path}`, { method: body === undefined ? 'GET' : 'POST', redirect: 'error',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(45_000) });
@@ -229,7 +297,10 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
       const result = responseSchemas[operation].parse(data);
       print(result);
       return 'delivery' in result && result.delivery === 'not-delivered' ? 1 : 0;
-    } catch { throw new DelegationPolicyError('unavailable_transport', 'Delegation transport failed or returned an invalid response'); }
+    } catch (error) {
+      if (error instanceof DelegationPolicyError) throw error;
+      throw new DelegationPolicyError('unavailable_transport', 'Delegation transport failed or returned an invalid response');
+    }
   } catch (error) {
     print(error instanceof DelegationPolicyError ? { code: error.code, error: error.message } : { code: 'invalid_input', error: formatWorkerCliError(error, argv[0]) });
     return 1;

@@ -4,7 +4,7 @@ import type { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import type { DelegationApp } from '../delegation/transport.ts';
 import type { AppType } from './app-type.ts';
-import type { conversationSendRequestSchema, conversationSendResultSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, conversationStateSchema, requestOutcomeSchema, requestWaitRequestSchema, workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, runRelationshipsSchema, runIdParamSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema, workerDiffSchema, workerWaitResultSchema, workerSpawnRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerSteerRequestSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
+import type { conversationSendRequestSchema, conversationSendResultSchema, conversationInspectRequestSchema, conversationInspectResultSchema, conversationCancelRequestSchema, inboxReserveResultSchema, inboxReceiptRequestSchema, inboxReceiptResultSchema, requestOutcomeSchema, requestWaitRequestSchema, workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, runRelationshipsSchema, runIdParamSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema, workerDiffSchema, workerWaitResultSchema, workerSpawnRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerSteerRequestSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
 
 describe('delegation contract and chained type surface', () => {
   const client = hc<DelegationApp>('http://127.0.0.1');
@@ -18,12 +18,18 @@ describe('delegation contract and chained type surface', () => {
     Assert<Mutual<z.infer<typeof conversationSendResultSchema>, InferResponseType<typeof family.send.$post, 200>>>,
     Assert<Mutual<z.infer<typeof conversationSendResultSchema>, InferResponseType<typeof family['follow-up']['$post'], 200>>>,
     Assert<Mutual<z.infer<typeof conversationSendResultSchema>, InferResponseType<typeof family.reply.$post, 200>>>,
-    Assert<Mutual<z.infer<typeof conversationStateSchema>, InferResponseType<typeof family.conversation.$post, 200>>>,
+    Assert<Mutual<z.infer<typeof conversationInspectResultSchema>, InferResponseType<typeof family.conversation.$post, 200>>>,
+    Assert<Mutual<z.infer<typeof inboxReserveResultSchema>, InferResponseType<typeof family.inbox.$post, 200>>>,
+    Assert<Mutual<z.infer<typeof inboxReceiptResultSchema>, InferResponseType<typeof family.inbox.ack.$post, 200>>>,
+    Assert<Mutual<z.infer<typeof inboxReceiptResultSchema>, InferResponseType<typeof family.inbox.release.$post, 200>>>,
     Assert<Mutual<z.infer<typeof requestOutcomeSchema>, InferResponseType<typeof family['cancel-request']['$post'], 200>>>,
     Assert<Mutual<z.input<typeof conversationSendRequestSchema>, Schema['/api/v1/delegation/send']['$post']['input']['json']>>,
     Assert<Mutual<z.input<typeof conversationSendRequestSchema>, Schema['/api/v1/delegation/follow-up']['$post']['input']['json']>>,
     Assert<Mutual<z.input<typeof conversationSendRequestSchema>, Schema['/api/v1/delegation/reply']['$post']['input']['json']>>,
     Assert<Mutual<z.input<typeof conversationInspectRequestSchema>, Schema['/api/v1/delegation/conversation']['$post']['input']['json']>>,
+    Assert<Mutual<z.input<typeof workerEmptyRequestSchema>, Schema['/api/v1/delegation/inbox']['$post']['input']['json']>>,
+    Assert<Mutual<z.input<typeof inboxReceiptRequestSchema>, Schema['/api/v1/delegation/inbox/ack']['$post']['input']['json']>>,
+    Assert<Mutual<z.input<typeof inboxReceiptRequestSchema>, Schema['/api/v1/delegation/inbox/release']['$post']['input']['json']>>,
     Assert<Mutual<z.input<typeof conversationCancelRequestSchema>, Schema['/api/v1/delegation/cancel-request']['$post']['input']['json']>>,
 
     Assert<Mutual<z.infer<typeof workerCollectedResultSchema>, InferResponseType<typeof family[':workerId']['collect']['$post'], 200>>>,

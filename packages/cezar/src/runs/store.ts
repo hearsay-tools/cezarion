@@ -1,14 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
-  ciWaitSchema, agentInputSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
+  ciWaitSchema, agentInputSchema, inboxClaimSchema, delegationStateSchema, workerCreationReceiptSchema, workerCollectedResultSchema, workerResultFileSchema,
   continuationMessageSchema,
   runRecordSchema as contractRunRecordSchema,
 } from '@open-mercato/cezar-contract';
-import type { CiWait, ConversationState, AgentInput, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
+import type { CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, WorkerCollectedResult } from '@open-mercato/cezar-contract';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
@@ -932,11 +933,103 @@ export class RunStore extends EventEmitter {
     const run = this.runs.get(id);
     if (!run) throw new Error('missing agent input target');
     const agentInputs = inputs.map(input => agentInputSchema.parse(input));
+    const now = new Date().toISOString();
+    for (const input of run.agentInputs ?? []) {
+      const claim = input.inboxClaim;
+      if (!claim || claim.acknowledgedAt || claim.expiresAt <= now) continue;
+      const matching = agentInputs.filter(next => next.id === input.id);
+      if (matching.length !== 1 || !isDeepStrictEqual(matching[0]!.inboxClaim, claim)) {
+        throw new Error('live inbox receipt changed');
+      }
+    }
     if (openingContinuationInputId && (run.continuationMessage?.agentInputId !== openingContinuationInputId ||
       !agentInputs.some(input => input.id === openingContinuationInputId && input.deliveredAt))) throw new Error('opening agent input checkpoint changed');
     const proposed = new Map(this.runs);
     proposed.set(id, { ...run, agentInputs, ...(openingContinuationInputId ? { continuationMessage: undefined } : {}) });
     this.commitIndex(proposed, new Set([id]));
+  }
+
+  /** Reserve only unread conversation inputs in one durable index replacement. */
+  claimInboxInputs(runId: string, ids: readonly string[], claim: InboxClaim): void {
+    const run = this.runs.get(runId);
+    if (!run) throw new Error('missing inbox recipient');
+    const selected = z.array(z.uuid()).min(1).max(32).refine(values => new Set(values).size === values.length).parse(ids);
+    const receipt = inboxClaimSchema.parse({ ...claim, memberIds: selected });
+    if (receipt.acknowledgedAt || receipt.expiresAt <= new Date().toISOString()) throw new Error('inbox claim is not live');
+    const inputs = run.agentInputs ?? [];
+    if (inputs.some(input => input.inboxClaim?.receiptId === receipt.receiptId)) throw new Error('inbox receipt already exists');
+    for (const id of selected) {
+      const matching = inputs.filter(input => input.id === id);
+      if (matching.length !== 1 || matching[0]?.source !== 'agent' || !matching[0].conversation ||
+        matching[0].deliveredAt || (matching[0].inboxClaim && matching[0].inboxClaim.expiresAt > new Date().toISOString())) {
+        throw new Error('inbox input is not available');
+      }
+    }
+    const selectedIds = new Set(selected);
+    const proposed = new Map(this.runs);
+    proposed.set(runId, { ...run, agentInputs: inputs.map(input => selectedIds.has(input.id)
+      ? agentInputSchema.parse({ ...input, inboxClaim: receipt }) : input) });
+    this.commitIndex(proposed, new Set([runId]));
+  }
+
+  /** A receipt owns every matching input or none; exact ACK retries preserve the first timestamp. */
+  ackInboxInputs(runId: string, receiptId: string, generation: string, at: string): 'acknowledged' | 'already-acknowledged' {
+    const run = this.runs.get(runId);
+    if (!run) throw new Error('missing inbox recipient');
+    inboxClaimSchema.shape.receiptId.parse(receiptId);
+    inboxClaimSchema.shape.generation.parse(generation);
+    inboxClaimSchema.shape.expiresAt.parse(at);
+    const matching = (run.agentInputs ?? []).filter(input => input.inboxClaim?.receiptId === receiptId);
+    const receipt = matching[0]?.inboxClaim;
+    const memberIds = receipt?.memberIds;
+    if (!memberIds || matching.length !== memberIds.length ||
+      !memberIds.every(id => matching.some(input => input.id === id)) ||
+      matching.some(input => !isDeepStrictEqual(input.inboxClaim, receipt)) ||
+      matching.some(input => input.inboxClaim?.generation !== generation ||
+      input.source !== 'agent' || !input.conversation)) throw new Error('inbox receipt changed');
+    if (matching.every(input => input.inboxClaim?.acknowledgedAt && input.deliveredAt === input.inboxClaim.acknowledgedAt)) {
+      return 'already-acknowledged';
+    }
+    if (matching.some(input => input.deliveredAt || input.inboxClaim?.acknowledgedAt || input.inboxClaim!.expiresAt <= at)) {
+      throw new Error('inbox receipt expired or displaced');
+    }
+    const proposed = new Map(this.runs);
+    proposed.set(runId, { ...run, agentInputs: run.agentInputs!.map(input => input.inboxClaim?.receiptId === receiptId
+      ? agentInputSchema.parse({ ...input, deliveredAt: at, inboxClaim: { ...input.inboxClaim, acknowledgedAt: at } }) : input) });
+    this.commitIndex(proposed, new Set([runId]));
+    return 'acknowledged';
+  }
+
+  releaseInboxInputs(runId: string, receiptId: string, generation: string): 'released' {
+    const run = this.runs.get(runId);
+    if (!run) throw new Error('missing inbox recipient');
+    inboxClaimSchema.shape.receiptId.parse(receiptId);
+    inboxClaimSchema.shape.generation.parse(generation);
+    const matching = (run.agentInputs ?? []).filter(input => input.inboxClaim?.receiptId === receiptId);
+    if (!matching.length || matching.some(input => input.inboxClaim?.generation !== generation ||
+      input.inboxClaim?.acknowledgedAt || input.deliveredAt)) throw new Error('inbox receipt changed');
+    const proposed = new Map(this.runs);
+    proposed.set(runId, { ...run, agentInputs: run.agentInputs!.map(input => {
+      if (input.inboxClaim?.receiptId !== receiptId) return input;
+      const { inboxClaim: _claim, ...unclaimed } = input;
+      return agentInputSchema.parse(unclaimed);
+    }) });
+    this.commitIndex(proposed, new Set([runId]));
+    return 'released';
+  }
+
+  clearExpiredInboxClaims(runId: string, now: string): void {
+    const run = this.runs.get(runId);
+    if (!run) throw new Error('missing inbox recipient');
+    inboxClaimSchema.shape.expiresAt.parse(now);
+    if (!run.agentInputs?.some(input => input.inboxClaim && !input.inboxClaim.acknowledgedAt && input.inboxClaim.expiresAt <= now)) return;
+    const proposed = new Map(this.runs);
+    proposed.set(runId, { ...run, agentInputs: run.agentInputs.map(input => {
+      if (!input.inboxClaim || input.inboxClaim.acknowledgedAt || input.inboxClaim.expiresAt > now) return input;
+      const { inboxClaim: _claim, ...unclaimed } = input;
+      return agentInputSchema.parse(unclaimed);
+    }) });
+    this.commitIndex(proposed, new Set([runId]));
   }
 
   /** CI intent and its wake entry share one atomic index replacement. */

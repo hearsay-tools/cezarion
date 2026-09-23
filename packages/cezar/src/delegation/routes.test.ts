@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { createDelegationRoutes } from './routes.ts';
 import { fixture } from './service.testkit.ts';
-import { conversationSendResultSchema, conversationStateSchema, requestOutcomeSchema, delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract';
+import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema, delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract';
 
 describe('authenticated delegation HTTP family', () => {
   let f: ReturnType<typeof fixture>, app: ReturnType<typeof createDelegationRoutes>;
@@ -45,9 +45,37 @@ describe('authenticated delegation HTTP family', () => {
     const reply = await request('/reply', { id: randomUUID(), recipientRunId: f.parent.id, kind: 'reply', requestId: input.id, text: 'index.ts' }, { authorization: `Bearer ${token}` });
     expect(reply.status).toBe(200); expect(conversationSendResultSchema.parse(await reply.json()).outcome?.status).toBe('replied');
     const inspected = await request('/conversation', { recipientRunId: workerId });
-    expect(conversationStateSchema.parse(await inspected.json()).messages).toHaveLength(3);
+    expect(conversationInspectResultSchema.parse(await inspected.json()).messages).toHaveLength(3);
     const cancelled = await request('/cancel-request', { requestId: input.id });
     expect(requestOutcomeSchema.parse(await cancelled.json()).status).toBe('replied');
+  });
+  it('validates inbox bodies and scopes receipts to the authenticated session', async () => {
+    const { workerId } = await spawn(); f.store.updateRun(workerId, { status: 'running' });
+    const workerToken = f.credentials.issue('project', workerId, randomUUID());
+    const sent = await request('/send', { id: randomUUID(), recipientRunId: workerId, kind: 'progress', text: 'Read me' });
+    expect(sent.status).toBe(200);
+    for (const body of [{ recipientRunId: workerId }, { receiptId: randomUUID() }, { projectId: 'project' }]) expect((await request('/inbox', body)).status).toBe(400);
+    const reserve = await request('/inbox', {}, { authorization: `Bearer ${workerToken}` });
+    expect(reserve.status).toBe(200);
+    const batch = inboxReserveResultSchema.parse(await reserve.json());
+    expect(batch.messages).toMatchObject([{ senderRunId: f.parent.id, recipientRunId: workerId, text: 'Read me' }]);
+    expect((await request('/inbox/ack', { receiptId: batch.receiptId!, runId: workerId }, { authorization: `Bearer ${workerToken}` })).status).toBe(400);
+    expect((await request('/inbox/ack', { receiptId: 'bad' }, { authorization: `Bearer ${workerToken}` })).status).toBe(400);
+    expect((await request('/inbox/ack', { receiptId: batch.receiptId! })).status).toBe(403);
+    const staleToken = workerToken;
+    const currentToken = f.credentials.issue('project', workerId, randomUUID());
+    expect((await request('/inbox/ack', { receiptId: batch.receiptId! }, { authorization: `Bearer ${staleToken}` })).status).toBe(401);
+    expect((await request('/inbox/ack', { receiptId: batch.receiptId! }, { authorization: `Bearer ${currentToken}` })).status).toBe(403);
+  });
+  it('ACKs and releases only the supplied live receipt', async () => {
+    const { workerId } = await spawn(); f.store.updateRun(workerId, { status: 'running' });
+    const token = f.credentials.issue('project', workerId, randomUUID());
+    await request('/send', { id: randomUUID(), recipientRunId: workerId, kind: 'progress', text: 'First' });
+    const first = inboxReserveResultSchema.parse(await (await request('/inbox', {}, { authorization: `Bearer ${token}` })).json());
+    expect(inboxReceiptResultSchema.parse(await (await request('/inbox/release', { receiptId: first.receiptId }, { authorization: `Bearer ${token}` })).json()).status).toBe('released');
+    const second = inboxReserveResultSchema.parse(await (await request('/inbox', {}, { authorization: `Bearer ${token}` })).json());
+    expect(second.messages.map(message => message.id)).toEqual(first.messages.map(message => message.id));
+    expect(inboxReceiptResultSchema.parse(await (await request('/inbox/ack', { receiptId: second.receiptId }, { authorization: `Bearer ${token}` })).json()).status).toBe('acknowledged');
   });
   it('collects under legacy inspect-only authority with strict middleware', async () => {
     const { workerId } = await spawn(); const parent = f.store.getRun(f.parent.id)!;

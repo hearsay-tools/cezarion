@@ -5,6 +5,53 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
 import { projectConversationEvents } from './conversations.ts';
+import {
+  conversationInspectResultSchema, conversationStateSchema, inboxClaimSchema, inboxReceiptRequestSchema,
+  inboxReceiptResultSchema, inboxReserveResultSchema,
+} from '@open-mercato/cezar-contract';
+
+describe('worker inbox contract', () => {
+  const at = '2026-09-06T12:00:00.000Z';
+  const message = { id: randomUUID(), senderRunId: randomUUID(), recipientRunId: randomUUID(), kind: 'request',
+    text: 'Need a decision', createdAt: at, requestHash: 'a'.repeat(64), state: 'accepted' };
+  const outcome = { requestId: message.id, status: 'replied', observedAt: at, replyId: randomUUID() };
+  const receiptId = randomUUID();
+
+  it('parses bounded snapshots and requires receipt fields together only for a nonempty batch', () => {
+    const batch = { messages: [message], outcomes: [outcome], receiptId, expiresAt: '2026-09-06T12:02:00.000Z' };
+    expect(inboxReserveResultSchema.parse(batch)).toEqual(batch);
+    expect(inboxReserveResultSchema.parse({ messages: [], outcomes: [] })).toEqual({ messages: [], outcomes: [] });
+    for (const invalid of [
+      { messages: [], outcomes: [], receiptId, expiresAt: batch.expiresAt },
+      { messages: [message], outcomes: [] },
+      { messages: [message], outcomes: [], receiptId },
+      { messages: [message], outcomes: [], expiresAt: batch.expiresAt },
+      { ...batch, messages: Array.from({ length: 33 }, (_, n) => ({ ...message, id: randomUUID(), text: `message ${n}` })) },
+      { ...batch, outcomes: Array.from({ length: 33 }, () => ({ ...outcome, requestId: randomUUID() })) },
+    ]) expect(inboxReserveResultSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it('validates receipt identity, acknowledgement status and inspection hint separately from persisted state', () => {
+    const claim = { receiptId, generation: randomUUID(), expiresAt: '2026-09-06T12:02:00.000Z' };
+    const memberIds = [randomUUID(), randomUUID()];
+    expect(inboxClaimSchema.parse(claim)).toEqual(claim);
+    expect(inboxClaimSchema.parse({ ...claim, memberIds })).toEqual({ ...claim, memberIds });
+    expect(inboxClaimSchema.safeParse({ ...claim, memberIds: [] }).success).toBe(false);
+    expect(inboxClaimSchema.safeParse({ ...claim, memberIds: [memberIds[0], memberIds[0]] }).success).toBe(false);
+    expect(inboxClaimSchema.parse({ ...claim, acknowledgedAt: at })).toEqual({ ...claim, acknowledgedAt: at });
+    expect(inboxClaimSchema.safeParse({ ...claim, generation: 'bad' }).success).toBe(false);
+    expect(inboxClaimSchema.safeParse({ ...claim, expiresAt: 'tomorrow' }).success).toBe(false);
+    expect(inboxReceiptRequestSchema.parse({ receiptId })).toEqual({ receiptId });
+    expect(inboxReceiptRequestSchema.safeParse({ receiptId, generation: claim.generation }).success).toBe(false);
+    for (const status of ['acknowledged', 'already-acknowledged', 'released']) {
+      expect(inboxReceiptResultSchema.parse({ receiptId, status })).toEqual({ receiptId, status });
+    }
+    expect(inboxReceiptResultSchema.safeParse({ receiptId, status: 'pending' }).success).toBe(false);
+    const inspection = { messages: [message], outcomes: [outcome], hint: 'Run worker inbox' };
+    expect(conversationInspectResultSchema.parse(inspection)).toEqual(inspection);
+    expect(conversationStateSchema.safeParse(inspection).success).toBe(false);
+  });
+});
 
 describe('durable conversations', () => {
   let f: ReturnType<typeof fixture>;
@@ -18,6 +65,67 @@ describe('durable conversations', () => {
     f.store.updateRun(workerId, { status: 'running' });
     return { id: workerId, caller: f.credentials.authenticate(f.credentials.issue('project', workerId, randomUUID()))! };
   }
+  it('reserves incoming messages across workers, preserves outcomes and acknowledges exact IDs', async () => {
+    const a = await worker(); const b = await worker();
+    const request = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: a.id, kind: 'request', text: 'Question', timeoutSeconds: 600 });
+    const reply = await f.service.reply(a.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'reply', requestId: request.message.id, text: 'Answer', timeoutSeconds: 600 });
+    const update = await f.service.send(b.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Update', timeoutSeconds: 600 });
+    const inspected = await f.service.conversation(f.caller, { recipientRunId: a.id });
+    expect(conversationInspectResultSchema.parse(inspected).hint).toContain('Inbox will show them again intentionally');
+    expect(f.store.getRun(f.parent.id)?.agentInputs?.find(input => input.id === reply.message.id)?.deliveredAt).toBeUndefined();
+    const batch = inboxReserveResultSchema.parse(await f.service.inbox(f.caller));
+    expect(batch.messages.map(message => [message.id, message.senderRunId])).toEqual([[reply.message.id, a.id], [update.message.id, b.id]]);
+    expect(batch.outcomes).toMatchObject([{ requestId: request.message.id, status: 'replied' }]);
+    expect(inboxReserveResultSchema.parse(await f.service.inbox(f.caller))).toEqual({ messages: [], outcomes: [] });
+    expect((await f.service.ackInbox(f.caller, { receiptId: batch.receiptId! })).status).toBe('acknowledged');
+    expect((await f.service.ackInbox(f.caller, { receiptId: batch.receiptId! })).status).toBe('already-acknowledged');
+    expect(f.store.getRun(f.parent.id)?.agentInputs?.filter(input => [reply.message.id, update.message.id].includes(input.id)).every(input => !!input.deliveredAt)).toBe(true);
+    expect((await f.service.conversation(f.caller, { recipientRunId: a.id })).hint).toBeUndefined();
+  });
+  it('keeps new arrivals outside a live receipt and leaves request obligations pending', async () => {
+    const w = await worker();
+    const first = await f.service.send(w.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'request', text: 'Need decision', timeoutSeconds: 600 });
+    const batch = await f.service.inbox(f.caller);
+    const later = await f.service.send(w.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'More context', timeoutSeconds: 600 });
+    expect(batch.messages.map(message => message.id)).toEqual([first.message.id]);
+    expect(batch.outcomes).toEqual([]);
+    expect((await f.service.inbox(f.caller)).messages).toEqual([]);
+    await f.service.ackInbox(f.caller, { receiptId: batch.receiptId! });
+    expect((await f.service.inbox(f.caller)).messages.map(message => message.id)).toEqual([later.message.id]);
+    expect((await f.service.conversation(w.caller, { recipientRunId: f.parent.id })).outcomes).toEqual([]);
+  });
+  it('hints only for unread incoming messages in the inspected pair', async () => {
+    const a = await worker(); const b = await worker();
+    const outbound = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: a.id, kind: 'progress', text: 'Outbound', timeoutSeconds: 600 });
+    expect((await f.service.conversation(f.caller, { recipientRunId: a.id })).hint).toBeUndefined();
+    expect((await f.service.conversation(a.caller, { recipientRunId: f.parent.id })).hint).toContain('Inbox will show them again intentionally');
+    await f.service.send(b.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Other pair', timeoutSeconds: 600 });
+    expect((await f.service.conversation(f.caller, { recipientRunId: a.id })).hint).toBeUndefined();
+    expect(f.store.getRun(a.id)?.agentInputs?.find(input => input.id === outbound.message.id)?.deliveredAt).toBeUndefined();
+  });
+  it('limits snapshots to 32 messages and 100000 text characters without splitting a message', async () => {
+    const w = await worker();
+    for (let i = 0; i < 32; i++) await f.service.send(w.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: `item ${i}`, timeoutSeconds: 600 });
+    const full = await f.service.inbox(f.caller);
+    expect(full.messages).toHaveLength(32);
+    await f.service.ackInbox(f.caller, { receiptId: full.receiptId! });
+    for (const text of ['a'.repeat(60_000), 'b'.repeat(40_000), 'last']) await f.service.send(w.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text, timeoutSeconds: 600 });
+    const bounded = await f.service.inbox(f.caller);
+    expect(bounded.messages.map(message => message.text.length)).toEqual([60_000, 40_000]);
+    await f.service.ackInbox(f.caller, { receiptId: bounded.receiptId! });
+    expect((await f.service.inbox(f.caller)).messages.map(message => message.text)).toEqual(['last']);
+  });
+  it('permits a worker to read only its parent and denies unrelated callers or receipts', async () => {
+    const a = await worker(); const b = await worker();
+    const incoming = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: a.id, kind: 'progress', text: 'For A', timeoutSeconds: 600 });
+    await f.service.send(f.caller, { id: randomUUID(), recipientRunId: b.id, kind: 'progress', text: 'For B', timeoutSeconds: 600 });
+    const batch = await f.service.inbox(a.caller);
+    expect(batch.messages.map(message => message.id)).toEqual([incoming.message.id]);
+    await expect(f.service.ackInbox(b.caller, { receiptId: batch.receiptId! })).rejects.toMatchObject({ code: 'denied_scope' });
+    const foreign = f.credentials.authenticate(f.credentials.issue('other', f.parent.id, randomUUID()))!;
+    await expect(f.service.inbox(foreign)).rejects.toMatchObject({ code: 'denied_scope' });
+    await f.service.releaseInbox(a.caller, { receiptId: batch.receiptId! });
+  });
   async function completedWorker(status: 'done' | 'review' = 'done') {
     const w = await worker();
     // This service fixture holds the scheduler; remove its original queued job
