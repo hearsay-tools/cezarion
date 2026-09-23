@@ -121,6 +121,15 @@ describe('application update chrome', () => {
     browser.click('[data-slot="alert-dialog-cancel"]')
     browser.waitForFunction(`document.querySelector('[role="alertdialog"]') === null && document.activeElement?.getAttribute('aria-label') === 'Restart application'`)
     browser.click(`${drawer} [aria-label="Restart application"]`)
+    browser.waitForFunction(`(() => {
+      const dialog = document.querySelector('[role="alertdialog"]')
+      const overlay = document.querySelector('[data-slot="alert-dialog-overlay"]')
+      const action = dialog?.querySelector('[data-slot="alert-dialog-action"]')
+      if (!dialog || !overlay || !action) return false
+      if ([dialog, overlay].some(el => el.getAnimations().some(animation => animation.playState === 'running'))) return false
+      const rect = action.getBoundingClientRect()
+      return getComputedStyle(dialog).opacity === '1' && action.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))
+    })()`)
     browser.click('[data-slot="alert-dialog-action"]')
     browser.waitForFunction(`document.querySelector('${drawer} [aria-label="Reconnecting after restart"]') !== null && document.querySelector('[role="alertdialog"]') === null`)
     browser.screenshot(`${artifacts}/mobile-restarting-dark.png`, { viewport: true })
