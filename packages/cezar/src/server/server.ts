@@ -101,6 +101,9 @@ import {
   runIdParamSchema,
 } from '@open-mercato/cezar-contract';
 import { resolveAttachmentPath } from '../workflows/attachment-path.ts';
+import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-contract';
+import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/store.ts';
+import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
 import { removeWorktree, worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
 import { isReclaimable, reclaimWorktrees } from '../runs/retention.ts';
@@ -4202,6 +4205,61 @@ export function createApp(deps: ServerDeps) {
       const result = await collectCommitChanges(workingDirectory, c.req.param('sha'));
       if (!result.ok) return c.json({ error: result.error }, 409);
       return c.json(result.commit);
+    })
+
+    .get('/runs/:id/file-link', paramZodValidator(artifactParamsSchema.omit({ artifactId: true })), queryZodValidator(fileLinkQuerySchema), async (c) => {
+      const { root, dataDir, store } = c.get('project');
+      const run = store.getRun(c.req.valid('param').id);
+      if (!run) return c.json({ error: 'not found' }, 404);
+      const query = c.req.valid('query');
+      const loaded = await loadFileLink({ dataDir, runId: run.id, projectRoot: root, workingDirectory: run.worktreePath ?? root, path: query.path });
+      if (query.raw === '1') {
+        if (!loaded.imageBytes || loaded.preview.type !== 'file') return c.json({ error: 'Only bounded raster images can be served inline.' }, 409);
+        return c.body(new Uint8Array(loaded.imageBytes).buffer, 200, {
+          'content-type': rasterMime(loaded.preview.path)!, 'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'private, no-store',
+        });
+      }
+      return c.json(loaded.preview);
+    })
+    .get('/runs/:id/artifacts', paramZodValidator(artifactParamsSchema.omit({ artifactId: true })), async (c) => {
+      const { dataDir, store } = c.get('project');
+      const id = c.req.valid('param').id;
+      if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
+      return c.json({ artifacts: await listArtifacts(artifactDirectory(dataDir, id), id) });
+    })
+    .get('/runs/:id/artifacts/:artifactId', paramZodValidator(artifactParamsSchema), async (c) => {
+      const { dataDir, store } = c.get('project');
+      const { id, artifactId } = c.req.valid('param');
+      if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
+      const entry = await readArtifact(artifactDirectory(dataDir, id), id, artifactId);
+      if (!entry) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
+      return c.json(artifactPreview(entry.metadata, entry.bytes));
+    })
+    .get('/runs/:id/artifacts/:artifactId/download', paramZodValidator(artifactParamsSchema), async (c) => {
+      const { dataDir, store } = c.get('project');
+      const { id, artifactId } = c.req.valid('param');
+      if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
+      const entry = await readArtifact(artifactDirectory(dataDir, id), id, artifactId);
+      if (!entry) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
+      return c.body(new Uint8Array(entry.bytes).buffer, 200, {
+        'content-type': 'application/octet-stream', 'x-content-type-options': 'nosniff',
+        'content-disposition': `attachment; filename="${entry.metadata.name.replace(/[^A-Za-z0-9._-]/g, '_')}"`,
+        'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'private, no-store',
+      });
+    })
+    .get('/runs/:id/artifacts/:artifactId/image', paramZodValidator(artifactParamsSchema), async (c) => {
+      const { dataDir, store } = c.get('project');
+      const { id, artifactId } = c.req.valid('param');
+      if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
+      const entry = await readArtifact(artifactDirectory(dataDir, id), id, artifactId);
+      if (!entry) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
+      const mime = rasterMime(entry.metadata.name);
+      if (!mime) return c.json({ error: 'Only raster images can be served inline.' }, 409);
+      return c.body(new Uint8Array(entry.bytes).buffer, 200, {
+        'content-type': mime, 'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'private, no-store',
+      });
     })
 
     // Files tab: directory listing (path omitted or a dir) or file content

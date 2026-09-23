@@ -408,13 +408,17 @@ export class DelegationService {
     if (!worker) {
       const retained = project.store.readDeletedWorkerResult(caller.runId, workerId);
       authorizeRetainedResult(caller, parent, project.id, workerId, retained);
-      return project.store.commitWorkerResult(caller.runId, revalidateRetainedWorkerResult(project.root, retained!), project.store.readWorkerResultDiff(caller.runId, workerId));
+      const evidence = await revalidateRetainedWorkerResult(project.root, retained!);
+      authorizeRetainedResult(caller, project.store.getRun(caller.runId), project.id, workerId, project.store.readDeletedWorkerResult(caller.runId, workerId));
+      return project.store.commitWorkerResult(caller.runId, evidence, project.store.readWorkerResultDiff(caller.runId, workerId));
     }
     authorizeWorker(caller, worker, 'inspect', parent, project.id);
     if (parent?.delegation?.role === 'root' && parent.delegation.receipts.some(receipt => receipt.workerId === workerId && receipt.deletion?.phase === 'pending')) {
       const retained = project.store.readWorkerResult(parent.id, workerId);
       if (!retained || !project.store.canDeleteRun(workerId)) throw new DelegationPolicyError('incompatible_state', 'Worker history deletion evidence is unavailable');
-      return project.store.commitWorkerResult(parent.id, revalidateRetainedWorkerResult(project.root, retained), project.store.readWorkerResultDiff(parent.id, workerId));
+      const evidence = await revalidateRetainedWorkerResult(project.root, retained);
+      if (!project.store.canDeleteRun(workerId)) throw new DelegationPolicyError('incompatible_state', 'Worker history changed during collection');
+      return project.store.commitWorkerResult(parent.id, evidence, project.store.readWorkerResultDiff(parent.id, workerId));
     }
     // Store records preserve object references. Copy before yielding to Continue or cleanup.
     const snapshot = structuredClone(worker);

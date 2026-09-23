@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useContext, useMemo } from 'react'
 import {
   Streamdown,
   defaultRemarkPlugins,
@@ -9,6 +9,8 @@ import {
 import { SYN_THEME, highlight, highlightSync, supportedLanguages } from '@/lib/highlighter'
 
 import { LinkSafetyDialog } from './link-safety-dialog'
+import { TaskFileContext, taskFileHref } from './file-links'
+import { TaskLink } from './task-link'
 
 /**
  * Assistant markdown for the thread — Streamdown (spec tech pick: stable-block memoization,
@@ -43,6 +45,7 @@ const shikiPlugin: CodeHighlighterPlugin = {
 interface MdastNode {
   type: string
   value?: string
+  url?: string
   children?: MdastNode[]
 }
 
@@ -122,20 +125,47 @@ export const Markdown = memo(function Markdown({
   children,
   breaks = false,
   inline = false,
+  document = false,
 }: {
   children: string
   breaks?: boolean
   inline?: boolean
+  document?: boolean
 }) {
+  const fileContext = useContext(TaskFileContext)
+  const contextual = useMemo(() => {
+    const internal = new Set<string>()
+    function taskLinks() {
+      const walk = (node: MdastNode): void => {
+        if ((node.type === 'link' || node.type === 'definition') && node.url && fileContext) {
+          const target = taskFileHref(node.url, fileContext)
+          if (target) { node.url = target; internal.add(target) }
+        }
+        node.children?.forEach(walk)
+      }
+      return walk
+    }
+    return {
+      remark: [...(breaks ? HARD_BREAKS : Object.values(defaultRemarkPlugins)), taskLinks],
+      components: {
+        ...(fileContext || document ? { a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+          // A snapshot has no live directory. Relative links cannot silently target the host.
+          if (document && !fileContext && !/^(?:https?:|mailto:|#)/i.test(href ?? '')) return <span>{children}</span>
+          return <TaskLink href={href} internal={internal.has(href ?? '')}>{children}</TaskLink>
+        } } : {}),
+        ...(document ? { img: ({ alt }: { alt?: string }) => <span className="text-muted-foreground">[Image: {alt || 'embedded image'}]</span> } : {}),
+      },
+    }
+  }, [fileContext, breaks, document])
   return (
     <Streamdown
       className={inline ? 'thread-markdown thread-markdown-inline' : 'thread-markdown'}
       plugins={{ code: shikiPlugin }}
       shikiTheme={[SYN_THEME, SYN_THEME]}
-      remarkPlugins={breaks ? HARD_BREAKS : undefined}
+      remarkPlugins={fileContext ? contextual.remark : breaks ? HARD_BREAKS : undefined}
       allowedElements={inline ? INLINE_ELEMENTS : undefined}
       unwrapDisallowed={inline || undefined}
-      components={inline ? INLINE_COMPONENTS : undefined}
+      components={inline ? INLINE_COMPONENTS : fileContext || document ? contextual.components : undefined}
       linkSafety={LINK_SAFETY}
       // Copy + language chip on every fence (the deliverable); download is file-manager noise
       // in a chat, and table export dropdowns are R5-territory chrome.

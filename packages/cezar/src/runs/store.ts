@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -2085,6 +2086,7 @@ export class RunStore extends EventEmitter {
     rmSync(this.eventsPath(id), { force: true });
     rmSync(this.handoffPath(id), { force: true });
     rmSync(this.imagesDir(id), { recursive: true, force: true });
+    removeArtifacts(this.dataDir, id);
   }
 
   deleteRun(id: string): boolean {
@@ -2097,6 +2099,7 @@ export class RunStore extends EventEmitter {
         rmSync(this.eventsPath(id), { force: true });
         rmSync(this.handoffPath(id), { force: true });
         rmSync(this.imagesDir(id), { recursive: true, force: true });
+        removeArtifacts(this.dataDir, id);
       } catch { /* Ordinary run deletion preserves its existing best-effort behavior. */ }
       this.seqs.delete(id);
       this.scheduleSave();
@@ -2171,6 +2174,7 @@ export class RunStore extends EventEmitter {
         rmSync(this.eventsPath(stale.id), { force: true });
         rmSync(this.handoffPath(stale.id), { force: true });
         rmSync(this.imagesDir(stale.id), { recursive: true, force: true });
+        removeArtifacts(this.dataDir, stale.id);
       } catch {
         // best effort
       }

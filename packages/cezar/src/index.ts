@@ -52,6 +52,7 @@ Usage:
   cez projects              list the projects this cockpit serves
                             (also: projects add [<dir>] · projects remove <id>)
   cez worker                manage owned workers (see: worker --help)
+  cez artifact publish <path> publish a local task artifact (see: artifact --help)
   cez server-install        interactive wizard to host cezar on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install
@@ -86,6 +87,11 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repo
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
+  if (process.argv[2] === 'artifact') {
+    const { runArtifactCommand } = await import('./artifacts/cli.ts');
+    process.exitCode = await runArtifactCommand(process.argv.slice(3), process.env);
+    return;
+  }
   if (process.argv[2] === 'worker') {
     const { runWorkerCommand } = await import('./delegation/cli.ts');
     process.exitCode = await runWorkerCommand(process.argv.slice(3), process.env);

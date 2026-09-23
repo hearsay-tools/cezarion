@@ -85,6 +85,12 @@ function stubFetch(overrides: Record<string, () => Response> = {}): string[] {
       if (method === 'GET' && path === '/api/v1/runs/r1') return jsonResponse(RUN)
       if (method === 'GET' && path === '/api/v1/health') return jsonResponse(HEALTH)
       if (method === 'GET' && path === '/api/v1/runs/r1/files?path=') return jsonResponse(ROOT)
+      if (method === 'GET' && path === '/api/v1/runs/r1/artifacts') return jsonResponse({ artifacts: [] })
+      const linkedMatch = /^\/api\/v1\/runs\/r1\/file-link\?path=(.+)$/.exec(path)
+      if (method === 'GET' && linkedMatch && FILES[linkedMatch[1]!]) {
+        const entry = FILES[linkedMatch[1]!]!
+        return jsonResponse(entry.type === 'dir' ? { type: 'unavailable', path: entry.path, reason: 'Choose a file inside this directory.' } : { ...entry, source: 'worktree' })
+      }
       const filesMatch = /^\/api\/v1\/runs\/r1\/files\?path=(.+)$/.exec(path)
       if (method === 'GET' && filesMatch && FILES[filesMatch[1]!]) return jsonResponse(FILES[filesMatch[1]!])
       return jsonResponse({ error: `unstubbed: ${path}` }, 404)
@@ -93,10 +99,10 @@ function stubFetch(overrides: Record<string, () => Response> = {}): string[] {
   return sent
 }
 
-function renderFilesRoute() {
+function renderFilesRoute(search = '') {
   render(
     <QueryClientProvider client={createQueryClient()}>
-      <MemoryRouter initialEntries={['/tasks/r1/files']}>
+      <MemoryRouter initialEntries={[`/tasks/r1/files${search}`]}>
         <Routes>
           <Route path="/tasks/:id/files" element={<TaskFilesRoute />} />
         </Routes>
@@ -116,6 +122,22 @@ async function openFile(path: string) {
 // ---- the route -------------------------------------------------------------------------------
 
 describe('the Files tab route', () => {
+  it('opens a bookmarked file selection without searching the tree', async () => {
+    stubFetch()
+    renderFilesRoute('?path=hello.ts')
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-code"]')?.textContent).toContain("export const hi = 'world'"))
+  })
+
+  it('opens a published snapshot even after the worktree is gone', async () => {
+    stubFetch({
+      'GET /api/v1/runs/r1/files?path=': () => jsonResponse({ error: 'Worktree removed' }, 409),
+      'GET /api/v1/runs/r1/artifacts/report': () => jsonResponse({ type: 'file', path: 'decision.txt', source: 'artifact', size: 8, binary: false, tooLarge: false, content: 'snapshot', artifact: { id: 'report', name: 'decision.txt', createdAt: '2026-09-23T00:00:00Z', size: 8 } }),
+    })
+    renderFilesRoute('?artifact=report')
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-code"]')?.textContent).toContain('snapshot'))
+    expect(screen.getByRole('link', { name: 'Download' })).toBeTruthy()
+  })
+
   it('renders the header with Files active, the root listing, and the select-a-file prompt', async () => {
     stubFetch()
     renderFilesRoute()
@@ -194,10 +216,21 @@ describe('the Files tab route', () => {
 
     await waitFor(() => expect(document.querySelector('[data-slot="file-preview-image"]')).not.toBeNull())
     const img = document.querySelector('[data-slot="file-preview-image"]') as HTMLImageElement
-    expect(img.getAttribute('src')).toBe('/api/v1/runs/r1/files?path=logo.png&raw=1')
+    expect(img.getAttribute('src')).toBe('/api/v1/runs/r1/file-link?path=logo.png&raw=1')
     expect(img.getAttribute('alt')).toBe('logo.png')
   })
 
+  it('previews a bounded raster larger than the text preview cap', async () => {
+    stubFetch({ 'GET /api/v1/runs/r1/file-link?path=logo.png': () => jsonResponse({ type: 'file', path: 'logo.png', source: 'worktree', size: 1024 * 1024, binary: true, tooLarge: true }) })
+    renderFilesRoute('?path=logo.png')
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-image"]')).not.toBeNull())
+  })
+  it('keeps the path field synchronized with URL selection changes', async () => {
+    stubFetch()
+    renderFilesRoute('?path=hello.ts')
+    await openFile('logo.png')
+    await waitFor(() => expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('logo.png'))
+  })
   it('a size-capped file gets the honest too-large state, never a fake preview', async () => {
     stubFetch()
     renderFilesRoute()
@@ -221,8 +254,8 @@ describe('the Files tab route', () => {
 
   it('a per-file 409 shows the server words as a refusal, not an outage', async () => {
     stubFetch({
-      'GET /api/v1/runs/r1/files?path=hello.ts': () =>
-        jsonResponse({ error: 'symlinks are not served: hello.ts' }, 409),
+      'GET /api/v1/runs/r1/file-link?path=hello.ts': () =>
+        jsonResponse({ type: 'unavailable', path: 'hello.ts', reason: 'symlinks are not served: hello.ts' }),
     })
     renderFilesRoute()
     await openFile('hello.ts')
@@ -267,7 +300,7 @@ it('opens a known worktree path without fetching unopened directories', async ()
   const input = await screen.findByRole('textbox', { name: 'File path in the worktree' })
   fireEvent.change(input, { target: { value: 'src/nested.md' } })
   fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
-  await waitFor(() => expect(sent).toContain('GET /api/v1/runs/r1/files?path=src%2Fnested.md'))
+  await waitFor(() => expect(sent).toContain('GET /api/v1/runs/r1/file-link?path=src%2Fnested.md'))
   expect(sent).not.toContain('GET /api/v1/runs/r1/files?path=src')
 })
 
@@ -278,5 +311,5 @@ it('explains a directory entered in the file-path control instead of blanking th
   const input = await screen.findByRole('textbox', { name: 'File path in the worktree' })
   fireEvent.change(input, { target: { value: 'src' } })
   fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
-  expect(await screen.findByRole('heading', { name: 'Choose a file inside this directory' })).toBeTruthy()
+  expect(await screen.findByText('Choose a file inside this directory.')).toBeTruthy()
 })

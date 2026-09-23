@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { HANDOFF_INSTRUCTIONS, HANDOFF_ONLY_INSTRUCTIONS } from '../handoff.ts';
+import { HANDOFF_INSTRUCTIONS as BASE_HANDOFF, HANDOFF_ONLY_INSTRUCTIONS as BASE_HANDOFF_ONLY } from '../handoff.ts';
+import { artifactInstructions } from '../artifacts/lifecycle.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { WorkflowDef } from './types.ts';
@@ -16,6 +17,10 @@ import {
   skillSystemPrompt,
 } from './run.ts';
 
+// Publication guidance is additive for both fresh sessions and Continue; the
+// full prompt assertions below must still pin the unchanged handoff contract.
+const HANDOFF_INSTRUCTIONS = composeSystemPrompt(artifactInstructions('available'), BASE_HANDOFF);
+const HANDOFF_ONLY_INSTRUCTIONS = composeSystemPrompt(artifactInstructions('available'), BASE_HANDOFF_ONLY);
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 

@@ -847,6 +847,32 @@ works and how to redeploy new versions.
 
 ---
 
+## Reviewing task files
+
+File links in task messages open the Files tab at the selected file, rather than
+navigating to a host path under the cockpit URL. The selection stays in the URL,
+so bookmarks and browser Back work. This works with local and remote cockpits.
+
+For a deliverable outside the project, an agent must explicitly publish a snapshot:
+
+```sh
+cez artifact publish /tmp/decision.md
+```
+
+Cezar supplies the bundled command and task context to agent sessions automatically
+(`CEZ_TASK_ID` and `CEZ_ARTIFACTS_DIR`; do not configure these yourself). The command
+returns JSON with a Markdown link for the agent to share. The Files tab also lists
+published artifacts. It previews text, Markdown and raster images; other formats
+can be downloaded. HTML/scripts never execute inside the cockpit, and embedded
+images in Markdown documents do not load automatically.
+
+Snapshots do not change when the original file changes. They survive worktree
+removal and are removed with task history, including normal history retention.
+Publication is limited to 10 MiB per file, 64 snapshots and 64 MiB per task; reaching
+a limit refuses the new publication without evicting earlier files. There is no
+arbitrary host-file reader or automatic collection of mentioned paths. Publish
+only intended review material, never credentials or unrelated private files.
+
 ## Configuration (optional)
 
 Zero config is the default — everything below is opt-in via

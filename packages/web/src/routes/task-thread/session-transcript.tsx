@@ -1,4 +1,5 @@
 import { useMemo, type ReactNode } from 'react'
+import { TaskFileScope } from './task-file-scope'
 
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 
@@ -208,6 +209,7 @@ export function SessionTranscript({
     )
 
   return (
+    <TaskFileScope runId={runId}>
     <ThreadCardCache runId={runId}>
       <ConversationNavigation.Provider value={navigation}>
       {mode === 'panel' ? (
@@ -232,6 +234,7 @@ export function SessionTranscript({
       )}
       </ConversationNavigation.Provider>
     </ThreadCardCache>
+    </TaskFileScope>
   )
 }
 
