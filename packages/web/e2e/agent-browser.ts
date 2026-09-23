@@ -659,6 +659,16 @@ export class AgentBrowser {
     return this.run(['eval', js]).result
   }
 
+  /** Serve deterministic API fixtures through Chrome's network layer, across document reloads. */
+  routeJson(pattern: string, body: unknown): void {
+    this.run(['network', 'unroute', pattern])
+    this.run(['network', 'route', pattern, '--body', JSON.stringify(body)])
+  }
+
+  unroute(pattern: string): void {
+    this.run(['network', 'unroute', pattern])
+  }
+
   /** operation: interact (`set viewport`) — the descriptor's "other actions use the matching
    *  CLI command" clause. Responsive layout is a real behavior of this app, so the specs must be
    *  able to ask for an iPhone-sized window rather than assume the default one. */

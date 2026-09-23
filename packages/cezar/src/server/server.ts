@@ -174,6 +174,8 @@ import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { readUiState, uiStatePath } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
+import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract';
+import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type ApplicationUpdateServiceLike } from '../application-update/service.ts';
 import { createSocketHub, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index.ts';
@@ -207,6 +209,8 @@ export interface ServerDeps {
   /** Mutable holder for the async npm-registry update check (#368) —
    *  `latest` appears once the registry answers with a newer version. */
   update?: { latest?: string };
+  /** Local npm update coordinator, absent for test/embedded servers. */
+  applicationUpdate?: ApplicationUpdateServiceLike;
   /** Host the HTTP server binds (default 127.0.0.1). A non-loopback host
    *  implies hosted mode — `capabilities.localHandoff:false`. */
   bindHost?: string;
@@ -1488,6 +1492,9 @@ export function createApp(deps: ServerDeps) {
       // the key as always-present, which is a shape no client ever receives. The contract schema
       // says `.optional()`, and contract-parity.test.ts holds the two together.
       ...(update?.latest !== undefined ? { latestVersion: update.latest } : {}),
+      ...(deps.applicationUpdate ? { applicationUpdate: caps.localHandoff
+        ? deps.applicationUpdate.snapshot()
+        : { status: 'idle' as const, supported: false, message: 'Update this installation manually.' } } : {}),
       // Health is CORS-open and, in hosted mode, reachable off the loopback —
       // so any site/host that reads it would learn the developer's absolute
       // checkout path and username (#431). Local mode keeps the full path (the
@@ -1563,6 +1570,10 @@ export function createApp(deps: ServerDeps) {
     })();
     return healthInFlight;
   };
+  deps.applicationUpdate?.onStateChange?.(() => {
+    healthCache = undefined;
+    void refreshHealth();
+  });
 
   // The read the GET and the topic snapshot share. On the live server (a hub is
   // injected) it answers from cache instantly and revalidates behind the
@@ -2788,6 +2799,21 @@ export function createApp(deps: ServerDeps) {
         }
         throw error;
       }
+    });
+
+  // Workspace-level, server-selected target and executable. The empty JSON body is strict.
+  const applicationUpdateRoutes = new Hono()
+    .post('/workspace/application-update/apply', jsonZodValidator(applicationUpdateInputSchema), async (c) => {
+      if (!capabilities().localHandoff) return c.json({ error: 'Application updates require a local cockpit.' }, 409);
+      if (!deps.applicationUpdate) return c.json({ error: 'Application update is unavailable.' }, 409);
+      try { return c.json({ state: await deps.applicationUpdate.apply() }); }
+      catch (error) { return c.json({ error: error instanceof ApplicationUpdateConflictError || error instanceof ApplicationUpdateFailureError ? error.message : 'Application update preparation failed.' }, error instanceof ApplicationUpdateConflictError ? 409 : error instanceof ApplicationUpdateFailureError ? error.status : 500); }
+    })
+    .post('/workspace/application-update/restart', jsonZodValidator(applicationUpdateInputSchema), async (c) => {
+      if (!capabilities().localHandoff) return c.json({ error: 'Application updates require a local cockpit.' }, 409);
+      if (!deps.applicationUpdate) return c.json({ error: 'Application update is unavailable.' }, 409);
+      try { return c.json({ state: await deps.applicationUpdate.restart() }); }
+      catch (error) { return c.json({ error: error instanceof ApplicationUpdateConflictError ? error.message : 'Application restart is unavailable.' }, error instanceof ApplicationUpdateConflictError ? 409 : 500); }
     });
 
   // ---- GUI clone (multi-project spec, step 4.3) ----------------------------
@@ -5607,6 +5633,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', projectsRoutes)
     .route('/', agentProfilesRoutes)
     .route('/', skillsUpdateRoutes)
+    .route('/', applicationUpdateRoutes)
     .route('/', workspaceConfigRoutes)
     .route('/', fsBrowseRoutes)
     .route('/', automationChecksRoutes)
@@ -5641,7 +5668,7 @@ export function createApp(deps: ServerDeps) {
   return routed;
 }
 
-export function startServer(deps: ServerDeps, port: number): ServerType {
+export function startServer(deps: ServerDeps, port: number): ServerType & { shutdownForRestart: () => Promise<void> } {
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
   const skillsUpdate = deps.skillsUpdate ?? new SkillsUpdateService({ invalidateCatalog: refreshTeamSkills });
   // The subscription hub rides the same HTTP server (one port, zero config):
@@ -5677,7 +5704,27 @@ export function startServer(deps: ServerDeps, port: number): ServerType {
   // hosted/VPS deployment (which also flips CEZ_REMOTE to gate the local-handoff endpoints) —
   // src/index.ts never passes it, so the loopback guarantee holds for the normal CLI.
   const server = serve({
-    fetch: app.fetch,
+    fetch: async (request, env) => {
+      const result = await app.fetch(request, env);
+      if (request.method === 'POST' && new URL(request.url).pathname === '/api/v1/workspace/application-update/restart'
+        && result.status === 200) {
+        // Arming is server-owned. A connected caller must receive the complete
+        // acknowledgement before shutdown; a caller that already disconnected
+        // cannot leave its explicitly requested, armed restart stranded.
+        const response = env.outgoing;
+        const handoff = () => {
+          response.off('finish', handoff);
+          response.off('close', handoff);
+          deps.applicationUpdate?.afterResponse?.();
+        };
+        if (response.destroyed) handoff();
+        else {
+          response.once('finish', handoff);
+          response.once('close', handoff);
+        }
+      }
+      return result;
+    },
     port,
     hostname: deps.bindHost ?? '127.0.0.1',
   });
@@ -5764,7 +5811,17 @@ export function startServer(deps: ServerDeps, port: number): ServerType {
   });
   server.once('close', () => { unsubscribe(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close(); });
   socketHub.attach(server, (req) => verifyWsUpgrade(req, deps.bindHost));
-  return server;
+  const shutdownForRestart = async (): Promise<void> => {
+    sharedContexts.disposeAll(); // flush every built secondary project before old process exits
+    deps.store.flush();
+    socketHub.close();
+    await deps.delegation?.close();
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      if ('closeAllConnections' in server) server.closeAllConnections();
+    });
+  };
+  return Object.assign(server, { shutdownForRestart });
 }
 
 /**

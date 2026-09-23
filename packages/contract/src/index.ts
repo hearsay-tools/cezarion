@@ -7,6 +7,7 @@ export * from './ask.ts';
 export * from './delegation.ts';
 export * from './effort.ts';
 export * from './health.ts';
+export * from './application-update.ts';
 export * from './runs.ts';
 export * from './repo.ts';
 export * from './github.ts';
