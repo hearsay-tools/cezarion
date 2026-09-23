@@ -225,20 +225,20 @@ it('retains known IDs during loading, request error and offline pause, then retr
   observations.push({ loading: 'known ID retained', error: 'known ID retained; real retry succeeds', offline: 'paused; reconnect fetch succeeds' })
 })
 
-it('global Tasks and cross-project palette retain worker labels and parked-root status', () => {
+it('global Tasks and cross-project palette keep parked-root status without listing workers', () => {
   browser.goto(`${base}/tasks`)
   browser.waitForFunction(`document.querySelector('[data-slot="global-task-row"][data-run-id="${waitingId}"]') !== null`)
   expect(browser.text(`[data-slot="global-task-row"][data-run-id="${waitingId}"]`)).toContain('waiting on workers')
-  expect(browser.text('body')).toContain('Worker')
+  expect(browser.text('body')).not.toContain('Worker')
   browser.press('Control+k')
   browser.fill('[cmdk-input]', 'Waiting root fixture')
   browser.waitForFunction(`document.querySelector('[cmdk-list]')?.textContent.includes('Waiting root fixture')`)
   expect(browser.count('[cmdk-list] [aria-label="waiting on workers"]')).toBe(1)
   browser.fill('[cmdk-input]', 'Owned worker 1')
-  browser.waitForFunction(`document.querySelector('[cmdk-list]')?.textContent.includes('Owned worker 1')`)
-  expect(browser.text('[cmdk-list]')).toContain('Worker')
+  expect(browser.text('[cmdk-list]')).not.toContain('Owned worker 1')
+  expect(browser.text('[cmdk-list]')).not.toContain('Worker')
   browser.press('Escape')
-  observations.push({ globalTasks: 'worker label and waiting on workers', palette: 'cross-project index matches local status' })
+  observations.push({ globalTasks: 'waiting on workers without worker rows', palette: 'cross-project index omits workers' })
 })
 
 
@@ -260,15 +260,15 @@ it('keeps request waits consistent in threads, global tasks and the palette at p
     }
   }
   browser.goto(`${base}/tasks`)
-  for (const [id, label] of [[requestParentId, 'waiting on worker replies'], [requestWorkerId, 'waiting on parent reply']] as const) {
-    const row = `[data-slot="global-task-row"][data-run-id="${id}"]`
-    browser.waitForFunction(`document.querySelector('${row}') !== null`)
-    expect(browser.text(row)).toContain(label)
-    expect(browser.text(row)).not.toContain('needs you')
-  }
+  const parentRow = `[data-slot="global-task-row"][data-run-id="${requestParentId}"]`
+  const workerRow = `[data-slot="global-task-row"][data-run-id="${requestWorkerId}"]`
+  browser.waitForFunction(`document.querySelector('${parentRow}') !== null`)
+  expect(browser.text(parentRow)).toContain('waiting on worker replies')
+  expect(browser.text(parentRow)).not.toContain('needs you')
+  expect(browser.evaluate(`document.querySelector('${workerRow}')`)).toBeNull()
   browser.press('Control+k')
   browser.fill('[cmdk-input]', 'Worker awaiting parent reply')
-  browser.waitForFunction(`document.querySelector('[cmdk-list] [aria-label="waiting on parent reply"]') !== null`)
-  expect(browser.count('[cmdk-list] [aria-label="needs you"]')).toBe(0)
+  expect(browser.text('[cmdk-list]')).not.toContain('Worker awaiting parent reply')
+  expect(browser.count('[cmdk-list] [aria-label="waiting on parent reply"]')).toBe(0)
   browser.press('Escape')
 }, 120_000)

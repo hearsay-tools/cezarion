@@ -2,6 +2,7 @@ import type { ApiRun, RunRecord, RunStatus, Runner } from '@open-mercato/cezar-a
 import { cliTargetRunner } from '@/components/open-in-menu'
 import { deriveAttention } from '@/lib/attention'
 import { canBeUnread, isUnread } from '@/lib/read-state'
+import { isOwnedWorker } from '@/lib/task-groups'
 
 export { cliTargetRunner }
 
@@ -140,7 +141,7 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
     terminal: !active && hasSession,
     notes: true,
     archive: !active,
-    pin: !run.archived && run.delegation?.role !== 'worker',
+    pin: !run.archived && !isOwnedWorker(run),
     markUnread: canBeUnread(run) && !isUnread(run),
     cancel: active,
     deleteRun: !active,

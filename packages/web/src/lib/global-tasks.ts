@@ -1,7 +1,7 @@
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
 import { allProjectTags } from '@/lib/project-tags'
-import { runTitle } from '@/lib/task-groups'
+import { isOwnedWorker, runTitle } from '@/lib/task-groups'
 
 /**
  * The pure half of the global Tasks page (`/tasks`): joining the cross-project run index to the
@@ -155,7 +155,7 @@ export function toGlobalTasks(
 ): GlobalTask[] {
   const byId = new Map(projects.map((project) => [project.id, project]))
   return runs
-    .filter((run) => run.delegation?.role !== 'worker')
+    .filter((run) => !isOwnedWorker(run))
     .map((run) => {
       const project = byId.get(run.projectId)
       return {
