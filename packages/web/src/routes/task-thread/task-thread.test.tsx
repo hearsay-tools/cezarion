@@ -1,10 +1,11 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ProjectScopeProvider } from '@/api/project-scope-context'
+import { GlobalEventsProvider } from '@/api/global-events'
 import { queryKeys, workspaceQueryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
 import type {
@@ -957,18 +958,22 @@ function historyBodyFor(path: string, id: string): unknown {
   return undefined
 }
 
-/** Route-level: loading and 404 — driven through the real fetch boundary. jsdom has no
- *  EventSource, which `useRunEvents` treats as "no stream" — honest for these states. */
-function renderRoute(id: string) {
+/** Route-level GETs through the real fetch boundary. jsdom has no EventSource unless a
+ * test installs one explicitly; these ordinary loading/error cases need no stream. */
+function renderRoute(id: string, queryClient = createQueryClient(), withStream = false) {
+  const route = (
+    <MemoryRouter initialEntries={[`/tasks/${id}`]}>
+      <Routes>
+        <Route path="/tasks/:id" element={<TaskThreadRoute />} />
+      </Routes>
+    </MemoryRouter>
+  )
   render(
-    <QueryClientProvider client={createQueryClient()}>
-      <MemoryRouter initialEntries={[`/tasks/${id}`]}>
-        <Routes>
-          <Route path="/tasks/:id" element={<TaskThreadRoute />} />
-        </Routes>
-      </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      {withStream ? <GlobalEventsProvider>{route}</GlobalEventsProvider> : route}
     </QueryClientProvider>,
   )
+  return queryClient
 }
 
 describe('TaskThreadRoute', () => {
@@ -1019,6 +1024,20 @@ describe('TaskThreadRoute', () => {
     expect(hint?.textContent).toContain('Usage limit reached — this task resumes automatically at')
   })
 
+  it('a genuine non-404 GET failure shows the load error, not a missing task', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      const history = historyBodyFor(path, 'r1')
+      return Promise.resolve(history !== undefined
+        ? new Response(JSON.stringify(history), { status: 200, headers: { 'content-type': 'application/json' } })
+        : new Response(JSON.stringify({ error: 'server unavailable' }), { status: 503, headers: { 'content-type': 'application/json' } }))
+    }))
+    renderRoute('r1')
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Could not load this task'), { timeout: 3_000 })
+    expect(document.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe('danger')
+    expect(screen.queryByText('Task not found')).toBeNull()
+  })
+
   it('unknown run id → the 404-style CenteredState with a way home', async () => {
     vi.stubGlobal(
       'fetch',
@@ -1032,6 +1051,140 @@ describe('TaskThreadRoute', () => {
     })
     expect(screen.getByRole('link', { name: 'Back to tasks' }).getAttribute('href')).toBe('/')
     expect(document.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe('neutral')
+  })
+})
+
+/** A real abortable detail GET: TanStack owns its AbortSignal; only the HTTP boundary is fake.
+ * The queue makes it possible to hold a request IN FLIGHT while an SSE event or Stop cancels it. */
+function stubPendingDetailGets(id = 'r1') {
+  const requests: Array<{ signal: AbortSignal; reply: (run: ApiRun) => void }> = []
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init: RequestInit = {}) => {
+    const path = String(input)
+    if (path === `/api/v1/runs/${id}` && (init.method ?? 'GET') === 'GET') {
+      return new Promise<Response>((resolve, reject) => {
+        const signal = init.signal as AbortSignal
+        signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')), { once: true })
+        requests.push({
+          signal,
+          reply: (record) => resolve(new Response(JSON.stringify(record), {
+            status: 200, headers: { 'content-type': 'application/json' },
+          })),
+        })
+      })
+    }
+    const history = historyBodyFor(path, id)
+    const body = history !== undefined ? history
+      : init.method === 'POST' && path.endsWith('/cancel') ? { cancelled: true }
+      : path === '/api/v1/providers/status' ? { providers: [] }
+      : path === '/api/v1/runs' ? [] : {}
+    return Promise.resolve(new Response(JSON.stringify(body), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }))
+  }))
+  return requests
+}
+
+/** This suite catches the old `cancelQueries({ revert: false })` path producing a transient
+ * `run.isError`. Its expected outcome is UI behavior, not a mocked useRun result. */
+describe('TaskThreadRoute — in-flight detail cancellation (#483)', () => {
+  it('keeps a cached thread on screen during cancellation and recovers from the next GET', async () => {
+    const requests = stubPendingDetailGets()
+    const queryClient = createQueryClient()
+    queryClient.setQueryData(queryKeys.runs.detail('r1'), run('running'))
+    renderRoute('r1', queryClient)
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing'))
+
+    void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail('r1') })
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0]!.signal.aborted).toBe(false)
+    await act(async () => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.runs.detail('r1') }, { revert: false })
+    })
+    expect(requests[0]!.signal.aborted).toBe(true)
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing')
+    expect(screen.queryByText('Could not load this task')).toBeNull()
+
+    void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail('r1') })
+    await waitFor(() => expect(requests).toHaveLength(2))
+    await act(async () => requests[1]!.reply(run('waiting', { titleSummary: 'Fresh server title' })))
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Fresh server title'))
+  })
+
+  it('keeps an uncached initial load pending through cancellation until a real GET answers', async () => {
+    const requests = stubPendingDetailGets()
+    const queryClient = renderRoute('r1')
+    // renderRoute above starts the real useRun request; this stub is its only network boundary.
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Loading task…')
+    await act(async () => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.runs.detail('r1') }, { revert: false })
+    })
+    expect(requests[0]!.signal.aborted).toBe(true)
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Loading task…')
+    expect(screen.queryByText('Could not load this task')).toBeNull()
+
+    void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail('r1') })
+    await waitFor(() => expect(requests).toHaveLength(2))
+    await act(async () => requests[1]!.reply(run('running')))
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing'))
+  })
+
+  it('a worker status SSE event keeps its cached parent thread visible while refreshing its in-flight detail', async () => {
+    const requests = stubPendingDetailGets()
+    const sources: Array<{ emit: (name: string, payload: unknown) => void }> = []
+    class FakeEventSource {
+      private listeners = new Map<string, (event: MessageEvent<string>) => void>()
+      constructor(url: string | URL, _options?: EventSourceInit) {
+        if (String(url).endsWith('/workspace/events')) sources.push(this)
+      }
+      addEventListener(name: string, listener: (event: MessageEvent<string>) => void) { this.listeners.set(name, listener) }
+      emit(name: string, payload: unknown) { this.listeners.get(name)?.({ data: JSON.stringify(payload) } as MessageEvent<string>) }
+      close() {}
+    }
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const queryClient = createQueryClient()
+    queryClient.setQueryData(queryKeys.health, { bootProject: 'demo' })
+    queryClient.setQueryData(queryKeys.runs.detail('r1'), run('waiting', { finishBlocked: 'worker pending' }))
+    renderRoute('r1', queryClient, true)
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing'))
+    void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail('r1') })
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(sources).toHaveLength(1)
+    await act(async () => {
+      sources[0]!.emit('run', { ...run('done', {
+        id: '0f1cbcbf-84b2-4978-8381-c9dfbe9339b5',
+        delegation: {
+          role: 'worker', parentRunId: 'r1', permissions: [],
+          workspace: {
+            ownerRunId: '0f1cbcbf-84b2-4978-8381-c9dfbe9339b5',
+            resourceId: 'a45eb6fd-be26-4ebc-9b96-8f1c4b7607cb',
+            kind: 'owned-isolated', path: '/tmp/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40),
+          },
+        },
+      }), project: 'demo' })
+    })
+    expect(requests[0]!.signal.aborted).toBe(true)
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing')
+    expect(screen.queryByText('Could not load this task')).toBeNull()
+    await waitFor(() => expect(requests).toHaveLength(2), { timeout: 2_000 })
+    await act(async () => requests[1]!.reply(run('waiting', { titleSummary: 'Parent after worker' })))
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Parent after worker'))
+  })
+
+  it('Stop does not replace the cached thread with a load error while its in-flight detail is refreshed', async () => {
+    const requests = stubPendingDetailGets()
+    const queryClient = createQueryClient()
+    queryClient.setQueryData(queryKeys.runs.detail('r1'), run('running'))
+    renderRoute('r1', queryClient)
+    void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail('r1') })
+    await waitFor(() => expect(requests).toHaveLength(1))
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(requests[0]!.signal.aborted).toBe(true))
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing')
+    expect(screen.queryByText('Could not load this task')).toBeNull()
+    await waitFor(() => expect(requests).toHaveLength(2))
+    await act(async () => requests[1]!.reply(run('done', { titleSummary: 'Stopped by server' })))
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Stopped by server'))
   })
 })
 
