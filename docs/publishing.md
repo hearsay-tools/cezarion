@@ -113,6 +113,34 @@ trusted publisher on npmjs.com is pinned to that same environment name. Outside
 Actions, with neither `NODE_AUTH_TOKEN` nor the OIDC request env, the script
 degrades to a loud dry run.
 
+### Release changelog
+
+Each new GitHub Release includes a commit changelog alongside the published
+package versions and installation command. Its base is the highest stable
+`v<major>.<minor>.<patch>` tag below the new version that is an ancestor of the
+published source commit. Preview tags, the current release tag, newer versions,
+and tags on unrelated branches are excluded, including for maintenance releases.
+The range excludes the base commit and includes the published source commit;
+it never includes the later version-bump commit. Annotated and lightweight tags
+both work. Without a previous stable tag, the first release lists all reachable
+history. The inline list shows newest commits first and is bounded to about 60 KB;
+large ranges include an omitted count and a link to the full history or comparison.
+Long subjects are shortened, with each commit linked to its full message.
+A release at the same commit as its predecessor reports no new commits.
+
+Notes link each commit and the full comparison using commit IDs. A hidden marker
+records the original range so retries stay identical even after tags are added or
+moved. Finalization regenerates the notes from that range and requires an exact
+body match; it never appends a second changelog or overwrites edited notes.
+Full Git history is required (the Release workflow already uses `fetch-depth: 0`).
+Older releases containing only matching package and installation details remain
+reusable without a retroactive changelog update.
+
+The fork's first release, [v0.11.0](https://github.com/hearsay-tools/cezarion/releases/tag/v0.11.0),
+was backfilled from upstream [v0.10.0](https://github.com/open-mercato/cezar/releases/tag/v0.10.0)
+(`1912f2f2aefe2596a72b6a21eef053682f64dda8`): 73 commits, with the original
+package and installation details preserved. Later releases use the fork's own tags.
+
 ### Retrying an interrupted release
 
 Publication, the version-bump PR, and the GitHub Release have separate outcomes

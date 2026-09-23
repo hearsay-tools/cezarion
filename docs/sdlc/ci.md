@@ -120,6 +120,14 @@ The recovery job executes only the default-branch script, with `actions: write` 
 
 ### Stable release recovery
 
+New GitHub Releases include a commit changelog from the highest preceding stable
+ancestor tag to the published source commit, alongside package versions and the
+install command. The first release covers all reachable history; oversized lists
+show an omitted count and a full-history link. Notes record
+the comparison range and are regenerated against it on retry; matching releases
+are reused without appending notes or overwriting edits. Legacy metadata-only
+releases remain reusable. See [release changelog](../publishing.md#release-changelog).
+
 Stable releases keep the explicitly selected bump. When npm rejects publication,
 `scripts/release.mjs` accepts an existing version only if its registry `gitHead`
 matches the checkout commit. Missing or different source metadata stops the run
