@@ -38,6 +38,19 @@ That's the whole setup. If your `claude` CLI is logged in (Pro/Max) and `gh` is
 authenticated, there is nothing else to configure. State lives in `.ai/cezar/`
 inside your repo — plain JSON, NDJSON and Markdown you can `cat` and fix by hand.
 
+Local npm installations have a workspace update API. `POST
+/api/v1/workspace/application-update/apply` with `{}` prepares the release
+advertised by health while the current server keeps running; `POST
+/api/v1/workspace/application-update/restart` with `{}` then restarts it. A
+successful restart updates the original global installation or ordinary npx
+cache entry, so the same command uses the new version on its next launch.
+Update preparation and recovery state is generated under
+`~/.cezar/application-updates/` (or `CEZ_HOME`).
+Pinned npx invocations, source checkouts, npm links, and hosted deployments use
+their existing manual update paths. Cezar holds its own installation lock and
+npm's npx lock during promotion; a separate manual `npm install` does not honor
+those locks, so avoid one while an update is preparing or restarting.
+
 ## A look inside
 
 Click any thumbnail for the full-size screenshot.

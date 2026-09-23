@@ -36,6 +36,9 @@ import { runMigrations } from './workspace/migrations.ts';
 import { registerProject, shouldRegisterProject } from './workspace/projects.ts';
 import { runProjectsCommand } from './workspace/projects-cli.ts';
 import { WorkspaceSemaphore } from './workspace/semaphore.ts';
+import { ApplicationUpdateService } from './application-update/service.ts';
+import { armRestartHelper } from './application-update/launcher.ts';
+import { cezarHomeDir } from './paths.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
 
@@ -100,6 +103,7 @@ async function main(): Promise<void> {
       reconfigure: { type: 'string' },
       reinstall: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
+      'restart-exact': { type: 'boolean', default: false },
     },
     allowPositionals: true,
   });
@@ -124,7 +128,7 @@ async function main(): Promise<void> {
 
   switch (command) {
     case 'serve':
-      await serveCommand(repoRoot, Number(values.port), !values['no-open'], values['bind-host']);
+      await serveCommand(repoRoot, Number(values.port), !values['no-open'], values['bind-host'], Boolean(values['restart-exact']));
       return;
     case 'run':
       await runCommand(repoRoot, positionals.slice(1).join(' ').trim(), values.workflow, values.model);
@@ -209,6 +213,7 @@ async function serveCommand(
   preferredPort: number,
   openBrowser: boolean,
   bindHost?: string,
+  restartExact = false,
 ): Promise<void> {
   const bootProjectId = await initWorkspace(repoRoot);
   // ONE workspace semaphore for the whole process (spec 2026-07-20, step 2.5):
@@ -271,7 +276,7 @@ async function serveCommand(
     console.log(`\n  ⬆ cezar ${latest} is available (running ${version}) — restart with: npx ${pkgName}@latest\n`);
   });
 
-  const port = await pickPort(preferredPort);
+  const port = restartExact ? preferredPort : await pickPort(preferredPort);
   // SECURITY: cezar executes agents. A non-loopback bind exposes that box to
   // whatever can reach the interface, and cezar itself has NO auth — it is only
   // for a deliberate hosted setup where a reverse proxy in front provides TLS +
@@ -283,13 +288,32 @@ async function serveCommand(
         `    and make sure this interface is not reachable from the internet.\n`,
     );
   }
-  const server = startServer({
+  // Discovery reads npm metadata only; a missing npm or source checkout degrades to manual update.
+  const npmValue = (args: string[]): string | undefined => {
+    try { return execFileSync('npm', args, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+    catch { return undefined; }
+  };
+  const npmPrefix = npmValue(['prefix', '-g']);
+  const npmCache = npmValue(['config', 'get', 'cache']);
+  let server: ReturnType<typeof startServer>;
+  const applicationUpdate = (npmPrefix && npmCache) || process.env.CEZ_DRY_RUN === '1'
+    ? new ApplicationUpdateService({
+      packageRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
+      launchEntry: resolve(process.argv[1] ?? ''),
+      npmPrefix: npmPrefix ?? join(cezarHomeDir(), 'dry-prefix'),
+      npmCache: npmCache ?? join(cezarHomeDir(), 'dry-cache'), home: cezarHomeDir(), targetVersion: () => update.latest,
+      dryRun: process.env.CEZ_DRY_RUN === '1',
+      armRestart: (plan) => armRestartHelper(plan, { repoRoot, port, npmBin: 'npm' }),
+      handoff: () => { void server.shutdownForRestart().then(() => process.exit(0)); },
+    }) : undefined;
+  server = startServer({
     delegation,
     repoRoot,
     store,
     manager,
     version,
     update,
+    applicationUpdate,
     bootProjectId,
     semaphore,
     bindHost,
@@ -297,6 +321,14 @@ async function serveCommand(
     providerRuntimeAuth,
     workspaceEvents,
   }, port);
+  if (restartExact && process.send) {
+    const acknowledgeListener = () => {
+      process.send?.({ type: 'application-update-listening', port, repoRoot, version },
+        () => process.disconnect?.());
+    };
+    if (server.listening) acknowledgeListener();
+    else server.once('listening', acknowledgeListener);
+  }
   const url = `http://localhost:${port}`;
 
   console.log(`\n  cezar v${version} — ${repoRoot}`);
