@@ -81,4 +81,15 @@ describe('codex agent input steering (#505)', () => {
     expect(events.filter(e => e.type === 'turn-end')[1]).toEqual({ type: 'turn-end' });
     session.end(); await session.result;
   });
+
+  it('reports a turn/start submission unread when its turn fails (#505 review)', async () => {
+    const consumed: string[][] = [];
+    const { session, events } = start('inspect the working tree', { onAgentInputConsumed: ids => consumed.push([...ids]) }, { CEZ_MOCK_CODEX_NO_USER_ITEM: '1' });
+    await waitUntil(() => events.some(e => e.type === 'turn-end'));
+    await session.sendAgentMessage([{ type: 'text', text: 'mock:provider-error after guidance' }], ['in-failed']);
+    await waitUntil(() => events.filter(e => e.type === 'turn-end').length === 2);
+    expect(consumed).toEqual([]);
+    expect(events.filter(e => e.type === 'turn-end')[1]).toEqual({ type: 'turn-end', unconsumedInputIds: ['in-failed'] });
+    session.end(); await session.result.catch(() => undefined);
+  });
 });

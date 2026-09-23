@@ -727,7 +727,9 @@ class CodexSession implements AgentSession {
           this.emit({ type: 'error', message: outcome.error });
         }
         this.agentInputReady = this.open;
-        const started = [...this.turnStartSubmissions].flatMap(id => this.submissions.consume(id));
+        // A completed turn processed its own input; a failed one may never have reached the
+        // model, so its input stays pending and is reported unconsumed below.
+        const started = outcome.error === undefined ? [...this.turnStartSubmissions].flatMap(id => this.submissions.consume(id)) : [];
         this.turnStartSubmissions.clear();
         if (started.length) this.opts.onAgentInputConsumed?.(started);
         // An in-flight steer is owned by its RPC outcome, not by this boundary.

@@ -3581,6 +3581,16 @@ export class RunManager {
     catch (error) { console.warn(`[cez] bundled read checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
+  /** #505: the session closed without reporting it read (failure, stop, exit): the input
+   * goes back to the queue so a later session delivers it; never shown as delivered. */
+  private requeueUnreadAtClose(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
+    const ids = [...(state.unreadInputIds ?? [])];
+    if (!session || !ids.length || this.active.get(runId) !== state || state.session !== session) return;
+    state.unreadInputIds?.clear();
+    try { this.store.requeueUnconsumedAgentInputs(runId, ids); }
+    catch (error) { console.warn(`[cez] agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
   /** #505: the harness accepted input this session has not reported reading yet. */
   private harnessOwesInput(state: ActiveRun | undefined): boolean {
     return !!state?.unreadInputIds?.size;
@@ -4727,7 +4737,7 @@ export class RunManager {
       this.flushAgentInputs(runId);
       if (session.pid !== undefined) registerRunProcess(runId, session.pid);
       setupComplete = true;
-      const result = await session.result.finally(() => state.agentInputFlight?.settled);
+      const result = await session.result.finally(() => state.agentInputFlight?.settled).finally(() => this.requeueUnreadAtClose(runId, state, session));
       if (this.preserveRunAfterDisposal(runId, state)) return;
       this.persistWorkerAssistantResult(runId, stepId, result.text);
       if (this.store.getRun(runId)?.ciWait && !state.cancelled) {
@@ -5585,7 +5595,7 @@ export class RunManager {
       this.flushAgentInputs(runId);
       if (session.pid !== undefined) registerRunProcess(runId, session.pid);
       setupComplete = true;
-      const result = await session.result.finally(() => state.agentInputFlight?.settled);
+      const result = await session.result.finally(() => state.agentInputFlight?.settled).finally(() => this.requeueUnreadAtClose(runId, state, session));
       if (this.isDisposedDelegatedRun(runId)) return null;
       this.persistWorkerAssistantResult(runId, step.id, result.text);
       const inputOrSessionError = sessionError ?? state.agentInputError ??

@@ -59,4 +59,20 @@ describe('unread agent input is resubmitted (#505)', () => {
       });
     } finally { if (saved === undefined) delete process.env.CEZ_MOCK_STEER_MS; else process.env.CEZ_MOCK_STEER_MS = saved; }
   }, 60_000);
+
+  it('codex returns input to the queue when its turn fails before anything read it (#505 review)', async () => {
+    const saved = process.env.CEZ_MOCK_CODEX_NO_USER_ITEM; process.env.CEZ_MOCK_CODEX_NO_USER_ITEM = '1';
+    try {
+      await withOwnedInputRun('codex', 'baseline', async ({ store, manager, runId, parentRunId }) => {
+        manager.enqueueOwnedRun(runId);
+        await waitFor(() => store.getRun(runId)?.status === 'waiting');
+        const input: AgentInput = { id: randomUUID(), source: 'agent', parentRunId, text: 'mock:provider-error guidance', createdAt: new Date().toISOString() };
+        manager.steerWorker(runId, input);
+        await waitFor(() => !manager.isActive(runId), 15_000);
+        expect(store.getRun(runId)?.status).toBe('failed');
+        // Never reported read: it is queued again, not shown as delivered.
+        expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+      });
+    } finally { if (saved === undefined) delete process.env.CEZ_MOCK_CODEX_NO_USER_ITEM; else process.env.CEZ_MOCK_CODEX_NO_USER_ITEM = saved; }
+  }, 60_000);
 });
