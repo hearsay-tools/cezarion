@@ -1104,18 +1104,19 @@ describe('global tasks page', () => {
   })
 })
 
-it('identifies indexed workers and parked parents while preserving human waiting phases', async () => {
+it('hides indexed workers while preserving parked-parent waiting phases', async () => {
   const runs = [
     { ...RUNS[0]!, id: 'worker', delegation: { role: 'worker' as const } },
     ...(['registered', 'parked', 'wake-pending'] as const).map(phase => ({ ...RUNS[0]!, id: phase, status: 'waiting' as const, delegation: { role: 'root' as const, wait: { phase } } })),
   ]
   stubFetch({ runs }); renderPage()
-  await screen.findByText('Worker')
+  await waitFor(() => expect(document.querySelector('[data-slot="global-task-row"][data-run-id="parked"]')).not.toBeNull())
+  expect(document.querySelector('[data-slot="global-task-row"][data-run-id="worker"]')).toBeNull()
+  expect(screen.queryByText('Worker')).toBeNull()
   for (const phase of ['registered', 'parked', 'wake-pending']) {
     const row = document.querySelector(`[data-slot="global-task-row"][data-run-id="${phase}"]`)
     expect(row?.textContent).toContain(phase === 'parked' ? 'waiting on workers' : 'needs you')
   }
-  expect(document.querySelector('[data-run-id="worker"] a a')).toBeNull()
 })
 
 it('shows a parked parent human question from the slim workspace index', async () => {
@@ -1136,11 +1137,29 @@ it('starts a new task in the boot project from the workspace toolbar', async () 
 })
 
 
-it.each(['root', 'worker'] as const)('renders indexed %s request waits with dependency wording', async role => {
-  stubFetch({ runs: [{ ...RUNS[0]!, id: 'request-wait', status: 'waiting', delegation: { role, wait: { phase: 'parked', requestIds: ['10000000-0000-4000-8000-000000000001'] } } }] })
+it('renders a parent request-wait as a global-task-row and hides the worker', async () => {
+  stubFetch({
+    runs: [
+      {
+        ...RUNS[0]!,
+        id: 'parent-wait',
+        title: 'Parent wait',
+        status: 'waiting',
+        delegation: { role: 'root', wait: { phase: 'parked', requestIds: ['10000000-0000-4000-8000-000000000001'] } },
+      },
+      {
+        ...RUNS[0]!,
+        id: 'request-wait',
+        title: 'Worker wait',
+        status: 'waiting',
+        delegation: { role: 'worker', wait: { phase: 'parked', requestIds: ['10000000-0000-4000-8000-000000000001'] } },
+      },
+    ],
+  })
   renderPage()
-  await waitFor(() => expect(document.querySelector('[data-slot="global-task-row"][data-run-id="request-wait"]')).not.toBeNull())
-  const row = document.querySelector('[data-slot="global-task-row"][data-run-id="request-wait"]')
-  expect(row?.textContent).toContain(role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies')
+  await waitFor(() => expect(document.querySelector('[data-slot="global-task-row"][data-run-id="parent-wait"]')).not.toBeNull())
+  const row = document.querySelector('[data-slot="global-task-row"][data-run-id="parent-wait"]')
+  expect(row?.textContent).toContain('waiting on worker replies')
   expect(row?.textContent).not.toContain('needs you')
+  expect(document.querySelector('[data-slot="global-task-row"][data-run-id="request-wait"]')).toBeNull()
 })

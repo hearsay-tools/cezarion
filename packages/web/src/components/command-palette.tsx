@@ -124,7 +124,9 @@ export function mergeTasks(
   runsProjectId: string | null,
   indexed: readonly RunIndexEntry[] | undefined,
 ): PaletteTask[] {
-  const mine: PaletteTask[] = orderRuns(activeRuns).map((run) => ({
+  const mine: PaletteTask[] = orderRuns(
+    activeRuns.filter((run) => run.delegation?.role !== 'worker'),
+  ).map((run) => ({
     projectId: runsProjectId,
     id: run.id,
     title: run.title,
@@ -145,7 +147,7 @@ export function mergeTasks(
   }))
   const live = new Set(mine.map(taskKey))
   const theirs = (indexed ?? [])
-    .filter((entry) => !live.has(taskKey(entry)))
+    .filter((entry) => entry.delegation?.role !== 'worker' && !live.has(taskKey(entry)))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   return [...mine, ...theirs]
 }

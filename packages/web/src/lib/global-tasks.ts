@@ -154,15 +154,17 @@ export function toGlobalTasks(
   projects: readonly ProjectListEntry[],
 ): GlobalTask[] {
   const byId = new Map(projects.map((project) => [project.id, project]))
-  return runs.map((run) => {
-    const project = byId.get(run.projectId)
-    return {
-      run,
-      project,
-      projectName: project?.name || run.projectId,
-      tags: project?.tags ?? [],
-    }
-  })
+  return runs
+    .filter((run) => run.delegation?.role !== 'worker')
+    .map((run) => {
+      const project = byId.get(run.projectId)
+      return {
+        run,
+        project,
+        projectName: project?.name || run.projectId,
+        tags: project?.tags ?? [],
+      }
+    })
 }
 
 /** Every workflow present in the CURRENT list — the workflow facet's options. Derived from the
