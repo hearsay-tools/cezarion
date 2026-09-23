@@ -15,14 +15,17 @@ type ActiveOperation = {
   controller: AbortController
   initialState: ApplicationUpdateState | undefined
   initialCacheState: ApplicationUpdateState | undefined
+  initialVersion: string | undefined
   kind: 'apply' | 'restart'
   timer: ReturnType<typeof setTimeout>
   resolve: (state: ApplicationUpdateState | undefined) => void
 }
 
-function isAuthoritativeOutcome(kind: ActiveOperation['kind'], state: ApplicationUpdateState | undefined): state is ApplicationUpdateState {
-  return Boolean(state && (state.status === 'error' || kind === 'apply' && state.status === 'ready'
-    || kind === 'restart' && (state.status === 'restarting' || state.status === 'idle')))
+function isAuthoritativeOutcome(operation: ActiveOperation, health: HealthResponse | undefined): health is HealthResponse & { applicationUpdate: ApplicationUpdateState } {
+  const state = health?.applicationUpdate
+  return Boolean(state && (state.status === 'error' || operation.kind === 'apply' && state.status === 'ready'
+    || operation.kind === 'restart' && (state.status === 'restarting'
+      || state.status === 'idle' && operation.initialVersion && health.version !== operation.initialVersion)))
 }
 
 /** Owns transient mutation feedback while health remains the authoritative durable state. */
@@ -91,9 +94,11 @@ export function useApplicationUpdate(health: HealthResponse | undefined, reloadD
   React.useEffect(() => {
     const operation = active.current
     const state = health?.applicationUpdate
-    if (!operation || state === operation.initialState || !isAuthoritativeOutcome(operation.kind, state)) return
+    if (!operation) return
+    if ((state === operation.initialState && health?.version === operation.initialVersion)
+      || !isAuthoritativeOutcome(operation, health)) return
     finish(operation, { source: 'health', state })
-  }, [health?.applicationUpdate, finish])
+  }, [health?.applicationUpdate, health?.version, finish])
 
   React.useEffect(() => () => {
     const operation = active.current
@@ -108,12 +113,13 @@ export function useApplicationUpdate(health: HealthResponse | undefined, reloadD
     if (active.current) return Promise.resolve(undefined)
     const controller = new AbortController()
     const initialState = healthRef.current?.applicationUpdate
+    const initialVersion = healthRef.current?.version
     const initialCacheState = queryClient.getQueryData<HealthResponse>(queryKeys.health)?.applicationUpdate
     setBusy(true)
     setError(null)
     return new Promise((resolve) => {
       const operation: ActiveOperation = {
-        controller, initialState, initialCacheState, kind, resolve,
+        controller, initialState, initialCacheState, initialVersion, kind, resolve,
         timer: setTimeout(() => finish(operation, { source: 'timeout' }), kind === 'apply' ? APPLY_WAIT_MS : RESTART_WAIT_MS),
       }
       active.current = operation
@@ -121,10 +127,12 @@ export function useApplicationUpdate(health: HealthResponse | undefined, reloadD
         if (active.current !== operation) return
         // A health publication that won the race is authoritative even if React has not
         // rendered it yet. Do not let an older HTTP response move Ready back to idle/error.
-        const cached = queryClient.getQueryData<HealthResponse>(queryKeys.health)?.applicationUpdate
-        const latest = healthRef.current?.applicationUpdate
-        const authoritative = cached !== initialCacheState && isAuthoritativeOutcome(kind, cached) ? cached
-          : latest !== initialState && isAuthoritativeOutcome(kind, latest) ? latest : undefined
+        const cachedHealth = queryClient.getQueryData<HealthResponse>(queryKeys.health)
+        const latestHealth = healthRef.current
+        const authoritative = cachedHealth?.applicationUpdate !== initialCacheState && isAuthoritativeOutcome(operation, cachedHealth)
+          ? cachedHealth.applicationUpdate
+          : latestHealth?.applicationUpdate !== initialState && isAuthoritativeOutcome(operation, latestHealth)
+            ? latestHealth.applicationUpdate : undefined
         finish(operation, authoritative
           ? { source: 'health', state: authoritative }
           : { source: 'response', state: response.state })

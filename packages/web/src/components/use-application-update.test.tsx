@@ -215,6 +215,63 @@ it('accepts authoritative Restart acknowledgement after its HTTP response is los
   expect(sessionStorage.getItem('cez:application-restart-from')).toBe('1.0.0')
 })
 
+it('keeps Restart pending when a delayed health snapshot reports old-version idle', async () => {
+  let signal: AbortSignal | undefined
+  vi.stubGlobal('fetch', fetchMock.mockImplementation((_url, init) => {
+    signal = init?.signal as AbortSignal | undefined
+    return new Promise<Response>(() => {})
+  }))
+  const ready = { ...health, applicationUpdate: { status: 'ready', supported: true, targetVersion: '2.0.0' } } as HealthResponse
+  const client = createQueryClient()
+  client.setQueryData(queryKeys.health, ready)
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  const { result, rerender } = renderHook(({ current }) => useApplicationUpdate(current), { wrapper, initialProps: { current: ready } })
+  act(() => { void result.current.restart() })
+  const stale = { ...health, applicationUpdate: { status: 'idle', supported: true } } as HealthResponse
+  client.setQueryData(queryKeys.health, stale)
+  rerender({ current: stale })
+  expect(result.current.busy).toBe(true)
+  expect(signal?.aborted).toBe(false)
+  expect(sessionStorage.getItem('cez:application-restart-from')).toBeNull()
+  rerender({ current: { ...health, applicationUpdate: { status: 'restarting', supported: true, targetVersion: '2.0.0' } } as HealthResponse })
+  await waitFor(() => expect(result.current.busy).toBe(false))
+})
+
+it('does not let stale cached idle override a valid Restart response', async () => {
+  let deliver!: (response: Response) => void
+  vi.stubGlobal('fetch', fetchMock.mockImplementation(() => new Promise<Response>((resolve) => { deliver = resolve })))
+  const ready = { ...health, applicationUpdate: { status: 'ready', supported: true, targetVersion: '2.0.0' } } as HealthResponse
+  const client = createQueryClient()
+  client.setQueryData(queryKeys.health, ready)
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  const { result } = renderHook(() => useApplicationUpdate(ready), { wrapper })
+  act(() => { void result.current.restart() })
+  client.setQueryData(queryKeys.health, { ...health, applicationUpdate: { status: 'idle', supported: true } })
+  await act(async () => {
+    deliver(new Response(JSON.stringify({ state: { status: 'restarting', supported: true, targetVersion: '2.0.0' } }), { headers: { 'content-type': 'application/json' } }))
+  })
+  expect(client.getQueryData<HealthResponse>(queryKeys.health)?.applicationUpdate?.status).toBe('restarting')
+  expect(sessionStorage.getItem('cez:application-restart-from')).toBe('1.0.0')
+  expect(result.current.busy).toBe(false)
+})
+
+it('settles a pending Restart only when idle health confirms the new running version', async () => {
+  vi.stubGlobal('fetch', fetchMock.mockImplementation(() => new Promise<Response>(() => {})))
+  const ready = { ...health, applicationUpdate: { status: 'ready', supported: true, targetVersion: '2.0.0' } } as HealthResponse
+  const client = createQueryClient()
+  client.setQueryData(queryKeys.health, ready)
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  const reload = vi.fn()
+  const { result, rerender } = renderHook(({ current }) => useApplicationUpdate(current, reload), { wrapper, initialProps: { current: ready } })
+  act(() => { void result.current.restart() })
+  const completed = { ...health, version: '2.0.0', applicationUpdate: { status: 'idle', supported: true } } as HealthResponse
+  client.setQueryData(queryKeys.health, completed)
+  rerender({ current: completed })
+  await waitFor(() => expect(result.current.busy).toBe(false))
+  expect(reload).toHaveBeenCalledTimes(1)
+  expect(sessionStorage.getItem('cez:application-restart-from')).toBeNull()
+})
+
 it('does not claim a restart while a completed Apply is reconciling Ready', () => {
   render(<ApplicationUpdateFeedback state={{ status: 'ready', supported: true, targetVersion: '2.0.0' }} busy />)
   expect(screen.getByRole('status').textContent).toMatch(/checking update status/i)
