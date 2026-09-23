@@ -287,6 +287,47 @@ describe('useGlobalEvents — run events', () => {
     }
   })
 
+  it.each(['own', 'worker'] as const)('preserves cached detail during an in-flight %s event and debounces the replacement', async kind => {
+    const id = kind === 'own' ? 'r1' : 'parent'
+    const key = queryKeys.runs.detail(id)
+    const before = { ...runRecord(id, { status: 'running' }), finishBlocked: null, usage: SAMPLE }
+    const stale = deferredResponse()
+    const fresh = deferredResponse()
+    client.setQueryData<ApiRun>(key, before)
+    vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
+    const { result } = renderHook(() => useRun(id), { wrapper })
+    const { source } = mount()
+    void client.refetchQueries({ queryKey: key })
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    expect(client.getQueryState(key)?.fetchStatus).toBe('fetching')
+
+    source.emit('run', stampedRun(kind === 'own'
+      ? runRecord(id, { status: 'waiting', tokensUsed: 42 })
+      : runRecord('worker', {
+        delegation: { role: 'worker', parentRunId: id, permissions: [],
+          workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
+      })))
+
+    // A cancelled fetch must not become an error (the run-detail error flash), and cancelling
+    // must not roll back the event's patch or the last successful GET's usage sample.
+    await act(async () => {})
+    expect(result.current.isError).toBe(false)
+    expect(client.getQueryState(key)?.status).toBe('success')
+    expect(client.getQueryState(key)?.fetchStatus).toBe('idle')
+    expect(client.getQueryData<ApiRun>(key)).toMatchObject({ id, usage: SAMPLE,
+      status: kind === 'own' ? 'waiting' : 'running',
+      tokensUsed: kind === 'own' ? 42 : 0 })
+    expect(client.getQueryData<ApiRun>(key)?.finishBlocked).toBeUndefined()
+    await act(async () => stale.resolve(json({ ...before, finishBlocked: null })))
+    expect(client.getQueryData<ApiRun>(key)?.finishBlocked).toBeUndefined()
+    expect(fetch).toHaveBeenCalledTimes(1)
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    await act(async () => fresh.resolve(json({ ...before, status: 'waiting', finishBlocked: 'Wait for the worker.' })))
+    await waitFor(() => expect(client.getQueryData<ApiRun>(key)?.finishBlocked).toBe('Wait for the worker.'))
+    expect(result.current.isError).toBe(false)
+  })
+
   it('cancels pending detail refreshes when the event provider unmounts', async () => {
     vi.useFakeTimers()
     try {
@@ -313,7 +354,16 @@ describe('useGlobalEvents — run events', () => {
       delegation: { role: 'worker', parentRunId: 'r1', permissions: [],
         workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
     })))
+    // Initial loading has no last good result to restore: stay pending (not error), and do
+    // not let the pre-event response install an obsolete Finish permission.
+    await act(async () => {})
+    expect(client.getQueryState(queryKeys.runs.detail('r1'))?.status).toBe('pending')
+    expect(client.getQueryState(queryKeys.runs.detail('r1'))?.fetchStatus).toBe('idle')
+    expect(client.getQueryData(queryKeys.runs.detail('r1'))).toBeUndefined()
     stale.resolve(json({ ...runRecord('r1', { status: 'waiting' }), finishBlocked: null }))
+    await act(async () => {})
+    expect(client.getQueryData(queryKeys.runs.detail('r1'))).toBeUndefined()
+    expect(fetch).toHaveBeenCalledTimes(1)
     fresh.resolve(json({ ...runRecord('r1', { status: 'waiting' }), finishBlocked: 'Answer the pending human question.' }))
     await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBe('Answer the pending human question.'))
   })

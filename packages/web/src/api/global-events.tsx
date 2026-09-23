@@ -233,7 +233,10 @@ function createRunDetailRefresher(queryClient: QueryClient) {
       clearTimeout(pending.get(cacheKey))
       // Invalidation alone reuses an initial in-flight request. Cancel it now so a
       // pre-event response cannot restore permission during the debounce window.
-      void queryClient.cancelQueries({ queryKey: key }, { revert: false })
+      // Keep TanStack's default revert: a cancelled fetch restores the last successful
+      // query state (or pending on first load), instead of surfacing a cancellation error.
+      // setQueryData updates the revert snapshot, so the event patch above survives too.
+      void queryClient.cancelQueries({ queryKey: key })
       pending.set(cacheKey, setTimeout(() => {
         pending.delete(cacheKey)
         void queryClient.invalidateQueries({ queryKey: key })
