@@ -235,8 +235,18 @@ it('global Tasks and cross-project palette keep parked-root status without listi
   browser.waitForFunction(`document.querySelector('[cmdk-list]')?.textContent.includes('Waiting root fixture')`)
   expect(browser.count('[cmdk-list] [aria-label="waiting on workers"]')).toBe(1)
   browser.fill('[cmdk-input]', 'Owned worker 1')
-  expect(browser.text('[cmdk-list]')).not.toContain('Owned worker 1')
-  expect(browser.text('[cmdk-list]')).not.toContain('Worker')
+  const workerSearch = browser.waitForValue(`(() => {
+    const input = document.querySelector('[cmdk-input]')
+    if (!input || input.value !== 'Owned worker 1') return null
+    const list = document.querySelector('[cmdk-list]')
+    if (!list) return null
+    const text = list.textContent ?? ''
+    if (text.includes('Waiting root fixture')) return null
+    return { text, tasks: [...list.querySelectorAll('[data-slot="palette-task"]')].map(el => el.getAttribute('data-run-id')) }
+  })()`) as { text: string; tasks: (string | null)[] }
+  expect(workerSearch.text).not.toContain('Owned worker 1')
+  expect(workerSearch.text).not.toContain('Worker')
+  expect(workerSearch.tasks).toEqual([])
   browser.press('Escape')
   observations.push({ globalTasks: 'waiting on workers without worker rows', palette: 'cross-project index omits workers' })
 })
@@ -268,7 +278,17 @@ it('keeps request waits consistent in threads, global tasks and the palette at p
   expect(browser.evaluate(`document.querySelector('${workerRow}')`)).toBeNull()
   browser.press('Control+k')
   browser.fill('[cmdk-input]', 'Worker awaiting parent reply')
-  expect(browser.text('[cmdk-list]')).not.toContain('Worker awaiting parent reply')
-  expect(browser.count('[cmdk-list] [aria-label="waiting on parent reply"]')).toBe(0)
+  const workerWait = browser.waitForValue(`(() => {
+    const input = document.querySelector('[cmdk-input]')
+    if (!input || input.value !== 'Worker awaiting parent reply') return null
+    const list = document.querySelector('[cmdk-list]')
+    if (!list) return null
+    return {
+      workerPresent: list.querySelector('[data-slot="palette-task"][data-run-id="${requestWorkerId}"]') !== null,
+      waitingOnParent: list.querySelectorAll('[aria-label="waiting on parent reply"]').length,
+    }
+  })()`) as { workerPresent: boolean; waitingOnParent: number }
+  expect(workerWait.workerPresent).toBe(false)
+  expect(workerWait.waitingOnParent).toBe(0)
   browser.press('Escape')
 }, 120_000)

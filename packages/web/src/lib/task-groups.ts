@@ -249,8 +249,8 @@ export function sidebarActiveRunId(
 ): string | null {
   if (currentRunId == null) return null
   const current = runs.find((run) => run.id === currentRunId)
-  if (current?.delegation?.role === 'worker') return current.delegation.parentRunId
-  return currentRunId
+  if (!current || !isOwnedWorker(current) || current.delegation?.role !== 'worker') return currentRunId
+  return current.delegation.parentRunId
 }
 
 /**

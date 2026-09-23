@@ -924,14 +924,14 @@ describe('SidebarSessionScope', () => {
   })
 })
 
-it('identifies owned worker rows without nested links or changing ordinary titles', () => {
+it('hides owned worker rows without changing ordinary titles', () => {
   renderList({ runs: [run({ id: 'worker', title: 'Investigate', delegation: { role: 'worker' as const, permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated' as const, path: '/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), run({ id: 'ordinary', title: 'Ordinary' })] })
   expect(row('worker')).toBeNull()
   expect(document.querySelector('[data-slot="session-workers"]')).toBeNull()
   expect(screen.getAllByRole('link', { name: /Ordinary/ }).length).toBeGreaterThan(0)
 })
 
-it('places a worker below its parent even when their statuses put them in different buckets', () => {
+it('does not nest a worker under its parent even when their statuses put them in different buckets', () => {
   const child = run({ id: 'child', status: 'running', title: 'Check result', delegation: { role: 'worker', permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'child', resourceId: 'child', kind: 'owned-isolated', path: '/child', branch: 'cez/child', baselineSha: 'a'.repeat(40) } } })
   renderList({ runs: [child, run({ id: 'parent', title: 'Build feature' })] })
   expect(row('child')).toBeNull()
@@ -939,7 +939,7 @@ it('places a worker below its parent even when their statuses put them in differ
   expect(document.querySelector('[data-slot="session-workers"]')).toBeNull()
 })
 
-it('keeps an independently pinned worker in Pinned when its parent is recent', () => {
+it('does not keep an independently pinned worker in Pinned when its parent is recent', () => {
   const worker = run({ id: 'child', pinned: true, delegation: { role: 'worker', permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'child', resourceId: 'child', kind: 'owned-isolated', path: '/child', branch: 'cez/child', baselineSha: 'a'.repeat(40) } } })
   renderList({ runs: [run({ id: 'parent' }), worker] })
   expect(row('child')).toBeNull()
