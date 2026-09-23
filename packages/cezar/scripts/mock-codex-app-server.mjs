@@ -145,7 +145,7 @@ rl.on('line', async (line) => {
       steerTurn = { id: turnId, steered: [], race: steerScenario === 'mock:steer-race', strand: steerScenario === 'mock:steer-strand' };
       const agent = (text) => emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId, item: { type: 'agentMessage', id: `item_steer_${++steerSerial}`, text } } });
       if (steerScenario === 'mock:steer-late') {
-        agent('late window: final message already sent');
+        agent(`late window: final message already sent${turnText.includes('mock:done-late') ? '\n\nCEZ:DONE' : ''}`);
         await sleep(300);
         completeSteerTurn(turnId); // steers accepted in this window are never read
         return;
