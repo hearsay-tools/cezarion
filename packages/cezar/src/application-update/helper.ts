@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { cp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { isIP, type AddressInfo } from 'node:net';
 import { withDirectoryLock } from './lock.js';
 import { runOwnedNpm } from './npm-process.js';
 
@@ -23,9 +24,24 @@ export interface HelperPlan {
   cliArgs: string[];
   cwd: string;
   repoRoot: string;
+  host: string;
   port: number;
   npmBin: string;
   claimId: string;
+}
+
+/** Only a listening TCP server can supply the private restart destination. */
+export function restartEndpoint(address: AddressInfo | string | null): Pick<HelperPlan, 'host' | 'port'> {
+  if (!address || typeof address === 'string' || !Number.isInteger(address.port) || address.port < 1 || address.port > 65535
+    || !(isIP(address.address) === 4 && address.address.split('.')[0] === '127' || address.address === '::1')) {
+    throw new Error('restart requires a bound loopback endpoint');
+  }
+  return { host: address.address, port: address.port };
+}
+
+export function restartHealthUrl(endpoint: Pick<HelperPlan, 'host' | 'port'>): string {
+  const { host, port } = restartEndpoint({ address: endpoint.host, port: endpoint.port, family: '' });
+  return `http://${host.includes(':') ? `[${host}]` : host}:${port}/api/v1/health`;
 }
 
 export interface RestartIO {
@@ -152,7 +168,7 @@ export async function promoteOriginal(plan: HelperPlan, npxLockAlreadyHeld = fal
 
 function launch(plan: HelperPlan): ReturnType<typeof spawn> {
   const args = [...plan.nodeArgs, plan.installation.launchEntry, ...plan.cliArgs,
-    '--port', String(plan.port), '--repo', plan.repoRoot, '--no-open', '--restart-exact'];
+    '--bind-host', plan.host, '--port', String(plan.port), '--repo', plan.repoRoot, '--no-open', '--restart-exact'];
   return spawn(plan.nodeExecutable, args, { cwd: plan.cwd, env: process.env,
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'], detached: true });
 }
@@ -174,9 +190,9 @@ async function verifyHealth(plan: HelperPlan, expectedVersion: string, child: Re
     const onExit = () => finish(new Error('replacement exited before listener acknowledgement'));
     const onAbort = () => finish(new Error('update lock ownership changed'));
     const onMessage = (value: unknown) => {
-      const message = value as { type?: string; port?: number; repoRoot?: string; version?: string };
+      const message = value as { type?: string; host?: string; port?: number; repoRoot?: string; version?: string };
       if (message?.type !== 'application-update-listening') return;
-      if (message.port !== plan.port || message.repoRoot !== plan.repoRoot || message.version !== expectedVersion) {
+      if (message.host !== plan.host || message.port !== plan.port || message.repoRoot !== plan.repoRoot || message.version !== expectedVersion) {
         finish(new Error('replacement listener identity mismatch')); return;
       }
       finish();
@@ -191,7 +207,7 @@ async function verifyHealth(plan: HelperPlan, expectedVersion: string, child: Re
     if (signal?.aborted) throw new Error('update lock ownership changed');
     if (child.exitCode !== null) throw new Error('replacement exited before health');
     try {
-      const response = await fetch(`http://127.0.0.1:${plan.port}/api/v1/health`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(1000)]) : AbortSignal.timeout(1000) });
+      const response = await fetch(restartHealthUrl(plan), { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(1000)]) : AbortSignal.timeout(1000) });
       if (response.ok) {
         const health = await response.json() as { version?: string; repoRoot?: string };
         if (health.version === expectedVersion && health.repoRoot === plan.repoRoot) {
@@ -253,6 +269,7 @@ export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promi
 }
 
 export async function runHelper(plan: HelperPlan, onArmed?: () => void): Promise<void> {
+  restartHealthUrl(plan); // Reject an invalid destination before claiming or mutating the installation.
   let replacement: ReturnType<typeof spawn> | undefined;
   let transactionSignal: AbortSignal | undefined;
   const assertClaim = async (): Promise<void> => {

@@ -8,7 +8,7 @@ import type { HelperPlan } from './helper.ts';
 
 /** Copy the helper out of the package npm will replace; pass credentials only via inherited env. */
 export async function armRestartHelper(plan: RestartPlan, launch: {
-  repoRoot: string; port: number; npmBin: string;
+  repoRoot: string; host: string; port: number; npmBin: string;
 }): Promise<number> {
   const source = dirname(fileURLToPath(import.meta.url));
   const target = join(dirname(plan.recordPath), 'helper');
@@ -25,7 +25,7 @@ export async function armRestartHelper(plan: RestartPlan, launch: {
   const message: HelperPlan = {
     ...plan, oldPid: process.pid, nodeExecutable: process.execPath, nodeArgs: process.execArgv,
     cliArgs: process.argv.slice(2), cwd: process.cwd(), repoRoot: launch.repoRoot,
-    port: launch.port, npmBin: launch.npmBin,
+    host: launch.host, port: launch.port, npmBin: launch.npmBin,
   };
   await new Promise<void>((resolve, reject) => {
     let settled = false;

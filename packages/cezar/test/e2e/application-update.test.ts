@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile as execFileCallback, spawn } from 'node:child_process';
-import { createServer } from 'node:http';
+import { Agent, createServer, get } from 'node:http';
 import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,7 +18,54 @@ const execFile = promisify(execFileCallback);
 const npm = async (args: string[], env: NodeJS.ProcessEnv) => execFile('npm', args, { env, timeout: 90_000, maxBuffer: 2_000_000 });
 const readJson = async (path: string) => JSON.parse(await readFile(path, 'utf8')) as Record<string, any>;
 
-async function simpleHelperFixture() {
+// These are strictly local fixture requests. A fresh agent avoids a worker's
+// inherited Node global proxy (which need not exempt ::1 or all of 127/8).
+async function localJson(url: string): Promise<Record<string, any>> {
+  const agent = new Agent();
+  try {
+    return await new Promise((resolve, reject) => {
+      const request = get(url, { agent }, response => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => { body += chunk; });
+        response.on('end', () => {
+          try { assert.equal(response.statusCode, 200); resolve(JSON.parse(body)); } catch (error) { reject(error); }
+        });
+        response.on('error', reject);
+      });
+      request.once('error', reject);
+      request.setTimeout(1000, () => request.destroy(new Error('local fixture request timed out')));
+    });
+  } finally { agent.destroy(); }
+}
+
+// Keep this owner alive until cleanup, so its replacement children are reaped.
+// Proxy configuration is excluded only from this local process fixture, not
+// from the production helper's inherited environment.
+function isolatedHelper() {
+  const helper = new URL('../../dist/application-update/helper.js', import.meta.url).href;
+  const child = spawn(process.execPath, ['--input-type=module', '--eval', `
+import { runHelper } from ${JSON.stringify(helper)};
+process.on('message', async plan => {
+  try { await runHelper(plan); process.send({ok:true}); }
+  catch(error) { process.send({ok:false,message:error.message}); }
+});`], { env: { ...process.env, NODE_USE_ENV_PROXY: '0' }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  return {
+    child,
+    run: (plan: Parameters<typeof runHelper>[0]) => new Promise<void>((resolve, reject) => {
+      const onExit = () => reject(new Error('fixture helper exited unexpectedly'));
+      child.once('exit', onExit);
+      child.once('message', message => {
+        child.off('exit', onExit);
+        const result = message as { ok: boolean; message?: string };
+        if (result.ok) resolve(); else reject(new Error(result.message));
+      });
+      child.send(plan);
+    }),
+  };
+}
+
+async function simpleHelperFixture(host = '127.0.0.1', badHealth = false) {
   const root = await mkdtemp(join(tmpdir(), 'cez-update-helper-boundary-'));
   const prefix = join(root, 'prefix');
   const original = join(prefix, 'lib/node_modules/@wjarka/cezarion');
@@ -33,12 +80,16 @@ async function simpleHelperFixture() {
   await writeFile(join(original, 'package.json'), JSON.stringify({ name: '@wjarka/cezarion', version: '1.0.0', type: 'module' }));
   await writeFile(join(original, 'web/dist/index.html'), '<!doctype html>');
   await writeFile(join(original, 'dist/index.js'), `import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
-const args = process.argv.slice(2); const value = (flag) => args[args.lastIndexOf(flag) + 1];
+import { readFileSync, appendFileSync } from 'node:fs';
+const args = process.argv.slice(2); const value = (flag) => args.includes(flag) ? args[args.lastIndexOf(flag) + 1] : undefined;
 const port = Number(value('--port')); const repoRoot = value('--repo');
 const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version;
-const server = createServer((req, res) => res.end(JSON.stringify({version, repoRoot, pid:process.pid})));
-server.listen(port, '127.0.0.1', () => process.send?.({type:'application-update-listening', port, repoRoot, version}, () => process.disconnect?.()));
+const server = createServer((req, res) => res.end(JSON.stringify({version: ${badHealth} && version === '2.0.0' ? 'wrong-version' : version, repoRoot, pid:process.pid})));
+server.listen(port, value('--bind-host') ?? ${JSON.stringify(host)}, () => {
+  const bound = server.address();
+  appendFileSync(${JSON.stringify(join(root, 'children.ndjson'))}, JSON.stringify({pid:process.pid,version,host:bound.address,port:bound.port})+'\\n');
+  process.send?.({type:'application-update-listening', host:bound.address, port:bound.port, repoRoot, version}, () => process.disconnect?.());
+});
 process.on('SIGTERM', () => server.close(() => process.exit(0)));`);
   await cp(original, recovery, { recursive: true });
   await writeFile(recordPath, JSON.stringify({ state: { status: 'restarting', supported: true, targetVersion: '2.0.0' },
@@ -46,13 +97,13 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)));`);
   const installation = { kind: 'global' as const, prefix, cache, installRoot: prefix, packageRoot: original,
     outerRoot: original, launchEntry: join(original, 'dist/index.js'), outerPackage: '@wjarka/cezarion' as const, request: '@wjarka/cezarion' };
   const portProbe = createServer();
-  await new Promise<void>((resolve) => portProbe.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => portProbe.listen(0, host, resolve));
   const address = portProbe.address(); assert.ok(address && typeof address !== 'string');
   const port = address.port;
   await new Promise<void>((resolve) => portProbe.close(() => resolve()));
   const plan = { installation, targetVersion: '2.0.0', oldVersion: '1.0.0', recovery, recordPath, claimId,
     oldPid: 2_000_000_000, nodeExecutable: process.execPath, nodeArgs: [], cliArgs: ['serve'], cwd: root,
-    repoRoot: root, port, npmBin: join(root, 'fake-npm.cjs') };
+    repoRoot: root, host, port, npmBin: join(root, 'fake-npm.cjs') };
   return { root, original, stateDir, recovery, recordPath, plan };
 }
 
@@ -112,7 +163,7 @@ else {
     } else { res.statusCode = 404; res.end(); }
   });
   server.listen(port, '127.0.0.1', () => {
-    if (process.send) process.send({ type: 'application-update-listening', port, repoRoot, version }, () => process.disconnect?.());
+    if (process.send) process.send({ type: 'application-update-listening', host: server.address().address, port: server.address().port, repoRoot, version }, () => process.disconnect?.());
   });
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
 }
@@ -214,7 +265,7 @@ for (const [oldVersion, newVersion] of [['0.14.8', '0.15.0'], ['1.0.0', '2.0.0']
       if (layout.kind === 'unsupported') return;
       const plan = { installation: layout, targetVersion: newVersion, oldVersion, stage: record.stage, recovery: record.recovery, binLinks: record.binLinks, claimId: randomUUID(),
         recordPath: join(fixture.home, 'application-updates', updateDirs[0]!, 'state.json'), oldPid: -1,
-        nodeExecutable: process.execPath, nodeArgs: [], cliArgs: [], cwd: fixture.root, repoRoot: fixture.root, port: 0, npmBin: 'npm' };
+        nodeExecutable: process.execPath, nodeArgs: [], cliArgs: [], cwd: fixture.root, repoRoot: fixture.root, host: '127.0.0.1', port: 0, npmBin: 'npm' };
       await withDirectoryLock(join(npxRoot, 'concurrency.lock'), async (assertOwned) => {
         await promoteOriginal(plan, true);
         await assertOwned();
@@ -259,7 +310,7 @@ test(`${outerPackage} global promotion changes the original command used by futu
     if (layout.kind === 'unsupported') return;
     const plan = { installation: layout, targetVersion: '2.0.0', oldVersion: '1.0.0', stage: record.stage, recovery: record.recovery, binLinks: record.binLinks, claimId: randomUUID(),
       recordPath, oldPid: -1, nodeExecutable: process.execPath, nodeArgs: [], cliArgs: [], cwd: fixture.root,
-      repoRoot: fixture.root, port: 0, npmBin: 'npm' };
+      repoRoot: fixture.root, host: '127.0.0.1', port: 0, npmBin: 'npm' };
     await promoteOriginal(plan);
     assert.equal(await versionFromFreshOriginalCommand(originalLaunch), '2.0.0');
     // npm may remove the original bin link before a failed promotion. Recovery
@@ -326,7 +377,7 @@ test(`real ${installKind} restart helper ${badHealth ? 'reaps new process and ro
     const plan = { installation: layout, targetVersion: '2.0.0', oldVersion: '1.0.0', stage: record.stage, claimId,
       recovery: record.recovery, binLinks: record.binLinks, recordPath, oldPid: old.pid!,
       nodeExecutable: process.execPath, nodeArgs: [], cliArgs: ['serve'], cwd: fixture.root,
-      repoRoot: fixture.root, port, npmBin: 'npm' };
+      repoRoot: fixture.root, host: '127.0.0.1', port, npmBin: 'npm' };
     const running = runHelper(plan);
     const acknowledgement = await fetch(`http://127.0.0.1:${port}/restart`, { method: 'POST' });
     assert.equal(await acknowledgement.text(), 'ack');
@@ -484,7 +535,7 @@ const p=${JSON.stringify(join(fixture.original, 'package.json'))}; const pkg=JSO
   }
 });
 
-test('built production CLI acknowledges only after its exact listener is bound', { timeout: 30_000 }, async () => {
+for (const ephemeral of [false, true]) test(`built production CLI acknowledges its actual listener (ephemeral=${ephemeral})`, { timeout: 30_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'cez-built-listener-'));
   await execFile('git', ['init', '-q', root]);
   const probe = createServer();
@@ -493,20 +544,24 @@ test('built production CLI acknowledges only after its exact listener is bound',
   const port = address.port;
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   const cli = new URL('../../dist/index.js', import.meta.url).pathname;
-  const child = spawn(process.execPath, [cli, 'serve', '--repo', root, '--port', String(port), '--no-open', '--restart-exact'], {
+  const host = ephemeral ? '127.0.0.2' : '127.0.0.1';
+  const child = spawn(process.execPath, [cli, 'serve', '--repo', root, '--bind-host', host, '--port', String(ephemeral ? 0 : port), '--no-open', '--restart-exact'], {
     cwd: root, env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_NO_BANNER: '1', CEZ_REMOTE: '0',
       npm_config_cache: join(root, 'cache'), npm_config_prefix: join(root, 'prefix') },
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   });
   try {
-    const listening = await new Promise<{ type: string; port: number; repoRoot: string; version: string }>((resolve, reject) => {
+    const listening = await new Promise<{ type: string; host: string; port: number; repoRoot: string; version: string }>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('built CLI did not acknowledge listener')), 20_000);
-      child.once('message', (message) => { clearTimeout(timer); resolve(message as { type: string; port: number; repoRoot: string; version: string }); });
+      child.once('message', (message) => { clearTimeout(timer); resolve(message as { type: string; host: string; port: number; repoRoot: string; version: string }); });
       child.once('exit', (code) => { clearTimeout(timer); reject(new Error(`built CLI exited before listening: ${code}`)); });
     });
-    assert.deepEqual({ type: listening.type, port: listening.port, repoRoot: listening.repoRoot },
-      { type: 'application-update-listening', port, repoRoot: root });
-    const health = await (await fetch(`http://127.0.0.1:${port}/api/v1/health`)).json() as { version: string; repoRoot: string };
+    assert.ok(listening.port > 0, 'IPC must carry the actual nonzero listener port');
+    assert.equal(listening.host, host);
+    if (!ephemeral) assert.equal(listening.port, port);
+    assert.equal(listening.type, 'application-update-listening');
+    assert.equal(listening.repoRoot, root);
+    const health = await localJson(`http://${host}:${listening.port}/api/v1/health`);
     assert.equal(health.version, listening.version);
     assert.equal(health.repoRoot, root);
   } finally {
@@ -530,7 +585,7 @@ const p=${JSON.stringify(manifest)}; const pkg=JSON.parse(fs.readFileSync(p)); p
     await writeFile(script, `import { readFileSync, writeFileSync } from 'node:fs';
 import { armRestartHelper } from ${JSON.stringify(new URL('file://' + launcherPath).href)};
 const plan = JSON.parse(readFileSync(${JSON.stringify(planPath)}));
-const pid = await armRestartHelper(plan, { repoRoot: plan.repoRoot, port: plan.port, npmBin: plan.npmBin });
+const pid = await armRestartHelper(plan, { repoRoot: plan.repoRoot, host: plan.host, port: plan.port, npmBin: plan.npmBin });
 writeFileSync(${JSON.stringify(join(fixture.root, 'ack'))}, String(pid));`);
     const orchestrator = spawn(process.execPath, [script, 'serve'], {
       cwd: fixture.root, env: { ...process.env, CEZ_HOME: join(fixture.root, 'home'), npm_config_cache: join(fixture.root, 'cache') },
@@ -572,7 +627,7 @@ test('detached launcher rejects a helper that exits before acknowledgement', { t
 import { armRestartHelper } from ${JSON.stringify(new URL('file://' + launcherPath).href)};
 const plan=JSON.parse(readFileSync(${JSON.stringify(planPath)}));
 process.env.NODE_OPTIONS='--require /definitely-missing-cezar-update-test';
-try { await armRestartHelper(plan,{repoRoot:plan.repoRoot,port:plan.port,npmBin:plan.npmBin}); }
+try { await armRestartHelper(plan,{repoRoot:plan.repoRoot,host:plan.host,port:plan.port,npmBin:plan.npmBin}); }
 catch { writeFileSync(${JSON.stringify(join(fixture.root, 'ack-failed'))}, 'yes'); }`);
     const child = spawn(process.execPath, [script, 'serve'], { cwd: fixture.root,
       env: { ...process.env, CEZ_HOME: join(fixture.root, 'home') }, stdio: 'ignore' });
@@ -593,7 +648,7 @@ test('detached helper does not acknowledge a stale durable claim', { timeout: 10
     await writeFile(script, `import { readFileSync, writeFileSync } from 'node:fs';
 import { armRestartHelper } from ${JSON.stringify(new URL('file://' + launcherPath).href)};
 const plan=JSON.parse(readFileSync(${JSON.stringify(planPath)}));
-try { await armRestartHelper(plan,{repoRoot:plan.repoRoot,port:plan.port,npmBin:plan.npmBin}); writeFileSync(${JSON.stringify(join(fixture.root, 'ack-result'))},'armed'); }
+try { await armRestartHelper(plan,{repoRoot:plan.repoRoot,host:plan.host,port:plan.port,npmBin:plan.npmBin}); writeFileSync(${JSON.stringify(join(fixture.root, 'ack-result'))},'armed'); }
 catch { writeFileSync(${JSON.stringify(join(fixture.root, 'ack-result'))},'rejected'); }`);
     const child = spawn(process.execPath, [script, 'serve'], { cwd: fixture.root,
       env: { ...process.env, CEZ_HOME: join(fixture.root, 'home') }, stdio: 'ignore' });
@@ -601,3 +656,55 @@ catch { writeFileSync(${JSON.stringify(join(fixture.root, 'ack-result'))},'rejec
     assert.equal(await readFile(join(fixture.root, 'ack-result'), 'utf8'), 'rejected');
   } finally { await rm(fixture.root, { recursive: true, force: true }); }
 });
+
+for (const host of ['127.0.0.2', '::1']) for (const rollback of [false, true]) {
+  test(`helper preserves actual loopback endpoint ${host} (rollback=${rollback})`, { timeout: 55_000 }, async (t) => {
+    if (host === '::1') {
+      const ipv6 = createServer((_req, res) => res.end(JSON.stringify({ ipv6: true })));
+      try {
+        await new Promise<void>((resolve, reject) => { ipv6.once('error', reject); ipv6.listen(0, host, resolve); });
+        const address = ipv6.address(); assert.ok(address && typeof address !== 'string');
+        assert.equal((await localJson(`http://[::1]:${address.port}`)).ipv6, true);
+      } catch {
+        t.skip('IPv6 listener/HTTP unavailable in this environment; IPv4 nondefault loopback covers process behavior'); return;
+      } finally { await new Promise<void>(resolve => ipv6.close(() => resolve())); }
+    }
+    const fixture = await simpleHelperFixture(host, rollback);
+    const helper = isolatedHelper();
+    const endpoint = `http://${host.includes(':') ? `[${host}]` : host}:${fixture.plan.port}`;
+    try {
+      // Old argv may contain an ephemeral port or hostname. The server-owned
+      // endpoint must override them for both upgrade and rollback launches.
+      fixture.plan.cliArgs = ['serve', '--bind-host', host, '--port', '0'];
+      await writeFile(fixture.plan.npmBin, `#!/usr/bin/env node
+const fs=require('node:fs'); const p=${JSON.stringify(join(fixture.original, 'package.json'))};
+const pkg=JSON.parse(fs.readFileSync(p)); pkg.version='2.0.0'; fs.writeFileSync(p,JSON.stringify(pkg));`, { mode: 0o700 });
+      await helper.run(fixture.plan);
+      const record = await readJson(fixture.recordPath);
+      assert.equal(record.state.status, rollback ? 'error' : 'idle');
+      if (rollback) assert.match(record.state.message, /previous release was restored/);
+      const health = await localJson(`${endpoint}/api/v1/health`);
+      assert.equal(health.version, rollback ? '1.0.0' : '2.0.0');
+      assert.equal(health.repoRoot, fixture.root);
+      const boots = (await readFile(join(fixture.root, 'children.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+      assert.deepEqual(boots.map(boot => ({ host: boot.host, port: boot.port })),
+        Array.from({ length: rollback ? 2 : 1 }, () => ({ host, port: fixture.plan.port })));
+      if (rollback) assert.throws(() => process.kill(boots[0].pid, 0), 'failed upgrade is reaped before rollback');
+    } finally {
+      // Reap every owned fixture child even when assertions/verification fail.
+      const boots = await readFile(join(fixture.root, 'children.ndjson'), 'utf8').catch(() => '');
+      for (const line of boots.trim().split('\n').filter(Boolean)) {
+        const { pid } = JSON.parse(line);
+        try { process.kill(pid, 'SIGTERM'); } catch { /* helper already reaped it */ }
+        for (let attempt = 0; attempt < 100; attempt++) {
+          try { process.kill(pid, 0); } catch { break; }
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        assert.throws(() => process.kill(pid, 0), 'owned fixture child must be reaped');
+      }
+      helper.child.kill('SIGTERM');
+      if (helper.child.exitCode === null) await new Promise<void>(resolve => helper.child.once('exit', () => resolve()));
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+}

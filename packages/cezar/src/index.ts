@@ -3,6 +3,7 @@ import { DelegationController } from './delegation/provision.ts';
 import { parseArgs } from 'node:util';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
+import { once } from 'node:events';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +39,7 @@ import { runProjectsCommand } from './workspace/projects-cli.ts';
 import { WorkspaceSemaphore } from './workspace/semaphore.ts';
 import { ApplicationUpdateService } from './application-update/service.ts';
 import { armRestartHelper } from './application-update/launcher.ts';
+import { restartEndpoint } from './application-update/helper.ts';
 import { cezarHomeDir } from './paths.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
@@ -303,7 +305,7 @@ async function serveCommand(
       npmPrefix: npmPrefix ?? join(cezarHomeDir(), 'dry-prefix'),
       npmCache: npmCache ?? join(cezarHomeDir(), 'dry-cache'), home: cezarHomeDir(), targetVersion: () => update.latest,
       dryRun: process.env.CEZ_DRY_RUN === '1',
-      armRestart: (plan) => armRestartHelper(plan, { repoRoot, port, npmBin: 'npm' }),
+      armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(server.address()), npmBin: 'npm' }),
       handoff: () => { void server.shutdownForRestart().then(() => process.exit(0)); },
     }) : undefined;
   server = startServer({
@@ -321,15 +323,16 @@ async function serveCommand(
     providerRuntimeAuth,
     workspaceEvents,
   }, port);
+  if (!server.listening) await once(server, 'listening');
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('cockpit TCP listener is unavailable');
+  const boundPort = address.port;
+  const boundHost = address.address;
   if (restartExact && process.send) {
-    const acknowledgeListener = () => {
-      process.send?.({ type: 'application-update-listening', port, repoRoot, version },
-        () => process.disconnect?.());
-    };
-    if (server.listening) acknowledgeListener();
-    else server.once('listening', acknowledgeListener);
+    process.send({ type: 'application-update-listening', host: boundHost, port: boundPort, repoRoot, version },
+      () => process.disconnect?.());
   }
-  const url = `http://localhost:${port}`;
+  const url = `http://${boundHost.includes(':') ? `[${boundHost}]` : boundHost}:${boundPort}`;
 
   console.log(`\n  cezar v${version} — ${repoRoot}`);
   console.log(`  ${repo ? `branch ${repo.branch}` : 'not a git repository (tasks run in place, one at a time; repo view is empty)'}`);
@@ -338,7 +341,7 @@ async function serveCommand(
     const detail = check.available ? (check.version ?? 'ok') : (check.hint ?? 'missing');
     console.log(`  ${mark} ${check.name.padEnd(6)} ${detail}`);
   }
-  if (port !== preferredPort) console.log(`  (port ${preferredPort} was busy — using ${port})`);
+  if (preferredPort !== 0 && boundPort !== preferredPort) console.log(`  (port ${preferredPort} was busy — using ${boundPort})`);
   console.log(`\n  cockpit → ${url}\n`);
   // Silenced by CEZ_NO_BANNER=1 or by dismissing the cockpit's banner (#391).
   await printSkillsBanner(repoRoot);

@@ -62,3 +62,26 @@ describe('restart helper transaction', () => {
       .toBe("npm install --prefix '/tmp/npx root' cezarion@0.14.8");
   });
 });
+
+describe('server-owned restart endpoint', () => {
+  it('captures a bound nondefault address and actual assigned port', async () => {
+    const { restartEndpoint } = await import('./helper.ts');
+    expect(restartEndpoint({ address: '127.0.0.2', family: 'IPv4', port: 54321 })).toEqual({ host: '127.0.0.2', port: 54321 });
+  });
+
+  it('formats IPv6 health URLs with brackets', async () => {
+    const { restartHealthUrl } = await import('./helper.ts');
+    expect(restartHealthUrl({ host: '::1', port: 4321 })).toBe('http://[::1]:4321/api/v1/health');
+  });
+
+  it('refuses missing, unbound or non-loopback endpoints', async () => {
+    const { restartEndpoint } = await import('./helper.ts');
+    for (const address of [null, '/tmp/socket',
+      { address: '127.0.0.1', family: 'IPv4', port: 0 },
+      { address: '0.0.0.0', family: 'IPv4', port: 4321 },
+      { address: '192.168.1.2', family: 'IPv4', port: 4321 },
+      { address: '127.0.0.1.evil.test', family: 'IPv4', port: 4321 },
+      { address: '::', family: 'IPv6', port: 4321 },
+    ]) expect(() => restartEndpoint(address)).toThrow();
+  });
+});
