@@ -19,10 +19,21 @@ export async function invokeCiTool(input: unknown) {
     return { isError: true, content: [{ type: 'text' as const, text: error instanceof Error ? error.message : 'CI tool unavailable' }], details: {} };
   }
 }
-export async function serveCiMcp(): Promise<void> {
-  const server = new Server({ name: 'cezar-ci', version: '1.0.0' }, { capabilities: { tools: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [ciToolDefinition] }));
+// #497: deferred-tool harnesses show a bare tool name until the agent loads its
+// schema, so the initialize instructions carry one trigger line per listed tool.
+const tools = [{ definition: ciToolDefinition, trigger: 'load when opening or updating a PR you want to watch CI on.' }];
+export const ciServerInstructions = [
+  'The interface to Cezarion, the orchestrator running this session. Load a tool below when its situation comes up.',
+  ...tools.map(tool => `- ${tool.definition.name}: ${tool.trigger}`),
+].join('\n');
+export function createCiMcpServer(): Server {
+  const server = new Server({ name: 'cezar-ci', version: '1.0.0' }, { capabilities: { tools: {} }, instructions: ciServerInstructions });
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools.map(tool => tool.definition) }));
   server.setRequestHandler(CallToolRequestSchema, async request => request.params.name === ciToolDefinition.name ? invokeCiTool(request.params.arguments) : { isError: true, content: [{ type: 'text', text: 'Unknown tool' }] });
+  return server;
+}
+export async function serveCiMcp(): Promise<void> {
+  const server = createCiMcpServer();
   const finish = () => { void server.close().finally(() => process.exit(0)); };
   const stop = monitorCiOwner(finish);
   process.stdin.once('end', finish);
