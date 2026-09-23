@@ -91,6 +91,24 @@ describe('application update chrome', () => {
     browser.click(`${drawer} [aria-label="Restart application"]`)
     browser.waitForFunction(`document.querySelector('[role="alertdialog"]') !== null`)
     expect(browser.text('[role="alertdialog"]')).toContain('Running tasks will be recovered after restart.')
+    const modal = browser.waitForValue(`(() => {
+      const dialog = document.querySelector('[role="alertdialog"]')
+      const overlay = document.querySelector('[data-slot="alert-dialog-overlay"]')
+      const sheet = document.querySelector('${drawer}')
+      if (!dialog || !overlay || !sheet) return null
+      if ([dialog, overlay, sheet].some(el => el.getAnimations().some(animation => animation.playState === 'running'))) return null
+      const rect = dialog.getBoundingClientRect()
+      return {
+        opacity: getComputedStyle(dialog).opacity,
+        left: sheet.getBoundingClientRect().left,
+        dialogLeft: rect.left,
+        dialogRight: rect.right,
+        topIsDialog: dialog.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)),
+        titleColor: getComputedStyle(dialog.querySelector('[data-slot="alert-dialog-title"]')).color,
+        background: getComputedStyle(dialog).backgroundColor,
+      }
+    })()`)
+    expect(modal).toMatchObject({ opacity: '1', left: 0, dialogLeft: 16, dialogRight: 344, topIsDialog: true })
     browser.screenshot(`${artifacts}/mobile-confirm-dark.png`, { viewport: true })
     browser.click('[data-slot="alert-dialog-cancel"]')
     browser.waitForFunction(`document.querySelector('[role="alertdialog"]') === null && document.activeElement?.getAttribute('aria-label') === 'Restart application'`)
