@@ -332,8 +332,10 @@ export class ClaudeCliRunner implements AgentRunner {
               onEvent?.({ type: 'cost', usd: msg.total_cost_usd });
             }
             pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
-            const settled = msg.queued_turn_count === 0 ? [...unsettled]
-              : Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String)
+            // The named lines are exact; `queued_turn_count: 0` is only a fallback, because a
+            // line still in the pipe when the CLI computed this result is not covered by it.
+            const settled = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String)
+              : msg.queued_turn_count === 0 ? [...unsettled]
               : [...unsettled].slice(0, 1);
             // A line this result covered was read even if its replay echo was missed.
             const covered = settled.flatMap(id => { unsettled.delete(id); return submissions.consume(id); });

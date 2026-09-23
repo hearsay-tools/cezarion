@@ -644,3 +644,33 @@ describe('agent input written after the last model call (#505)', () => {
     session.end(); await session.result;
   });
 });
+
+describe('Claude result coverage prefers the lines it names (#505 review)', () => {
+  afterEach(() => { spawnHook.override = null; });
+  it('does not settle a line still in the pipe when queued_turn_count is 0 but user_message_uuids names only the earlier line', async () => {
+    const emitter = new EventEmitter();
+    const stdout = new PassThrough(); const stdin = new PassThrough();
+    const written: Array<{ uuid: string }> = []; let buffered = '';
+    stdin.on('data', chunk => { buffered += String(chunk); let i; while ((i = buffered.indexOf('\n')) >= 0) { written.push(JSON.parse(buffered.slice(0, i))); buffered = buffered.slice(i + 1); } });
+    const child = Object.assign(emitter, { stdin, stdout, stderr: new PassThrough(), exitCode: null as number | null, signalCode: null as NodeJS.Signals | null, killed: false,
+      kill: () => { close(); return true; } }) as unknown as ChildProcessWithoutNullStreams;
+    const close = () => { if (child.exitCode !== null) return; Object.assign(child, { exitCode: 0 }); stdout.end(); emitter.emit('exit', 0, null); emitter.emit('close', 0, null); };
+    spawnHook.override = () => child;
+    const events: AgentEvent[] = []; const ui: UiEvent[] = []; const consumed: string[][] = [];
+    const session = new ClaudeCliRunner({ bin: 'unused-pipe-fixture' }).startSession({ userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 },
+      event => events.push(event), { onUiEvent: event => ui.push(event), onAgentInputConsumed: ids => consumed.push([...ids]) });
+    try {
+      await vi.waitFor(() => expect(written).toHaveLength(1));
+      await session.sendAgentMessage([{ type: 'text', text: 'late line' }], ['late']);
+      await vi.waitFor(() => expect(written).toHaveLength(2));
+      // The CLI computed this result before it read the late line: it names only the opening.
+      stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'done', queued_turn_count: 0,
+        user_message_uuids: [written[0]!.uuid], usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));
+      expect(consumed).toEqual([]); // the late line is not read yet
+      stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'late done', queued_turn_count: 0,
+        user_message_uuids: [written[1]!.uuid], usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
+      await vi.waitFor(() => expect(consumed).toEqual([['late']]));
+    } finally { session.interrupt(); close(); await session.result; }
+  });
+});
