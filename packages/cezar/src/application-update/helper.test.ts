@@ -85,3 +85,32 @@ describe('server-owned restart endpoint', () => {
     ]) expect(() => restartEndpoint(address)).toThrow();
   });
 });
+
+describe('direct restart health request', () => {
+  it.each([false, true])('aborts and closes an unresponsive probe (headers sent=%s)', async (sendHeaders) => {
+    const { createServer } = await import('node:http');
+    const { requestRestartHealth } = await import('./helper.ts');
+    let closed!: Promise<void>;
+    let received!: () => void;
+    const started = new Promise<void>(resolve => { received = resolve; });
+    const server = createServer((_request, response) => {
+      closed = new Promise<void>(resolve => response.once('close', resolve));
+      if (sendHeaders) { response.writeHead(200, { 'content-type': 'application/json' }); response.write('{'); }
+      received();
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('missing fixture listener');
+      const controller = new AbortController();
+      const rejected = expect(requestRestartHealth({ host: address.address, port: address.port }, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+      await started;
+      controller.abort();
+      await rejected;
+      await closed;
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+});

@@ -40,16 +40,16 @@ async function localJson(url: string): Promise<Record<string, any>> {
 }
 
 // Keep this owner alive until cleanup, so its replacement children are reaped.
-// Proxy configuration is excluded only from this local process fixture, not
-// from the production helper's inherited environment.
-function isolatedHelper() {
+// The endpoint cases enable an explicit rejecting local proxy in this child;
+// production must keep its private loopback probe off that proxy.
+function isolatedHelper(proxy: string) {
   const helper = new URL('../../dist/application-update/helper.js', import.meta.url).href;
   const child = spawn(process.execPath, ['--input-type=module', '--eval', `
 import { runHelper } from ${JSON.stringify(helper)};
 process.on('message', async plan => {
   try { await runHelper(plan); process.send({ok:true}); }
   catch(error) { process.send({ok:false,message:error.message}); }
-});`], { env: { ...process.env, NODE_USE_ENV_PROXY: '0' }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+});`], { env: { ...process.env, NODE_USE_ENV_PROXY: '1', HTTP_PROXY: proxy, http_proxy: proxy, HTTPS_PROXY: proxy, https_proxy: proxy, NO_PROXY: '', no_proxy: '' }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   return {
     child,
     run: (plan: Parameters<typeof runHelper>[0]) => new Promise<void>((resolve, reject) => {
@@ -658,7 +658,7 @@ catch { writeFileSync(${JSON.stringify(join(fixture.root, 'ack-result'))},'rejec
 });
 
 for (const host of ['127.0.0.2', '::1']) for (const rollback of [false, true]) {
-  test(`helper preserves actual loopback endpoint ${host} (rollback=${rollback})`, { timeout: 55_000 }, async (t) => {
+  test(`helper preserves actual loopback endpoint ${host} (rollback=${rollback}, rejecting proxy enabled)`, { timeout: 55_000 }, async (t) => {
     if (host === '::1') {
       const ipv6 = createServer((_req, res) => res.end(JSON.stringify({ ipv6: true })));
       try {
@@ -670,7 +670,15 @@ for (const host of ['127.0.0.2', '::1']) for (const rollback of [false, true]) {
       } finally { await new Promise<void>(resolve => ipv6.close(() => resolve())); }
     }
     const fixture = await simpleHelperFixture(host, rollback);
-    const helper = isolatedHelper();
+    let proxyRequests = 0;
+    const proxy = createServer((_req, response) => { proxyRequests++; response.writeHead(502).end(); });
+    proxy.on('connect', (_req, socket) => {
+      proxyRequests++;
+      socket.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n');
+    });
+    await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve));
+    const proxyAddress = proxy.address(); assert.ok(proxyAddress && typeof proxyAddress !== 'string');
+    const helper = isolatedHelper(`http://127.0.0.1:${proxyAddress.port}`);
     const endpoint = `http://${host.includes(':') ? `[${host}]` : host}:${fixture.plan.port}`;
     try {
       // Old argv may contain an ephemeral port or hostname. The server-owned
@@ -680,6 +688,7 @@ for (const host of ['127.0.0.2', '::1']) for (const rollback of [false, true]) {
 const fs=require('node:fs'); const p=${JSON.stringify(join(fixture.original, 'package.json'))};
 const pkg=JSON.parse(fs.readFileSync(p)); pkg.version='2.0.0'; fs.writeFileSync(p,JSON.stringify(pkg));`, { mode: 0o700 });
       await helper.run(fixture.plan);
+      assert.equal(proxyRequests, 0, 'the private loopback health request must never reach the configured proxy');
       const record = await readJson(fixture.recordPath);
       assert.equal(record.state.status, rollback ? 'error' : 'idle');
       if (rollback) assert.match(record.state.message, /previous release was restored/);
@@ -704,6 +713,8 @@ const pkg=JSON.parse(fs.readFileSync(p)); pkg.version='2.0.0'; fs.writeFileSync(
       }
       helper.child.kill('SIGTERM');
       if (helper.child.exitCode === null) await new Promise<void>(resolve => helper.child.once('exit', () => resolve()));
+      proxy.closeAllConnections();
+      await new Promise<void>(resolve => proxy.close(() => resolve()));
       await rm(fixture.root, { recursive: true, force: true });
     }
   });

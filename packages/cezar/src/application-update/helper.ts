@@ -3,6 +3,7 @@ import { cp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/p
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isIP, type AddressInfo } from 'node:net';
+import { Agent, get } from 'node:http';
 import { withDirectoryLock } from './lock.js';
 import { runOwnedNpm } from './npm-process.js';
 
@@ -42,6 +43,29 @@ export function restartEndpoint(address: AddressInfo | string | null): Pick<Help
 export function restartHealthUrl(endpoint: Pick<HelperPlan, 'host' | 'port'>): string {
   const { host, port } = restartEndpoint({ address: endpoint.host, port: endpoint.port, family: '' });
   return `http://${host.includes(':') ? `[${host}]` : host}:${port}/api/v1/health`;
+}
+
+/** A private loopback probe must not use Node's environment-proxied global agent. */
+export async function requestRestartHealth(endpoint: Pick<HelperPlan, 'host' | 'port'>, signal: AbortSignal): Promise<{ version?: string; repoRoot?: string } | undefined> {
+  const agent = new Agent();
+  try {
+    return await new Promise((resolve, reject) => {
+      const request = get(restartHealthUrl(endpoint), { agent, signal }, (response) => {
+        response.once('error', reject);
+        if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+          response.resume(); resolve(undefined); return;
+        }
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => { body += chunk; });
+        response.once('end', () => {
+          try { resolve(JSON.parse(body) as { version?: string; repoRoot?: string }); }
+          catch (error) { reject(error); }
+        });
+      });
+      request.once('error', reject);
+    });
+  } finally { agent.destroy(); }
 }
 
 export interface RestartIO {
@@ -207,9 +231,8 @@ async function verifyHealth(plan: HelperPlan, expectedVersion: string, child: Re
     if (signal?.aborted) throw new Error('update lock ownership changed');
     if (child.exitCode !== null) throw new Error('replacement exited before health');
     try {
-      const response = await fetch(restartHealthUrl(plan), { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(1000)]) : AbortSignal.timeout(1000) });
-      if (response.ok) {
-        const health = await response.json() as { version?: string; repoRoot?: string };
+      const health = await requestRestartHealth(plan, signal ? AbortSignal.any([signal, AbortSignal.timeout(1000)]) : AbortSignal.timeout(1000));
+      if (health) {
         if (health.version === expectedVersion && health.repoRoot === plan.repoRoot) {
           if (child.connected) child.disconnect();
           child.unref(); return;
