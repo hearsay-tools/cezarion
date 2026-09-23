@@ -4523,12 +4523,12 @@ export class RunManager {
       failBeforeSpawn(err.message);
       return;
     }
-    if (state.cancelled) {
+    const settlePrelaunchCancellation = () => {
       this.store.updateStep(runId, stepId, { status: 'cancelled' });
       this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
       this.clearAutosaveTimer(state); this.dropActive(runId);
-      return;
-    }
+    };
+    if (state.cancelled) { settlePrelaunchCancellation(); return; }
     if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images }, state)) return;
     this.store.updateStep(runId, stepId, { profileId: continueProfile.profileId });
 
@@ -4548,6 +4548,23 @@ export class RunManager {
     if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
     const delegation = this.provisionSession(runId, state);
     const ciTools = await this.provisionCiSession(runId, state);
+    // Stop/Finish can arrive while the local tool controller is starting.
+    const launchRun = this.store.getRun(runId);
+    if (state.cancelled || this.workerExecutionStopped(runId) || this.active.get(runId) !== state ||
+      (launchRun && this.executionBlockedByRootFinish(launchRun))) {
+      ciTools?.revoke();
+      if (state.revokeCiTools === ciTools?.revoke) state.revokeCiTools = undefined;
+      delegation?.revoke();
+      if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
+      if (this.active.get(runId) !== state) return;
+      if (state.cancelled || this.workerExecutionStopped(runId)) {
+        state.cancelled = true;
+        settlePrelaunchCancellation();
+      } else {
+        this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images }, state);
+      }
+      return;
+    }
     try {
     session = runner.startSession(
       {
@@ -4982,6 +4999,10 @@ export class RunManager {
         startImages = undefined;
         startAttachments = [];
         checkFailure = null;
+        // Stale setup cannot finalize a replacement owner. Disposal also clears
+        // active, but must still honor a previously accepted Stop/Finish intent.
+        if (this.active.get(runId) !== state &&
+          !(this.disposed && (state.cancelled || state.finishRequested))) return;
         if (state.cancelled || this.preserveRunAfterDisposal(runId, state)) break;
         const current = this.store.getRun(runId);
         if (current && this.executionBlockedByRootFinish(current) && !state.sessionEverOpened) {
@@ -5366,8 +5387,20 @@ export class RunManager {
     this.beginUsageInvocation(runId, state, step.id);
     const delegation = this.provisionSession(runId, state);
     const ciTools = await this.provisionCiSession(runId, state);
+    // Revalidate after provisioning, then let execute settle cancellation or
+    // requeue a Finish-held step through its existing no-session paths.
+    const launchRun = this.store.getRun(runId);
+    if (state.cancelled || this.workerExecutionStopped(runId) || this.active.get(runId) !== state ||
+      (launchRun && this.executionBlockedByRootFinish(launchRun))) {
+      ciTools?.revoke();
+      if (state.revokeCiTools === ciTools?.revoke) state.revokeCiTools = undefined;
+      delegation?.revoke();
+      if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
+      if (this.workerExecutionStopped(runId)) state.cancelled = true;
+      state.currentStepId = undefined;
+      return null;
+    }
     try {
-      if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
       session = runner.startSession(
         {
           // Skill body, then the run's extra prompt (POST override or config

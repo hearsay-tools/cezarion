@@ -47,6 +47,7 @@ function renderView(
       const path = String(input)
       const body =
         path === '/api/v1/models?runner=claude' ? { runner: 'claude', models: [], source: 'unavailable', stale: false }
+        : path === '/api/v1/models?runner=codex' ? { runner: 'codex', models: [], source: 'unavailable', stale: false }
         : path === '/api/v1/providers/status' ? providerStatus
         : path === '/api/v1/health' ? health
         : path.endsWith('/relationships') ? { workers: [] }
@@ -1230,8 +1231,21 @@ describe('composer execution actions (#201)', () => {
     expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
   })
 
-  it('preserves a draft after Stop acceptance until the run terminates', async () => {
-    renderView(<ThreadView run={run('running')} thread={reduceThread([])} />)
+  it('releases Stopping only on authoritative cancellation and preserves the draft and attachment (#493)', async () => {
+    const active = run('running', {
+      runner: 'codex', currentStepId: 'task',
+      steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0, sessionId: 'startup-session', backend: 'codex' }],
+    })
+    const thread = reduceThread([line(1, 'note', { message: 'Codex startup: waiting for initialize' })])
+    const { rerender, queryClient } = renderView(<ThreadView run={active} thread={thread} />, {
+      providers: [{ provider: 'codex', status: 'connected', enabled: true }],
+    })
+    const updateRun = (next: ApiRun) => rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><ThreadView run={next} thread={thread} /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(screen.getByText('Codex startup: waiting for initialize', { exact: false })).toBeTruthy()
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
     await waitFor(() => expect(textarea.disabled).toBe(false))
     const previousFetch = globalThis.fetch
@@ -1241,6 +1255,9 @@ describe('composer execution actions (#201)', () => {
       return previousFetch(input, init)
     }))
     fireEvent.change(textarea, { target: { value: 'keep this draft' } })
+    const file = new File([new Uint8Array([9, 9])], 'startup.png', { type: 'image/png' })
+    fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: file.type, getAsFile: () => file }] } })
+    await screen.findByLabelText('Remove startup.png')
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     await waitFor(() => expect(stops).toBe(1))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Stopping…' }).hasAttribute('disabled')).toBe(true))
@@ -1248,6 +1265,27 @@ describe('composer execution actions (#201)', () => {
     expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(stops).toBe(1)
+
+    updateRun({ ...active, stopping: true })
+    expect(screen.getByRole('button', { name: 'Stopping…' }).hasAttribute('disabled')).toBe(true)
+    // A server snapshot omits optional stopping once cleanup has completed.
+    updateRun({ ...active, status: 'cancelled', currentStepId: undefined,
+      finishedAt: '2026-07-14T12:01:00.000Z', steps: active.steps.map(step => ({ ...step, status: 'cancelled' })) })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stopping…' })).toBeNull())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false))
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expect(textarea.value).toBe('keep this draft')
+    expect(textarea.readOnly).toBe(false)
+    expect(screen.getByRole('button', { name: 'Remove startup.png' }).hasAttribute('disabled')).toBe(false)
+    expect(stops).toBe(1)
+  })
+
+  it('renders a no-turn startup failure in the task thread (#493)', () => {
+    const message = 'Codex startup timed out after 60s while waiting for initialize'
+    renderView(<ThreadView run={run('failed', { runner: 'codex' })} thread={reduceThread([
+      line(1, 'error', { message }),
+    ])} />)
+    expect(screen.getByText(message, { exact: false }).closest('[data-slot="note-line"]')?.getAttribute('data-tone')).toBe('danger')
   })
 })
 

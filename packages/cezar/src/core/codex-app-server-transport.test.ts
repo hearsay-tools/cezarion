@@ -8,6 +8,7 @@ import {
   CodexAppServerRpc,
   endCodexAppServer,
   resolveCodexExecutable,
+  waitForCodexAppServerExit,
 } from './codex-app-server-transport.ts';
 
 const originalBin = process.env.CEZ_CODEX_BIN;
@@ -66,6 +67,17 @@ describe('Codex app-server transport', () => {
     expect(writes.join('')).toContain('"method":"initialized"');
   });
 
+  it('rejects instead of reserving an unacknowledgeable request on destroyed stdin', async () => {
+    const { child, writes } = fakeChild();
+    child.stdin.destroy();
+    const rpc = new CodexAppServerRpc(child);
+    let outcome = 'pending';
+    void rpc.request('initialize', {}).then(() => { outcome = 'resolved'; }, () => { outcome = 'rejected'; });
+    await Promise.resolve();
+    expect(outcome).toBe('rejected');
+    expect(writes).toEqual([]);
+  });
+
   it('rejects a correlated request with the app-server error message', async () => {
     const { child } = fakeChild();
     const rpc = new CodexAppServerRpc(child);
@@ -108,6 +120,29 @@ describe('endCodexAppServer watchdog', () => {
     };
     return { child, signals, exit };
   }
+
+  it('never fabricates process termination when a safety interval elapses', async () => {
+    vi.useFakeTimers();
+    try {
+      const { child, exit } = signallableChild();
+      let exited = false;
+      void waitForCodexAppServerExit(child).then(() => { exited = true; });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(exited).toBe(false);
+      exit(143);
+      await Promise.resolve();
+      expect(exited).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('recognizes an already-observed signal exit without waiting for a second event', async () => {
+    const { child } = signallableChild();
+    Object.assign(child, { signalCode: 'SIGTERM' });
+    let exited = false;
+    void waitForCodexAppServerExit(child).then(() => { exited = true; });
+    await Promise.resolve();
+    expect(exited).toBe(true);
+  });
 
   it('reports each escalation step so the runner can classify the exit', () => {
     vi.useFakeTimers();

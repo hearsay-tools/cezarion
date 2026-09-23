@@ -100,6 +100,18 @@ signal — keeps running, and the escalation written for exactly that case is
 skipped. Use `trackChildExit(child)` (`packages/cezar/src/core/agent-runner.ts`),
 which seeds from `exitCode`/`signalCode` and listens for `exit`.
 
+Codex startup has one internal 60-second budget, including initialize, thread
+start/resume, the opening turn acknowledgement and the first main-thread
+`turn/started`. Phase notes identify a stalled boundary. Interactive
+`timeoutMs: 0` does not disable startup protection; successful startup removes
+it, so model turns and native human questions have no new lifetime cap.
+Stop revokes pending RPCs and prevents late replies from starting work, then
+sends SIGTERM and escalates to SIGKILL after 10 seconds unless the process has
+actually exited. RPC rejection is not termination: `result` still waits for
+real exit (or a failed spawn). After exit, inherited stdout gets a bounded
+250ms drain; remaining pipe handles are closed. Neither a timeout nor sending
+a signal can fabricate an exit or free a still-live session's capacity.
+
 **Non-human input (owned workers, 2026-09-06).** `sendAgentMessage` must never
 resolve a native question or a portable marker ask. False means the caller still
 owns the input and must retry at a later safe boundary, NEVER fall back to

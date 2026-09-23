@@ -38,6 +38,13 @@ import {
   type CodexUiMapperState,
 } from './codex-ui-mapper.ts';
 
+// One startup budget, including handshake ACKs and the first main-thread turn.
+// This is not a model-turn or human-question lifetime limit.
+const STARTUP_TIMEOUT_MS = 60_000;
+// After real process exit, allow buffered output to drain before closing pipes
+// a descendant may have inherited. This timer never proves termination.
+const EXIT_DRAIN_MS = 250;
+
 export interface CodexRunnerOptions {
   /** Override the binary name/path; defaults to `codex` on PATH. */
   bin?: string;
@@ -147,6 +154,14 @@ class CodexSession implements AgentSession {
   });
   private tokensUsed = 0;
   private ready!: Promise<void>;
+  private startupPhase = 'initialize';
+  private openingAcknowledged = false;
+  private firstTurnStarted = false;
+  private startupComplete = false;
+  private startupTimer: NodeJS.Timeout | undefined;
+  private stopKillTimer: NodeJS.Timeout | undefined;
+  private hardStopStarted = false;
+  private failure: Error | undefined;
   private autoEndTimer: NodeJS.Timeout | undefined;
   private eofTermTimer: NodeJS.Timeout | undefined;
   private eofKillTimer: NodeJS.Timeout | undefined;
@@ -174,91 +189,112 @@ class CodexSession implements AgentSession {
   ) {
     try {
       this.child = spawnCodexAppServer(bin, spec.cwd, spec.env);
-      this.rpc = new CodexAppServerRpc(this.child);
+      this.rpc = new CodexAppServerRpc(this.child, (error) => {
+        if (!this.hardStopStarted && !this.hasExited()) this.fail(error);
+      });
     } catch (err) {
       throw codexSpawnError(err, bin);
     }
 
-    this.hasExited = trackChildExit(this.child);
+    const hasExited = trackChildExit(this.child);
+    this.hasExited = hasExited;
+    // Observe termination BEFORE bootstrap. Pending RPCs cannot own the only
+    // path to discovering that their process has already gone (#493).
+    const exited = waitForCodexAppServerExit(this.child);
+    let drainTimer: NodeJS.Timeout | undefined;
     this.child.on('error', (err: NodeJS.ErrnoException) => {
-      this.spawnFailed = codexSpawnError(err, bin);
+      if (this.child.pid === undefined) {
+        this.spawnFailed = codexSpawnError(err, bin);
+        this.closeInput(this.spawnFailed.message);
+        this.child.stdout.destroy();
+      } else if (this.stdinOpen) {
+        this.fail(new Error(`codex app-server process error while waiting for ${this.startupPhase}`));
+      }
+    });
+    this.child.once('exit', (code, signal) => {
+      if (this.stdinOpen && !this.startupComplete) {
+        this.failure ??= new Error(`Codex startup exited (${signal ?? code ?? 'unknown'}) while waiting for ${this.startupPhase}`);
+      }
+      // Do not discard final buffered text on a healthy exit. Revoke RPCs
+      // immediately, then bound pipe draining ONLY after physical termination.
+      this.rpc.close('codex app-server exited');
+      drainTimer = setTimeout(() => this.child.stdout.destroy(), EXIT_DRAIN_MS);
+      drainTimer.unref?.();
+      if (this.stopKillTimer) clearTimeout(this.stopKillTimer);
     });
     const stderrChunks: string[] = [];
     this.child.stderr.setEncoding('utf8');
     this.child.stderr.on('data', (chunk: string) => stderrChunks.push(chunk));
 
-    // Optional wall-clock kill switch (disabled for interactive sessions).
+    // Whole-session timeouts remain optional; startup is always bounded.
     const limitMs = spec.timeoutMs ?? timeoutMs;
-    let killTimer: NodeJS.Timeout | undefined;
     let deadline: NodeJS.Timeout | undefined;
     if (limitMs > 0) {
       deadline = setTimeout(() => {
         this.timedOut = true;
         this.interrupt();
-        this.child.stdout.destroy();
-        killTimer = setTimeout(() => {
-          if (!this.hasExited()) {
-            this.terminatedByCezar = true;
-            this.child.kill('SIGKILL');
-          }
-        }, KILL_GRACE_MS);
-        killTimer.unref?.();
       }, limitMs);
       deadline.unref?.();
     }
+    this.startupTimer = setTimeout(() => {
+      this.fail(new Error(`Codex startup timed out after 60s while waiting for ${this.startupPhase}`), 'timed out after 60s');
+    }, STARTUP_TIMEOUT_MS);
+    this.startupTimer.unref?.();
 
-    // Handshake → thread → first turn. Kicked off concurrently with the read
-    // loop below (which resolves the request() promises this awaits).
     this.ready = this.bootstrap();
+    const reader = (async () => {
+      try {
+        for await (const line of readNdjson(this.child.stdout)) {
+          let msg: CodexAppServerMessage;
+          try { msg = JSON.parse(line) as CodexAppServerMessage; }
+          catch { continue; }
+          // Explicit shutdown suppresses late lifecycle, not passive output.
+          // Natural exit can overtake the final turn frame: retain its outcome
+          // without restoring ACK/ask/input authority on the dead connection.
+          const finalOutcome = this.stdinOpen && hasExited() &&
+            (msg.method === 'turn/completed' || msg.method === 'turn/failed');
+          if (!this.open && (msg.id !== undefined || (!PASSIVE_OUTPUT_METHODS.has(msg.method ?? '') && !finalOutcome))) continue;
+          // Child turn lifecycle must reach neither channel (#600).
+          if (this.isForeignTurnLifecycle(msg)) continue;
+          this.emitUi((state) => mapCodexNotification(msg, state));
+          this.dispatch(msg);
+        }
+        if (this.stdinOpen && !hasExited()) {
+          if (!this.startupComplete) this.fail(new Error(`Codex startup stdout closed while waiting for ${this.startupPhase}`));
+          else this.end();
+        }
+      } catch {
+        if (this.stdinOpen && !hasExited()) {
+          this.fail(new Error(`codex app-server output failed while waiting for ${this.startupPhase}`));
+        }
+      }
+    })();
 
     this.result = (async (): Promise<AgentRunResult> => {
-      let sessionError: unknown;
+      let exitCode: number | null;
       try {
-        const readLoop = async () => {
-          for await (const line of readNdjson(this.child.stdout)) {
-            if (this.timedOut) break;
-            let msg: CodexAppServerMessage;
-            try {
-              msg = JSON.parse(line) as CodexAppServerMessage;
-            } catch {
-              continue; // not JSON-RPC — skip
-            }
-            // A sub-agent child thread's turn lifecycle must reach neither channel (#600):
-            // v1 would emit a bogus `turn-end`, and the v2 mapper — which carries no thread
-            // identity — would record the child turn as the parent's, clearing its turn-scoped
-            // plan/reasoning state and resetting the current turn id. Child ITEM events still
-            // flow, so nested sub-agent activity keeps rendering.
-            if (this.isForeignTurnLifecycle(msg)) continue;
-            this.emitUi((state) => mapCodexNotification(msg, state));
-            this.dispatch(msg);
-          }
-        };
-        // Start consuming stdout before awaiting bootstrap: JSON-RPC responses
-        // read here settle the initialize/thread/turn requests. Owning both
-        // promises makes every bootstrap rejection part of session.result.
-        await Promise.all([this.ready, readLoop()]);
-      } catch (err) {
-        if (!this.timedOut) {
-          sessionError = err;
-          // Bootstrap failed before a usable turn exists. Closing stdin lets
-          // app-server exit normally; end() also owns the TERM/KILL watchdog
-          // if a broken child ignores EOF.
-          this.end();
+        try {
+          await Promise.all([this.ready, reader]);
+        } catch (err) {
+          if (this.stdinOpen && !hasExited()) this.fail(err instanceof Error ? err : new Error(String(err)));
         }
+        // RPC cancellation is not a receipt for process termination. Keep the
+        // TERM→KILL watchdog alive until this independently owned promise settles.
+        exitCode = await exited;
+        await reader;
       } finally {
         if (deadline) clearTimeout(deadline);
-        if (killTimer) clearTimeout(killTimer);
-        if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
-        this.stdinOpen = false;
+        if (drainTimer) clearTimeout(drainTimer);
+        if (this.stopKillTimer) clearTimeout(this.stopKillTimer);
+        if (this.eofTermTimer) clearTimeout(this.eofTermTimer);
+        if (this.eofKillTimer) clearTimeout(this.eofKillTimer);
+        this.closeInput('codex app-server exited');
+        this.child.stdin.destroy();
+        this.child.stderr.destroy();
       }
 
-      const exitCode = await waitForCodexAppServerExit(this.child);
-      if (this.eofTermTimer) clearTimeout(this.eofTermTimer);
-      if (this.eofKillTimer) clearTimeout(this.eofKillTimer);
-      this.rpc.rejectPending();
-
       if (this.spawnFailed) throw this.spawnFailed;
-      if (sessionError) throw sessionError;
+      if (this.failure) throw this.failure;
 
       // Timeout/interrupt can end the read loop mid-item — recover buffered prose.
       this.textCoalescer.flush();
@@ -302,7 +338,7 @@ class CodexSession implements AgentSession {
   }
 
   get open(): boolean {
-    return this.stdinOpen;
+    return this.stdinOpen && this.rpc.open && !this.hasExited();
   }
 
   get pid(): number | undefined {
@@ -310,7 +346,7 @@ class CodexSession implements AgentSession {
   }
 
   sendAgentMessage(content: ContentBlock[]): false | Promise<void> {
-    if (!this.stdinOpen || !this.agentInputReady || this.pendingUserInput || this.agentSubmissionPending) return false;
+    if (!this.open || !this.agentInputReady || this.pendingUserInput || this.agentSubmissionPending) return false;
     this.agentInputReady = false;
     this.agentSubmissionPending = true;
     if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
@@ -329,7 +365,7 @@ class CodexSession implements AgentSession {
   }
 
   private scheduleAutoEnd(): void {
-    if (!this.opts.autoEndAfterFirstTurn || !this.stdinOpen || this.autoEndTimer || this.agentSubmissionPending) return;
+    if (!this.opts.autoEndAfterFirstTurn || !this.open || this.autoEndTimer || this.agentSubmissionPending) return;
     this.autoEndTimer = setTimeout(() => {
       this.autoEndTimer = undefined;
       if (this.opts.shouldAutoEnd?.() !== false) this.end();
@@ -339,7 +375,7 @@ class CodexSession implements AgentSession {
 
   sendMessage(content: ContentBlock[]): boolean {
     this.agentInputReady = false;
-    if (!this.stdinOpen) return false;
+    if (!this.open) return false;
     if (this.autoEndTimer) {
       clearTimeout(this.autoEndTimer);
       this.autoEndTimer = undefined;
@@ -350,14 +386,16 @@ class CodexSession implements AgentSession {
       const pending = this.pendingUserInput;
       this.pendingUserInput = undefined;
       this.rpc.respond({ id: pending.rpcId, result: { answers: userInputAnswers(pending.questions, text) } });
-      return true;
+      return this.open;
     }
     // Wait for the thread to exist, then steer the live turn or start a new one.
     void this.ready
       .then(() => this.startOrSteerTurn(text))
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        this.emit({ type: 'note', message: `codex: turn failed: ${message}` });
+        if (this.stdinOpen) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.emit({ type: 'note', message: `codex: turn failed: ${message}` });
+        }
       });
     return true;
   }
@@ -366,8 +404,7 @@ class CodexSession implements AgentSession {
 
   end(): void {
     if (!this.stdinOpen) return;
-    this.rejectPendingUserInput('session ended');
-    this.stdinOpen = false;
+    this.closeInput('session ended');
     try {
       endCodexAppServer(
         this.child,
@@ -385,24 +422,65 @@ class CodexSession implements AgentSession {
   }
 
   interrupt(): void {
+    if (this.hardStopStarted || this.hasExited()) return;
+    this.hardStopStarted = true;
+    if (this.eofTermTimer) clearTimeout(this.eofTermTimer);
+    if (this.eofKillTimer) clearTimeout(this.eofKillTimer);
+    // Native cancellation is best effort; never wait for its ACK to stop.
+    if (this.stdinOpen && this.threadId && this.activeTurnId) {
+      void this.rpc.request('turn/interrupt', { threadId: this.threadId, turnId: this.activeTurnId }).catch(() => undefined);
+    }
+    this.closeInput('codex session stopped');
+    this.terminatedByCezar = true;
+    this.child.kill('SIGTERM');
+    this.stopKillTimer = setTimeout(() => {
+      if (!this.hasExited()) this.child.kill('SIGKILL');
+    }, KILL_GRACE_MS);
+    this.stopKillTimer.unref?.();
+  }
+
+  private closeInput(reason: string): void {
     this.stdinOpen = false;
-    this.rejectPendingUserInput('turn interrupted');
-    // Best-effort graceful cancel of the in-flight turn, then hard stop.
-    if (this.threadId && this.activeTurnId) {
-      void this.rpc.request('turn/interrupt', { threadId: this.threadId, turnId: this.activeTurnId }).catch(
-        () => undefined,
-      );
-    }
-    if (!this.hasExited()) {
-      this.terminatedByCezar = true;
-      this.child.kill('SIGTERM');
-    }
+    this.rejectPendingUserInput(reason);
+    this.agentInputReady = false;
+    if (this.startupTimer) clearTimeout(this.startupTimer);
+    if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
+    this.rpc.close(reason);
+  }
+
+  private fail(error: Error, diagnostic = 'failed'): void {
+    if (!this.stdinOpen) return;
+    this.failure ??= error;
+    // Stage-only diagnostics never include prompt/config/env or raw stderr.
+    const message = this.startupComplete ? 'Codex app-server failed; closing app-server'
+      : `Codex startup ${diagnostic} while waiting for ${this.startupPhase}; closing app-server`;
+    try { this.emit({ type: 'note', message }); }
+    catch { /* A failing diagnostic sink cannot release a still-live process. */ }
+    this.interrupt();
+  }
+
+  private assertOpen(): void {
+    if (!this.open) throw new Error('codex session closed');
+  }
+
+  private startupWaitingFor(phase: string): void {
+    this.assertOpen();
+    this.startupPhase = phase;
+    this.emit({ type: 'note', message: `Codex startup: waiting for ${phase}` });
+  }
+
+  private checkStartupComplete(): void {
+    if (!this.openingAcknowledged || !this.firstTurnStarted || !this.stdinOpen) return;
+    this.startupComplete = true;
+    if (this.startupTimer) clearTimeout(this.startupTimer);
   }
 
   // ---- protocol -----------------------------------------------------------
 
   private async bootstrap(): Promise<void> {
+    this.startupWaitingFor('initialize');
     await this.rpc.initialize();
+    this.assertOpen();
 
     const overrides = {
       model: this.spec.model,
@@ -419,10 +497,14 @@ class CodexSession implements AgentSession {
       } } : {}),
     };
     if (this.spec.resume && this.spec.sessionId) {
+      this.startupWaitingFor('thread/resume');
       await this.rpc.request('thread/resume', { threadId: this.spec.sessionId, ...clean(overrides) });
+      this.assertOpen();
       this.threadId = this.spec.sessionId;
     } else {
+      this.startupWaitingFor('thread/start');
       const res = await this.rpc.request('thread/start', clean(overrides));
+      this.assertOpen();
       this.threadId = threadIdOf(res) ?? this.spec.sessionId;
     }
     if (this.threadId) {
@@ -437,11 +519,17 @@ class CodexSession implements AgentSession {
     // has no dedicated app-server field, so it rides along as a leading block
     // of the opening message.
     const first = prependSystemPrompt(this.spec.systemPrompt, this.spec.userPrompt);
+    this.startupWaitingFor('turn/start');
     await this.startOrSteerTurn(first);
+    this.assertOpen();
+    this.openingAcknowledged = true;
+    this.checkStartupComplete();
+    if (!this.startupComplete) this.startupWaitingFor('first main-thread turn');
   }
 
   private async startOrSteerTurn(text: string): Promise<void> {
-    if (!this.threadId) return;
+    this.assertOpen();
+    if (!this.threadId) throw new Error('codex app-server did not return a thread id');
     this.agentInputReady = false;
     const input = [{ type: 'text', text, text_elements: [] }];
     if (this.activeTurnId) {
@@ -516,6 +604,10 @@ class CodexSession implements AgentSession {
       case 'turn/started': {
         if (!this.isForeignThreadTurn(params)) this.turnBoundaryVersion += 1;
         if (this.isForeignThreadTurn(params)) break; // sub-agent child thread — not our turn (#600)
+        if (this.threadId && turnIdOf(params)) {
+          this.firstTurnStarted = true;
+          this.checkStartupComplete();
+        }
         this.activeTurnId = turnIdOf(params) ?? this.activeTurnId;
         break;
       }
@@ -578,7 +670,7 @@ class CodexSession implements AgentSession {
         if (outcome.error !== undefined && !this.terminatedByCezar) {
           this.emit({ type: 'error', message: outcome.error });
         }
-        this.agentInputReady = true;
+        this.agentInputReady = this.open;
         this.emit({ type: 'turn-end' });
         this.scheduleAutoEnd();
         break;
@@ -653,6 +745,13 @@ const NON_TOOL_ITEMS = new Set(['agentMessage', 'userMessage', 'reasoning', 'pla
 /** Turn-lifecycle notification methods — the only frames whose child-thread copies must be
  *  dropped so a sub-agent turn can't be mistaken for the parent's (#600). */
 const TURN_LIFECYCLE_METHODS = new Set(['turn/started', 'turn/completed', 'turn/failed']);
+
+/** Notifications that only collect output; never dispatch control after close. */
+const PASSIVE_OUTPUT_METHODS = new Set([
+  'item/started', 'item/updated', 'item/completed', 'item/agentMessage/delta',
+  'item/reasoning/textDelta', 'item/reasoning/summaryDelta', 'item/reasoning/summaryTextDelta',
+  'item/commandExecution/outputDelta', 'thread/tokenUsage/updated', 'turn/plan/updated',
+]);
 
 const REASONING_SUMMARIES = new Set(['auto', 'concise', 'detailed', 'none']);
 
