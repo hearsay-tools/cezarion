@@ -1,7 +1,7 @@
 import { parseCursorConfigOptions, cursorEffortSelection, type CursorConfigOption } from './cursor-config-options.ts';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import type { AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport, AgentSession, AgentToolCallRecord, ContentBlock, SessionOptions } from './agent-runner.ts';
+import type { AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport, AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions } from './agent-runner.ts';
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { parseAskMarker, parseAskRequest, type AskQuestion } from './ask.ts';
@@ -51,6 +51,9 @@ export const CURSOR_SPEC_SUPPORT: AgentRunSpecSupport = {
 export class CursorAcpRunner implements AgentRunner {
   readonly backend = 'cursor' as const;
   readonly specSupport = CURSOR_SPEC_SUPPORT;
+  /** A second ACP session/prompt cancels the running turn (probe 2026-09-23, cursor-agent
+   * 2026.09.18), so agent input waits for the turn boundary; routine messages never cancel tools (#505). */
+  readonly inputDelivery: InputDelivery = { mode: 'boundary', consumption: 'unobservable', via: 'next session/prompt after end_turn' };
   private lastSession?: AgentSession;
   constructor(private readonly options: { bin?: string; timeoutMs?: number; providerRetry?: CursorProviderRetryOptions } = {}) {}
   startSession(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void, opts: SessionOptions = {}): AgentSession {

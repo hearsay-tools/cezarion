@@ -353,3 +353,9 @@ it('refuses a config acknowledgement that does not confirm the requested value',
   expect(result.text).toBe('');
   expect(errors.some(event => event.type === 'error' && event.message.includes('did not confirm'))).toBe(true);
 });
+
+describe('Cursor input delivery (#505)', () => {
+  it('declares boundary delivery: a second session/prompt would cancel the running turn', () => {
+    expect(new CursorAcpRunner().inputDelivery).toEqual({ mode: 'boundary', consumption: 'unobservable', via: expect.stringContaining('session/prompt') });
+  });
+});
