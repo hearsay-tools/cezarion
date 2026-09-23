@@ -26,7 +26,7 @@ After it finishes, reply with every user message you received after this one, ve
 const runner = createRunner(backend);
 rec('delivery', inputDeliveryOf(runner));
 let sent = false; let turnEnds = 0;
-const session = runner.startSession({ userPrompt: PROMPT, cwd, model, effort: 'low', allowedTools: ['Bash'], timeoutMs: 300_000 }, (event: AgentEvent) => {
+const session = runner.startSession({ userPrompt: PROMPT, cwd, model, ...(backend === 'cursor' ? {} : { effort: 'low' }), allowedTools: ['Bash'], timeoutMs: 300_000 }, (event: AgentEvent) => {
   if (event.type === 'tool-call') { rec('tool-call', event.tool); if (!sent) { sent = true; setTimeout(send, 8_000); } }
   else if (event.type === 'tool-result') rec('tool-result', event.result.slice(0, 60));
   else if (event.type === 'text') rec('text', event.text.slice(0, 160));

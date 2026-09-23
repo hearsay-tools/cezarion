@@ -101,7 +101,9 @@ export class CodexAppServerRunner implements AgentRunner {
   readonly specSupport = CODEX_SPEC_SUPPORT;
   readonly inputDelivery: InputDelivery = {
     mode: 'steer', consumption: 'observable',
-    via: 'turn/steer with clientUserMessageId; item/started userMessage clientId at consumption',
+    // The userMessage item marks the input entering the thread's history (probe 2026-09-24:
+    // 0.8 s and 26.7 s after the steer, both before the tool ended); the next model call reads it.
+    via: 'turn/steer with clientUserMessageId; item/started userMessage clientId once in the thread history',
   };
 
   private readonly bin: string;

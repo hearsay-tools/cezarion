@@ -41,6 +41,13 @@ is recorded. Logs are local run evidence and are not copied into the repository.
 
 A first OpenCode probe went through the runner's `prompt`, whose client-side `while (this.turnActive)` wait held the message for the next turn. That measured cezar's own gate, not the server; the direct POST above is the server's behavior.
 
+Final-evidence probes on 2026-09-24 (`.ai/scripts/probe-steering.ts`, the shipped path):
+Claude, Pi and OpenCode reported the read right after the tool ended, with one turn-end
+and the token in the reply. Codex reported its `userMessage` item 0.8 s and 26.7 s after
+the steer in two runs, both before the tool ended: with `clientUserMessageId` the item
+marks the input entering the thread's history, which the next model call reads, not the
+model sampling it. Cursor refused the busy input and accepted it at the turn boundary.
+
 One existing bug surfaced: Claude merges a mid-turn message into the running turn
 and emits one `result`, but `pendingPromptTurns` counts two, so `agentInputReady`
 stays false after a human follow-up.
@@ -67,7 +74,7 @@ stays false after a human follow-up.
 | Backend | `inputDelivery` | Busy submission | Consumed when |
 | --- | --- | --- | --- |
 | Claude | `steer`, observable | stdin line with `uuid` = input ID; argv gains `--replay-user-messages`. `pendingPromptTurns` is replaced by tracking `result.user_message_uuids` | The replay echo with that uuid |
-| Codex | `steer`, observable | `turn/steer` with `expectedTurnId` and `clientUserMessageId`. A definitive `expectedTurnId` mismatch (the turn just ended) falls back to `turn/start`. An ambiguous RPC failure or timeout rejects and is never retried by the runner | `item/started` `userMessage` whose `clientId` matches |
+| Codex | `steer`, observable (in history) | `turn/steer` with `expectedTurnId` and `clientUserMessageId`. A definitive `expectedTurnId` mismatch (the turn just ended) falls back to `turn/start`. An ambiguous RPC failure or timeout rejects and is never retried by the runner | `item/started` `userMessage` whose `clientId` matches |
 | Pi | `steer`, observable | `prompt` with `streamingBehavior: "steer"`, busy or idle. Cezar's `follow-up` kind is never mapped to Pi's `followUp` | A user `message_start` whose text equals the submitted text, oldest pending submission first |
 | OpenCode V1 | `steer`, observable | `prompt_async` POSTed at once; the client-side idle waits in both `sendAgentMessage` and `prompt` are removed for agent input | The first assistant `message.updated` whose `parentID` is the user message carrying the submitted text. A turn that goes idle before that is reported in `unconsumedInputIds` (the upstream lost-wake case) |
 | Cursor | `boundary` | Refused while busy, as today | The turn it opens |
