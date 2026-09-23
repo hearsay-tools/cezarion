@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
-import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, KILL_GRACE_MS } from './runner-runtime.ts';
+import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS } from './runner-runtime.ts';
 
 export interface CodexAppServerMessage {
   id?: number | string;
@@ -46,14 +46,29 @@ export function spawnCodexAppServer(
 export class CodexAppServerRpc {
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
+  private closed: Error | undefined;
 
-  constructor(readonly child: ChildProcessWithoutNullStreams) {}
+  constructor(
+    readonly child: ChildProcessWithoutNullStreams,
+    private readonly onFailure?: (error: Error) => void,
+  ) {
+    // An idle session may have no pending RPC to reject. Unexpected transport
+    // loss must reach its owner as well as the outstanding request callers.
+    child.stdin.on('error', () => this.fail('codex app-server stdin failed'));
+    child.stdin.once('close', () => this.fail('codex app-server stdin closed'));
+    child.stdin.once('finish', () => this.fail('codex app-server stdin closed'));
+  }
+
+  get open(): boolean {
+    return !this.closed && !this.child.stdin.destroyed && !this.child.stdin.writableEnded;
+  }
 
   allocateId(): number {
     return this.nextId++;
   }
 
   request(method: string, params: unknown): Promise<Record<string, unknown>> {
+    if (this.closed) return Promise.reject(this.closed);
     const id = this.allocateId();
     const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -93,12 +108,31 @@ export class CodexAppServerRpc {
     this.pending.clear();
   }
 
+  /** Revoke this connection, independently of whether its process has exited. */
+  close(message = 'codex app-server connection closed'): void {
+    this.closed ??= new Error(message);
+    this.rejectPending(this.closed.message);
+  }
+
+  private fail(message: string): void {
+    if (this.closed) return; // deliberate close, or an already-reported fault
+    const error = new Error(message);
+    this.close(message);
+    this.onFailure?.(error);
+  }
+
   private write(message: unknown): void {
-    if (this.child.stdin.destroyed) return;
+    if (this.closed) return;
+    if (this.child.stdin.destroyed || this.child.stdin.writableEnded) {
+      this.fail('codex app-server stdin closed');
+      return;
+    }
     try {
-      this.child.stdin.write(`${JSON.stringify(message)}\n`);
+      this.child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+        if (error) this.fail('codex app-server stdin write failed');
+      });
     } catch {
-      // The read/exit path owns settlement when stdin disappears.
+      this.fail('codex app-server stdin write failed');
     }
   }
 }
@@ -141,24 +175,26 @@ export function endCodexAppServer(
   onTimers?.(termTimer, killTimer);
 }
 
+/** Observe from spawn, not after the RPC/read loop: an exited process may leave
+ * inherited stdout open. A timer or a failed kill is never termination proof. */
 export function waitForCodexAppServerExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
-  if (child.exitCode != null) return Promise.resolve(child.exitCode);
+  if (child.exitCode != null || child.signalCode != null) return Promise.resolve(child.exitCode);
   return new Promise((resolve) => {
-    let done = false;
     const finish = (code: number | null) => {
-      if (done) return;
-      done = true;
-      clearTimeout(safety);
+      child.off('close', onClose);
+      child.off('exit', finish);
+      child.off('error', onError);
       resolve(code);
     };
-    child.once('close', (code) => finish(code));
-    child.once('exit', (code) => finish(code));
-    child.once('error', () => finish(child.exitCode ?? null));
-    const safety = setTimeout(
-      () => finish(child.exitCode ?? null),
-      EOF_TERM_GRACE_MS + EOF_KILL_GRACE_MS + KILL_GRACE_MS + 5_000,
-    );
-    safety.unref?.();
+    const onClose = (code: number | null) => finish(code);
+    const onError = () => {
+      // ENOENT/EACCES never created a process. Other child errors (including
+      // unsuccessful signals) must not pretend a live process terminated.
+      if (child.pid === undefined) finish(child.exitCode);
+    };
+    child.once('close', onClose);
+    child.once('exit', finish);
+    child.on('error', onError);
   });
 }
 
