@@ -23,7 +23,7 @@ import { deriveAttention } from '@/lib/attention'
 import { shortAge } from '@/lib/format'
 import { isUnread } from '@/lib/read-state'
 import { orderSkillsByUsage } from '@/lib/skills'
-import { runTitle } from '@/lib/task-groups'
+import { isOwnedWorker, runTitle } from '@/lib/task-groups'
 import { useCommandShortcut, useKeyShortcut } from '@/lib/use-command-shortcut'
 
 /**
@@ -124,7 +124,9 @@ export function mergeTasks(
   runsProjectId: string | null,
   indexed: readonly RunIndexEntry[] | undefined,
 ): PaletteTask[] {
-  const mine: PaletteTask[] = orderRuns(activeRuns).map((run) => ({
+  const mine: PaletteTask[] = orderRuns(
+    activeRuns.filter((run) => !isOwnedWorker(run)),
+  ).map((run) => ({
     projectId: runsProjectId,
     id: run.id,
     title: run.title,
@@ -145,7 +147,7 @@ export function mergeTasks(
   }))
   const live = new Set(mine.map(taskKey))
   const theirs = (indexed ?? [])
-    .filter((entry) => !live.has(taskKey(entry)))
+    .filter((entry) => !isOwnedWorker(entry) && !live.has(taskKey(entry)))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   return [...mine, ...theirs]
 }

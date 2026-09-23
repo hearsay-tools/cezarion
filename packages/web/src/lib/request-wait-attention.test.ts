@@ -29,7 +29,9 @@ it.each([
   }
   expect(wantsAttention(record)).toBe(false)
   expect(bucketOf(record, 'active')).toBe('Working')
-  expect(listCounts([record])).toEqual({ active: 1, archived: 0, waiting: 0 })
+  expect(listCounts([record])).toEqual(
+    role === 'worker' ? { active: 0, archived: 0, waiting: 0 } : { active: 1, archived: 0, waiting: 0 },
+  )
   const previous = diffRunTransitions(new Map(), [{ ...record, status: 'running' }]).statuses
   const parked = diffRunTransitions(previous, [record])
   expect(parked.entering).toEqual([])
@@ -37,7 +39,7 @@ it.each([
   expect(deriveAttention(asking).label).toBe('needs you')
   expect(deriveAttention(record, true).label).toBe('needs you')
   expect(bucketOf(asking, 'active')).toBe('Needs you')
-  expect(listCounts([asking]).waiting).toBe(1)
+  expect(listCounts([asking]).waiting).toBe(role === 'worker' ? 0 : 1)
   expect(diffRunTransitions(parked.statuses, [asking]).entering).toEqual([asking])
   expect(deriveAttention({ ...record, status: 'review' }).label).toBe('needs review')
 })

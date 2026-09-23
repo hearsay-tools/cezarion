@@ -13,6 +13,7 @@ import {
   queuePositions,
   refPrefixMatches,
   runTitle,
+  sidebarActiveRunId,
   sortRuns,
   splitRefPrefix,
   type QuickListBucket,
@@ -636,4 +637,89 @@ it('counts a parked parent question as Needs you from the run summary', () => {
   expect(bucketOf(record, 'active')).toBe('Needs you')
   expect(listCounts([record])).toEqual({ active: 1, archived: 0, waiting: 1 })
   expect(bucketOf({ ...record, hasPendingHumanAsk: false }, 'active')).toBe('Working')
+})
+
+function ownedWorker(over: Partial<RunRecord> = {}, parentRunId = 'parent'): RunRecord {
+  const base = run(over)
+  return {
+    ...base,
+    delegation: over.delegation ?? {
+      role: 'worker',
+      permissions: [],
+      parentRunId,
+      workspace: {
+        ownerRunId: base.id,
+        resourceId: base.id,
+        kind: 'owned-isolated',
+        path: `/${base.id}`,
+        branch: `cez/${base.id}`,
+        baselineSha: 'a'.repeat(40),
+      },
+    },
+  }
+}
+
+describe('owned workers are not list rows (#312)', () => {
+  it('omits a worker from groupRuns even when pinned, and even when the parent is archived', () => {
+    const parent = run({ id: 'parent', archived: true })
+    const child = ownedWorker({ id: 'child', pinned: true, pinnedAt: '2026-08-29T10:00:00.000Z' })
+    const other = run({ id: 'other' })
+    expect(shape(groupRuns([parent, child, other], 'active'))).toEqual(['Recent: other'])
+    expect(shape(groupRuns([parent, child, other], 'archived'))).toEqual(['Archived: parent'])
+  })
+
+  it('does not let an owned worker join a variant group', () => {
+    const runs = [
+      run({ id: 'a', groupId: 'g1', variant: 'A', title: 'Add autocomplete (A)' }),
+      ownedWorker({ id: 'b', groupId: 'g1', variant: 'B', title: 'Add autocomplete (B)' }),
+    ]
+    expect(shape(groupRuns(runs, 'active'))).toEqual(['Recent: a'])
+  })
+
+  it('does not count workers in Active, Archived, or waiting', () => {
+    const runs = [
+      run({ status: 'running' }),
+      ownedWorker({ status: 'waiting' }),
+      ownedWorker({ archived: true }),
+      run({ archived: true }),
+    ]
+    expect(listCounts(runs)).toEqual({ active: 1, archived: 1, waiting: 0 })
+  })
+
+  it('does not let workers spend the capBuckets row budget', () => {
+    const parents = Array.from({ length: 10 }, (_, i) =>
+      run({ id: `p${i}`, status: 'done', createdAt: `2026-07-14T10:${String(i).padStart(2, '0')}:00.000Z` }),
+    )
+    const workers = Array.from({ length: 20 }, (_, i) =>
+      ownedWorker({
+        id: `w${i}`,
+        status: 'running',
+        createdAt: `2026-07-14T12:${String(i).padStart(2, '0')}:00.000Z`,
+      }),
+    )
+    const capped = capBuckets(groupRuns([...parents, ...workers], 'active'), 10)
+    const ids = capped.flatMap((bucket) =>
+      bucket.rows.map((row) => (row.kind === 'run' ? row.run.id : row.groupId)),
+    )
+    expect(ids).toHaveLength(10)
+    expect(ids).toEqual(parents.map((parent) => parent.id).reverse())
+  })
+
+  it('maps a worker currentRunId to its parent', () => {
+    const parent = run({ id: 'parent' })
+    const child = ownedWorker({ id: 'child' }, 'parent')
+    expect(sidebarActiveRunId('child', [parent, child])).toBe('parent')
+    expect(sidebarActiveRunId('parent', [parent, child])).toBe('parent')
+    expect(sidebarActiveRunId(null, [parent, child])).toBeNull()
+    expect(sidebarActiveRunId(undefined, [parent, child])).toBeNull()
+  })
+
+  it('returns the parent id even when the parent is missing from runs', () => {
+    const child = ownedWorker({ id: 'child' }, 'parent')
+    expect(sidebarActiveRunId('child', [child])).toBe('parent')
+  })
+
+  it('returns the current id when it is not an owned worker', () => {
+    expect(sidebarActiveRunId('missing', [])).toBe('missing')
+  })
 })

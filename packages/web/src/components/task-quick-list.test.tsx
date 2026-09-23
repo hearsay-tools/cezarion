@@ -924,29 +924,52 @@ describe('SidebarSessionScope', () => {
   })
 })
 
-it('identifies owned worker rows without nested links or changing ordinary titles', () => {
+it('hides owned worker rows without changing ordinary titles', () => {
   renderList({ runs: [run({ id: 'worker', title: 'Investigate', delegation: { role: 'worker' as const, permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated' as const, path: '/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), run({ id: 'ordinary', title: 'Ordinary' })] })
-  for (const element of [row('worker')]) {
-    expect(element?.textContent).toContain('Worker')
-    expect(element?.querySelector('a a')).toBeNull()
-  }
+  expect(row('worker')).toBeNull()
+  expect(document.querySelector('[data-slot="session-workers"]')).toBeNull()
   expect(screen.getAllByRole('link', { name: /Ordinary/ }).length).toBeGreaterThan(0)
 })
 
-it('places a worker below its parent even when their statuses put them in different buckets', () => {
+it('does not nest a worker under its parent even when their statuses put them in different buckets', () => {
   const child = run({ id: 'child', status: 'running', title: 'Check result', delegation: { role: 'worker', permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'child', resourceId: 'child', kind: 'owned-isolated', path: '/child', branch: 'cez/child', baselineSha: 'a'.repeat(40) } } })
   renderList({ runs: [child, run({ id: 'parent', title: 'Build feature' })] })
-  const family = document.querySelector('[data-session-family="parent"]')
-  expect(family).not.toBeNull()
-  expect(family?.querySelector('[data-run-id="child"]')).not.toBeNull()
-  expect(document.querySelectorAll('[data-run-id="child"]')).toHaveLength(1)
+  expect(row('child')).toBeNull()
+  expect(row('parent')).not.toBeNull()
+  expect(document.querySelector('[data-slot="session-workers"]')).toBeNull()
 })
 
-it('keeps an independently pinned worker in Pinned when its parent is recent', () => {
+it('does not keep an independently pinned worker in Pinned when its parent is recent', () => {
   const worker = run({ id: 'child', pinned: true, delegation: { role: 'worker', permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'child', resourceId: 'child', kind: 'owned-isolated', path: '/child', branch: 'cez/child', baselineSha: 'a'.repeat(40) } } })
   renderList({ runs: [run({ id: 'parent' }), worker] })
-  expect(bucket('Pinned').querySelector('[data-run-id="child"]')).not.toBeNull()
-  expect(row('child')?.closest('[data-slot="session-workers"]')).toBeNull()
+  expect(row('child')).toBeNull()
+  expect(document.querySelector('[data-bucket="Pinned"]')).toBeNull()
+})
+
+it('marks the parent row active when currentRunId is the worker', () => {
+  const child = run({
+    id: 'child',
+    title: 'Check result',
+    delegation: {
+      role: 'worker',
+      permissions: [],
+      parentRunId: 'parent',
+      workspace: {
+        ownerRunId: 'child',
+        resourceId: 'child',
+        kind: 'owned-isolated',
+        path: '/child',
+        branch: 'cez/child',
+        baselineSha: 'a'.repeat(40),
+      },
+    },
+  })
+  renderList({
+    runs: [child, run({ id: 'parent', title: 'Build feature' })],
+    currentRunId: 'child',
+  })
+  expect(row('child')).toBeNull()
+  expect(row('parent')?.getAttribute('data-active')).toBe('true')
 })
 
 it('shows both tracker references on the separate badge line', () => {
