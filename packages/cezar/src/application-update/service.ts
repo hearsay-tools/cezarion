@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
-import { access, cp, lstat, mkdir, readFile, readlink, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { applicationUpdateStateSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract';
@@ -10,6 +10,8 @@ import { isNewerVersion } from '../update-check.ts';
 import { discoverInstallation, type Installation } from './discovery.ts';
 import { LockBusyError, withDirectoryLock } from './lock.ts';
 import { runOwnedNpm } from './npm-process.ts';
+import { snapshotGlobalBins, windowsGlobalLayout } from './bin-recovery.ts';
+import { globalBinDir } from '../install-as-command.ts';
 
 const PACKAGE = '@wjarka/cezarion';
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -276,15 +278,9 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
               filter: async () => { await assertOwned(); return true; } });
           if (installation.kind === 'global') {
             const outer = JSON.parse(await readFile(join(installation.outerRoot, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
-            const links: Array<{ name: string; target: string }> = [];
-            for (const name of Object.keys(outer.bin ?? {})) {
-              if (!/^[a-zA-Z0-9-]+$/.test(name)) throw new Error('invalid npm bin name');
-              const path = join(installation.prefix, 'bin', name);
-              if ((await lstat(path).catch(() => undefined))?.isSymbolicLink()) {
-                links.push({ name, target: await readlink(path) });
-              }
-            }
-            await writeFile(binLinks, JSON.stringify(links), { mode: 0o600 });
+            const windows = windowsGlobalLayout(installation.prefix, installation.outerRoot, installation.outerPackage);
+            await snapshotGlobalBins(globalBinDir(installation.prefix, windows ? 'win32' : 'linux'),
+              Object.keys(outer.bin ?? {}), windows, binLinks, assertOwned);
           }
           await assertOwned();
           await this.persist({ status: 'ready', supported: true, targetVersion: target }, { stage, recovery,

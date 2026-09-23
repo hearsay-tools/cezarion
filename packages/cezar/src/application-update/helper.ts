@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
-import { cp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isIP, type AddressInfo } from 'node:net';
 import { Agent, get } from 'node:http';
 import { withDirectoryLock } from './lock.js';
 import { runOwnedNpm } from './npm-process.js';
+import { restoreGlobalBins, windowsGlobalLayout } from './bin-recovery.js';
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -277,14 +278,9 @@ export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promi
     await assertOwned();
     await copy(plan.recovery, outer);
     if (plan.binLinks) {
-      const links = JSON.parse(await readFile(plan.binLinks, 'utf8')) as Array<{ name: string; target: string }>;
-      for (const link of links) {
-        await assertOwned();
-        if (!/^[a-zA-Z0-9-]+$/.test(link.name)) throw new Error('invalid recovery bin name');
-        const path = join(installation.prefix, 'bin', link.name);
-        await rm(path, { force: true });
-        await symlink(link.target, path);
-      }
+      const outerManifest = JSON.parse(await readFile(join(plan.recovery, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
+      await restoreGlobalBins(installation.prefix, Object.keys(outerManifest.bin ?? {}),
+        windowsGlobalLayout(installation.prefix, installation.outerRoot, installation.outerPackage), plan.binLinks, assertOwned);
     }
   }
   await assertOwned();

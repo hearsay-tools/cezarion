@@ -17,6 +17,7 @@ export async function armRestartHelper(plan: RestartPlan, launch: {
   await copyFile(join(source, 'helper.js'), join(target, 'helper.js'));
   await copyFile(join(source, 'lock.js'), join(target, 'lock.js'));
   await copyFile(join(source, 'npm-process.js'), join(target, 'npm-process.js'));
+  await copyFile(join(source, 'bin-recovery.js'), join(target, 'bin-recovery.js'));
   await writeFile(join(target, 'package.json'), '{"type":"module"}', { mode: 0o600 });
   const child = spawn(process.execPath, [join(target, 'helper.js'), '--application-update-helper'], {
     cwd: process.cwd(), env: process.env, detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],

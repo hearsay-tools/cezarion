@@ -40,6 +40,7 @@ import { WorkspaceSemaphore } from './workspace/semaphore.ts';
 import { ApplicationUpdateService } from './application-update/service.ts';
 import { armRestartHelper } from './application-update/launcher.ts';
 import { restartEndpoint } from './application-update/helper.ts';
+import { readNpmConfiguration } from './application-update/npm-process.ts';
 import { cezarHomeDir } from './paths.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
@@ -291,21 +292,18 @@ async function serveCommand(
     );
   }
   // Discovery reads npm metadata only; a missing npm or source checkout degrades to manual update.
-  const npmValue = (args: string[]): string | undefined => {
-    try { return execFileSync('npm', args, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
-    catch { return undefined; }
-  };
-  const npmPrefix = npmValue(['prefix', '-g']);
-  const npmCache = npmValue(['config', 'get', 'cache']);
+  const npm = readNpmConfiguration();
+  const npmPrefix = npm?.prefix;
+  const npmCache = npm?.cache;
   let server: ReturnType<typeof startServer>;
   const applicationUpdate = (npmPrefix && npmCache) || process.env.CEZ_DRY_RUN === '1'
     ? new ApplicationUpdateService({
       packageRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
       launchEntry: resolve(process.argv[1] ?? ''),
       npmPrefix: npmPrefix ?? join(cezarHomeDir(), 'dry-prefix'),
-      npmCache: npmCache ?? join(cezarHomeDir(), 'dry-cache'), home: cezarHomeDir(), targetVersion: () => update.latest,
+      npmCache: npmCache ?? join(cezarHomeDir(), 'dry-cache'), npmBin: npm?.npmBin, home: cezarHomeDir(), targetVersion: () => update.latest,
       dryRun: process.env.CEZ_DRY_RUN === '1',
-      armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(server.address()), npmBin: 'npm' }),
+      armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(server.address()), npmBin: npm?.npmBin ?? 'npm' }),
       handoff: () => { void server.shutdownForRestart().then(() => process.exit(0)); },
     }) : undefined;
   server = startServer({
