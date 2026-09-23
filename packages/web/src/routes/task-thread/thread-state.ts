@@ -48,7 +48,9 @@ export interface ThreadNote {
   attribution?: { source: 'agent' | 'lifecycle'; parentRunId: string }
 }
 
-export type ThreadConversationDelivery = 'queued' | 'delivered' | 'not-delivered'
+export type ThreadConversationDelivery = 'queued' | 'delivered' | 'consumed' | 'not-delivered'
+/** Delivery only moves forward: a later, lower projection never downgrades it (#505). */
+const DELIVERY_RANK: Record<ThreadConversationDelivery, number> = { 'not-delivered': 0, queued: 1, delivered: 2, consumed: 3 }
 
 /** A parent/worker conversation envelope, with its request outcome folded onto the request. */
 export interface ThreadConversationMessage {
@@ -62,6 +64,8 @@ export interface ThreadConversationMessage {
   requestId?: string
   delivery: ThreadConversationDelivery
   deliveredAt?: string
+  /** When the recipient's harness reported the model read it (#505). */
+  consumedAt?: string
   recordedAt?: string
   instruction?: string
   resumed?: true
@@ -429,11 +433,11 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       resumed?: true
     },
     delivery: ThreadConversationDelivery,
-    timing?: { deliveredAt?: string; recordedAt?: string },
+    timing?: { deliveredAt?: string; consumedAt?: string; recordedAt?: string },
   ): ThreadConversationMessage => {
     const existing = conversationEntries.get(message.id)
     if (existing) {
-      if (existing.delivery !== 'delivered') existing.delivery = delivery
+      if (DELIVERY_RANK[existing.delivery] < DELIVERY_RANK.delivered || DELIVERY_RANK[delivery] > DELIVERY_RANK[existing.delivery]) existing.delivery = delivery
       if (message.text !== '') existing.text = message.text
       if (message.state !== undefined) existing.state = message.state
       if (message.createdAt !== undefined) existing.createdAt = message.createdAt
@@ -443,6 +447,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       if (message.instruction !== undefined) existing.instruction = message.instruction
       if (message.resumed !== undefined) existing.resumed = message.resumed
       if (timing?.deliveredAt !== undefined) existing.deliveredAt = timing.deliveredAt
+      if (timing?.consumedAt !== undefined) existing.consumedAt = timing.consumedAt
       if (timing?.recordedAt !== undefined && (delivery === 'delivered' || existing.delivery !== 'delivered')) existing.recordedAt = timing.recordedAt
       attachOutcome(existing)
       return existing
@@ -476,7 +481,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       case 'conversation-message': {
         const parsed = conversationMessageEventSchema.safeParse(event)
         if (!parsed.success) break
-        upsertConversation(parsed.data.message, parsed.data.delivery, { deliveredAt: parsed.data.deliveredAt, recordedAt: parsed.data.ts })
+        upsertConversation(parsed.data.message, parsed.data.delivery, { deliveredAt: parsed.data.deliveredAt, consumedAt: parsed.data.consumedAt, recordedAt: parsed.data.ts })
         break
       }
       case 'request-outcome': {

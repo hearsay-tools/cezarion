@@ -70,8 +70,11 @@ for (const backend of RUNNER_IDS) {
         expect(store.readEvents(runId).filter(event => event.type === 'text' && String(event.text).includes(input.text))).toHaveLength(1);
       }
       const projections = store.readEvents(runId).filter(event => event.type === 'conversation-message');
-      expect(projections).toHaveLength(4); // One queued and one delivered projection per message.
-      expect(new Set(projections.map(event => event.projectionId)).size).toBe(4);
+      // One queued and one delivered projection per message; an observable harness adds
+      // at most one consumed projection per message (#505).
+      expect(projections.filter(event => event.delivery !== 'consumed')).toHaveLength(4);
+      expect(projections.filter(event => event.delivery === 'consumed').length).toBeLessThanOrEqual(2);
+      expect(new Set(projections.map(event => event.projectionId)).size).toBe(projections.length);
       expect(store.readEvents(runId).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
       expect(store.readEvents(runId).filter(event => event.type === 'user-message').map(event => event.text))
         .toEqual(['Vitest', 'mock:agent-echo human barrier']);

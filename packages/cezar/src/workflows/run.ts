@@ -3520,8 +3520,11 @@ export class RunManager {
     for (const id of ids) if (inFlight.includes(id)) state.consumedBeforeAck?.add(id);
     const read = ids.filter(id => !inFlight.includes(id));
     for (const id of read) state.unreadInputIds?.delete(id);
-    try { if (read.length) this.store.commitAgentInputsConsumed(runId, read, new Date().toISOString()); }
-    catch (error) { console.warn(`[cez] agent input consumption checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+    try {
+      if (!read.length) return;
+      this.store.commitAgentInputsConsumed(runId, read, new Date().toISOString());
+      this.reconcileWorkerWaits(); // projects the consumed receipt
+    } catch (error) { console.warn(`[cez] agent input consumption checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
   /** #505: input the harness accepted but will never read returns to the queue, so
@@ -3574,7 +3577,7 @@ export class RunManager {
     const ids = state.bundledInputIds ?? [];
     state.bundledInputIds = undefined;
     if (!ids.length || state.cancelled) return;
-    try { this.store.commitAgentInputsConsumed(runId, ids, new Date().toISOString()); }
+    try { this.store.commitAgentInputsConsumed(runId, ids, new Date().toISOString()); this.reconcileWorkerWaits(); }
     catch (error) { console.warn(`[cez] bundled read checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 

@@ -79,6 +79,8 @@ export function conversationDeliveryLabel(delivery: ThreadConversationMessage['d
       return 'Queued'
     case 'delivered':
       return 'Delivered'
+    case 'consumed':
+      return 'Read'
     case 'not-delivered':
       return 'Not delivered'
     default:

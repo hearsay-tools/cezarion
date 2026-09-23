@@ -34,10 +34,17 @@ export function projectConversationEvents(store: import('../runs/store.ts').RunS
       let ids = projections.get(runId);
       if (!ids) { ids = new Set(store.readEvents(runId).map(event => event.projectionId)); projections.set(runId, ids); }
       const input = store.getRun(message.recipientRunId)?.agentInputs?.find(input => input.id === message.id);
-      const delivery = input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered';
-      const projectionId = `conversation-message:${message.id}:${delivery}`;
-      if (!ids.has(projectionId)) { store.appendEvent(runId, { type: 'conversation-message', projectionId, message, delivery,
-        ...(input?.deliveredAt ? { deliveredAt: input.deliveredAt } : {}) }); ids.add(projectionId); }
+      const delivery = input?.consumedAt ? 'consumed' : input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered';
+      // A read message was delivered first, even when both landed between two projections;
+      // readers that predate `consumed` still see it delivered (#505).
+      for (const step of delivery === 'consumed' ? ['delivered', 'consumed'] as const : [delivery]) {
+        const projectionId = `conversation-message:${message.id}:${step}`;
+        if (ids.has(projectionId)) continue;
+        store.appendEvent(runId, { type: 'conversation-message', projectionId, message, delivery: step,
+          ...(input?.deliveredAt ? { deliveredAt: input.deliveredAt } : {}),
+          ...(step === 'consumed' && input?.consumedAt ? { consumedAt: input.consumedAt } : {}) });
+        ids.add(projectionId);
+      }
       const outcome = outcomes.get(message.id);
       if (outcome && !ids.has(`request-outcome:${outcome.requestId}`)) {
         store.appendEvent(runId, { type: 'request-outcome', projectionId: `request-outcome:${outcome.requestId}`, outcome });
