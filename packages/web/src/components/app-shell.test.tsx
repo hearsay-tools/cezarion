@@ -76,6 +76,32 @@ describe('AppShell', () => {
     await waitFor(() => expect(document.querySelector('[data-slot="tooltip-content"]')?.textContent).toContain('Update from v1.0.0 to v2.0.0'))
   })
 
+  it('does not reserve an empty update action or show manual guidance without a newer release', () => {
+    renderShell('/', { version: '0.14.8-pr501.7.abcdef', latestVersion: '0.14.8', applicationUpdate: { status: 'idle', supported: false, message: 'Update this installation manually.' } })
+    expect(sidebar().querySelector('[data-slot="application-update-action"]')).toBeNull()
+    expect(sidebar().querySelector('[data-slot="application-update-feedback"]')).toBeNull()
+    expect(within(sidebar()).queryByText('Update this installation manually.')).toBeNull()
+  })
+
+  it('explains manual updates beside the version only when a newer release exists', () => {
+    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'idle', supported: false, message: 'Update this installation manually.' } })
+    const header = sidebar().querySelector('[data-slot="sidebar-header"]') as HTMLElement
+    expect(header).not.toBeNull()
+    expect(within(header).getByRole('status').textContent).toContain('In-app updates are unavailable for this installation.')
+    expect(within(header).getByRole('status').textContent).toContain('Install the newer release using your original installation method, then restart Cezarion.')
+    expect(header.querySelector('[data-slot="version-chip"]')?.textContent).toBe('v1.0.0')
+    expect(within(sidebar()).queryByRole('button', { name: /update|restart/i })).toBeNull()
+  })
+
+  it('keeps update progress and errors with the version above navigation', () => {
+    renderShell('/', { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'error', supported: true, message: 'Preparation failed.' }, onApplyUpdate: vi.fn() })
+    const feedback = sidebar().querySelector('[data-slot="application-update-feedback"]') as HTMLElement
+    expect(feedback.closest('[data-slot="sidebar-header"]')).not.toBeNull()
+    const search = sidebar().querySelector('[data-slot="command-palette-hint"]')!
+    expect(feedback.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(footer().contains(feedback)).toBe(false)
+  })
+
   it('keeps ready state until Restart Now is confirmed', async () => {
     const restart = vi.fn().mockResolvedValue(undefined)
     renderShell('/', { version: '1.0.0', applicationUpdate: { status: 'ready', supported: true, targetVersion: '2.0.0' }, onRestart: restart })

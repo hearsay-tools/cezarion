@@ -527,20 +527,21 @@ function SidebarContent({
       // an `@min-[…]/sidebar:` query and returns when the user drags the column wider.
       className="@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
-      <div className="flex min-w-0 items-center gap-[9px] px-4 pt-5 pb-2">
-        <span
-          data-slot="brand-wordmark"
-          className="shrink-0 text-[23px] leading-normal font-semibold tracking-[-0.03em] text-foreground"
-        >
-          Cezarion
-        </span>
-        <div className="ml-auto flex min-w-0 items-center" data-slot="version-action">
-          {version ? <VersionChip version={version} latestVersion={latestVersion} /> : <span className="min-w-0 flex-1" />}
-          <ApplicationUpdateControl version={version} latestVersion={latestVersion} state={applicationUpdate} onApplyUpdate={onApplyUpdate} onRestart={onRestart} error={applicationUpdateError} busy={applicationUpdateBusy} offline={applicationUpdateOffline} />
+      <div data-slot="sidebar-header" className="shrink-0">
+        <div className="flex min-w-0 items-center gap-[9px] px-4 pt-5 pb-2">
+          <span
+            data-slot="brand-wordmark"
+            className="shrink-0 text-[23px] leading-normal font-semibold tracking-[-0.03em] text-foreground"
+          >
+            Cezarion
+          </span>
+          <div className="ml-auto flex min-h-11 min-w-0 items-center justify-end" data-slot="version-action">
+            {version ? <VersionChip version={version} latestVersion={latestVersion} /> : <span className="min-w-0 flex-1" />}
+            <ApplicationUpdateControl version={version} latestVersion={latestVersion} state={applicationUpdate} onApplyUpdate={onApplyUpdate} onRestart={onRestart} error={applicationUpdateError} busy={applicationUpdateBusy} offline={applicationUpdateOffline} />
+          </div>
         </div>
-        {headerAction ? (
-          <div className={cn('shrink-0', (!repo || projectGroups) && 'ml-auto')}>{headerAction}</div>
-        ) : null}
+        <ApplicationUpdateFeedback version={version} latestVersion={latestVersion} state={applicationUpdate} error={applicationUpdateError} offline={applicationUpdateOffline} busy={applicationUpdateBusy} />
+        {headerAction}
       </div>
 
       <div className="px-4 pb-2">
@@ -652,8 +653,6 @@ function SidebarContent({
           </div>
         </div>
       )}
-
-      <ApplicationUpdateFeedback state={applicationUpdate} error={applicationUpdateError} offline={applicationUpdateOffline} busy={applicationUpdateBusy} />
 
       <div
         data-slot="sidebar-footer"

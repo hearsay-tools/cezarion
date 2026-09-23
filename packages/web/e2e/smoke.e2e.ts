@@ -232,14 +232,14 @@ describe('cockpit app shell', () => {
   })
 
   it('keeps the header version inside the 264px column even on a nightly-length release', async () => {
-    const NIGHTLY = '0.9.2-nightly.20260813.1'
+    const NIGHTLY = '0.9.2-nightly.20260813.1.abcdef1234567890'
     // The e2e server reports this checkout's own (short) semver, which never overflowed. The
-    // string that DID is the nightly dist-tag of #876, and the CLI reads its version from its own
-    // `package.json` at boot. Serve it through Chrome's route fixture before page navigation so
+    // regression first appeared with nightly releases (#876), and the CLI reads its version from
+    // `package.json` at boot. Serve a long nightly through Chrome's route fixture before navigation so
     // the application reads it as its initial health answer.
     //
-    // The version now yields to the wordmark and reserved action in the header. A long release
-    // still needs to truncate without pushing either fixed part outside the 264px column.
+    // Without an empty update-action slot, the shorter nightly now fits in full. Use a longer
+    // release string to exercise truncation without pushing the header outside the 264px column.
     const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as { version: string; capabilities: Record<string, unknown> }
     browser.routeJson('**/api/v1/health', {
       ...health, capabilities: { ...health.capabilities, localHandoff: false },

@@ -47,6 +47,8 @@ export function ApplicationUpdateControl({ version, latestVersion, state, onAppl
     void onRestart?.().finally(() => { pending.current = false })
   }
 
+  if (!action) return null
+
   return <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
     <div data-slot="application-update-action" className="flex size-11 shrink-0 items-center justify-center">
       {action ? <TooltipProvider><Tooltip><TooltipTrigger asChild>
@@ -67,15 +69,19 @@ export function ApplicationUpdateControl({ version, latestVersion, state, onAppl
   </AlertDialog>
 }
 
-export function ApplicationUpdateFeedback({ state, error, offline = false, busy = false }: Pick<ApplicationUpdateControlProps, 'state' | 'error' | 'offline' | 'busy'>) {
+export function ApplicationUpdateFeedback({ version, latestVersion, state, error, offline = false, busy = false }: Pick<ApplicationUpdateControlProps, 'state' | 'error' | 'offline' | 'busy'> & Partial<Pick<ApplicationUpdateControlProps, 'version' | 'latestVersion'>>) {
   const failure = error ?? (state?.status === 'error' ? state.message ?? 'Update failed.' : null)
+  const manualUpdate = state && !state.supported && version && latestVersion && isNewerVersion(latestVersion, version)
+  const manualInstructions = state?.message && state.message !== 'Update this installation manually.'
+    ? state.message : 'Install the newer release using your original installation method, then restart Cezarion.'
   const message = failure ? null
     : offline ? 'Connection lost. Reconnect to continue.'
         : state?.status === 'preparing' || busy && state?.status !== 'ready' ? 'Preparing update.'
           : state?.status === 'restarting' ? 'Restarting. Reconnecting to the cockpit.'
             : busy && state?.status === 'ready' ? 'Checking update status.'
-            : state && !state.supported ? state.message ?? 'Use your installation’s update method.' : null
-  return <div data-slot="application-update-feedback" className="min-h-10 shrink-0 px-4 pt-1 text-[11px] leading-4 text-muted-foreground">
+            : manualUpdate ? `In-app updates are unavailable for this installation. ${manualInstructions}` : null
+  if (!failure && !message) return null
+  return <div data-slot="application-update-feedback" className="px-4 pb-2 text-[11px] leading-4 text-muted-foreground">
     {failure ? <p role="status"><span className="block truncate" title={failure}>{failure}</span><span className="block">Retry or update manually.</span></p> : message ? <p role="status" title={message}>{message}</p> : null}
   </div>
 }
