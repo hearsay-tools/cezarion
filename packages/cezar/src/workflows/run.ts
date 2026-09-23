@@ -4382,7 +4382,8 @@ export class RunManager {
         state.doneAtBoundary = done ? state.session : undefined;
         state.parkAfterAck = sessionOpen && state.session ? { session: state.session, monitoring: !!monitoring } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
-        const agentInputDelivered = !ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state));
+        // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
+        const agentInputDelivered = !ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state) || !!state.agentInputFlight);
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347) — same as in runAgentStep.
@@ -5299,7 +5300,8 @@ export class RunManager {
         state.doneAtBoundary = done ? state.session : undefined;
         state.parkAfterAck = interactive && sessionOpen && state.session ? { session: state.session, monitoring: !!monitoring } : undefined;
         // #505: input the harness accepted but has not read yet runs as its next turn.
-        const agentInputDelivered = !ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state));
+        // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
+        const agentInputDelivered = !ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state) || !!state.agentInputFlight);
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347): close the session instead

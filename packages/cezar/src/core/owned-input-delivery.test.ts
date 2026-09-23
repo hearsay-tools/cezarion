@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { expect, it, vi } from 'vitest';
 import { withDelayedCommand, withRejectedCommand } from './owned-input-delivery.testkit.ts';
+
+/** A delivered receipt; an observable harness may also have reported reading it (#505). */
+const delivered = (input: object, stored: { consumedAt?: string } | undefined) =>
+  ({ ...input, deliveredAt: expect.any(String), ...(stored?.consumedAt ? { consumedAt: expect.any(String) } : {}) });
 import { driveSeam, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 
 for (const backend of ['codex', 'opencode', 'pi'] as const) {
@@ -28,7 +32,7 @@ for (const backend of ['codex', 'opencode', 'pi'] as const) {
         await waitFor(() => recovered.store.getRun(runId)?.status === 'waiting');
         const texts = recovered.store.readEvents(runId).filter(event => event.type === 'text').map(event => event.text);
         expect(texts.some(text => typeof text === 'string' && text.includes('reject-owned-turn'))).toBe(true);
-        expect(recovered.store.getRun(runId)?.agentInputs).toEqual([{ ...input, deliveredAt: expect.any(String) }]);
+        expect(recovered.store.getRun(runId)?.agentInputs).toEqual([delivered(input, recovered.store.getRun(runId)?.agentInputs?.[0])]);
         expect(recovered.store.readEvents(runId).filter(event => event.type === 'agent-input')).toHaveLength(1);
       });
     });
@@ -78,7 +82,7 @@ for (const backend of ['codex', 'opencode', 'pi'] as const) {
         release();
         await waitFor(() => !manager.isActive(runId));
         expect(['done', 'review']).toContain(store.getRun(runId)?.status);
-        expect(store.getRun(runId)?.agentInputs ?? []).toEqual(origin === 'owned' ? [{ ...input, deliveredAt: expect.any(String) }] : []);
+        expect(store.getRun(runId)?.agentInputs ?? []).toEqual(origin === 'owned' ? [delivered(input, store.getRun(runId)?.agentInputs?.[0])] : []);
       });
     });
   }, 60_000);
@@ -156,8 +160,7 @@ for (const backend of ['claude', 'codex', 'opencode', 'pi'] as const) {
       await waitFor(() => !manager.isActive(runId));
       expect(store.getRun(runId)?.status).toBe('failed');
       // #505: an observable harness may also have reported reading it before the failure.
-      expect(store.getRun(runId)?.agentInputs).toEqual([{ ...input, deliveredAt: expect.any(String),
-        ...(store.getRun(runId)?.agentInputs?.[0]?.consumedAt ? { consumedAt: expect.any(String) } : {}) }]);
+      expect(store.getRun(runId)?.agentInputs).toEqual([delivered(input, store.getRun(runId)?.agentInputs?.[0])]);
       expect(store.readEvents(runId).filter(event => event.type === 'agent-input')).toHaveLength(1);
     });
   }, 60_000);
@@ -183,7 +186,7 @@ it.each(['fresh', 'continuation'] as const)('opencode %s provider failure before
       release();
       await waitFor(() => !manager.isActive(runId));
       expect(store.getRun(runId)?.status).toBe('failed');
-      expect(store.getRun(runId)?.agentInputs).toEqual([{ ...input, deliveredAt: expect.any(String) }]);
+      expect(store.getRun(runId)?.agentInputs).toEqual([delivered(input, store.getRun(runId)?.agentInputs?.[0])]);
       expect(store.readEvents(runId).filter(event => event.type === 'agent-input')).toHaveLength(1);
     });
   }, 'mock:provider-error');

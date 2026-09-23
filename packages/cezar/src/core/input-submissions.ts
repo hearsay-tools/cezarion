@@ -3,6 +3,7 @@
 export class InputSubmissions {
   private readonly entries: { id: string; inputIds: readonly string[]; text: string }[] = [];
   get pending(): number { return this.entries.length; }
+  has(submissionId: string): boolean { return this.entries.some(entry => entry.id === submissionId); }
   accept(submissionId: string, inputIds: readonly string[], text: string): void {
     if (inputIds.length) this.entries.push({ id: submissionId, inputIds: [...inputIds], text });
   }

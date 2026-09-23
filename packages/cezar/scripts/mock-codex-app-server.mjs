@@ -11,10 +11,38 @@
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
 
-const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
+const write = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
+// #505: like the real app-server, any active main-thread turn accepts `turn/steer`.
+// Steers accepted by an ordinary scripted turn are read just before it completes:
+// a userMessage item (echoing clientUserMessageId as clientId) and an echo reply.
+let activeTurnId = null;
+let pendingSteers = [];
+let steerEchoSerial = 0;
+const emit = (obj) => {
+  const ending = (obj.method === 'turn/completed' || obj.method === 'turn/failed') && (!obj.params?.threadId || obj.params.threadId === 'th_mock_1');
+  if (ending && obj.method === 'turn/completed' && pendingSteers.length) {
+    const turnId = activeTurnId ?? 'turn_mock_1';
+    for (const entry of pendingSteers.splice(0)) {
+      const item = { type: 'userMessage', id: `item_user_generic_${++steerEchoSerial}`, clientId: entry.clientId, content: [{ type: 'text', text: entry.text }] };
+      write({ method: 'item/started', params: { threadId: 'th_mock_1', turnId, item } });
+      write({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId, item } });
+      write({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId, item: { type: 'agentMessage', id: `item_steer_echo_${steerEchoSerial}`, text: entry.text } } });
+    }
+  }
+  if (ending) { activeTurnId = null; pendingSteers = []; }
+  write(obj);
+};
 const rl = createInterface({ input: process.stdin });
 let echoSerial = 0;
 let ciWire;
+// #505 steering scenarios: the one turn that accepts `turn/steer`, while it is open.
+let steerTurn = null;
+let steerSerial = 0;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const completeSteerTurn = (turnId) => {
+  steerTurn = null;
+  emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: turnId, status: 'completed' } } });
+};
 
 const ignoreEof = process.env.MOCK_CODEX_IGNORE_EOF === '1';
 if (ignoreEof) {
@@ -43,6 +71,32 @@ rl.on('line', async (line) => {
     emit((Array.isArray(answer) && answer[0] === 'Vitest') || (Array.isArray(freeText) && freeText[0] === 'Use sensible defaults')
       ? { method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } }
       : { method: 'turn/failed', params: { turn: { id: 'turn_mock_1', status: 'failed' }, error: { message: 'bad answer' } } });
+  } else if (msg.method === 'turn/steer') {
+    const turn = steerTurn;
+    if (!turn && activeTurnId && msg.params?.expectedTurnId === activeTurnId) {
+      pendingSteers.push({ clientId: msg.params?.clientUserMessageId ?? null, text: msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '' });
+      emit({ id: msg.id, result: {} });
+      return;
+    }
+    if (!turn || msg.params?.expectedTurnId !== turn.id) {
+      emit({ id: msg.id, error: { code: -32600, message: 'no active turn matching expectedTurnId' } });
+      return;
+    }
+    const text = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
+    if (turn.strand) {
+      // The turn completes first, then the server acknowledges the steer: nothing reads it.
+      completeSteerTurn(turn.id);
+      emit({ id: msg.id, result: {} });
+      return;
+    }
+    if (turn.race) {
+      // The turn ends before the server processes the steer: a definitive mismatch.
+      completeSteerTurn(turn.id);
+      emit({ id: msg.id, error: { code: -32600, message: 'no active turn matching expectedTurnId' } });
+      return;
+    }
+    turn.steered.push({ clientId: msg.params?.clientUserMessageId ?? null, text });
+    emit({ id: msg.id, result: {} });
   } else if (msg.method === 'initialize') {
     emit({ id: msg.id, result: { userAgent: 'mock-codex/0.0.0' } });
   } else if (msg.method === 'thread/start' || msg.method === 'thread/resume') {
@@ -67,14 +121,48 @@ rl.on('line', async (line) => {
       emit({ id: msg.id, result: { thread: { id: msg.params?.threadId } } });
     }
   } else if (msg.method === 'turn/start') {
+    activeTurnId = 'turn_mock_1';
     emit({ id: msg.id, result: { turn: { id: 'turn_mock_1' } } });
     emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
     const turnText = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
+    // The real app-server records the turn's own input as a userMessage item,
+    // echoing clientUserMessageId as clientId (probe 0.155.1, #505).
+    const opening = { type: 'userMessage', id: `item_user_open_${++steerEchoSerial}`, clientId: msg.params?.clientUserMessageId ?? null, content: [{ type: 'text', text: turnText }] };
+    if (process.env.CEZ_MOCK_CODEX_NO_USER_ITEM !== '1') {
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: opening } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: opening } });
+    }
     if (turnText.includes('mock:ci-wait')) {
       const { ciPrompt } = await import('./mock-ci-tool.mjs');
       const text = await ciPrompt('codex', ciWire, turnText);
       emit({ method: 'item/completed', params: { item: { type: 'agentMessage', id: 'ci-result', text } } });
       emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
+    }
+    const steerScenario = ['mock:steer-tool', 'mock:steer-late', 'mock:steer-race', 'mock:steer-strand'].find((marker) => turnText.includes(marker));
+    if (steerScenario) {
+      const turnId = 'turn_mock_1';
+      steerTurn = { id: turnId, steered: [], race: steerScenario === 'mock:steer-race', strand: steerScenario === 'mock:steer-strand' };
+      const agent = (text) => emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId, item: { type: 'agentMessage', id: `item_steer_${++steerSerial}`, text } } });
+      if (steerScenario === 'mock:steer-late') {
+        agent('late window: final message already sent');
+        await sleep(300);
+        completeSteerTurn(turnId); // steers accepted in this window are never read
+        return;
+      }
+      const exec = { type: 'commandExecution', id: 'exec_steer', command: 'wait', status: 'inProgress' };
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId, item: exec } });
+      await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
+      if (!steerTurn) return; // a race already ended it
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId, item: { ...exec, status: 'completed' } } });
+      const steered = steerTurn.steered;
+      for (const entry of steered) {
+        const item = { type: 'userMessage', id: `item_user_${++steerSerial}`, clientId: entry.clientId, content: [{ type: 'text', text: entry.text }] };
+        emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId, item } });
+        emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId, item } });
+      }
+      agent(['steer tool done', ...steered.map((entry) => `saw: ${entry.text}`)].join('\n'));
+      completeSteerTurn(turnId);
       return;
     }
     if (turnText.includes('mock:agent-echo')) {

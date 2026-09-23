@@ -434,9 +434,13 @@ describe('harness parity — seam tier, session control', () => {
       const steer = inputDeliveryOf(createRunner(backend)).mode === 'steer';
       await driveSeam(backend, 'hold', {
         whileOpen: async (session, { v1 }) => {
-          const busy = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }]);
-          if (steer) await expect(busy).resolves.toBeUndefined();
-          else {
+          let busy = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }]);
+          if (steer) {
+            // Startup may refuse (codex has no thread yet); the running turn then admits it.
+            if (busy === false) await waitFor(() => (busy = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])) !== false);
+            expect(v1.some(e => e.type === 'turn-end')).toBe(false);
+            await expect(busy).resolves.toBeUndefined();
+          } else {
             expect(busy).toBe(false);
             await waitFor(() => v1.some(e => e.type === 'turn-end'));
             await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).resolves.toBeUndefined();

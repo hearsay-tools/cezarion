@@ -24,3 +24,13 @@ describe('InputSubmissions', () => {
     expect(ledger.pending).toBe(0);
   });
 });
+
+describe('InputSubmissions.has', () => {
+  it('reports whether a submission is still pending', () => {
+    const ledger = new InputSubmissions();
+    ledger.accept('s1', ['a'], '');
+    expect(ledger.has('s1')).toBe(true);
+    ledger.consume('s1');
+    expect(ledger.has('s1')).toBe(false);
+  });
+});
