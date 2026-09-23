@@ -1,7 +1,7 @@
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
 import { allProjectTags } from '@/lib/project-tags'
-import { runTitle } from '@/lib/task-groups'
+import { isOwnedWorker, runTitle } from '@/lib/task-groups'
 
 /**
  * The pure half of the global Tasks page (`/tasks`): joining the cross-project run index to the
@@ -154,15 +154,17 @@ export function toGlobalTasks(
   projects: readonly ProjectListEntry[],
 ): GlobalTask[] {
   const byId = new Map(projects.map((project) => [project.id, project]))
-  return runs.map((run) => {
-    const project = byId.get(run.projectId)
-    return {
-      run,
-      project,
-      projectName: project?.name || run.projectId,
-      tags: project?.tags ?? [],
-    }
-  })
+  return runs
+    .filter((run) => !isOwnedWorker(run))
+    .map((run) => {
+      const project = byId.get(run.projectId)
+      return {
+        run,
+        project,
+        projectName: project?.name || run.projectId,
+        tags: project?.tags ?? [],
+      }
+    })
 }
 
 /** Every workflow present in the CURRENT list — the workflow facet's options. Derived from the

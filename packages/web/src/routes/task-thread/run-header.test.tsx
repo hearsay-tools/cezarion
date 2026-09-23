@@ -464,6 +464,29 @@ describe('actions hit their endpoints', () => {
     expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Unpin task' })).toBeNull()
   })
 
+  it('a worker header offers neither Pin task nor Unpin task', () => {
+    stubFetch()
+    renderHeader(
+      run('running', {
+        delegation: {
+          role: 'worker',
+          permissions: [],
+          parentRunId: '10000000-0000-4000-8000-000000000001',
+          workspace: {
+            ownerRunId: 'r1',
+            resourceId: 'r1',
+            kind: 'owned-isolated',
+            path: '/worker',
+            branch: 'cez/worker',
+            baselineSha: 'a'.repeat(40),
+          },
+        },
+      }),
+    )
+    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Pin task' })).toBeNull()
+    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Unpin task' })).toBeNull()
+  })
+
   it('Pin is in the mobile kebab too', async () => {
     stubFetch()
     renderHeader(run('running'))

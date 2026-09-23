@@ -21,6 +21,7 @@ import {
   listCounts,
   refPrefixMatches,
   runTitle,
+  sidebarActiveRunId,
   splitRefPrefix,
   type ListView,
   type QuickListBucket,
@@ -97,7 +98,7 @@ export function TaskQuickList({
       ) : (
         <QuickListBuckets
           buckets={buckets}
-          currentRunId={currentRunId}
+          currentRunId={sidebarActiveRunId(currentRunId, runs)}
           now={now}
           showTokens={showTokens}
           showCost={showCost}
@@ -147,30 +148,18 @@ export function QuickListBuckets({
     const rows = buckets.filter(bucket => label === 'Recent' ? bucket.label !== 'Pinned' && bucket.label !== 'Archived' : bucket.label === label).flatMap(bucket => bucket.rows)
     if (rows.length) sidebarBuckets.push({ label, rows })
   }
-  const plainRows = sidebarBuckets.flatMap(bucket => bucket.rows).filter((row): row is Extract<QuickListRow, { kind: 'run' }> => row.kind === 'run')
-  const parents = new Set(plainRows.filter(row => row.run.delegation?.role !== 'worker').map(row => row.run.id))
-  const children = new Map<string, typeof plainRows>()
-  for (const row of plainRows) {
-    const metadata = row.run.delegation
-    if (metadata?.role !== 'worker' || !parents.has(metadata.parentRunId)) continue
-    // An independently pinned worker must stay in Pinned rather than following an unpinned parent.
-    if (row.run.pinned && !plainRows.find(parent => parent.run.id === metadata.parentRunId)?.run.pinned) continue
-    children.set(metadata.parentRunId, [...(children.get(metadata.parentRunId) ?? []), row])
-  }
-  const nested = new Set([...children.values()].flat().map(row => row.run.id))
   const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} />
 
   return (
     <>
-      {sidebarBuckets.filter(bucket => bucket.rows.some(row => row.kind !== 'run' || !nested.has(row.run.id))).map((bucket) => (
+      {sidebarBuckets.map((bucket) => (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
           <h2 className="pl-9 pt-3 pb-2 text-[9px] font-medium tracking-[0.14em] text-soft-foreground uppercase">
             {bucket.label}
           </h2>
-          {bucket.rows.filter(row => row.kind !== 'run' || !nested.has(row.run.id)).map((row) => (
-            <div key={row.kind === 'group' ? row.groupId : row.run.id} data-session-family={row.kind === 'run' ? row.run.id : undefined}>
+          {bucket.rows.map((row) => (
+            <div key={row.kind === 'group' ? row.groupId : row.run.id}>
               {renderRow(row)}
-              {row.kind === 'run' && children.has(row.run.id) ? <div className="ml-5" data-slot="session-workers">{children.get(row.run.id)!.map(child => <div key={child.run.id}>{renderRow(child)}</div>)}</div> : null}
             </div>
           ))}
         </div>

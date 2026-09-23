@@ -167,4 +167,13 @@ describe('unreadDoneCount', () => {
   it('is zero for an empty list', () => {
     expect(unreadDoneCount([])).toBe(0)
   })
+
+  it('does not count owned workers — they are not task-list rows (#312)', () => {
+    expect(
+      unreadDoneCount([
+        done({ seenAt: undefined }),
+        done({ seenAt: undefined, delegation: { role: 'worker' } }),
+      ]),
+    ).toBe(1)
+  })
 })

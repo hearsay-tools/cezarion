@@ -953,6 +953,37 @@ describe('the pure ordering helpers', () => {
     expect(merged.map((task) => `${task.projectId}/${task.id}`)).toEqual(['cezar/a', 'shop/z'])
   })
 
+  it('mergeTasks drops owned workers from both the live list and the index', () => {
+    const merged = mergeTasks(
+      [
+        run({ id: 'parent', title: 'Parent' }),
+        run({
+          id: 'live-worker',
+          title: 'Live worker',
+          delegation: {
+            role: 'worker',
+            permissions: [],
+            parentRunId: 'parent',
+            workspace: {
+              ownerRunId: 'live-worker',
+              resourceId: 'live-worker',
+              kind: 'owned-isolated',
+              path: '/worker',
+              branch: 'cez/worker',
+              baselineSha: 'a'.repeat(40),
+            },
+          },
+        }),
+      ],
+      'cezar',
+      [
+        indexed({ id: 'indexed-worker', projectId: 'other', title: 'Indexed worker', delegation: { role: 'worker' } }),
+        indexed({ id: 'other-parent', projectId: 'other', title: 'Other parent' }),
+      ],
+    )
+    expect(merged.map((task) => task.id)).toEqual(['parent', 'other-parent'])
+  })
+
   it('orderProjects sorts most-recently-opened first, active last, without mutating', () => {
     const input = [
       project({ id: 'old', lastOpenedAt: '2026-07-10T00:00:00Z' }),
@@ -967,19 +998,43 @@ describe('the pure ordering helpers', () => {
   })
 })
 
-it('preserves worker roles and wait phases from both live and indexed palette tasks', async () => {
+it('preserves parked-parent wait phases without listing owned workers', async () => {
   const workerId = '10000000-0000-4000-8000-000000000002'
   const live = run({ id: 'live-parent', title: 'Live parent', status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: workerId, workerIds: [workerId], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
-  renderPalette({ projects: [project({ id: 'cezar' }), project({ id: 'other' })], runs: [live], indexed: [
+  const liveWorker = run({
+    id: 'live-worker',
+    title: 'Secret worker title',
+    status: 'running',
+    delegation: {
+      role: 'worker',
+      permissions: [],
+      parentRunId: '10000000-0000-4000-8000-000000000001',
+      workspace: {
+        ownerRunId: 'live-worker',
+        resourceId: 'live-worker',
+        kind: 'owned-isolated',
+        path: '/worker',
+        branch: 'cez/worker',
+        baselineSha: 'a'.repeat(40),
+      },
+    },
+  })
+  renderPalette({ projects: [project({ id: 'cezar' }), project({ id: 'other' })], runs: [live, liveWorker], indexed: [
     { ...live, id: 'indexed-parent', title: 'Indexed parent', projectId: 'other', delegation: { role: 'root', wait: { phase: 'parked' } } },
-    { ...live, id: 'indexed-worker', title: 'Indexed worker', status: 'running', projectId: 'other', delegation: { role: 'worker' } },
+    { ...live, id: 'indexed-worker', title: 'Indexed worker unique', status: 'running', projectId: 'other', delegation: { role: 'worker' } },
   ] })
   openWith({ metaKey: true })
-  await screen.findByText('Indexed worker')
+  await screen.findByText('Indexed parent')
   for (const id of ['live-parent', 'indexed-parent']) {
     expect(document.querySelector(`[data-slot="palette-task"][data-run-id="${id}"] [data-slot="status-dot"]`)?.getAttribute('aria-label')).toBe('waiting on workers')
   }
-  expect(document.querySelector('[data-slot="palette-task"][data-run-id="indexed-worker"]')?.textContent).toContain('Worker')
+  expect(document.querySelector('[data-slot="palette-task"][data-run-id="indexed-worker"]')).toBeNull()
+  expect(document.querySelector('[data-slot="palette-task"][data-run-id="live-worker"]')).toBeNull()
+
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Secret worker title' } })
+  expect(document.querySelector('[data-slot="palette-task"][data-run-id="live-worker"]')).toBeNull()
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Indexed worker unique' } })
+  expect(document.querySelector('[data-slot="palette-task"][data-run-id="indexed-worker"]')).toBeNull()
 })
 
 it('preserves pending human attention in live and indexed palette rows', async () => {
