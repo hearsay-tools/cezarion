@@ -59,13 +59,13 @@ import {
 } from './harness-parity.testkit.ts';
 
 /** One row of the matrix, named once and applied to every harness. */
-interface SeamCriterion {
+interface SeamCriterion<T = SeamObservation> {
   /** Stable id the exemption table references. */
   readonly id: string;
   readonly name: string;
   readonly scenario: ScenarioName;
   /** Throws when the backend does not satisfy the criterion. */
-  readonly assert: (obs: SeamObservation) => void;
+  readonly assert: (obs: T) => void;
 }
 
 const sessionEvents = (v1: readonly AgentEvent[]) =>
@@ -348,10 +348,10 @@ const CONTROL_CRITERIA = [
  * is pinned. Never relax an assertion to accommodate an exemption; delete the
  * exemption instead.
  */
-function parityRow(
+function parityRow<T = SeamObservation>(
   backend: RunnerId,
-  criterion: SeamCriterion,
-  observe: () => Promise<SeamObservation>,
+  criterion: SeamCriterion<T>,
+  observe: () => Promise<T>,
 ): void {
   const exempt = exemptionFor(criterion.id, backend);
   if (!exempt) {
@@ -386,6 +386,68 @@ describe('harness parity — seam tier', () => {
   for (const backend of RUNNER_IDS) {
     for (const criterion of SEAM_CRITERIA) {
       parityRow(backend, criterion, () => driveSeam(backend, criterion.scenario));
+    }
+  }
+});
+
+// Group 8 — #505: agent input reaches a running turn and its reading is reported.
+interface InputObservation {
+  readonly obs: SeamObservation;
+  readonly consumed: readonly string[];
+  readonly consumedBeforeTurnEnd: boolean;
+  readonly unconsumed: readonly string[];
+}
+async function observeInput(backend: RunnerId, scenario: ScenarioName, id: string): Promise<InputObservation> {
+  const consumed: string[] = [];
+  let consumedBeforeTurnEnd = false;
+  let seenTurnEnd = false;
+  const obs = await driveSeam(backend, scenario, {
+    sessionOptions: { onAgentInputConsumed: ids => { consumed.push(...ids); if (!seenTurnEnd) consumedBeforeTurnEnd = true; } },
+    whileOpen: async (session, { v1 }) => {
+      const firstTurnEnd = () => { seenTurnEnd ||= v1.some(e => e.type === 'turn-end'); return seenTurnEnd; };
+      await waitFor(() => v1.some(e => (scenario === 'steer-tool' ? e.type === 'tool-call' : e.type === 'text')) || firstTurnEnd());
+      let ack: false | Promise<void> = false;
+      const text = `mock:agent-echo parity ${id}`;
+      await waitFor(() => (ack = session.sendAgentMessage([{ type: 'text', text }], [id])) !== false || firstTurnEnd());
+      if (ack) await ack;
+      await waitFor(() => firstTurnEnd());
+      // Late input is read by a follow-on turn or reported; OpenCode reports after a grace window.
+      const reported = () => v1.some(e => (e.type === 'turn-end' && !!e.unconsumedInputIds?.length) || e.type === 'input-unconsumed');
+      await waitFor(() => consumed.includes(id) || reported(), 6_000).catch(() => undefined);
+    },
+  });
+  const unconsumed = obs.v1.flatMap(e => e.type === 'input-unconsumed' ? [...e.inputIds]
+    : e.type === 'turn-end' ? [...(e.unconsumedInputIds ?? [])] : []);
+  return { obs, consumed, consumedBeforeTurnEnd, unconsumed };
+}
+const INPUT_CRITERIA: readonly SeamCriterion<InputObservation>[] = [
+  {
+    id: 'I1',
+    name: 'I1 admits agent input mid-turn and reports it read before that turn ends',
+    scenario: 'steer-tool',
+    assert: ({ obs, consumed, consumedBeforeTurnEnd }) => {
+      expect(consumed).toEqual(['parity-I1']);
+      expect(consumedBeforeTurnEnd).toBe(true);
+      expect(obs.v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
+    },
+  },
+  {
+    id: 'I2',
+    name: 'I2 reports accepted input the finished turn never read',
+    scenario: 'steer-late',
+    assert: ({ unconsumed, consumed }) => {
+      expect(unconsumed).toEqual(['parity-I2']);
+      expect(consumed).toEqual([]);
+    },
+  },
+];
+describe('harness parity — input delivery (#505)', () => {
+  for (const backend of RUNNER_IDS) {
+    it(`${backend} I0 declares its input delivery`, () => {
+      expect(['steer', 'boundary']).toContain(inputDeliveryOf(createRunner(backend)).mode);
+    });
+    for (const criterion of INPUT_CRITERIA) {
+      parityRow(backend, criterion, () => observeInput(backend, criterion.scenario, `parity-${criterion.id}`));
     }
   }
 });
@@ -862,11 +924,12 @@ describe('OpenCode durable input acknowledgements', () => {
 describe('harness parity — the matrix itself', () => {
   const allIds = [
     ...SEAM_CRITERIA.map((c) => c.id),
+    ...INPUT_CRITERIA.map((c) => c.id),
     ...CONTROL_CRITERIA.map((c) => c.id),
     ...RUN_CRITERIA.map((c) => c.id),
   ];
   const scenarioOf = (id: string): ScenarioName => {
-    const seam = SEAM_CRITERIA.find((c) => c.id === id);
+    const seam = SEAM_CRITERIA.find((c) => c.id === id) ?? INPUT_CRITERIA.find((c) => c.id === id);
     if (seam) return seam.scenario;
     const control = CONTROL_CRITERIA.find((c) => c.id === id);
     if (control) return control.scenario;
