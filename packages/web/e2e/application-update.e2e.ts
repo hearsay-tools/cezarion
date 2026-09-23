@@ -1,0 +1,125 @@
+import { resolve } from 'node:path'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+
+const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/application-update')
+let browser: AgentBrowser
+let baseUrl: string
+let project: string
+let actualHealth: Record<string, unknown>
+const desktop = '[data-slot="sidebar"]'
+const drawer = '[data-slot="mobile-nav-drawer"]'
+
+beforeAll(async () => {
+  baseUrl = readTestEnv().baseUrl
+  project = await bootProjectId(baseUrl)
+  browser = AgentBrowser.open(`application-update-${process.pid}`)
+  actualHealth = await fetch(`${baseUrl}/api/v1/health`).then((response) => response.json()) as Record<string, unknown>
+})
+afterAll(() => { browser?.close() })
+
+/** Chrome route fixtures survive the document reload that a confirmed version change triggers. */
+function fixture(state: { status: string; supported: boolean; targetVersion?: string; message?: string }, version = '1.0.0') {
+  browser.routeJson('**/api/v1/health', {
+    ...actualHealth,
+    capabilities: { ...(actualHealth.capabilities as object), localHandoff: false },
+    version, latestVersion: '2.0.0', applicationUpdate: state,
+  })
+  browser.routeJson('**/api/v1/workspace/application-update/apply', { state: { status: 'ready', supported: true, targetVersion: '2.0.0' } })
+  browser.routeJson('**/api/v1/workspace/application-update/restart', { state: { status: 'restarting', supported: true, targetVersion: '2.0.0' } })
+}
+
+function reconcile(): void {
+  browser.evaluate(`window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))`)
+}
+
+describe('application update chrome', () => {
+  it('keeps the header steady through preparation, error and ready on a minimum desktop sidebar', () => {
+    browser.setViewport(1024, 768)
+    fixture({ status: 'idle', supported: true })
+    browser.goto(`${baseUrl}/p/${project}/skills`)
+    browser.waitForFunction(`document.querySelector('${desktop} [data-slot="version-chip"]') !== null`)
+    browser.evaluate(`localStorage.setItem('cez-theme', 'light')`)
+    browser.goto(`${baseUrl}/p/${project}/skills`)
+    browser.waitForFunction(`document.documentElement.classList.contains('light')`)
+    browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Update application"]') !== null`)
+    const before = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="brand-wordmark"]').parentElement.getBoundingClientRect(); const button = root.querySelector('[aria-label="Update application"]').getBoundingClientRect(); return { width: root.getBoundingClientRect().width, top: header.top, height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Update application"]').title, version: root.querySelector('[data-slot="version-chip"]').textContent }; })()`)
+    expect(before).toMatchObject({ width: 264, button: [44, 44], title: 'Update from v1.0.0 to v2.0.0', version: 'v1.0.0' })
+    browser.hover(`${desktop} [aria-label="Update application"]`)
+    expect(browser.waitForValue(`document.querySelector('[data-slot="tooltip-content"]')?.textContent?.includes('Update from v1.0.0 to v2.0.0') ? true : null`)).toBe(true)
+    browser.screenshot(`${artifacts}/desktop-update-light.png`, { viewport: true })
+    fixture({ status: 'preparing', supported: true, targetVersion: '2.0.0' }); reconcile()
+    browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Preparing update"]')?.disabled === true`)
+    browser.screenshot(`${artifacts}/desktop-preparing-light.png`, { viewport: true })
+    fixture({ status: 'error', supported: true, message: 'Preparation failed.' }); reconcile()
+    browser.waitForFunction(`document.querySelector('${desktop} [role="status"]')?.textContent.includes('Retry or update manually')`)
+    browser.screenshot(`${artifacts}/desktop-error-light.png`, { viewport: true })
+    browser.click(`${desktop} [aria-label="Update application"]`)
+    browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Restart application"]') !== null`)
+    const after = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const header = root.querySelector('[data-slot="brand-wordmark"]').parentElement.getBoundingClientRect(); const button = root.querySelector('[aria-label="Restart application"]').getBoundingClientRect(); return { top: header.top, height: header.height, button: [button.width, button.height], title: root.querySelector('[aria-label="Restart application"]').title }; })()`)
+    expect(after).toEqual({ top: (before as { top: number }).top, height: (before as { height: number }).height, button: [44, 44], title: 'Restart required' })
+    browser.screenshot(`${artifacts}/desktop-ready-light.png`, { viewport: true })
+  })
+
+  it('supports the mobile dialog actions in dark mode and restores focus after Later', () => {
+    browser.setViewport(360, 640)
+    fixture({ status: 'ready', supported: true, targetVersion: '2.0.0' })
+    browser.goto(`${baseUrl}/p/${project}/skills`)
+    browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
+    browser.evaluate(`localStorage.setItem('cez-theme', 'dark')`)
+    browser.goto(`${baseUrl}/p/${project}/skills`)
+    browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
+    browser.waitForFunction(`document.querySelector('button[aria-label="Open menu"]') !== null`)
+    browser.click('[aria-label="Open menu"]')
+    browser.waitForFunction(`(() => { const d = document.querySelector('${drawer}'); return !!d && d.getBoundingClientRect().left === 0 && !!d.querySelector('[aria-label="Restart application"]') })()`)
+    browser.screenshot(`${artifacts}/mobile-ready-dark.png`, { viewport: true })
+    browser.click(`${drawer} [data-slot="theme-toggle"]`)
+    browser.waitForFunction(`document.querySelector('${drawer} [data-slot="theme-toggle"]')?.getAttribute('data-theme-pref') === 'system'`)
+    browser.click(`${drawer} [data-slot="theme-toggle"]`)
+    browser.waitForFunction(`document.documentElement.classList.contains('light')`)
+    browser.goto(`${baseUrl}/p/${project}/skills`)
+    browser.waitForFunction(`document.documentElement.classList.contains('light') && document.querySelector('button[aria-label="Open menu"]') !== null`)
+    browser.click('button[aria-label="Open menu"]')
+    browser.waitForFunction(`document.querySelector('${drawer}')?.getBoundingClientRect().left === 0`)
+    browser.moveTo(350, 600)
+    browser.screenshot(`${artifacts}/mobile-ready-light.png`, { viewport: true })
+    browser.evaluate(`localStorage.setItem('cez-theme', 'dark')`)
+    browser.goto(`${baseUrl}/p/${project}/skills`)
+    browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
+    browser.click('button[aria-label="Open menu"]')
+    browser.waitForFunction(`document.querySelector('${drawer}')?.getBoundingClientRect().left === 0`)
+    browser.click(`${drawer} [aria-label="Restart application"]`)
+    browser.waitForFunction(`document.querySelector('[role="alertdialog"]') !== null`)
+    expect(browser.text('[role="alertdialog"]')).toContain('Running tasks will be recovered after restart.')
+    browser.screenshot(`${artifacts}/mobile-confirm-dark.png`, { viewport: true })
+    browser.click('[data-slot="alert-dialog-cancel"]')
+    browser.waitForFunction(`document.querySelector('[role="alertdialog"]') === null && document.activeElement?.getAttribute('aria-label') === 'Restart application'`)
+    browser.click(`${drawer} [aria-label="Restart application"]`)
+    browser.click('[data-slot="alert-dialog-action"]')
+    browser.waitForFunction(`document.querySelector('${drawer} [aria-label="Reconnecting after restart"]') !== null`)
+    browser.screenshot(`${artifacts}/mobile-restarting-dark.png`, { viewport: true })
+    fixture({ status: 'idle', supported: true }, '2.0.0'); reconcile()
+    const reloaded = browser.waitForValue(`(() => { const navigation = performance.getEntriesByType('navigation')[0]; return navigation?.type === 'reload' ? { path: location.pathname, marker: sessionStorage.getItem('cez:application-restart-from') } : null })()`)
+    expect(reloaded).toEqual({ path: `/p/${project}/skills`, marker: null })
+  })
+
+  it('keeps last-known version through offline and respects zoom and reduced motion', () => {
+    browser.setViewport(1440, 900)
+    fixture({ status: 'idle', supported: true })
+    browser.goto(`${baseUrl}/p/${project}/skills`)
+    browser.waitForFunction(`document.querySelector('${desktop} [data-slot="version-chip"]') !== null`)
+    browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Update application"]') !== null`)
+    browser.setOffline(true)
+    browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Update application"]')?.disabled === true && document.querySelector('${desktop} [role="status"]')?.textContent.includes('Connection lost')`)
+    expect(browser.text(`${desktop} [data-slot="version-chip"]`)).toBe('v1.0.0')
+    browser.screenshot(`${artifacts}/desktop-offline-dark.png`, { viewport: true })
+    browser.setOffline(false)
+    browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Update application"]')?.disabled === false`)
+    browser.setReducedMotion()
+    browser.evaluate(`document.documentElement.style.zoom = '2'`)
+    const geometry = browser.waitForValue(`(() => { const root = document.querySelector('${desktop}'); const action = root.querySelector('[aria-label="Update application"]'); const header = root.querySelector('[data-slot="brand-wordmark"]').parentElement; return { reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, width: action.getBoundingClientRect().width, overflow: header.scrollWidth - header.clientWidth, title: action.title }; })()`)
+    expect(geometry).toMatchObject({ reduced: true, width: 88, title: 'Update from v1.0.0 to v2.0.0' })
+    expect((geometry as { overflow: number }).overflow).toBeLessThanOrEqual(0)
+    browser.screenshot(`${artifacts}/desktop-zoom-200-reduced-dark.png`, { viewport: true })
+  })
+})

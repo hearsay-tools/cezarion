@@ -52,6 +52,7 @@ import type {
   GithubPrChangesData,
   GroupResponse,
   HealthResponse,
+  ApplicationUpdateResponse,
   AttachmentInput,
   LaunchKeyResponse,
   MessageInput,
@@ -1032,6 +1033,16 @@ export async function getGroup(groupId: string, opts?: ReadOptions): Promise<Gro
 }
 
 // ---- workspace mutations ------------------------------------------------------------------
+
+/** Prepare the server-selected release without interrupting the running cockpit. */
+export async function applyApplicationUpdate(): Promise<ApplicationUpdateResponse> {
+  return unwrap(await cez.api.v1.workspace['application-update'].apply.$post({ json: {} }), '/workspace/application-update/apply')
+}
+
+/** Acknowledges the restart before the server hands off to its detached helper. */
+export async function restartApplication(): Promise<ApplicationUpdateResponse> {
+  return unwrap(await cez.api.v1.workspace['application-update'].restart.$post({ json: {} }), '/workspace/application-update/restart')
+}
 
 /**
  * Open a terminal signed in to `provider`, optionally for a NAMED account.

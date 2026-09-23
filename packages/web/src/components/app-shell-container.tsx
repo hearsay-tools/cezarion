@@ -1,9 +1,10 @@
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 
 import { useHealth, useProjectRuns, useProjects, useRuns, useSkillsUpdate, useTodos } from '@/api/queries'
 import type { HealthResponse, SkillsUpdateState } from '@open-mercato/cezar-api-client'
 import { AppShell, type RepoChip } from '@/components/app-shell'
+import { useApplicationUpdate } from '@/components/use-application-update'
 import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
@@ -44,19 +45,20 @@ export function skillsUpdateMarkerOf(state: SkillsUpdateState | undefined): bool
 /**
  * The app shell, wired to live data.
  *
- * AppShell itself stays presentational — it takes repo/version/inboxCount and renders them, or
- * renders nothing. This is the seam where those become real: `useHealth()` for the repo and
- * version chips, `useTodos()` for the inbox badge.
+ * AppShell stays presentational. This container reads health for repo/version/update state,
+ * owns the mutation hook, and reads todos for the inbox badge.
  *
- * Nothing here caches boot-time values (#369: the legacy UI read the branch once at startup and
- * then showed a stale branch forever). The chips read whatever is currently in the health query,
- * so keeping them live is `useHealth`'s job — its poll plus Step 3.2's reconnect/visibility
- * reconcile — not a change here.
+ * The last good health payload protects the shell through a failed reconciliation; the root
+ * health subscription remains the live source, with reconnect/visibility HTTP reconciliation.
  */
 export function AppShellContainer({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const projectId = useActiveProjectId()
   const health = useHealth()
+  const lastKnownHealth = useRef<HealthResponse | undefined>(undefined)
+  if (health.data) lastKnownHealth.current = health.data
+  const shellHealth = health.data ?? lastKnownHealth.current
+  const applicationUpdate = useApplicationUpdate(shellHealth)
   // The global inbox is opt-in (#471). With the capability off there is no Inbox nav item to
   // badge and the endpoint can only answer [], so the query parks rather than polls.
   const inboxAvailable = health.data?.capabilities.followups === true
@@ -111,8 +113,14 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
       <AppShell
         repo={pathname === '/tools' ? repoChipOf(health.data) : globalSettings ? null : activeProject ? { name: activeProject.name, branch: activeProject.id === bootProjectId ? health.data?.repo?.branch ?? '' : '' } : repoChipOf(health.data)}
         breadcrumb={{ project: pathname === '/tools' ? 'Workspace' : projectName, page: titleRun ? `Tasks / ${pageLabel}` : pageLabel ?? 'Cezarion', branch: titleRun?.worktreePath ? 'Isolated worktree' : undefined }}
-        version={health.data?.version ?? null}
-        latestVersion={health.data?.latestVersion ?? null}
+        version={shellHealth?.version ?? null}
+        latestVersion={shellHealth?.latestVersion ?? null}
+        applicationUpdate={shellHealth?.applicationUpdate}
+        onApplyUpdate={applicationUpdate.apply}
+        onRestart={applicationUpdate.restart}
+        applicationUpdateError={applicationUpdate.error}
+        applicationUpdateBusy={applicationUpdate.busy}
+        applicationUpdateOffline={applicationUpdate.offline || health.isError}
         // `?? null` rather than `?? 0`: no badge while the inbox is unknown, and no badge when it
         // is known to be empty — AppShell renders neither for a falsy count.
         inboxCount={todos.data?.length ?? null}
