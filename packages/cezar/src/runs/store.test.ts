@@ -2502,3 +2502,22 @@ describe('RunStore — agent input consumption receipts (#505)', () => {
     expect(RunStore.open(dataDir).getRun(LEGACY_RUN.id)?.agentInputs).toEqual(inputs);
   });
 });
+
+describe('RunStore — replaying accepted but unread input after a crash (#505)', () => {
+  let dataDir: string;
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), 'cez-store-unread-')); });
+  afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
+
+  it('requeues only inputs still awaiting a read, keeping pre-#505 receipts intact', () => {
+    const parentRunId = randomUUID();
+    const base = { source: 'agent', parentRunId, text: 'hello', createdAt: '2026-09-23T10:00:00.000Z', deliveredAt: '2026-09-23T10:00:01.000Z' };
+    const unread = { ...base, id: randomUUID(), awaitingRead: true };
+    const read = { ...base, id: randomUUID(), consumedAt: '2026-09-23T10:00:02.000Z' };
+    const historical = { ...base, id: randomUUID() };
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([{ ...LEGACY_RUN, agentInputs: [unread, read, historical] }]), 'utf8');
+    const store = RunStore.open(dataDir);
+    expect(store.requeueAwaitingReadInputs(LEGACY_RUN.id)).toEqual([unread.id]);
+    const { deliveredAt: _d, awaitingRead: _a, ...queued } = unread;
+    expect(store.getRun(LEGACY_RUN.id)?.agentInputs).toEqual([queued, read, historical]);
+  });
+});

@@ -39,4 +39,24 @@ describe('unread agent input is resubmitted (#505)', () => {
       });
     } finally { adapter.scenarios['steer-late'] = original; }
   }, 60_000);
+
+  it('claude replays accepted but unread input after a restart, and reads it', async () => {
+    const saved = process.env.CEZ_MOCK_STEER_MS; process.env.CEZ_MOCK_STEER_MS = '5000';
+    try {
+      await withOwnedInputRun('claude', 'steer-tool', async fixture => {
+        const { runId, parentRunId } = fixture;
+        fixture.manager.enqueueOwnedRun(runId);
+        await waitFor(() => fixture.store.readEvents(runId).some(e => e.type === 'tool-call'));
+        const input = late(parentRunId);
+        fixture.manager.steerWorker(runId, input);
+        await waitFor(() => !!fixture.store.getRun(runId)?.agentInputs?.[0]?.deliveredAt);
+        expect(fixture.store.getRun(runId)?.agentInputs?.[0]).toMatchObject({ awaitingRead: true });
+        const { store, manager } = await fixture.restart();
+        expect(store.getRun(runId)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
+        if (!manager.isActive(runId)) expect(manager.continueRun(runId, { text: 'mock:agent-echo resume' }).ok).toBe(true);
+        await waitFor(() => !!store.getRun(runId)?.agentInputs?.[0]?.consumedAt, 15_000);
+        expect(store.getRun(runId)?.agentInputs?.[0]?.awaitingRead).toBeUndefined();
+      });
+    } finally { if (saved === undefined) delete process.env.CEZ_MOCK_STEER_MS; else process.env.CEZ_MOCK_STEER_MS = saved; }
+  }, 60_000);
 });

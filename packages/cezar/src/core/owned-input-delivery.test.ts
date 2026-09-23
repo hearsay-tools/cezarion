@@ -4,8 +4,9 @@ import { expect, it, vi } from 'vitest';
 import { withDelayedCommand, withRejectedCommand } from './owned-input-delivery.testkit.ts';
 
 /** A delivered receipt; an observable harness may also have reported reading it (#505). */
-const delivered = (input: object, stored: { consumedAt?: string } | undefined) =>
-  ({ ...input, deliveredAt: expect.any(String), ...(stored?.consumedAt ? { consumedAt: expect.any(String) } : {}) });
+const delivered = (input: object, stored: { consumedAt?: string; awaitingRead?: true } | undefined) =>
+  ({ ...input, deliveredAt: expect.any(String), ...(stored?.consumedAt ? { consumedAt: expect.any(String) } : {}),
+    ...(stored?.awaitingRead ? { awaitingRead: true } : {}) });
 import { driveSeam, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 
 for (const backend of ['codex', 'opencode', 'pi'] as const) {

@@ -1873,6 +1873,12 @@ export class RunManager {
     for (const run of this.store.listRuns()) {
       this.store.clearExpiredInboxClaims(run.id, new Date().toISOString());
       this.armInboxClaimExpiry(run.id);
+      // #505: the session that accepted this input died before the model read it.
+      // Delivery is at-least-once: the replay keeps the input's ID in its text.
+      if (['queued', 'running', 'waiting'].includes(run.status) && !this.isActive(run.id)) {
+        const replayed = this.store.requeueAwaitingReadInputs(run.id);
+        if (replayed.length) this.store.appendEvent(run.id, { type: 'note', message: `replaying ${replayed.length} message${replayed.length === 1 ? '' : 's'} accepted before the restart but not read` });
+      }
     }
     this.reconcileWorkerWaits();
     const live = this.store
@@ -3590,8 +3596,10 @@ export class RunManager {
             this.ciWakeAdmitted.delete(runId);
           } else {
             const deliveredAt = new Date().toISOString();
+            // An observable harness still owes a read: mark it so a restart replays it (#505).
+            const awaiting = state.inputDelivery?.consumption === 'observable' ? { awaitingRead: true as const } : {};
             this.store.commitAgentInputs(runId, queue.map(input => inputIds.includes(input.id) && !input.deliveredAt
-              ? { ...input, deliveredAt } : input));
+              ? { ...input, deliveredAt, ...awaiting } : input));
             if (state.inputDelivery?.consumption === 'observable') {
               const early = inputIds.filter(id => state.consumedBeforeAck?.has(id));
               for (const id of inputIds) if (!early.includes(id)) state.unreadInputIds?.add(id);

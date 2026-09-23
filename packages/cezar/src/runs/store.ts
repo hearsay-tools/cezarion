@@ -936,7 +936,7 @@ export class RunStore extends EventEmitter {
     if (!run?.agentInputs || !ids.length) return;
     this.commitAgentInputs(id, run.agentInputs.map(input => {
       if (!ids.includes(input.id)) return input;
-      const { deliveredAt: _delivered, consumedAt: _consumed, ...queued } = input;
+      const { deliveredAt: _delivered, consumedAt: _consumed, awaitingRead: _awaiting, ...queued } = input;
       return queued;
     }));
   }
@@ -945,8 +945,19 @@ export class RunStore extends EventEmitter {
   commitAgentInputsConsumed(id: string, ids: readonly string[], at: string): void {
     const run = this.runs.get(id);
     if (!run?.agentInputs || !ids.length) return;
-    this.commitAgentInputs(id, run.agentInputs.map(input => ids.includes(input.id) && input.deliveredAt && !input.consumedAt
-      ? { ...input, consumedAt: at } : input));
+    this.commitAgentInputs(id, run.agentInputs.map(input => {
+      if (!ids.includes(input.id) || !input.deliveredAt || input.consumedAt) return input;
+      const { awaitingRead: _awaiting, ...read } = input;
+      return { ...read, consumedAt: at };
+    }));
+  }
+
+  /** Crash recovery (#505): input a harness accepted but was never seen reading goes
+   * back to the queue. Returns the requeued IDs. */
+  requeueAwaitingReadInputs(id: string): string[] {
+    const ids = (this.runs.get(id)?.agentInputs ?? []).filter(input => input.awaitingRead && input.deliveredAt && !input.consumedAt).map(input => input.id);
+    this.requeueUnconsumedAgentInputs(id, ids);
+    return ids;
   }
 
   commitAgentInputs(id: string, inputs: readonly AgentInput[], openingContinuationInputId?: string): void {
