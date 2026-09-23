@@ -50,7 +50,8 @@ Usage:
   cez run "<task>"          run a task headless in the terminal
   cez init                  scaffold .ai/cezar/ (example workflow + skill)
   cez projects              list the projects this cockpit serves
-                            (also: projects add [<dir>] · projects remove <id>)
+                            (also: projects add [<dir>] · projects remove|rm <id> ·
+                             projects tag <id> [<tag>…])
   cez worker                manage owned workers (see: worker --help)
   cez server-install        interactive wizard to host cezar on a server
   cez server-deploy         redeploy a new version (reload the service) + verify

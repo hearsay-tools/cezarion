@@ -109,6 +109,8 @@ try {
     });
     assert.match(help.stdout, /cezar — local cockpit/);
     assert.match(help.stdout, /cez run "<task>"/);
+    assert.match(help.stdout, /projects remove\|rm <id>/);
+    assert.match(help.stdout, /projects tag <id> \[<tag>…\]/);
     assert.match(help.stdout, /cez worker/);
     for (const args of [['worker', '--help'], ['worker', 'spawn', '--help']]) {
       const workerHelp = await execFile(process.execPath, [cliPath, ...args], {

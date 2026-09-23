@@ -156,7 +156,7 @@ describe('cezar projects CLI', () => {
       expect(await run('remove', 'nope')).toBe(1);
       expect(io.err.join('\n')).toContain('unknown project: nope');
       expect(await run('remove')).toBe(1);
-      expect(io.err.join('\n')).toContain('cez projects remove <id>');
+      expect(io.err.join('\n')).toContain('cez projects remove|rm <id>');
     });
   });
 
