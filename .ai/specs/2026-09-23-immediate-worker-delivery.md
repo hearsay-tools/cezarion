@@ -57,11 +57,12 @@ stays false after a human follow-up.
   inferred from an HTTP, RPC or pipe acknowledgement.
 - `turn-end` gains `unconsumedInputIds`: inputs accepted in that turn that the
   model never consumed before the turn ended idle.
-- Each runner declares `inputDelivery` in `specSupport`:
+- Each runner declares `inputDelivery` beside `specSupport` (which is keyed by
+  `AgentRunSpec` fields and cannot carry it), and its sessions expose it:
   `steer` (accepted mid-turn, consumed inside the running turn) or `boundary`
   (refused while busy), plus whether consumption is observable. An absent
-  declaration means `boundary`, which is what every runner did before. `harness-parity.test.ts`
-  pins each declaration against the runner's behavior.
+  declaration means `boundary`, which is what every runner did before.
+  `harness-parity.test.ts` pins each declaration against the runner's behavior.
 
 | Backend | `inputDelivery` | Busy submission | Consumed when |
 | --- | --- | --- | --- |
