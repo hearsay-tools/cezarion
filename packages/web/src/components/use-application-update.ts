@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ApplicationUpdateState, HealthResponse } from '@open-mercato/cezar-api-client'
-import { applyApplicationUpdate, restartApplication } from '@/api/client'
+import { ApiError, applyApplicationUpdate, restartApplication } from '@/api/client'
 import { queryKeys } from '@/api/queries'
 
 const RESTART_VERSION_KEY = 'cez:application-restart-from'
@@ -17,6 +17,7 @@ type ActiveOperation = {
   initialCacheState: ApplicationUpdateState | undefined
   initialVersion: string | undefined
   kind: 'apply' | 'restart'
+  reconciledRestart?: ApplicationUpdateState
   timer: ReturnType<typeof setTimeout>
   resolve: (state: ApplicationUpdateState | undefined) => void
 }
@@ -75,6 +76,10 @@ export function useApplicationUpdate(health: HealthResponse | undefined, reloadD
 
   const finish = React.useCallback((operation: ActiveOperation, outcome: { state?: ApplicationUpdateState; source: 'health' | 'response' | 'failure' | 'timeout'; cause?: unknown }) => {
     if (active.current !== operation) return // An aborted request may still resolve much later.
+    if (operation.reconciledRestart && (outcome.source === 'timeout'
+      || outcome.source === 'failure' && outcome.cause instanceof ApiError && outcome.cause.status === 0)) {
+      outcome = { source: 'health', state: operation.reconciledRestart }
+    }
     active.current = null
     clearTimeout(operation.timer)
     if (outcome.source !== 'response') operation.controller.abort()
@@ -83,6 +88,10 @@ export function useApplicationUpdate(health: HealthResponse | undefined, reloadD
     if (outcome.source === 'timeout') setError(UNCERTAIN_RESPONSE)
     else if (outcome.source === 'failure') setError(outcome.cause instanceof Error ? outcome.cause.message : 'The request failed.')
     else setError(null)
+    if (outcome.source === 'failure' && operation.kind === 'restart') {
+      try { window.sessionStorage.removeItem(RESTART_VERSION_KEY) } catch { /* degraded private storage */ }
+      setRestartFrom(null)
+    }
     if (outcome.source === 'timeout' || outcome.source === 'failure') {
       // One reconciliation through the existing health query; the root subscription remains
       // responsible for subsequent state changes. Never automatically replay a mutation.
@@ -97,6 +106,16 @@ export function useApplicationUpdate(health: HealthResponse | undefined, reloadD
     if (!operation) return
     if ((state === operation.initialState && health?.version === operation.initialVersion)
       || !isAuthoritativeOutcome(operation, health)) return
+    if (operation.kind === 'restart' && state?.status === 'restarting') {
+      // Health can publish before helper arming completes. Release the UI, but
+      // retain the POST until its acknowledgement, deadline or unmount. The
+      // server owns the restart even if that transport subsequently disconnects.
+      operation.reconciledRestart = state
+      setBusy(false)
+      setError(null)
+      operation.resolve(state)
+      return
+    }
     finish(operation, { source: 'health', state })
   }, [health?.applicationUpdate, health?.version, finish])
 

@@ -201,8 +201,12 @@ it('releases Apply on an authoritative error despite a pending response', async 
   expect(result.current.error).toBeNull()
 })
 
-it('accepts authoritative Restart acknowledgement after its HTTP response is lost', async () => {
-  vi.stubGlobal('fetch', fetchMock.mockImplementation(() => new Promise<Response>(() => {})))
+it('reconciles Restart health without aborting the pending acknowledgement transport', async () => {
+  let signal: AbortSignal | undefined
+  vi.stubGlobal('fetch', fetchMock.mockImplementation((_url, init) => {
+    signal = init?.signal as AbortSignal | undefined
+    return new Promise<Response>(() => {})
+  }))
   const ready = { ...health, applicationUpdate: { status: 'ready', supported: true, targetVersion: '2.0.0' } } as HealthResponse
   const client = createQueryClient()
   client.setQueryData(queryKeys.health, ready)
@@ -213,6 +217,9 @@ it('accepts authoritative Restart acknowledgement after its HTTP response is los
   rerender({ current: { ...ready, applicationUpdate: { status: 'restarting', supported: true, targetVersion: '2.0.0' } } as HealthResponse })
   await waitFor(() => expect(result.current.busy).toBe(false))
   expect(sessionStorage.getItem('cez:application-restart-from')).toBe('1.0.0')
+  expect(signal?.aborted).toBe(false)
+  act(() => { void result.current.restart() })
+  expect(fetchMock).toHaveBeenCalledTimes(1)
 })
 
 it('keeps Restart pending when a delayed health snapshot reports old-version idle', async () => {
@@ -276,4 +283,50 @@ it('does not claim a restart while a completed Apply is reconciling Ready', () =
   render(<ApplicationUpdateFeedback state={{ status: 'ready', supported: true, targetVersion: '2.0.0' }} busy />)
   expect(screen.getByRole('status').textContent).toMatch(/checking update status/i)
   expect(screen.getByRole('status').textContent).not.toMatch(/restarting/i)
+})
+
+it('bounds the retained Restart transport and ignores late responses after reconciliation', async () => {
+  let signal: AbortSignal | undefined
+  let deliver!: (response: Response) => void
+  vi.stubGlobal('fetch', fetchMock.mockImplementation((_url, init) => {
+    signal = init?.signal as AbortSignal | undefined
+    return new Promise<Response>(resolve => { deliver = resolve })
+  }))
+  vi.useFakeTimers()
+  try {
+    const ready = { ...health, applicationUpdate: { status: 'ready', supported: true } } as HealthResponse
+    const restarting = { ...health, applicationUpdate: { status: 'restarting', supported: true } } as HealthResponse
+    const client = createQueryClient()
+    client.setQueryData(queryKeys.health, ready)
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    const { result, rerender } = renderHook(({ current }) => useApplicationUpdate(current), { wrapper, initialProps: { current: ready } })
+    act(() => { void result.current.restart() })
+    client.setQueryData(queryKeys.health, restarting)
+    await act(async () => { rerender({ current: restarting }) })
+    expect(signal?.aborted).toBe(false)
+    expect(result.current.busy).toBe(false)
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    expect(signal?.aborted).toBe(true)
+    expect(result.current.error).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await act(async () => { deliver(new Response(JSON.stringify({ state: { status: 'ready', supported: true } }), { headers: { 'content-type': 'application/json' } })) })
+    expect(client.getQueryData<HealthResponse>(queryKeys.health)?.applicationUpdate?.status).toBe('restarting')
+    expect(sessionStorage.getItem('cez:application-restart-from')).toBe('1.0.0')
+  } finally { vi.useRealTimers() }
+})
+
+it('surfaces helper arming rejection after early Restart health and clears the reload marker', async () => {
+  let deliver!: (response: Response) => void
+  vi.stubGlobal('fetch', fetchMock.mockImplementation(() => new Promise<Response>(resolve => { deliver = resolve })))
+  const ready = { ...health, applicationUpdate: { status: 'ready', supported: true } } as HealthResponse
+  const client = createQueryClient()
+  client.setQueryData(queryKeys.health, ready)
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  const { result, rerender } = renderHook(({ current }) => useApplicationUpdate(current), { wrapper, initialProps: { current: ready } })
+  act(() => { void result.current.restart() })
+  await act(async () => { rerender({ current: { ...health, applicationUpdate: { status: 'restarting', supported: true } } as HealthResponse }) })
+  expect(sessionStorage.getItem('cez:application-restart-from')).toBe('1.0.0')
+  await act(async () => { deliver(new Response(JSON.stringify({ error: 'Application restart is unavailable.' }), { status: 500, headers: { 'content-type': 'application/json' } })) })
+  expect(result.current.error).toBe('Application restart is unavailable.')
+  expect(sessionStorage.getItem('cez:application-restart-from')).toBeNull()
 })

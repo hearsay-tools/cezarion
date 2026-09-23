@@ -5704,17 +5704,29 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   // hosted/VPS deployment (which also flips CEZ_REMOTE to gate the local-handoff endpoints) —
   // src/index.ts never passes it, so the loopback guarantee holds for the normal CLI.
   const server = serve({
-    fetch: app.fetch,
+    fetch: async (request, env) => {
+      const result = await app.fetch(request, env);
+      if (request.method === 'POST' && new URL(request.url).pathname === '/api/v1/workspace/application-update/restart'
+        && result.status === 200) {
+        // Arming is server-owned. A connected caller must receive the complete
+        // acknowledgement before shutdown; a caller that already disconnected
+        // cannot leave its explicitly requested, armed restart stranded.
+        const response = env.outgoing;
+        const handoff = () => {
+          response.off('finish', handoff);
+          response.off('close', handoff);
+          deps.applicationUpdate?.afterResponse?.();
+        };
+        if (response.destroyed) handoff();
+        else {
+          response.once('finish', handoff);
+          response.once('close', handoff);
+        }
+      }
+      return result;
+    },
     port,
     hostname: deps.bindHost ?? '127.0.0.1',
-  });
-  // The raw Node response's finish event is the acknowledgement boundary. A Hono handler's
-  // return only builds a Response; shutting down there can truncate the reply.
-  server.on('request', (request, response) => {
-    if (request.method !== 'POST' || request.url?.split('?')[0] !== '/api/v1/workspace/application-update/restart') return;
-    response.once('finish', () => {
-      if (response.statusCode === 200) deps.applicationUpdate?.afterResponse?.();
-    });
   });
   const coordinator = new SkillsUpdateCoordinator(skillsUpdate, async () =>
     effectiveSkillsAutoUpdate(await loadWorkspaceConfig()));
