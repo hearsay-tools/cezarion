@@ -8,7 +8,40 @@ process.on('SIGTERM', () => process.exit(143));
 
 if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('pi', process.argv.slice(2)); }
 const sessionId = '00000000-0000-4000-8000-0000000000pi';
-const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
+const write = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
+// #505: like pi 0.87, a prompt with streamingBehavior 'steer' joins the running
+// turn. Steers accepted by a scripted turn are read just before it settles: a user
+// message_start/end, then an echo, unless the turn is `late` (never read).
+let activeTurn = null;
+// The prompt a queued handler is running; pi records it as the turn's user message.
+let currentPrompt;
+const send = (value) => {
+  if (value?.type === 'turn_start' && !activeTurn) {
+    activeTurn = { steers: [], late: false };
+    write(value);
+    if (currentPrompt !== undefined) {
+      const message = { role: 'user', content: [{ type: 'text', text: currentPrompt }] };
+      currentPrompt = undefined;
+      write({ type: 'message_start', message });
+      write({ type: 'message_end', message });
+    }
+    return;
+  }
+  if (value?.type === 'agent_settled' && activeTurn) {
+    const turn = activeTurn; activeTurn = null;
+    if (!turn.late) for (const text of turn.steers) {
+      write({ type: 'message_start', message: { role: 'user', content: [{ type: 'text', text }] } });
+      write({ type: 'message_end', message: { role: 'user', content: [{ type: 'text', text }] } });
+      sendText([text]);
+      write({ type: 'message_end', message: { role: 'assistant', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } } });
+    }
+    write(value);
+    // A steer that arrived after the final model call runs as the next prompt.
+    if (turn.late) for (const text of turn.steers) queue = queue.then(() => { currentPrompt = text; return handle({ type: 'prompt', message: text }); });
+    return;
+  }
+  write(value);
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** One valid CEZ:ASK payload (spec #473), used by the `mock:ask` scenario. */
@@ -32,8 +65,21 @@ function sendTurnEnd(usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0
   send({ type: 'agent_settled' });
 }
 
-for await (const line of readline.createInterface({ input: process.stdin })) {
+const rl = readline.createInterface({ input: process.stdin });
+let queue = Promise.resolve();
+rl.on('line', (line) => {
   const command = JSON.parse(line);
+  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn) {
+    if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: 0, streamingBehavior: 'steer' })}\n`);
+    activeTurn.steers.push(command.message);
+    write({ id: command.id, type: 'response', command: 'prompt', success: true });
+    return;
+  }
+  queue = queue.then(() => { currentPrompt = command.type === 'prompt' ? command.message : undefined; return handle(command); });
+});
+rl.on('close', () => { queue.then(() => process.exit(0)); });
+
+async function handle(command) {
   // Testability hook, mirroring mock-claude: CEZ_MOCK_STDIN_FILE=<path> appends
   // each inbound prompt's text and image count, so tests can assert what the
   // runner actually wrote onto the RPC (harness parity's AgentRunSpec probes).
@@ -67,6 +113,21 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     send({ type: 'agent_start' }); send({ type: 'turn_start' });
     const { ciPrompt } = await import('./mock-ci-tool.mjs');
     sendText([await ciPrompt('pi', process.argv.slice(2), command.message)]);
+    sendTurnEnd();
+  } else if (command.type === 'prompt' && command.message.includes('mock:steer-tool')) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' }); send({ type: 'turn_start' });
+    send({ type: 'tool_execution_start', toolCallId: 'tool-steer', toolName: 'bash', args: { command: 'wait' } });
+    await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
+    send({ type: 'tool_execution_end', toolCallId: 'tool-steer', toolName: 'bash', result: { content: [{ type: 'text', text: 'waited' }] }, isError: false });
+    sendText(['steer tool done']);
+    sendTurnEnd();
+  } else if (command.type === 'prompt' && command.message.includes('mock:steer-late')) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' }); send({ type: 'turn_start' });
+    sendText(['late window: final message already sent']);
+    activeTurn.late = true;
+    await sleep(300);
     sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:agent-echo')) {
     // rpc-lifecycle.ndjson's normal prompt/assistant/settled sequence.

@@ -30,6 +30,7 @@ describe('InputSubmissions.has', () => {
     const ledger = new InputSubmissions();
     ledger.accept('s1', ['a'], '');
     expect(ledger.has('s1')).toBe(true);
+    expect(ledger.pendingIds()).toEqual(['s1']);
     ledger.consume('s1');
     expect(ledger.has('s1')).toBe(false);
   });
