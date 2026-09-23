@@ -19,19 +19,26 @@ process.on('SIGTERM',()=>{}); setInterval(()=>{},100);`);
   const controller = new AbortController();
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const run = runOwnedNpm(process.execPath, [script], {}, controller.signal);
-  const readyDeadline = Date.now() + 2_000;
-  while (Date.now() < readyDeadline && !existsSync(ready)) {
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  expect(existsSync(ready)).toBe(true);
-  const pid = Number(readFileSync(ready, 'utf8'));
+  const reaped = run.catch(() => {});
   try {
+    const readyDeadline = Date.now() + 2_000;
+    while (Date.now() < readyDeadline && !existsSync(ready)) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(existsSync(ready)).toBe(true);
+    const pid = Number(readFileSync(ready, 'utf8'));
     await vi.advanceTimersByTimeAsync(120_000);
     controller.abort();
     await vi.advanceTimersByTimeAsync(2_000);
     await expect(run).rejects.toThrow('update lock ownership changed');
     expect(() => process.kill(pid, 0)).toThrow();
   } finally {
-    try { process.kill(pid, 'SIGKILL'); } catch { /* already reaped */ }
+    controller.abort();
+    try {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await reaped;
+    } finally {
+      vi.useRealTimers();
+    }
   }
 });
