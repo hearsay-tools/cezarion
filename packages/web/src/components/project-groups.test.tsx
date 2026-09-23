@@ -136,6 +136,67 @@ describe('ProjectGroups', () => {
     expect(more.getAttribute('href')).toBe('/p/cezar/')
   })
 
+  it('does not let owned workers appear or spend the 10-row budget', async () => {
+    const parents = Array.from({ length: 10 }, (_, i) => run({ id: `p${i}` }))
+    const workers = Array.from({ length: 5 }, (_, i) =>
+      run({
+        id: `w${i}`,
+        status: 'running',
+        delegation: {
+          role: 'worker',
+          permissions: [],
+          parentRunId: 'p0',
+          workspace: {
+            ownerRunId: `w${i}`,
+            resourceId: `w${i}`,
+            kind: 'owned-isolated',
+            path: `/w${i}`,
+            branch: `cez/w${i}`,
+            baselineSha: 'a'.repeat(40),
+          },
+        },
+      }),
+    )
+    serve({ '/api/v1/p/cezar/runs': [...parents, ...workers] })
+    renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
+
+    await waitFor(() => expect(taskLinks('cezar').length).toBeGreaterThan(0))
+    expect(taskLinks('cezar')).toHaveLength(10)
+    for (const worker of workers) {
+      expect(group('cezar').querySelector(`[data-run-id="${worker.id}"]`)).toBeNull()
+    }
+    for (const parent of parents) {
+      expect(group('cezar').querySelector(`[data-run-id="${parent.id}"]`)).not.toBeNull()
+    }
+  })
+
+  it('marks the parent row active when the URL is an owned worker', async () => {
+    const parent = run({ id: 'parent', title: 'Build feature' })
+    const child = run({
+      id: 'child',
+      title: 'Check result',
+      delegation: {
+        role: 'worker',
+        permissions: [],
+        parentRunId: 'parent',
+        workspace: {
+          ownerRunId: 'child',
+          resourceId: 'child',
+          kind: 'owned-isolated',
+          path: '/child',
+          branch: 'cez/child',
+          baselineSha: 'a'.repeat(40),
+        },
+      },
+    })
+    serve({ '/api/v1/p/cezar/runs': [parent, child] })
+    renderGroups([project()], '/p/cezar/tasks/child')
+
+    await waitFor(() => expect(group('cezar').querySelector('[data-run-id="parent"]')).not.toBeNull())
+    expect(group('cezar').querySelector('[data-run-id="child"]')).toBeNull()
+    expect(group('cezar').querySelector('[data-run-id="parent"]')?.getAttribute('data-active')).toBe('true')
+  })
+
   it('orders groups by lastOpenedAt and only fetches the expanded one', async () => {
     serve({ '/api/v1/p/cezar/runs': [] })
     renderGroups([

@@ -1291,12 +1291,10 @@ describe('TasksOverviewRoute — wired to the app', () => {
   })
 })
 
-it('identifies owned worker rows without nested links or changing ordinary titles', () => {
+it('hides owned worker rows without changing ordinary titles', () => {
   renderOverview({ runs: [run({ id: 'worker', title: 'Investigate', delegation: { role: 'worker' as const, permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated' as const, path: '/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), run({ id: 'ordinary', title: 'Ordinary' })] })
-  for (const element of [tableRow('worker'), card('worker')]) {
-    expect(element?.textContent).toContain('Worker')
-    expect(element?.querySelector('a a')).toBeNull()
-  }
+  expect(tableRow('worker')).toBeNull()
+  expect(card('worker')).toBeNull()
   expect(screen.getAllByRole('link', { name: /Ordinary/ }).length).toBeGreaterThan(0)
 })
 

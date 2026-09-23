@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { EyeIcon } from 'lucide-react'
 import { CheckIcon, CircleSlashIcon, CpuIcon, GitBranchIcon, GaugeIcon, TerminalIcon, SlidersHorizontalIcon, FolderOpenIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 
 import { Link, useNavigate } from '@/lib/project-router'
@@ -113,6 +113,10 @@ export function NewTaskRoute() {
   const [search] = useSearchParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const agentOptionsRef = useRef<HTMLDivElement>(null)
+  const [compactAgentOptions, setCompactAgentOptions] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth <= 767,
+  )
 
   // The composer's project (multi-project spec, step 3.4). TWO ids, deliberately:
   //  - `urlProjectId` is what the URL names — always a real project, boot included. It is the
@@ -328,6 +332,21 @@ export function NewTaskRoute() {
   // `auto=1` with a ref arms the unattended start; the composer stays hidden behind a
   // "Starting…" surface until the key check + POST settle (or fail into the prefill path).
   const [autoStarting, setAutoStarting] = useState(() => deepLink.auto && deepLink.ref !== '')
+  // Keep keyboard order aligned with the compact visual order, including a wide sidebar
+  // on a desktop viewport. CSS uses the same 550px group-width boundary.
+  useLayoutEffect(() => {
+    const group = agentOptionsRef.current
+    if (!group) return
+    const measure = () => setCompactAgentOptions(window.innerWidth <= 767 || group.getBoundingClientRect().width < 550)
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(group)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [autoStarting])
   const [notice, setNotice] = useState<DeepLinkNotice | null>(() =>
     !deepLink.auto && deepLink.ref !== '' ? { kind: 'prefill' } : null,
   )
@@ -557,6 +576,79 @@ export function NewTaskRoute() {
     )
   }
 
+  const showRunnerPill = runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id))
+  const runnerPill = showRunnerPill ? (
+    <RunnerPill
+      key="runner"
+      icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+      fieldLabel
+      runners={runners}
+      value={displayRunner}
+      accounts={accountChoices}
+      account={agentProfile}
+      repoAccount={repoAccount}
+      onPick={(next, picked) =>
+        update({
+          runner: next,
+          agentProfile: picked,
+          ...(next === displayRunner ? {} : { model: null }),
+        })
+      }
+      disabled={!providersReady}
+    />
+  ) : null
+  const modelPill = (
+    <PickerPill
+      key="model"
+      icon={<CpuIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+      fieldLabel
+      slot="model-pill"
+      ariaLabel="Model"
+      label={models.find((m) => m.id === model)?.label ?? 'auto'}
+      value={model}
+      disabled={!providersReady}
+      readOnly={modelsLocked}
+      disabledHint={
+        modelsLocked
+          ? 'Model selection is locked to native coding-agent settings.'
+          : undefined
+      }
+      onPick={(next) => {
+        const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
+        update({
+          model: next,
+          effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
+        })
+      }}
+      options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
+      status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
+    />
+  )
+  const effortPill = (
+    <PickerPill
+      key="effort"
+      icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
+      fieldLabel
+      slot="effort-pill"
+      ariaLabel="Effort"
+      label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
+      value={effort}
+      disabled={!providersReady}
+      readOnly={modelsLocked}
+      disabledHint={
+        modelsLocked
+          ? 'Effort selection is locked to native coding-agent settings.'
+          : undefined
+      }
+      onPick={(next) => update({ effort: next })}
+      options={effortOptions.map((option) => ({
+        value: option.value,
+        label: option.label,
+        desc: option.desc,
+      }))}
+    />
+  )
+
   return (
     <div
       data-route="new"
@@ -642,74 +734,10 @@ export function NewTaskRoute() {
             </>
           }
           agentOptions={
-              <div data-slot="agent-options" role="group" aria-label="Agent settings" className="new-task-agent-options">
-                {/* Runner, model and effort stay with the editor in the approved desktop
-                    composition. Run isolation and automation choices live in the side panel. */}
-                {runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id)) ? (
-                  <RunnerPill
-                    icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
-                    fieldLabel
-                    runners={runners}
-                    value={displayRunner}
-                    accounts={accountChoices}
-                    account={agentProfile}
-                    repoAccount={repoAccount}
-                    onPick={(next, picked) =>
-                      update({
-                        runner: next,
-                        agentProfile: picked,
-                        ...(next === displayRunner ? {} : { model: null }),
-                      })
-                    }
-                    disabled={!providersReady}
-                  />
-                ) : null}
-                <PickerPill
-                  icon={<CpuIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
-                  fieldLabel
-                  slot="model-pill"
-                  ariaLabel="Model"
-                  label={models.find((m) => m.id === model)?.label ?? 'auto'}
-                  value={model}
-                  disabled={!providersReady}
-                  readOnly={modelsLocked}
-                  disabledHint={
-                    modelsLocked
-                      ? 'Model selection is locked to native coding-agent settings.'
-                      : undefined
-                  }
-                  onPick={(next) => {
-                    const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
-                    update({
-                      model: next,
-                      effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
-                    })
-                  }}
-                  options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
-                  status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
-                />
-                <PickerPill
-                  icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
-                  fieldLabel
-                  slot="effort-pill"
-                  ariaLabel="Effort"
-                  label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
-                  value={effort}
-                  disabled={!providersReady}
-                  readOnly={modelsLocked}
-                  disabledHint={
-                    modelsLocked
-                      ? 'Effort selection is locked to native coding-agent settings.'
-                      : undefined
-                  }
-                  onPick={(next) => update({ effort: next })}
-                  options={effortOptions.map((option) => ({
-                    value: option.value,
-                    label: option.label,
-                    desc: option.desc,
-                  }))}
-                />
-                  </div>
+            <div ref={agentOptionsRef} data-slot="agent-options" role="group" aria-label="Agent settings" className="new-task-agent-options">
+              {/* Controls stay with the editor; responsive DOM order follows their visual order. */}
+              {compactAgentOptions ? [runnerPill, effortPill, modelPill] : [runnerPill, modelPill, effortPill]}
+            </div>
           }
           executionOptions={
             <div className="flex min-w-0 flex-col gap-4">

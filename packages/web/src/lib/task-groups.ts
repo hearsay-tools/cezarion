@@ -233,6 +233,27 @@ export function sortRuns(runs: readonly RunRecord[], view: ListView): RunRecord[
     })
 }
 
+/** Owned workers are not task-list rows — they live on the parent’s Run activity dock (#312).
+ *  The argument is role-only so a full `RunRecord` and a slim index row both type-check. */
+export function isOwnedWorker(run: { delegation?: { role?: string } | null }): boolean {
+  return run.delegation?.role === 'worker'
+}
+
+/**
+ * Which sidebar row to paint as current. A `/tasks/:workerId` URL still opens the worker, but
+ * the list has no worker row, so the parent lights instead. Missing parent → still the parent id
+ * (the row simply will not highlight).
+ */
+export function sidebarActiveRunId(
+  currentRunId: string | null | undefined,
+  runs: readonly { id: string; delegation?: { role?: string; parentRunId?: string } | null }[],
+): string | null {
+  if (currentRunId == null) return null
+  const current = runs.find((run) => run.id === currentRunId)
+  if (!current || !isOwnedWorker(current)) return currentRunId
+  return current.delegation?.parentRunId ?? currentRunId
+}
+
 /**
  * The whole list, ready to render: filtered to the view, sorted, variant-collapsed and bucketed.
  *
@@ -247,7 +268,7 @@ export function sortRuns(runs: readonly RunRecord[], view: ListView): RunRecord[
  */
 export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickListBucket[] {
   const positions = queuePositions(runs)
-  const sorted = sortRuns(runs, view)
+  const sorted = sortRuns(runs, view).filter((run) => !isOwnedWorker(run))
   const byBucket = new Map<BucketLabel, QuickListRow[]>()
   const push = (label: BucketLabel, row: QuickListRow) => {
     const rows = byBucket.get(label)
@@ -320,6 +341,7 @@ export function listCounts(runs: readonly RunRecord[]): {
   let archived = 0
   let waiting = 0
   for (const run of runs) {
+    if (isOwnedWorker(run)) continue
     if (run.archived) {
       archived += 1
       continue

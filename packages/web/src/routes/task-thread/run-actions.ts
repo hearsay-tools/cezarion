@@ -2,6 +2,7 @@ import type { ApiRun, RunRecord, RunStatus, Runner } from '@open-mercato/cezar-a
 import { cliTargetRunner } from '@/components/open-in-menu'
 import { deriveAttention } from '@/lib/attention'
 import { canBeUnread, isUnread } from '@/lib/read-state'
+import { isOwnedWorker } from '@/lib/task-groups'
 
 export { cliTargetRunner }
 
@@ -106,7 +107,8 @@ export interface RunActionFlags {
    *  Offered for every status, because a pin is about what YOU are working on rather than what
    *  the engine is doing: a queued task you are waiting for is as pin-worthy as a running one.
    *  Not for an archived run: archiving retires the pin server-side and the archived view is one
-   *  flat bucket, so the button would be an action with nowhere to show its result. */
+   *  flat bucket, so the button would be an action with nowhere to show its result.
+   *  Not for an owned worker: workers are not task-list rows, so a pin would have nowhere to show. */
   pin: boolean
   /** Put a read, finished task back into the unread list (#775). Offered only where it would
    *  MEAN something: the run must be eligible to wear the unread marker at all
@@ -139,7 +141,7 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
     terminal: !active && hasSession,
     notes: true,
     archive: !active,
-    pin: !run.archived,
+    pin: !run.archived && !isOwnedWorker(run),
     markUnread: canBeUnread(run) && !isUnread(run),
     cancel: active,
     deleteRun: !active,

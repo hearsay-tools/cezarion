@@ -1,4 +1,5 @@
 import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { isOwnedWorker } from './task-groups'
 
 /**
  * The read/unread grammar for *done items* (#unread-done-items) — the email-style "which
@@ -23,7 +24,7 @@ const UNREAD_ELIGIBLE: readonly RunRecord['status'][] = ['done', 'failed']
 export type ReadStateInput = Pick<
   RunRecord,
   'status' | 'finishedAt' | 'seenAt' | 'archived' | 'autoResumeAt'
->
+> & { delegation?: { role?: string } | null }
 
 /**
  * A run stopped by a provider usage limit with a resume already scheduled (spec
@@ -103,5 +104,5 @@ export function isReadDoneItem(run: ReadStateInput): boolean {
 /** How many done items are unread — the Tasks nav badge's number. Archived runs are already
  *  excluded by `isUnread`, so this counts exactly the rows that wear the unread marker. */
 export function unreadDoneCount(runs: readonly ReadStateInput[]): number {
-  return runs.reduce((total, run) => (isUnread(run) ? total + 1 : total), 0)
+  return runs.reduce((total, run) => (isOwnedWorker(run) || !isUnread(run) ? total : total + 1), 0)
 }

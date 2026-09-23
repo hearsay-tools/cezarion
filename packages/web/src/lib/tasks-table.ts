@@ -1,5 +1,5 @@
 import type { ProcessUsage, RunRecord, RunStatus } from '@open-mercato/cezar-api-client'
-import { groupTitle, runTitle, type ListView } from '@/lib/task-groups'
+import { groupTitle, isOwnedWorker, runTitle, type ListView } from '@/lib/task-groups'
 
 /**
  * The pure half of the Tasks table (the `/` overview): search, the header's archive count, the
@@ -91,9 +91,10 @@ export function workflowLabel(run: RunRecord): string {
  * appear for no visible reason.
  */
 export function filterRuns(runs: readonly RunRecord[], query: string): RunRecord[] {
+  const listed = runs.filter((run) => !isOwnedWorker(run))
   const needle = query.trim().toLowerCase()
-  if (!needle) return [...runs]
-  return runs.filter((run) =>
+  if (!needle) return [...listed]
+  return listed.filter((run) =>
     [runTitle(run), run.branch ?? '', run.workflow, workflowLabel(run)].some((text) =>
       text.toLowerCase().includes(needle),
     ),
@@ -103,7 +104,9 @@ export function filterRuns(runs: readonly RunRecord[], query: string): RunRecord
 /** How many active runs "Archive finished" would sweep. The button only exists when this is
  *  nonzero — a broom over an empty floor is noise (legacy showed the same count-gated button). */
 export function finishedRunCount(runs: readonly RunRecord[]): number {
-  return runs.filter((run) => !run.archived && FINISHED_STATUSES.has(run.status)).length
+  return runs.filter(
+    (run) => !run.archived && FINISHED_STATUSES.has(run.status) && !isOwnedWorker(run),
+  ).length
 }
 
 /** A git remote as a GitHub web root (`https://github.com/owner/repo`) — the caller passes the

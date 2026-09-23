@@ -177,6 +177,30 @@ describe('filterRuns', () => {
   it('does not match on the task prompt — text the table never shows', () => {
     expect(filterRuns([run({ task: 'secret prompt words' })], 'secret')).toEqual([])
   })
+
+  it('omits owned workers even with an empty query, while their parent remains', () => {
+    const parent = run({ id: 'parent', title: 'Parent task' })
+    const worker = run({
+      id: 'worker',
+      title: 'Worker task',
+      delegation: {
+        role: 'worker' as const,
+        permissions: [],
+        parentRunId: 'parent',
+        workspace: {
+          ownerRunId: 'worker',
+          resourceId: 'worker',
+          kind: 'owned-isolated' as const,
+          path: '/worker',
+          branch: 'cez/worker',
+          baselineSha: 'a'.repeat(40),
+        },
+      },
+    })
+    expect(filterRuns([parent, worker], '').map((r) => r.id)).toEqual(['parent'])
+    expect(filterRuns([parent, worker], '   ').map((r) => r.id)).toEqual(['parent'])
+    expect(filterRuns([parent, worker], 'Worker').map((r) => r.id)).toEqual([])
+  })
 })
 
 describe('finishedRunCount', () => {
@@ -195,6 +219,30 @@ describe('finishedRunCount', () => {
         run({ status: 'done', archived: true }),
       ]),
     ).toBe(3)
+  })
+
+  it('does not count owned workers as finished project tasks', () => {
+    expect(
+      finishedRunCount([
+        run({ status: 'done' }),
+        run({
+          status: 'done',
+          delegation: {
+            role: 'worker' as const,
+            permissions: [],
+            parentRunId: 'parent',
+            workspace: {
+              ownerRunId: 'worker',
+              resourceId: 'worker',
+              kind: 'owned-isolated' as const,
+              path: '/worker',
+              branch: 'cez/worker',
+              baselineSha: 'a'.repeat(40),
+            },
+          },
+        }),
+      ]),
+    ).toBe(1)
   })
 })
 

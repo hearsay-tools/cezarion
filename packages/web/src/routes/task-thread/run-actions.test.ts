@@ -87,6 +87,28 @@ describe('runActionFlags — the visibility matrix, all 7 statuses × archived',
     expect(flags.terminal).toBe(false)
     expect(flags.deleteRun).toBe(true)
   })
+
+  it('a live worker has pin: false', () => {
+    expect(
+      runActionFlags(
+        run('running', {
+          delegation: {
+            role: 'worker',
+            permissions: [],
+            parentRunId: '10000000-0000-4000-8000-000000000001',
+            workspace: {
+              ownerRunId: 'r1',
+              resourceId: 'r1',
+              kind: 'owned-isolated',
+              path: '/worker',
+              branch: 'cez/worker',
+              baselineSha: 'a'.repeat(40),
+            },
+          },
+        }),
+      ).pin,
+    ).toBe(false)
+  })
 })
 
 describe('runActionFlags.markUnread — the read→unread affordance (#775)', () => {

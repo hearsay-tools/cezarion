@@ -12,7 +12,7 @@ import { ReferenceStatusProvider } from '@/components/reference-status'
 import { QuickListBuckets } from '@/components/task-quick-list'
 import { Link, pathnameProjectId, scopeTo, stripProjectPrefix, useProjectMatch } from '@/lib/project-router'
 import { isProjectCollapsed, readStoredCollapsed, writeStoredCollapsed } from '@/lib/sidebar-collapse'
-import { capBuckets, groupRuns, listCounts, type ListView } from '@/lib/task-groups'
+import { capBuckets, groupRuns, listCounts, sidebarActiveRunId, type ListView } from '@/lib/task-groups'
 import { taskReferences } from '@/lib/tasks-table'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
@@ -269,8 +269,7 @@ function ProjectGroup({
         <div
           id={bodyId}
           data-slot="project-group-body"
-          // The project navigation aligns with the group heading; only owned workers get an
-          // indented relationship rail, inside QuickListBuckets (design.pen frames 17).
+          // The project navigation aligns with the group heading.
           className="mt-1"
         >
           <nav aria-label={`${project.name} navigation`} className="flex flex-col gap-0.5">
@@ -329,7 +328,7 @@ function ProjectGroup({
           <ReferenceStatusProvider projectId={project.id} requests={referenceRequests}>
             <QuickListBuckets
               buckets={buckets}
-              currentRunId={active ? currentRunId : null}
+              currentRunId={active ? sidebarActiveRunId(currentRunId, runs.data ?? []) : null}
               now={now}
               scope={project.id}
               showTokens={showTokens}

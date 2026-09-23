@@ -102,6 +102,22 @@ describe('toGlobalTasks', () => {
   it('preserves the server’s newest-first order rather than inventing its own', () => {
     expect(ids(tasks)).toEqual(['a1', 'w1', 'i1', 'l1', 'old'])
   })
+
+  it('omits owned workers so facets, groups, and the table never see them', () => {
+    const list = toGlobalTasks(
+      [
+        run({ id: 'parent', projectId: 'api', title: 'Parent task' }),
+        run({
+          id: 'worker',
+          projectId: 'api',
+          title: 'Worker task',
+          delegation: { role: 'worker' },
+        }),
+      ],
+      PROJECTS,
+    )
+    expect(ids(list)).toEqual(['parent'])
+  })
 })
 
 describe('option lists', () => {
