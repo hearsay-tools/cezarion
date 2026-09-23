@@ -19,11 +19,11 @@ beforeAll(async () => {
 afterAll(() => { browser?.close() })
 
 /** Chrome route fixtures survive the document reload that a confirmed version change triggers. */
-function fixture(state: { status: string; supported: boolean; targetVersion?: string; message?: string }, version = '1.0.0') {
+function fixture(state: { status: string; supported: boolean; targetVersion?: string; message?: string }, version = '1.0.0', latestVersion = '2.0.0') {
   browser.routeJson('**/api/v1/health', {
     ...actualHealth,
     capabilities: { ...(actualHealth.capabilities as object), localHandoff: false },
-    version, latestVersion: '2.0.0', applicationUpdate: state,
+    version, latestVersion, applicationUpdate: state,
   })
   browser.routeJson('**/api/v1/workspace/application-update/apply', { state: { status: 'ready', supported: true, targetVersion: '2.0.0' } })
   browser.routeJson('**/api/v1/workspace/application-update/restart', { state: { status: 'restarting', supported: true, targetVersion: '2.0.0' } })
@@ -34,6 +34,50 @@ function reconcile(): void {
 }
 
 describe('application update chrome', () => {
+  it.each([
+    { width: 1024, theme: 'light' }, { width: 1024, theme: 'dark' },
+    { width: 360, theme: 'light' }, { width: 360, theme: 'dark' },
+  ])('aligns preview versions at the trailing edge and keeps manual guidance in the header at $width/$theme', ({ width, theme }) => {
+    const root = width < 768 ? drawer : desktop
+    const preview = '0.14.8-pr501.7.abcdef1234567890'
+    browser.setViewport(width, 640)
+    fixture({ status: 'idle', supported: false, message: 'Update this installation manually.' }, preview, '0.14.8')
+    browser.goto(`${baseUrl}/p/${project}/skills`)
+    browser.waitForFunction(`document.querySelector('[data-slot="version-chip"]') !== null`)
+    browser.evaluate(`localStorage.setItem('cez-theme', ${JSON.stringify(theme)})`)
+    browser.goto(`${baseUrl}/p/${project}/skills`)
+    browser.waitForFunction(`document.documentElement.classList.contains('light') === ${theme === 'light'}`)
+    if (width < 768) browser.click('[aria-label="Open menu"]')
+    const aligned = browser.waitForValue(`(() => {
+      const root = document.querySelector('${root}')
+      const chip = root?.querySelector('[data-slot="version-chip"]')
+      if (!chip || root.getAnimations().some(a => a.playState === 'running')) return null
+      const row = root.querySelector('[data-slot="brand-wordmark"]').parentElement
+      const edge = row.getBoundingClientRect().right - parseFloat(getComputedStyle(row).paddingRight)
+      return { gap: edge - chip.getBoundingClientRect().right, overflow: row.scrollWidth - row.clientWidth,
+        version: chip.textContent, action: !!root.querySelector('[data-slot="application-update-action"]'),
+        feedback: !!root.querySelector('[data-slot="application-update-feedback"]') }
+    })()`)
+    expect(aligned).toMatchObject({ version: `v${preview}`, overflow: 0, action: false, feedback: false })
+    expect(Math.abs((aligned as { gap: number }).gap)).toBeLessThanOrEqual(1)
+    browser.screenshot(`${artifacts}/preview-${width}-${theme}.png`, { viewport: true })
+    fixture({ status: 'idle', supported: false, message: 'Update this installation manually.' }, preview)
+    reconcile()
+    const guidance = browser.waitForValue(`(() => {
+      const root = document.querySelector('${root}')
+      const feedback = root?.querySelector('[data-slot="application-update-feedback"]')
+      if (!feedback?.textContent.includes('Install the newer release')) return null
+      const row = root.querySelector('[data-slot="brand-wordmark"]').parentElement
+      return { text: feedback.textContent, inHeader: !!feedback.closest('[data-slot="sidebar-header"]'),
+        afterVersion: feedback.getBoundingClientRect().top >= row.getBoundingClientRect().bottom,
+        beforeSearch: feedback.getBoundingClientRect().bottom <= root.querySelector('[data-slot="command-palette-hint"]').getBoundingClientRect().top,
+        footerVisible: root.querySelector('[data-slot="sidebar-footer"]').getBoundingClientRect().bottom <= root.getBoundingClientRect().bottom + 1 }
+    })()`)
+    expect(guidance).toMatchObject({ inHeader: true, afterVersion: true, beforeSearch: true, footerVisible: true })
+    expect((guidance as { text: string }).text).toContain('In-app updates are unavailable for this installation.')
+    browser.screenshot(`${artifacts}/manual-update-${width}-${theme}.png`, { viewport: true })
+  })
+
   it('keeps the header steady through preparation, error and ready on a minimum desktop sidebar', () => {
     browser.setViewport(1024, 768)
     fixture({ status: 'idle', supported: true })
