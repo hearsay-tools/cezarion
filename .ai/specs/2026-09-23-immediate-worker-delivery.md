@@ -36,8 +36,10 @@ is recorded. Logs are local run evidence and are not copied into the repository.
 | Claude | 2.1.280 | stdin `user` line | Same turn, first model call after the tool | `--replay-user-messages` echoes the line **at consumption** (44.0 s, not at the 11.7 s write), carrying the caller's `uuid`; `result.user_message_uuids` lists every input the result covered |
 | Codex | 0.155.1 | `turn/steer` | Same turn, after the tool | `item/started` `userMessage` at 43.8 s; its `clientId` echoes `turn/steer.clientUserMessageId` |
 | Pi | 0.87.0 | `prompt`, `streamingBehavior: "steer"` | Same turn, after the tool | `queue_update` (pending steering texts) then a user `message_start`; no id field |
-| OpenCode V1 | 1.18.32 | Busy `prompt` accepted by the server | **Next turn**: the first turn answered "NONE", then turn 2 ran the message | The next turn's start |
+| OpenCode V1 | 1.18.32 | `prompt_async` POSTed directly while the session is busy | Same turn, after the tool | The user message is created at the POST (13.8 s); the first assistant message whose `parentID` is that user message is created at 46.1 s, when the tool ends |
 | Cursor | 2026.09.18 | A second `session/prompt` | Never: it **cancels the running turn**, cutting off the tool | None usable |
+
+A first OpenCode probe went through the runner's `prompt`, whose client-side `while (this.turnActive)` wait held the message for the next turn. That measured cezar's own gate, not the server; the direct POST above is the server's behavior.
 
 One existing bug surfaced: Claude merges a mid-turn message into the running turn
 and emits one `result`, but `pendingPromptTurns` counts two, so `agentInputReady`
@@ -56,21 +58,22 @@ stays false after a human follow-up.
 - `turn-end` gains `unconsumedInputIds`: inputs accepted in that turn that the
   model never consumed before the turn ended idle.
 - Each runner declares `inputDelivery` in `specSupport`:
-  `steer` (accepted mid-turn, consumed inside the running turn), `next-turn`
-  (accepted mid-turn, consumed at the next turn's start) or `boundary` (refused
-  while busy), plus whether consumption is observable. `harness-parity.test.ts`
+  `steer` (accepted mid-turn, consumed inside the running turn) or `boundary`
+  (refused while busy), plus whether consumption is observable. An absent
+  declaration means `boundary`, which is what every runner did before. `harness-parity.test.ts`
   pins each declaration against the runner's behavior.
 
 | Backend | `inputDelivery` | Busy submission | Consumed when |
 | --- | --- | --- | --- |
 | Claude | `steer`, observable | stdin line with `uuid` = input ID; argv gains `--replay-user-messages`. `pendingPromptTurns` is replaced by tracking `result.user_message_uuids` | The replay echo with that uuid |
 | Codex | `steer`, observable | `turn/steer` with `expectedTurnId` and `clientUserMessageId`. A definitive `expectedTurnId` mismatch (the turn just ended) falls back to `turn/start`. An ambiguous RPC failure or timeout rejects and is never retried by the runner | `item/started` `userMessage` whose `clientId` matches |
-| Pi | `steer`, observable | `prompt` with `streamingBehavior: "steer"`, busy or idle. Cezar's `follow-up` kind is never mapped to Pi's `followUp` | A user `message_start` whose text carries the input ID prefix |
-| OpenCode V1 | `next-turn`, observable | `prompt` submitted at once; the idle guards in both `sendAgentMessage` and `prompt` are removed | The next turn's start. A turn that ends idle while an accepted prompt never started is reported in `unconsumedInputIds` (the upstream lost-wake case) |
+| Pi | `steer`, observable | `prompt` with `streamingBehavior: "steer"`, busy or idle. Cezar's `follow-up` kind is never mapped to Pi's `followUp` | A user `message_start` whose text equals the submitted text, oldest pending submission first |
+| OpenCode V1 | `steer`, observable | `prompt_async` POSTed at once; the client-side idle waits in both `sendAgentMessage` and `prompt` are removed for agent input | The first assistant `message.updated` whose `parentID` is the user message carrying the submitted text. A turn that goes idle before that is reported in `unconsumedInputIds` (the upstream lost-wake case) |
 | Cursor | `boundary` | Refused while busy, as today | The turn it opens |
 
-OpenCode V2's `delivery: "steer"` needs an API and event migration and is not
-installed locally. It is a follow-up issue, not part of #505.
+OpenCode V2's durable admission and explicit `delivery: "steer"` need an API and
+event migration and are not installed locally. V1 already steers, so V2 is a
+follow-up issue, not part of #505.
 
 ### Orchestrator (`workflows/run.ts`)
 
@@ -108,8 +111,8 @@ installed locally. It is a follow-up issue, not part of #505.
   - an answer through a native reply (Codex `requestUserInput`, an OpenCode
     question, Pi, Claude) continues the turn, and the messages steer immediately
     behind it; the model may make one call on the answer alone first;
-  - on `boundary` and `next-turn` backends the messages arrive on the turn after
-    the answer's turn.
+  - on a `boundary` backend (Cursor) the messages arrive on the turn after the
+    answer's turn.
 - **Unchanged.** Finish and cancellation precedence, scheduler admission,
   identity-based retries, accepted grants, the cooperative `worker inbox` as a
   supplemental read, and no tool interruption for routine messages.
@@ -156,12 +159,12 @@ Every new regression is proven red against the old gates before the fix lands.
 
 - `harness-parity.test.ts`: an `inputDelivery` row per runner — busy submission,
   consumption ID matching, `unconsumedInputIds` at an idle turn end, definitive
-  and ambiguous acknowledgement failures. `boundary` and `next-turn` are declared
-  exemptions, never skips.
+  and ambiguous acknowledgement failures. Cursor's `boundary` is a declared
+  exemption, never a skip.
 - Runner tests: Claude argv and uuid matching, one `result` covering several
   inputs, the `pendingPromptTurns` fix; Codex `clientUserMessageId` and the
   `expectedTurnId` fallback; Pi busy steer and text matching; OpenCode busy
-  admission through both guards and the lost wake.
+  admission through both guards, `parentID` consumption and the lost wake.
 - `run.ts` integration with fake runners, both directions: a long tool-using first
   turn, a resumed opening turn with later messages, burst ordering and batch spill,
   busy-to-idle races, unconsumed-at-turn-end resubmission holding DONE, auto-end
