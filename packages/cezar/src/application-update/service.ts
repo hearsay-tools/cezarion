@@ -58,6 +58,7 @@ export interface RestartPlan {
   oldVersion: string;
   stage: string;
   recovery: string;
+  recoveryPackage?: string;
   binLinks?: string;
   recordPath: string;
   claimId: string;
@@ -66,6 +67,7 @@ export interface RestartPlan {
 const recordSchema = z.object({
   state: applicationUpdateStateSchema,
   stage: z.string().optional(), recovery: z.string().optional(), binLinks: z.string().optional(),
+  recoveryPackage: z.string().max(4096).optional(),
   ownerPid: z.number().int().positive().optional(), claimId: z.uuid().optional(),
   startedAt: z.number().int().nonnegative().optional(),
   repairCommand: z.string().max(2048).optional(),
@@ -124,6 +126,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
   private readonly installation: Installation;
   private readonly recordPath: string;
   private readonly dir: string;
+  private readonly recoveryPackage: string | undefined;
   private record: RecordShape;
   private applying?: Promise<ApplicationUpdateState>;
   private handoffArmed = false;
@@ -137,6 +140,9 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
       : `${this.installation.kind}\0${this.installation.installRoot}\0${this.installation.outerPackage}`;
     this.dir = join(options.home, 'application-updates', createHash('sha256').update(identity).digest('hex'));
     this.recordPath = join(this.dir, 'state.json');
+    this.recoveryPackage = this.installation.kind === 'global' && this.installation.outerPackage === 'cezarion'
+      && this.installation.packageRoot === join(dirname(this.installation.outerRoot), PACKAGE)
+      ? join(this.dir, 'recovery-package') : undefined;
     this.record = { state: this.installation.kind === 'unsupported' && !options.dryRun
       ? { status: 'idle', supported: false, message: 'Update this installation manually.' }
       : { status: 'idle', supported: true } };
@@ -162,6 +168,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
       || (loaded.state.targetVersion !== undefined && !VERSION_RE.test(loaded.state.targetVersion))
       || (loaded.stage !== undefined && loaded.stage !== stage)
       || (loaded.recovery !== undefined && loaded.recovery !== recovery)
+      || (loaded.recoveryPackage !== undefined && loaded.recoveryPackage !== join(this.dir, 'recovery-package'))
       || (loaded.binLinks !== undefined && loaded.binLinks !== join(this.dir, 'bin-links.json'))
       || (loaded.state.status === 'restarting' && !loaded.claimId && !this.options.dryRun)
       || (!this.options.dryRun && ['preparing', 'restarting'].includes(loaded.state.status)
@@ -176,6 +183,13 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
       try {
         if (!loaded.stage || !loaded.recovery || !loaded.state.targetVersion || !existsSync(stage) || !existsSync(recovery)) {
           throw new Error('prepared files missing');
+        }
+        // Older hoisted records backed up only the alias; a changed layout also
+        // needs preparation again. Completed/in-flight claims may retain their
+        // original snapshot metadata after npm changes the dependency layout.
+        if (loaded.recoveryPackage !== this.recoveryPackage) throw new Error('hoisted recovery mismatch');
+        if (this.recoveryPackage && this.installation.kind === 'global') {
+          validateInstalledPackage(this.recoveryPackage, packageVersion(this.installation.packageRoot));
         }
         const stagedScoped = stageScopedPath(stage, this.installation.kind === 'unsupported' ? PACKAGE : this.installation.outerPackage);
         validateInstalledPackage(stagedScoped, loaded.state.targetVersion, stage);
@@ -241,10 +255,12 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
     let enteredLock = false;
     try {
       const originalPath = installation.kind === 'npx' ? installation.installRoot : installation.outerRoot;
-      const writable = await stat(originalPath);
-      if ((writable.mode & 0o222) === 0) throw new ApplicationUpdateFailureError('Original installation is not writable. Update manually.', 409);
-      try { await access(originalPath, fsConstants.W_OK); }
-      catch { throw new ApplicationUpdateFailureError('Original installation is not writable. Update manually.', 409); }
+      for (const path of this.recoveryPackage ? [originalPath, installation.packageRoot] : [originalPath]) {
+        const writable = await stat(path);
+        if ((writable.mode & 0o222) === 0) throw new ApplicationUpdateFailureError('Original installation is not writable. Update manually.', 409);
+        try { await access(path, fsConstants.W_OK); }
+        catch { throw new ApplicationUpdateFailureError('Original installation is not writable. Update manually.', 409); }
+      }
       assertCezarHomeWriteIsSandboxed(this.dir);
       await mkdir(this.dir, { recursive: true, mode: 0o700 });
       return await withDirectoryLock(join(this.dir, 'operation.lock'), async (assertOwned, signal) => {
@@ -257,6 +273,10 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
           await assertOwned();
           await rm(stage, { recursive: true, force: true });
           await rm(recovery, { recursive: true, force: true });
+          if (this.recoveryPackage) {
+            await assertOwned();
+            await rm(this.recoveryPackage, { recursive: true, force: true });
+          }
           await mkdir(stage, { recursive: true });
           const spec = `${installation.outerPackage}@${target}`;
           if (!this.options.dryRun) {
@@ -276,6 +296,14 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
           await cp(installation.kind === 'npx' ? installation.installRoot : installation.outerRoot,
             recovery, { recursive: true, dereference: false,
               filter: async () => { await assertOwned(); return true; } });
+          // A global alias can resolve a sibling runtime that npm also replaces.
+          // Nested aliases and npx already include it in their whole-root copy.
+          if (this.recoveryPackage) {
+            await assertOwned();
+            await cp(installation.packageRoot, this.recoveryPackage, { recursive: true, dereference: false,
+              filter: async () => { await assertOwned(); return true; } });
+            validateInstalledPackage(this.recoveryPackage, oldVersion);
+          }
           if (installation.kind === 'global') {
             const outer = JSON.parse(await readFile(join(installation.outerRoot, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
             const windows = windowsGlobalLayout(installation.prefix, installation.outerRoot, installation.outerPackage);
@@ -284,6 +312,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
           }
           await assertOwned();
           await this.persist({ status: 'ready', supported: true, targetVersion: target }, { stage, recovery,
+            recoveryPackage: this.recoveryPackage,
             binLinks: installation.kind === 'global' ? binLinks : undefined, ownerPid: undefined,
             claimId: undefined, startedAt: undefined }, assertOwned);
           return this.record.state;
@@ -359,7 +388,8 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
         const claimId = randomUUID();
         const plan: RestartPlan = { installation,
           targetVersion: target, oldVersion: packageVersion(installation.packageRoot), stage: this.record.stage,
-          recovery: this.record.recovery, binLinks: this.record.binLinks, recordPath: this.recordPath, claimId };
+          recovery: this.record.recovery, recoveryPackage: this.record.recoveryPackage,
+          binLinks: this.record.binLinks, recordPath: this.recordPath, claimId };
         await this.persist({ status: 'restarting', supported: true, targetVersion: target }, { ownerPid: process.pid, claimId, startedAt: Date.now() });
         await assertOwned();
         return plan;

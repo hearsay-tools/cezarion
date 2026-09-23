@@ -18,6 +18,7 @@ export interface HelperPlan {
   targetVersion: string;
   oldVersion: string;
   recovery: string;
+  recoveryPackage?: string;
   binLinks?: string;
   recordPath: string;
   oldPid: number;
@@ -260,6 +261,20 @@ export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promi
   const copy = async (from: string, to: string) => cp(from, to, { recursive: true, dereference: false,
     filter: async () => { await assertOwned(); return true; } });
   await assertOwned();
+  const hoisted = installation.kind === 'global' && installation.outerPackage === 'cezarion'
+    && installation.packageRoot === join(dirname(installation.outerRoot), '@wjarka/cezarion');
+  if (hoisted || plan.recoveryPackage !== undefined) {
+    // No destination list from disk: only the discovery-owned scoped sibling
+    // and one fixed private backup are allowed. Validate before removing roots.
+    if (!hoisted || plan.recoveryPackage !== join(dirname(plan.recordPath), 'recovery-package')) {
+      throw new Error('invalid hoisted package recovery');
+    }
+    const pkg = JSON.parse(await readFile(join(plan.recoveryPackage, 'package.json'), 'utf8')) as { name?: string; version?: string };
+    if (pkg.name !== '@wjarka/cezarion' || pkg.version !== plan.oldVersion
+      || !existsSync(join(plan.recoveryPackage, 'dist/index.js')) || !existsSync(join(plan.recoveryPackage, 'web/dist/index.html'))) {
+      throw new Error('invalid hoisted package recovery');
+    }
+  }
   if (installation.kind === 'npx') {
     // Preserve the live concurrency.lock directory while restoring the rest of
     // the npx root. Removing the root would compromise our own npm lock.
@@ -277,6 +292,12 @@ export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promi
     await rm(outer, { recursive: true, force: true });
     await assertOwned();
     await copy(plan.recovery, outer);
+    if (hoisted) {
+      await assertOwned();
+      await rm(installation.packageRoot, { recursive: true, force: true });
+      await assertOwned();
+      await copy(plan.recoveryPackage!, installation.packageRoot);
+    }
     if (plan.binLinks) {
       const outerManifest = JSON.parse(await readFile(join(plan.recovery, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
       await restoreGlobalBins(installation.prefix, Object.keys(outerManifest.bin ?? {}),

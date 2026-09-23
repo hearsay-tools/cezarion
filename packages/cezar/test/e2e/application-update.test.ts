@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { Agent, createServer, get } from 'node:http';
-import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,6 +84,7 @@ import { readFileSync, appendFileSync } from 'node:fs';
 const args = process.argv.slice(2); const value = (flag) => args.includes(flag) ? args[args.lastIndexOf(flag) + 1] : undefined;
 const port = Number(value('--port')); const repoRoot = value('--repo');
 const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version;
+if (args.includes('--version')) { console.log(version); process.exit(0); }
 const server = createServer((req, res) => res.end(JSON.stringify({version: ${badHealth} && version === '2.0.0' ? 'wrong-version' : version, repoRoot, pid:process.pid})));
 server.listen(port, value('--bind-host') ?? ${JSON.stringify(host)}, () => {
   const bound = server.address();
@@ -263,7 +264,7 @@ for (const [oldVersion, newVersion] of [['0.14.8', '0.15.0'], ['1.0.0', '2.0.0']
       const layout = discoverInstallation({ prefix: fixture.prefix, cache: fixture.cache, packageRoot: original, launchEntry: originalLaunch });
       assert.notEqual(layout.kind, 'unsupported');
       if (layout.kind === 'unsupported') return;
-      const plan = { installation: layout, targetVersion: newVersion, oldVersion, stage: record.stage, recovery: record.recovery, binLinks: record.binLinks, claimId: randomUUID(),
+      const plan = { installation: layout, targetVersion: newVersion, oldVersion, stage: record.stage, recovery: record.recovery, recoveryPackage: record.recoveryPackage, binLinks: record.binLinks, claimId: randomUUID(),
         recordPath: join(fixture.home, 'application-updates', updateDirs[0]!, 'state.json'), oldPid: -1,
         nodeExecutable: process.execPath, nodeArgs: [], cliArgs: [], cwd: fixture.root, repoRoot: fixture.root, host: '127.0.0.1', port: 0, npmBin: 'npm' };
       await withDirectoryLock(join(npxRoot, 'concurrency.lock'), async (assertOwned) => {
@@ -308,7 +309,7 @@ test(`${outerPackage} global promotion changes the original command used by futu
     const layout = discoverInstallation({ prefix: fixture.prefix, cache: fixture.cache, packageRoot: original, launchEntry: originalLaunch });
     assert.notEqual(layout.kind, 'unsupported');
     if (layout.kind === 'unsupported') return;
-    const plan = { installation: layout, targetVersion: '2.0.0', oldVersion: '1.0.0', stage: record.stage, recovery: record.recovery, binLinks: record.binLinks, claimId: randomUUID(),
+    const plan = { installation: layout, targetVersion: '2.0.0', oldVersion: '1.0.0', stage: record.stage, recovery: record.recovery, recoveryPackage: record.recoveryPackage, binLinks: record.binLinks, claimId: randomUUID(),
       recordPath, oldPid: -1, nodeExecutable: process.execPath, nodeArgs: [], cliArgs: [], cwd: fixture.root,
       repoRoot: fixture.root, host: '127.0.0.1', port: 0, npmBin: 'npm' };
     await promoteOriginal(plan);
@@ -375,7 +376,7 @@ test(`real ${installKind} restart helper ${badHealth ? 'reaps new process and ro
     const claimId = randomUUID();
     await writeFile(recordPath, JSON.stringify({ ...record, state: { status: 'restarting', supported: true, targetVersion: '2.0.0' }, claimId, ownerPid: process.pid }));
     const plan = { installation: layout, targetVersion: '2.0.0', oldVersion: '1.0.0', stage: record.stage, claimId,
-      recovery: record.recovery, binLinks: record.binLinks, recordPath, oldPid: old.pid!,
+      recovery: record.recovery, recoveryPackage: record.recoveryPackage, binLinks: record.binLinks, recordPath, oldPid: old.pid!,
       nodeExecutable: process.execPath, nodeArgs: [], cliArgs: ['serve'], cwd: fixture.root,
       repoRoot: fixture.root, host: '127.0.0.1', port, npmBin: 'npm' };
     const running = runHelper(plan);
@@ -716,6 +717,103 @@ const pkg=JSON.parse(fs.readFileSync(p)); pkg.version='2.0.0'; fs.writeFileSync(
       proxy.closeAllConnections();
       await new Promise<void>(resolve => proxy.close(() => resolve()));
       await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+}
+
+// npm's accepted global alias can resolve its runtime from a sibling scoped
+// package. Use real fixture processes to force that layout through both failure
+// boundaries; every path and npm mutation stays in this temporary prefix.
+for (const failure of ['promotion', 'health'] as const) {
+  test(`hoisted global alias restores both packages and fresh launchers after ${failure} failure`, { timeout: 30_000 }, async () => {
+    const fixture = await simpleHelperFixture('127.0.0.1', true);
+    const { root, original } = fixture;
+    const { prefix, cache } = fixture.plan.installation;
+    const alias = join(prefix, 'lib/node_modules/cezarion');
+    const bin = join(prefix, 'bin');
+    const sibling = join(prefix, 'lib/node_modules/unrelated/keep');
+    try {
+      await mkdir(alias, { recursive: true }); await mkdir(bin);
+      await mkdir(join(prefix, 'lib/node_modules/unrelated'));
+      await writeFile(sibling, 'unrelated package stays intact');
+      const scopedManifest = { ...(await readJson(join(original, 'package.json'))),
+        exports: { '.': './dist/index.js' }, bin: { cez: 'dist/index.js', cezarion: 'dist/index.js' }, dependencies: {} };
+      await writeFile(join(original, 'package.json'), JSON.stringify(scopedManifest));
+      await writeFile(join(alias, 'package.json'), JSON.stringify({ name: 'cezarion', version: '1.0.0', type: 'module',
+        bin: { cez: 'bin.js', cezarion: 'bin.js' }, dependencies: { '@wjarka/cezarion': '^1.0.0' } }));
+      const aliasBytes = "#!/usr/bin/env node\nimport '@wjarka/cezarion';\n";
+      await writeFile(join(alias, 'bin.js'), aliasBytes, { mode: 0o755 });
+      const linkTarget = '../lib/node_modules/cezarion/bin.js';
+      for (const name of ['cez', 'cezarion']) await symlink(linkTarget, join(bin, name));
+      const originalLaunch = join(bin, 'cez');
+      const layout = discoverInstallation({ prefix, cache, packageRoot: original, launchEntry: originalLaunch });
+      assert.equal(layout.kind, 'global');
+      if (layout.kind !== 'global') throw new Error('fixture must be accepted');
+      assert.equal(layout.outerPackage, 'cezarion');
+      assert.equal(layout.packageRoot, original); assert.equal(layout.outerRoot, alias);
+      const scopedBytes = await readFile(join(original, 'dist/index.js'));
+      // Real bounded npm process fixture: mutate both owned roots, record the
+      // mutation, then either fail npm or boot a replacement with wrong health.
+      await writeFile(fixture.plan.npmBin, `#!/usr/bin/env node
+const fs=require('node:fs'),path=require('node:path');
+const args=process.argv.slice(2), promotion=args.includes('--global');
+const destination=args[args.indexOf('--prefix')+1];
+const outer=promotion ? ${JSON.stringify(alias)} : path.join(destination,'node_modules/cezarion');
+const scoped=promotion ? ${JSON.stringify(original)} : path.join(destination,'node_modules/@wjarka/cezarion');
+if(!promotion) {
+  fs.cpSync(${JSON.stringify(alias)},outer,{recursive:true});
+  fs.cpSync(${JSON.stringify(original)},scoped,{recursive:true});
+}
+for(const directory of [outer,scoped]) {
+  const file=path.join(directory,'package.json'),pkg=JSON.parse(fs.readFileSync(file));
+  pkg.version='2.0.0'; fs.writeFileSync(file,JSON.stringify(pkg));
+}
+if(promotion) {
+  fs.appendFileSync(path.join(outer,'bin.js'),'// replaced by promotion\\n');
+  fs.appendFileSync(path.join(scoped,'dist/index.js'),'// replaced by promotion\\n');
+  fs.writeFileSync(${JSON.stringify(join(root, 'promotion.json'))},JSON.stringify([outer,scoped].map(directory=>JSON.parse(fs.readFileSync(path.join(directory,'package.json'))).version)));
+  if(${failure === 'promotion'}) {
+    for(const name of ['cez','cezarion']) fs.unlinkSync(path.join(${JSON.stringify(bin)},name));
+    process.exit(1);
+  }
+}`, { mode: 0o700 });
+      let restart: Parameters<typeof armRestartHelper>[0] | undefined;
+      const service = new ApplicationUpdateService({ packageRoot: original, launchEntry: originalLaunch,
+        npmPrefix: prefix, npmCache: cache, npmBin: fixture.plan.npmBin, home: join(root, 'home'),
+        targetVersion: () => '2.0.0', armRestart: async plan => { restart = plan; } });
+      assert.equal((await service.apply()).status, 'ready');
+      for (const name of ['cez', 'cezarion']) assert.equal(await versionFromFreshOriginalCommand(join(bin, name)), '1.0.0');
+      await service.restart(); assert.ok(restart);
+      await runHelper({ ...fixture.plan, ...restart });
+      assert.deepEqual(await readJson(join(root, 'promotion.json')), ['2.0.0', '2.0.0']);
+      assert.equal((await readJson(join(alias, 'package.json'))).version, '1.0.0');
+      assert.equal((await readJson(join(original, 'package.json'))).version, '1.0.0', 'hoisted runtime must be rolled back too');
+      assert.equal(await readFile(join(alias, 'bin.js'), 'utf8'), aliasBytes);
+      assert.deepEqual(await readFile(join(original, 'dist/index.js')), scopedBytes);
+      assert.match((await readJson(restart.recordPath)).state.message, /previous release was restored/);
+      assert.equal(await readFile(sibling, 'utf8'), 'unrelated package stays intact');
+      assert.equal(existsSync(restart.recovery), true, 'retain recovery after rollback');
+      for (const name of ['cez', 'cezarion']) {
+        assert.equal(await readlink(join(bin, name)), linkTarget);
+        assert.equal((await execFile(join(bin, name), ['--version'])).stdout.trim(), '1.0.0');
+      }
+      const health = await localJson(`http://127.0.0.1:${fixture.plan.port}/api/v1/health`);
+      assert.equal(health.version, '1.0.0'); assert.equal(health.repoRoot, root);
+      const boots = (await readFile(join(root, 'children.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+      assert.deepEqual(boots.map(boot => boot.version), failure === 'health' ? ['2.0.0', '1.0.0'] : ['1.0.0']);
+      if (failure === 'health') assert.throws(() => process.kill(boots[0].pid, 0), 'replacement reaped before rollback');
+    } finally {
+      const boots = await readFile(join(root, 'children.ndjson'), 'utf8').catch(() => '');
+      for (const line of boots.trim().split('\n').filter(Boolean)) {
+        const { pid } = JSON.parse(line);
+        try { process.kill(pid, 'SIGTERM'); } catch { /* already reaped */ }
+        for (let attempt = 0; attempt < 100; attempt++) {
+          try { process.kill(pid, 0); } catch { break; }
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        assert.throws(() => process.kill(pid, 0), 'owned fixture child must be reaped');
+      }
+      await rm(root, { recursive: true, force: true });
     }
   });
 }
