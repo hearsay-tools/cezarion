@@ -233,8 +233,9 @@ export function sortRuns(runs: readonly RunRecord[], view: ListView): RunRecord[
     })
 }
 
-/** Owned workers are not task-list rows — they live on the parent’s Run activity dock (#312). */
-export function isOwnedWorker(run: Pick<RunRecord, 'delegation'>): boolean {
+/** Owned workers are not task-list rows — they live on the parent’s Run activity dock (#312).
+ *  The argument is role-only so a full `RunRecord` and a slim index row both type-check. */
+export function isOwnedWorker(run: { delegation?: { role?: string } | null }): boolean {
   return run.delegation?.role === 'worker'
 }
 
@@ -245,12 +246,12 @@ export function isOwnedWorker(run: Pick<RunRecord, 'delegation'>): boolean {
  */
 export function sidebarActiveRunId(
   currentRunId: string | null | undefined,
-  runs: readonly Pick<RunRecord, 'id' | 'delegation'>[],
+  runs: readonly { id: string; delegation?: { role?: string; parentRunId?: string } | null }[],
 ): string | null {
   if (currentRunId == null) return null
   const current = runs.find((run) => run.id === currentRunId)
-  if (!current || !isOwnedWorker(current) || current.delegation?.role !== 'worker') return currentRunId
-  return current.delegation.parentRunId
+  if (!current || !isOwnedWorker(current)) return currentRunId
+  return current.delegation?.parentRunId ?? currentRunId
 }
 
 /**

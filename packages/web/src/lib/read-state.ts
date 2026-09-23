@@ -23,8 +23,8 @@ const UNREAD_ELIGIBLE: readonly RunRecord['status'][] = ['done', 'failed']
  *  record can call it without a full `RunRecord`. */
 export type ReadStateInput = Pick<
   RunRecord,
-  'status' | 'finishedAt' | 'seenAt' | 'archived' | 'autoResumeAt' | 'delegation'
->
+  'status' | 'finishedAt' | 'seenAt' | 'archived' | 'autoResumeAt'
+> & { delegation?: { role?: string } | null }
 
 /**
  * A run stopped by a provider usage limit with a resume already scheduled (spec

@@ -957,7 +957,23 @@ describe('the pure ordering helpers', () => {
     const merged = mergeTasks(
       [
         run({ id: 'parent', title: 'Parent' }),
-        run({ id: 'live-worker', title: 'Live worker', delegation: { role: 'worker' } }),
+        run({
+          id: 'live-worker',
+          title: 'Live worker',
+          delegation: {
+            role: 'worker',
+            permissions: [],
+            parentRunId: 'parent',
+            workspace: {
+              ownerRunId: 'live-worker',
+              resourceId: 'live-worker',
+              kind: 'owned-isolated',
+              path: '/worker',
+              branch: 'cez/worker',
+              baselineSha: 'a'.repeat(40),
+            },
+          },
+        }),
       ],
       'cezar',
       [
