@@ -929,6 +929,18 @@ export class RunStore extends EventEmitter {
   }
 
   /** Observable atomic input checkpoint: a failed write publishes nothing. */
+  /** Accepted input the harness will never read returns to the queue (#505): only its
+   * delivery and consumption receipts are cleared; order and identity are kept. */
+  requeueUnconsumedAgentInputs(id: string, ids: readonly string[]): void {
+    const run = this.runs.get(id);
+    if (!run?.agentInputs || !ids.length) return;
+    this.commitAgentInputs(id, run.agentInputs.map(input => {
+      if (!ids.includes(input.id)) return input;
+      const { deliveredAt: _delivered, consumedAt: _consumed, ...queued } = input;
+      return queued;
+    }));
+  }
+
   /** Model consumption observed by the current session (#505). Never un-sets deliveredAt. */
   commitAgentInputsConsumed(id: string, ids: readonly string[], at: string): void {
     const run = this.runs.get(id);

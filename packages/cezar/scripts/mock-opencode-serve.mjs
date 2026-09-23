@@ -22,9 +22,30 @@ const SESSION_ID = 'ses_mock_1';
 const MESSAGE_ID = 'msg_mock_1';
 
 let sse = null;
-const send = (event) => {
+const write = (event) => {
   if (sse) sse.write(`data: ${JSON.stringify(event)}\n\n`);
 };
+// #505: like opencode 1.18.32, a prompt_async POSTed while the session is busy is
+// steered into the running loop: its user message exists at once, and the next
+// assistant message names it as parentID. Steers are read just before the turn's
+// idle, unless the turn is `late` (the upstream lost wake: never read).
+let turnActive = false;
+let turnLate = false;
+let steers = [];
+let steerSerial = 0;
+const send = (event) => {
+  const ownIdle = event?.type === 'session.idle' && (!event.properties?.sessionID || event.properties.sessionID === SESSION_ID);
+  if (ownIdle) {
+    if (!turnLate) for (const steer of steers) {
+      const id = `msg_steer_reply_${++steerSerial}`;
+      write({ type: 'message.updated', properties: { info: { ...info({}), id, parentID: steer.userId } } });
+      write({ type: 'message.part.updated', properties: { part: { id: `prt_${id}`, messageID: id, sessionID: SESSION_ID, type: 'text', text: steer.text } } });
+    }
+    steers = []; turnActive = false; turnLate = false;
+  }
+  write(event);
+};
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Questions the runner can look up an id for. `replyQuestion`/`rejectQuestion`
  *  resolve the id through `GET /question` before answering (see
@@ -51,10 +72,14 @@ const sendQuestionPart = (input) =>
       },
     },
   });
+// The user message of the prompt being answered: opencode 1.18.32 creates it at the
+// POST and names it as the assistant's parentID (#505 probe).
+let currentUserId;
 const info = (extra) => ({
   id: MESSAGE_ID,
   sessionID: SESSION_ID,
   role: 'assistant',
+  ...(currentUserId ? { parentID: currentUserId } : {}),
   time: { created: 1760000000000 },
   modelID: 'mock-model',
   providerID: 'mock',
@@ -112,9 +137,41 @@ const server = createServer((req, res) => {
         res.end(JSON.stringify({ error: 'agent prompt rejected' }));
         return;
       }
+      if (turnActive && url.endsWith('/prompt_async')) {
+        const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
+        const userId = `msg_steer_user_${++steerSerial}`;
+        res.writeHead(204); res.end();
+        send({ type: 'message.updated', properties: { info: { id: userId, sessionID: SESSION_ID, role: 'user', time: { created: Date.now() } } } });
+        send({ type: 'message.part.updated', properties: { part: { id: `prt_${userId}`, messageID: userId, sessionID: SESSION_ID, type: 'text', text } } });
+        steers.push({ userId, text });
+        return;
+      }
+      turnActive = true;
       // `prompt_async` semantics: acknowledge now, stream the turn over SSE.
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ info: info({}), parts: [] }));
+      if (url.endsWith('/prompt_async')) {
+        currentUserId = `msg_user_${++steerSerial}`;
+        const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
+        send({ type: 'message.updated', properties: { info: { id: currentUserId, sessionID: SESSION_ID, role: 'user', time: { created: Date.now() } } } });
+        send({ type: 'message.part.updated', properties: { part: { id: `prt_${currentUserId}`, messageID: currentUserId, sessionID: SESSION_ID, type: 'text', text } } });
+      }
+      if (body.includes('mock:steer-tool')) {
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'prt_steer_tool', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', callID: 'call_steer', tool: 'bash', state: { status: 'running', input: { command: 'wait' } } } } });
+        await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
+        send({ type: 'message.part.updated', properties: { part: { id: 'prt_steer_tool', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', callID: 'call_steer', tool: 'bash', state: { status: 'completed', input: { command: 'wait' }, output: 'waited' } } } });
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+        return;
+      }
+      if (body.includes('mock:steer-late')) {
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'prt_steer_late', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: 'late window: final message already sent', time: { start: 1760000000000, end: 1760000000001 } } } });
+        turnLate = true;
+        await sleep(300);
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+        return;
+      }
       // The raw body is enough to spot a `mock:` marker — the prompt text is
       // inside it whatever part shape the runner used to wrap it.
       if (body.includes('mock:ci-wait')) {

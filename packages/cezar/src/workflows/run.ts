@@ -3516,6 +3516,18 @@ export class RunManager {
     catch (error) { console.warn(`[cez] agent input consumption checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
+  /** #505: input the harness accepted but will never read returns to the queue, so
+   * DONE, auto-end and park see queued work. Out of a turn (an OpenCode lost wake)
+   * it is submitted right away; at a turn-end the handler's own flush submits it. */
+  private retireUnreadInputs(runId: string, state: ActiveRun, ids: readonly string[], outOfTurn: boolean): void {
+    if (!ids.length || state.cancelled || this.active.get(runId) !== state) return;
+    for (const id of ids) state.unreadInputIds?.delete(id);
+    try { this.store.requeueUnconsumedAgentInputs(runId, ids); }
+    catch (error) { console.warn(`[cez] agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); return; }
+    this.store.appendEvent(runId, { type: 'note', message: `resubmitting ${ids.length} message${ids.length === 1 ? '' : 's'} the agent did not read` });
+    if (outOfTurn) this.flushAgentInputs(runId);
+  }
+
   /** #505: the harness accepted input this session has not reported reading yet. */
   private harnessOwesInput(state: ActiveRun | undefined): boolean {
     return !!state?.unreadInputIds?.size;
@@ -4298,6 +4310,7 @@ export class RunManager {
         if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
         return;
       }
+      if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
       this.store.appendEvent(runId, { ...event, stepId });
       if (event.type === 'error') {
         // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
@@ -4319,6 +4332,7 @@ export class RunManager {
       }
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
+        this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
         state.workerWakeTurn = undefined;
         state.ciWakeTurn = undefined;
         state.atTurnBoundary = state.session;
@@ -5243,6 +5257,7 @@ export class RunManager {
         if (text) emit({ type: 'text', text, stepId: step.id });
         return;
       }
+      if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
       emit({ ...event, stepId: step.id });
       if (event.type === 'error') {
         // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
@@ -5265,6 +5280,7 @@ export class RunManager {
       }
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
+        this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
         state.workerWakeTurn = undefined;
         state.ciWakeTurn = undefined;
         state.atTurnBoundary = state.session;

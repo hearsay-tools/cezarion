@@ -790,11 +790,14 @@ describe('OpenCode durable input acknowledgements', () => {
         expect(events.findIndex(e => e.type === 'error')).toBeLessThan(events.findIndex(e => e.type === 'turn-end'));
       }
       expect(events.filter(e => e.type === 'human-input-delivered')).toEqual([]);
-      expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+      // #505: the queued message steers into the answering turn right behind the answer,
+      // so it may carry a delivery receipt; the input itself is unchanged and never lost.
+      const withoutReceipts = (inputs: AgentInput[] | undefined) => inputs?.map(({ deliveredAt: _d, consumedAt: _c, ...rest }) => rest);
+      expect(withoutReceipts(store.getRun(runId)?.agentInputs)).toEqual([input]);
       const recovered = await fixture.restart();
       expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(true);
       expect(recovered.manager.continueRun(runId).ok).toBe(false);
-      expect(recovered.store.getRun(runId)?.agentInputs).toEqual([input]);
+      expect(withoutReceipts(recovered.store.getRun(runId)?.agentInputs)).toEqual([input]);
     });
   }, 60_000);
 

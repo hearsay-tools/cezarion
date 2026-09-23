@@ -202,6 +202,9 @@ export type AgentEvent =
   /** `unconsumedInputIds`: agent input accepted in this turn that the model never
    *  read before the turn ended idle (#505). */
   | { type: 'turn-end'; unconsumedInputIds?: readonly string[] }
+  /** Accepted agent input the harness will not read without a new prompt, reported
+   *  outside a turn (an OpenCode lost wake) (#505). */
+  | { type: 'input-unconsumed'; inputIds: readonly string[] }
   | { type: 'note'; message: string }
   | { type: 'done' }
   | { type: 'error'; message: string };

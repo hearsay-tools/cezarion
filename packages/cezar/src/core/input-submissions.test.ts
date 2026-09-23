@@ -35,3 +35,13 @@ describe('InputSubmissions.has', () => {
     expect(ledger.has('s1')).toBe(false);
   });
 });
+
+describe('InputSubmissions.findByText', () => {
+  it('finds the oldest pending match without consuming it', () => {
+    const ledger = new InputSubmissions();
+    ledger.accept('s1', ['a'], 'same'); ledger.accept('s2', ['b'], 'same');
+    expect(ledger.findByText('same')).toBe('s1');
+    expect(ledger.pending).toBe(2);
+    expect(ledger.findByText('none')).toBeUndefined();
+  });
+});

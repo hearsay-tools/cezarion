@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
@@ -10,7 +11,9 @@ import type {
   AgentToolCallRecord,
   ContentBlock,
   AgentRunSpecSupport,
+  InputDelivery,
 } from './agent-runner.ts';
+import { InputSubmissions } from './input-submissions.ts';
 import type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
@@ -84,9 +87,16 @@ export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
   sessionId: { honored: false, reason: 'every start opens a fresh server session; the id is only reported back on the result' },
   resume: { honored: false, reason: 'Continue opens a fresh session carrying the continuation prompt' },
 };
+/** How long an idle session may sit on steered input before it counts as a lost wake. */
+export const OPENCODE_LOST_WAKE_GRACE_MS = 2_000;
+
 export class OpencodeServerRunner implements AgentRunner {
   readonly backend = 'opencode' as const;
   readonly specSupport = OPENCODE_SPEC_SUPPORT;
+  readonly inputDelivery: InputDelivery = {
+    mode: 'steer', consumption: 'observable',
+    via: 'prompt_async while busy; assistant message.updated parentID at consumption',
+  };
 
   private readonly bin: string;
   private readonly timeoutMs: number;
@@ -148,6 +158,13 @@ class OpencodeSession implements AgentSession {
   /** messageID → role. Parts carry no role; only assistant parts are surfaced
    *  (the user's own message also streams as parts over the same SSE feed). */
   private readonly msgRole = new Map<string, string>();
+  /** Accepted agent prompts, the user message carrying each, and prompts that
+   *  opened their turn (read when that turn goes idle) (#505). */
+  private readonly submissions = new InputSubmissions();
+  private readonly userMessageSubmission = new Map<string, string>();
+  private readonly turnOpeners = new Set<string>();
+  private refusedBeforeOpening = false;
+  private lostWakeTimer: NodeJS.Timeout | undefined;
   private tokensUsed = 0;
   private lastCost = 0;
   /** A prompt was posted and its `session.idle` has not arrived yet. */
@@ -295,12 +312,26 @@ class OpencodeSession implements AgentSession {
     return this.child.pid;
   }
 
-  sendAgentMessage(content: ContentBlock[]): false | Promise<void> {
-    if (!this.serverOpen || !this.agentInputReady || this.turnActive || this.pendingQuestion || this.questionReply || this.pendingPromptRequests > 0 || this.agentRequest) return false;
+  sendAgentMessage(content: ContentBlock[], inputIds: readonly string[] = []): false | Promise<void> {
+    // #505: a busy session is steered with prompt_async; only a pending native question,
+    // a queued human prompt or an in-flight agent POST refuses.
+    // Nothing may run ahead of the task: refuse until the opening prompt has started,
+    // then hint once so the refused input steers the opening turn.
+    if (this.serverOpen && this.turnSerial === 0) { this.refusedBeforeOpening = true; return false; }
+    if (!this.serverOpen || !this.sessionId || this.pendingQuestion || this.questionReply || this.pendingPromptRequests > 0 || this.agentRequest) return false;
     this.agentInputReady = false;
     const request = new AbortController();
     this.agentRequest = request;
-    const acknowledgement = this.prompt(textOf(content), 'agent', request.signal).finally(() => {
+    const text = textOf(content);
+    const submissionId = randomUUID();
+    const steering = this.turnActive;
+    this.submissions.accept(submissionId, inputIds, text);
+    if (!steering && inputIds.length) this.turnOpeners.add(submissionId);
+    const post = steering ? this.steerPrompt(text, request.signal) : this.prompt(text, 'agent', request.signal);
+    const acknowledgement = post.catch((err: unknown) => {
+      this.submissions.consume(submissionId); this.turnOpeners.delete(submissionId);
+      throw err;
+    }).finally(() => {
       if (this.agentRequest === request) this.agentRequest = undefined;
       if (this.serverOpen && !this.providerErrorPending && !this.turnActive && !this.pendingQuestion && !this.questionReply) {
         this.agentInputReady = true;
@@ -479,6 +510,10 @@ class OpencodeSession implements AgentSession {
 
     const first = prependSystemPrompt(this.spec.systemPrompt, this.spec.userPrompt);
     await this.prompt(first, 'opening');
+    if (this.refusedBeforeOpening) queueMicrotask(() => {
+      this.refusedBeforeOpening = false;
+      if (this.serverOpen && !this.pendingQuestion && !this.questionReply && !this.agentRequest) this.opts.onAgentInputReady?.();
+    });
   }
 
   private async prompt(text: string, origin: 'opening' | 'human' | 'agent' = 'human', signal?: AbortSignal): Promise<void> {
@@ -495,27 +530,14 @@ class OpencodeSession implements AgentSession {
     // auto-end. Cancel at actual delivery time, not only at sendMessage time.
     this.cancelAutoEnd();
     if (!this.sessionId || !this.serverOpen) return;
-    this.turnActive = true;
-    this.agentInputReady = false;
-    this.turnEnded = false;
-    this.turnSerial += 1;
-    this.turnFinished = new Promise((resolve) => {
-      this.turnFinishedResolve = resolve;
-    });
+    this.openTurn();
     // Turn boundary, v1 and v2 alike — the prompt POST is the turn start
     // (§7.1); the end comes from the SSE `session.idle`, never from the HTTP
     // response below. `POST /session/:id/message` long-polled the whole turn,
     // and undici's default 300s headers timeout ended it as `prompt failed:
     // fetch failed` (#4, upstream #897); `prompt_async` returns immediately.
     this.emitUi(opencodeTurnStarted);
-    const body: Record<string, unknown> = { parts: [{ type: 'text', text }] };
-    // `spec.model` arrives already normalised to canonical `provider/model`
-    // (the run wiring's fail-loud gate). Split it with the shared parser — the
-    // one every runner uses — into opencode's `{ providerID, modelID }`.
-    const id = parseModelIdentity(this.spec.model);
-    if (id) body.model = { providerID: id.provider, modelID: id.model };
-    const effort = parseEffort(this.spec.effort);
-    if (effort) body.variant = effort;
+    const body = this.promptBody(text);
     try {
       await this.http('POST', `/session/${this.sessionId}/prompt_async`, body, signal);
     } catch (err) {
@@ -551,9 +573,53 @@ class OpencodeSession implements AgentSession {
     }
   }
 
+  private promptBody(text: string): Record<string, unknown> {
+    const body: Record<string, unknown> = { parts: [{ type: 'text', text }] };
+    // `spec.model` arrives already normalised to canonical `provider/model`
+    // (the run wiring's fail-loud gate). Split it with the shared parser — the
+    // one every runner uses — into opencode's `{ providerID, modelID }`.
+    const id = parseModelIdentity(this.spec.model);
+    if (id) body.model = { providerID: id.provider, modelID: id.model };
+    const effort = parseEffort(this.spec.effort);
+    if (effort) body.variant = effort;
+    return body;
+  }
+
+  /** Busy agent input: the running prompt loop rereads it between steps (1.18.32 probe).
+   *  No new turn opens; the running turn's idle ends it (#505). */
+  private async steerPrompt(text: string, signal?: AbortSignal): Promise<void> {
+    try {
+      await this.http('POST', `/session/${this.sessionId}/prompt_async`, this.promptBody(text), signal);
+    } catch (err) {
+      if (this.serverOpen) {
+        this.emit({ type: 'error', message: `opencode: agent input failed: ${err instanceof Error ? err.message : String(err)}` });
+        this.interrupt();
+      }
+      throw err;
+    }
+  }
+
   /** The single v1 turn-end: from the session's own `session.idle`, the
    *  prompt-POST failure path, or the teardown safety net — whichever comes
    *  first; the guards make every later call a no-op. */
+  /** Turn bookkeeping for a prompt POST, or for a server run that started on its own
+   *  to answer steered input (#505). */
+  private openTurn(): void {
+    this.clearLostWakeTimer();
+    this.turnActive = true;
+    this.agentInputReady = false;
+    this.turnEnded = false;
+    this.turnSerial += 1;
+    this.turnFinished = new Promise((resolve) => {
+      this.turnFinishedResolve = resolve;
+    });
+  }
+
+  private clearLostWakeTimer(): void {
+    if (this.lostWakeTimer) clearTimeout(this.lostWakeTimer);
+    this.lostWakeTimer = undefined;
+  }
+
   private finishTurn(): void {
     if (!this.turnActive || this.turnEnded) return;
     this.turnEnded = true;
@@ -567,7 +633,26 @@ class OpencodeSession implements AgentSession {
     // its prose before the turn boundary (run.ts reads markers there).
     this.textCoalescer.flush();
     this.agentInputReady = true;
+    // A prompt that opened this turn was processed by it; steered input the turn never
+    // answered (no assistant message named it as parentID) is a lost wake (#505).
+    const opened = [...this.turnOpeners].flatMap(id => this.submissions.consume(id));
+    this.turnOpeners.clear();
+    if (opened.length) this.opts.onAgentInputConsumed?.(opened);
     this.emit({ type: 'turn-end' });
+    // Steered input the server holds is read by a follow-on run, or stranded by the
+    // upstream lost wake (anomalyco/opencode#46842). Only a quiet grace window tells
+    // them apart; then report it so cezar submits it as a new prompt.
+    if (this.submissions.pending > 0) {
+      this.clearLostWakeTimer();
+      this.lostWakeTimer = setTimeout(() => {
+        this.lostWakeTimer = undefined;
+        if (!this.serverOpen || this.turnActive) return;
+        const inputIds = this.submissions.takeUnconsumed();
+        this.userMessageSubmission.clear();
+        if (inputIds.length) this.emit({ type: 'input-unconsumed', inputIds });
+      }, OPENCODE_LOST_WAKE_GRACE_MS);
+      this.lostWakeTimer.unref?.();
+    }
     if (!this.questionReply) this.scheduleAutoEnd();
   }
 
@@ -706,6 +791,16 @@ class OpencodeSession implements AgentSession {
       const mid = stringField(info, 'id');
       const role = stringField(info, 'role');
       if (mid && role) this.msgRole.set(mid, role);
+      // The model answers a steered user message: it has read it (#505).
+      const parent = role === 'assistant' ? stringField(info, 'parentID') : undefined;
+      const submission = parent ? this.userMessageSubmission.get(parent) : undefined;
+      if (parent && submission) {
+        this.userMessageSubmission.delete(parent);
+        // After an idle, the server started a new run for steered input: a new turn.
+        if (!this.turnActive && this.serverOpen) { this.openTurn(); this.emitUi(opencodeTurnStarted); }
+        const ids = this.submissions.consume(submission);
+        if (ids.length) this.opts.onAgentInputConsumed?.(ids);
+      }
       this.absorbUsage(info);
     } else if (type === 'message.part.updated' || type === 'message.part.created') {
       this.handlePart((props.part as Record<string, unknown>) ?? props);
@@ -738,7 +833,14 @@ class OpencodeSession implements AgentSession {
     // over the same feed. Role is known early (the message.updated event
     // precedes its parts); an unknown role means "not assistant yet" → skip.
     const messageID = stringField(part, 'messageID');
-    if (messageID && this.msgRole.get(messageID) !== 'assistant') return;
+    if (messageID && this.msgRole.get(messageID) !== 'assistant') {
+      // A user message carrying submitted agent text: remember which submission it is.
+      if (this.msgRole.get(messageID) === 'user' && stringField(part, 'type') === 'text' && !this.userMessageSubmission.has(messageID)) {
+        const submission = this.submissions.findByText(stringField(part, 'text') ?? '');
+        if (submission && ![...this.userMessageSubmission.values()].includes(submission)) this.userMessageSubmission.set(messageID, submission);
+      }
+      return;
+    }
     const kind = stringField(part, 'type');
     const id = stringField(part, 'id') ?? messageID ?? '';
     if (kind === 'text') {

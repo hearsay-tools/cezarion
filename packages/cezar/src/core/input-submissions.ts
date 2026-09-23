@@ -5,6 +5,8 @@ export class InputSubmissions {
   get pending(): number { return this.entries.length; }
   has(submissionId: string): boolean { return this.entries.some(entry => entry.id === submissionId); }
   pendingIds(): string[] { return this.entries.map(entry => entry.id); }
+  /** The oldest pending submission with this exact text, without consuming it. */
+  findByText(text: string): string | undefined { return this.entries.find(entry => entry.text === text)?.id; }
   accept(submissionId: string, inputIds: readonly string[], text: string): void {
     if (inputIds.length) this.entries.push({ id: submissionId, inputIds: [...inputIds], text });
   }
