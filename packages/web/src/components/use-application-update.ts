@@ -1,15 +1,36 @@
 import * as React from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import type { HealthResponse } from '@open-mercato/cezar-api-client'
+import type { ApplicationUpdateState, HealthResponse } from '@open-mercato/cezar-api-client'
 import { applyApplicationUpdate, restartApplication } from '@/api/client'
 import { queryKeys } from '@/api/queries'
 
 const RESTART_VERSION_KEY = 'cez:application-restart-from'
+// Preparation can wait for npm (120 seconds), lock acquisition and recovery-copy I/O.
+// These browser waits exceed the ordinary server work but cannot hold the UI forever.
+const APPLY_WAIT_MS = 240_000
+const RESTART_WAIT_MS = 30_000
+const UNCERTAIN_RESPONSE = 'The response was lost; update status is unknown. Reconnect or check the current state before retrying.'
+
+type ActiveOperation = {
+  controller: AbortController
+  initialState: ApplicationUpdateState | undefined
+  initialCacheState: ApplicationUpdateState | undefined
+  kind: 'apply' | 'restart'
+  timer: ReturnType<typeof setTimeout>
+  resolve: (state: ApplicationUpdateState | undefined) => void
+}
+
+function isAuthoritativeOutcome(kind: ActiveOperation['kind'], state: ApplicationUpdateState | undefined): state is ApplicationUpdateState {
+  return Boolean(state && (state.status === 'error' || kind === 'apply' && state.status === 'ready'
+    || kind === 'restart' && (state.status === 'restarting' || state.status === 'idle')))
+}
 
 /** Owns transient mutation feedback while health remains the authoritative durable state. */
 export function useApplicationUpdate(health: HealthResponse | undefined, reloadDocument: () => void = () => window.location.reload()) {
   const queryClient = useQueryClient()
-  const pending = React.useRef(false)
+  const active = React.useRef<ActiveOperation | null>(null)
+  const healthRef = React.useRef(health)
+  healthRef.current = health
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [offline, setOffline] = React.useState(() => !navigator.onLine)
@@ -49,35 +70,79 @@ export function useApplicationUpdate(health: HealthResponse | undefined, reloadD
     queryClient.setQueryData<HealthResponse>(queryKeys.health, (current) => current ? { ...current, applicationUpdate: state } : current)
   }, [queryClient])
 
-  const run = React.useCallback(async (operation: typeof applyApplicationUpdate) => {
-    if (pending.current) return
-    pending.current = true
+  const finish = React.useCallback((operation: ActiveOperation, outcome: { state?: ApplicationUpdateState; source: 'health' | 'response' | 'failure' | 'timeout'; cause?: unknown }) => {
+    if (active.current !== operation) return // An aborted request may still resolve much later.
+    active.current = null
+    clearTimeout(operation.timer)
+    if (outcome.source !== 'response') operation.controller.abort()
+    setBusy(false)
+    if (outcome.source === 'response' && outcome.state) reconcile(outcome.state)
+    if (outcome.source === 'timeout') setError(UNCERTAIN_RESPONSE)
+    else if (outcome.source === 'failure') setError(outcome.cause instanceof Error ? outcome.cause.message : 'The request failed.')
+    else setError(null)
+    if (outcome.source === 'timeout' || outcome.source === 'failure') {
+      // One reconciliation through the existing health query; the root subscription remains
+      // responsible for subsequent state changes. Never automatically replay a mutation.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.health })
+    }
+    operation.resolve(outcome.state)
+  }, [queryClient, reconcile])
+
+  React.useEffect(() => {
+    const operation = active.current
+    const state = health?.applicationUpdate
+    if (!operation || state === operation.initialState || !isAuthoritativeOutcome(operation.kind, state)) return
+    finish(operation, { source: 'health', state })
+  }, [health?.applicationUpdate, finish])
+
+  React.useEffect(() => () => {
+    const operation = active.current
+    if (!operation) return
+    active.current = null
+    clearTimeout(operation.timer)
+    operation.controller.abort()
+    operation.resolve(undefined)
+  }, [])
+
+  const run = React.useCallback((kind: ActiveOperation['kind'], request: typeof applyApplicationUpdate): Promise<ApplicationUpdateState | undefined> => {
+    if (active.current) return Promise.resolve(undefined)
+    const controller = new AbortController()
+    const initialState = healthRef.current?.applicationUpdate
+    const initialCacheState = queryClient.getQueryData<HealthResponse>(queryKeys.health)?.applicationUpdate
     setBusy(true)
     setError(null)
-    try {
-      const response = await operation()
-      reconcile(response.state)
-      return response.state
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The request failed.')
-      return undefined
-    } finally {
-      pending.current = false
-      setBusy(false)
-    }
-  }, [reconcile])
+    return new Promise((resolve) => {
+      const operation: ActiveOperation = {
+        controller, initialState, initialCacheState, kind, resolve,
+        timer: setTimeout(() => finish(operation, { source: 'timeout' }), kind === 'apply' ? APPLY_WAIT_MS : RESTART_WAIT_MS),
+      }
+      active.current = operation
+      void request(controller.signal).then((response) => {
+        if (active.current !== operation) return
+        // A health publication that won the race is authoritative even if React has not
+        // rendered it yet. Do not let an older HTTP response move Ready back to idle/error.
+        const cached = queryClient.getQueryData<HealthResponse>(queryKeys.health)?.applicationUpdate
+        const latest = healthRef.current?.applicationUpdate
+        const authoritative = cached !== initialCacheState && isAuthoritativeOutcome(kind, cached) ? cached
+          : latest !== initialState && isAuthoritativeOutcome(kind, latest) ? latest : undefined
+        finish(operation, authoritative
+          ? { source: 'health', state: authoritative }
+          : { source: 'response', state: response.state })
+      }, (cause: unknown) => finish(operation, { source: 'failure', cause }))
+    })
+  }, [finish, queryClient])
 
-  const apply = React.useCallback(async () => { await run(applyApplicationUpdate) }, [run])
+  const apply = React.useCallback(async () => { await run('apply', applyApplicationUpdate) }, [run])
   const restart = React.useCallback(async () => {
-    if (pending.current) return
-    const version = health?.version
-    const acknowledged = await run(restartApplication)
+    if (active.current) return
+    const version = healthRef.current?.version
+    const acknowledged = await run('restart', restartApplication)
     // Only keep a reload marker when the server has acknowledged the restart.
     if (version && acknowledged?.status === 'restarting') {
       try { window.sessionStorage.setItem(RESTART_VERSION_KEY, version) } catch { /* degraded private storage */ }
       setRestartFrom(version)
     }
-  }, [health?.version, run])
+  }, [run])
 
   return { apply, restart, busy, error, offline }
 }

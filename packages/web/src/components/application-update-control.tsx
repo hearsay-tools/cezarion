@@ -72,7 +72,8 @@ export function ApplicationUpdateFeedback({ state, error, offline = false, busy 
   const message = failure ? null
     : offline ? 'Connection lost. Reconnect to continue.'
         : state?.status === 'preparing' || busy && state?.status !== 'ready' ? 'Preparing update.'
-          : state?.status === 'restarting' || busy ? 'Restarting. Reconnecting to the cockpit.'
+          : state?.status === 'restarting' ? 'Restarting. Reconnecting to the cockpit.'
+            : busy && state?.status === 'ready' ? 'Checking update status.'
             : state && !state.supported ? state.message ?? 'Use your installation’s update method.' : null
   return <div data-slot="application-update-feedback" className="min-h-10 shrink-0 px-4 pt-1 text-[11px] leading-4 text-muted-foreground">
     {failure ? <p role="status"><span className="block truncate" title={failure}>{failure}</span><span className="block">Retry or update manually.</span></p> : message ? <p role="status" title={message}>{message}</p> : null}

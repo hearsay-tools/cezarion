@@ -63,7 +63,7 @@ describe('application update chrome', () => {
 
   it('supports the mobile dialog actions in dark mode and restores focus after Later', () => {
     browser.setViewport(360, 640)
-    fixture({ status: 'ready', supported: true, targetVersion: '2.0.0' })
+    fixture({ status: 'ready', supported: true, targetVersion: '2.0.0' }, '1.0.0-nightly.20260923.abcdef1234567890')
     browser.goto(`${baseUrl}/p/${project}/skills`)
     browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
     browser.evaluate(`localStorage.setItem('cez-theme', 'dark')`)
@@ -88,6 +88,14 @@ describe('application update chrome', () => {
     browser.waitForFunction(`!document.documentElement.classList.contains('light')`)
     browser.click('button[aria-label="Open menu"]')
     browser.waitForFunction(`document.querySelector('${drawer}')?.getBoundingClientRect().left === 0`)
+    const nightly = browser.waitForValue(`(() => {
+      const chip = document.querySelector('${drawer} [data-slot="version-chip"]')
+      const header = chip?.closest('[data-slot="version-action"]')?.parentElement
+      if (!chip || !header) return null
+      return { version: chip.textContent, title: chip.title, overflow: header.scrollWidth - header.clientWidth }
+    })()`)
+    expect(nightly).toMatchObject({ version: 'v1.0.0-nightly.20260923.abcdef1234567890', overflow: 0 })
+    expect((nightly as { title: string }).title).toContain('v1.0.0-nightly.20260923.abcdef1234567890')
     browser.click(`${drawer} [aria-label="Restart application"]`)
     browser.waitForFunction(`document.querySelector('[role="alertdialog"]') !== null`)
     expect(browser.text('[role="alertdialog"]')).toContain('Running tasks will be recovered after restart.')
@@ -114,7 +122,7 @@ describe('application update chrome', () => {
     browser.waitForFunction(`document.querySelector('[role="alertdialog"]') === null && document.activeElement?.getAttribute('aria-label') === 'Restart application'`)
     browser.click(`${drawer} [aria-label="Restart application"]`)
     browser.click('[data-slot="alert-dialog-action"]')
-    browser.waitForFunction(`document.querySelector('${drawer} [aria-label="Reconnecting after restart"]') !== null`)
+    browser.waitForFunction(`document.querySelector('${drawer} [aria-label="Reconnecting after restart"]') !== null && document.querySelector('[role="alertdialog"]') === null`)
     browser.screenshot(`${artifacts}/mobile-restarting-dark.png`, { viewport: true })
     fixture({ status: 'idle', supported: true }, '2.0.0'); reconcile()
     const reloaded = browser.waitForValue(`(() => { const navigation = performance.getEntriesByType('navigation')[0]; return navigation?.type === 'reload' ? { path: location.pathname, marker: sessionStorage.getItem('cez:application-restart-from') } : null })()`)
@@ -139,5 +147,20 @@ describe('application update chrome', () => {
     expect(geometry).toMatchObject({ reduced: true, width: 88, title: 'Update from v1.0.0 to v2.0.0' })
     expect((geometry as { overflow: number }).overflow).toBeLessThanOrEqual(0)
     browser.screenshot(`${artifacts}/desktop-zoom-200-reduced-dark.png`, { viewport: true })
+    fixture({ status: 'ready', supported: true, targetVersion: '2.0.0' })
+    reconcile()
+    browser.waitForFunction(`document.querySelector('${desktop} [aria-label="Restart application"]') !== null`)
+    browser.click(`${desktop} [aria-label="Restart application"]`)
+    const dialogMotion = browser.waitForValue(`(() => {
+      const dialog = document.querySelector('[role="alertdialog"]')
+      const overlay = document.querySelector('[data-slot="alert-dialog-overlay"]')
+      return dialog && overlay ? {
+        reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
+        dialogAnimation: getComputedStyle(dialog).animationName,
+        overlayAnimation: getComputedStyle(overlay).animationName,
+      } : null
+    })()`)
+    expect(dialogMotion).toEqual({ reduced: true, dialogAnimation: 'none', overlayAnimation: 'none' })
+    browser.screenshot(`${artifacts}/desktop-confirm-zoom-200-reduced-dark.png`, { viewport: true })
   })
 })
