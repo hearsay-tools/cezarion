@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { classifyCursorProviderError, sanitizeCursorProviderError } from './cursor-provider-error.ts';
 
 describe('sanitizeCursorProviderError', () => {
@@ -50,6 +51,26 @@ describe('classifyCursorProviderError', () => {
 
   it('classes unknown provider prose as fatal', () => {
     expect(classifyCursorProviderError('\n\nError: context length exceeded', now)).toEqual({ kind: 'fatal' });
+  });
+
+  it('classes the recorded RetriableError stream-protocol envelope as transient', () => {
+    const envelope = readFileSync(new URL('./__fixtures__/cursor/retriable-protocol-error.txt', import.meta.url), 'utf8');
+    expect(classifyCursorProviderError(envelope, now)).toEqual({ kind: 'transient' });
+    expect(sanitizeCursorProviderError(envelope))
+      .toBe('RetriableError: [invalid_argument] protocol error: missing EndStreamResponse');
+  });
+
+  it.each([
+    '[invalid_argument] protocol error: missing EndStreamResponse',
+    '[invalid_argument] protocol error: unknown frame',
+    'NonRetriableError: [invalid_argument] protocol error: unknown frame',
+  ])('keeps protocol errors without an explicit transient signal fatal: %s', detail => {
+    expect(classifyCursorProviderError(`\n\nError: ${detail}`, now)).toEqual({ kind: 'fatal' });
+  });
+
+  it('keeps authentication failures fatal even when marked RetriableError', () => {
+    expect(classifyCursorProviderError('\n\nError: RetriableError: [unauthenticated] request rejected', now))
+      .toEqual({ kind: 'auth' });
   });
 
   it('reads a reset instant that sits beyond the display-detail cap', () => {

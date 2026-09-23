@@ -17,6 +17,13 @@ Verified 2026-09-16 against Cursor CLI **2026.09.15-d2fe57e** and:
 
 ## Provenance: observed versus constructed
 
+`retriable-protocol-error.txt` preserves the error text reported in run
+`346079d9-3e1a-4abd-9111-3ce07eb5343b`, sequence 889, at
+2026-09-23T21:37:26.642Z (Cursor CLI **2026.09.18-9a7762b**, #508).
+The envelope prefix is reconstructed from Cursor's `agent_message_chunk`
+format; this is not a raw wire capture. Classifier tests read the fixture,
+and the offline ACP mock emits the same text for recovery and exhaustion.
+
 `acp-lifecycle.ndjson` is a **constructed, source/schema-derived** sequence,
 not a captured model session. Text, paths, ids, tool arguments and outputs
 are synthetic. Its expected events are hand-authored from the normalized
