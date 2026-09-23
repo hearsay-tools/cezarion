@@ -3528,6 +3528,18 @@ export class RunManager {
     if (outOfTurn) this.flushAgentInputs(runId);
   }
 
+  /** #505: the harness started the opening turn, so the opening input was accepted.
+   * Its replay-prompt retirement still waits for that turn's successful end. */
+  private recordOpeningAccepted(runId: string, state: ActiveRun): void {
+    const id = state.openingAgentInputId;
+    if (!id || state.cancelled || this.active.get(runId) !== state) return;
+    const inputs = this.store.getRun(runId)?.agentInputs ?? [];
+    if (!inputs.some(input => input.id === id && !input.deliveredAt)) return;
+    const deliveredAt = new Date().toISOString();
+    try { this.store.commitAgentInputs(runId, inputs.map(input => input.id === id ? { ...input, deliveredAt } : input)); }
+    catch (error) { console.warn(`[cez] opening input acceptance checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
   /** #505: the harness accepted input this session has not reported reading yet. */
   private harnessOwesInput(state: ActiveRun | undefined): boolean {
     return !!state?.unreadInputIds?.size;
@@ -3645,16 +3657,16 @@ export class RunManager {
       (this.workerWait(runId)?.phase === 'registered') ||
       (this.workerWait(runId)?.phase === 'wake-pending' && !this.workerWakeAdmitted.has(runId))) return false;
     if (state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId)) return false;
-    // The opening prompt already carries this input. It must not be resubmitted
-    // by a readiness callback before the first successful turn checkpoints it.
-    if (state.openingAgentInputId) return false;
+    // The opening prompt already carries its own input; later input steers the
+    // opening turn instead of waiting for it to end (#505).
+    const queue = (run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId);
     if (run.ciWait) {
       if (!this.ciWakeAdmitted.has(runId) || state.atTurnBoundary !== state.session) return false;
       // Preserve CI admission and atomic retirement; conversations batch on the next turn.
       const input = run.agentInputs?.find(entry => entry.id === run.ciWait?.wakeId && !entry.deliveredAt);
       return !!input && this.submitAgentInput(runId, state, [{ type: 'text', text: this.formatAgentInput(runId, input) }], [input.id]);
     }
-    const batch = agentInputBatch(run.agentInputs ?? [], input => this.formatAgentInput(runId, input));
+    const batch = agentInputBatch(queue, input => this.formatAgentInput(runId, input));
     return !!batch && this.submitAgentInput(runId, state, [{ type: 'text', text: batch.text }], batch.inputs.map(input => input.id));
   }
 
@@ -4645,6 +4657,7 @@ export class RunManager {
       {
         onUiEvent: (event) => {
           completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
+          if (event.type === 'turn.started') this.recordOpeningAccepted(runId, state);
           this.handleRunnerUiEvent(runId, state, sink, event);
         },
         onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
