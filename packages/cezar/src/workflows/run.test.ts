@@ -252,7 +252,7 @@ describe('RunManager reported cost accounting', () => {
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  it.each([false, true])('counts cumulative Claude USD across Continue steps (legacy inflated: %s)', async (legacyInflated) => {
+  it.each(['fresh', 'legacy-inflated', 'missed-persist'] as const)('counts cumulative Claude USD across Continue steps (%s)', async (priorState) => {
     let launches = 0;
     runnerHook.runner = {
       backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT,
@@ -299,10 +299,11 @@ describe('RunManager reported cost accounting', () => {
       expect(store.getRun(record.id)?.costUsd).toBeCloseTo(cost);
     };
     await waitForCost(3.94);
-    if (legacyInflated) store.updateStep(record.id, record.steps[0]!.id, { costUsd: 7.35, backend: undefined });
+    if (priorState === 'legacy-inflated') store.updateStep(record.id, record.steps[0]!.id, { costUsd: 7.35, backend: undefined });
+    if (priorState === 'missed-persist') store.updateStep(record.id, record.steps[0]!.id, { costUsd: 1.74 });
     expect(manager.continueRun(record.id, { text: 'continue' })).toEqual({ ok: true });
-    await waitForCost(legacyInflated ? 8.42 : 5.01);
-    expect(store.getRun(record.id)?.steps[0]?.costUsd).toBeCloseTo(legacyInflated ? 7.35 : 3.94);
+    await waitForCost(priorState === 'legacy-inflated' ? 8.42 : 5.01);
+    expect(store.getRun(record.id)?.steps[0]?.costUsd).toBeCloseTo(priorState === 'legacy-inflated' ? 7.35 : 3.94);
     expect(store.getRun(record.id)?.steps[1]?.costUsd).toBeCloseTo(1.07);
   }, 30_000);
 

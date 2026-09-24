@@ -6095,12 +6095,25 @@ export class RunManager {
             ? candidate.sessionId === step.sessionId
             : candidate.id === step.id)).map((candidate) => candidate.id));
         previous = 0;
+        const priorCostByStep = new Map<string, number>();
         for (let index = 0; index < events.length; index++) {
           if (index === currentReportIndex) continue;
           const event = events[index]!;
           if (event.type === 'cost' && event.stepId && sessionStepIds.has(event.stepId) &&
-              typeof event.usd === 'number' && Number.isFinite(event.usd)) {
+              typeof event.usd === 'number' && Number.isFinite(event.usd) && event.usd >= 0) {
+            priorCostByStep.set(event.stepId,
+              (priorCostByStep.get(event.stepId) ?? 0) + Math.max(0, event.usd - previous));
             previous = Math.max(previous, event.usd);
+          }
+        }
+        // The event log is appended before the step total. A process exit between
+        // those writes leaves a report whose USD never reached the run record.
+        // Restore missing amounts, while preserving older inflated totals rather
+        // than silently migrating historical run state.
+        for (const [priorStepId, expectedCost] of priorCostByStep) {
+          const priorStep = run.steps.find((candidate) => candidate.id === priorStepId);
+          if (priorStep && (priorStep.costUsd === undefined || priorStep.costUsd < expectedCost)) {
+            this.store.updateStep(runId, priorStepId, { costUsd: expectedCost });
           }
         }
       }
