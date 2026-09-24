@@ -1,4 +1,4 @@
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
@@ -119,7 +119,7 @@ export class ClaudeCliRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const args = buildClaudeArgs(spec);
+    const args = buildClaudeArgs(spec, process.env, { replayUserMessages: supportsReplayUserMessages(this.bin) });
 
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -459,9 +459,26 @@ export class ClaudeCliRunner implements AgentRunner {
  * keeps today's path: `CEZ_APPROVAL_GATE=1` opts into `acceptEdits` (#435).
  * `CEZ_CLAUDE_SETTING_SOURCES` optionally adds `--setting-sources`.
  */
+/** `--replay-user-messages` is the read signal (#505), but an older CLI rejects unknown
+ * options at startup. Read the installed CLI's own `--help` once per binary; without the
+ * flag, result coverage (`user_message_uuids`) still reports reads. */
+const replaySupport = new Map<string, boolean>();
+export function supportsReplayUserMessages(bin: string): boolean {
+  const known = replaySupport.get(bin);
+  if (known !== undefined) return known;
+  let supported = false;
+  try {
+    supported = execFileSync(bin, ['--help'], { encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'ignore'] })
+      .includes('--replay-user-messages');
+  } catch { supported = false; }
+  replaySupport.set(bin, supported);
+  return supported;
+}
+
 export function buildClaudeArgs(
   spec: AgentRunSpec,
   env: NodeJS.ProcessEnv = process.env,
+  features: { replayUserMessages: boolean } = { replayUserMessages: true },
 ): string[] {
   const args: string[] = [
     '--input-format',
@@ -469,9 +486,9 @@ export function buildClaudeArgs(
     '--output-format',
     'stream-json',
     '--verbose',
-    // Echo each stdin line when the model consumes it: the consumption signal (#505).
-    '--replay-user-messages',
   ];
+  // Echo each stdin line when the model consumes it: the consumption signal (#505).
+  if (features.replayUserMessages) args.push('--replay-user-messages');
   const permissionMode = env.CEZ_CLAUDE_PERMISSION_MODE;
   if (permissionMode === 'bypass') {
     args.push('--dangerously-skip-permissions');

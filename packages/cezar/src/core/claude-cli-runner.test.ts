@@ -691,3 +691,24 @@ describe('Claude failed result (#505 review)', () => {
     session.interrupt(); await session.result.catch(() => undefined);
   });
 });
+
+describe('Claude --replay-user-messages feature detection (#505 review)', () => {
+  it('omits the flag when the installed CLI does not list it', async () => {
+    const { mkdtempSync, writeFileSync, readFileSync } = await import('node:fs');
+    const dir = mkdtempSync(join(tmpdir(), 'cez-claude-old-'));
+    const argsFile = join(dir, 'args.json');
+    const bin = join(dir, 'claude-old.mjs');
+    writeFileSync(bin, `#!/usr/bin/env node
+import { writeFileSync } from 'node:fs';
+if (process.argv.includes('--help')) { console.log('Usage: claude [options]\\\\n  --input-format <format>'); process.exit(0); }
+if (process.argv.includes('--replay-user-messages')) { console.error("error: unknown option '--replay-user-messages'"); process.exit(1); }
+writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));
+console.log(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', usage: { input_tokens: 1, output_tokens: 1 } }));
+`, { mode: 0o755 });
+    try {
+      const result = await new ClaudeCliRunner({ bin, timeoutMs: 10_000 }).run({ userPrompt: 'hello', cwd: dir });
+      expect(result.text).toBe('ok');
+      expect(JSON.parse(readFileSync(argsFile, 'utf8'))).not.toContain('--replay-user-messages');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});

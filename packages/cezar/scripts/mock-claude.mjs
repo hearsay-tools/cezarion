@@ -11,6 +11,12 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 
+// `--help` lists the options cezar feature-detects (#505).
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: claude [options]\n  --input-format <format>\n  --replay-user-messages  Re-emit user messages from stdin back on stdout\n');
+  process.exit(0);
+}
+
 // Testability hook: CEZ_MOCK_ARGS_FILE=<path> appends the argv this mock was
 // spawned with (one JSON array per line), so tests and dry-run proofs can
 // assert exactly what reached the CLI (e.g. `--append-system-prompt …`).
