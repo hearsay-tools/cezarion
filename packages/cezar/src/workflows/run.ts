@@ -3282,6 +3282,8 @@ export class RunManager {
     if (!state) {
       // An automated answer is not a human override: the reopened session waits for capacity.
       if (this.isActive(runId)) return;
+      // As on the live path, the answer supersedes a wait registered before the question.
+      if (this.workerWait(runId)) { try { this.withdrawWorkerWait(runId); } catch { return; } }
       const result = this.continueRun(runId, { text, answerInputId: reply.id }, true);
       if (!result.ok) this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `parent answer not delivered: ${result.error}` });
       return;

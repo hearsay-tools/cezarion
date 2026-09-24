@@ -401,4 +401,31 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       expect(eventsOf(f.w.id, 'worker-question-fallback')).toEqual([]);
     } finally { f.close(); }
   });
+
+  // Guard: the parked wait adopts the reply as its message wake, and the reopened answer clears it.
+  it('withdraws an earlier wait when the answer reopens a closed worker session', async () => {
+    const f = await askedPair();
+    f.close();
+    const request = randomUUID();
+    const credentials = new CredentialRegistry();
+    try {
+      const workerCaller = credentials.authenticate(credentials.issue('project', f.w.id, randomUUID()))!;
+      await f.service.send(workerCaller, { id: request, recipientRunId: f.p.id, kind: 'request', text: 'Which module? mock:hold', timeoutSeconds: 600 });
+    } finally { credentials.close(); }
+    const delegation = store.getRun(f.w.id)!.delegation!;
+    if (delegation.role !== 'worker') throw Error('missing worker');
+    store.commitDelegation([{ id: f.w.id, delegation: { ...delegation, wait: { id: randomUUID(), workerIds: [], requestIds: [request], outcomes: [],
+      deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'parked' } } }]);
+    await restart(false, undefined, eventCheckpoint());
+    const credentials2 = new CredentialRegistry();
+    try {
+      const parentCaller = credentials2.authenticate(credentials2.issue('project', f.p.id, randomUUID()))!;
+      const service = new DelegationService();
+      service.registerProject({ id: 'project', root, store, manager });
+      await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting' && !manager.isActive(f.w.id));
+      await service.send(parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: f.questionId, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
+      await until(() => answered(f.w.id).length === 1);
+      expect(waitOf(store.getRun(f.w.id))?.requestIds).toBeUndefined();
+    } finally { credentials2.close(); }
+  });
 });
