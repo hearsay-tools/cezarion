@@ -31,7 +31,11 @@ const emit = (obj) => {
   }
   if (ending) { activeTurnId = null; pendingSteers = []; }
   write(obj);
+  // #505 review: CEZ_MOCK_CODEX_LATE_START_ACK=1 answers turn/start after the turn completed.
+  if (ending && lateStartAck !== undefined) { const id = lateStartAck; lateStartAck = undefined; write({ id, result: { turn: { id: 'turn_mock_1' } } }); }
 };
+let lateStartAck;
+let startSerial = 0;
 const rl = createInterface({ input: process.stdin });
 let echoSerial = 0;
 let ciWire;
@@ -124,7 +128,10 @@ rl.on('line', async (line) => {
     }
   } else if (msg.method === 'turn/start') {
     activeTurnId = 'turn_mock_1';
+    // owned-input-delivery.testkit.ts patches the exact `emit(...)` line below; keep it verbatim.
+    if (process.env.CEZ_MOCK_CODEX_LATE_START_ACK === '1' && startSerial++ > 0) lateStartAck = msg.id; else {
     emit({ id: msg.id, result: { turn: { id: 'turn_mock_1' } } });
+    }
     emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
     const turnText = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
     // The real app-server records the turn's own input as a userMessage item,

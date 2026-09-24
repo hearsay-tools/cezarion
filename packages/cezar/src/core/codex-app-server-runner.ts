@@ -157,6 +157,9 @@ class CodexSession implements AgentSession {
   private refusedForHuman = false;
   /** Submissions that opened a turn via turn/start rather than steering one. */
   private readonly turnStartSubmissions = new Set<string>();
+  /** Recent main-thread turn outcomes (true = completed without error), for a late turn/start response. */
+  private readonly completedTurns = new Map<string, boolean>();
+  private turnCompletions = 0;
   private agentSubmissionPending = false;
   private turnBoundaryVersion = 0;
   private pendingUserInput: PendingUserInput | undefined;
@@ -605,14 +608,25 @@ class CodexSession implements AgentSession {
     // though the mapper and UI can render it. The override persists for this
     // turn and every subsequent turn, so seeding it on turn/start is enough.
     const boundaryVersion = this.turnBoundaryVersion;
+    const completionsBefore = this.turnCompletions;
     const res = await this.rpc.request('turn/start', {
       threadId: this.threadId,
       input,
       ...ids,
       ...codexTurnStartExtras(this.spec),
     });
-    // This turn's own input: its completion proves the model processed it (#505).
-    if (clientUserMessageId) this.turnStartSubmissions.add(clientUserMessageId);
+    if (clientUserMessageId) {
+      // This turn's own input: its completion proves the model processed it (#505). A response
+      // can arrive after that turn already completed; settle it from the recorded outcome.
+      const startedTurn = turnIdOf(res);
+      const outcome = startedTurn && this.turnCompletions > completionsBefore ? this.completedTurns.get(startedTurn) : undefined;
+      if (outcome === undefined) this.turnStartSubmissions.add(clientUserMessageId);
+      else {
+        const settled = this.submissions.consume(clientUserMessageId);
+        if (settled.length && outcome) this.opts.onAgentInputConsumed?.(settled);
+        else if (settled.length) this.emit({ type: 'input-unconsumed', inputIds: settled });
+      }
+    }
     if (this.turnBoundaryVersion === boundaryVersion) this.activeTurnId = turnIdOf(res) ?? this.activeTurnId;
   }
 
@@ -736,6 +750,12 @@ class CodexSession implements AgentSession {
         // partial prose before the turn boundary (run.ts reads markers there).
         this.textCoalescer.flush();
         const outcome = codexTurnOutcome(method, params);
+        const completedId = turnIdOf(params);
+        if (completedId) {
+          this.completedTurns.set(completedId, outcome.error === undefined);
+          if (this.completedTurns.size > 32) this.completedTurns.delete(this.completedTurns.keys().next().value!);
+        }
+        this.turnCompletions += 1;
         if (outcome.error !== undefined && !this.terminatedByCezar) {
           this.emit({ type: 'error', message: outcome.error });
         }

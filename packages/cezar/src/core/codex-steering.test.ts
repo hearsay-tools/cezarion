@@ -121,4 +121,17 @@ describe('codex agent input steering (#505)', () => {
     expect(texts.findIndex(t => t.includes('human answer'))).toBeLessThan(texts.findIndex(t => t.includes('agent batch')));
     session.end(); await session.result;
   });
+
+  it('credits a turn/start submission whose response arrives after its turn completed (#505 review)', async () => {
+    const consumed: string[][] = [];
+    const { session, events } = start('inspect the working tree', { onAgentInputConsumed: ids => consumed.push([...ids]) },
+      { CEZ_MOCK_CODEX_NO_USER_ITEM: '1', CEZ_MOCK_CODEX_LATE_START_ACK: '1' });
+    await waitUntil(() => events.some(e => e.type === 'turn-end'));
+    await session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo idle start' }], ['late-ack']);
+    await waitUntil(() => events.filter(e => e.type === 'turn-end').length === 2);
+    await waitUntil(() => consumed.length > 0);
+    expect(consumed).toEqual([['late-ack']]);
+    expect(events.some(e => e.type === 'input-unconsumed' || (e.type === 'turn-end' && !!e.unconsumedInputIds))).toBe(false);
+    session.end(); await session.result;
+  });
 });
