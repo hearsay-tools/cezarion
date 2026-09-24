@@ -379,6 +379,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     }
 
     const evidence = browser.waitForValue<{
+      bottomGap: number
       panesUncovered: boolean
       titleGone: boolean
       tabsVisible: boolean
@@ -402,10 +403,14 @@ describe('the GitHub tab against the live dry-run server', () => {
       const tabsBox = tabs.getBoundingClientRect();
       const tabsVisible = tabsBox.top >= mainTop - 2 && tabsBox.bottom > mainTop + 16;
       const filtersVisible = toolbar.getBoundingClientRect().bottom > mainTop + 8;
+      const mainBottom = main.getBoundingClientRect().bottom;
+      const bottomGap = Math.round(mainBottom - Math.max(
+        list.getBoundingClientRect().bottom,
+        detail.getBoundingClientRect().bottom,
+      ));
       const panesUncovered = [list, detail].every(pane => {
         const box = pane.getBoundingClientRect();
-        return box.top >= toolbar.getBoundingClientRect().bottom &&
-          box.bottom <= main.getBoundingClientRect().bottom + 1;
+        return box.top >= toolbar.getBoundingClientRect().bottom && box.bottom <= mainBottom - 15;
       });
       list.scrollTop = 0;
       detail.scrollTop = 0;
@@ -419,6 +424,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       const listStill = list.scrollTop === listBefore;
       const listHasNoXScroll = getComputedStyle(list).overflowX === 'hidden';
       return {
+        bottomGap,
         panesUncovered,
         titleGone,
         tabsVisible,
@@ -434,6 +440,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       };
     })()`, (value) => Boolean(
       value &&
+        value.bottomGap >= 15 && value.bottomGap <= 17 &&
         value.panesUncovered &&
         value.titleGone &&
         value.tabsVisible &&
@@ -445,6 +452,7 @@ describe('the GitHub tab against the live dry-run server', () => {
         value.listHasNoXScroll,
     ))
     expect(evidence).toMatchObject({
+      bottomGap: 16,
       panesUncovered: true,
       titleGone: true,
       tabsVisible: true,
