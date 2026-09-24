@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -12,18 +12,35 @@ function fixture() {
   return { root, prefix, snapshot: join(root, 'bin-links.json'), assertOwned: async () => {} };
 }
 
+// Node 24.13 `rmSync` follows a dangling symlink, reports it missing, and returns
+// without unlinking (nodejs/node#61040). `writeFileSync` then opens the leftover
+// link and throws ENOENT — the release-gate failure. `unlink` removes the link.
+function overwriteCommand(path: string, contents: string): void {
+  unlinkSync(path);
+  writeFileSync(path, contents);
+}
+
 it('keeps POSIX links, regular-file modes and absent commands intact', async () => {
   const { prefix, snapshot, assertOwned } = fixture(); const bin = join(prefix, 'bin'); mkdirSync(bin);
   symlinkSync('../lib/node_modules/@wjarka/cezarion/dist/index.js', join(bin, 'cez'));
   writeFileSync(join(bin, 'cezarion'), Buffer.from([0, 255, 13, 10]), { mode: 0o751 });
   await snapshotGlobalBins(bin, ['cez', 'cezarion', 'absent'], false, snapshot, assertOwned);
-  rmSync(join(bin, 'cez')); writeFileSync(join(bin, 'cez'), 'broken');
+  overwriteCommand(join(bin, 'cez'), 'broken');
   writeFileSync(join(bin, 'cezarion'), 'broken'); writeFileSync(join(bin, 'absent'), 'unwanted');
   await restoreGlobalBins(prefix, ['cez', 'cezarion', 'absent'], false, snapshot, assertOwned);
   expect(readlinkSync(join(bin, 'cez'))).toBe('../lib/node_modules/@wjarka/cezarion/dist/index.js');
   expect(readFileSync(join(bin, 'cezarion'))).toEqual(Buffer.from([0, 255, 13, 10]));
   if (process.platform !== 'win32') expect(statSync(join(bin, 'cezarion')).mode & 0o777).toBe(0o751);
   expect(existsSync(join(bin, 'absent'))).toBe(false);
+});
+
+it('replaces a dangling POSIX command symlink instead of following it', () => {
+  const { prefix } = fixture(); const bin = join(prefix, 'bin'); mkdirSync(bin);
+  const path = join(bin, 'cez');
+  symlinkSync('../lib/node_modules/@wjarka/cezarion/dist/index.js', path);
+  overwriteCommand(path, 'broken');
+  expect(lstatSync(path).isSymbolicLink()).toBe(false);
+  expect(readFileSync(path, 'utf8')).toBe('broken');
 });
 
 it('retains existing POSIX snapshots and refuses legacy Windows snapshots that saved no launchers', async () => {
