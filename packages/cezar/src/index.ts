@@ -42,6 +42,7 @@ import { armRestartHelper } from './application-update/launcher.ts';
 import { restartEndpoint } from './application-update/helper.ts';
 import { readNpmConfiguration } from './application-update/npm-process.ts';
 import { cezarHomeDir } from './paths.ts';
+import { openUrl } from './open-url.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
 
@@ -781,24 +782,6 @@ function readOwnVersion(): string {
     return pkg.version ?? '0.0.0';
   } catch {
     return '0.0.0';
-  }
-}
-
-function openUrl(url: string): void {
-  const cmd =
-    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
-  try {
-    const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
-    // A missing opener (e.g. no `xdg-open` on a headless Linux VPS) surfaces
-    // asynchronously as an 'error' event, NOT a synchronous throw — without a
-    // listener Node promotes it to an unhandled error and hard-crashes the whole
-    // process, even though the cockpit is already serving. Swallow it: the URL is
-    // printed above, so a browser-less host just doesn't auto-open.
-    child.on('error', () => {});
-    child.unref();
-  } catch {
-    // the printed URL is enough
   }
 }
 
