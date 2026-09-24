@@ -26,7 +26,7 @@ export function SkillSourceTag({ source, className }: { source: Skill['source'];
       data-slot="skill-source"
       data-source={source}
       className={cn(
-        'shrink-0 rounded bg-accent-strong/10 px-2 py-1 text-[10.5px]',
+        'shrink-0 rounded bg-accent-strong/10 px-2 py-1 text-[12px]',
         project ? 'font-semibold text-foreground' : 'text-soft-foreground',
         className,
       )}
@@ -50,12 +50,12 @@ export function SkillDetailBody({
   return (
     <div data-slot="skill-detail" className="min-w-0">
       <div className="flex min-w-0 flex-col items-start gap-4">
-        <span className="sw-detail-source"><SkillSourceTag source={skill.source} /> skill</span>
+        <span className="sw-detail-source text-[12px]"><SkillSourceTag source={skill.source} /> skill</span>
         <Heading className="min-w-0 text-[19px] font-normal md:text-2xl break-words [overflow-wrap:anywhere]">
           {skill.name}
         </Heading>
       </div>
-      <p data-slot="skill-path" className="mt-4 text-[11px] break-all text-soft-foreground">
+      <p data-slot="skill-path" className="mt-4 text-[12px] break-all text-soft-foreground">
         {skill.path}
         {skill.team ? ` · from ${skill.team.repo}` : ''}
       </p>

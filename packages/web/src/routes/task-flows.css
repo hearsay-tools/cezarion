@@ -73,11 +73,11 @@
 
 [data-slot="variant-column"] { gap: 16px; }
 [data-slot="variant-letter"] { color: var(--foreground); font-weight: 400; }
-[data-slot="variant-diffstat"] { font-family: inherit; font-size: 15px; line-height: 1.5; padding: 0; }
+[data-slot="variant-diffstat"] { line-height: 1.5; padding: 0; }
 [data-slot="variant-column"] > div:has([data-slot="variant-diffstat"]),
 [data-slot="variant-column"] > div:has([data-slot="variant-progress"]) { gap: 16px; }
 [data-slot="variant-column"] > div:has([data-slot="variant-progress"]) > span { font-size: 12px; font-weight: 400; text-transform: none; color: var(--foreground); }
-[data-slot="variant-column"] > div:has([data-slot="variant-diffstat"]) > span { font-size: 10px; font-weight: 400; letter-spacing: normal; }
+[data-slot="variant-column"] > div:has([data-slot="variant-diffstat"]) > span { font-weight: 400; letter-spacing: normal; }
 [data-slot="variant-column"] > button, [data-slot="variant-column"] > a { min-height: 40px; font-size: 12px; font-weight: 400; padding: 10px 16px; }
 [data-slot="variant-pick"] > svg { display: none; }
 [data-slot="plan-review"] [data-slot="dialog-header"] { padding: 24px 24px 12px; border: 0; gap: 12px; }
@@ -114,7 +114,6 @@
 [data-slot="plan-start"] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 [data-slot="plan-start"] > svg { display: none; }
 [data-slot="plan-actions"] > button, [data-slot="plan-step-actions"] > button { font-size: 12px; font-weight: 400; min-height: 40px; padding: 10px 16px; }
-[data-slot="plan-review"] [data-slot="plan-step"] p { font-family: 'IBM Plex Mono', var(--font-mono); font-size: 11px; }
 [data-slot="plan-review"] [data-slot="plan-step-actions"] { gap: 12px; }
 @media (max-width: 767px) {
   [data-slot="plan-actions"] > button, [data-slot="plan-step-actions"] > button { padding: 16px; min-height: 48px; }

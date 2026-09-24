@@ -1,5 +1,5 @@
 import { ChevronDownIcon } from '@/components/design-icons'
-import type { ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 import { DEFAULT_AGENT_ACCOUNT_ID, type Runner } from '@open-mercato/cezar-api-client'
@@ -25,6 +25,34 @@ export const chipClass =
 export const chevron = (
   <ChevronDownIcon aria-hidden="true" className="size-2.5 shrink-0 text-supporting-foreground" />
 )
+
+/** Keep the intrinsic full-label width even when the prefix is hidden, avoiding a
+ * shrink/restore loop on auto-sized pills. Both measurements follow the actual font
+ * and container; a breakpoint cannot tell whether a particular value fits. */
+function FieldLabel({ field, children }: { field: string; children: ReactNode }) {
+  const box = useRef<HTMLSpanElement>(null)
+  const measure = useRef<HTMLSpanElement>(null)
+  const [showField, setShowField] = useState(true)
+  useLayoutEffect(() => {
+    const container = box.current!
+    const full = measure.current!
+    const update = () => setShowField(full.scrollWidth <= container.clientWidth)
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(update)
+    observer.observe(container)
+    observer.observe(full)
+    return () => observer.disconnect()
+  }, [field, children])
+  return (
+    <span ref={box} className="relative min-w-0 overflow-hidden" aria-hidden="true">
+      <span ref={measure} className="invisible block w-max whitespace-nowrap">{field} · {children}</span>
+      <span data-slot="picker-label" className="absolute inset-0 block truncate">
+        {showField ? <span className="text-muted-foreground">{field} · </span> : null}{children}
+      </span>
+    </span>
+  )
+}
 
 /** A generic single-choice pill (runner / model / variants): DropdownMenu radio semantics,
  *  two-line items (label + quiet description), disabled state carries its reason as `title`. */
@@ -62,16 +90,24 @@ export function PickerPill({
   status?: string
 }) {
   const presentation = icon ? ' h-11 gap-2 rounded-lg border-border px-3 text-foreground' : ''
-  const contents = <>{icon}<span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{fieldLabel ? <span className="text-muted-foreground">{ariaLabel} · </span> : null}{label}</span></>
+  const fullLabel = fieldLabel
+    ? `${ariaLabel} · ${typeof label === 'string' ? label : options.find(option => option.value === value)?.label ?? value}`
+    : ariaLabel
+  const explanation = readOnly ? disabledHint ?? hint : disabled ? disabledHint : hint
+  const title = fieldLabel ? [fullLabel, explanation].filter(Boolean).join(' — ') : explanation
+  const contents = <>{icon}{fieldLabel
+    ? <FieldLabel field={ariaLabel}>{label}</FieldLabel>
+    : <span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{label}</span>}</>
   if (readOnly) {
     return (
       <span
         data-slot={slot}
-        aria-label={ariaLabel}
-        title={disabledHint ?? hint}
+        aria-label={fullLabel}
+        title={title}
         className={cn(chipClass, presentation, 'cursor-default hover:bg-card hover:text-muted-foreground')}
       >
         {contents}
+        {fieldLabel ? <span className="sr-only">{fullLabel}</span> : null}
       </span>
     )
   }
@@ -79,9 +115,9 @@ export function PickerPill({
     <button
       type="button"
       data-slot={slot}
-      aria-label={ariaLabel}
+      aria-label={fullLabel}
       disabled={disabled}
-      title={disabled ? disabledHint : hint}
+      title={title}
       className={cn(chipClass, presentation)}
     >
       {contents}
@@ -93,7 +129,7 @@ export function PickerPill({
   // that still receives hover.
   if (disabled) {
     return (
-      <span title={disabledHint} className="inline-flex">
+      <span title={title} className="inline-flex min-w-0 max-w-full">
         {trigger}
       </span>
     )
@@ -106,16 +142,16 @@ export function PickerPill({
           {options.map((option) => (
             <DropdownMenuRadioItem key={option.value} value={option.value} className="gap-2.5">
               <span className="flex min-w-0 flex-col">
-                <span className="text-[12.5px] font-medium">{option.label}</span>
+                <span className="text-[13px] font-medium">{option.label}</span>
                 {option.desc ? (
-                  <span className="text-[11.5px] text-muted-foreground">{option.desc}</span>
+                  <span className="text-[11px] text-muted-foreground">{option.desc}</span>
                 ) : null}
               </span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
         {status ? (
-          <DropdownMenuItem disabled className="border-t border-border text-[11.5px] text-muted-foreground">
+          <DropdownMenuItem disabled className="border-t border-border text-[11px] text-muted-foreground">
             {status}
           </DropdownMenuItem>
         ) : null}

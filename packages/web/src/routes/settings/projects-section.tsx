@@ -608,7 +608,7 @@ export function ProjectTagsEditor({
           // and picking a suggestion for the happy path.
           onInteractOutside={(event) => event.preventDefault()}
         >
-          <p className="px-2 pt-1 pb-1.5 text-[10.5px] text-soft-foreground">
+          <p className="px-2 pt-1 pb-1.5 text-[11px] text-soft-foreground">
             Tags used in this workspace
           </p>
           {suggestions.map((tag, index) => (

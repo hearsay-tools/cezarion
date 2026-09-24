@@ -658,7 +658,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
 
             {/* ---- palette + YAML preview ------------------------------------------------- */}
             <aside data-slot="wb-aside" className="min-w-0 rounded-xl border border-border bg-card p-5">
-              <h2 className="text-[15px] font-semibold">Available skills</h2>
+              <h2 className="text-[16px] font-semibold">Available skills</h2>
               <div className="sw-search relative mt-4"><SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" />
               <Input
                 data-slot="wb-filter"
@@ -694,7 +694,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
                 </div>
                 <pre
                   data-slot="wb-yaml"
-                  className="mt-2 max-h-96 overflow-auto rounded-lg border border-border bg-background p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre text-muted-foreground"
+                  className="mt-2 max-h-96 overflow-auto rounded-lg border border-border bg-background p-3 font-mono text-[11px] leading-relaxed whitespace-pre text-muted-foreground"
                 >
                   {yaml}
                 </pre>
@@ -975,14 +975,14 @@ function StepCardBody({
           className="inline-flex size-[26px] shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
           {...gripProps}
         >
-          <span className="rounded bg-accent-strong/10 px-2 py-1 font-mono text-[10px] text-link-foreground">{String(index + 1).padStart(2, '0')}</span>
+          <span className="rounded bg-accent-strong/10 px-2 py-1 font-mono text-[12px] text-link-foreground">{String(index + 1).padStart(2, '0')}</span>
         </button>
         <div className="min-w-0 flex-1 break-words text-sm font-medium [overflow-wrap:anywhere]">{title}</div>
         {badge ? (
           <span
             data-slot="wb-step-badge"
             className={cn(
-              'shrink-0 rounded-full border px-2 py-px font-mono text-[10.5px]',
+              'shrink-0 rounded-full border px-2 py-px font-mono text-[11px]',
               badge === 'unknown' && 'border-danger/35 text-danger',
             )}
           >
@@ -1012,7 +1012,7 @@ function StepCardBody({
           {description}
         </div>
       ) : null}
-      <p data-slot="wb-step-kind" className="mt-3 text-[10px] text-link-foreground">
+      <p data-slot="wb-step-kind" className="mt-3 text-[12px] text-link-foreground">
         {isCheck
           ? `Command step${step.onFail ? ` · Retry ×${step.onFail.max ?? 2}` : ''}`
           : step.skill

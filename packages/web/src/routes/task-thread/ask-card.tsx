@@ -134,7 +134,7 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
       </div>
       {oneTap && !hasOtherAnswer ? (
         resuming ? (
-          <p data-slot="ask-resume-hint" className="mt-3 text-[11.5px] text-soft-foreground">
+          <p data-slot="ask-resume-hint" className="mt-3 text-[11px] text-soft-foreground">
             The session has ended — your answer reopens it and goes to the agent.
           </p>
         ) : null
@@ -152,7 +152,7 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
               "pick one or more" hint a live run shows. */}
           <span
             data-slot={resuming ? 'ask-resume-hint' : 'ask-hint'}
-            className="text-[11.5px] text-soft-foreground"
+            className="text-[11px] text-soft-foreground"
           >
             {resuming
               ? 'the session has ended — sending reopens it'
@@ -220,11 +220,11 @@ function AskQuestionBlock({
   return (
     <div role="group" aria-label={question.question}>
       <div className="mb-0.5 flex items-center gap-2">
-        <span className="rounded-md bg-accent-strong px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-strong-foreground">
+        <span className="rounded-md bg-accent-strong px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-accent-strong-foreground">
           {question.header}
         </span>
         {multiSelect ? (
-          <span className="ml-auto text-[10.5px] text-soft-foreground">select all that apply</span>
+          <span className="ml-auto text-[11px] text-soft-foreground">select all that apply</span>
         ) : null}
       </div>
       <p className="mb-2.5 break-words text-sm font-semibold text-foreground">{question.question}</p>
@@ -244,12 +244,12 @@ function AskQuestionBlock({
                 isSelected ? 'border-accent-strong/60 bg-accent-strong/[0.06]' : 'border-border bg-card',
               )}
             >
-              <span className="flex min-w-0 items-start gap-2 text-[13.5px] font-semibold text-foreground">
+              <span className="flex min-w-0 items-start gap-2 text-[14px] font-semibold text-foreground">
                 {multiSelect ? (
                   <span
                     aria-hidden
                     className={cn(
-                      'flex size-4 shrink-0 items-center justify-center rounded border text-[10px]',
+                      'flex size-4 shrink-0 items-center justify-center rounded border text-[12px]',
                       isSelected
                         ? 'border-accent-strong bg-accent-strong text-accent-strong-foreground'
                         : 'border-soft-foreground',

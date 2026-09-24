@@ -343,7 +343,7 @@ export function TasksOverview({
             key={group.groupId}
             data-slot="compare-strip"
             data-group-id={group.groupId}
-            className="mt-3.5 flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card px-3.5 py-2.5 text-[12.5px] text-muted-foreground shadow-xs"
+            className="mt-3.5 flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card px-3.5 py-2.5 text-[13px] text-muted-foreground shadow-xs"
           >
             <ScaleIcon className="size-[15px] shrink-0 text-soft-foreground" aria-hidden="true" />
             <span>
@@ -436,7 +436,7 @@ function SummaryTasksTable({ projectName, runs, positions, onRename, onTogglePin
   return <div data-slot="tasks-summary" className="hidden md:block"><div className="rounded-lg border border-border bg-card p-5">
     <table className="w-full table-fixed border-collapse">
       <colgroup><col /><col className="w-[136px]" /><col className="w-[106px]" /><col className="w-[116px]" /><col className="w-[70px]" /></colgroup>
-      <thead><tr>{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <th key={label} className="h-8 border-b border-border text-left text-[10px] font-medium uppercase text-muted-foreground">{label}</th>)}</tr></thead>
+      <thead><tr>{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <th key={label} className="h-8 border-b border-border text-left text-[12px] font-medium uppercase text-muted-foreground">{label}</th>)}</tr></thead>
       <tbody>{runs.map((run) => {
         const attention = deriveAttention(run)
         const scheduled = scheduledResume(run)
@@ -503,7 +503,7 @@ function OverviewTab({
       aria-pressed={isActive}
       onClick={() => onSelect(view)}
       className={cn(
-        'flex min-h-11 items-center justify-center gap-1.5 border-b-2 border-transparent text-[12.5px] font-medium text-muted-foreground',
+        'flex min-h-11 items-center justify-center gap-1.5 border-b-2 border-transparent text-[13px] font-medium text-muted-foreground',
         isActive && 'border-accent-strong font-semibold text-accent-text'
       )}
     >
@@ -674,7 +674,7 @@ function TableRow({
               data-slot="queue-note"
               data-column-id="cpu-memory"
               colSpan={2}
-              className={cn(TD_BASE, 'text-right font-mono text-[11.5px] text-supporting-foreground')}
+              className={cn(TD_BASE, 'text-right font-mono text-[11px] text-supporting-foreground')}
             >
               #{queuePosition} in queue
             </td>
@@ -767,7 +767,7 @@ function TaskTableCell({
       )
     case 'workflow':
       return (
-        <td data-column-id={column.id} className={cn(TD_BASE, 'max-w-0 truncate text-[12.5px] text-muted-foreground')}>
+        <td data-column-id={column.id} className={cn(TD_BASE, 'max-w-0 truncate text-[13px] text-muted-foreground')}>
           {workflowLabel(run)}
         </td>
       )
@@ -956,7 +956,7 @@ function UsageTd({ column, cell }: { column: 'cpu' | 'memory'; cell: UsageCell }
         'overflow-hidden',
         'text-right font-mono tabular-nums',
         cell.kind === 'live' && 'bg-accent-strong/5 text-xs font-medium text-foreground',
-        cell.kind === 'peak' && 'text-[11.5px] text-supporting-foreground',
+        cell.kind === 'peak' && 'text-[11px] text-supporting-foreground',
         cell.kind === 'none' && 'text-xs text-soft-foreground'
       )}
     >
@@ -1026,7 +1026,7 @@ function TaskCard({
         <Link
           to={to}
           className={cn(
-            'order-first w-full min-w-0 rounded-sm text-[13.5px] leading-[1.35] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
+            'order-first w-full min-w-0 rounded-sm text-[14px] leading-[1.35] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
             unread ? 'font-semibold text-foreground' : readDone ? 'font-normal text-foreground' : 'font-medium'
           )}
         >
@@ -1094,7 +1094,7 @@ function BranchChip({ branch }: { branch: string }) {
   return (
     <span
       title={branch}
-      className="block truncate rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[11.5px] font-medium text-muted-foreground"
+      className="block truncate rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground"
     >
       {branch}
     </span>

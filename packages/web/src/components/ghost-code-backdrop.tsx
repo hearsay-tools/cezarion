@@ -165,7 +165,7 @@ function GhostBlock({ block, cycleMs }: { block: SceneBlock; cycleMs: number }) 
   return (
     <div
       className={cn(
-        'ghost-code-block absolute font-mono text-[11.5px] leading-[1.9] text-soft-foreground',
+        'ghost-code-block absolute font-mono text-[11px] leading-[1.9] text-soft-foreground',
         block.slot,
       )}
       style={{ '--cycle': `${cycleMs}ms` } as CSSProperties}

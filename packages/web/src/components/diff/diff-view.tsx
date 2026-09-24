@@ -338,16 +338,16 @@ function DiffFileCard({
             )}
           </span>
           {badge ? (
-            <span className="shrink-0 rounded-sm bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-sm bg-muted px-1.5 py-px text-[12px] font-medium text-muted-foreground">
               {badge}
             </span>
           ) : null}
           {file.image ? (
-            <span className="shrink-0 rounded-sm bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-sm bg-muted px-1.5 py-px text-[12px] font-medium text-muted-foreground">
               image
             </span>
           ) : file.binary ? (
-            <span className="shrink-0 rounded-sm bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-sm bg-muted px-1.5 py-px text-[12px] font-medium text-muted-foreground">
               binary
             </span>
           ) : null}

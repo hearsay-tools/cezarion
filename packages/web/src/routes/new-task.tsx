@@ -568,7 +568,7 @@ export function NewTaskRoute() {
         <TwinkleBackdrop />
         <div data-slot="auto-starting" role="status" className="text-center">
           <h1 className="animate-pulse text-lg font-semibold tracking-tight">Starting task…</h1>
-          <p className="mt-1.5 text-[13.5px] text-muted-foreground">
+          <p className="mt-1.5 text-[14px] text-muted-foreground">
             Launched from a bookmarklet — taking you to the run.
           </p>
         </div>
@@ -813,7 +813,7 @@ export function NewTaskRoute() {
               />
               <kbd
                 aria-hidden="true"
-                className="hidden rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[10.5px] font-medium text-muted-foreground md:inline"
+                className="hidden rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[11px] font-medium text-muted-foreground md:inline"
               >
                 {submitShortcutHint()}
               </kbd>
@@ -886,7 +886,7 @@ function WorktreeToggle({
       }
       className="flex items-center justify-between gap-3 px-0 py-3 text-left"
     >
-      <span><span className="block text-[13px] font-medium">Worktree</span><span className="block text-[10px] text-muted-foreground">Run in an isolated working copy</span></span>
+      <span><span className="block text-[13px] font-medium">Worktree</span><span className="block text-[12px] text-muted-foreground">Run in an isolated working copy</span></span>
       <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
     </button>
   )
@@ -921,7 +921,7 @@ function AutonomousToggle({
       }
       className="flex items-center justify-between gap-3 px-0 py-3 text-left disabled:opacity-50"
     >
-      <span><span className="block text-[13px] font-medium">Autonomous</span><span className="block text-[10px] text-muted-foreground">Let the agent proceed without prompts</span></span>
+      <span><span className="block text-[13px] font-medium">Autonomous</span><span className="block text-[12px] text-muted-foreground">Let the agent proceed without prompts</span></span>
       <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
     </button>
   )
@@ -951,7 +951,7 @@ function GenerateFollowupsToggle({
       aria-label="Follow-ups"
       className="flex min-h-11 w-full items-center justify-between gap-4 text-left text-foreground"
     >
-      <span><span className="block text-[15px]">Follow-ups</span><span className="mt-1 block text-xs leading-[1.5] text-muted-foreground">Generate suggestions in Inbox after this task. Enabled by default; your choice is remembered.</span></span>
+      <span><span className="block text-[16px]">Follow-ups</span><span className="mt-1 block text-xs leading-[1.5] text-muted-foreground">Generate suggestions in Inbox after this task. Enabled by default; your choice is remembered.</span></span>
       <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
     </button>
   )
@@ -1221,7 +1221,7 @@ function SourcePill({
       }}
       className={cn(
         chipClass,
-        'font-mono text-[11.5px]',
+        'font-mono text-[11px]',
         source === null
           ? 'text-muted-foreground'
           : 'rounded-r-none border-r-0 border-foreground/60 pr-1.5 font-semibold text-foreground',
@@ -1390,7 +1390,7 @@ function BaseBranchPill({ repo }: { repo: RepoResponse }) {
     <PickerPill
       slot="base-pill"
       ariaLabel="Base branch"
-      label={<span className="text-[11.5px]">{current}</span>}
+      label={<span className="text-[11px]">{current}</span>}
       value={repo.baseBranch ?? ''}
       onPick={(value) => mutation.mutate(value === '' ? null : value)}
       options={[

@@ -1,27 +1,79 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PickerPill } from './picker-pill'
 
 afterEach(cleanup)
 
-describe('PickerPill fieldLabel (#272)', () => {
-  it('always shows the field name beside the value, at every width', () => {
-    render(
-      <PickerPill
-        fieldLabel
-        slot="model-pill"
-        ariaLabel="Model"
-        label="Default"
-        value=""
-        onPick={() => {}}
-        options={[{ value: '', label: 'Default' }]}
-      />,
-    )
-    const button = screen.getByRole('button', { name: 'Model' })
-    expect(button.textContent).toBe('Model · Default')
-    const field = [...button.querySelectorAll('span')].find((node) => node.textContent === 'Model · ')
-    expect(field).toBeTruthy()
-    expect(field!.className).not.toMatch(/\bhidden\b/)
+describe('PickerPill fieldLabel (#522)', () => {
+  let available = 200
+  let fullWidth = 150
+  let resize: () => void
+
+  beforeEach(() => {
+    available = 200
+    fullWidth = 150
+    // jsdom has no layout. Supply only the browser measurements; the component decides
+    // which text to render, including when the same pill shrinks and grows again.
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => available)
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(() => fullWidth)
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { resize = callback }
+      observe() {}
+      disconnect() {}
+    })
+  })
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  function pill(label = 'Fable', props = {}) {
+    return <PickerPill fieldLabel slot="model-pill" ariaLabel="Model" label={label}
+      value={label} onPick={() => {}} options={[{ value: label, label }]} {...props} />
+  }
+  const visibleLabel = () => document.querySelector('[data-slot="picker-label"]')?.textContent
+
+  it('keeps the entire prefix when the full label fits, including an exact fit', () => {
+    available = fullWidth
+    render(pill())
+    expect(visibleLabel()).toBe('Model · Fable')
+  })
+
+  it('drops the whole prefix before the value and restores it after growing', () => {
+    render(pill())
+    available = fullWidth - 1
+    act(() => resize())
+    expect(visibleLabel()).toBe('Fable')
+    available = 200
+    act(() => resize())
+    expect(visibleLabel()).toBe('Model · Fable')
+  })
+
+  it('keeps the full title and accessible name when a long value overflows', () => {
+    available = 60
+    fullWidth = 350
+    render(pill('opencode/muse-spark-1.3-contributor-free'))
+    const button = screen.getByRole('button', { name: 'Model · opencode/muse-spark-1.3-contributor-free' })
+    expect(button.title).toBe('Model · opencode/muse-spark-1.3-contributor-free')
+    expect(visibleLabel()).toBe('opencode/muse-spark-1.3-contributor-free')
+  })
+
+  it('rechecks the fit when the selected label changes', () => {
+    const view = render(pill())
+    fullWidth = 350
+    view.rerender(pill('opencode/muse-spark-1.3-contributor-free'))
+    expect(visibleLabel()).toBe('opencode/muse-spark-1.3-contributor-free')
+  })
+
+  it('exposes the full read-only value as text outside the aria-hidden visual label', () => {
+    available = 60
+    render(pill('Fable', { readOnly: true }))
+    expect(screen.getAllByText('Model · Fable').some(node => !node.closest('[aria-hidden="true"]'))).toBe(true)
+  })
+
+  it.each([{ disabled: true }, { readOnly: true }])('retains the full label and explanation for %o', props => {
+    render(pill('Fable', { ...props, disabledHint: 'Managed by agent settings' }))
+    const control = document.querySelector('[data-slot="model-pill"]')!
+    expect(control.getAttribute('aria-label')).toBe('Model · Fable')
+    expect(control.getAttribute('title')).toContain('Model · Fable')
+    expect(control.getAttribute('title')).toContain('Managed by agent settings')
   })
 })
 

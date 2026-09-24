@@ -81,6 +81,16 @@ const card = () => document.querySelector('[data-slot="tool-card"]')!
 const trigger = (name: RegExp) => screen.getByRole('button', { name })
 
 describe('ToolCard — states', () => {
+  it('keeps the complete command in the tooltip and expanded row', () => {
+    const command = 'cd /home/agent/projects/a-very-long-project-path && npm run typecheck'
+    const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
+    render(<ToolCard item={{ ...item, title: `Ran ${command}` }} />)
+    const button = trigger(/Ran.*a-very-long-project-path/)
+    expect(button.querySelector('code')?.getAttribute('title')).toBe(command)
+    fireEvent.click(button)
+    expect(document.querySelector('[data-slot="tool-command"]')?.textContent).toBe(command)
+  })
+
   it('running without output: shimmering verb, spinner, locked (disabled trigger, no chevron)', () => {
     const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'running')
     render(<ToolCard item={item} />)

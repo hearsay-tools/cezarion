@@ -46,7 +46,7 @@ const MESSAGE_SURFACE = {
     speaker: 'Agent response',
     classes: 'border-message-agent-border bg-message-agent-bg',
     accent: 'text-message-agent-accent',
-    body: 'max-md:text-[13px]',
+    body: 'max-w-[65ch] text-[15px] md:text-[14px]',
   },
 } as const
 
@@ -70,10 +70,10 @@ export function ConversationMessage({ role, children, className, ...rest }: Conv
         className,
       )}
     >
-      <p className={cn('m-0 flex items-center gap-2 text-[11px] leading-none font-semibold tracking-[0.6px] uppercase', surface.accent)}>
+      <p className={cn('m-0 flex items-center gap-2 text-[11px] leading-[1.2] font-semibold tracking-[0.6px] uppercase', surface.accent)}>
         <MessageSquareIcon aria-hidden="true" className="size-4 shrink-0" />{surface.label}
       </p>
-      <div className={cn('min-w-0 break-words text-[14px] leading-[1.6] text-foreground select-text [overflow-wrap:anywhere]', surface.body)}>
+      <div className={cn('min-w-0 break-words text-[14px] text-foreground select-text [overflow-wrap:anywhere]', surface.body, 'leading-[1.6]')}>
         {children}
       </div>
     </article>
@@ -173,7 +173,7 @@ export function UserBubble({
               void save()
             }
           }}
-          className="block max-h-[220px] min-h-[60px] w-full resize-none rounded-md bg-background px-2 py-1.5 text-[13.5px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="block max-h-[220px] min-h-[60px] w-full resize-none rounded-md bg-background px-2 py-1.5 text-[14px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         />
         <span className="mt-1.5 flex justify-end gap-1.5">
           <button
@@ -335,7 +335,7 @@ function WorkerConversationBatchCard({
       className={cn('flex w-full min-w-0 flex-col gap-2 rounded-[8px] border p-3 md:px-4 md:py-[14px]', surface.classes)}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <p className={cn('m-0 flex min-w-0 flex-wrap items-center gap-x-2 text-[11px] leading-none font-semibold tracking-[0.6px] uppercase', surface.accent)}>
+        <p className={cn('m-0 flex min-w-0 flex-wrap items-center gap-x-2 text-[11px] leading-[1.2] font-semibold tracking-[0.6px] uppercase', surface.accent)}>
           <span>{headingPrefix}</span>
           {counterpartIds.map((id, index) => (
             <span key={id} className="inline-flex min-w-0 items-center gap-x-2 normal-case tracking-normal">
@@ -346,7 +346,7 @@ function WorkerConversationBatchCard({
             </span>
           ))}
         </p>
-        <span data-slot="conversation-kind" className="rounded-full bg-background/60 px-2 py-0.5 text-[10.5px] font-semibold tracking-[0.05em] text-foreground uppercase">
+        <span data-slot="conversation-kind" className="rounded-full bg-background/60 px-2 py-0.5 text-[11px] font-semibold tracking-[0.05em] text-foreground uppercase">
           {conversationKindLabel(batch.kind)}
         </span>
         {batch.messages.length === 1 && soleStatus ? (
@@ -808,7 +808,7 @@ export function ToolCard({
           {verb}
         </span>
         {detail !== undefined ? (
-          <code className="min-w-0 truncate font-mono text-xs text-muted-foreground">{detail}</code>
+          <code title={detail} className="block min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{detail}</code>
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-2 pl-2">
           {busy ? (
@@ -820,7 +820,7 @@ export function ToolCard({
             <span
               data-slot="tool-exit"
               className={cn(
-                'rounded-full px-2 py-px font-mono text-[10.5px] font-semibold',
+                'rounded-full px-2 py-px font-mono text-[11px] font-semibold',
                 item.exitCode === 0 ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
               )}
             >
@@ -831,6 +831,9 @@ export function ToolCard({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="border-t border-border bg-card-2">
+          {detail !== undefined ? (
+            <pre data-slot="tool-command" className="px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{detail}</pre>
+          ) : null}
           {item.error !== undefined && item.error !== '' ? (
             <div data-slot="tool-error" className="px-4 py-3 font-mono text-xs leading-[1.7] whitespace-pre-wrap text-danger">
               {item.error}
@@ -856,7 +859,7 @@ export function ToolCard({
 export function ContextGroup({ group, scope }: { group: ContextGroupBlock; scope?: string }) {
   return (
     <Collapsible data-slot="ctx-group" className="min-w-0">
-      <CollapsibleTrigger className="group flex h-[34px] w-full items-center gap-2 rounded-md px-2 -mx-2 text-left text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
+      <CollapsibleTrigger className="group flex h-[34px] tabular-nums w-full items-center gap-2 rounded-md px-2 -mx-2 text-left text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
         <ChevronRightIcon
           aria-hidden
           className="size-3.5 shrink-0 text-soft-foreground transition-transform group-data-[state=open]:rotate-90"
@@ -879,7 +882,7 @@ export function ContextGroup({ group, scope }: { group: ContextGroupBlock; scope
 export function ToolStreak({ count, children }: { count: number; children: ReactNode }) {
   return (
     <Collapsible data-slot="tool-streak" className="min-w-0">
-      <CollapsibleTrigger className="group flex items-center gap-1.5 rounded-md p-0.5 text-left text-xs text-soft-foreground hover:text-muted-foreground">
+      <CollapsibleTrigger className="group flex items-center gap-1.5 rounded-md p-0.5 tabular-nums text-left text-xs text-soft-foreground hover:text-muted-foreground">
         <ChevronRightIcon
           aria-hidden
           className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90"

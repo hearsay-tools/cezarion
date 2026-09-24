@@ -366,7 +366,7 @@ export function GlobalTasksRoute() {
           <ViewTab view="archived" current={view} onSelect={setView}>
             Archived
           </ViewTab>
-        <span data-slot="global-tasks-count" className="ml-auto text-[12.5px] text-soft-foreground tabular-nums">
+        <span data-slot="global-tasks-count" className="ml-auto text-[13px] text-soft-foreground tabular-nums">
           {visible.length} of {tasks.length}
         </span>
         </div>
@@ -395,7 +395,7 @@ export function GlobalTasksRoute() {
         />
 
         {truncated.length > 0 ? (
-          <p data-slot="global-tasks-truncated" className="text-[11.5px] text-soft-foreground">
+          <p data-slot="global-tasks-truncated" className="text-[11px] text-soft-foreground">
             Showing the newest {index.data?.perProjectLimit} tasks per project — older ones in{' '}
             {truncated.join(', ')} are only in that project&rsquo;s own Tasks page.
           </p>
@@ -479,7 +479,7 @@ function ViewTab({
       aria-pressed={isActive}
       onClick={() => onSelect(view)}
       className={cn(
-        'flex min-h-11 items-center justify-center border-b-2 border-transparent text-[12.5px] font-medium text-muted-foreground',
+        'flex min-h-11 items-center justify-center border-b-2 border-transparent text-[13px] font-medium text-muted-foreground',
         isActive && 'border-accent-strong font-semibold text-accent-text',
       )}
     >
@@ -673,7 +673,7 @@ function TaskList({
       data-slot="global-tasks-table"
       className="overflow-x-auto rounded-lg border border-border bg-card p-5"
     >
-      <div data-slot="global-summary-head" aria-hidden="true">{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <span key={label}>{label}</span>)}</div>
+      <div data-slot="global-summary-head" className="text-[12px]" aria-hidden="true">{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <span key={label}>{label}</span>)}</div>
       <TooltipProvider>
             {tasks.map((task) => (
               <TaskRow
@@ -747,7 +747,7 @@ function TaskRow({
             to={to}
             title={runTitle(run)}
             className={cn(
-              'min-w-0 truncate text-[13px]',
+              'min-w-0 truncate text-[14px] md:text-[13px]',
               unread
                 ? 'font-semibold text-foreground'
                 : readDone
@@ -797,7 +797,7 @@ function TaskRow({
           <Dash />
         )}
       </div>
-      <div data-slot="global-task-workflow" className="text-[12.5px] text-muted-foreground">
+      <div data-slot="global-task-workflow" className="text-[13px] text-muted-foreground">
         {run.workflow}
       </div>
       <div data-slot="global-task-diff" className="text-xs text-muted-foreground"><span title="Change totals are available in the project task list">—</span></div>
@@ -1061,7 +1061,7 @@ function ReferenceOverflow({
           if (openedByHover.current) event.preventDefault()
         }}
       >
-        <p className="px-1 pb-1.5 text-[10.5px] text-soft-foreground">References</p>
+        <p className="px-1 pb-1.5 text-[11px] text-soft-foreground">References</p>
         <span className="flex flex-col items-start gap-1">
           {references.map((reference) => (
             <ReferenceChip
@@ -1091,7 +1091,7 @@ export function TagChip({ tag, className }: { tag: string; className?: string })
     <span
       data-slot="project-tag"
       className={cn(
-        'inline-flex max-w-full items-center truncate rounded-full bg-muted px-1.5 py-px text-[10.5px] font-medium text-muted-foreground',
+        'inline-flex max-w-full items-center truncate rounded-full bg-muted px-1.5 py-px text-[11px] font-medium text-muted-foreground',
         className,
       )}
     >

@@ -857,7 +857,7 @@ function GithubRow({
             {item.title}
           </span>
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] font-mono text-[10.5px] text-muted-foreground md:flex-nowrap md:gap-y-0">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] font-mono text-[11px] text-muted-foreground md:flex-nowrap md:gap-y-0">
           <span>#{item.number}</span>
           <span className="max-w-full shrink-0 truncate md:min-w-0 md:shrink">{item.author}</span>
           <span>{shortAge(item.createdAt)}</span>
@@ -951,7 +951,7 @@ function LabelChip({ label, color, plain = false }: { label: string; color: stri
       data-slot="gh-label"
       data-label={label}
       style={plain ? undefined : labelChipStyle(color)}
-      className={plain ? "text-[11px] font-normal text-muted-foreground" : "rounded-full border px-1.5 py-px text-[10px] font-medium"}
+      className={plain ? "text-[11px] font-normal text-muted-foreground" : "rounded-full border px-1.5 py-px text-[12px] font-medium"}
     >
       {label}
     </span>
@@ -989,7 +989,7 @@ function GithubDetail({
 
       <div data-slot="gh-description-card" className={item.kind === 'pr' ? 'rounded-xl border border-border bg-card p-6' : undefined}>
       {item.kind === 'pr' ? <h2 className="mb-4 text-[22px] leading-snug font-normal">#{item.number} {item.title}</h2> : null}
-      <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[10.5px] text-soft-foreground">
+      <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[11px] text-soft-foreground">
         <span>#{item.number}</span>·<span>{kindWord}</span>·<span>opened by {item.author}</span>·
         <span>{shortAge(item.createdAt)} ago</span>
         {item.comments ? (
@@ -1626,7 +1626,7 @@ function EventPhrase({ event, colors }: { event: GithubTimelineEvent; colors: Re
             <span
               data-slot="gh-event-label"
               style={labelChipStyle(event.label.color ?? colors[event.label.name])}
-              className="max-w-[12rem] truncate rounded-full border px-1.5 py-px font-sans text-[10px]"
+              className="max-w-[12rem] truncate rounded-full border px-1.5 py-px font-sans text-[12px]"
             >
               {event.label.name}
             </span>
@@ -1704,7 +1704,7 @@ function ThreadEntry({ comment }: { comment: GithubComment }) {
           <span
             data-slot="gh-review-chip"
             data-review-state={comment.reviewState}
-            className={cn('rounded-full border px-1.5 py-px font-sans text-[10px] font-medium', chip.tone)}
+            className={cn('rounded-full border px-1.5 py-px font-sans text-[12px] font-medium', chip.tone)}
           >
             {chip.label}
           </span>

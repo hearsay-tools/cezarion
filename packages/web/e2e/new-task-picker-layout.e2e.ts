@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,6 +24,10 @@ beforeAll(async () => {
   const opencode = join(root, 'opencode-fixture')
   writeFileSync(opencode, '#!/bin/sh\necho 1.0.0\n')
   chmodSync(opencode, 0o755)
+  mkdirSync(join(root, '.ai/cezar'), { recursive: true })
+  writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({
+    defaultModels: { opencode: 'opencode/muse-spark-1.3-contributor-free' },
+  }))
   git('add', '.')
   git('commit', '-qm', 'init')
 
@@ -58,7 +62,7 @@ afterAll(async () => {
 })
 
 type Box = { left: number; right: number; top: number; bottom: number; width: number; height: number }
-type Layout = { runner: Box; model: Box; effort: Box; group: Box; sidebarWidth: number; viewportOverflow: boolean; clipped: string[]; truncated: string[]; hiddenFieldNames: string[] }
+type Layout = { runner: Box; model: Box; effort: Box; group: Box; sidebarWidth: number; viewportOverflow: boolean; clipped: string[]; truncated: string[]; incorrectPrefixes: string[] }
 
 function layout(): Layout {
   return browser.evaluate(`(() => {
@@ -75,13 +79,16 @@ function layout(): Layout {
         return box.left < r.left - 1 || box.right > r.right + 1;
       }).map(el => el.getAttribute('data-slot')),
       truncated: [...group.querySelectorAll('[data-slot$="pill"]')].filter(el => {
-        const label = el.querySelector('span.min-w-0');
+        const label = el.querySelector('[data-slot="picker-label"]');
         return label && label.scrollWidth > label.clientWidth + 1;
       }).map(el => el.getAttribute('data-slot')),
-      hiddenFieldNames: ['runner-pill', 'effort-pill'].filter(slot => {
-        const prefix = group.querySelector('[data-slot="' + slot + '"] > span > span');
-        return getComputedStyle(prefix).display === 'none';
-      }),
+      incorrectPrefixes: [...group.querySelectorAll('[data-slot$="pill"]')].filter(pill => {
+        const label = pill.querySelector('[data-slot="picker-label"]');
+        const full = pill.getAttribute('aria-label');
+        const value = full.slice(full.indexOf(' · ') + 3);
+        const fits = label.previousElementSibling.scrollWidth <= label.clientWidth;
+        return label.textContent !== (fits ? full : value) || pill.title !== full;
+      }).map(el => el.getAttribute('data-slot')),
     };
   })()`) as Layout
 }
@@ -116,12 +123,12 @@ it('lays out New Task pickers in reading order without clipping at desktop, narr
         expect(boxes.group.width).toBeGreaterThanOrEqual(550)
         expect(boxes.group.width).toBeLessThan(600)
       }
-      if (width === 360 || width === 500) expect(boxes.hiddenFieldNames, `${width}px: field names hidden`).toEqual([])
+      expect(boxes.incorrectPrefixes, `${width}px: remove the whole field before truncating the value`).toEqual([])
       expect(boxes.viewportOverflow, `${width}px ${theme}: page overflow`).toBe(false)
       expect(boxes.clipped, `${width}px ${theme}: clipped picker labels or boxes`).toEqual([])
       const truncatedValues = boxes.truncated.filter((slot) => slot !== 'model-pill')
       expect(truncatedValues, `${width}px ${theme}: selected values truncated`).toEqual([])
-      if (width === 1440 && sidebar === 264) expect(boxes.truncated, `${theme}: desktop labels truncated`).toEqual([])
+      expect(browser.text('[data-slot="model-pill"]')).toContain('opencode/muse-spark-1.3-contributor-free')
       for (const pill of [boxes.runner, boxes.model, boxes.effort]) expect(pill.height).toBeGreaterThanOrEqual(44)
       if (width >= 1280) {
         expect(boxes.runner.top).toBe(boxes.model.top)

@@ -14,9 +14,6 @@
   [data-route='new'] .new-task-agent-options:not(:has([data-slot='runner-pill'])) [data-slot='effort-pill'] { grid-column: 1 / -1; }
   [data-route='new'] .new-task-agent-options :is([data-slot='runner-pill'], [data-slot='effort-pill']) > svg:first-child { display: none; }
 }
-@container new-task-agent-options (max-width: 299.99px) {
-  [data-route='new'] .new-task-agent-options :is([data-slot='runner-pill'], [data-slot='effort-pill']) > span > span { display: none; }
-}
 [data-route='new'] .new-task-agent-options [data-slot$='pill'] { border-color: var(--border); border-radius: 9px; min-height: 44px; }
 [data-route='new'] .new-task-agent-options [data-slot='model-pill'] { height: 44px; min-height: 44px; padding: 0 12px; }
 [data-route='new'] .new-task-agent-options [data-slot='model-pill'] > svg { width: 18px; height: 18px; }
@@ -26,11 +23,11 @@
 [data-route='new'] [data-slot='source-pill'] { border-color: var(--border); }
 [data-route='new'] [data-slot='followups-options'] { background: transparent; padding: 16px; }
 [data-route='new'] [data-slot='execution-options'] summary { gap: 10px; }
-[data-route='new'] [data-slot='execution-options'] summary > span:first-of-type { font-size: 15px; font-weight: 600; }
+[data-route='new'] [data-slot='execution-options'] summary > span:first-of-type { font-weight: 600; }
 [data-route='new'] [data-slot='execution-options'] > div { border-top: 0; padding-top: 0; }
 [data-route='new'] [data-slot='execution-options'] > div > p:first-child { font-size: 11px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
 [data-route='new'] [data-slot='execution-tip'] { margin-top: 16px; font-size: 11px; line-height: 1.7; }
-[data-route='new'] .new-task-run-settings > button > span:first-child > span:last-child { font-size: 10px; line-height: 1.6; }
+[data-route='new'] .new-task-run-settings > button > span:first-child > span:last-child { line-height: 1.6; }
 [data-route='new'] .new-task-run-settings > button[aria-checked='false'] > span:last-child > span { background: var(--muted-foreground); }
 @media (min-width: 1280px) {
   [data-route='new'] [data-slot='execution-options'][open] { padding: 20px; }

@@ -729,7 +729,7 @@ const sessionLayoutExpression = `(() => {
     return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height, hit: !!under && el.contains(under) }
   }
   const controls = {
-    runner: select('[data-slot="session-controls"] [aria-label="Runner"]'),
+    runner: select('[data-slot="session-controls"] [aria-label^="Runner · "]'),
     model: select('[data-slot="follow-up-model-pill"]'),
     effort: select('[data-slot="follow-up-effort-pill"]'),
     attach: select('[data-slot="composer"] [aria-label="Attach files"]'),
@@ -744,7 +744,7 @@ const sessionLayoutExpression = `(() => {
     chevron: select('[data-slot="follow-up-model-pill"] > svg:last-child'),
   }
   if (Object.values(modelChrome).some(value => !value)) return null
-  const label = document.querySelector('[data-slot="follow-up-model-pill"] > span')
+  const label = document.querySelector('[data-slot="follow-up-model-pill"] [data-slot="picker-label"]')
   const archive = document.querySelector('[data-slot="composer-actions"] [aria-label="Archive task"]')
   const main = document.querySelector('[data-slot="main"]')
   const group = select('[data-slot="session-controls"]')
@@ -873,23 +873,24 @@ describe('responsive session composer', () => {
 
     // WCAG AA: small text 4.5:1; meaningful icons 3:1, sampled over their painted surfaces.
     const textTargets: Array<[string, string]> = [
-      ['Runner value', '[data-slot="session-controls"] [aria-label="Runner"]'],
-      ['Runner label', '[data-slot="session-controls"] [aria-label="Runner"] .text-muted-foreground'],
+      ['Runner value', '[data-slot="session-controls"] [aria-label^="Runner · "]'],
+      ['Runner label', '[data-slot="session-controls"] [aria-label^="Runner · "] [data-slot="picker-label"] > span'],
       ['Model value', '[data-slot="follow-up-model-pill"]'],
-      ['Model label', '[data-slot="follow-up-model-pill"] .text-muted-foreground'],
+      ['Model label', '[data-slot="follow-up-model-pill"] [data-slot="picker-label"] > span'],
       ['Effort value', '[data-slot="follow-up-effort-pill"]'],
-      ['Effort label', '[data-slot="follow-up-effort-pill"] .text-muted-foreground'],
+      ['Effort label', '[data-slot="follow-up-effort-pill"] [data-slot="picker-label"] > span'],
       ['Send', '[data-slot="composer-actions"] [aria-label="Continue"]'],
     ]
     if (width >= 768) textTargets.push(['Archive task', '[data-slot="composer-actions"] [aria-label="Archive task"]'])
     const textSamples: Array<{ target: string } & ContrastSample> = []
     for (const [name, selector] of textTargets) {
+      if (name.endsWith(' label') && browser.count(selector) === 0) continue
       const sample = browser.evaluate(contrastSampleExpression(selector)) as ContrastSample
       textSamples.push({ target: name, ...sample })
       expect(sample.ratio, `${theme} ${width}px ${name} text contrast`).toBeGreaterThanOrEqual(4.5)
     }
     const iconTargets: Array<[string, string]> = [
-      ['Runner', '[data-slot="session-controls"] [aria-label="Runner"] svg:first-child'],
+      ['Runner', '[data-slot="session-controls"] [aria-label^="Runner · "] svg:first-child'],
       ['Model', '[data-slot="follow-up-model-pill"] svg:first-child'],
       ['Effort', '[data-slot="follow-up-effort-pill"] svg:first-child'],
       ['Attach files', '[data-slot="composer"] [aria-label="Attach files"] svg'],
@@ -975,7 +976,7 @@ describe('responsive session composer', () => {
       const groups = [...document.querySelectorAll('[data-slot="composer"] [data-slot="session-controls"]')]
       if (!overlay || groups.length !== 1) return null
       const group = document.querySelector('[data-slot="composer"] [data-slot="session-controls"]')
-      return { runner: !!group?.querySelector('[aria-label="Runner"]'), model: group?.querySelector('[data-slot="follow-up-model-pill"]')?.textContent ?? null, effort: !!group?.querySelector('[data-slot="follow-up-effort-pill"]') }
+      return { runner: !!group?.querySelector('[aria-label^="Runner · "]'), model: group?.querySelector('[data-slot="follow-up-model-pill"]')?.textContent ?? null, effort: !!group?.querySelector('[data-slot="follow-up-effort-pill"]') }
     })()`) as { runner: boolean; model: string | null; effort: boolean }
     expect(recording.runner).toBe(true)
     expect(recording.model, 'Model stays in the recording settings group').not.toBeNull()
@@ -984,4 +985,30 @@ describe('responsive session composer', () => {
     browser.click('[aria-label="Cancel dictation"]')
     browser.waitForFunction(`document.querySelector('[data-slot="dictation-overlay"]') === null && document.querySelector('[data-slot="composer-toolbar"]') !== null`)
   }, 90_000)
+})
+
+it.each([375, 1280])('uses the readable agent type scale and preserves full tool commands at %ipx (#522)', (width) => {
+  browser.setViewport(width, 800)
+  browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
+  const facts = browser.waitForValue(`(() => {
+    const message = document.querySelector('[data-slot="assistant-message"]');
+    const body = message?.querySelector(':scope > div');
+    const eyebrow = message?.querySelector(':scope > p');
+    const command = document.querySelector('[data-slot="tool-card"][data-kind="execute"] > button code');
+    if (!body || !eyebrow || !command) return null;
+    const style = getComputedStyle(body);
+    return { fontSize: style.fontSize, lineHeight: style.lineHeight,
+      width: body.getBoundingClientRect().width, maxWidth: parseFloat(style.maxWidth),
+      eyebrowLineHeight: getComputedStyle(eyebrow).lineHeight,
+      command: command.textContent, title: command.title,
+      overflow: getComputedStyle(command).textOverflow, whiteSpace: getComputedStyle(command).whiteSpace };
+  })()`) as { fontSize: string; lineHeight: string; width: number; maxWidth: number; eyebrowLineHeight: string; command: string; title: string; overflow: string; whiteSpace: string }
+  expect(facts.fontSize).toBe(width < 768 ? '15px' : '14px')
+  expect(facts.lineHeight).toBe(width < 768 ? '24px' : '22.4px')
+  expect(facts.width).toBeLessThanOrEqual(facts.maxWidth + 1)
+  expect(Number.isFinite(facts.maxWidth)).toBe(true)
+  expect(facts.eyebrowLineHeight).toBe('13.2px')
+  expect(facts.title).toBe(facts.command)
+  expect(facts.overflow).toBe('ellipsis')
+  expect(facts.whiteSpace).toBe('nowrap')
 })

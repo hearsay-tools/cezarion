@@ -134,7 +134,7 @@ export function ReferenceChip({
   const conflicting = kind === 'PR' && (explicitConflicting ?? entry.conflicting) === true
   const presentation = conflicting ? REFERENCE_CONFLICT : statusPresentation
   const chipClass = cn(
-    'inline-flex h-[22px] items-center gap-1 rounded-md border px-1.5 font-mono text-[10px] font-normal',
+    'inline-flex h-[22px] items-center gap-1 rounded-md border px-1.5 font-mono text-[12px] font-normal',
     TONE_CLASS[presentation?.tone ?? 'accent'],
     className,
   )

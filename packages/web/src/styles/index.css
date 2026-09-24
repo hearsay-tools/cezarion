@@ -64,11 +64,6 @@
     U+2C60-2C7F, U+A720-A7FF;
 }
 
-@font-face {
-  font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap;
-  src: url('../assets/fonts/ibm-plex-mono-regular.ttf') format('truetype');
-}
-
 /* ---------- tokens: dark (default) ---------- */
 
 :root {
@@ -687,7 +682,7 @@
   gap: 16px;
 }
 .new-task-editor { grid-row: 1; }
-.new-task-editor textarea { min-height: 132px; padding: 16px 20px; font-size: 17px; }
+.new-task-editor textarea { min-height: 132px; padding: 16px 20px; }
 .new-task-composer [data-slot='composer-agent-options'] { grid-row: 3; }
 .new-task-composer [data-slot='composer-execution-panel'] { grid-row: 4; }
 .new-task-submission { display: contents; }

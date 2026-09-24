@@ -344,7 +344,7 @@ export function HandToAgent({
         </Button>
         <kbd
           aria-hidden="true"
-          className="rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[10.5px] font-medium text-muted-foreground"
+          className="rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[11px] font-medium text-muted-foreground"
         >
           {submitShortcutHint()}
         </kbd>
@@ -399,7 +399,7 @@ function WorkflowPicker({
           type="button"
           data-slot="gh-workflow-trigger"
           aria-label="Choose a workflow"
-          className={cn(chipClass, value && 'border-foreground/60 font-mono text-[11.5px] font-semibold text-foreground')}
+          className={cn(chipClass, value && 'border-foreground/60 font-mono text-[11px] font-semibold text-foreground')}
         >
           <WorkflowIcon size={16} aria-hidden="true" className="size-3 shrink-0 text-accent-icon" />
           <span className="min-w-0 max-w-44 truncate">{value ?? 'workflow'}</span>

@@ -106,7 +106,7 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
           >
             {d.label}
             {!installed.includes(d.id) && (
-              <Badge variant="outline" className="text-[10px] text-soft-foreground">
+              <Badge variant="outline" className="text-[12px] text-soft-foreground">
                 not installed
               </Badge>
             )}
@@ -186,7 +186,7 @@ function AgentPane({
                   >
                     <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{file.label}</span>
                     {file.seeded && (
-                      <Badge variant="outline" className="shrink-0 text-[10px]">
+                      <Badge variant="outline" className="shrink-0 text-[12px]">
                         seeded
                       </Badge>
                     )}
@@ -280,7 +280,7 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
       <p data-slot="agent-config-scope" title={file.path} className="text-[12px] text-muted-foreground break-words">{file.scope.charAt(0).toUpperCase() + file.scope.slice(1)} scope · {file.path}</p>
       <div className="settings-readout flex flex-wrap items-center gap-2">
         <span className="font-mono text-[13px]">{file.label}</span>
-        <Badge variant="outline" className="text-[10px] uppercase">
+        <Badge variant="outline" className="text-[12px] uppercase">
           {file.format}
         </Badge>
         <a

@@ -380,7 +380,7 @@ describe('the hero surface', () => {
     expect(disclosure.contains(screen.getByRole('radio', { name: 'Plan first' }))).toBe(false)
     expect(disclosure.contains(screen.getByRole('button', { name: 'Start task' }))).toBe(false)
     expect(summary.parentElement?.textContent).toContain('claude')
-    const model = screen.getByRole('button', { name: 'Model' })
+    const model = screen.getByRole('button', { name: /^Model · / })
     expect(disclosure.contains(model)).toBe(false)
     fireEvent.pointerDown(model)
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /sonnet/ }))
@@ -394,7 +394,7 @@ describe('the hero surface', () => {
     expect(textarea()).toBe(originalTextarea)
     expect(textarea().value).toBe('Keep this draft')
     expect(screen.getByRole('button', { name: 'Parallel variants' }).textContent).toContain('×2')
-    expect(screen.getByRole('button', { name: 'Model' })).toBe(model)
+    expect(screen.getByRole('button', { name: /^Model · / })).toBe(model)
   })
 
   it('renders the design hero without decorative backdrops and focuses the textarea', async () => {
@@ -448,9 +448,9 @@ describe('picker data flows', () => {
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()
     await pillReady()
-    expect(screen.getByRole('button', { name: 'Model' }).textContent).toMatch(/^Model \u00b7 /)
-    expect(screen.getByRole('button', { name: 'Runner' }).textContent).toMatch(/^Runner \u00b7 /)
-    expect(screen.getByRole('button', { name: 'Effort' }).textContent).toMatch(/^Effort \u00b7 /)
+    expect(screen.getByRole('button', { name: /^Model · / }).textContent).toMatch(/^Model \u00b7 /)
+    expect(screen.getByRole('button', { name: /^Runner · / }).textContent).toMatch(/^Runner \u00b7 /)
+    expect(screen.getByRole('button', { name: /^Effort · / }).textContent).toMatch(/^Effort \u00b7 /)
     expect(document.querySelector('.new-task-model-label')).toBeNull()
     expect(document.querySelector('.new-task-runner-control')).toBeNull()
   })
@@ -497,7 +497,7 @@ describe('picker data flows', () => {
     })
     fireEvent.click(modelOption as HTMLElement)
 
-    const effort = screen.getByRole('button', { name: 'Effort' })
+    const effort = screen.getByRole('button', { name: /^Effort · / })
     fireEvent.pointerDown(effort)
     options = await screen.findAllByRole('menuitemradio')
     expect(options).toHaveLength(3)
@@ -1367,9 +1367,9 @@ describe('submit', () => {
     // A locked model keeps its identity icon, but offers no dropdown affordance.
     expect(modelPill.querySelector(':scope > svg[data-design-icon="cpu"]')).not.toBeNull()
     expect(modelPill.querySelector(':scope > svg[data-design-icon="chevron-down"]')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Model' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Model · / })).toBeNull()
 
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Runner' }))
+    fireEvent.pointerDown(screen.getByRole('button', { name: /^Runner · / }))
     const runnerOptions = await screen.findAllByRole('menuitemradio')
     fireEvent.click(runnerOptions.find((option) => option.textContent?.includes('Codex')) as HTMLElement)
     await waitFor(() => expect(modelPill.textContent).toContain('gpt-5.6-codex'))
@@ -2522,7 +2522,7 @@ describe('the composer runner pill carries the account', () => {
     await pickFrom(runnerPill()!, 'codex')
 
     // Codex has no second login, so the account group goes away and the pill is a runner again…
-    await waitFor(() => expect(runnerPill()?.textContent?.trim()).toBe('Runner · codex'))
+    await waitFor(() => expect(runnerPill()?.querySelector('[data-slot="picker-label"]')?.textContent?.trim()).toBe('Runner · codex'))
     fireEvent.change(textarea(), { target: { value: 'do the thing' } })
     await startTask()
     // …and nothing account-shaped reaches the wire.

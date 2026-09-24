@@ -6,11 +6,11 @@
 [data-slot="skills-refresh"] { gap: 8px; padding-inline: 12px; border-radius: 8px; color: var(--foreground); }
 [data-slot="skills-refresh"] svg { width: 16px; height: 16px; }
 [data-slot="skill-row"] { min-height: 0; gap: 10px; }
-[data-slot="skill-row"] [data-slot="skill-source"] { font-size: 10px; line-height: 1.5; }
+[data-slot="skill-row"] [data-slot="skill-source"] { line-height: 1.5; }
 [data-slot="skill-row"] > span:nth-child(2) { font-size: 11px; line-height: 1.65; }
 [data-slot="skill-detail"] { display: flex; flex-direction: column; gap: 16px; }
 [data-slot="skill-detail"] > :is(p, section) { margin-top: 0; }
-.sw-detail-source { display: inline-flex; height: 26px; align-items: center; padding-inline: 8px; border-radius: 5px; background: color-mix(in srgb, var(--accent-strong) 10%, transparent); color: var(--link-foreground); font-size: 10px; font-weight: 500; white-space: pre; }
+.sw-detail-source { display: inline-flex; height: 26px; align-items: center; padding-inline: 8px; border-radius: 5px; background: color-mix(in srgb, var(--accent-strong) 10%, transparent); color: var(--link-foreground); font-weight: 500; white-space: pre; }
 .sw-detail-source [data-slot="skill-source"] { padding: 0; background: none; color: inherit; font-size: inherit; font-weight: inherit; }
 [data-slot="skills-detail"] [data-slot="skill-description"] { display: none; }
 [data-slot="skill-used-by"] > p { margin-top: 16px; line-height: 1.6; }
@@ -20,7 +20,7 @@
 [data-slot="skill-body"] h3 { font-size: 14px; font-weight: 600; }
 [data-slot="skills-import-panel"] { display: flex; flex-direction: column; gap: 16px; }
 [data-slot="skills-import-panel"] > * { margin-top: 0; margin-bottom: 0; }
-[data-slot="skills-import-panel"] > p:first-child { align-self: start; height: 26px; display: flex; align-items: center; padding: 0 8px; border-radius: 5px; background: color-mix(in srgb, var(--accent-strong) 10%, transparent); font-size: 10px; letter-spacing: 0; }
+[data-slot="skills-import-panel"] > p:first-child { align-self: start; height: 26px; display: flex; align-items: center; padding: 0 8px; border-radius: 5px; background: color-mix(in srgb, var(--accent-strong) 10%, transparent); letter-spacing: 0; }
 [data-slot="skills-import-panel"] > h2 { font-size: 28px; font-weight: 400; }
 [data-slot="skills-import-panel"] > p:nth-of-type(3) { color: var(--link-foreground); }
 [data-slot="skills-update-card"] { background: var(--card); border-radius: 10px; }
@@ -64,7 +64,6 @@
 }
 @container (max-width: 649px) {
   [data-slot="skill-row"][aria-current="page"] { background: transparent; border-color: var(--border); }
-  [data-slot="skill-path"] { font-size: 10px; }
 }
 [data-route="skills"] h1, [data-route="workflows"] h1 { line-height: 1.2; letter-spacing: -.7px; }
 [data-route="skills"] header p, [data-route="workflows"] header p { line-height: 1.6; color: var(--soft-foreground); }
@@ -75,7 +74,7 @@
 [data-slot="skill-row"][aria-current="page"], [data-slot="skill-row"][data-highlighted], [data-slot="skills-section"] > header a[aria-current="page"] { background: var(--task-brand-selected); }
 [data-slot="skill-detail"] > div:first-child { gap: 16px; }
 [data-slot="skill-detail"] > div:first-child > :is(h2,h3) { line-height: 1.6; }
-[data-slot="skill-path"] { font-size: 10px; line-height: 1.6; }
+[data-slot="skill-path"] { line-height: 1.6; }
 [data-slot="skill-body"] .thread-markdown { display: flex; flex-direction: column; gap: 16px; }
 [data-slot="skill-body"] .thread-markdown > * { margin: 0; }
 [data-slot="skill-body"] .thread-markdown :is(p,ul,ol) { color: var(--muted-foreground); }
@@ -165,7 +164,7 @@
 [data-slot="wb-step-grip"] span { border-radius: 5px; }
 [data-slot="wb-main"], [data-slot="wb-aside"] { padding: 19px; }
 [data-slot="wb-step"] { padding: 15px; }
-[data-slot="wb-step-heading"] > div { font-size: 15px; line-height: 24px; }
+[data-slot="wb-step-heading"] > div { line-height: 24px; }
 [data-slot="wb-step-summary"], [data-slot="wb-main"] > p:first-child,
 [data-slot="wb-main"] footer p, [data-slot="wb-aside"] > p { line-height: 19px; }
 [data-slot="wb-main"] > p:last-of-type { line-height: 18px; }
