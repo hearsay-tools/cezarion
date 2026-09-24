@@ -3289,10 +3289,17 @@ export class RunManager {
     if (!admitted && (this.waiting.has(runId) || this.monitoring.has(runId))) {
       // The parked worker released its slot: the answer rides the ordinary message wake,
       // which delivers it here once the scheduler admits the worker.
-      if (this.workerWait(runId)) return;
-      const wait: WorkerWait = { id: randomUUID(), workerIds: [], outcomes: [],
-        deadline: new Date().toISOString(), phase: 'wake-pending', reason: 'message', wakeId: reply.id };
-      this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait } }]);
+      const existing = this.workerWait(runId);
+      if (existing?.wakeId !== reply.id) {
+        // An answer supersedes a wait the worker registered before asking, exactly as a
+        // human answer withdraws it; a failed checkpoint leaves both for a later retry.
+        if (existing) { try { this.withdrawWorkerWait(runId); } catch { return; } }
+        const wait: WorkerWait = { id: randomUUID(), workerIds: [], outcomes: [],
+          deadline: new Date().toISOString(), phase: 'wake-pending', reason: 'message', wakeId: reply.id };
+        const current = this.store.getRun(runId)?.delegation;
+        if (current?.role !== 'worker') return;
+        this.store.commitDelegation([{ id: runId, delegation: { ...current, wait } }]);
+      }
       this.clearIdleTimer(state); this.clearMonitoringWakeTimer(state, runId);
       this.waiting.delete(runId); this.monitoring.delete(runId); this.workerWaiting.add(runId);
       this.queueWorkerWake(runId);

@@ -311,4 +311,20 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       await until(() => answered(f.w.id).length === 1);
     } finally { credentials.close(); }
   });
+
+  it('answers a worker that registered a request wait before asking', async () => {
+    const f = await askedPair();
+    try {
+      const request = randomUUID();
+      await f.service.send(f.workerCaller, { id: request, recipientRunId: f.p.id, kind: 'request', text: 'Which module? mock:hold', timeoutSeconds: 600 });
+      // The durable wait a turn registered before its ask; prepareHumanAsk keeps it.
+      const delegation = store.getRun(f.w.id)!.delegation!;
+      if (delegation.role !== 'worker') throw Error('missing worker');
+      store.commitDelegation([{ id: f.w.id, delegation: { ...delegation, wait: { id: randomUUID(), workerIds: [], requestIds: [request], outcomes: [],
+        deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'parked' } } }]);
+      await f.reply('mock:agent-echo Use the parser');
+      await until(() => answered(f.w.id).length === 1);
+      await until(() => said(f.w.id, 'Use the parser'));
+    } finally { f.close(); }
+  });
 });
