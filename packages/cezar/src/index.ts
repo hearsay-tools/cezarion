@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { DelegationController } from './delegation/provision.ts';
 import { parseArgs } from 'node:util';
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
@@ -42,6 +42,7 @@ import { armRestartHelper } from './application-update/launcher.ts';
 import { restartEndpoint } from './application-update/helper.ts';
 import { readNpmConfiguration } from './application-update/npm-process.ts';
 import { cezarHomeDir } from './paths.ts';
+import { openUrl } from './open-url.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
 
@@ -53,6 +54,7 @@ Usage:
                             (also: projects add [<dir>] · projects remove|rm <id> ·
                              projects tag <id> [<tag>…])
   cez worker                manage owned workers (see: worker --help)
+  cez task                  start/watch/steer cockpit tasks from the terminal (see: task --help)
   cez artifact publish <path> publish a local task artifact (see: artifact --help)
   cez server-install        interactive wizard to host cezar on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
@@ -91,6 +93,12 @@ async function main(): Promise<void> {
   if (process.argv[2] === 'artifact') {
     const { runArtifactCommand } = await import('./artifacts/cli.ts');
     process.exitCode = await runArtifactCommand(process.argv.slice(3), process.env);
+    return;
+  }
+  if (process.argv[2] === 'task') {
+    // Before the global parseArgs, like `worker`: task flags are not cockpit flags (#504).
+    const { runTaskCommand } = await import('./task-cli/cli.ts');
+    process.exitCode = await runTaskCommand(process.argv.slice(3), process.env);
     return;
   }
   if (process.argv[2] === 'worker') {
@@ -402,6 +410,20 @@ async function waitForHealth(healthUrl: string, timeoutMs: number): Promise<bool
 
 // ---- run (headless) ----------------------------------------------------------
 
+/**
+ * Headless `run` stays headless (#504), but a cockpit already serving this repo will never see
+ * the run until it restarts — say so once, on stderr. Capped so it never delays the run, and
+ * silent on any failure.
+ */
+async function hintRunningCockpit(repoRoot: string): Promise<void> {
+  const { discoverCockpit } = await import('./task-cli/discovery.ts');
+  const found = await Promise.race([
+    discoverCockpit({ repoDir: repoRoot, timeoutMs: 300 }).catch(() => undefined),
+    new Promise<undefined>((done) => setTimeout(() => done(undefined), 600).unref()),
+  ]);
+  if (found) console.error(`a cockpit is running at ${found.origin}; use "cez task start" to run this task there instead`);
+}
+
 async function runCommand(
   repoRoot: string,
   task: string,
@@ -413,6 +435,7 @@ async function runCommand(
     process.exitCode = 1;
     return;
   }
+  await hintRunningCockpit(repoRoot);
   await initWorkspace(repoRoot);
   const { workflows, issues } = await loadWorkflows(repoRoot);
   for (const issue of issues) console.error(`! skipped ${issue.path}: ${issue.message}`);
@@ -781,24 +804,6 @@ function readOwnVersion(): string {
     return pkg.version ?? '0.0.0';
   } catch {
     return '0.0.0';
-  }
-}
-
-function openUrl(url: string): void {
-  const cmd =
-    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
-  try {
-    const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
-    // A missing opener (e.g. no `xdg-open` on a headless Linux VPS) surfaces
-    // asynchronously as an 'error' event, NOT a synchronous throw — without a
-    // listener Node promotes it to an unhandled error and hard-crashes the whole
-    // process, even though the cockpit is already serving. Swallow it: the URL is
-    // printed above, so a browser-less host just doesn't auto-open.
-    child.on('error', () => {});
-    child.unref();
-  } catch {
-    // the printed URL is enough
   }
 }
 

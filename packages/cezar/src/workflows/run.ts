@@ -1408,10 +1408,28 @@ export class RunManager {
     }
   }
 
+  /**
+   * Idempotent start (#504, spec 2026-09-24-cez-task-cli). Lookup and create share one
+   * synchronous path, so the event loop serialises concurrent retries: the first creates, every
+   * later one with the same hash gets that run back, and a different hash is a conflict.
+   */
+  startRunIdempotent(
+    workflow: WorkflowDef,
+    input: StartRunInput,
+    request: { id: string; hash: string },
+  ): { run: RunRecord; created: boolean } | { conflict: true } {
+    const existing = this.store.findRunByClientRequestId(request.id);
+    if (existing) {
+      return existing.clientRequestHash === request.hash ? { run: existing, created: false } : { conflict: true };
+    }
+    return { run: this.startRun(workflow, input, undefined, request), created: true };
+  }
+
   startRun(
     workflow: WorkflowDef,
     input: StartRunInput,
     group?: { groupId: string; variant: string },
+    clientRequest?: { id: string; hash: string },
   ): RunRecord {
     // Sanitize at the manager boundary so CLI runs, workflows, variants, and
     // direct callers cannot bypass the HTTP policy.
@@ -1443,6 +1461,8 @@ export class RunManager {
       worktree: !group && input.worktree === false ? false : undefined,
       groupId: group?.groupId,
       variant: group?.variant,
+      clientRequestId: clientRequest?.id,
+      clientRequestHash: clientRequest?.hash,
       steps: workflow.steps.map((s) => ({ id: s.id, name: s.name ?? s.id, kind: stepKind(s) })),
     });
     // Persist the full definition so a queued run survives a restart (#367) —
