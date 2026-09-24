@@ -25,6 +25,8 @@ describe('parent-routed worker questions (#505)', () => {
     expect(text).toContain('Managed');
     expect(text).toContain(`worker reply ${W} '<answer>' --id <new-message-UUID> --request-id ${id}`);
     expect(text).toContain('ask the human with your own question');
+    // The reply reaches the worker verbatim, so it asks for the lines a native answer parses.
+    for (const question of request.questions) expect(text).toContain(`\n${question.header}: <option>`);
   });
   it('treats only a reply to that question as its answer', () => {
     const message = questionMessage({ ...base, now: '2026-09-24T10:00:00.000Z' });

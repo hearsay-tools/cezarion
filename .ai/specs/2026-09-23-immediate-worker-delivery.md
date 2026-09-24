@@ -159,7 +159,10 @@ follow-up issue, not part of #505.
   answers it; a reply to a settled question is refused. The answer enters the
   worker's answer seam — `sendMessage` on a live session, or a continuation that
   answers that ask after a restart (the `openingAnswerAskSeq` path) — and records
-  `human-input-delivered` with `source: 'parent'`. The request outcome becomes
+  `human-input-delivered` with `source: 'parent'`. The reply text is delivered
+  verbatim: native answer seams parse `Header: option` lines exactly as they parse a
+  human's, so the question text asks the parent for one such line per question. The
+  request outcome becomes
   `replied`. Progress, follow-ups and other requests to the worker stay queued and
   flush right behind the answer; none of them answers the question.
 - **Escalation.** The parent asks the human with its own `CEZ:ASK` or native ask,

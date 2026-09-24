@@ -24,7 +24,9 @@ export function formatQuestionText(workerRunId: string, messageId: string, reque
     lines.push(`${index + 1}. [${question.header}] ${question.question}${question.multiSelect ? ' (choose one or more)' : ''}`);
     for (const option of question.options) lines.push(`   - ${option.label}${option.description ? `: ${option.description}` : ''}`);
   });
-  lines.push(`Answer with: worker reply ${workerRunId} '<answer>' --id <new-message-UUID> --request-id ${messageId}`);
+  const format = request.questions.map(question => `${question.header}: <option>`).join('\n');
+  lines.push(`Answer with one line per question, exactly as the worker reads a human answer:\n${format}`);
+  lines.push(`Send it with: worker reply ${workerRunId} '<answer>' --id <new-message-UUID> --request-id ${messageId}`);
   lines.push('If you cannot decide, ask the human with your own question, then reply with their answer.');
   return lines.join('\n');
 }

@@ -3249,7 +3249,8 @@ export class RunManager {
     const routed = this.routedAsk(runId);
     const reply = routed && this.store.getRun(runId)?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
     if (!routed || !reply) return;
-    const text = `Your parent answered your question:\n${reply.text}`;
+    // Verbatim: a native answer seam parses `Header: label` lines, exactly as a human's.
+    const text = reply.text;
     const state = this.active.get(runId);
     if (!state) {
       const result = this.continueRun(runId, { text, answerInputId: reply.id });

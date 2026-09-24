@@ -67,7 +67,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `Owned workers are available through the bundled command ${invocation}.`,
         `Commands return JSON.`,
         conversationGuidance,
-        `Worker questions arrive as requests carrying a question; answer with worker reply <worker-id> '<answer>' --id <new-message-UUID> --request-id <question-id>. If you cannot decide, ask the human with your own question, then reply. Progress and follow-ups never answer it, and you cannot finish while it is unanswered.`,
+        `Worker questions arrive as requests carrying a question; answer with worker reply <worker-id> '<answer>' --id <new-message-UUID> --request-id <question-id>, one '<header>: <option>' line per question, which the worker reads verbatim as its answer. If you cannot decide, ask the human with your own question, then reply. Progress and follow-ups never answer it, and you cannot finish while it is unanswered.`,
         `Use ${invocation} spawn --baseline parent-head --request-id <UUID> '<task>' (or an explicit committed ref).`,
         `Reuse the request ID only for the exact same task/baseline/context/backend/model/effort/workflow on a retry.`,
         `Optional spawn flags: --workflow <name>, --context '<selected text>' or --context-file <local-UTF-8-file> (mutually exclusive), --backend <claude|codex|opencode|pi|cursor>, --model <model>, --effort <low|medium|high|xhigh|max>.`,
