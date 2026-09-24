@@ -302,6 +302,8 @@ interface ActiveRun {
   consumedBeforeAck?: Set<string>;
   /** Conversation input carried by a human answer's own write; read at that turn's end. */
   bundledInputIds?: string[];
+  /** Reported unread while their own submission was still unacknowledged. */
+  retiredInFlight?: Set<string>;
   /** Liveness bound for unread input (#505): timer, and IDs already resubmitted once. */
   unreadInputTimer?: NodeJS.Timeout;
   unreadRetried?: Set<string>;
@@ -3543,6 +3545,9 @@ export class RunManager {
   private retireUnreadInputs(runId: string, state: ActiveRun, ids: readonly string[], outOfTurn: boolean): void {
     if (!ids.length || state.cancelled || this.active.get(runId) !== state) return;
     for (const id of ids) state.unreadInputIds?.delete(id);
+    // Reported before its own acknowledgement landed: that acknowledgement must not
+    // mark it delivered again.
+    for (const id of ids) if (state.agentInputFlight?.inputIds.includes(id)) (state.retiredInFlight ??= new Set()).add(id);
     try { this.store.requeueUnconsumedAgentInputs(runId, ids); }
     catch (error) { console.warn(`[cez] agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); return; }
     this.store.appendEvent(runId, { type: 'note', message: `resubmitting ${ids.length} message${ids.length === 1 ? '' : 's'} the agent did not read` });
@@ -3729,11 +3734,15 @@ export class RunManager {
             const deliveredAt = new Date().toISOString();
             // An observable harness still owes a read: mark it so a restart replays it (#505).
             const awaiting = state.inputDelivery?.consumption === 'observable' ? { awaitingRead: true as const } : {};
-            this.store.commitAgentInputs(runId, queue.map(input => inputIds.includes(input.id) && !input.deliveredAt
+            // Input the harness reported unread while this very POST was pending stays queued:
+            // the flush after this acknowledgement resubmits it (#505 review).
+            const accepted = inputIds.filter(id => !state.retiredInFlight?.has(id));
+            for (const id of inputIds) state.retiredInFlight?.delete(id);
+            this.store.commitAgentInputs(runId, queue.map(input => accepted.includes(input.id) && !input.deliveredAt
               ? { ...input, deliveredAt, ...awaiting } : input));
             if (state.inputDelivery?.consumption === 'observable') {
-              const early = inputIds.filter(id => state.consumedBeforeAck?.has(id));
-              for (const id of inputIds) if (!early.includes(id)) state.unreadInputIds?.add(id);
+              const early = accepted.filter(id => state.consumedBeforeAck?.has(id));
+              for (const id of accepted) if (!early.includes(id)) state.unreadInputIds?.add(id);
               for (const id of early) state.consumedBeforeAck?.delete(id);
               if (early.length) this.store.commitAgentInputsConsumed(runId, early, deliveredAt);
             }
@@ -3747,8 +3756,9 @@ export class RunManager {
       const authorized = current();
       state.agentInputFlight = undefined;
       if (!authorized || !session.open || state.agentSessionError || state.agentInputError) return;
-      // A liveness resubmission gets its own quiet window: the second one gives up (#505).
-      if (inputIds.some(id => state.unreadRetried?.has(id))) this.armUnreadInputTimer(runId, state);
+      // A liveness resubmission gets its own quiet window, and so does input acknowledged
+      // after its turn already ended: no later turn-end would arm one (#505 review).
+      if (inputIds.some(id => state.unreadRetried?.has(id)) || state.atTurnBoundary === session) this.armUnreadInputTimer(runId, state);
       if (this.flushAgentInputs(runId)) return;
       this.settleIdleBoundary(runId, state, session);
     }).catch(error => {

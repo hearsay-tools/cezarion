@@ -140,7 +140,10 @@ const server = createServer((req, res) => {
       if (turnActive && url.endsWith('/prompt_async')) {
         const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
         const userId = `msg_steer_user_${++steerSerial}`;
-        res.writeHead(204); res.end();
+        // #505 review: acknowledge a steer later than the runner's lost-wake window.
+        const ackDelay = Number(process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS ?? 0);
+        if (ackDelay > 0) setTimeout(() => { res.writeHead(204); res.end(); }, ackDelay);
+        else { res.writeHead(204); res.end(); }
         send({ type: 'message.updated', properties: { info: { id: userId, sessionID: SESSION_ID, role: 'user', time: { created: Date.now() } } } });
         send({ type: 'message.part.updated', properties: { part: { id: `prt_${userId}`, messageID: userId, sessionID: SESSION_ID, type: 'text', text } } });
         steers.push({ userId, text });

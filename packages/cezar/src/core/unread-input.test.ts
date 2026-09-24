@@ -88,4 +88,17 @@ describe('unread agent input is resubmitted (#505)', () => {
       });
     } finally { if (saved === undefined) delete process.env.CEZ_MOCK_CODEX_NO_USER_ITEM; else process.env.CEZ_MOCK_CODEX_NO_USER_ITEM = saved; }
   }, 60_000);
+
+  it('opencode resubmits input its lost-wake report retired while the POST was still unacknowledged (#505 review)', async () => {
+    const saved = process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS; process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS = '3000';
+    try {
+      await withOwnedInputRun('opencode', 'steer-late', async ({ store, manager, runId, parentRunId }) => {
+        manager.enqueueOwnedRun(runId);
+        await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('late window')));
+        manager.steerWorker(runId, late(parentRunId));
+        await waitFor(() => !!store.getRun(runId)?.agentInputs?.[0]?.consumedAt, 20_000);
+        await waitFor(() => store.getRun(runId)?.status === 'waiting', 20_000);
+      });
+    } finally { if (saved === undefined) delete process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS; else process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS = saved; }
+  }, 60_000);
 });
