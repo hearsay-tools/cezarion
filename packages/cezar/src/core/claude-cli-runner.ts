@@ -162,6 +162,7 @@ export class ClaudeCliRunner implements AgentRunner {
     // lists every line it covered in `user_message_uuids` (#505) — a per-line
     // counter left the runner busy forever after a merged follow-up.
     const unsettled = new Set<string>();
+    let queuedTurnPending = false;
     const submissions = new InputSubmissions();
     const scheduleAutoEnd = () => {
       // Never arm the close window while an accepted turn is still running:
@@ -182,6 +183,7 @@ export class ClaudeCliRunner implements AgentRunner {
       if (!stdinOpen) return false;
       // A line written while a turn runs joins that turn instead of opening one (#505).
       const opensTurn = unsettled.size === 0;
+      if (opensTurn) queuedTurnPending = false;
       agentInputReady = false;
       if (opensTurn) {
         pendingMarkerAsk = false;
@@ -303,6 +305,10 @@ export class ClaudeCliRunner implements AgentRunner {
           // describes the intentional stop rather than an agent failure.
           // Normalize only this precise wire shape so genuine result errors
           // (authentication, limits, malformed sessions) stay authoritative.
+          if (queuedTurnPending && (msg.type === 'assistant' || msg.type === 'user' || msg.type === 'result')) {
+            queuedTurnPending = false;
+            emitUi(claudeTurnStarted);
+          }
           // `--replay-user-messages` echoes a line when the model consumes it (#505).
           // Presentation-free: it is the user's own text, and it carries no tool_result.
           if (msg.type === 'user' && msg.isReplay === true) {
@@ -345,9 +351,10 @@ export class ClaudeCliRunner implements AgentRunner {
             onEvent?.({ type: 'turn-end' });
             scheduleAutoEnd();
             // A line written after this turn's last model call runs as the CLI's next
-            // queued turn; its replay/result reports consumption then (#505). The
-            // orchestrator counts it as pending work until that happens.
-            if (unsettled.size > 0) emitUi(claudeTurnStarted);
+            // queued turn; its replay/result reports consumption then (#505). Announce
+            // that turn when its first frame arrives, never speculatively: a line the
+            // CLI never runs must not look like activity.
+            queuedTurnPending = unsettled.size > 0;
           }
         }
       } catch (err) {

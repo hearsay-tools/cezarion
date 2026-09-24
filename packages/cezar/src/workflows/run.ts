@@ -302,6 +302,9 @@ interface ActiveRun {
   consumedBeforeAck?: Set<string>;
   /** Conversation input carried by a human answer's own write; read at that turn's end. */
   bundledInputIds?: string[];
+  /** Liveness bound for unread input (#505): timer, and IDs already resubmitted once. */
+  unreadInputTimer?: NodeJS.Timeout;
+  unreadRetried?: Set<string>;
   /** Only this older ask is being answered by the current continuation's opening turn. */
   openingAnswerAskSeq?: number;
   openingAgentInputId?: string;
@@ -352,6 +355,9 @@ interface ActiveRun {
 }
 
 /** Safety cap on autonomous auto-continues per run — stops a stuck agent from nudging forever. */
+/** #505: a real steer is read at the harness's next model step; a quiet boundary this long
+ * with input still unread means the harness will not read it without help. */
+export const UNREAD_INPUT_GRACE_MS = 30_000;
 const MAX_AUTO_CONTINUES = 40;
 const AUTONOMOUS_NUDGE =
   'Continue working autonomously until the task is fully complete. Do not ask me for confirmation or clarification — make reasonable assumptions and proceed. When everything is done, end the session with your done signal.';
@@ -843,6 +849,8 @@ export class RunManager {
   private readonly inboxClaimTimers = new Map<string, NodeJS.Timeout>();
   private reconcilingWorkers = false;
   private recovering = false;
+  /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
+  private readonly unreadInputGraceMs: number;
   private disposed = false;
   private readonly onDelegationRun = (run: RunRecord): void => {
     if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status)) this.withdrawCiWait(run.id);
@@ -917,9 +925,10 @@ export class RunManager {
   constructor(
     private readonly store: RunStore,
     private readonly repoRoot: string,
-    options: { semaphore?: WorkspaceSemaphore } = {},
+    options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
+    this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.ciResources = acquireCiResources(this.semaphore);
     this.ciSupervisor = this.ciResources.supervisor;
@@ -3520,6 +3529,7 @@ export class RunManager {
     for (const id of ids) if (inFlight.includes(id)) state.consumedBeforeAck?.add(id);
     const read = ids.filter(id => !inFlight.includes(id));
     for (const id of read) state.unreadInputIds?.delete(id);
+    if (!this.harnessOwesInput(state)) this.clearUnreadInputTimer(state);
     try {
       if (!read.length) return;
       this.store.commitAgentInputsConsumed(runId, read, new Date().toISOString());
@@ -3584,11 +3594,82 @@ export class RunManager {
   /** #505: the session closed without reporting it read (failure, stop, exit): the input
    * goes back to the queue so a later session delivers it; never shown as delivered. */
   private requeueUnreadAtClose(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
+    this.clearUnreadInputTimer(state);
     const ids = [...(state.unreadInputIds ?? [])];
     if (!session || !ids.length || this.active.get(runId) !== state || state.session !== session) return;
     state.unreadInputIds?.clear();
     try { this.store.requeueUnconsumedAgentInputs(runId, ids); }
     catch (error) { console.warn(`[cez] agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  /** An idle, open boundary with nothing left to deliver: DONE closes, otherwise the
+   * run parks as waiting or monitoring. Shared by acknowledgements that land after a
+   * turn ended and by the unread-input grace timer (#505). */
+  private settleIdleBoundary(runId: string, state: ActiveRun, session: AgentSession): void {
+    if (state.atTurnBoundary !== session || state.pendingHumanAsk || this.workerWait(runId) || this.store.getRun(runId)?.ciWait || this.hasQueuedAgentInputs(runId)) return;
+    if (state.doneAtBoundary === session) {
+      if (this.deferParentCompletion(runId)) return;
+      this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed' });
+      appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — goal achieved, session closed');
+      session.end();
+    } else if (state.parkAfterAck?.session === session && !this.waiting.has(runId) && !this.monitoring.has(runId)) {
+      // A wake turn can finish before its HTTP/RPC acknowledgement. Retiring
+      // that wait must release its completed turn, not invent another turn.
+      if ((state.parkAfterAck.monitoring || this.hasLiveWorkers(runId)) && !this.parentCompletionAttention(runId)) {
+        this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
+        if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'running' });
+        this.monitoring.add(runId);
+        this.clearIdleTimer(state);
+        this.armMonitoringWakeTimer(runId, state);
+      } else {
+        this.store.updateRun(runId, { status: 'waiting', activity: undefined });
+        if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+        this.store.flush(); // Match ordinary turn-end durability before releasing capacity.
+        this.armIdleTimer(runId, state);
+      }
+      this.waiting.add(runId);
+      this.releaseSlot();
+    }
+  }
+
+  /** #505 liveness bound: a harness that accepted input and then neither read it nor ran
+   * another turn must not hold the run and its slot forever. After a quiet grace window the
+   * input is resubmitted once; after a second it is left delivered but unconfirmed. */
+  private armUnreadInputTimer(runId: string, state: ActiveRun): void {
+    this.clearUnreadInputTimer(state);
+    const session = state.session;
+    if (!session?.open || !this.harnessOwesInput(state) || state.agentInputFlight) return;
+    const timer = setTimeout(() => {
+      state.unreadInputTimer = undefined;
+      if (this.disposed || this.active.get(runId) !== state || state.session !== session || !session.open || state.cancelled ||
+        state.agentInputFlight || !this.harnessOwesInput(state)) return;
+      const ids = [...state.unreadInputIds!];
+      const retried = ids.filter(id => state.unreadRetried?.has(id));
+      const fresh = ids.filter(id => !state.unreadRetried?.has(id));
+      if (retried.length) {
+        for (const id of retried) state.unreadInputIds?.delete(id);
+        try { this.store.commitAgentInputsUnconfirmed(runId, retried); } catch { /* receipt stays awaiting; a restart replays it */ }
+        this.store.appendEvent(runId, { type: 'note', message: `delivered ${retried.length} message${retried.length === 1 ? '' : 's'}; the agent did not confirm reading ${retried.length === 1 ? 'it' : 'them'}` });
+      }
+      if (fresh.length) {
+        state.unreadRetried ??= new Set();
+        for (const id of fresh) state.unreadRetried.add(id);
+        this.retireUnreadInputs(runId, state, fresh, true);
+      }
+      // No content since the last turn ended: the harness is idle, whatever turn it announced.
+      if (!this.harnessOwesInput(state) && !state.agentInputFlight) {
+        state.atTurnBoundary = session;
+        if (state.parkAfterAck?.session !== session) state.parkAfterAck = { session, monitoring: false };
+        this.settleIdleBoundary(runId, state, session);
+      }
+    }, this.unreadInputGraceMs);
+    timer.unref?.();
+    state.unreadInputTimer = timer;
+  }
+
+  private clearUnreadInputTimer(state: ActiveRun): void {
+    if (state.unreadInputTimer) clearTimeout(state.unreadInputTimer);
+    state.unreadInputTimer = undefined;
   }
 
   /** #505: the harness accepted input this session has not reported reading yet. */
@@ -3661,31 +3742,10 @@ export class RunManager {
       const authorized = current();
       state.agentInputFlight = undefined;
       if (!authorized || !session.open || state.agentSessionError || state.agentInputError) return;
+      // A liveness resubmission gets its own quiet window: the second one gives up (#505).
+      if (inputIds.some(id => state.unreadRetried?.has(id))) this.armUnreadInputTimer(runId, state);
       if (this.flushAgentInputs(runId)) return;
-      if (state.atTurnBoundary !== session || state.pendingHumanAsk || this.workerWait(runId) || this.store.getRun(runId)?.ciWait || this.hasQueuedAgentInputs(runId)) return;
-      if (state.doneAtBoundary === session) {
-        if (this.deferParentCompletion(runId)) return;
-        this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed' });
-        appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — goal achieved, session closed');
-        session.end();
-      } else if (state.parkAfterAck?.session === session && !this.waiting.has(runId) && !this.monitoring.has(runId)) {
-        // A wake turn can finish before its HTTP/RPC acknowledgement. Retiring
-        // that wait must release its completed turn, not invent another turn.
-        if ((state.parkAfterAck.monitoring || this.hasLiveWorkers(runId)) && !this.parentCompletionAttention(runId)) {
-          this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
-          if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'running' });
-          this.monitoring.add(runId);
-          this.clearIdleTimer(state);
-          this.armMonitoringWakeTimer(runId, state);
-        } else {
-          this.store.updateRun(runId, { status: 'waiting', activity: undefined });
-          if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-          this.store.flush(); // Match ordinary turn-end durability before releasing capacity.
-          this.armIdleTimer(runId, state);
-        }
-        this.waiting.add(runId);
-        this.releaseSlot();
-      }
+      this.settleIdleBoundary(runId, state, session);
     }).catch(error => {
       // Bookkeeping failures cannot become unhandled promise rejections.
       if (state.agentInputFlight === undefined) state.agentInputFlight = flight;
@@ -4377,12 +4437,14 @@ export class RunManager {
         return;
       }
       if (event.type === 'text') {
+        this.clearUnreadInputTimer(state); // real content: the harness is working
         turnText = appendTurnText(turnText, event.text);
         const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
         if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
         return;
       }
       if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
+      if (event.type === 'tool-call' || event.type === 'tool-result') this.clearUnreadInputTimer(state);
       this.store.appendEvent(runId, { ...event, stepId });
       if (event.type === 'error') {
         // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
@@ -4471,6 +4533,7 @@ export class RunManager {
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
         const agentInputDelivered = !ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state) || !!state.agentInputFlight);
+        if (!ask && !workerWaitParked) this.armUnreadInputTimer(runId, state);
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347) — same as in runAgentStep.
@@ -5326,12 +5389,14 @@ export class RunManager {
         return;
       }
       if (event.type === 'text') {
+        this.clearUnreadInputTimer(state); // real content: the harness is working
         turnText = appendTurnText(turnText, event.text);
         const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
         if (text) emit({ type: 'text', text, stepId: step.id });
         return;
       }
       if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
+      if (event.type === 'tool-call' || event.type === 'tool-result') this.clearUnreadInputTimer(state);
       emit({ ...event, stepId: step.id });
       if (event.type === 'error') {
         // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
@@ -5393,6 +5458,7 @@ export class RunManager {
         // #505: input the harness accepted but has not read yet runs as its next turn.
         // An in-flight submission is settled by its acknowledgement (parkAfterAck), not here.
         const agentInputDelivered = !ask && !workerWaitParked && (this.flushAgentInputs(runId) || this.harnessOwesInput(state) || !!state.agentInputFlight);
+        if (!ask && !workerWaitParked) this.armUnreadInputTimer(runId, state);
         if (state.agentInputError) return;
         if (done && !workerWaitParked && !state.pendingHumanAsk && !agentInputDelivered && !state.agentInputFlight && !this.hasQueuedAgentInputs(runId)) {
           // Goal achieved (agent contract, #347): close the session instead

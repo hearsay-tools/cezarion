@@ -952,6 +952,17 @@ export class RunStore extends EventEmitter {
     }));
   }
 
+  /** Delivered, but the harness never confirmed reading it (#505): stop awaiting a read. */
+  commitAgentInputsUnconfirmed(id: string, ids: readonly string[]): void {
+    const run = this.runs.get(id);
+    if (!run?.agentInputs || !ids.length) return;
+    this.commitAgentInputs(id, run.agentInputs.map(input => {
+      if (!ids.includes(input.id) || !input.awaitingRead) return input;
+      const { awaitingRead: _awaiting, ...unconfirmed } = input;
+      return unconfirmed;
+    }));
+  }
+
   /** Crash recovery (#505): input a harness accepted but was never seen reading goes
    * back to the queue. Returns the requeued IDs. */
   requeueAwaitingReadInputs(id: string): string[] {

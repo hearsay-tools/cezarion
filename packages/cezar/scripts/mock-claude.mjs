@@ -33,6 +33,7 @@ const emitReplay = (uuid, text) => {
 };
 // Non-null while a `mock:steer-tool` turn is inside its tool: later lines join that turn.
 let steering = null;
+let droppedOnce = false;
 
 // A tiny generated PNG (320x200) standing in for a browser screenshot.
 const MOCK_SCREENSHOT_B64 =
@@ -637,6 +638,10 @@ rl.on('line', (line) => {
       // best effort — never break the mock over the hook
     }
   }
+  // #505 liveness tests: silently drop a matching line (a harness that accepted input
+  // and never runs it). CEZ_MOCK_DROP_ONCE=1 drops only the first match.
+  const drop = process.env.CEZ_MOCK_DROP_LINES;
+  if (drop && userText.includes(drop) && !(process.env.CEZ_MOCK_DROP_ONCE === '1' && droppedOnce)) { droppedOnce = true; return; }
   if (steering) { steering.push({ userText, uuid }); return; }
   queue = queue.then(() => respond(userText, imageCount, uuid));
 });
