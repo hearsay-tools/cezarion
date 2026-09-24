@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 
 // Run the real dispatcher, replacing only the expensive server/browser boot and
 // test process with executables that record the arguments they receive.
-function run(t, args = [], { installed = true, exit = 0 } = {}) {
+function run(t, args = [], { installed = true, exit = 0, bootExit = 0 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-e2e-runner-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, '.ai/scripts'), { recursive: true });
@@ -15,7 +15,7 @@ function run(t, args = [], { installed = true, exit = 0 } = {}) {
   fs.mkdirSync(path.join(root, 'bin'));
   fs.copyFileSync(path.join(__dirname, '../../.ai/scripts/e2e.sh'), path.join(root, '.ai/scripts/e2e.sh'));
   fs.writeFileSync(path.join(root, '.ai/qa/test-env.json'), JSON.stringify({ browser: { installed } }));
-  fs.writeFileSync(path.join(root, '.ai/scripts/test-env-up.sh'), '#!/bin/sh\nfor arg do\n case "$arg" in --force|--force-rebuild) ;; *) exit 2;; esac\ndone\nprintf "%s\\n" "$@" > boot-args\n');
+  fs.writeFileSync(path.join(root, '.ai/scripts/test-env-up.sh'), `#!/bin/sh\nfor arg do\n case "$arg" in --force|--force-rebuild) ;; *) exit 2;; esac\ndone\nprintf "%s\\n" "$@" > boot-args\nexit ${bootExit}\n`);
   for (const name of ['npm', 'npx']) {
     fs.writeFileSync(path.join(root, 'bin', name), `#!/bin/sh\nprintf '%s\\n' "$@" > test-args\nexit ${exit}\n`, { mode: 0o755 });
   }
@@ -34,6 +34,53 @@ test('shard reaches the test process and bootstrap flags reach only boot', (t) =
   assert.ok(!r.tests.includes('--force'));
   assert.ok(!r.tests.includes('--force-rebuild'));
   assert.match(r.stdout, /TEST_E2E_STATUS=passed/);
+});
+
+test('spec paths and a quoted test-name filter reach Vitest intact', (t) => {
+  const filters = ['smoke.e2e.ts', 'path with spaces.e2e.ts', '-t', String.raw`opens (drawer|dialog) \[safely\]`];
+  const r = run(t, ['--force', ...filters, '--force-rebuild']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.boot, ['--force', '--force-rebuild']);
+  assert.deepEqual(r.tests, ['test', '--', '--config', 'packages/web/e2e/vitest.config.ts', ...filters]);
+  assert.match(r.stdout, /TEST_E2E_STATUS=passed/);
+});
+
+test('long-form test filters and split shard arguments are forwarded in order', (t) => {
+  const args = ['--testNamePattern=loads .*', '--shard', '1/4', 'smoke.e2e.ts'];
+  const r = run(t, args);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.boot, []);
+  assert.deepEqual(r.tests, ['test', '--', '--config', 'packages/web/e2e/vitest.config.ts', ...args]);
+});
+
+test('an explicit separator ends wrapper flag parsing', (t) => {
+  const r = run(t, ['--force', '--', '--force-rebuild']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.boot, ['--force']);
+  assert.deepEqual(r.tests, ['test', '--', '--config', 'packages/web/e2e/vitest.config.ts', '--', '--force-rebuild']);
+});
+
+test('a filtered test failure still reports failed rather than passed', (t) => {
+  const r = run(t, ['smoke.e2e.ts', '-t', 'missing test'], { exit: 1 });
+  assert.equal(r.status, 1);
+  assert.ok(r.tests.includes('missing test'));
+  assert.match(r.stderr, /TEST_E2E_STATUS=failed/);
+  assert.doesNotMatch(r.stdout, /TEST_E2E_STATUS=passed/);
+});
+
+test('bootstrap failure prevents filtered test execution and reports failure', (t) => {
+  const r = run(t, ['--force-rebuild', 'smoke.e2e.ts'], { bootExit: 1 });
+  assert.equal(r.status, 1);
+  assert.deepEqual(r.boot, ['--force-rebuild']);
+  assert.deepEqual(r.tests, []);
+  assert.match(r.stderr, /TEST_E2E_STATUS=failed/);
+});
+
+test('unavailable browser skips filtered runs without executing tests', (t) => {
+  const r = run(t, ['smoke.e2e.ts', '-t', 'opens drawer'], { installed: false });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.tests, []);
+  assert.match(r.stdout, /TEST_E2E_STATUS=skipped/);
 });
 
 test('default local run selects the full suite', (t) => {

@@ -82,7 +82,13 @@ after waiting.
 
 Cockpit shards run on separate VMs, each owning its server, `CEZ_HOME`, test-env descriptor and browser namespace. The browser sequencer uses measured durations in `.github/cockpit-test-durations.json` to select each slice; `fileParallelism: false` keeps tests sequential within each shard. The matrix uses `fail-fast: false` so a failure does not cancel evidence from the other shards. The aggregate waits on the entire matrix and requires its result to be `success`.
 
-Local `npm run test:e2e` still runs the full sequential suite, with the existing environment reuse and skip-exit-0 behavior. Optional `--force` and `--force-rebuild` still go to environment bootstrap; `--shard=N/M` goes only to Vitest.
+Local `npm run test:e2e` without arguments still runs the full sequential suite,
+with the existing environment reuse and skip-exit-0 behavior. For iteration use
+`npm run test:e2e -- smoke.e2e.ts -t 'test name'`. Optional `--force` and
+`--force-rebuild` go only to environment bootstrap; other arguments (including
+`--shard=N/M`, spec paths and test-name filters) go to Vitest with quoting preserved.
+A literal `--` ends wrapper option parsing. A filtered pass is selection-only
+verification, not evidence that the complete browser gate passed.
 
 The [sequential baseline](https://github.com/hearsay-tools/cezarion/actions/runs/34973823399/job/104396396906) took 13m16s: browser provision took about 6s, dependency install/build 15s, server startup 1s, and Vitest 764.16s (757.50s of tests across 43 files). The first four-shard CI run reduced the longest job to 6m22s; actual wall time depends on file balance and runner queueing.
 

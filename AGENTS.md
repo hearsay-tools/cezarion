@@ -149,7 +149,8 @@ A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run
 
 **Iteration is targeted; the full gate is a final checkpoint, not a loop.** During
 implementation, run the affected test files/test names, or `npm run test:changed`.
-Use focused browser specs for affected UI flows (see `packages/web/e2e/README.md`).
+Use focused browser specs for affected UI flows, e.g.
+`npm run test:e2e -- smoke.e2e.ts -t 'test name'` (see `packages/web/e2e/README.md`).
 Do not run the entire Vitest or browser suite after each edit or each review round.
 
 Once implementation stabilizes, run the full gate below once before committing or
@@ -216,7 +217,7 @@ network), reuses an already-healthy instance instead of double-booting, and writ
 
 | Exit     | Marker                    | Meaning                                                                                                           |
 | -------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| 0        | `TEST_E2E_STATUS=passed`  | every spec passed                                                                                                 |
+| 0        | `TEST_E2E_STATUS=passed`  | every selected spec passed; a filtered run is not a full-suite pass                                                                                                 |
 | 0        | `TEST_E2E_STATUS=skipped` | agent-browser could not be provisioned (no network / unsupported platform); prints a loud banner — **not** a pass |
 | non-zero | `TEST_E2E_STATUS=failed`  | a spec failed, or the env could not boot                                                                          |
 

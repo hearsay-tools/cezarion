@@ -140,14 +140,19 @@ rules (`CODE_REVIEW.md`) send it back.
 The whole suite takes about 14 minutes; one test takes seconds.
 
 ```bash
-sh .ai/scripts/test-env-up.sh                       # boots or reuses the env, installs Chrome
-env -u CEZ_AUTOMATIONS npm test -- --config packages/web/e2e/vitest.config.ts \
-  <spec>.e2e.ts -t '<test name>'
+env -u CEZ_AUTOMATIONS npm run test:e2e -- <spec>.e2e.ts -t '<test name>'
+# Multiple spec filters and Vitest options work too:
+npm run test:e2e -- smoke.e2e.ts composer.e2e.ts --force-rebuild
 ```
 
 `CEZ_AUTOMATIONS` is unset because CI never sets it and four tests render differently with it.
-If Chrome refuses to start with a socket-path error, export `TMPDIR` from
-`browser.runtimeEnv` in `.ai/qa/test-env.json` first, which is what `e2e.sh` does.
+The wrapper boots or reuses the environment, installs Chrome if needed, and exports
+the browser's temporary-directory settings from `.ai/qa/test-env.json` (including
+the socket-path workaround). `--force` and `--force-rebuild` go only to bootstrap;
+other arguments, including `--shard=N/M`, spec paths and quoted test-name patterns,
+are passed intact to Vitest. A literal `--` ends wrapper option parsing.
+With no arguments the full sequential suite still runs. A filtered run's
+`TEST_E2E_STATUS=passed` verifies only that selection, not the full browser gate.
 
 To force a race that CI hits and your machine does not, slow the server down behind an
 environment variable rather than editing the spec. Specs that boot their own cezar spawn
