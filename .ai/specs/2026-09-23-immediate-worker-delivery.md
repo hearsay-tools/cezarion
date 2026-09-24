@@ -63,7 +63,9 @@ stays false after a human follow-up.
   shows the model received those inputs, at most once per ID. It is never
   inferred from an HTTP, RPC or pipe acknowledgement.
 - `turn-end` gains `unconsumedInputIds`: inputs accepted in that turn that the
-  model never consumed before the turn ended idle.
+  model never consumed before the turn ended idle. Where only a quiet window can
+  tell (OpenCode), the runner reports them afterwards with the out-of-turn event
+  `input-unconsumed`.
 - Each runner declares `inputDelivery` beside `specSupport` (which is keyed by
   `AgentRunSpec` fields and cannot carry it), and its sessions expose it:
   `steer` (accepted mid-turn, consumed inside the running turn) or `boundary`
@@ -76,7 +78,7 @@ stays false after a human follow-up.
 | Claude | `steer`, observable | stdin line with `uuid` = input ID; argv gains `--replay-user-messages`. `pendingPromptTurns` is replaced by tracking `result.user_message_uuids` | The replay echo with that uuid |
 | Codex | `steer`, observable (in history) | `turn/steer` with `expectedTurnId` and `clientUserMessageId`. A definitive `expectedTurnId` mismatch (the turn just ended) falls back to `turn/start`. An ambiguous RPC failure or timeout rejects and is never retried by the runner | `item/started` `userMessage` whose `clientId` matches |
 | Pi | `steer`, observable | `prompt` with `streamingBehavior: "steer"`, busy or idle. Cezar's `follow-up` kind is never mapped to Pi's `followUp` | A user `message_start` whose text equals the submitted text, oldest pending submission first |
-| OpenCode V1 | `steer`, observable | `prompt_async` POSTed at once; the client-side idle waits in both `sendAgentMessage` and `prompt` are removed for agent input | The first assistant `message.updated` whose `parentID` is the user message carrying the submitted text. A turn that goes idle before that is reported in `unconsumedInputIds` (the upstream lost-wake case) |
+| OpenCode V1 | `steer`, observable | `prompt_async` POSTed at once; the client-side idle waits in both `sendAgentMessage` and `prompt` are removed for agent input | The first assistant `message.updated` whose `parentID` is the user message carrying the submitted text. Steered input still unanswered 2 s after idle is reported as `input-unconsumed` (the upstream lost-wake case); a later server run that answers it opens its own turn |
 | Cursor | `boundary` | Refused while busy, as today | The turn it opens |
 
 OpenCode V2's durable admission and explicit `delivery: "steer"` need an API and
@@ -107,10 +109,19 @@ follow-up issue, not part of #505.
   and worker-wait park treat them as queued work through `hasQueuedAgentInputs`,
   so the idle event of the original turn cannot finish unconsumed work. Both
   turn-end handlers (`runAgentStep`, `runContinuation`) share one helper for this.
-- **Crash recovery.** On restart, an input on an observable backend with
-  `deliveredAt` and no `consumedAt` is replayed. Its text keeps the input ID, so a
-  repeat is recognizable: the guarantee is at-least-once, not exactly-once.
-  Unobservable backends keep today's semantics, where acceptance means delivered.
+  Input that opened a turn counts as read when that turn completes; a turn that
+  fails reports it unconsumed. A session that closes with unread input returns it
+  to the queue.
+- **Liveness bound.** Unread input cannot hold a run forever: when a turn ends with
+  input still unread and the harness produces no content for 30 s, cezar
+  resubmits it once; after a second quiet window it stays delivered but
+  unconfirmed, and the run settles its idle boundary normally.
+- **Crash recovery.** Acceptance on an observable session writes `awaitingRead`,
+  cleared when the input is read. On restart, input still `awaitingRead` is
+  replayed. Its text keeps the input ID, so a repeat is recognizable: the
+  guarantee is at-least-once, not exactly-once. Records written before #505 never
+  carry the marker, so nothing historical replays; unobservable backends keep
+  today's semantics, where acceptance means delivered.
 - **Human answers first.** No agent input is submitted while a human question is
   pending, so worker messages never answer it. Right after a live human answer is
   accepted, `deliverMessage` flushes pending conversation input:
@@ -186,7 +197,7 @@ Every new regression is proven red against the old gates before the fix lands.
   within scheduler limits.
 - Existing ordinary completion, human input and cancellation suites stay green
   unchanged.
-- Real harness: `packages/cezar/scripts/probe-steering.ts`, manual and never in CI
+- Real harness: `.ai/scripts/probe-steering.ts`, manual and never in CI
   because it spends paid sessions, runs once per backend against each finished PR
   (slow tool plus mid-turn message for A; worker question plus parent reply for
   B). Its timelines go in the PR body.
