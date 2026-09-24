@@ -14,8 +14,9 @@ describe('PickerPill fieldLabel (#522)', () => {
     fullWidth = 150
     // jsdom has no layout. Supply only the browser measurements; the component decides
     // which text to render, including when the same pill shrinks and grows again.
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => available)
-    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(() => fullWidth)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { width: this.classList.contains('invisible') ? fullWidth : available } as DOMRect
+    })
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback: () => void) { resize = callback }
       observe() {}
@@ -34,6 +35,16 @@ describe('PickerPill fieldLabel (#522)', () => {
     available = fullWidth
     render(pill())
     expect(visibleLabel()).toBe('Model · Fable')
+  })
+
+  it('keeps a fractional-width prefix within the half-pixel fit tolerance', () => {
+    fullWidth = 98.5625
+    available = 98.25
+    render(pill('grok-4.6'))
+    expect(visibleLabel()).toBe('Model · grok-4.6')
+    available = 98
+    act(() => resize())
+    expect(visibleLabel()).toBe('grok-4.6')
   })
 
   it('drops the whole prefix before the value and restores it after growing', () => {

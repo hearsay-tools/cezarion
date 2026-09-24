@@ -91,6 +91,19 @@ describe('ToolCard — states', () => {
     expect(document.querySelector('[data-slot="tool-command"]')?.textContent).toBe(command)
   })
 
+  it('keeps a bare OpenCode execute title in mono with an ellipsis and expandable full text', () => {
+    const command = 'cd /home/agent/projects/long-project && npm run test -- --runInBand'
+    const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
+    render(<ToolCard item={{ ...item, name: 'shell', title: command }} />)
+    const button = screen.getByRole('button', { name: /npm run test/ })
+    const code = button.querySelector('code')
+    expect(code?.textContent).toBe(command)
+    expect(code?.title).toBe(command)
+    expect(code?.className).toContain('truncate')
+    fireEvent.click(button)
+    expect(document.querySelector('[data-slot="tool-command"]')?.textContent).toBe(command)
+  })
+
   it.each([undefined, ''])('expands a completed command with no output (%s)', (output) => {
     const command = 'cd /home/agent/projects/a-very-long-project-path && git diff --check'
     const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
@@ -166,7 +179,7 @@ describe('ToolCard — states', () => {
 
   it('stays locked when neither command detail nor content exists', () => {
     const item = goldenItem(failedAndDenied, 'toolu_denied_01', 'declined')
-    render(<ToolCard item={{ ...item, title: 'Tool' }} />)
+    render(<ToolCard item={{ ...item, toolKind: 'other', title: 'Tool' }} />)
     expect((screen.getByRole('button', { name: /declined/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 

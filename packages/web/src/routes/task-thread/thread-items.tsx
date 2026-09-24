@@ -763,7 +763,11 @@ export function ToolCard({
     setUserOpenState(open)
   }
   const busy = item.status === 'running' || item.status === 'pending'
-  const { verb, detail } = splitToolTitle(item.title)
+  const title = splitToolTitle(item.title)
+  // OpenCode sends the command itself as an execute title, without a "Ran" prefix.
+  const { verb, detail } = item.toolKind === 'execute' && title.detail === undefined
+    ? { verb: 'Ran', detail: item.title }
+    : title
   const hasContent =
     (item.output !== undefined && item.output !== '') ||
     (item.error !== undefined && item.error !== '') ||

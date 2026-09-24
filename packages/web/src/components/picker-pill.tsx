@@ -36,7 +36,9 @@ function FieldLabel({ field, children }: { field: string; children: ReactNode })
   useLayoutEffect(() => {
     const container = box.current!
     const full = measure.current!
-    const update = () => setShowField(full.scrollWidth <= container.clientWidth)
+    const update = () => setShowField(
+      full.getBoundingClientRect().width <= container.getBoundingClientRect().width + 0.5,
+    )
     update()
     if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(update)

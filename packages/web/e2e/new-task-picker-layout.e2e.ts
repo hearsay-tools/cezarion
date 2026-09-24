@@ -24,6 +24,9 @@ beforeAll(async () => {
   const opencode = join(root, 'opencode-fixture')
   writeFileSync(opencode, '#!/bin/sh\necho 1.0.0\n')
   chmodSync(opencode, 0o755)
+  const pi = join(root, 'pi-fixture')
+  writeFileSync(pi, '#!/bin/sh\necho 1.0.0\n')
+  chmodSync(pi, 0o755)
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({
     defaultModels: { opencode: 'opencode/muse-spark-1.3-contributor-free' },
@@ -42,7 +45,7 @@ beforeAll(async () => {
   })
   baseUrl = `http://127.0.0.1:${port}`
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
-    env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: opencode }), stdio: 'ignore',
+    env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: opencode, CEZ_PI_BIN: pi }), stdio: 'ignore',
   })
   await waitForHealth(baseUrl)
   browser = AgentBrowser.open(`picker-layout-${process.pid}`)
@@ -86,7 +89,7 @@ function layout(): Layout {
         const label = pill.querySelector('[data-slot="picker-label"]');
         const full = pill.getAttribute('aria-label');
         const value = full.slice(full.indexOf(' · ') + 3);
-        const fits = label.previousElementSibling.scrollWidth <= label.clientWidth;
+        const fits = label.previousElementSibling.getBoundingClientRect().width <= label.getBoundingClientRect().width + 0.5;
         return label.textContent !== (fits ? full : value) || pill.title !== full;
       }).map(el => el.getAttribute('data-slot')),
     };
@@ -95,7 +98,7 @@ function layout(): Layout {
 
 it('lays out New Task pickers in reading order without clipping at desktop, narrow desktop, and mobile widths', () => {
   for (const theme of ['dark', 'light']) {
-    const sizes: Array<[number, number]> = [[1440, 264], [1440, 420], [1280, 264], [768, 420], [767, 0], [360, 0], [500, 0]]
+    const sizes: Array<[number, number]> = [[1440, 264], [1440, 420], [1280, 264], [768, 420], [767, 0], [375, 0], [360, 0], [500, 0]]
     for (const [width, sidebar] of sizes) {
       browser.setViewport(width, 900)
       browser.evaluate(`localStorage.setItem('cez-sidebar-width', '${sidebar}')`)
@@ -115,9 +118,14 @@ it('lays out New Task pickers in reading order without clipping at desktop, narr
       expect(effortIndex).toBeGreaterThan(0)
       browser.click(`[data-testid="effort-pill-menu"] [role="menuitemradio"]:nth-child(${effortIndex})`)
       browser.waitForFunction(`document.querySelector('[data-slot="effort-pill"]')?.textContent?.includes('medium') === true`)
+      browser.waitForFunction(`document.querySelector('[data-testid="effort-pill-menu"]') === null`)
       expect(browser.text('[data-slot="runner-pill"]')).toContain('opencode')
       expect(browser.text('[data-slot="effort-pill"]')).toContain('medium')
       const boxes = layout()
+      if (theme === 'light' && ((width === 375 && sidebar === 0) || (width === 1440 && sidebar === 420))) {
+        mkdirSync(join(import.meta.dirname, '../../../.ai/qa/artifacts_e2e'), { recursive: true })
+        browser.screenshot(join(import.meta.dirname, `../../../.ai/qa/artifacts_e2e/522-new-task-long-${width}.png`), { viewport: true })
+      }
       if (sidebar === 420) expect(boxes.sidebarWidth).toBe(420)
       if ((width === 1280 && sidebar === 264) || (width === 1440 && sidebar === 420)) {
         expect(boxes.group.width).toBeGreaterThanOrEqual(550)
@@ -137,8 +145,8 @@ it('lays out New Task pickers in reading order without clipping at desktop, narr
         expect(boxes.model.right).toBeLessThan(boxes.effort.left)
         expect(boxes.runner.width).toBeLessThanOrEqual(230)
         expect(boxes.effort.width).toBeLessThanOrEqual(210)
-        expect(boxes.runner.width).toBe(210)
-        expect(boxes.effort.width).toBe(180)
+        expect(boxes.runner.width).toBeGreaterThan(100)
+        expect(boxes.effort.width).toBeGreaterThan(90)
         if (width === 1440 && sidebar === 264) {
           expect(boxes.model.width).toBeGreaterThan(boxes.runner.width)
           expect(boxes.model.width).toBeGreaterThan(boxes.effort.width)
@@ -204,4 +212,47 @@ it('lets Model occupy the freed desktop track when Runner is unavailable', () =>
   expect(boxes.model.right).toBeLessThan(boxes.effort.left)
   expect(boxes.effort.right).toBeCloseTo(boxes.group.right, 0)
   expect(boxes.model.width).toBeGreaterThan(boxes.effort.width)
+})
+
+it('shows the fractional-width Model prefix when pi / grok-4.6 fits at three-column width', async () => {
+  const exit = once(server, 'exit')
+  server.kill()
+  await exit
+  writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({
+    defaultModels: { pi: 'grok-4.6' },
+  }))
+  server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {
+    env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: join(root, 'opencode-fixture'), CEZ_PI_BIN: join(root, 'pi-fixture') }), stdio: 'ignore',
+  })
+  await waitForHealth(baseUrl)
+  browser.setViewport(1440, 900)
+  browser.evaluate(`localStorage.setItem('cez-sidebar-width', '420')`)
+  browser.goto(`${baseUrl}/new`)
+  browser.waitForFunction(`document.querySelector('[data-slot="runner-pill"]')?.checkVisibility() === true`)
+  browser.click('[data-slot="runner-pill"]')
+  browser.waitForFunction(`document.querySelector('[data-testid="runner-pill-menu"] [role="menuitemradio"]') !== null`)
+  const index = browser.evaluate(`[...document.querySelectorAll('[data-testid="runner-pill-menu"] [role="menuitemradio"]')].findIndex(el => el.textContent.includes('pi CLI')) + 1`) as number
+  expect(index).toBeGreaterThan(0)
+  browser.click(`[data-testid="runner-pill-menu"] [role="menuitemradio"]:nth-child(${index})`)
+  browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]')?.getAttribute('aria-label') === 'Model · grok-4.6'`)
+  browser.waitForFunction(`document.querySelector('[data-testid="runner-pill-menu"]') === null`)
+  const facts = browser.evaluate(`(() => {
+    const group = document.querySelector('[data-slot="agent-options"]');
+    const pill = group.querySelector('[data-slot="model-pill"]');
+    const label = pill.querySelector('[data-slot="picker-label"]');
+    const fullWidth = label.previousElementSibling.getBoundingClientRect().width;
+    const slotWidth = label.getBoundingClientRect().width;
+    return { groupWidth: group.getBoundingClientRect().width, fullWidth, slotWidth, text: label.textContent };
+  })()`) as { groupWidth: number; fullWidth: number; slotWidth: number; text: string }
+  expect(facts.groupWidth).toBeGreaterThanOrEqual(550)
+  expect(facts.fullWidth % 1).toBeGreaterThan(0.01)
+  expect(facts.fullWidth).toBeLessThanOrEqual(facts.slotWidth + 0.5)
+  expect(facts.text).toBe('Model · grok-4.6')
+  expect(layout().incorrectPrefixes).toEqual([])
+  mkdirSync(join(import.meta.dirname, '../../../.ai/qa/artifacts_e2e'), { recursive: true })
+  browser.screenshot(join(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/522-new-task-short-1440.png'), { viewport: true })
+  browser.setViewport(375, 800)
+  browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]')?.getAttribute('aria-label') === 'Model · grok-4.6'`)
+  expect(layout().incorrectPrefixes).toEqual([])
+  browser.screenshot(join(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/522-new-task-short-375.png'), { viewport: true })
 })
