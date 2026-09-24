@@ -74,6 +74,19 @@ describe('discoverCockpit', () => {
     expect((await discoverCockpit({ repoDir: join(worktree), ports: [port] })).projectId).toBe('mine');
   });
 
+  it('discovers the submodule project from its task worktree, not the superproject', async () => {
+    const source = gitRepo();
+    const superproject = gitRepo();
+    execFileSync('git', ['-C', superproject, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', source, 'nested module']);
+    const module = join(superproject, 'nested module');
+    const worktree = join(module, '.ai/cezar/worktrees/abc');
+    execFileSync('git', ['-C', module, 'worktree', 'add', '-q', '-b', 'cez/abc', worktree]);
+    expect(await checkoutRoot(module)).toBe(module);
+    expect(await checkoutRoot(worktree)).toBe(module);
+    const port = await cockpit([project('superproject', superproject), project('module', module)]);
+    expect((await discoverCockpit({ repoDir: worktree, ports: [port] })).projectId).toBe('module');
+  });
+
   it('fails with no-cockpit (exit 2) when nothing serves this checkout', async () => {
     const repo = gitRepo();
     const port = await cockpit([project('stranger', '/nowhere')]);

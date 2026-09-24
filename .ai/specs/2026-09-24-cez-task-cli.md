@@ -63,7 +63,9 @@ and other JSON requests retain the byte cap. No new API route is introduced.
 3. For each healthy cockpit, read `GET /api/v1/projects` and compare each
    project `root` with this checkout's root: the realpath of `--repo` or cwd,
    resolved to the main checkout through `git rev-parse --git-common-dir` so a
-   task worktree finds its parent project. Lowest matching port wins.
+   task worktree finds its parent project. For submodules, whose shared Git dir
+   is under `.git/modules/`, resolve the main checkout's `core.worktree` against
+   that Git dir. Lowest matching port wins.
 4. No match → `{ code: "no-cockpit", error, hint }`, exit 2. No headless
    fallback, no server started, nothing written.
 

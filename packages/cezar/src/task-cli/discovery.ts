@@ -27,10 +27,17 @@ async function realpathOr(path: string): Promise<string> {
 /**
  * The main checkout that owns `dir`. A task worktree's common git dir is the parent repo's
  * `.git`, so this is what maps `.ai/cezar/worktrees/<id>` back to the project that ran it.
+ * Submodules instead keep their git dir under `.git/modules/` and record `core.worktree`.
  */
 export async function checkoutRoot(dir: string): Promise<string> {
   const common = await git(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
   if (common && basename(common) === '.git') return realpathOr(dirname(common));
+  if (common) {
+    // Read the main worktree's config, not a linked worktree override. Git resolves a relative
+    // core.worktree against this shared git dir, even when the caller is in a task worktree.
+    const main = await git(dir, ['--git-dir', common, 'config', '--path', '--get', 'core.worktree']);
+    if (main) return realpathOr(resolve(common, main));
+  }
   const top = await git(dir, ['rev-parse', '--show-toplevel']);
   return realpathOr(top ?? dir);
 }
