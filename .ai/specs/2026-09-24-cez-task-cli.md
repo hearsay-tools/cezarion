@@ -49,7 +49,11 @@ The only API change. Everything else is client-side.
 
 Dispatched in `src/index.ts` before the global `parseArgs`, as `worker` is.
 Plain `fetch`; responses validated with contract schemas; no runtime import of
-the api-client.
+the api-client. Requests retain deadlines. Successful `GET /runs` responses are
+exempt from the ordinary 3 MiB byte cap: that existing endpoint returns the full,
+unpaginated history, which can legitimately exceed the cap. Like the cockpit,
+`list` and `wait` currently materialize that history in memory; error responses
+and other JSON requests retain the byte cap. No new API route is introduced.
 
 ### Discovery (`discovery.ts`)
 

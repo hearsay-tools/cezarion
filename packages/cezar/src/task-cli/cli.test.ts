@@ -115,6 +115,19 @@ describe('cez task', () => {
   });
 
   describe('list', () => {
+    it('lists and waits on a project history larger than the single-response byte cap', async () => {
+      // Each task is valid at the API boundary; only the aggregate exceeds 3 MiB.
+      const runs = Array.from({ length: 32 }, (_, index) => {
+        const run = store.createRun({ title: `task ${index}`, workflow: 'quick-task', task: 'x'.repeat(100_000), steps: [] });
+        store.updateRun(run.id, { status: 'done' });
+        return run;
+      });
+      expect(await run(['list', '--limit', '100'])).toBe(0);
+      expect(last().runs).toHaveLength(32);
+      expect(await run(['wait', runs[0]!.id, '--timeout-seconds', '10'])).toBe(0);
+      expect(last()).toMatchObject({ timedOut: false, runs: [{ id: runs[0]!.id, status: 'done' }] });
+    });
+
     it('lists slim rows newest first, hides archived unless --all, filters and limits', async () => {
       const a = await start('a');
       const b = await start('b');

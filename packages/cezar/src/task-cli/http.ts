@@ -1,6 +1,6 @@
 /**
  * The loopback HTTP half of `cez task` (#504, spec 2026-09-24-cez-task-cli): plain `fetch`
- * against the cockpit's own `/api/v1/p/:projectId` routes, bounded like `cez worker`.
+ * against the cockpit's own `/api/v1/p/:projectId` routes, with request deadlines.
  *
  * No credential is read, sent or printed: the cockpit's origin guard (#426) admits a loopback
  * `Host` with no `Origin`, which is exactly what `fetch` sends.
@@ -28,9 +28,9 @@ export function threadUrl(cockpit: Cockpit, runId: string): string {
   return `${cockpit.origin}/p/${encodeURIComponent(cockpit.projectId)}/tasks/${encodeURIComponent(runId)}`;
 }
 
-/** Read at most RESPONSE_BYTES, so a hostile or broken server cannot exhaust memory. */
-async function boundedText(response: Response): Promise<string> {
-  if (Number(response.headers.get('content-length')) > RESPONSE_BYTES) {
+/** Enforce a byte limit where the route has a bounded response, including error bodies. */
+async function boundedText(response: Response, limit: number): Promise<string> {
+  if (Number(response.headers.get('content-length')) > limit) {
     await response.body?.cancel();
     throw new Error('Response too large');
   }
@@ -43,7 +43,7 @@ async function boundedText(response: Response): Promise<string> {
       const next = await reader.read();
       if (next.done) break;
       size += next.value.length;
-      if (size > RESPONSE_BYTES) { await reader.cancel(); throw new Error('Response too large'); }
+      if (size > limit) { await reader.cancel(); throw new Error('Response too large'); }
       chunks.push(next.value);
     }
   } finally { reader.releaseLock(); }
@@ -53,7 +53,7 @@ async function boundedText(response: Response): Promise<string> {
 export interface HttpResult { status: number; data: unknown }
 
 /** One request to an absolute URL. JSON bodies are parsed; anything else comes back as text. */
-export async function fetchJson(url: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<HttpResult> {
+export async function fetchJson(url: string, init: { method?: string; body?: unknown; timeoutMs?: number; responseLimitBytes?: number } = {}): Promise<HttpResult> {
   let response: Response;
   let text: string;
   try {
@@ -64,7 +64,7 @@ export async function fetchJson(url: string, init: { method?: string; body?: unk
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
       signal: AbortSignal.timeout(init.timeoutMs ?? REQUEST_TIMEOUT_MS),
     });
-    text = await boundedText(response);
+    text = await boundedText(response, response.ok ? (init.responseLimitBytes ?? RESPONSE_BYTES) : RESPONSE_BYTES);
   } catch (error) {
     throw new TaskCliError(2, { code: 'unavailable', error: `cockpit request failed: ${error instanceof Error ? error.message : String(error)}` });
   }
@@ -79,7 +79,14 @@ export async function fetchJson(url: string, init: { method?: string; body?: unk
 
 /** A project-scoped route: `path` starts with `/`, relative to `/api/v1/p/:projectId`. */
 export function request(cockpit: Cockpit, path: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<HttpResult> {
-  return fetchJson(`${cockpit.api}${path}`, init);
+  // GET /runs is the existing unpaginated full history. Even 32 valid 100k-character tasks
+  // exceed the ordinary cap. Match the cockpit's full-list read rather than making list/wait
+  // fail as history grows; retain deadlines, error-body caps and every other route's cap.
+  const fullRunList = path === '/runs' && (init.method ?? (init.body === undefined ? 'GET' : 'POST')) === 'GET';
+  return fetchJson(`${cockpit.api}${path}`, {
+    ...init,
+    ...(fullRunList ? { responseLimitBytes: Infinity } : {}),
+  });
 }
 
 /** The cockpit said no: pass its `{ error }` through verbatim, exit 2. */
