@@ -951,6 +951,15 @@ describe('reduceThread — parent/worker conversation', () => {
     })
   })
 
+  it('ranks a consumed projection above delivered and never downgrades it (#505)', () => {
+    const { turns } = reduceThread([
+      line(1, 'conversation-message', { message, delivery: 'queued' }),
+      line(2, 'conversation-message', { message, delivery: 'consumed', deliveredAt: '2026-09-08T12:00:01.000Z', consumedAt: '2026-09-08T12:00:05.000Z' }),
+      line(3, 'conversation-message', { message, delivery: 'delivered', deliveredAt: '2026-09-08T12:00:01.000Z' }),
+    ])
+    expect(turns[0]!.items[0]).toMatchObject({ kind: 'conversation', delivery: 'consumed', consumedAt: '2026-09-08T12:00:05.000Z' })
+  })
+
   it('marks an unanswered request pending', () => {
     const { turns } = reduceThread([line(1, 'conversation-message', { message, delivery: 'queued' })])
     expect(turns[0]!.items[0]).toMatchObject({ kind: 'conversation', outcome: { status: 'pending' } })

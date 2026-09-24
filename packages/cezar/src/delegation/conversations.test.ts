@@ -40,4 +40,21 @@ describe('conversation settlement', () => {
     expect(reconcileConversationState(root, [root], now, () => false)?.outcomes).toEqual([{ requestId: request.id, status: 'destroyed', observedAt: now }]);
   });
 
+
+  it('projects a consumed message once, above its delivered projection (#505)', async () => {
+    const { projectConversationEvents } = await import('./conversations.ts');
+    const { root, worker, request } = records();
+    const byRun = new Map<string, Array<Record<string, unknown>>>();
+    const eventsOf = (id: string) => { if (!byRun.has(id)) byRun.set(id, []); return byRun.get(id)!; };
+    worker.agentInputs = [{ id: request.id, source: 'agent', parentRunId: root.id, text: request.text, createdAt: now,
+      deliveredAt: '2026-09-08T20:00:01.000Z', consumedAt: '2026-09-08T20:00:05.000Z' }];
+    const store = { getRun: (id: string) => [root, worker].find(run => run.id === id), readEvents: (id: string) => eventsOf(id),
+      appendEvent: (id: string, event: Record<string, unknown>) => { eventsOf(id).push(event); } } as unknown as import('../runs/store.ts').RunStore;
+    projectConversationEvents(store, root); projectConversationEvents(store, root);
+    const consumed = [...byRun.values()].flat().filter(event => event.type === 'conversation-message' && event.delivery === 'consumed');
+    expect(consumed).toHaveLength(2); // one per participant
+    const delivered = [...byRun.values()].flat().filter(event => event.type === 'conversation-message' && event.delivery === 'delivered');
+    expect(delivered).toHaveLength(2); // the delivered step is never skipped
+    expect(consumed[0]).toMatchObject({ consumedAt: '2026-09-08T20:00:05.000Z', deliveredAt: '2026-09-08T20:00:01.000Z' });
+  });
 });

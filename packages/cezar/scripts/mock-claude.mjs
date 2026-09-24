@@ -11,6 +11,12 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 
+// `--help` lists the options cezar feature-detects (#505).
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: claude [options]\n  --input-format <format>\n  --replay-user-messages  Re-emit user messages from stdin back on stdout\n');
+  process.exit(0);
+}
+
 // Testability hook: CEZ_MOCK_ARGS_FILE=<path> appends the argv this mock was
 // spawned with (one JSON array per line), so tests and dry-run proofs can
 // assert exactly what reached the CLI (e.g. `--append-system-prompt …`).
@@ -26,6 +32,14 @@ if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-c
 emit({ type: 'system', subtype: 'init' });
 
 let turn = 0;
+// #505: `--replay-user-messages` echoes each stdin line when the model consumes it.
+const replay = process.argv.includes('--replay-user-messages') && process.env.CEZ_MOCK_CLAUDE_NO_REPLAY !== '1';
+const emitReplay = (uuid, text) => {
+  if (replay && uuid) emit({ type: 'user', isReplay: true, uuid, message: { role: 'user', content: [{ type: 'text', text }] } });
+};
+// Non-null while a `mock:steer-tool` turn is inside its tool: later lines join that turn.
+let steering = null;
+let droppedOnce = false;
 
 // A tiny generated PNG (320x200) standing in for a browser screenshot.
 const MOCK_SCREENSHOT_B64 =
@@ -75,7 +89,22 @@ function writeHandoffAndTodo() {
   }
 }
 
-async function respond(userText, imageCount) {
+async function respond(userText, imageCount, uuid) {
+  emitReplay(uuid, userText);
+  // `mock:steer-tool` → one tool call; lines written while it runs are consumed after
+  // it (replayed with their uuid) and settled by the SAME result, like Claude 2.1.280 (#505).
+  if (userText.includes('mock:steer-tool')) {
+    steering = [];
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_steer', name: 'Bash', input: { command: 'wait' } }] } });
+    await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
+    const steered = steering; steering = null;
+    emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_steer', content: 'waited' }] } });
+    for (const s of steered) emitReplay(s.uuid, s.userText);
+    const text = ['steer tool done', ...steered.map(s => `saw: ${s.userText}`)].join('\n');
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+    emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid, ...steered.map(s => s.uuid)].filter(Boolean), usage: { input_tokens: 20, output_tokens: 10 } });
+    return;
+  }
   if (userText.includes('mock:ci-wait')) {
     const { ciPrompt } = await import('./mock-ci-tool.mjs');
     const text = await ciPrompt('claude', process.argv.slice(2), userText);
@@ -583,6 +612,7 @@ rl.on('line', (line) => {
   if (!trimmed) return;
   let userText = '(unparseable message)';
   let imageCount = 0;
+  let uuid;
   try {
     const msg = JSON.parse(trimmed);
     if (msg.type === 'control_request' && msg.request?.subtype === 'list_models') {
@@ -595,6 +625,7 @@ rl.on('line', (line) => {
       })}\n`);
       return;
     }
+    uuid = typeof msg.uuid === 'string' ? msg.uuid : undefined;
     const blocks = msg?.message?.content ?? [];
     userText = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n') || '(no text)';
     imageCount = blocks.filter((b) => b.type === 'image').length;
@@ -613,7 +644,12 @@ rl.on('line', (line) => {
       // best effort — never break the mock over the hook
     }
   }
-  queue = queue.then(() => respond(userText, imageCount));
+  // #505 liveness tests: silently drop a matching line (a harness that accepted input
+  // and never runs it). CEZ_MOCK_DROP_ONCE=1 drops only the first match.
+  const drop = process.env.CEZ_MOCK_DROP_LINES;
+  if (drop && userText.includes(drop) && !(process.env.CEZ_MOCK_DROP_ONCE === '1' && droppedOnce)) { droppedOnce = true; return; }
+  if (steering) { steering.push({ userText, uuid }); return; }
+  queue = queue.then(() => respond(userText, imageCount, uuid));
 });
 rl.on('close', () => {
   // EOF = session over; finish any in-flight turn then exit cleanly.

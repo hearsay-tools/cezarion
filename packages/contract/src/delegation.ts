@@ -224,6 +224,12 @@ export const agentInputSchema = z.object({
   text: z.string().min(1).max(100_000),
   createdAt: z.iso.datetime(),
   deliveredAt: z.iso.datetime().optional(),
+  /** The model received it, when the harness can show that (#505). Absent on
+   * unobservable backends and on records written before #505. */
+  consumedAt: z.iso.datetime().optional(),
+  /** Accepted by a harness that reports reading, and not read yet. A restart replays
+   * such input; records written before #505 never carry it, so nothing historical replays. */
+  awaitingRead: z.literal(true).optional(),
   inboxClaim: inboxClaimSchema.optional(),
 }).strict();
 export type AgentInput = z.infer<typeof agentInputSchema>;

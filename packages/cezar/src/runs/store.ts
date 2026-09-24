@@ -930,6 +930,48 @@ export class RunStore extends EventEmitter {
   }
 
   /** Observable atomic input checkpoint: a failed write publishes nothing. */
+  /** Accepted input the harness will never read returns to the queue (#505): only its
+   * delivery and consumption receipts are cleared; order and identity are kept. */
+  requeueUnconsumedAgentInputs(id: string, ids: readonly string[]): void {
+    const run = this.runs.get(id);
+    if (!run?.agentInputs || !ids.length) return;
+    this.commitAgentInputs(id, run.agentInputs.map(input => {
+      if (!ids.includes(input.id)) return input;
+      const { deliveredAt: _delivered, consumedAt: _consumed, awaitingRead: _awaiting, ...queued } = input;
+      return queued;
+    }));
+  }
+
+  /** Model consumption observed by the current session (#505). Never un-sets deliveredAt. */
+  commitAgentInputsConsumed(id: string, ids: readonly string[], at: string): void {
+    const run = this.runs.get(id);
+    if (!run?.agentInputs || !ids.length) return;
+    this.commitAgentInputs(id, run.agentInputs.map(input => {
+      if (!ids.includes(input.id) || !input.deliveredAt || input.consumedAt) return input;
+      const { awaitingRead: _awaiting, ...read } = input;
+      return { ...read, consumedAt: at };
+    }));
+  }
+
+  /** Delivered, but the harness never confirmed reading it (#505): stop awaiting a read. */
+  commitAgentInputsUnconfirmed(id: string, ids: readonly string[]): void {
+    const run = this.runs.get(id);
+    if (!run?.agentInputs || !ids.length) return;
+    this.commitAgentInputs(id, run.agentInputs.map(input => {
+      if (!ids.includes(input.id) || !input.awaitingRead) return input;
+      const { awaitingRead: _awaiting, ...unconfirmed } = input;
+      return unconfirmed;
+    }));
+  }
+
+  /** Crash recovery (#505): input a harness accepted but was never seen reading goes
+   * back to the queue. Returns the requeued IDs. */
+  requeueAwaitingReadInputs(id: string): string[] {
+    const ids = (this.runs.get(id)?.agentInputs ?? []).filter(input => input.awaitingRead && input.deliveredAt && !input.consumedAt).map(input => input.id);
+    this.requeueUnconsumedAgentInputs(id, ids);
+    return ids;
+  }
+
   commitAgentInputs(id: string, inputs: readonly AgentInput[], openingContinuationInputId?: string): void {
     const run = this.runs.get(id);
     if (!run) throw new Error('missing agent input target');

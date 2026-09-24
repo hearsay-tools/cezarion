@@ -50,6 +50,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
  * | `ask-bad` | a malformed ask, and then still end the turn |
  * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
+ * | `steer-tool` | one slow tool; agent input sent while it runs is read before the turn ends (#505) |
+ * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
  */
 export const SCENARIOS = [
   'baseline',
@@ -61,6 +63,8 @@ export const SCENARIOS = [
   'ask-bad',
   'ask-reply-late',
   'subagent',
+  'steer-tool',
+  'steer-late',
 ] as const;
 export type ScenarioName = (typeof SCENARIOS)[number];
 
@@ -102,6 +106,9 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-reply-late': 'mock:ask',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagents',
+      'steer-tool': 'mock:steer-tool',
+      // A line written after the last model call runs as the CLI's next queued turn.
+      'steer-late': 'mock:hold',
     },
   },
   codex: {
@@ -120,6 +127,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-bad': 'mock:ask-bad',
       // #600's repro: a child thread's own turn/completed must not end the parent.
       subagent: 'mock:child-turn',
+      'steer-tool': 'mock:steer-tool',
+      'steer-late': 'mock:steer-late',
     },
   },
   opencode: {
@@ -136,6 +145,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'ask-reply-late': 'mock:ask-reply-late',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagent',
+      'steer-tool': 'mock:steer-tool',
+      'steer-late': 'mock:steer-late',
     },
   },
   cursor: {
@@ -159,6 +170,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       ask: 'mock:ask',
       'ask-reply-late': 'mock:ask',
       'ask-bad': 'mock:ask-bad',
+      'steer-tool': 'mock:steer-tool',
+      'steer-late': 'mock:steer-late',
       // No `subagent`: see the S9 and R12 entries in PARITY_EXEMPTIONS.
     },
   },
@@ -206,6 +219,22 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  {
+    criterion: 'I1', backend: 'cursor', kind: 'scenario-unconstructible',
+    reason: 'Cursor ACP 2026.09.18: a second session/prompt cancels the running turn (live probe 2026-09-23), so agent input cannot be admitted mid-turn without cancelling tools. inputDelivery is boundary (#505).',
+  },
+  {
+    criterion: 'I2', backend: 'cursor', kind: 'scenario-unconstructible',
+    reason: 'Same wire as I1: Cursor admits no mid-turn agent input, so none can be left unread (#505).',
+  },
+  {
+    criterion: 'I2', backend: 'claude', kind: 'capability-absent',
+    reason: 'Claude 2.1.280 runs a stdin line written after the last model call as its own following result (queued_turn_count), so accepted input is never left unread (#505).',
+  },
+  {
+    criterion: 'I2', backend: 'pi', kind: 'capability-absent',
+    reason: 'pi 0.87.0 delivers an acknowledged steer in the running turn or runs it as the next prompt (rpc.md steer; #505 repro), so accepted input is never left unread.',
+  },
   {
     criterion: 'S4', backend: 'cursor', kind: 'capability-absent',
     reason: 'Cursor ACP 2026.09.15-d2fe57e emits no token usage (src/acp presenter and prompt result; live probe). Do not manufacture counts from text. Revisit when upstream emits telemetry.',

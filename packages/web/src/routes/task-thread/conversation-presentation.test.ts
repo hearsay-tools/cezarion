@@ -51,3 +51,10 @@ describe('conversation presentation titles', () => {
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued' })).toBeUndefined()
   })
 })
+
+describe('conversation delivery labels (#505)', () => {
+  it('names a message the recipient read', async () => {
+    const { conversationDeliveryLabel } = await import('./conversation-presentation')
+    expect(conversationDeliveryLabel('consumed')).toBe('Read')
+  })
+})

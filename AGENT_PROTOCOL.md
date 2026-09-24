@@ -58,6 +58,12 @@ interface AgentRunner {
   run(spec: AgentRunSpec, onEvent?: (e: AgentEvent) => void): Promise<AgentRunResult>;
   startSession(spec: AgentRunSpec, onEvent?: (e: AgentEvent) => void, opts?: SessionOptions): AgentSession;
   interrupt(): Promise<void>;
+  readonly inputDelivery?: InputDelivery; // absent = boundary (#505)
+}
+interface InputDelivery {
+  readonly mode: 'steer' | 'boundary';                 // mid-turn admission, or refused while busy
+  readonly consumption: 'observable' | 'unobservable'; // does the wire show the model read it?
+  readonly via: string;                                // the native mechanism
 }
 ```
 
@@ -77,7 +83,7 @@ interface AgentSession {
   result: Promise<AgentRunResult>;   // resolves when the process exits
   readonly pid?: number;             // root of the run's process tree (resource telemetry, #348)
   sendMessage(content: ContentBlock[]): boolean;  // human input; false when closed
-  sendAgentMessage(content: ContentBlock[]): false | Promise<void>; // reserve now, acknowledge asynchronously
+  sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[]): false | Promise<void>; // reserve now, harness acceptance later
   discardQueuedMessages(): void;     // drop mid-turn follow-ups; CEZ:ASK park calls this
   end(): void;                       // graceful: end input, SIGTERM→SIGKILL watchdog
   interrupt(): void;                 // hard stop (cancel)
@@ -112,20 +118,46 @@ real exit (or a failed spawn). After exit, inherited stdout gets a bounded
 250ms drain; remaining pipe handles are closed. Neither a timeout nor sending
 a signal can fabricate an exit or free a still-live session's capacity.
 
-**Non-human input (owned workers, 2026-09-06).** `sendAgentMessage` must never
-resolve a native question or a portable marker ask. False means the caller still
-owns the input and must retry at a later safe boundary, NEVER fall back to
-`sendMessage`. All four runners conservatively accept it at idle turn boundaries;
-existing human mid-turn steering and native answer routing are unchanged. Already
-queued human turns have priority: Claude counts outstanding prompt results and
-OpenCode counts queued human prompts through their HTTP acknowledgements. Pi's
-autonomously resumed turns are active too. OpenCode preserves its immediate v1
-SSE-idle boundary; when a question-reply or queued-prompt HTTP acknowledgement
-settles later, it emits an in-process readiness hint instead.
+**Non-human input (owned workers, 2026-09-06; immediate delivery, #505).** `sendAgentMessage`
+must never resolve a native question or a portable marker ask. False means the caller
+still owns the input and must retry later, NEVER fall back to `sendMessage`. A runner
+whose `inputDelivery.mode` is `steer` admits it while a turn runs, through the
+harness's native mechanism, so the model reads it at its next model step instead of
+after the whole turn; a `boundary` runner refuses it until the turn ends. Routine
+input never cancels a running tool. Every runner refuses while a native question or
+a trailing `CEZ:ASK` is pending, and before its opening prompt exists (Codex until
+startup completes, OpenCode until the opening prompt starts), then emits one
+readiness hint if it refused. Human input keeps priority: an outstanding human prompt
+acknowledgement refuses, then hints once it lands.
+
+`inputIds` name the durable inputs in the submission. A runner reports
+`onAgentInputConsumed(ids)` when its wire shows the model received them — never from
+a transport acknowledgement — and reports input it accepted but the model will never
+read: as `turn-end.unconsumedInputIds` at that turn's end, or as the out-of-turn event
+`input-unconsumed` when only a quiet grace window can tell (OpenCode). Input that
+opened a turn counts as read when that turn completes.
+
+| Backend | `inputDelivery` | Busy submission | Read when | Unread report |
+| --- | --- | --- | --- | --- |
+| Claude 2.1.280 | steer, observable | stdin line with `uuid`; argv `--replay-user-messages` | the replay echo with that uuid, or a `result` listing it in `user_message_uuids` | none: a line written after the last model call runs as the CLI's next queued turn |
+| Codex 0.155.1 | steer, observable | `turn/steer` with `expectedTurnId` and `clientUserMessageId` | `item/started` `userMessage` whose `clientId` matches — the input entered the thread's history and the next model call reads it (not a sampling timestamp: probes saw it 0.8 s and 26.7 s after the steer, mid-tool); a `turn/start` submission at its turn's completion | `turn-end.unconsumedInputIds`; a steer refused because its turn ended, or acknowledged after it completed, starts a turn with the same client id |
+| Pi 0.87.0 | steer, observable | `prompt` with `streamingBehavior: 'steer'` (never `followUp`) | the user `message_start` with the submitted text; input queued when a turn began, at that turn's settle | none: pi runs an acknowledged steer in the turn or as the next prompt |
+| OpenCode 1.18.32 (V1) | steer, observable | `prompt_async` while busy; no second turn opens | the first assistant `message.updated` naming the steered user message as `parentID` | `input-unconsumed` after a 2 s quiet idle (opencode#46842 lost wake); a later server run for it opens its own turn |
+| Cursor 2026.09.18 | boundary | refused while busy: a second ACP `session/prompt` cancels the running turn | the turn it opens | none |
+
+Probe evidence for this table is in `.ai/specs/2026-09-23-immediate-worker-delivery.md`;
+`.ai/scripts/probe-steering.ts` re-runs it against the installed CLIs (paid sessions,
+manual only).
 
 RunManager persists an attributed `AgentInput` before calling this seam, retains
 it on false or rejection, and records `deliveredAt` only after the returned Promise
-resolves. The method remains synchronous: false refuses without a write; a Promise
+resolves — harness acceptance, which on a steer runner can be mid-turn. `consumedAt`
+records the read report; an observable acceptance also writes `awaitingRead` until
+then. Input the harness reports unread returns to the queue (receipts cleared, order
+and identity kept) and is submitted again; accepted-but-unread input counts as queued
+work, so DONE, auto-end, the autonomous nudge and parking wait for it. A restart
+replays input still `awaitingRead`: delivery is at-least-once and the replayed text
+keeps the input ID. The method remains synchronous: false refuses without a write; a Promise
 reserves one submission immediately, but is not a delivery receipt. Codex resolves
 at the matching turn/start or turn/steer RPC result, OpenCode at successful prompt
 HTTP acknowledgement, and Pi at the matching prompt response id. Claude has no
@@ -140,12 +172,15 @@ Human `sendMessage` keeps its existing synchronous semantics. The `agent-input` 
 carries `{input: {id, source: 'agent'|'lifecycle', parentRunId, text, createdAt,
 deliveredAt?, conversation?: {senderRunId, recipientRunId, kind, requestId?}}}`; it is not a `user-message`, does not resolve an ask card, and
 never expands registry slash skills. The queue cap is 32 **undelivered** inputs, including the in-flight reservation.
-At a safe boundary the manager batches pending conversations in FIFO order into
-one submission, up to 32 messages and 100,000 formatted characters. An individually
+The manager batches pending conversations in FIFO order into one submission, up to
+32 messages and 100,000 formatted characters, as soon as the runner admits input. An individually
 valid message may exceed the aggregate limit by its attribution overhead; it is
 sent alone, never split. Non-conversation inputs remain barriers. The snapshot
 keeps every message ID, sender and request outcome; settled requests are labelled
-without reviving them. New arrivals wait for the next safe boundary.
+without reviving them. New arrivals go in the next submission once the in-flight one
+is acknowledged. A human answer that opens a new turn carries the held conversation
+batch in its own write, after the answer; an answer to a native ask continues the
+turn and the held batch steers right behind it.
 Only one exact current state/session/batch can be in flight. ACK merges into the
 current durable queue, preserving concurrent enqueues; duplicate readiness hints
 cannot submit it again. All inputs in the batch receive the same acknowledgement
@@ -196,10 +231,10 @@ capacity scheduler with its accepted identity and a new execution revision.
 Acceptance atomically records the ledger, input and continuation checkpoint.
 Exact retries return the existing receipt without another continuation; retrying
 a rejected ID with changed flags is a conflict, so a corrected send needs a new ID.
-The opening instruction is attributed agent input, never a human answer. Its
-delivery is confirmed conservatively at the first successful open-session turn
-boundary, atomically with retiring the opening replay prompt. Until then the
-receipt remains queued. The cockpit distinguishes that confirmation from normal
+The opening instruction is attributed agent input, never a human answer. It is
+delivered when its turn starts; retiring the opening replay prompt still waits for
+the first successful open-session turn boundary. Later input steers the opening
+turn instead of waiting for it. The cockpit distinguishes that confirmation from normal
 transport ACK time and from the later event projection timestamp.
 Stopped/destroyed workers cannot be resumed by messages; workers cannot resume
 their parent. Parent review and genuine human questions still require a human.
@@ -233,6 +268,8 @@ not exactly-once delivery); it must never silently drop it or claim success.
   exact current session across accepted worker waits and the admitted wake's
   reply turn and pending delivery acknowledgement, including nonfinal agent steps. Explicit end/interrupt and provider
   failures keep their existing semantics; a timer is never termination proof.
+- `onAgentInputConsumed?: (inputIds) => void` — the model received these inputs
+  (#505). At most once per ID; never from a transport acknowledgement.
 - `onAgentInputReady?: () => void` — optional in-process retry hint, NOT delivery
   acknowledgement or completion. Only a successful late reply/prompt at an idle,
   open session with no queued human prompt emits it. The manager checks current session identity, pending asks,
@@ -326,7 +363,8 @@ type AgentEvent =
   | { type: 'token-usage'; tokensUsed: number }
   | { type: 'cost'; usd: number }
   | { type: 'session'; sessionId: string }                    // backend's real session id, once known
-  | { type: 'turn-end' }
+  | { type: 'turn-end'; unconsumedInputIds?: readonly string[] } // #505
+  | { type: 'input-unconsumed'; inputIds: readonly string[] }    // #505: out-of-turn unread report
   | { type: 'note'; message: string }
   | { type: 'done' }
   | { type: 'error'; message: string };
@@ -717,8 +755,12 @@ session transcript. Codex filters both child message deltas and completions;
 Claude excludes child assistant text from v1 and its result fallback buffer;
 the v2 fallback uses the same parent-only guard.
 
-Owned-input rows S11/S12 pin ask separation and false/retry/closed-session delivery
-on all four real runners. R6–R11 exercise durable queued/startup input, before/during/
+Owned-input rows S11/S12 pin ask separation and each runner's declared delivery mode:
+a `steer` runner admits busy input, a `boundary` runner refuses and retries at its
+boundary, and a closed session refuses. Input rows I1/I2 (#505) pin that mid-turn
+input is reported read before its turn ends, and that accepted input a finished turn
+never read is reported; Cursor is scenario-unconstructible for both, and Claude and
+Pi are capability-absent for I2 because they never leave acknowledged input unread. R6–R11 exercise durable queued/startup input, before/during/
 after asks, restart with an unanswered ask, continuation asks, delayed native replies,
 DONE/explicit-stop precedence and post-send checkpoint failure. R13 runs a persisted
 catalog chain (an agent step plus a check step) inside the owned worker on every
@@ -894,7 +936,9 @@ To be first-class:
    `result`). Honor `AgentRunSpec` uniformly — use `prependSystemPrompt` if the
    backend has no native system-prompt channel — and declare `specSupport` (§1):
    every field, honored with its channel or dropped with the wire reason. The §7
-   spec-support rows hold the declaration against the mock's recording.
+   spec-support rows hold the declaration against the mock's recording. Declare
+   `inputDelivery` (§1) from a live probe of mid-turn input, and pass the §7 I1/I2
+   rows or declare their exemption.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and
    a `case` in `createRunner` (`runner-factory.ts`). Add `UiBackend` in
    `ui-events.ts` **and its mirror** `packages/api-client/src/protocol/ui-events.ts` (the

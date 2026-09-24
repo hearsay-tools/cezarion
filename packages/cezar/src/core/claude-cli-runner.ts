@@ -1,4 +1,5 @@
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
@@ -20,6 +21,7 @@ import type {
   ContentBlock,
   SessionOptions,
   AgentRunSpecSupport,
+  InputDelivery,
 } from './agent-runner.ts';
 
 // Re-exported for backends and the run manager that still import them from here.
@@ -28,6 +30,7 @@ import { isSignalTerminationExit, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { costWeightedTokens, type RawUsage } from './usage.ts';
 import { readNdjson } from './ndjson.ts';
+import { InputSubmissions } from './input-submissions.ts';
 import {
   claudeTurnStarted,
   createClaudeUiState,
@@ -88,6 +91,10 @@ export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
 export class ClaudeCliRunner implements AgentRunner {
   readonly backend = 'claude' as const;
   readonly specSupport = CLAUDE_SPEC_SUPPORT;
+  readonly inputDelivery: InputDelivery = {
+    mode: 'steer', consumption: 'observable',
+    via: 'stream-json stdin line with uuid; --replay-user-messages echo at consumption',
+  };
 
   private readonly bin: string;
   private readonly timeoutMs: number;
@@ -112,7 +119,7 @@ export class ClaudeCliRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const args = buildClaudeArgs(spec);
+    const args = buildClaudeArgs(spec, process.env, { replayUserMessages: supportsReplayUserMessages(this.bin) });
 
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -150,17 +157,20 @@ export class ClaudeCliRunner implements AgentRunner {
     child.stdin.on('error', (error: Error) => { onEvent?.({ type: 'note', message: `claude: stdin write failed: ${error.message}` }); });
     let agentInputReady = false;
     let agentWritePending = false;
-    // Prompt turns written to stdin whose `result` has not arrived yet. A
-    // follow-up accepted while the opening turn is still running makes this 2,
-    // and the opening result brings it back to 1, not 0.
-    let pendingPromptTurns = 0;
+    // Stdin lines (by uuid) whose `result` has not arrived yet. Claude 2.1.280
+    // merges a line written mid-turn into the running turn, and that ONE result
+    // lists every line it covered in `user_message_uuids` (#505) — a per-line
+    // counter left the runner busy forever after a merged follow-up.
+    const unsettled = new Set<string>();
+    let queuedTurnPending = false;
+    const submissions = new InputSubmissions();
     const scheduleAutoEnd = () => {
       // Never arm the close window while an accepted turn is still running:
       // the timer the opening result would start here has nothing to cancel it,
       // and closing stdin under a queued turn truncates it (#146). The final
       // result brings the count to 0 and arms the window as before.
       if (!opts.autoEndAfterFirstTurn || !stdinOpen || autoEndTimer || agentWritePending) return;
-      if (pendingPromptTurns > 0) return;
+      if (unsettled.size > 0) return;
       autoEndTimer = setTimeout(() => {
         autoEndTimer = undefined;
         if (opts.shouldAutoEnd?.() !== false) end();
@@ -169,26 +179,34 @@ export class ClaudeCliRunner implements AgentRunner {
     };
     let pendingMarkerAsk = false;
     let turnTextStart = 0;
-    const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void): boolean => {
+    const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void, inputIds: readonly string[] = []): boolean => {
       if (!stdinOpen) return false;
+      // A line written while a turn runs joins that turn instead of opening one (#505).
+      const opensTurn = unsettled.size === 0;
+      if (opensTurn) queuedTurnPending = false;
       agentInputReady = false;
-      pendingMarkerAsk = false;
-      turnTextStart = textChunks.length;
+      if (opensTurn) {
+        pendingMarkerAsk = false;
+        turnTextStart = textChunks.length;
+      }
       // A follow-up inside the reopen window cancels the scheduled close.
       if (autoEndTimer) {
         clearTimeout(autoEndTimer);
         autoEndTimer = undefined;
       }
+      const uuid = randomUUID();
       const line = JSON.stringify({
         type: 'user',
+        uuid,
         message: { role: 'user', content },
         session_id: spec.sessionId,
       });
       try {
         child.stdin.write(`${line}\n`, acknowledge);
-        pendingPromptTurns += 1;
-        // Each user message written to stdin begins a turn (§7.1).
-        emitUi(claudeTurnStarted);
+        unsettled.add(uuid);
+        submissions.accept(uuid, inputIds, '');
+        // A user message written to an idle session begins a turn (§7.1).
+        if (opensTurn) emitUi(claudeTurnStarted);
         return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -287,6 +305,17 @@ export class ClaudeCliRunner implements AgentRunner {
           // describes the intentional stop rather than an agent failure.
           // Normalize only this precise wire shape so genuine result errors
           // (authentication, limits, malformed sessions) stay authoritative.
+          if (queuedTurnPending && (msg.type === 'assistant' || msg.type === 'user' || msg.type === 'result')) {
+            queuedTurnPending = false;
+            emitUi(claudeTurnStarted);
+          }
+          // `--replay-user-messages` echoes a line when the model consumes it (#505).
+          // Presentation-free: it is the user's own text, and it carries no tool_result.
+          if (msg.type === 'user' && msg.isReplay === true) {
+            const ids = typeof msg.uuid === 'string' ? submissions.consume(msg.uuid) : [];
+            if (ids.length) opts.onAgentInputConsumed?.(ids);
+            continue;
+          }
           const mappedMessage = normalizeIntentionalTeardownResult(msg, terminatedByCezar);
           emitUi((state) => mapClaudeMessage(mappedMessage, state));
 
@@ -309,9 +338,24 @@ export class ClaudeCliRunner implements AgentRunner {
               onEvent?.({ type: 'cost', usd: msg.total_cost_usd });
             }
             pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
-            pendingPromptTurns = Math.max(0, pendingPromptTurns - 1);
+            // The named lines are exact; `queued_turn_count: 0` is only a fallback, because a
+            // line still in the pipe when the CLI computed this result is not covered by it.
+            const settled = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String)
+              : msg.queued_turn_count === 0 ? [...unsettled]
+              : [...unsettled].slice(0, 1);
+            // A line this result covered was read even if its replay echo was missed.
+            // An error result settles its lines but proves nothing reached the model: they
+            // stay pending, so a closing session returns them to the queue (#505 review).
+            const covered = settled.flatMap(id => { unsettled.delete(id); return msg.is_error === true ? [] : submissions.consume(id); });
+            if (covered.length) opts.onAgentInputConsumed?.(covered);
             // A result is not idle if human stdin messages already queued later turns.
-            agentInputReady = pendingPromptTurns === 0;
+            agentInputReady = unsettled.size === 0;
+            // A line written after this turn's last model call runs as the CLI's next
+            // queued turn; its replay/result reports consumption then (#505). Announce
+            // that turn when its first frame arrives, never speculatively: a line the
+            // CLI never runs must not look like activity. Decided before the turn-end
+            // callback, which may itself submit (and announce) the next prompt.
+            queuedTurnPending = unsettled.size > 0;
             onEvent?.({ type: 'turn-end' });
             scheduleAutoEnd();
           }
@@ -373,8 +417,9 @@ export class ClaudeCliRunner implements AgentRunner {
     const session: AgentSession = {
       result,
       sendMessage,
-      sendAgentMessage: (content) => {
-        if (!stdinOpen || !agentInputReady || pendingMarkerAsk || agentWritePending) return false;
+      sendAgentMessage: (content, inputIds = []) => {
+        // #505: allowed mid-turn — the CLI steers the line into the running turn.
+        if (!stdinOpen || pendingMarkerAsk || agentWritePending) return false;
         let resolve!: () => void, reject!: (error: Error) => void;
         const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
         agentWritePending = true;
@@ -386,7 +431,7 @@ export class ClaudeCliRunner implements AgentRunner {
           if (error) reject(error);
           else resolve();
           if (stdinOpen && agentInputReady) { opts.onAgentInputReady?.(); scheduleAutoEnd(); }
-        });
+        }, inputIds);
         if (!sent) { agentWritePending = false; child.off('close', closed); return false; }
         // Claude has no per-prompt RPC receipt: successful pipe write is the
         // transport boundary, not a promise that the model executed the input.
@@ -415,9 +460,26 @@ export class ClaudeCliRunner implements AgentRunner {
  * keeps today's path: `CEZ_APPROVAL_GATE=1` opts into `acceptEdits` (#435).
  * `CEZ_CLAUDE_SETTING_SOURCES` optionally adds `--setting-sources`.
  */
+/** `--replay-user-messages` is the read signal (#505), but an older CLI rejects unknown
+ * options at startup. Read the installed CLI's own `--help` once per binary; without the
+ * flag, result coverage (`user_message_uuids`) still reports reads. */
+const replaySupport = new Map<string, boolean>();
+export function supportsReplayUserMessages(bin: string): boolean {
+  const known = replaySupport.get(bin);
+  if (known !== undefined) return known;
+  let supported = false;
+  try {
+    supported = execFileSync(bin, ['--help'], { encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'ignore'] })
+      .includes('--replay-user-messages');
+  } catch { supported = false; }
+  replaySupport.set(bin, supported);
+  return supported;
+}
+
 export function buildClaudeArgs(
   spec: AgentRunSpec,
   env: NodeJS.ProcessEnv = process.env,
+  features: { replayUserMessages: boolean } = { replayUserMessages: true },
 ): string[] {
   const args: string[] = [
     '--input-format',
@@ -426,6 +488,8 @@ export function buildClaudeArgs(
     'stream-json',
     '--verbose',
   ];
+  // Echo each stdin line when the model consumes it: the consumption signal (#505).
+  if (features.replayUserMessages) args.push('--replay-user-messages');
   const permissionMode = env.CEZ_CLAUDE_PERMISSION_MODE;
   if (permissionMode === 'bypass') {
     args.push('--dangerously-skip-permissions');
@@ -527,6 +591,11 @@ interface ClaudeStreamMessage {
   usage?: RawUsage;
   is_error?: boolean;
   total_cost_usd?: number;
+  /** #505: stdin echo at consumption (`--replay-user-messages`) and result coverage. */
+  uuid?: string;
+  isReplay?: boolean;
+  user_message_uuids?: unknown[];
+  queued_turn_count?: number;
 }
 
 function normalizeIntentionalTeardownResult(

@@ -43,6 +43,10 @@ export function spawnCodexAppServer(
 }
 
 /** Minimal newline-JSON request correlator shared by runs and short-lived discovery. */
+/** The server answered the request with a JSON-RPC error — a definitive refusal,
+ * unlike a timeout or a closed transport (#505). */
+export class CodexRpcResponseError extends Error {}
+
 export class CodexAppServerRpc {
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
@@ -90,7 +94,7 @@ export class CodexAppServerRpc {
     const pending = this.pending.get(message.id);
     if (!pending) return false;
     this.pending.delete(message.id);
-    if (message.error) pending.reject(new Error(codexErrorText(message.error)));
+    if (message.error) pending.reject(new CodexRpcResponseError(codexErrorText(message.error)));
     else pending.resolve((message.result as Record<string, unknown>) ?? {});
     return true;
   }

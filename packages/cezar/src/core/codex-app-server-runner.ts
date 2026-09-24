@@ -1,4 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract';
 import type {
   AgentEvent,
@@ -10,6 +11,7 @@ import type {
   ContentBlock,
   SessionOptions,
   AgentRunSpecSupport,
+  InputDelivery,
 } from './agent-runner.ts';
 import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import {
@@ -20,9 +22,11 @@ import {
 import { parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
+import { InputSubmissions } from './input-submissions.ts';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 import {
   CodexAppServerRpc,
+  CodexRpcResponseError,
   codexSpawnError,
   endCodexAppServer,
   resolveCodexExecutable,
@@ -95,6 +99,12 @@ export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
 export class CodexAppServerRunner implements AgentRunner {
   readonly backend = 'codex' as const;
   readonly specSupport = CODEX_SPEC_SUPPORT;
+  readonly inputDelivery: InputDelivery = {
+    mode: 'steer', consumption: 'observable',
+    // The userMessage item marks the input entering the thread's history (probe 2026-09-24:
+    // 0.8 s and 26.7 s after the steer, both before the tool ended); the next model call reads it.
+    via: 'turn/steer with clientUserMessageId; item/started userMessage clientId once in the thread history',
+  };
 
   private readonly bin: string;
   private readonly timeoutMs: number;
@@ -139,6 +149,17 @@ class CodexSession implements AgentSession {
   private threadId: string | undefined;
   private activeTurnId: string | undefined;
   private agentInputReady = false;
+  /** Accepted agent input not yet seen as a consumed userMessage item (#505). */
+  private readonly submissions = new InputSubmissions();
+  private inFlightSubmissionId: string | undefined;
+  private refusedBeforeStartup = false;
+  private humanPromptsPending = 0;
+  private refusedForHuman = false;
+  /** Submissions that opened a turn via turn/start rather than steering one. */
+  private readonly turnStartSubmissions = new Set<string>();
+  /** Recent main-thread turn outcomes (true = completed without error), for a late turn/start response. */
+  private readonly completedTurns = new Map<string, boolean>();
+  private turnCompletions = 0;
   private agentSubmissionPending = false;
   private turnBoundaryVersion = 0;
   private pendingUserInput: PendingUserInput | undefined;
@@ -345,18 +366,30 @@ class CodexSession implements AgentSession {
     return this.child.pid;
   }
 
-  sendAgentMessage(content: ContentBlock[]): false | Promise<void> {
-    if (!this.open || !this.agentInputReady || this.pendingUserInput || this.agentSubmissionPending) return false;
+  sendAgentMessage(content: ContentBlock[], inputIds: readonly string[] = []): false | Promise<void> {
+    // #505: a running turn is steered with turn/steer; only an unanswered native ask
+    // or an in-flight submission refuses.
+    // Until the thread and its first turn exist there is nothing to steer or start;
+    // a refusal here earns one readiness hint when startup completes.
+    if (this.open && !this.startupComplete) { this.refusedBeforeStartup = true; return false; }
+    // A human prompt still on its way to the wire goes first (#505 local review).
+    if (this.open && this.humanPromptsPending > 0) { this.refusedForHuman = true; return false; }
+    if (!this.open || this.pendingUserInput || this.agentSubmissionPending) return false;
     this.agentInputReady = false;
     this.agentSubmissionPending = true;
     if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
     this.autoEndTimer = undefined;
+    const submissionId = randomUUID();
+    this.submissions.accept(submissionId, inputIds, '');
+    this.inFlightSubmissionId = submissionId;
     // Reserve synchronously; only the matching RPC result acknowledges delivery.
-    return this.startOrSteerTurn(textOf(content)).catch((err: unknown) => {
+    return this.startOrSteerTurn(textOf(content), submissionId).catch((err: unknown) => {
+      this.submissions.consume(submissionId); // never accepted: the caller keeps ownership
       if (this.stdinOpen) this.emit({ type: 'error', message: `codex: agent input failed: ${String(err)}` });
       throw err;
     }).finally(() => {
       this.agentSubmissionPending = false;
+      if (this.inFlightSubmissionId === submissionId) this.inFlightSubmissionId = undefined;
       if (this.stdinOpen && this.agentInputReady && !this.pendingUserInput) {
         this.opts.onAgentInputReady?.();
         this.scheduleAutoEnd();
@@ -388,13 +421,22 @@ class CodexSession implements AgentSession {
       this.rpc.respond({ id: pending.rpcId, result: { answers: userInputAnswers(pending.questions, text) } });
       return this.open;
     }
-    // Wait for the thread to exist, then steer the live turn or start a new one.
+    // Wait for the thread to exist, then steer the live turn or start a new one. Agent input
+    // waits until this prompt's request settles, so it can never overtake it.
+    this.humanPromptsPending += 1;
     void this.ready
       .then(() => this.startOrSteerTurn(text))
       .catch((err: unknown) => {
         if (this.stdinOpen) {
           const message = err instanceof Error ? err.message : String(err);
           this.emit({ type: 'note', message: `codex: turn failed: ${message}` });
+        }
+      })
+      .finally(() => {
+        this.humanPromptsPending -= 1;
+        if (this.humanPromptsPending === 0 && this.refusedForHuman) {
+          this.refusedForHuman = false;
+          if (this.open && !this.pendingUserInput && !this.agentSubmissionPending) this.opts.onAgentInputReady?.();
         }
       });
     return true;
@@ -471,8 +513,14 @@ class CodexSession implements AgentSession {
 
   private checkStartupComplete(): void {
     if (!this.openingAcknowledged || !this.firstTurnStarted || !this.stdinOpen) return;
+    if (this.startupComplete) return;
     this.startupComplete = true;
     if (this.startupTimer) clearTimeout(this.startupTimer);
+    // Input refused during startup can now steer the opening turn (#505).
+    if (this.refusedBeforeStartup) queueMicrotask(() => {
+      this.refusedBeforeStartup = false;
+      if (this.open && !this.pendingUserInput && !this.agentSubmissionPending) this.opts.onAgentInputReady?.();
+    });
   }
 
   // ---- protocol -----------------------------------------------------------
@@ -527,29 +575,58 @@ class CodexSession implements AgentSession {
     if (!this.startupComplete) this.startupWaitingFor('first main-thread turn');
   }
 
-  private async startOrSteerTurn(text: string): Promise<void> {
+  private async startOrSteerTurn(text: string, clientUserMessageId?: string): Promise<void> {
     this.assertOpen();
     if (!this.threadId) throw new Error('codex app-server did not return a thread id');
     this.agentInputReady = false;
     const input = [{ type: 'text', text, text_elements: [] }];
+    // Echoed as the consumed userMessage item's `clientId` (#505).
+    const ids = clientUserMessageId ? { clientUserMessageId } : {};
     if (this.activeTurnId) {
-      await this.rpc.request('turn/steer', {
-        threadId: this.threadId,
-        input,
-        expectedTurnId: this.activeTurnId,
-      });
-      return;
+      const boundary = this.turnBoundaryVersion;
+      try {
+        await this.rpc.request('turn/steer', {
+          threadId: this.threadId,
+          input,
+          expectedTurnId: this.activeTurnId,
+          ...ids,
+        });
+        // Accepted, but the turn completed before the model read it: nothing will read
+        // it now, so start a turn with it under the same client id (#505).
+        const stranded = clientUserMessageId !== undefined && this.turnBoundaryVersion !== boundary &&
+          !this.activeTurnId && this.submissions.has(clientUserMessageId);
+        if (!stranded) return;
+      } catch (err) {
+        // Only a definitive refusal falls back: the server answered with an error AND
+        // the turn ended meanwhile. A timeout or closed transport is ambiguous — the
+        // steer may have landed — so it rejects without a retry (#505).
+        if (!(err instanceof CodexRpcResponseError) || this.turnBoundaryVersion === boundary || this.activeTurnId) throw err;
+      }
     }
     // Ask the app-server for reasoning summaries; without this the model runs
     // with its default (no summary), so the reasoning thread stays empty even
     // though the mapper and UI can render it. The override persists for this
     // turn and every subsequent turn, so seeding it on turn/start is enough.
     const boundaryVersion = this.turnBoundaryVersion;
+    const completionsBefore = this.turnCompletions;
     const res = await this.rpc.request('turn/start', {
       threadId: this.threadId,
       input,
+      ...ids,
       ...codexTurnStartExtras(this.spec),
     });
+    if (clientUserMessageId) {
+      // This turn's own input: its completion proves the model processed it (#505). A response
+      // can arrive after that turn already completed; settle it from the recorded outcome.
+      const startedTurn = turnIdOf(res);
+      const outcome = startedTurn && this.turnCompletions > completionsBefore ? this.completedTurns.get(startedTurn) : undefined;
+      if (outcome === undefined) this.turnStartSubmissions.add(clientUserMessageId);
+      else {
+        const settled = this.submissions.consume(clientUserMessageId);
+        if (settled.length && outcome) this.opts.onAgentInputConsumed?.(settled);
+        else if (settled.length) this.emit({ type: 'input-unconsumed', inputIds: settled });
+      }
+    }
     if (this.turnBoundaryVersion === boundaryVersion) this.activeTurnId = turnIdOf(res) ?? this.activeTurnId;
   }
 
@@ -622,6 +699,12 @@ class CodexSession implements AgentSession {
       case 'item/started': {
         const item = (params.item as Record<string, unknown>) ?? {};
         const type = stringField(item, 'type');
+        if (type === 'userMessage' && !this.isForeignThreadTurn(params)) {
+          // The model received this input now; `clientId` names our submission (#505).
+          const clientId = stringField(item, 'clientId');
+          const ids = clientId ? this.submissions.consume(clientId) : [];
+          if (ids.length) this.opts.onAgentInputConsumed?.(ids);
+        }
         // Only tool-like items become tool events; message/reasoning stream as text.
         if (type && !NON_TOOL_ITEMS.has(type)) {
           const id = stringField(item, 'id') ?? `item-${this.rpc.allocateId()}`;
@@ -667,11 +750,26 @@ class CodexSession implements AgentSession {
         // partial prose before the turn boundary (run.ts reads markers there).
         this.textCoalescer.flush();
         const outcome = codexTurnOutcome(method, params);
+        const completedId = turnIdOf(params);
+        if (completedId) {
+          this.completedTurns.set(completedId, outcome.error === undefined);
+          if (this.completedTurns.size > 32) this.completedTurns.delete(this.completedTurns.keys().next().value!);
+        }
+        this.turnCompletions += 1;
         if (outcome.error !== undefined && !this.terminatedByCezar) {
           this.emit({ type: 'error', message: outcome.error });
         }
         this.agentInputReady = this.open;
-        this.emit({ type: 'turn-end' });
+        // A completed turn processed its own input; a failed one may never have reached the
+        // model, so its input stays pending and is reported unconsumed below.
+        const started = outcome.error === undefined ? [...this.turnStartSubmissions].flatMap(id => this.submissions.consume(id)) : [];
+        this.turnStartSubmissions.clear();
+        if (started.length) this.opts.onAgentInputConsumed?.(started);
+        // An in-flight steer is owned by its RPC outcome, not by this boundary.
+        const inFlight = this.inFlightSubmissionId ? this.submissions.consume(this.inFlightSubmissionId) : [];
+        const unconsumedInputIds = this.submissions.takeUnconsumed();
+        if (this.inFlightSubmissionId && inFlight.length) this.submissions.accept(this.inFlightSubmissionId, inFlight, '');
+        this.emit(unconsumedInputIds.length ? { type: 'turn-end', unconsumedInputIds } : { type: 'turn-end' });
         this.scheduleAutoEnd();
         break;
       }

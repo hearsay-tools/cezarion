@@ -8,6 +8,7 @@ import type {
   AgentRunResult,
   AgentRunSpec,
   AgentRunSpecSupport,
+  InputDelivery,
   AgentRunner,
   AgentSession,
   AgentToolCallRecord,
@@ -19,6 +20,7 @@ import { buildChildEnv } from './agent-env.js';
 import { readNdjson } from './ndjson.js';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
 import { V1TextCoalescer } from './v1-text-coalescer.js';
+import { InputSubmissions } from './input-submissions.ts';
 import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
 
 export interface PiRunnerOptions {
@@ -61,6 +63,10 @@ export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
 export class PiRunner implements AgentRunner {
   readonly backend = 'pi' as const;
   readonly specSupport = PI_SPEC_SUPPORT;
+  readonly inputDelivery: InputDelivery = {
+    mode: 'steer', consumption: 'observable',
+    via: 'prompt with streamingBehavior steer; user message_start with the submitted text',
+  };
   private readonly bin: string;
   private readonly timeoutMs: number;
   private lastSession: AgentSession | null = null;
@@ -178,18 +184,37 @@ export class PiRunner implements AgentRunner {
       }, AUTO_END_DELAY_MS);
       autoEndTimer.unref?.();
     };
+    // Agent input refused only because a prompt acknowledgement was outstanding gets
+    // one readiness hint when it lands, even mid-turn: the turn can be steered (#505).
+    let refusedForAck = false;
     const readyAfterAck = () => {
       if (open && agentInputReady && !piUi.turnId && !agentAck && !humanPromptAcks) {
+        refusedForAck = false;
         opts.onAgentInputReady?.(); scheduleAutoEnd();
+      } else if (refusedForAck && open && !agentAck && !humanPromptAcks && !pendingMarkerAsk) {
+        refusedForAck = false;
+        opts.onAgentInputReady?.();
       }
     };
     let pendingMarkerAsk = false;
     let turnTextStart = 0;
-    const sendMessage = (content: ContentBlock[], requestId?: string): boolean => {
+    // Accepted agent prompts not yet seen as a user message_start (#505).
+    const submissions = new InputSubmissions();
+    // Submissions already queued when a turn began: that turn reads them. Pi never
+    // drops an acknowledged steer — one sent as a turn settles runs as the next
+    // prompt — so pi reports no unconsumed input (#505).
+    let carried = new Set<string>();
+    const acked = new Set<string>();
+    let turnFailed = false;
+    const sendMessage = (content: ContentBlock[], requestId?: string, inputIds: readonly string[] = []): boolean => {
       if (!open) return false;
+      // A steer joins the running turn; only an idle prompt opens one (#505).
+      const opensTurn = !piUi.turnId;
       agentInputReady = false;
-      pendingMarkerAsk = false;
-      turnTextStart = textChunks.length;
+      if (opensTurn) {
+        pendingMarkerAsk = false;
+        turnTextStart = textChunks.length;
+      }
       const { message, images } = toPiPrompt(content);
       if (autoEndTimer) {
         clearTimeout(autoEndTimer);
@@ -207,6 +232,9 @@ export class PiRunner implements AgentRunner {
         return false;
       }
       if (!requestId) humanPromptAcks += 1;
+      else {
+        submissions.accept(requestId, inputIds, message);
+      }
       if (!piUi.turnId) {
         const mapped = piTurnStarted(piUi);
         piUi = mapped.state;
@@ -299,7 +327,7 @@ export class PiRunner implements AgentRunner {
             const pending = agentAck;
             if (pending && value.id === pending.id) {
               agentAck = undefined;
-              if (value.success === true) pending.resolve();
+              if (value.success === true) { acked.add(pending.id); pending.resolve(); }
               else {
                 const message = rpcError(value);
                 if (open) onEvent?.({ type: 'error', message });
@@ -331,10 +359,20 @@ export class PiRunner implements AgentRunner {
               if (usage.cost > 0) onEvent?.({ type: 'cost', usd: usage.cost });
             }
             if (string(value.message.stopReason) === 'error') {
+              turnFailed = true;
               latchedProviderError = piProviderErrorMessage(value.message);
             } else {
               latchedProviderError = undefined;
             }
+          } else if (value.type === 'agent_start') {
+            // Pi handles commands in stream order: only a prompt it acknowledged before this
+            // agent_start can be in the turn it starts (#505 CI race).
+            carried = new Set(submissions.pendingIds().filter(id => acked.has(id)));
+            turnFailed = false;
+          } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
+            // The model received this prompt now (#505).
+            const ids = submissions.consumeOldestByText(piMessageText(value.message));
+            if (ids.length) opts.onAgentInputConsumed?.(ids);
           } else if (value.type === 'tool_execution_start') {
             flushText();
             const id = string(value.toolCallId);
@@ -359,6 +397,13 @@ export class PiRunner implements AgentRunner {
             emitLatchedProviderError();
             pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
             agentInputReady = true;
+            // Input queued before this turn began was processed by it, even when pi
+            // emitted no user message_start for it (#505) — unless a provider error ended
+            // the turn, which may never have reached the model.
+            const read = turnFailed ? [] : [...carried].flatMap(id => submissions.consume(id));
+            turnFailed = false;
+            carried = new Set();
+            if (read.length) opts.onAgentInputConsumed?.(read);
             onEvent?.({ type: 'turn-end' });
             scheduleAutoEnd();
           } else if (value.type === 'extension_error') {
@@ -406,13 +451,16 @@ export class PiRunner implements AgentRunner {
     const session: AgentSession = {
       result,
       sendMessage,
-      sendAgentMessage: (content) => {
-        if (!open || !agentInputReady || piUi.turnId || pendingMarkerAsk || agentAck || humanPromptAcks) return false;
+      sendAgentMessage: (content, inputIds = []) => {
+        // #505: a running turn is steered; only a pending CEZ:ASK or an unacknowledged
+        // prompt refuses.
+        if (open && !pendingMarkerAsk && (agentAck || humanPromptAcks)) { refusedForAck = true; return false; }
+        if (!open || pendingMarkerAsk) return false;
         const id = `cezar-agent-${++promptSerial}`;
         let resolve!: () => void, reject!: (error: Error) => void;
         const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
         agentAck = { id, resolve, reject };
-        if (!sendMessage(content, id)) { agentAck = undefined; return false; }
+        if (!sendMessage(content, id, inputIds)) { agentAck = undefined; return false; }
         return acknowledged;
       },
       discardQueuedMessages: () => undefined,
@@ -511,6 +559,14 @@ function emitImages(value: unknown, onEvent?: (event: AgentEvent) => void): void
       if (data && mediaType) onEvent?.({ type: 'image', data, mediaType });
     }
   }
+}
+
+/** A pi message's text: a plain string, or its text parts joined like toPiPrompt. */
+function piMessageText(message: Record<string, unknown>): string {
+  if (typeof message.content === 'string') return message.content;
+  return Array.isArray(message.content)
+    ? message.content.flatMap(part => isRecord(part) && part.type === 'text' && typeof part.text === 'string' ? [part.text] : []).join('\n')
+    : '';
 }
 
 function contentText(value: unknown): string | undefined {

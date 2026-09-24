@@ -36,6 +36,7 @@ import {
   type RunnerId,
 } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
+import { inputDeliveryOf } from './agent-runner.ts';
 import { appendTurnText } from '../workflows/run.ts';
 import { supportsProfiles } from './agent-profiles.ts';
 import type { WorkflowDef } from '../workflows/types.ts';
@@ -58,13 +59,13 @@ import {
 } from './harness-parity.testkit.ts';
 
 /** One row of the matrix, named once and applied to every harness. */
-interface SeamCriterion {
+interface SeamCriterion<T = SeamObservation> {
   /** Stable id the exemption table references. */
   readonly id: string;
   readonly name: string;
   readonly scenario: ScenarioName;
   /** Throws when the backend does not satisfy the criterion. */
-  readonly assert: (obs: SeamObservation) => void;
+  readonly assert: (obs: T) => void;
 }
 
 const sessionEvents = (v1: readonly AgentEvent[]) =>
@@ -347,10 +348,10 @@ const CONTROL_CRITERIA = [
  * is pinned. Never relax an assertion to accommodate an exemption; delete the
  * exemption instead.
  */
-function parityRow(
+function parityRow<T = SeamObservation>(
   backend: RunnerId,
-  criterion: SeamCriterion,
-  observe: () => Promise<SeamObservation>,
+  criterion: SeamCriterion<T>,
+  observe: () => Promise<T>,
 ): void {
   const exempt = exemptionFor(criterion.id, backend);
   if (!exempt) {
@@ -385,6 +386,68 @@ describe('harness parity — seam tier', () => {
   for (const backend of RUNNER_IDS) {
     for (const criterion of SEAM_CRITERIA) {
       parityRow(backend, criterion, () => driveSeam(backend, criterion.scenario));
+    }
+  }
+});
+
+// Group 8 — #505: agent input reaches a running turn and its reading is reported.
+interface InputObservation {
+  readonly obs: SeamObservation;
+  readonly consumed: readonly string[];
+  readonly consumedBeforeTurnEnd: boolean;
+  readonly unconsumed: readonly string[];
+}
+async function observeInput(backend: RunnerId, scenario: ScenarioName, id: string): Promise<InputObservation> {
+  const consumed: string[] = [];
+  let consumedBeforeTurnEnd = false;
+  let seenTurnEnd = false;
+  const obs = await driveSeam(backend, scenario, {
+    sessionOptions: { onAgentInputConsumed: ids => { consumed.push(...ids); if (!seenTurnEnd) consumedBeforeTurnEnd = true; } },
+    whileOpen: async (session, { v1 }) => {
+      const firstTurnEnd = () => { seenTurnEnd ||= v1.some(e => e.type === 'turn-end'); return seenTurnEnd; };
+      await waitFor(() => v1.some(e => (scenario === 'steer-tool' ? e.type === 'tool-call' : e.type === 'text')) || firstTurnEnd());
+      let ack: false | Promise<void> = false;
+      const text = `mock:agent-echo parity ${id}`;
+      await waitFor(() => (ack = session.sendAgentMessage([{ type: 'text', text }], [id])) !== false || firstTurnEnd());
+      if (ack) await ack;
+      await waitFor(() => firstTurnEnd());
+      // Late input is read by a follow-on turn or reported; OpenCode reports after a grace window.
+      const reported = () => v1.some(e => (e.type === 'turn-end' && !!e.unconsumedInputIds?.length) || e.type === 'input-unconsumed');
+      await waitFor(() => consumed.includes(id) || reported(), 6_000).catch(() => undefined);
+    },
+  });
+  const unconsumed = obs.v1.flatMap(e => e.type === 'input-unconsumed' ? [...e.inputIds]
+    : e.type === 'turn-end' ? [...(e.unconsumedInputIds ?? [])] : []);
+  return { obs, consumed, consumedBeforeTurnEnd, unconsumed };
+}
+const INPUT_CRITERIA: readonly SeamCriterion<InputObservation>[] = [
+  {
+    id: 'I1',
+    name: 'I1 admits agent input mid-turn and reports it read before that turn ends',
+    scenario: 'steer-tool',
+    assert: ({ obs, consumed, consumedBeforeTurnEnd }) => {
+      expect(consumed).toEqual(['parity-I1']);
+      expect(consumedBeforeTurnEnd).toBe(true);
+      expect(obs.v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
+    },
+  },
+  {
+    id: 'I2',
+    name: 'I2 reports accepted input the finished turn never read',
+    scenario: 'steer-late',
+    assert: ({ unconsumed, consumed }) => {
+      expect(unconsumed).toEqual(['parity-I2']);
+      expect(consumed).toEqual([]);
+    },
+  },
+];
+describe('harness parity — input delivery (#505)', () => {
+  for (const backend of RUNNER_IDS) {
+    it(`${backend} I0 declares its input delivery`, () => {
+      expect(['steer', 'boundary']).toContain(inputDeliveryOf(createRunner(backend)).mode);
+    });
+    for (const criterion of INPUT_CRITERIA) {
+      parityRow(backend, criterion, () => observeInput(backend, criterion.scenario, `parity-${criterion.id}`));
     }
   }
 });
@@ -427,12 +490,23 @@ describe('harness parity — seam tier, session control', () => {
       });
     }, 45_000);
 
-    it(`${backend} S12 non-human input refuses an unsafe turn and can retry at its boundary`, async () => {
+    // #505: a `steer` runner admits non-human input mid-turn; a `boundary` runner refuses
+    // it until the turn ends. Either way the input is eventually read, and a closed session refuses.
+    it(`${backend} S12 non-human input follows the runner's declared delivery mode`, async () => {
+      const steer = inputDeliveryOf(createRunner(backend)).mode === 'steer';
       await driveSeam(backend, 'hold', {
         whileOpen: async (session, { v1 }) => {
-          expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).toBe(false);
-          await waitFor(() => v1.some(e => e.type === 'turn-end'));
-          await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).resolves.toBeUndefined();
+          let busy = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }]);
+          if (steer) {
+            // Startup may refuse (codex has no thread yet); the running turn then admits it.
+            if (busy === false) await waitFor(() => (busy = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])) !== false);
+            expect(v1.some(e => e.type === 'turn-end')).toBe(false);
+            await expect(busy).resolves.toBeUndefined();
+          } else {
+            expect(busy).toBe(false);
+            await waitFor(() => v1.some(e => e.type === 'turn-end'));
+            await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }])).resolves.toBeUndefined();
+          }
           await waitFor(() => textEvents(v1).some(text => text.includes('retried steering')));
           session.end();
           expect(session.sendAgentMessage([{ type: 'text', text: 'closed' }])).toBe(false);
@@ -523,7 +597,11 @@ describe('harness parity — owned input run tier', () => {
         expect(manager.steerWorker(runId, second)).toBe('queued');
         await new Promise(resolve => setTimeout(resolve, 150));
         expect(store.getRun(runId)?.status).toBe('waiting');
-        expect(store.getRun(runId)?.agentInputs?.every(input => !input.deliveredAt)).toBe(true);
+        // #505: input queued before the session opened steers into the opening turn on a
+        // `steer` runner; input accepted while the ask is pending never reaches the session.
+        const steer = inputDeliveryOf(createRunner(backend)).mode === 'steer';
+        expect(!!store.getRun(runId)?.agentInputs?.find(input => input.id === first.id)?.deliveredAt).toBe(steer);
+        expect(store.getRun(runId)?.agentInputs?.find(input => input.id === second.id)?.deliveredAt).toBeUndefined();
         expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
         const attributed = store.readEvents(runId).filter(e => e.type === 'agent-input').map(e => agentInputEventSchema.parse(e).input);
         expect(attributed).toEqual([first, second]);
@@ -588,6 +666,9 @@ describe('harness parity — owned input run tier', () => {
           .toEqual(['refused answer']);
         expect(recovered.manager.continueRun(runId, { text: 'Vitest' }).ok).toBe(true);
         await waitFor(() => !!recovered.store.getRun(runId)?.agentInputs?.[0]?.deliveredAt);
+        // #505: input can land mid-turn, so delivery no longer implies the answering turn
+        // ended; the answer's durable checkpoint is still that turn's end.
+        await waitFor(() => recovered.store.readEvents(runId).some(e => e.type === 'human-input-delivered'));
         const replay = recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean };
         expect(replay.hasPendingHumanAsk(runId)).toBe(false);
       });
@@ -771,11 +852,14 @@ describe('OpenCode durable input acknowledgements', () => {
         expect(events.findIndex(e => e.type === 'error')).toBeLessThan(events.findIndex(e => e.type === 'turn-end'));
       }
       expect(events.filter(e => e.type === 'human-input-delivered')).toEqual([]);
-      expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+      // #505: the queued message steers into the answering turn right behind the answer,
+      // so it may carry a delivery receipt; the input itself is unchanged and never lost.
+      const withoutReceipts = (inputs: AgentInput[] | undefined) => inputs?.map(({ deliveredAt: _d, consumedAt: _c, awaitingRead: _a, ...rest }) => rest);
+      expect(withoutReceipts(store.getRun(runId)?.agentInputs)).toEqual([input]);
       const recovered = await fixture.restart();
       expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(true);
       expect(recovered.manager.continueRun(runId).ok).toBe(false);
-      expect(recovered.store.getRun(runId)?.agentInputs).toEqual([input]);
+      expect(withoutReceipts(recovered.store.getRun(runId)?.agentInputs)).toEqual([input]);
     });
   }, 60_000);
 
@@ -840,11 +924,12 @@ describe('OpenCode durable input acknowledgements', () => {
 describe('harness parity — the matrix itself', () => {
   const allIds = [
     ...SEAM_CRITERIA.map((c) => c.id),
+    ...INPUT_CRITERIA.map((c) => c.id),
     ...CONTROL_CRITERIA.map((c) => c.id),
     ...RUN_CRITERIA.map((c) => c.id),
   ];
   const scenarioOf = (id: string): ScenarioName => {
-    const seam = SEAM_CRITERIA.find((c) => c.id === id);
+    const seam = SEAM_CRITERIA.find((c) => c.id === id) ?? INPUT_CRITERIA.find((c) => c.id === id);
     if (seam) return seam.scenario;
     const control = CONTROL_CRITERIA.find((c) => c.id === id);
     if (control) return control.scenario;

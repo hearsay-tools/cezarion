@@ -146,7 +146,7 @@ export class DelegationService {
     const input = recipient?.agentInputs?.find(input => input.id === message.id);
     const state = root.delegation?.role === 'root' ? root.delegation.conversation : undefined;
     const outcome = state?.outcomes.find(outcome => outcome.requestId === (message.requestId ?? message.id));
-    return { message, delivery: input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered', ...(outcome ? { outcome } : {}) };
+    return { message, delivery: input?.consumedAt ? 'consumed' : input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered', ...(outcome ? { outcome } : {}) };
   }
   async send(caller: Caller, value: ConversationSendRequest): Promise<ConversationSendResult> {
     const request = conversationSendRequestSchema.parse(value);
