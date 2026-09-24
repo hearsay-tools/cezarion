@@ -358,6 +358,7 @@ describe('the GitHub tab against the live dry-run server', () => {
 
     const evidence = browser.waitForValue<{
       titleGone: boolean
+      tabsVisible: boolean
       filtersVisible: boolean
       listMoved: boolean
       detailStill: boolean
@@ -367,13 +368,16 @@ describe('the GitHub tab against the live dry-run server', () => {
     }>(`(() => {
       const main = document.querySelector('[data-slot="main"]');
       const masthead = document.querySelector('[data-slot="gh-masthead"]');
+      const tabs = document.querySelector('[data-slot="gh-tabs"]');
       const toolbar = document.querySelector('[data-slot="gh-header"]');
       const list = document.querySelector('[data-slot="gh-list"]');
       const detail = document.querySelector('[data-slot="gh-detail"]');
-      if (!main || !masthead || !toolbar || !list || !detail) return null;
+      if (!main || !masthead || !tabs || !toolbar || !list || !detail) return null;
       main.scrollTop = main.scrollHeight;
       const mainTop = main.getBoundingClientRect().top;
       const titleGone = masthead.getBoundingClientRect().bottom <= mainTop + 2;
+      const tabsBox = tabs.getBoundingClientRect();
+      const tabsVisible = tabsBox.top >= mainTop - 2 && tabsBox.bottom > mainTop + 16;
       const filtersVisible = toolbar.getBoundingClientRect().bottom > mainTop + 8;
       list.scrollTop = 0;
       detail.scrollTop = 0;
@@ -388,6 +392,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       const listHasNoXScroll = getComputedStyle(list).overflowX === 'hidden';
       return {
         titleGone,
+        tabsVisible,
         filtersVisible,
         listMoved,
         detailStill,
@@ -401,6 +406,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     })()`, (value) => Boolean(
       value &&
         value.titleGone &&
+        value.tabsVisible &&
         value.filtersVisible &&
         value.listMoved &&
         value.detailStill &&
@@ -410,6 +416,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     ))
     expect(evidence).toMatchObject({
       titleGone: true,
+      tabsVisible: true,
       filtersVisible: true,
       listMoved: true,
       detailStill: true,
