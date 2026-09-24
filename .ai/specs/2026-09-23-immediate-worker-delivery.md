@@ -142,9 +142,12 @@ follow-up issue, not part of #505.
   the worker as today: `waiting`, slot released, other input held. Cezar records a
   worker → parent conversation `request` carrying the structured question — a new
   optional `question` (`AskRequest`) on `conversationMessageSchema` in
-  `packages/contract`. The worker's `ask.requested` event records
-  `routedTo: 'parent'` and the message ID, so the routing survives restart. A
-  question has no deadline.
+  `packages/contract`. The worker then records a `worker-question-routed` event
+  (`askSeq`, `messageId`, `parentRunId`); the message ID derives from the worker
+  and the ask seq, so routing again after a restart finds the same message. A
+  question has no deadline. A question the parent cannot take (parent not live,
+  no `steer` grant, inbox or conversation at capacity) records
+  `worker-question-fallback` instead and stays with the human.
 - **Reaching the parent.** The request travels the ordinary conversation queue, so
   it steers an active parent immediately and wakes a parked parent through the
   existing message wake. Its formatted text shows the questions and options and the
@@ -161,12 +164,17 @@ follow-up issue, not part of #505.
   flush right behind the answer; none of them answers the question.
 - **Escalation.** The parent asks the human with its own `CEZ:ASK` or native ask,
   then replies to the worker. An unanswered worker question counts as parent
-  completion attention, so the parent cannot reach DONE past it.
+  completion attention, so the parent cannot reach DONE past it; the completion
+  note names the question, and no automatic wait on that worker is registered
+  (the two would wait on each other).
 - **Human fallback.** The worker's question card reads "Routed to parent" with no
-  answer box. When the parent cannot receive the question — stopped, destroyed,
-  finished, or history deletion pending — at ask time or later, the question
-  becomes an ordinary human ask on the worker with an answerable card, and its
-  request outcome is a new `human-fallback` status.
+  answer box; a human message or Continue on the worker is refused with a note
+  pointing at the parent. When the parent cannot receive the question at ask time,
+  or later settles `done`, `review`, `failed` or `cancelled` (including a parent
+  found closed on recovery), the worker records `worker-question-fallback` with
+  reason `parent-<status>`, the question becomes an ordinary human ask with an
+  answerable card, and its request outcome is a new `human-fallback` status.
+  History deletion destroys the workers with it, so it needs no fallback.
 - **Instructions.** `delegation/provision.ts` tells workers that questions go to
   their parent, and tells parents that worker questions arrive as requests, are
   answered with `reply`, and escalate through the parent's own question. The
