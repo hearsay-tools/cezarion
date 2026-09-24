@@ -12,6 +12,25 @@ const rootProcessDocuments = [
   'SDLC.md',
 ];
 
+const infraWorkflows = [
+  '.github/workflows/release.yml',
+  '.github/workflows/nightly.yml',
+  '.github/workflows/report-workflow-failure.yml',
+  '.github/workflows/sweep-ci-failures.yml',
+  '.github/workflows/upstream-scan.yml',
+  '.github/workflows/npm-preview-cleanup.yml',
+  '.github/workflows/publish-pr-snapshot.yml',
+  '.github/workflows/issue-intake.yml',
+];
+
+const infraScripts = [
+  '.github/scripts/ci-sweep-api.cjs',
+  '.github/scripts/ci-sweep-collect.cjs',
+  '.github/scripts/ci-sweep-patterns.cjs',
+  '.github/scripts/ci-sweep-report.cjs',
+  '.github/scripts/apply-issue-intake.cjs',
+];
+
 test('classifies every allowlisted path group as docs-only', () => {
   assert.equal(classifyPaths(['README.md', 'CHANGELOG.md', 'notes.md']), 'docs-only');
   assert.equal(classifyPaths(['docs/guide.md', 'docs/assets/diagram.svg']), 'docs-only');
@@ -23,6 +42,48 @@ test('classifies every allowlisted path group as docs-only', () => {
   for (const license of ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'LICENSE-THIRD-PARTY', 'LICENSE.custom']) {
     assert.equal(classifyPaths([license]), 'docs-only');
   }
+});
+
+test('classifies every infra allowlisted path as infra-only', () => {
+  for (const workflow of infraWorkflows) {
+    assert.equal(classifyPaths([workflow]), 'infra-only', workflow);
+  }
+  for (const script of infraScripts) {
+    assert.equal(classifyPaths([script]), 'infra-only', script);
+    assert.equal(classifyPaths([`${script.replace(/\.cjs$/, '')}.test.cjs`]), 'infra-only', script);
+  }
+  // #468 prototype: #467's single-file release.yml runner edit.
+  assert.equal(classifyPaths(['.github/workflows/release.yml']), 'infra-only');
+});
+
+test('classifies infra harness and unnamed github paths as full-matrix', () => {
+  for (const harness of [
+    '.github/workflows/ci.yml',
+    '.github/workflows/automated-code-review.yml',
+    '.github/workflows/recover-automated-review.yml',
+    '.github/workflows/ci-benchmark.yml',
+    '.github/scripts/change-surface.cjs',
+    '.github/scripts/change-surface.test.cjs',
+    '.github/scripts/require-e2e-passed.cjs',
+    '.github/scripts/ci-test-sequencer.mjs',
+    '.github/scripts/automated-review.cjs',
+    '.github/scripts/release-bump-pr.cjs',
+    '.github/scripts/ci.workflow.test.cjs',
+    '.github/workflows/some-new-ops-workflow.yml',
+    '.github/scripts/ci-sweep-collect.mjs',
+    '.github/scripts/ci-sweep-extra.cjs',
+    '.github/dependabot.yml',
+    '.github/CODEOWNERS',
+  ]) {
+    assert.equal(classifyPaths([harness]), 'full-matrix', harness);
+  }
+});
+
+test('classifies mixed surfaces as full-matrix', () => {
+  assert.equal(classifyPaths(['.github/workflows/release.yml', 'packages/cezar/src/index.ts']), 'full-matrix');
+  assert.equal(classifyPaths(['.github/workflows/release.yml', 'README.md']), 'full-matrix');
+  assert.equal(classifyPaths(['README.md', '.github/workflows/release.yml']), 'full-matrix');
+  assert.equal(classifyPaths(['.github/workflows/release.yml', '.github/workflows/ci.yml']), 'full-matrix');
 });
 
 test('classifies mixed documentation and code as full-matrix', () => {
@@ -60,6 +121,9 @@ test('classifies valid JSON-lines input and tolerates one final newline', () => 
   assert.equal(classifyJsonLines('"README.md"\n'), 'docs-only');
   assert.equal(classifyJsonLines('"README.md"\n"docs/guide.md"\n'), 'docs-only');
   assert.equal(classifyJsonLines('"README.md"\n"package.json"\n'), 'full-matrix');
+  assert.equal(classifyJsonLines('".github/workflows/release.yml"\n'), 'infra-only');
+  assert.equal(classifyJsonLines('".github/workflows/release.yml"\n".github/scripts/ci-sweep-api.cjs"\n'), 'infra-only');
+  assert.equal(classifyJsonLines('".github/workflows/release.yml"\n"README.md"\n'), 'full-matrix');
 });
 
 test('fails closed for malformed, blank, and invalid JSON-lines input', () => {
@@ -90,7 +154,7 @@ test('CLI emits exactly one supported classification line', () => {
     encoding: 'utf8',
   });
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /^(docs-only|full-matrix)\n$/);
+  assert.match(result.stdout, /^(docs-only|infra-only|full-matrix)\n$/);
   assert.equal(result.stderr, '');
 });
 
