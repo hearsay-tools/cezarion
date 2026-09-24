@@ -34,7 +34,7 @@ const defaultIo: ProjectsCommandIo = {
 const USAGE = `usage:
   cez projects [list]          list the registered projects
   cez projects add [<dir>]     register a folder (default: --repo, else cwd)
-  cez projects remove <id>     drop a registry entry (the repo is untouched)
+  cez projects remove|rm <id>  drop a registry entry (the repo is untouched)
   cez projects tag <id> [<tag>…]
                                set the grouping tags of a project (none clears them)
 
