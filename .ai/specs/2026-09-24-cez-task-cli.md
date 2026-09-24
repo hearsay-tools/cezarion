@@ -35,9 +35,13 @@ The only API change. Everything else is client-side.
     included;
   - different hash → a conflict;
   - a deleted run's id is gone with its record, so a retry creates a fresh run.
-- **Route.** `POST /runs` answers `201` with a new run, `200` with a matched one,
-  and `409 { error: "request id payload conflict" }`. Both success statuses are
-  `as const` so hono's inference keeps the split. The response body shape is
+- **Route.** After body validation, `POST /runs` checks for an existing id/hash
+  before mutable start prerequisites (workflow, provider, account and model
+  policy). A retry can retrieve an accepted run even when those prerequisites
+  no longer hold. New starts still pass every check and the synchronous manager
+  call rechecks dedupe after the awaits. The route answers `201` with a new run,
+  `200` with a matched one, and `409 { error: "request id payload conflict" }`.
+  Both success statuses are `as const` so hono's inference keeps the split. The response body shape is
   unchanged (`createRunResponseSchema`).
 - **Scope** is the project store, not the workspace.
 

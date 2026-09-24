@@ -3626,8 +3626,20 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/runs', jsonZodValidator(startRunSchema), async (c) => {
-      const { root: repoRoot, dataDir, manager } = c.get('project');
+      const { root: repoRoot, dataDir, manager, store } = c.get('project');
       const parsed = { data: c.req.valid('json') };
+      const clientRequest = parsed.data.clientRequestId
+        ? { id: parsed.data.clientRequestId, hash: clientRequestHash(parsed.data) }
+        : undefined;
+      // A retry only retrieves a persisted result: mutable start prerequisites (workflow,
+      // provider, account and model policy) must not invalidate an already accepted request.
+      if (clientRequest) {
+        const existing = store.findRunByClientRequestId(clientRequest.id);
+        if (existing) {
+          if (existing.clientRequestHash !== clientRequest.hash) return c.json({ error: 'request id payload conflict' }, 409);
+          return c.json(existing, 200 as const);
+        }
+      }
       if (
         agentModelsLocked(repoRoot) &&
         (parsed.data.model?.trim() || parsed.data.effort?.trim())
@@ -3678,13 +3690,10 @@ export function createApp(deps: ServerDeps) {
         // CEZ_TODOS_FILE alike (RunManager.agentEnv).
         generateFollowups: capabilities().followups ? parsed.data.generateFollowups : false,
       };
-      if (parsed.data.clientRequestId) {
-        // Idempotent start (#504). The lookup and the create are one synchronous call in the
-        // manager, after every await above, so two concurrent retries cannot both create.
-        const result = manager.startRunIdempotent(workflow, input, {
-          id: parsed.data.clientRequestId,
-          hash: clientRequestHash(parsed.data),
-        });
+      if (clientRequest) {
+        // Recheck after every await: concurrent first requests may both miss the early lookup.
+        // The manager's lookup and create are synchronous, so exactly one can create (#504).
+        const result = manager.startRunIdempotent(workflow, input, clientRequest);
         if ('conflict' in result) return c.json({ error: 'request id payload conflict' }, 409);
         if (!result.created) return c.json(result.run, 200 as const);
         if (parsed.data.todoId) await noteTodoStarted(dataDir, parsed.data.todoId, result.run.id);

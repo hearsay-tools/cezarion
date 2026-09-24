@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
@@ -71,6 +71,27 @@ describe('POST /api/v1/runs clientRequestId', () => {
     const conflict = await post({ ...body, ...changed });
     expect(conflict.status).toBe(409);
     expect(await conflict.json()).toEqual({ error: 'request id payload conflict' });
+    expect(store.listRuns()).toHaveLength(1);
+  });
+
+  it('replays an existing start after its workflow is removed, but validates new starts', async () => {
+    const workflowDir = join(repoRoot, '.ai/cezar/workflows');
+    mkdirSync(workflowDir, { recursive: true });
+    const workflowFile = join(workflowDir, 'temporary.yaml');
+    writeFileSync(workflowFile, 'name: temporary\nsteps:\n  - id: work\n    prompt: "{{task}}"\n');
+    const payload = { ...body, workflow: 'temporary' };
+    const first = await post(payload);
+    expect(first.status).toBe(201);
+    const { id } = await first.json() as { id: string };
+    rmSync(workflowFile);
+
+    const again = await post(payload);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ id });
+    const conflict = await post({ ...payload, task: 'changed task' });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ error: 'request id payload conflict' });
+    expect((await post({ ...payload, clientRequestId: '1f1c1b5e-2a7d-4c8e-9f3b-1d2e3f4a5b6c' })).status).toBe(404);
     expect(store.listRuns()).toHaveLength(1);
   });
 
