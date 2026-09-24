@@ -579,22 +579,24 @@ export function GithubRoute({
   )
 
   return (
-    // Desktop: the page fills `main`, so title/tabs/filters stay put and the two panes
-    // take the leftover height and scroll on their own. A viewport-tall sticky row was
-    // clipping the list and stealing the wheel before the page could move. Phone stays
-    // stacked document-flow. (#523)
-    <div data-route="github" className="flex min-h-full flex-col gap-3 px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))] md:h-full md:gap-[22px] md:p-9">
+    // Desktop: the title/repo line stays in document flow so `main` can scroll it away.
+    // Tabs, filters and the two panes live in a sticky workspace that fills the leftover
+    // viewport. Phone stays stacked document-flow. (#523)
+    <div data-route="github" className="flex min-h-full flex-col gap-3 px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))] md:gap-[22px] md:p-9">
+        <div data-slot="gh-masthead" className="flex min-w-0 shrink-0 flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight md:text-[30px]">GitHub</h1>
+          {gh.repo ? (
+            <span className="min-w-0 truncate text-[13px] text-muted-foreground">
+              <span data-slot="gh-repo">{gh.repo}</span>
+              <span data-slot="gh-synced"> · {gh.syncedAt ? `Synced ${shortAge(gh.syncedAt)} ago` : 'Not synced yet'}</span>
+            </span>
+          ) : null}
+        </div>
+        <div
+          data-slot="gh-workspace"
+          className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 md:sticky md:top-0 md:h-[calc(100dvh-4rem)] md:max-h-[calc(100dvh-4rem)] md:flex-none md:overflow-hidden md:gap-[22px]"
+        >
         <header data-slot="gh-header" className="flex shrink-0 flex-col gap-3 md:gap-[22px]">
-          <div className="flex min-w-0 flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight md:text-[30px]">GitHub</h1>
-            {gh.repo ? (
-              <span className="min-w-0 truncate text-[13px] text-muted-foreground">
-                <span data-slot="gh-repo">{gh.repo}</span>
-                <span data-slot="gh-synced"> · {gh.syncedAt ? `Synced ${shortAge(gh.syncedAt)} ago` : 'Not synced yet'}</span>
-              </span>
-            ) : null}
-
-          </div>
           <div data-slot="gh-tabs" className="flex min-h-11 flex-wrap items-center gap-3">
             <TabLink to="/github" active={view === 'issues'} onClick={() => saveGithubView('issues')}>
               Issues · {countLabel(gh.issues.length)}
@@ -658,7 +660,7 @@ export function GithubRoute({
         data-slot="gh-list"
         data-mobile-preview={compactPreview || undefined}
         style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
-        className="relative flex w-full min-h-0 flex-col rounded-lg border border-border bg-card p-3 md:w-[var(--github-list-width)] md:shrink-0 md:overflow-y-auto"
+        className="relative flex w-full min-h-0 min-w-0 flex-col rounded-lg border border-border bg-card p-3 md:w-[var(--github-list-width)] md:shrink-0 md:overflow-x-hidden md:overflow-y-auto"
       >
 
 
@@ -780,6 +782,7 @@ export function GithubRoute({
           />
         )}
       </section>
+      </div>
       </div>
     </div>
   )

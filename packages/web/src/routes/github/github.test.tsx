@@ -401,39 +401,36 @@ describe('the GitHub tab lists', () => {
     renderAt('/github/issues/142')
     await screen.findByRole('heading', { name: 'GitHub' })
     expect(ghList().className).not.toContain('max-md:max-h-64')
-    expect(ghList().className).not.toContain('hidden')
+    expect(ghList().className.split(' ')).not.toContain('hidden')
     expect(document.querySelector('[data-slot="gh-detail"]')?.className).toContain('flex')
   })
 
   // jsdom lays nothing out, so the classes are all this can check. The real-layout proof
-  // (header stays put, each pane scrolls without moving the other) lives in e2e/github.e2e.ts.
-  it('fills the remaining desktop height so list and detail scroll on their own (#523)', async () => {
+  // (the title can scroll away, then filters stay and each pane scrolls) lives in e2e.
+  it('lets the GitHub title leave while filters and panes stay in flow until dock (#523)', async () => {
     stubFetch()
     renderAt('/github')
     await screen.findByRole('heading', { name: 'GitHub' })
 
     const route = document.querySelector('[data-route="github"]') as HTMLElement
+    const masthead = document.querySelector('[data-slot="gh-masthead"]') as HTMLElement
+    const workspace = document.querySelector('[data-slot="gh-workspace"]') as HTMLElement
     const header = document.querySelector('[data-slot="gh-header"]') as HTMLElement
-    const panes = document.querySelector('[data-slot="gh-panes"]') as HTMLElement
     const detail = document.querySelector('[data-slot="gh-detail"]') as HTMLElement
 
-    expect(route.className).toContain('md:h-full')
-    expect(header.className).toContain('shrink-0')
-    expect(header.className.split(' ')).not.toContain('sticky')
-    expect(header.className.split(' ')).not.toContain('md:sticky')
-    expect(panes.getAttribute('data-docked')).toBeNull()
-    expect(panes.className.split(' ')).not.toContain('md:sticky')
-    expect(panes.className).toContain('min-h-0')
-    expect(panes.className).toContain('flex-1')
-    expect(panes.className).toContain('md:overflow-hidden')
-    expect(panes.className).toContain('md:items-stretch')
-    expect(ghList().className).toContain('min-h-0')
+    expect(route.className.split(' ')).not.toContain('md:h-full')
+    expect(masthead).not.toBeNull()
+    expect(masthead.contains(screen.getByRole('heading', { name: 'GitHub' }))).toBe(true)
+    expect(header.contains(document.querySelector('[data-slot="gh-tabs"]'))).toBe(true)
+    expect(header.contains(document.querySelector('[data-slot="gh-filter-toolbar"]'))).toBe(true)
+    expect(workspace.contains(header)).toBe(true)
+    expect(workspace.className).toContain('md:sticky')
+    expect(workspace.className).toContain('md:top-0')
+    expect(workspace.className).toContain('md:h-[calc(100dvh-4rem)]')
+    expect(ghList().className).toContain('min-w-0')
+    expect(ghList().className).toContain('md:overflow-x-hidden')
     expect(ghList().className).toContain('md:overflow-y-auto')
-    expect(detail.className).toContain('min-h-0')
     expect(detail.className).toContain('md:overflow-y-auto')
-    expect(panes.className.split(' ')).not.toContain('overscroll-contain')
-    expect(ghList().className.split(' ')).not.toContain('overflow-y-auto')
-    expect(detail.className.split(' ')).not.toContain('overflow-y-auto')
   })
 
   it('compacts the phone header so the first result can share the 360×640 viewport (#325)', async () => {

@@ -312,7 +312,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/github-pr-changes.png`)
   })
 
-  it('on desktop the list and detail scroll independently under a standing header (#523)', async () => {
+  it('on desktop hides the GitHub title then scrolls list and detail independently (#523)', async () => {
     if (!forgeAvailable) return
     const gh = await api<GithubPayload>('/api/v1/github')
     const template = gh.issues[0]
@@ -347,26 +347,34 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelectorAll('[data-slot="gh-row"]').length === 40`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-detail"]') !== null`)
 
+    const atTop = browser.waitForValue<{ titleVisible: boolean }>(`(() => {
+      const main = document.querySelector('[data-slot="main"]');
+      const masthead = document.querySelector('[data-slot="gh-masthead"]');
+      if (!main || !masthead) return null;
+      main.scrollTop = 0;
+      return { titleVisible: masthead.getBoundingClientRect().bottom > main.getBoundingClientRect().top + 8 };
+    })()`, (value) => Boolean(value?.titleVisible))
+    expect(atTop).toMatchObject({ titleVisible: true })
+
     const evidence = browser.waitForValue<{
-      headerVisible: boolean
+      titleGone: boolean
+      filtersVisible: boolean
       listMoved: boolean
       detailStill: boolean
       detailMoved: boolean
       listStill: boolean
+      listHasNoXScroll: boolean
     }>(`(() => {
       const main = document.querySelector('[data-slot="main"]');
-      const header = document.querySelector('[data-slot="gh-header"]');
+      const masthead = document.querySelector('[data-slot="gh-masthead"]');
+      const toolbar = document.querySelector('[data-slot="gh-header"]');
       const list = document.querySelector('[data-slot="gh-list"]');
       const detail = document.querySelector('[data-slot="gh-detail"]');
-      if (!main || !header || !list || !detail) return null;
+      if (!main || !masthead || !toolbar || !list || !detail) return null;
+      main.scrollTop = main.scrollHeight;
       const mainTop = main.getBoundingClientRect().top;
-      const headerVisible = header.getBoundingClientRect().bottom > mainTop + 8;
-      if (!headerVisible) return null;
-      if (getComputedStyle(list).overflowY !== 'auto') return null;
-      if (getComputedStyle(detail).overflowY !== 'auto') return null;
-      if (list.scrollHeight <= list.clientHeight) return null;
-      if (detail.scrollHeight <= detail.clientHeight) return null;
-      main.scrollTop = 0;
+      const titleGone = masthead.getBoundingClientRect().bottom <= mainTop + 2;
+      const filtersVisible = toolbar.getBoundingClientRect().bottom > mainTop + 8;
       list.scrollTop = 0;
       detail.scrollTop = 0;
       const detailBefore = detail.scrollTop;
@@ -377,15 +385,37 @@ describe('the GitHub tab against the live dry-run server', () => {
       detail.scrollTop = 160;
       const detailMoved = detail.scrollTop >= 80;
       const listStill = list.scrollTop === listBefore;
-      if (!listMoved || !detailStill || !detailMoved || !listStill) return null;
-      return { headerVisible, listMoved, detailStill, detailMoved, listStill };
-    })()`)
+      const listHasNoXScroll = getComputedStyle(list).overflowX === 'hidden';
+      return {
+        titleGone,
+        filtersVisible,
+        listMoved,
+        detailStill,
+        detailMoved,
+        listStill,
+        listHasNoXScroll,
+        mainScroll: [main.scrollTop, main.scrollHeight, main.clientHeight],
+        listOverflow: getComputedStyle(list).overflowY,
+        listSizes: [list.scrollHeight, list.clientHeight, list.scrollWidth, list.clientWidth],
+      };
+    })()`, (value) => Boolean(
+      value &&
+        value.titleGone &&
+        value.filtersVisible &&
+        value.listMoved &&
+        value.detailStill &&
+        value.detailMoved &&
+        value.listStill &&
+        value.listHasNoXScroll,
+    ))
     expect(evidence).toMatchObject({
-      headerVisible: true,
+      titleGone: true,
+      filtersVisible: true,
       listMoved: true,
       detailStill: true,
       detailMoved: true,
       listStill: true,
+      listHasNoXScroll: true,
     })
     browser.screenshot(`${artifactsDir}/github-independent-scroll.png`)
   })
