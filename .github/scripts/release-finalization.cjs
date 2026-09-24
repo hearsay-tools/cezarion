@@ -4,6 +4,7 @@ const { execFileSync } = require('node:child_process');
 const { appendFileSync } = require('node:fs');
 const { isReleaseBumpFile } = require('./release-bump-pr.cjs');
 const { ensureReleaseCi } = require('./release-ci.cjs');
+const { releaseChangelog } = require('./release-changelog.cjs');
 
 const command = (program, args) => execFileSync(program, args, {
   encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
@@ -130,7 +131,7 @@ async function githubRelease({ github, context, core }) {
     const alias = process.env.ALIAS_NAME;
     const published = (process.env.PUBLISHED_NAMES ?? '').split(',').filter(Boolean);
     if (!alias || !published.length) throw new Error('Missing published package names.');
-    const body = [
+    const metadata = [
       '## Published packages', '', '| Package | Version |', '|---|---|',
       ...published.map((name) => `| \`${name}\` | \`${version}\` |`),
       '', '### Install', '', '```bash', `npx ${alias}@${version}`, '```',
@@ -151,6 +152,19 @@ async function githubRelease({ github, context, core }) {
     };
     const tagged = await verifyTag();
     let release = await readOptional(() => github.rest.repos.getReleaseByTag({ ...context.repo, tag }));
+    // Old releases predate generated notes. Reuse exact legacy metadata, never
+    // overwrite it. New releases always include a verifiable changelog.
+    let body = metadata;
+    if (!release || release.body !== metadata) {
+      const prefix = `${metadata}\n\n`;
+      if (release && !release.body?.startsWith(prefix)) {
+        throw new Error(`Conflicting GitHub Release ${tag}. Existing metadata was not changed.`);
+      }
+      body = prefix + releaseChangelog({
+        git, url: repoUrl(context), sha: context.sha, version,
+        ...(release ? { previous: release.body.slice(prefix.length) } : {}),
+      });
+    }
     let status = 'reused';
     if (!release) {
       release = (await github.rest.repos.createRelease({

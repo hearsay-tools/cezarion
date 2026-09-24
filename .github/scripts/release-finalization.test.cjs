@@ -11,7 +11,7 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const missing = () => Object.assign(new Error('Not Found'), { status: 404 });
 const denied = () => Object.assign(new Error('GitHub Actions is not permitted to create or approve pull requests'), { status: 403 });
 
-async function fixture(t, base = 'main') {
+async function fixture(t, base = 'main', { historyCommits = 0, subject = 'source' } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-retry-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const cwd = path.join(dir, 'checkout');
@@ -32,9 +32,14 @@ async function fixture(t, base = 'main') {
   for (const [i, file] of manifests.entries()) write(file, { name: `fixture-${i}`, version: '0.12.0', private: i !== 0 });
   const npm = () => execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts', '--offline', '--no-audit', '--no-fund'], { cwd, stdio: 'pipe' });
   npm();
+  git('add', '.');
+  git('commit', '-m', 'initial history');
+  for (let i = 0; i < historyCommits; i++) {
+    git('commit', '--allow-empty', '-m', `history ${i} ${'x'.repeat(150)}`);
+  }
   write('source.txt', 'the published source\n');
   git('add', '.');
-  git('commit', '-m', 'source');
+  git('commit', '-m', subject);
   git('push', 'origin', base);
   const sha = git('rev-parse', 'HEAD');
   const stamp = () => {
@@ -320,6 +325,170 @@ test('repeated GitHub finalization reuses the matching release and annotated tag
   assert.match(original.body, /\| `@wjarka\/cezarion` \| `0.12.1` \|/);
   assert.match(original.body, /npx cezarion@0.12.1/);
   assert.doesNotMatch(original.body, /api-client/);
+});
+
+test('release changelog includes only commits after the previous stable ancestor tag', async (t) => {
+  const f = await fixture(t);
+  f.git('tag', '-a', 'v0.12.0', `${f.sha}^`, '-m', 'previous release');
+  f.git('tag', 'v0.12.1-preview.1', f.sha);
+  f.git('tag', 'v0.13.0', f.sha);
+  f.git('tag', 'unrelated-tag', f.sha);
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'created', f.errors.join('\n'));
+  const body = f.state.release.body;
+  assert.match(body, /## Changes/);
+  assert.match(body, /v0\.12\.0/);
+  assert.ok(body.includes(`/compare/${f.git('rev-parse', `${f.sha}^`)}...${f.sha}`));
+  assert.ok(body.includes(`/commit/${f.sha}`));
+  assert.match(body, /source/);
+  assert.doesNotMatch(body, /initial history|preview|v0\.13\.0|unrelated-tag/);
+  assert.match(body, /\| `@wjarka\/cezarion` \| `0.12.1` \|/);
+  assert.match(body, /npx cezarion@0.12.1/);
+});
+
+test('first release changelog includes all history through the published source, never later HEAD', async (t) => {
+  const f = await fixture(t);
+  f.git('commit', '--allow-empty', '-m', 'later unpublished work');
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'created', f.errors.join('\n'));
+  assert.match(f.state.release.body, /First release/);
+  assert.match(f.state.release.body, /initial history/);
+  assert.match(f.state.release.body, /source/);
+  assert.doesNotMatch(f.state.release.body, /later unpublished work/);
+});
+
+test('maintenance changelog ignores tags on unrelated branches', async (t) => {
+  const f = await fixture(t, 'release/0.12.x');
+  f.git('tag', 'v0.11.0', `${f.sha}^`);
+  f.git('commit', '--allow-empty', '-m', 'unreleased branch');
+  f.git('tag', 'v0.12.0');
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'created', f.errors.join('\n'));
+  assert.match(f.state.release.body, /v0\.11\.0/);
+  assert.doesNotMatch(f.state.release.body, /v0\.12\.0|unreleased branch/);
+});
+
+test('changelog retries retain the original range after more tags appear', async (t) => {
+  const f = await fixture(t);
+  await f.run(releaseStep);
+  const original = structuredClone(f.state.release);
+  f.git('tag', 'v0.12.0', `${f.sha}^`);
+  f.git('tag', 'v0.12.1', f.sha);
+  f.git('tag', 'v0.12.2', f.sha);
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'reused', f.errors.join('\n'));
+  assert.deepEqual(f.state.release, original);
+  assert.equal((f.state.release.body.match(/## Changes/g) ?? []).length, 1);
+});
+
+test('matching legacy release metadata is reused without rewriting old releases', async (t) => {
+  const f = await fixture(t);
+  f.state.tag = { type: 'commit', sha: f.sha };
+  f.state.release = {
+    tag_name: 'v0.12.1', name: 'v0.12.1', draft: false, prerelease: false,
+    html_url: 'https://github.com/example/project/releases/tag/v0.12.1',
+    body: '## Published packages\n\n| Package | Version |\n|---|---|\n| `@wjarka/cezarion` | `0.12.1` |\n| `cezarion` | `0.12.1` |\n\n### Install\n\n```bash\nnpx cezarion@0.12.1\n```',
+  };
+  const original = structuredClone(f.state.release);
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'reused', f.errors.join('\n'));
+  assert.deepEqual(f.state.release, original);
+});
+
+test('edited generated changelog is rejected without overwriting the release', async (t) => {
+  const f = await fixture(t);
+  await f.run(releaseStep);
+  assert.match(f.state.release.body, /initial history/);
+  f.state.release.body = f.state.release.body.replace('initial history', 'invented change');
+  const original = structuredClone(f.state.release);
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'failed');
+  assert.deepEqual(f.state.release, original);
+});
+
+test('existing release tag without a Release still gets the previous range', async (t) => {
+  const f = await fixture(t);
+  f.git('tag', 'v0.12.0', `${f.sha}^`);
+  f.git('tag', 'v0.12.1', f.sha);
+  f.state.tag = { type: 'commit', sha: f.sha };
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'created', f.errors.join('\n'));
+  assert.match(f.state.release.body, /## Changes/);
+  assert.match(f.state.release.body, /source/);
+  assert.doesNotMatch(f.state.release.body, /initial history/);
+});
+
+test('release on the same commit as its predecessor reports an empty changelog', async (t) => {
+  const f = await fixture(t);
+  f.git('tag', 'v0.12.0', f.sha);
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'created', f.errors.join('\n'));
+  assert.match(f.state.release.body, /No commits/);
+  assert.doesNotMatch(f.state.release.body, /initial history/);
+});
+
+test('previous release selection compares version numbers numerically', async (t) => {
+  const f = await fixture(t);
+  f.git('tag', 'v0.9.0', f.sha);
+  f.git('tag', 'v0.10.0', `${f.sha}^`);
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'created', f.errors.join('\n'));
+  assert.match(f.state.release.body, /v0\.10\.0/);
+  assert.doesNotMatch(f.state.release.body, /v0\.9\.0|initial history/);
+});
+
+test('changelog retry uses the recorded base commit after the old tag moves', async (t) => {
+  const f = await fixture(t);
+  f.git('tag', 'v0.12.0', `${f.sha}^`);
+  await f.run(releaseStep);
+  const original = structuredClone(f.state.release);
+  f.git('tag', '-f', 'v0.12.0', f.sha);
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'reused', f.errors.join('\n'));
+  assert.deepEqual(f.state.release, original);
+});
+
+test('incomplete history fails finalization instead of publishing an incomplete changelog', async (t) => {
+  const f = await fixture(t);
+  f.write('.git/shallow', `${f.sha}\n`);
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'failed');
+  assert.match(f.errors.join('\n'), /full Git history/);
+  assert.equal(f.state.release, null);
+});
+
+test('a changelog marker naming another source commit is rejected', async (t) => {
+  const f = await fixture(t);
+  await f.run(releaseStep);
+  f.state.release.body = f.state.release.body.replace(`head=${f.sha}`, `head=${'f'.repeat(40)}`);
+  const original = structuredClone(f.state.release);
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'failed');
+  assert.deepEqual(f.state.release, original);
+});
+
+test('large first-release changelog stays bounded and retries without losing the full-history link', async (t) => {
+  const f = await fixture(t, 'main', { historyCommits: 300 });
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'created', f.errors.join('\n'));
+  const original = structuredClone(f.state.release);
+  assert.ok(Buffer.byteLength(original.body) < 65000, 'notes must fit in a GitHub Release');
+  assert.match(original.body, /Showing \d+ of 302 commits/);
+  assert.ok(original.body.includes(`/commits/${f.sha}`));
+  assert.ok(original.body.includes(`/commit/${f.sha}`), 'include most recent commits first');
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'reused', f.errors.join('\n'));
+  assert.deepEqual(f.state.release, original);
+});
+
+test('long commit subjects remain bounded and render as text, not injected markup', async (t) => {
+  const f = await fixture(t, 'main', { subject: '<img> [fake](https://example.test) ' + 'x'.repeat(70000) });
+  await f.run(releaseStep);
+  assert.equal(f.outputs.github_release.status, 'created', f.errors.join('\n'));
+  const body = f.state.release.body;
+  assert.ok(Buffer.byteLength(body) < 65000);
+  assert.doesNotMatch(body, /<img>|\[fake\]\(https:/);
+  assert.ok(body.includes(`/commit/${f.sha}`));
 });
 
 test('a conflicting tag blocks release creation without overwriting it', async (t) => {
