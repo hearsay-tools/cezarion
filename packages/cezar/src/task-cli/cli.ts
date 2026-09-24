@@ -251,6 +251,17 @@ function statuses(value: string | boolean | undefined) {
   return new Set(list);
 }
 
+/** Every flag check `execute` makes, run up front so a bad flag never waits on discovery. */
+function validateFlags(name: string, values: Values): void {
+  if (name === 'list') { statuses(values.status); positiveInt(values.limit, 'limit', 1_000); }
+  if (name === 'wait') {
+    oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
+    oneOf<WaitUntil>(values.until, 'until', ['settled', 'attention'], 'settled');
+  }
+  if (name === 'log') { nonNegativeInt(values.since, 'since'); positiveInt(values['max-chars'], 'max-chars', 1_000_000); }
+  if (name === 'wait' || name === 'log' || (name === 'start' && values.wait)) timeoutMs(values);
+}
+
 async function getRun(cockpit: Cockpit, id: string): Promise<ApiRun> {
   const result = await request(cockpit, `/runs/${encodeURIComponent(id)}`);
   if (result.status !== 200) refuse(result);
@@ -277,8 +288,7 @@ async function pendingQuestion(cockpit: Cockpit, id: string): Promise<unknown> {
 type Values = Record<string, string | boolean | undefined>;
 type Printer = (value: unknown) => void;
 
-async function start(cockpit: Cockpit, io: TaskIo, values: Values, positionals: string[], print: Printer): Promise<number> {
-  const task = await textArgument(io, 'start', positionals[0], values['task-file'] as string | undefined, 'task');
+async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string, print: Printer): Promise<number> {
   const waitMs = values.wait ? timeoutMs(values) : undefined;
   const requestId = (values['request-id'] as string | undefined) ?? randomUUID();
   const result = await request(cockpit, '/runs', {
@@ -311,9 +321,7 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, positionals: 
   return waited.exitCode;
 }
 
-async function send(cockpit: Cockpit, io: TaskIo, values: Values, positionals: string[], print: Printer): Promise<number> {
-  const id = positionals[0]!;
-  const text = await textArgument(io, 'send', positionals[1], values['text-file'] as string | undefined, 'text');
+async function send(cockpit: Cockpit, values: Values, id: string, text: string, print: Printer): Promise<number> {
   const path = `/runs/${encodeURIComponent(id)}`;
   const delivered = await request(cockpit, `${path}/messages`, { body: { text } });
   if (delivered.status === 200) {
@@ -335,14 +343,16 @@ async function send(cockpit: Cockpit, io: TaskIo, values: Values, positionals: s
   return EXIT.ok;
 }
 
-async function execute(name: string, cockpit: Cockpit, io: TaskIo, values: Values, positionals: string[], print: Printer): Promise<number> {
+async function execute(
+  name: string, cockpit: Cockpit, io: TaskIo, values: Values, positionals: string[], text: string | undefined, print: Printer,
+): Promise<number> {
   const id = positionals[0]!;
   const path = `/runs/${encodeURIComponent(id)}`;
   switch (name) {
     case 'start':
-      return start(cockpit, io, values, positionals, print);
+      return start(cockpit, io, values, text!, print);
     case 'send':
-      return send(cockpit, io, values, positionals, print);
+      return send(cockpit, values, id, text!, print);
     case 'wait': {
       const mode = oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
       const until = oneOf<WaitUntil>(values.until, 'until', ['settled', 'attention'], 'settled');
@@ -431,11 +441,19 @@ export async function runTaskCommand(argv: string[], env: NodeJS.ProcessEnv, io:
       io.stdout(taskHelp(name));
       return EXIT.ok;
     }
+    // Input is judged before any cockpit is looked for: a usage error is exit 64 whether or not
+    // a cockpit is running, and stdin is read once, here.
+    const text = name === 'start'
+      ? await textArgument(io, 'start', positionals[0], values['task-file'] as string | undefined, 'task')
+      : name === 'send'
+        ? await textArgument(io, 'send', positionals[1], values['text-file'] as string | undefined, 'text')
+        : undefined;
+    validateFlags(name, values);
     const cockpit = await (io.discover ?? discoverCockpit)({
       url: (values.url as string | undefined) ?? (env.CEZ_URL?.trim() || undefined),
       repoDir: resolve((values.repo as string | undefined) ?? process.cwd()),
     });
-    return await execute(name, cockpit, io, values, positionals, print);
+    return await execute(name, cockpit, io, values, positionals, text, print);
   } catch (error) {
     if (error instanceof TaskCliError) {
       print(error.body);

@@ -1,5 +1,6 @@
 import {
   apiRunSchema,
+  runHistoryPageSchema,
   runRecordSchema,
   type ApiRun,
   type RunHistoryEvent,
@@ -22,7 +23,8 @@ export type WaitUntil = 'settled' | 'attention';
 
 export interface WaitEntry {
   id: string;
-  status: RunStatus | 'missing';
+  /** `unknown`: the deadline passed before any poll answered. */
+  status: RunStatus | 'missing' | 'unknown';
   activity?: string;
   hasPendingHumanAsk?: boolean;
 }
@@ -45,6 +47,7 @@ function entryFor(id: string, run: ApiRun | undefined): WaitEntry {
 
 /** Settled = nothing more will happen without a human; `missing` counts, it will never change. */
 function isSettled(entry: WaitEntry, until: WaitUntil): boolean {
+  if (entry.status === 'unknown') return false;
   if (entry.status === 'missing' || TERMINAL_STATUSES.includes(entry.status)) return true;
   return until === 'attention' && (entry.status === 'waiting' || entry.hasPendingHumanAsk === true);
 }
@@ -56,20 +59,33 @@ function isFailure(entry: WaitEntry): boolean {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Polls `GET /runs`: one call covers any number of runs and holds no socket open. */
+/**
+ * Polls `GET /runs`: one call covers any number of runs and holds no socket open. Each poll is
+ * bounded by what is left of the deadline, so a slow cockpit answers "timed out" on time rather
+ * than holding the caller for a full request timeout.
+ */
 export async function waitForRuns(
   cockpit: Cockpit,
   ids: string[],
   options: { mode: WaitMode; until: WaitUntil; timeoutMs: number; pollMs?: number },
 ): Promise<WaitResult> {
   const deadline = Date.now() + options.timeoutMs;
+  let entries: WaitEntry[] = ids.map((id) => ({ id, status: 'unknown' }));
   for (;;) {
-    const result = await request(cockpit, '/runs');
+    const budget = deadline - Date.now();
+    if (budget <= 0) return { exitCode: 3, runs: entries, timedOut: true };
+    let result;
+    try {
+      result = await request(cockpit, '/runs', { timeoutMs: budget });
+    } catch (error) {
+      if (Date.now() >= deadline) return { exitCode: 3, runs: entries, timedOut: true };
+      throw error;
+    }
     if (result.status !== 200) refuse(result);
     const runs = apiRunSchema.array().safeParse(result.data);
     if (!runs.success) invalidResponse('run list');
     const byId = new Map(runs.data.map((run) => [run.id, run]));
-    const entries = ids.map((id) => entryFor(id, byId.get(id)));
+    entries = ids.map((id) => entryFor(id, byId.get(id)));
     const settled = entries.filter((entry) => isSettled(entry, options.until));
     const done = options.mode === 'any' ? settled.length > 0 : settled.length === entries.length;
     if (done) {
@@ -167,13 +183,16 @@ async function* sseFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<SseF
 }
 
 /**
- * `log`, read from the run's SSE stream: the server replays every event after `afterSeq`, then
- * sends one `run` frame. Everything before that frame is the tail, bounded to `maxChars`. Without
- * `follow` the command ends there; with it, live events stream until a terminal `run` frame
- * (exit 0/1, final line is the status) or the deadline (exit 3). Deduped by `seq` throughout.
+ * `log`, read from the run's SSE stream, which replays every event after `afterSeq` and then
+ * streams live. The replay ends at `asOfSeq`, the event file's high-water mark read from
+ * `GET /history` just before connecting — NOT at the first `run` frame, because the route
+ * subscribes to live run updates before it replays, so one can land mid-replay. Everything up to
+ * that boundary is the tail, bounded to `maxChars`. Without `follow` the command ends there; with
+ * it, live events stream until the run is terminal (exit 0/1, final line is the status) or the
+ * deadline (exit 3). Deduped by `seq` throughout.
  *
- * The stream rather than `GET /history`: a history page starts at its first transcript item, so
- * it drops lifecycle events such as the opening `step-start`.
+ * The stream rather than `GET /history` pages: a history page starts at its first transcript
+ * item, so it drops lifecycle events such as the opening `step-start`.
  */
 export async function readLog(
   cockpit: Cockpit,
@@ -181,10 +200,17 @@ export async function readLog(
   options: { afterSeq: number; maxChars: number; follow: boolean; timeoutMs: number; print: (line: string) => void },
 ): Promise<number> {
   const tail = new LineTail(options.maxChars);
-  let replaying = true;
+  const history = await request(cockpit, `/runs/${encodeURIComponent(id)}/history`);
+  if (history.status !== 200) refuse(history);
+  const page = runHistoryPageSchema.safeParse(history.data);
+  if (!page.success) invalidResponse('history');
+  const boundarySeq = page.data.asOfSeq;
+  let replaying = boundarySeq > options.afterSeq;
+  if (!replaying && !options.follow) return 0;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs);
   let lastSeq = options.afterSeq;
+  let seenSeq = options.afterSeq;
   let status: RunStatus | undefined;
   try {
     let response: Response;
@@ -203,29 +229,30 @@ export async function readLog(
       refuse({ status: response.status, data });
     }
     try {
+      // Before the stream: a replay that is already empty ends here, exactly as below.
+      const early = afterReplay();
+      if (early !== undefined) return early;
       for await (const frame of sseFrames(response.body)) {
-        if (frame.event === 'run-event') {
+        if (frame.event === 'run-event' || frame.event === 'ui-event') {
           const event = JSON.parse(frame.data) as RunHistoryEvent;
-          if (typeof event.seq !== 'number' || event.seq <= lastSeq) continue;
-          lastSeq = event.seq;
-          const line = logLine(event);
-          if (!line) continue;
-          if (replaying) tail.push(JSON.stringify(line));
-          else options.print(JSON.stringify(line));
+          if (typeof event.seq !== 'number') continue;
+          // Both streams share the file's seq space, so either one can reach the boundary;
+          // only v1 lines are printed, deduped by seq.
+          seenSeq = Math.max(seenSeq, event.seq);
+          if (frame.event === 'run-event' && event.seq > lastSeq) {
+            lastSeq = event.seq;
+            const line = logLine(event);
+            if (line) {
+              if (replaying) tail.push(JSON.stringify(line));
+              else options.print(JSON.stringify(line));
+            }
+          }
         } else if (frame.event === 'run') {
           const run = runRecordSchema.safeParse(JSON.parse(frame.data));
-          if (!run.success) continue;
-          status = run.data.status;
-          if (replaying) {
-            replaying = false;
-            for (const line of tail.drain()) options.print(line);
-            if (!options.follow) return 0;
-          }
-          if (TERMINAL_STATUSES.includes(status)) {
-            options.print(JSON.stringify({ id, status, timedOut: false }));
-            return SUCCESS_STATUSES.includes(status) ? 0 : 1;
-          }
+          if (run.success) status = run.data.status;
         }
+        const exit = afterReplay();
+        if (exit !== undefined) return exit;
       }
     } catch (error) {
       if (!controller.signal.aborted) throw error;
@@ -235,6 +262,18 @@ export async function readLog(
   } finally {
     clearTimeout(timer);
     controller.abort();
+  }
+
+  /** Ends the replay once the boundary is reached; then a terminal status ends the command. */
+  function afterReplay(): number | undefined {
+    if (replaying && seenSeq >= boundarySeq) {
+      replaying = false;
+      for (const line of tail.drain()) options.print(line);
+      if (!options.follow) return 0;
+    }
+    if (replaying || status === undefined || !TERMINAL_STATUSES.includes(status)) return undefined;
+    options.print(JSON.stringify({ id, status, timedOut: false }));
+    return SUCCESS_STATUSES.includes(status) ? 0 : 1;
   }
 
   function timedOut(): number {

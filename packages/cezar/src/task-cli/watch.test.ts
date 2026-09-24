@@ -137,3 +137,87 @@ describe('cez task watching', () => {
     });
   });
 });
+
+/**
+ * Review round 1 (#504): behaviour a real cockpit cannot be timed into reliably, so a fake one
+ * scripts the exact wire — a slow `/runs`, and a live `run` frame landing mid-replay.
+ */
+describe('cez task watching against a scripted cockpit', () => {
+  let server: import('node:http').Server;
+  let origin: string;
+  let handler: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void;
+  const out: string[] = [];
+  const apiRun = (status: string) => ({
+    id: 'r1', title: 't', workflow: 'quick-task', task: 't', status, createdAt: '2026-01-01T00:00:00.000Z',
+    tokensUsed: 0, archived: false, steps: [],
+  });
+
+  beforeEach(async () => {
+    out.length = 0;
+    const { createServer } = await import('node:http');
+    server = createServer((req, res) => handler(req, res));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    origin = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+  });
+  afterEach(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  const run = (argv: string[]) => runTaskCommand(argv, {}, {
+    stdout: (line) => out.push(line),
+    discover: async () => ({ origin, projectId: 'default', api: `${origin}/api/v1/p/default` }),
+    pollMs: 20,
+  });
+  const json = (res: import('node:http').ServerResponse, body: unknown) => {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify(body));
+  };
+
+  it('wait answers timeout (exit 3) on time even when a poll is slower than the budget', async () => {
+    handler = (req, res) => {
+      if (req.url === '/api/v1/p/default/runs') setTimeout(() => json(res, [apiRun('queued')]), 4_000);
+      else { res.statusCode = 404; res.end(); }
+    };
+    const started = Date.now();
+    expect(await run(['wait', 'r1', '--timeout-seconds', '1'])).toBe(3);
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: true, runs: [{ id: 'r1' }] });
+  });
+
+  /** Replay of seq 1..3 with a live `run` frame (already terminal) arriving after seq 1. */
+  const replayWithEarlyRunFrame = () => {
+    handler = (req, res) => {
+      if (req.url === '/api/v1/p/default/runs/r1') return json(res, apiRun('done'));
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) {
+        return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 3, hasOlder: false });
+      }
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/events')) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        const frame = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        const text = (seq: number) => frame('run-event', { seq, ts: '2026-01-01T00:00:00.000Z', type: 'text', text: `t${seq}` });
+        text(1);
+        frame('run', apiRun('done'));
+        text(2);
+        text(3);
+        frame('run', apiRun('done'));
+        return;
+      }
+      res.statusCode = 404; res.end();
+    };
+  };
+
+  it('log keeps replaying past a live run frame that lands mid-replay', async () => {
+    replayWithEarlyRunFrame();
+    expect(await run(['log', 'r1'])).toBe(0);
+    expect(out.map((line) => JSON.parse(line).text)).toEqual(['t1', 't2', 't3']);
+  });
+
+  it('log --follow prints the whole replay before reporting the terminal status', async () => {
+    replayWithEarlyRunFrame();
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(0);
+    const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.slice(0, 3).map((line) => line.text)).toEqual(['t1', 't2', 't3']);
+    expect(lines.at(-1)).toMatchObject({ id: 'r1', status: 'done' });
+  });
+});

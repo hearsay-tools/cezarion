@@ -4,7 +4,7 @@ import type { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
 import { runTaskCommand, type TaskIo } from './cli.ts';
-import type { Cockpit } from './http.ts';
+import { TaskCliError, type Cockpit } from './http.ts';
 
 /** `cez task` against a real cockpit app on a real socket (#504). */
 describe('cez task', () => {
@@ -73,6 +73,14 @@ describe('cez task', () => {
       expect(await run(['start', '--task-file', '-'], '  \n')).toBe(64);
       expect(last()).toMatchObject({ code: 'invalid_input' });
       expect(store.listRuns()).toHaveLength(0);
+    });
+
+    it('rejects empty stdin as a usage error even when no cockpit is running', async () => {
+      const noCockpit = async () => { throw new TaskCliError(2, { code: 'no-cockpit', error: 'none' }); };
+      expect(await runTaskCommand(['start', '--task-file', '-'], {}, { ...io('  '), discover: noCockpit })).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input' });
+      expect(await runTaskCommand(['send', 'r1', '--text-file', '-'], {}, { ...io(''), discover: noCockpit })).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input' });
     });
 
     it('forwards --no-worktree and --autonomous', async () => {
@@ -204,6 +212,13 @@ describe('cez task', () => {
         expect(await run(argv)).toBe(64);
         expect(last()).toMatchObject({ code: 'invalid_input' });
         expect(last().usage).toBeDefined();
+        expect(discoveries).toBe(0);
+      },
+    );
+
+    it.each([[['list', '--limit', '0']], [['list', '--status', 'nope']], [['wait', 'x', '--mode', 'some']], [['log', 'x', '--since', '-1']], [['log', 'x', '--max-chars', '0']], [['start', 'x', '--wait', '--timeout-seconds', '0']]])(
+      'judges %j as a usage error before looking for a cockpit', async (argv) => {
+        expect(await run(argv)).toBe(64);
         expect(discoveries).toBe(0);
       },
     );
