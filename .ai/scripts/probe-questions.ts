@@ -47,6 +47,7 @@ const until = async (predicate: () => boolean, ms = 240_000) => {
   while (!predicate()) { if (Date.now() - start > ms) throw new Error('timed out'); await new Promise(resolve => setTimeout(resolve, 100)); }
 };
 manager.enqueueOwnedRun(workerId);
+let failed = false;
 try {
   await until(() => events('ask.requested').length > 0 || events('worker-question-fallback').length > 0);
   rec('ASKED', events('ask.requested')[0]?.questions ?? 'no ask');
@@ -73,11 +74,12 @@ try {
   rec('WORKER-READ', events('text').filter(event => /COLOR IS/i.test(String(event.text))).map(event => String(event.text).slice(0, 80)));
   rec('RESULT', { userMessages: events('user-message').length, answeredBy: events('human-input-delivered')[0]?.source });
 } catch (error) {
+  failed = true;
   rec('ERROR', String(error));
   rec('TAIL', store.readEvents(workerId).slice(-10).map(event => event.type + ('message' in event ? `:${String(event.message).slice(0, 80)}` : '')));
 } finally {
   manager.cancel(workerId);
   await until(() => !manager.isActive(workerId), 30_000).catch(() => {});
   manager.dispose(); store.flush();
-  process.exit(0);
+  process.exit(failed ? 1 : 0);
 }
