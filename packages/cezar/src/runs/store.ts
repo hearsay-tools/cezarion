@@ -296,6 +296,10 @@ export const runRecordSchema = z.object({
   groupId: z.string().optional(),
   /** Variant letter within the group — 'A' | 'B' | 'C' (kept as a string). */
   variant: z.string().optional(),
+  /** Idempotent start (#504): the caller's request id and the hash of the start payload it
+   *  named (`src/runs/client-request.ts`). Absent on every run started without one. */
+  clientRequestId: z.string().optional(),
+  clientRequestHash: z.string().optional(),
   /** Peak resident memory (bytes) / process count observed across the run's
    *  agent process trees (#348) — written when a session's telemetry ends.
    *  Optional: old runs.json files and `ps`-less platforms have neither. */
@@ -841,6 +845,13 @@ export class RunStore extends EventEmitter {
     return this.runs.get(id);
   }
 
+  /** The run an idempotent start already created (#504), archived or not. A deleted run is gone
+   *  with its record, so a retry after deletion honestly creates a fresh one. */
+  findRunByClientRequestId(clientRequestId: string): RunRecord | undefined {
+    for (const run of this.runs.values()) if (run.clientRequestId === clientRequestId) return run;
+    return undefined;
+  }
+
   createRun(input: {
     title: string;
     systemPrompt?: string;
@@ -858,6 +869,8 @@ export class RunStore extends EventEmitter {
     worktree?: false;
     groupId?: string;
     variant?: string;
+    clientRequestId?: string;
+    clientRequestHash?: string;
     steps: Array<Pick<StepState, 'id' | 'name' | 'kind'>>;
   }): RunRecord {
     const run = this.buildRun(input, randomUUID());
@@ -891,6 +904,7 @@ export class RunStore extends EventEmitter {
       worktree: input.worktree,
       groupId: input.groupId,
       variant: input.variant,
+      ...(input.clientRequestId === undefined ? {} : { clientRequestId: input.clientRequestId, clientRequestHash: input.clientRequestHash }),
       status: 'queued',
       createdAt: new Date().toISOString(),
       tokensUsed: 0,

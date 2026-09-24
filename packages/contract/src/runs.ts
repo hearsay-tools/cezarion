@@ -269,6 +269,10 @@ export const runRecordSchema = z.object({
   groupId: z.string().optional(),
   /** Variant letter within the group — 'A' | 'B' | 'C'. */
   variant: z.string().optional(),
+  /** Idempotent start (#504): the caller's request id and the hash of the start payload it
+   *  named (`src/runs/client-request.ts`). Absent on every run started without one. */
+  clientRequestId: z.string().optional(),
+  clientRequestHash: z.string().optional(),
   peakRssBytes: z.number().optional(),
   peakProcCount: z.number().optional(),
   archived: z.boolean(),
