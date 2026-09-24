@@ -1,56 +1,28 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { serve, type ServerType } from '@hono/node-server';
 import { apiRunSchema } from '@open-mercato/cezar-contract';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { RunStore } from '../runs/store.ts';
-import { connectedProviderAuth } from '../server/provider-auth.testkit.ts';
-import { createApp } from '../server/server.ts';
-import { RunManager } from '../workflows/run.ts';
-import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
+import type { RunStore } from '../runs/store.ts';
+import type { RunManager } from '../workflows/run.ts';
+import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
 import { runTaskCommand, type TaskIo } from './cli.ts';
 import type { Cockpit } from './http.ts';
 
-/**
- * `cez task` against a real cockpit app on a real socket (#504). No agent slot is free
- * (`maxParallel: 0`), so every run stays `queued` and nothing spawns; the tests move runs to
- * other states through the store, the way the engine would.
- */
+/** `cez task` against a real cockpit app on a real socket (#504). */
 describe('cez task', () => {
-  let repoRoot: string;
+  let harness: TestCockpit;
   let store: RunStore;
   let manager: RunManager;
-  let server: ServerType;
   let cockpit: Cockpit;
   let out: string[];
   let discoveries: number;
-  const savedDryRun = process.env.CEZ_DRY_RUN;
 
   beforeEach(async () => {
-    process.env.CEZ_DRY_RUN = '1';
-    repoRoot = mkdtempSync(join(tmpdir(), 'cez-task-cli-'));
-    store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
-    const app = createApp({ repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
-    server = await new Promise<ServerType>((resolve) => {
-      const started = serve({ fetch: app.fetch, port: 0, hostname: '127.0.0.1' }, () => resolve(started));
-    });
-    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    cockpit = { origin, projectId: 'default', api: `${origin}/api/v1/p/default` };
+    harness = await startTestCockpit();
+    ({ store, manager, cockpit } = harness);
     out = [];
     discoveries = 0;
   });
 
-  afterEach(async () => {
-    await new Promise((resolve) => server.close(resolve));
-    manager.dispose();
-    store.flush();
-    rmSync(repoRoot, { recursive: true, force: true });
-    if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
-    else process.env.CEZ_DRY_RUN = savedDryRun;
-  });
+  afterEach(() => harness.close());
 
   const io = (stdin = ''): TaskIo => ({
     stdout: (line) => out.push(line),

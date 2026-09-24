@@ -17,6 +17,7 @@ import { openUrl } from '../open-url.ts';
 import { discoverCockpit, type DiscoverOptions } from './discovery.ts';
 import { invalidResponse, refuse, request, TaskCliError, threadUrl, type Cockpit } from './http.ts';
 import { projectListRow, projectStatus } from './projections.ts';
+import { readLog, waitForRuns, type WaitMode, type WaitUntil } from './watch.ts';
 
 /**
  * `cez task` — start, watch and steer cockpit tasks from a terminal or a bot (#504, spec
@@ -32,6 +33,8 @@ export interface TaskIo {
   stdin?: () => Promise<string>;
   discover?: (options: DiscoverOptions) => Promise<Cockpit>;
   open?: (url: string) => void;
+  /** `wait`'s poll interval; tests shorten it. */
+  pollMs?: number;
 }
 
 type FlagSpec = { type: 'string' | 'boolean'; multiple?: boolean; help: string };
@@ -50,6 +53,9 @@ interface Operation {
 }
 
 const TASK_TEXT_MAX_CHARS = 100_000;
+const DEFAULT_TIMEOUT_SECONDS = 600;
+const MAX_TIMEOUT_SECONDS = 1_800;
+const TIMEOUT_FLAG: FlagSpec = { type: 'string', help: `<1-${MAX_TIMEOUT_SECONDS}>  Give up after this many seconds (default ${DEFAULT_TIMEOUT_SECONDS}).` };
 
 export const OPERATIONS: Record<string, Operation> = {
   start: {
@@ -65,6 +71,8 @@ export const OPERATIONS: Record<string, Operation> = {
       effort: { type: 'string', help: '<level>       Reasoning effort.' },
       autonomous: { type: 'boolean', help: '         Never park for input; run to completion.' },
       'no-worktree': { type: 'boolean', help: '      Run in the repo working tree, not a worktree.' },
+      wait: { type: 'boolean', help: '               Then wait until the task settles (see wait).' },
+      'timeout-seconds': TIMEOUT_FLAG,
     },
   },
   list: {
@@ -83,6 +91,27 @@ export const OPERATIONS: Record<string, Operation> = {
     description: 'Show one task.',
     positionals: [1, 1],
     flags: { full: { type: 'boolean', help: '               Print the contract ApiRun.' } },
+  },
+  log: {
+    args: '<id>',
+    description: "Print a task's recent transcript as JSON lines, oldest first.",
+    positionals: [1, 1],
+    flags: {
+      since: { type: 'string', help: '<seq>           Only events after this seq.' },
+      'max-chars': { type: 'string', help: '<n>        Keep the newest lines within n characters (default 8000).' },
+      follow: { type: 'boolean', help: '             Keep streaming until the task ends or the timeout.' },
+      'timeout-seconds': TIMEOUT_FLAG,
+    },
+  },
+  wait: {
+    args: '<id>...',
+    description: 'Block until the tasks settle; exit 0 done/review, 1 failed/cancelled, 3 timeout.',
+    positionals: [1, 32],
+    flags: {
+      mode: { type: 'string', help: '<any|all>        Return on the first task or on all of them (default all).' },
+      until: { type: 'string', help: '<settled|attention> Also stop on waiting or a pending question (attention).' },
+      'timeout-seconds': TIMEOUT_FLAG,
+    },
   },
   send: {
     args: "<id> '<text>' | <id> --text-file <path|->",
@@ -198,6 +227,22 @@ function positiveInt(value: string | boolean | undefined, flag: string, max: num
   return Number(value);
 }
 
+function nonNegativeInt(value: string | boolean | undefined, flag: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) usageError(`--${flag} must be a non-negative integer`);
+  return Number(value);
+}
+
+function timeoutMs(values: Record<string, string | boolean | undefined>): number {
+  return (positiveInt(values['timeout-seconds'], 'timeout-seconds', MAX_TIMEOUT_SECONDS) ?? DEFAULT_TIMEOUT_SECONDS) * 1_000;
+}
+
+function oneOf<T extends string>(value: string | boolean | undefined, flag: string, allowed: readonly T[], fallback: T): T {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'string' || !allowed.includes(value as T)) usageError(`--${flag} must be one of ${allowed.join(', ')}`);
+  return value as T;
+}
+
 function statuses(value: string | boolean | undefined) {
   if (typeof value !== 'string') return undefined;
   const list = value.split(',').map((entry) => entry.trim()).filter(Boolean);
@@ -234,6 +279,7 @@ type Printer = (value: unknown) => void;
 
 async function start(cockpit: Cockpit, io: TaskIo, values: Values, positionals: string[], print: Printer): Promise<number> {
   const task = await textArgument(io, 'start', positionals[0], values['task-file'] as string | undefined, 'task');
+  const waitMs = values.wait ? timeoutMs(values) : undefined;
   const requestId = (values['request-id'] as string | undefined) ?? randomUUID();
   const result = await request(cockpit, '/runs', {
     body: {
@@ -250,15 +296,19 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, positionals: 
   if (result.status !== 200 && result.status !== 201) refuse(result);
   const run = runRecordSchema.safeParse(result.data);
   if (!run.success) invalidResponse('start');
-  print({
+  const started = {
     id: run.data.id,
     url: threadUrl(cockpit, run.data.id),
     status: run.data.status,
     created: result.status === 201,
     requestId,
     ...(run.data.branch === undefined ? {} : { branch: run.data.branch }),
-  });
-  return EXIT.ok;
+  };
+  if (waitMs === undefined) { print(started); return EXIT.ok; }
+  const waited = await waitForRuns(cockpit, [run.data.id], { mode: 'all', until: 'settled', timeoutMs: waitMs, pollMs: io.pollMs });
+  const final = waited.runs[0]!;
+  print({ ...started, ...final, timedOut: waited.timedOut });
+  return waited.exitCode;
 }
 
 async function send(cockpit: Cockpit, io: TaskIo, values: Values, positionals: string[], print: Printer): Promise<number> {
@@ -293,6 +343,24 @@ async function execute(name: string, cockpit: Cockpit, io: TaskIo, values: Value
       return start(cockpit, io, values, positionals, print);
     case 'send':
       return send(cockpit, io, values, positionals, print);
+    case 'wait': {
+      const mode = oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
+      const until = oneOf<WaitUntil>(values.until, 'until', ['settled', 'attention'], 'settled');
+      const waited = await waitForRuns(cockpit, positionals, { mode, until, timeoutMs: timeoutMs(values), pollMs: io.pollMs });
+      print({ runs: waited.runs, timedOut: waited.timedOut });
+      return waited.exitCode;
+    }
+    case 'log': {
+      const since = nonNegativeInt(values.since, 'since') ?? 0;
+      const maxChars = positiveInt(values['max-chars'], 'max-chars', 1_000_000) ?? 8_000;
+      await getRun(cockpit, id);
+      return readLog(cockpit, id, {
+        afterSeq: since, maxChars, follow: values.follow === true,
+        // Without --follow the replay ends at the first `run` frame; the bound is only a backstop.
+        timeoutMs: values.follow ? timeoutMs(values) : 45_000,
+        print: (line) => io.stdout(line),
+      });
+    }
     case 'status': {
       const run = await getRun(cockpit, id);
       if (values.full) { print(run); return EXIT.ok; }
