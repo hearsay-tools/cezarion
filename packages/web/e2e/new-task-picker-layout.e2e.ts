@@ -1,4 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { once } from 'node:events'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -46,9 +47,13 @@ beforeAll(async () => {
   browser.waitForFunction(`document.querySelector('[data-slot="effort-pill"]')?.checkVisibility() === true && document.querySelector('[data-slot="version-chip"]') !== null`)
 }, 180_000)
 
-afterAll(() => {
+afterAll(async () => {
   browser?.close()
-  server?.kill()
+  if (server?.pid && server.exitCode === null && server.signalCode === null) {
+    const exit = once(server, 'exit')
+    server.kill()
+    await exit
+  }
   if (root) rmSync(root, { recursive: true, force: true })
 })
 

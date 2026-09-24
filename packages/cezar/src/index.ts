@@ -3,6 +3,7 @@ import { DelegationController } from './delegation/provision.ts';
 import { parseArgs } from 'node:util';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
+import { once } from 'node:events';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,11 @@ import { runMigrations } from './workspace/migrations.ts';
 import { registerProject, shouldRegisterProject } from './workspace/projects.ts';
 import { runProjectsCommand } from './workspace/projects-cli.ts';
 import { WorkspaceSemaphore } from './workspace/semaphore.ts';
+import { ApplicationUpdateService } from './application-update/service.ts';
+import { armRestartHelper } from './application-update/launcher.ts';
+import { restartEndpoint } from './application-update/helper.ts';
+import { readNpmConfiguration } from './application-update/npm-process.ts';
+import { cezarHomeDir } from './paths.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
 
@@ -100,6 +106,7 @@ async function main(): Promise<void> {
       reconfigure: { type: 'string' },
       reinstall: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
+      'restart-exact': { type: 'boolean', default: false },
     },
     allowPositionals: true,
   });
@@ -124,7 +131,7 @@ async function main(): Promise<void> {
 
   switch (command) {
     case 'serve':
-      await serveCommand(repoRoot, Number(values.port), !values['no-open'], values['bind-host']);
+      await serveCommand(repoRoot, Number(values.port), !values['no-open'], values['bind-host'], Boolean(values['restart-exact']));
       return;
     case 'run':
       await runCommand(repoRoot, positionals.slice(1).join(' ').trim(), values.workflow, values.model);
@@ -209,6 +216,7 @@ async function serveCommand(
   preferredPort: number,
   openBrowser: boolean,
   bindHost?: string,
+  restartExact = false,
 ): Promise<void> {
   const bootProjectId = await initWorkspace(repoRoot);
   // ONE workspace semaphore for the whole process (spec 2026-07-20, step 2.5):
@@ -271,7 +279,7 @@ async function serveCommand(
     console.log(`\n  ⬆ cezar ${latest} is available (running ${version}) — restart with: npx ${pkgName}@latest\n`);
   });
 
-  const port = await pickPort(preferredPort);
+  const port = restartExact ? preferredPort : await pickPort(preferredPort);
   // SECURITY: cezar executes agents. A non-loopback bind exposes that box to
   // whatever can reach the interface, and cezar itself has NO auth — it is only
   // for a deliberate hosted setup where a reverse proxy in front provides TLS +
@@ -283,13 +291,29 @@ async function serveCommand(
         `    and make sure this interface is not reachable from the internet.\n`,
     );
   }
-  const server = startServer({
+  // Discovery reads npm metadata only; a missing npm or source checkout degrades to manual update.
+  const npm = readNpmConfiguration();
+  const npmPrefix = npm?.prefix;
+  const npmCache = npm?.cache;
+  let server: ReturnType<typeof startServer>;
+  const applicationUpdate = (npmPrefix && npmCache) || process.env.CEZ_DRY_RUN === '1'
+    ? new ApplicationUpdateService({
+      packageRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
+      launchEntry: resolve(process.argv[1] ?? ''),
+      npmPrefix: npmPrefix ?? join(cezarHomeDir(), 'dry-prefix'),
+      npmCache: npmCache ?? join(cezarHomeDir(), 'dry-cache'), npmBin: npm?.npmBin, home: cezarHomeDir(), targetVersion: () => update.latest,
+      dryRun: process.env.CEZ_DRY_RUN === '1',
+      armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(server.address()), npmBin: npm?.npmBin ?? 'npm' }),
+      handoff: () => { void server.shutdownForRestart().then(() => process.exit(0)); },
+    }) : undefined;
+  server = startServer({
     delegation,
     repoRoot,
     store,
     manager,
     version,
     update,
+    applicationUpdate,
     bootProjectId,
     semaphore,
     bindHost,
@@ -297,7 +321,16 @@ async function serveCommand(
     providerRuntimeAuth,
     workspaceEvents,
   }, port);
-  const url = `http://localhost:${port}`;
+  if (!server.listening) await once(server, 'listening');
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('cockpit TCP listener is unavailable');
+  const boundPort = address.port;
+  const boundHost = address.address;
+  if (restartExact && process.send) {
+    process.send({ type: 'application-update-listening', host: boundHost, port: boundPort, repoRoot, version },
+      () => process.disconnect?.());
+  }
+  const url = `http://${boundHost.includes(':') ? `[${boundHost}]` : boundHost}:${boundPort}`;
 
   console.log(`\n  cezar v${version} — ${repoRoot}`);
   console.log(`  ${repo ? `branch ${repo.branch}` : 'not a git repository (tasks run in place, one at a time; repo view is empty)'}`);
@@ -306,7 +339,7 @@ async function serveCommand(
     const detail = check.available ? (check.version ?? 'ok') : (check.hint ?? 'missing');
     console.log(`  ${mark} ${check.name.padEnd(6)} ${detail}`);
   }
-  if (port !== preferredPort) console.log(`  (port ${preferredPort} was busy — using ${port})`);
+  if (preferredPort !== 0 && boundPort !== preferredPort) console.log(`  (port ${preferredPort} was busy — using ${boundPort})`);
   console.log(`\n  cockpit → ${url}\n`);
   // Silenced by CEZ_NO_BANNER=1 or by dismissing the cockpit's banner (#391).
   await printSkillsBanner(repoRoot);

@@ -474,6 +474,11 @@ describe('task thread', () => {
     browser.waitForFunction(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].some(el => el.textContent.trim() === 'Notes / handoff')`)
     browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent.trim() === 'Notes / handoff').click()`)
     browser.waitForFunction(`document.querySelector('[data-slot="notes-panel"]') === null`)
+    // The menu's exit animation can finish after Notes closes. Radix then restores focus to
+    // its trigger; if rename starts first, that focus move blurs and unmounts the title input.
+    browser.waitForFunction(
+      `document.querySelector('[data-slot="run-actions-menu"]') === null && document.activeElement?.getAttribute('aria-label') === 'Run actions'`,
+    )
   })
 
   it('renames the task inline and the PATCH persists server-side', async () => {

@@ -73,6 +73,7 @@ assert.match(session.descriptor.args[0], /mcp\\.js$/);
 const client = new Client({ name:'installed-ci-smoke', version:'1' });
 try {
  await client.connect(new StdioClientTransport({ ...session.descriptor, env:session.env, stderr:'pipe' }));
+ assert.match(client.getInstructions() ?? '', /^The interface to Cezarion[^\\n]*\\n- cezar_wait_for_ci: /);
  const tools = await client.listTools();
  assert.deepEqual(tools.tools.map(tool => tool.name), ['cezar_wait_for_ci']);
  assert.equal(count, 0);

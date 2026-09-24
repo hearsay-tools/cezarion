@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { applicationUpdateStateSchema } from './application-update.ts';
 
 /** The agent backends a run can be dispatched to. */
 export const runnerSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor']);
@@ -88,5 +89,6 @@ export const healthResponseSchema = z.object({
   // optional, which was wider than the server has ever been.
   projects: z.array(z.object({ id: z.string(), name: z.string() })),
   bootProject: z.string(),
+  applicationUpdate: applicationUpdateStateSchema.optional(),
 });
 export type HealthResponse = z.infer<typeof healthResponseSchema>;

@@ -12,6 +12,9 @@ import { commandShortcutHint } from '@/lib/use-command-shortcut'
 import { Link, stripProjectPrefix } from '@/lib/project-router'
 import { StatusDot } from '@/components/status-dot'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { ApplicationUpdateControl, ApplicationUpdateFeedback } from '@/components/application-update-control'
+import type { ApplicationUpdateState } from '@open-mercato/cezar-api-client'
+import { isNewerVersion } from '@/lib/is-newer-version'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -56,11 +59,16 @@ export type AppShellProps = {
   unreadCount?: number | null
   /** A quiet, accessible marker on Skills when a checked update remains actionable. */
   skillsUpdateAvailable?: boolean
-  /** cezar version for the footer chip. Null until Step 3.1 reads it from `/api/health`. */
+  /** Running cezar version beside the wordmark. Null while health is unknown. */
   version?: string | null
-  /** The npm registry's newer version, when the server's update check found one (#368). The
-   *  chip grows a pulsing pending dot + tooltip; absent or equal to `version`, it stays plain. */
+  /** The npm registry's newer version, when the server's update check found one (#368). */
   latestVersion?: string | null
+  applicationUpdate?: ApplicationUpdateState
+  onApplyUpdate?: () => Promise<void>
+  onRestart?: () => Promise<void>
+  applicationUpdateError?: string | null
+  applicationUpdateBusy?: boolean
+  applicationUpdateOffline?: boolean
   /** Step 3.3's grouped task quick-list. */
   taskQuickList?: ReactNode
   sessionScope?: ReactNode
@@ -140,6 +148,12 @@ export function AppShell({
   skillsUpdateAvailable = false,
   version = null,
   latestVersion = null,
+  applicationUpdate,
+  onApplyUpdate,
+  onRestart,
+  applicationUpdateError,
+  applicationUpdateBusy,
+  applicationUpdateOffline,
   taskQuickList,
   sessionScope,
   toolsMenu,
@@ -214,6 +228,12 @@ export function AppShell({
     skillsUpdateAvailable,
     version,
     latestVersion,
+    applicationUpdate,
+    onApplyUpdate,
+    onRestart,
+    applicationUpdateError,
+    applicationUpdateBusy,
+    applicationUpdateOffline,
     taskQuickList,
     sessionScope,
     toolsMenu,
@@ -285,6 +305,12 @@ type NavProps = {
   skillsUpdateAvailable: boolean
   version: string | null
   latestVersion: string | null
+  applicationUpdate?: ApplicationUpdateState
+  onApplyUpdate?: () => Promise<void>
+  onRestart?: () => Promise<void>
+  applicationUpdateError?: string | null
+  applicationUpdateBusy?: boolean
+  applicationUpdateOffline?: boolean
   taskQuickList?: ReactNode
   sessionScope?: ReactNode
   toolsMenu?: ReactNode
@@ -471,6 +497,12 @@ function SidebarContent({
   skillsUpdateAvailable,
   version,
   latestVersion,
+  applicationUpdate,
+  onApplyUpdate,
+  onRestart,
+  applicationUpdateError,
+  applicationUpdateBusy,
+  applicationUpdateOffline,
   taskQuickList,
   sessionScope,
   toolsMenu,
@@ -495,16 +527,21 @@ function SidebarContent({
       // an `@min-[…]/sidebar:` query and returns when the user drags the column wider.
       className="@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
-      <div className="flex items-center gap-[9px] px-4 pt-5 pb-2">
-        <span
-          data-slot="brand-wordmark"
-          className="text-[23px] leading-normal font-semibold tracking-[-0.03em] text-foreground"
-        >
-          Cezarion
-        </span>
-        {headerAction ? (
-          <div className={cn('shrink-0', (!repo || projectGroups) && 'ml-auto')}>{headerAction}</div>
-        ) : null}
+      <div data-slot="sidebar-header" className="shrink-0">
+        <div className="flex min-w-0 items-center gap-[9px] px-4 pt-5 pb-2">
+          <span
+            data-slot="brand-wordmark"
+            className="shrink-0 text-[23px] leading-normal font-semibold tracking-[-0.03em] text-foreground"
+          >
+            Cezarion
+          </span>
+          <div className="ml-auto flex min-h-11 min-w-0 items-center justify-end" data-slot="version-action">
+            {version ? <VersionChip version={version} latestVersion={latestVersion} /> : <span className="min-w-0 flex-1" />}
+            <ApplicationUpdateControl version={version} latestVersion={latestVersion} state={applicationUpdate} onApplyUpdate={onApplyUpdate} onRestart={onRestart} error={applicationUpdateError} busy={applicationUpdateBusy} offline={applicationUpdateOffline} />
+          </div>
+        </div>
+        <ApplicationUpdateFeedback version={version} latestVersion={latestVersion} state={applicationUpdate} error={applicationUpdateError} offline={applicationUpdateOffline} busy={applicationUpdateBusy} />
+        {headerAction}
       </div>
 
       <div className="px-4 pb-2">
@@ -631,7 +668,6 @@ function SidebarContent({
           </div>
           <ThemeToggle />
         </div>
-        {version ? <div className="sr-only"><VersionChip version={version} latestVersion={latestVersion} />{latestVersion && latestVersion !== version ? <span className="min-w-0 text-[10px] text-accent-text">Update available</span> : null}</div> : null}
       </div>
     </div>
   )
@@ -795,21 +831,13 @@ function CommandPaletteHint() {
 }
 
 /**
- * The footer's `v{version}` chip. When the server's npm-registry check found something newer
- * (`latestVersion`, #368), the chip grows a pulsing pending-tone dot and names the version in
- * its tooltip — an affordance, not an alert: updating is optional, so the chrome stays quiet.
+ * The header's `v{version}` chip. A numeric newer release gets a quiet pending dot.
  *
- * The chip is the controls row's ONE elastic item, and that is load-bearing. Every other control
- * there is `shrink-0` (the icon buttons inherit it from the button base class), so whatever a
- * version string costs beyond the column's width has to come out of somewhere — and while this
- * chip was `shrink-0` too, there was nowhere for it to come from: a nightly version (#876's
- * dist-tag, some 173px of it) shoved the gear and the theme toggle clean outside the sidebar
- * rather than clipping anything. Truncating from the tail keeps the half that carries meaning,
- * the semver, and the `title` keeps the whole string — which is why the tooltip is now there
- * even with no update to announce.
+ * The chip yields to the fixed 44px action when a nightly version is long. The full string
+ * remains in the DOM for assistive tech and in `title` for pointer readers when it truncates.
  */
 function VersionChip({ version, latestVersion }: { version: string; latestVersion: string | null }) {
-  const updateAvailable = Boolean(latestVersion && latestVersion !== version)
+  const updateAvailable = Boolean(latestVersion && isNewerVersion(latestVersion, version))
   return (
     <span
       data-slot="version-chip"
@@ -817,7 +845,7 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
       title={updateAvailable ? `v${version} — update available: v${latestVersion}` : `v${version}`}
       className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
     >
-      {updateAvailable ? <StatusDot tone="pending" pulse className="size-[5px] shrink-0" /> : null}
+      {updateAvailable ? <StatusDot tone="pending" className="size-[5px] shrink-0" /> : null}
       <span className="truncate">v{version}</span>
     </span>
   )

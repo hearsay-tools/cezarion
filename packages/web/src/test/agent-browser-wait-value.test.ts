@@ -2,7 +2,7 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentBrowser, WaitForValueError, configureFailureCapture } from '../../e2e/agent-browser'
 import { dismissWithEscape, focusWithKeyboard, hoverVisiblePoint } from '../../e2e/contrast'
 
@@ -113,11 +113,17 @@ describe('AgentBrowser.waitForValue (#409)', () => {
   it('a value that never matches fails through the failure bundle, naming the last sample', () => {
     shortTimeout()
     const { browser, commands, failures } = open([{ ready: false, seen: 'button#other' }])
+    const start = Date.now()
+    let clockReads = 0
+    // The initial deadline read starts at zero; each sample's clock read advances one interval.
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => start + 100 * clockReads++)
     let error: unknown
     try {
       browser.waitForValue<{ ready: boolean }>('probe()', (v) => v.ready)
     } catch (caught) {
       error = caught
+    } finally {
+      clock.mockRestore()
     }
     expect(error).toBeInstanceOf(WaitForValueError)
     const failure = error as WaitForValueError

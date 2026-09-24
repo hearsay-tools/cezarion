@@ -3,15 +3,21 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const yaml=require('yaml');
-const {harness}=require('./fixtures/sweep-harness.cjs');
+const {harness,stamp}=require('./fixtures/sweep-harness.cjs');
 const workflowPath=path.resolve(__dirname,'../workflows/sweep-ci-failures.yml');
+const fixtureNow=()=>Date.parse(stamp)+24*60*60*1000;
 function workflow(){assert.equal(fs.existsSync(workflowPath),true,'scheduled workflow implemented');return yaml.parse(fs.readFileSync(workflowPath,'utf8'));}
 const AsyncFunction=Object.getPrototypeOf(async()=>{}).constructor;
 async function execute(h,inputs={}) {
  const w=workflow(),step=w.jobs.sweep.steps.find(s=>s.uses?.startsWith('actions/github-script@'));
  const written={},summary=[],errors=[];
  const core={info:()=>{},setFailed:m=>errors.push(m),summary:{addRaw:m=>{summary.push(m);return core.summary;},write:async()=>{}}};
- const fakeRequire=p=>p==='node:fs'?{writeFileSync:(name,body)=>{written[name]=body;}}:require(path.resolve(__dirname,'../..',p));
+ const fakeRequire=p=>{
+  if(p==='node:fs')return {writeFileSync:(name,body)=>{written[name]=body;}};
+  const dependency=require(path.resolve(__dirname,'../..',p));
+  if(p==='./.github/scripts/sweep-ci-failures.cjs')return {sweepCiFailures:options=>dependency.sweepCiFailures({...options,now:fixtureNow})};
+  return dependency;
+ };
  await new AsyncFunction('require','github','context','core',step.with.script)(fakeRequire,h.github,{repo:{owner:'hearsay-tools',repo:'cezarion'},payload:{inputs}},core);
  return {written,summary,errors};
 }
@@ -38,7 +44,10 @@ test('entrypoint rejects arbitrary manual input without printing it or making re
 });
 test('empty successful scan still produces a coverage artifact and summary',async()=>{
  const h=harness();h.state.runs=[];const result=await execute(h);
- assert.equal(result.errors.length,0);assert.equal(JSON.parse(result.written['ci-sweep-coverage.json']).complete,true);assert.match(result.summary.join(''),/complete/i);
+ const manifest=JSON.parse(result.written['ci-sweep-coverage.json']);
+ assert.equal(result.errors.length,0);assert.equal(manifest.complete,true);
+ assert.equal(manifest.start,'2026-08-27T12:00:00Z');assert.equal(manifest.end,'2026-09-10T12:00:00Z');
+ assert.match(result.summary.join(''),/complete/i);
 });
 test('unavailable logs surface as evidence gaps in a complete summary',async()=>{
  const h=harness();h.state.logs.clear();

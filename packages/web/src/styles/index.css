@@ -73,6 +73,7 @@
 
 :root {
   color-scheme: dark;
+  --app-duration-1: 120ms;
   --nav-scrim: #0f172a99;
 
   /* Role-named family selected by appearance.accent. Cezarion is the sole family today. */

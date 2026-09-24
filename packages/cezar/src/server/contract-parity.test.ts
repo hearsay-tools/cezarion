@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import type {
   healthResponseSchema,
+  applicationUpdateResponseSchema,
   runHistoryContextSchema,
   runHistoryPageSchema,
 } from '@open-mercato/cezar-contract';
@@ -40,11 +41,15 @@ describe('src/contract schemas match the routes exactly', () => {
   type Health200 = InferResponseType<typeof client.api.v1.health.$get, 200>;
   type History200 = InferResponseType<(typeof client.api.v1.runs)[':id']['history']['$get'], 200>;
   type HistoryContext200 = InferResponseType<(typeof client.api.v1.runs)[':id']['history-context']['$get'], 200>;
+  type Apply200 = InferResponseType<(typeof client.api.v1.workspace)['application-update']['apply']['$post'], 200>;
+  type Restart200 = InferResponseType<(typeof client.api.v1.workspace)['application-update']['restart']['$post'], 200>;
 
   type _Checks = [
     Assert<Exact<z.infer<typeof healthResponseSchema>, Health200>>,
     Assert<Exact<z.infer<typeof runHistoryPageSchema>, History200>>,
     Assert<Exact<z.infer<typeof runHistoryContextSchema>, HistoryContext200>>,
+    Assert<Exact<z.infer<typeof applicationUpdateResponseSchema>, Apply200>>,
+    Assert<Exact<z.infer<typeof applicationUpdateResponseSchema>, Restart200>>,
   ];
 
   it('is enforced by tsc, not at runtime', () => {
