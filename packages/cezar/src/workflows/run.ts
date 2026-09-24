@@ -2046,6 +2046,8 @@ export class RunManager {
     // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
     // one — see `reconcileAutoResumes`.
     } finally { this.recovering = false; }
+    // A question committed to its parent just before a crash still records its routing (#505).
+    for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id, true);
     this.reconcileWorkerWaits();
     // A parent reply accepted just before the crash still answers its worker (#505).
     for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
@@ -3205,31 +3207,37 @@ export class RunManager {
   /** A worker's pending question goes to its owning parent as a conversation request
    * (#505). The worker still parks on its ask; only the parent's reply, or a human after
    * fallback, answers it. Routing is idempotent: the message ID derives from the ask seq. */
-  private routeWorkerQuestion(workerId: string): void {
+  private routeWorkerQuestion(workerId: string, repairOnly = false): void {
     const worker = this.store.getRun(workerId);
     if (worker?.delegation?.role !== 'worker') return;
     const ask = pendingHumanAsk(this.store.readEvents(workerId));
     if (!ask) return;
     const events = this.store.readEvents(workerId);
     if (events.some(event => (event.type === 'worker-question-routed' || event.type === 'worker-question-fallback') && event.askSeq === ask.seq)) return;
-    const fallback = (reason: string) => this.store.appendEvent(workerId, { type: 'worker-question-fallback', askSeq: ask.seq, reason });
+    const fallback = (reason: string) => { if (!repairOnly) this.store.appendEvent(workerId, { type: 'worker-question-fallback', askSeq: ask.seq, reason }); };
     const request = askRequestSchema.safeParse({ questions: ask.questions });
     if (!request.success) { fallback('the question cannot be carried to the parent'); return; }
     const parentId = worker.delegation.parentRunId;
     const root = this.store.getRun(parentId);
-    if (root?.delegation?.role !== 'root' || !this.parentCanReceive(root)) { fallback('the parent can no longer receive messages'); return; }
-    const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
     const now = new Date().toISOString();
     const message = questionMessage({ workerRunId: workerId, parentRunId: parentId, askSeq: ask.seq, request: request.data, now });
+    // Already committed (a crash before the routing event): the question did reach the parent,
+    // whatever its capacity or state is now. Record the routing; fallback sweeps follow.
+    const committed = root?.delegation?.role === 'root' && !!root.delegation.conversation?.messages.some(m => m.id === message.id);
+    if (committed) {
+      this.store.appendEvent(workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: message.id, parentRunId: parentId });
+      return;
+    }
+    if (repairOnly) return;
+    if (root?.delegation?.role !== 'root' || !this.parentCanReceive(root)) { fallback('the parent can no longer receive messages'); return; }
+    const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
     if (state.messages.length >= 1024 || (root.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32 ||
       state.messages.filter(m => m.kind === 'request' && m.state === 'accepted' && !state.outcomes.some(o => o.requestId === m.id)).length >= 32) {
       fallback('the parent conversation is at capacity'); return;
     }
-    if (!state.messages.some(m => m.id === message.id)) {
-      const input = { id: message.id, source: 'agent' as const, parentRunId: parentId, text: message.text, createdAt: now,
-        conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'request' as const } };
-      this.store.commitConversation(parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input });
-    }
+    const input = { id: message.id, source: 'agent' as const, parentRunId: parentId, text: message.text, createdAt: now,
+      conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'request' as const } };
+    this.store.commitConversation(parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input });
     projectConversationEvents(this.store, this.store.getRun(parentId)!);
     this.store.appendEvent(workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: message.id, parentRunId: parentId });
     this.deliverConversationInput(parentId);
@@ -3276,6 +3284,8 @@ export class RunManager {
       return;
     }
     if (!state.session?.open || state.cancelled || state.openingAgentInputId === reply.id) return;
+    // Already waiting for admission: only the admission itself may deliver it.
+    if (!admitted && (this.workerWaiting.has(runId) || this.workerWakeQueuedAt.has(runId))) return;
     if (!admitted && (this.waiting.has(runId) || this.monitoring.has(runId))) {
       // The parked worker released its slot: the answer rides the ordinary message wake,
       // which delivers it here once the scheduler admits the worker.

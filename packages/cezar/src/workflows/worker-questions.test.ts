@@ -265,6 +265,8 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       const sample = setInterval(() => { peak = Math.max(peak, semaphore.busy()); }, 5);
       try {
         await f.reply('mock:agent-echo Use the parser');
+        // Another message while the answer waits for admission must not deliver it early.
+        await f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'progress', text: 'mock:agent-echo Still here', timeoutSeconds: 600 });
         await new Promise(resolve => setTimeout(resolve, 300));
         expect(answered(f.w.id)).toEqual([]);
         // Freeing the slot admits the worker, and the held answer goes in.
@@ -288,5 +290,25 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
     // Without the fallback, a reviewing parent still gates its worker's Continue.
     expect(manager.continueRun(f.w.id).ok).toBe(false);
+  });
+
+  it('records the routing on recovery when the crash fell between the question and its event', async () => {
+    const f = await askedPair();
+    f.close();
+    // Drop the routing event from the checkpoint; the committed question stays.
+    const events = eventCheckpoint();
+    for (const [path, content] of events) events.set(path, content.split('\n').filter(line => !line.includes('"worker-question-routed"')).join('\n'));
+    await restart(false, undefined, events);
+    await until(() => eventsOf(f.w.id, 'worker-question-routed').length === 1);
+    expect(eventsOf(f.w.id, 'worker-question-routed')[0]).toMatchObject({ messageId: f.questionId });
+    const credentials = new CredentialRegistry();
+    try {
+      const parentCaller = credentials.authenticate(credentials.issue('project', f.p.id, randomUUID()))!;
+      const service = new DelegationService();
+      service.registerProject({ id: 'project', root, store, manager });
+      await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting');
+      await service.send(parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: f.questionId, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
+      await until(() => answered(f.w.id).length === 1);
+    } finally { credentials.close(); }
   });
 });
