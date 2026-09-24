@@ -43,14 +43,63 @@ export function AskCard({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
         data-resolved="true"
         className="rounded-lg border border-border bg-card px-3.5 py-2.5 text-xs text-muted-foreground"
       >
-        <span className="text-soft-foreground">Answered</span>
+        <span className="text-soft-foreground">{ask.answeredBy === 'parent' ? 'Answered by parent' : 'Answered'}</span>
         {ask.answer ? (
           <span className="ml-1.5 break-words whitespace-pre-line text-foreground">{ask.answer}</span>
         ) : null}
       </div>
     )
   }
+  if (ask.routedToParent) return <RoutedAsk ask={ask} />
   return <PendingAsk ask={ask} run={run} />
+}
+
+/** A worker's question sent to its parent task (#505): read-only here, answered there. If the
+ *  parent can no longer answer, the question falls back and this becomes the ordinary card. */
+function RoutedAsk({ ask }: { ask: ThreadAsk }) {
+  return (
+    <div
+      data-slot="ask-card"
+      data-resolved="false"
+      data-routed="parent"
+      className="rounded-lg border border-border bg-card px-4 pt-3.5 pb-3.5"
+    >
+      <div className="mb-2.5 flex items-center gap-2">
+        <span className="text-xs font-medium text-link-foreground">The agent is asking its parent</span>
+      </div>
+      <div className="flex flex-col gap-3">
+        {ask.questions.map((question, index) => (
+          <div key={question.id ?? index} role="group" aria-label={question.question}>
+            <div className="mb-0.5 flex items-center gap-2">
+              <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {question.header}
+              </span>
+            </div>
+            <p className="mb-1.5 break-words text-sm font-semibold text-foreground">{question.question}</p>
+            <ul className="flex list-disc flex-col gap-0.5 pl-5 text-[13px] text-muted-foreground">
+              {question.options.map((option) => (
+                <li key={option.label} className="break-words">
+                  <span className="text-foreground">{option.label}</span>
+                  {option.description ? <span>: {option.description}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <p data-slot="ask-routed-hint" className="mt-3 text-xs text-muted-foreground">
+        Routed to parent: answer it in the{' '}
+        {ask.parentRunId ? (
+          <Link to={`/tasks/${ask.parentRunId}`} className="font-medium text-foreground underline underline-offset-4">
+            parent task
+          </Link>
+        ) : (
+          'parent task'
+        )}
+        .
+      </p>
+    </div>
+  )
 }
 
 /** The unanswered card: option chips wired to whichever delivery seam the run's state allows. */

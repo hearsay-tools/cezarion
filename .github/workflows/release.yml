@@ -1,9 +1,9 @@
 name: Release
 
 # Stable `latest` releases are owner-driven and MANUAL — never a push
-# (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482). Pushes to `develop`
-# and same-repo PRs publish previews via ci.yml's `publish-snapshot`; only this
-# workflow moves the `latest` dist-tag.
+# (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482). Pushes to `main`
+# publish the `dev` preview via ci.yml's `publish-snapshot`; same-repo PRs use
+# publish-pr-snapshot.yml. Only this workflow moves the `latest` dist-tag.
 on:
   workflow_dispatch:
     inputs:

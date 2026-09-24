@@ -39,7 +39,7 @@ describe('Git page headings at the review viewports', () => {
       name: 'GitHub',
       title: 'GitHub',
       path: '/github',
-      header: '[data-slot="gh-header"]',
+      header: '[data-slot="gh-masthead"]',
       context: '[data-slot="gh-repo"]',
       content: '[data-slot="gh-row"]',
     },

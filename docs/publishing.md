@@ -24,14 +24,15 @@ two authentication methods (#33):
 - **Stable releases** (`latest`) are **owner-driven and manual**: a maintainer
   runs the [`Release`](../.github/workflows/release.yml) workflow from the
   Actions tab (`workflow_dispatch`) and picks the version bump. CI never moves
-  `latest` — a push to `main` publishes nothing. The workflow splits **Verify**
+  `latest` — CI never moves it on a merge to `main`. The workflow splits **Verify**
   (typecheck, tests, build) from **Release** (publish): a registry blip after a
   green suite fails only the publish job, so the Vitest Actions report stays a
   single green summary (#62). The publish job authenticates with **npm trusted
   publishing** (OIDC): no `NPM_TOKEN` in the job, provenance attached
   automatically.
-- **Previews** are **CI-driven**: `develop` pushes publish through the
-  `publish-snapshot` job in [`ci.yml`](../.github/workflows/ci.yml).
+- **Previews** are **CI-driven**: every green push to `main` publishes the
+  `dev` dist-tag through the `publish-snapshot` job in
+  [`ci.yml`](../.github/workflows/ci.yml).
   Same-repository PRs prepare archives after verification, without credentials.
   [`publish-pr-snapshot.yml`](../.github/workflows/publish-pr-snapshot.yml)
   then validates the current PR head, successful CI attempt, artifact identity,
@@ -47,7 +48,7 @@ two authentication methods (#33):
 |---|---|---|---|
 | `latest` (stable) | `release.yml` (`production`) | OIDC trusted publisher — no npm credential in the job | automatic (do not pass `--provenance`) |
 | `pr-<N>` | `publish-pr-snapshot.yml` | `NPM_TOKEN` | `--provenance` |
-| `develop` | `ci.yml` `publish-snapshot` | `NPM_TOKEN` | `--provenance` |
+| `dev` | `ci.yml` `publish-snapshot` | `NPM_TOKEN` | `--provenance` |
 | `nightly` | `nightly.yml` | `NPM_TOKEN` | `--provenance` |
 | drop `pr-<N>` dist-tag | `npm-preview-cleanup.yml` | `NPM_TOKEN` (`npm dist-tag rm`; OIDC does not cover this command) | n/a |
 
@@ -221,7 +222,7 @@ so a dispatch could cancel the eligible run. A retry reuses the original PR and
 branch without editing or reopening either.
 
 If native CI never appears, check the App installation, token permissions, and
-CI base-branch filter (`main`, `develop`, or `release/**` maintenance branches).
+CI base-branch filter (`main` or `release/**` maintenance branches).
 Re-running an old release retains its old workflow code. A PR created with
 `GITHUB_TOKEN` before this change still needs a maintainer close/reopen once to
 emit the eligible event. Do not publish another version to recover that PR.
@@ -326,11 +327,11 @@ become the default install.
 | Event | Version (example) | dist-tag | Install |
 |---|---|---|---|
 | same-repo PR, CI green | `0.1.5-pr482.123` | `pr-482` | `npx cezarion@0.1.5-pr482.123` |
-| push to `develop` | `0.1.5-develop.124` | `develop` | `npx cezarion@develop` |
+| push to `main` | `0.1.5-dev.124` | `dev` | `npx cezarion@dev` |
 | nightly cut of `main` | `0.1.5-nightly.20260813.126` | `nightly` | `npx cezarion@nightly` |
 
-A push to `main` publishes **nothing**: the trunk reaches npm through the nightly
-above, or through an owner-driven stable release — never straight off a merge.
+Every merge to `main` refreshes `dev` after a green CI run. The nightly channel
+above is a dated calendar cut; stable `latest` stays owner-driven.
 
 Version scheme: `<base>-<channel>.<run_number>`, with `.<run_attempt>` appended
 on re-runs so no publish ever collides. Prerelease versions under explicit
@@ -359,7 +360,7 @@ prereleases are inert).
 | `packages/cezar/src/release/manifests.ts` | the shared stamper: which manifests exist, and how each pins the next (unit-tested) |
 | `scripts/release.mjs` | stable orchestrator: stamps manifests, `npm publish --tag latest` via OIDC, no `--provenance` (e2e-tested) |
 | `scripts/release-snapshot.mjs` | snapshot orchestrator: stamps manifests, `npm publish --tag <channel> --provenance` with `NPM_TOKEN`, emits result JSON (`--dry-run` supported; e2e-tested) |
-| `ci.yml` → `publish-snapshot` | develop push gate (`needs: verify`) and provenance permissions |
+| `ci.yml` → `publish-snapshot` | `main` push gate (`needs: verify`) and provenance permissions |
 | `ci.yml` → `prepare-pr-snapshot` | same-repo PR archives after verification, without publishing credentials |
 | `publish-pr-snapshot.yml` + `.github/scripts/pr-snapshot.cjs` | trusted artifact validation and publishing, current-head/attempt checks, sticky PR comment and summary |
 | `nightly.yml` | the 03:17 UTC cron + manual dispatch: main-only guard, "did main move?" check, full verify, then the same orchestrator with `CEZ_RELEASE_CHANNEL=nightly` |

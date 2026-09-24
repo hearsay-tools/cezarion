@@ -97,6 +97,12 @@ export interface ThreadAsk {
   questions: UiAskQuestion[]
   resolved: boolean
   answer?: string
+  /** The `ask.requested` event seq a routing/fallback event names (#505). */
+  askSeq?: number
+  /** A worker's question sent to its parent task: answered there, not from this card (#505). */
+  routedToParent?: boolean
+  parentRunId?: string
+  answeredBy?: 'human' | 'parent'
 }
 
 /** A persisted, cezar-owned recovery marker for a provider's runtime authentication failure. */
@@ -516,6 +522,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         // that follows an ask closes it and records the answer.
         if (pendingAsk && !pendingAsk.resolved) {
           pendingAsk.resolved = true
+          pendingAsk.answeredBy = 'human'
           if (text !== '') pendingAsk.answer = text
           pendingAsk = undefined
         }
@@ -760,9 +767,32 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
             isRecord(q) && typeof q.header === 'string' && Array.isArray(q.options),
         )
         if (questions.length === 0) break
-        const ask: ThreadAsk = { kind: 'ask', id: requestId, questions, resolved: false }
+        const ask: ThreadAsk = { kind: 'ask', id: requestId, questions, resolved: false, askSeq: event.seq }
         currentTurn().entries.push({ origin: 'meta', entry: ask })
         pendingAsk = ask
+        break
+      }
+      // #505: a worker's question travels to its parent; the parent's reply answers it, and a
+      // parent that can no longer answer hands it back to the human (the card's chips return).
+      case 'worker-question-routed': {
+        if (pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) {
+          pendingAsk.routedToParent = true
+          const parentRunId = str(event.parentRunId)
+          if (parentRunId !== undefined) pendingAsk.parentRunId = parentRunId
+        }
+        break
+      }
+      case 'worker-question-fallback': {
+        if (pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) pendingAsk.routedToParent = false
+        break
+      }
+      case 'human-input-delivered': {
+        // A human answer resolves on its `user-message`; only the parent's answer has none.
+        if (event.source === 'parent' && pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) {
+          pendingAsk.resolved = true
+          pendingAsk.answeredBy = 'parent'
+          pendingAsk = undefined
+        }
         break
       }
 

@@ -215,7 +215,7 @@ Every green CI run also publishes an installable npm snapshot
 merged yet:
 
 ```bash
-npx cezarion@develop       # current develop head
+npx cezarion@dev           # current main head
 ```
 
 Every pull request gets its own preview too — the CI bot posts a sticky comment
@@ -565,6 +565,32 @@ Stop requests cancellation; `stopping` does not prove termination. Destroy check
 Provisioned sessions prefer cezar workers and suppress verified native delegation entry points through per-run adapter controls: Claude `Agent`/legacy `Task` denies, Codex multi-agent feature overrides, OpenCode session `task` denies, and pi's known `subagent` extension exclusion. See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. Native workers are not tracked by cezar. Pi has no native delegation primitive or universal identifier for arbitrary custom delegation extensions; guidance does not enforce those cases. With delegation disabled or unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its credentials authorize only the parent's own workers through that listener. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot delegate or message peers through cezar. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
 
 
+## From the terminal: `cez task`
+
+`cez task` starts, watches and steers tasks **in the running cockpit** from a shell — for you, or
+for a bot driving one. Every command prints one JSON object and exits with a code the caller can
+branch on, so nothing has to parse prose. It never starts a server: it finds the cockpit whose
+project registry holds this checkout (ports 4321–4370; a task worktree resolves to its parent
+project), or you point it at one with `--url` / `CEZ_URL`.
+
+```bash
+id=$(cez task start --task-file - <<'EOF' | jq -r .id
+Fix the flaky login test. Quote "anything" you like here.
+EOF
+)
+cez task wait "$id" --until attention --timeout-seconds 900   # 0 done/review · 1 failed · 3 timeout
+cez task status "$id"                                         # slim JSON: status, question, branch, diffStat…
+cez task send "$id" 'Use the retry helper instead'            # queued, delivered, or --resume to reopen
+cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it ends
+```
+
+`start` is retry-safe: it sends a request id (`--request-id <UUID>` to pick your own), and a
+retry with the same id and task answers with the run the first one created (`created: false`)
+instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`. Exit codes:
+`0` ok, `1` task failed/cancelled or a message was not delivered, `2` no cockpit or the cockpit
+refused (its `error` is passed through), `3` timed out, `64` usage error. `cez task --help` lists
+every flag.
+
 ## Workflow format
 
 A workflow is a small YAML file in `.ai/cezar/workflows/`:
@@ -624,6 +650,7 @@ Useful environment variables:
 |---|---|
 | `CEZ_DELEGATION=1` | Enable owned workers and the private loopback listener for this controller. Off by default; works with the cockpit and headless `cez run`. Session instructions and credentials are automatic. |
 | `CEZ_DELEGATION_URL`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
+| `CEZ_URL` | Cockpit origin for `cez task` (e.g. a hosted `CEZ_REMOTE` cockpit). Unset, `cez task` finds the local cockpit serving this checkout on ports 4321–4370. |
 | `CEZ_DRY_RUN=1` | Use bundled mocks for all five agent backends — the cockpit works offline for demos and development. Explicit backend binary overrides still win. |
 | `CEZ_AGENT_MODELS_LOCKED=1` | Globally lock each runner to the model configured in its native Claude/Codex/OpenCode settings while keeping runner selection available. Exact `1` also delegates authentication and provider enablement to those native agents, so Cezar skips its credential probes and provider-disable preferences. Existing Cezar presets are preserved but ignored, and an environment change requires a restart. The config-file equivalent is `"modelsLocked": true` in global `~/.cezar/config.json` or one repository's `.ai/cezar/config.json`; config-file locks do not disable provider checks. |
 | `CEZ_APPROVAL_GATE=1` | Opt into Claude's interactive approval UI; by default, unapproved tools are denied without interrupting the run. Ignored when `CEZ_CLAUDE_PERMISSION_MODE` is a recognized value (`dontAsk`, `acceptEdits`, or `bypass`). |
