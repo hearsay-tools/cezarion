@@ -176,6 +176,11 @@ export async function publishArtifact(directory: string, runId: string, source: 
       if (/^\.pending-[0-9a-f-]{36}$/i.test(id)) await rm(join(root.path, id), { recursive: true, force: true });
     }
     const bytes = await boundedRead(source, MAX_FILE_BYTES);
+    // A same-size rewrite inside one timestamp tick leaves the stat snapshot above
+    // unchanged, so reread and compare: any mutation that landed before this second
+    // read surfaces as differing bytes. Later mutations stay covered by the snapshot.
+    const reread = await boundedRead(source, MAX_FILE_BYTES);
+    if (!bytes.equals(reread)) throw new Error('File changed while publishing or reading artifact');
     await checkCapacity(root, bytes.length);
     const metadata = publishedArtifactSchema.parse({ id: randomUUID(), runId, name: basename(source), sourcePath: resolve(source), createdAt: new Date().toISOString(), size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
     pending = join(root.path, `.pending-${metadata.id}`);

@@ -136,6 +136,37 @@ describe('source mutation defenses', () => {
     await expect(publishArtifact(dir, runId, source)).rejects.toThrow(/changed/i);
     expect(await listArtifacts(dir, runId)).toEqual([]);
   });
+  it('rejects same-size mutation when timestamps cannot observe it', async () => {
+    // Regression: filesystems with coarse timestamp granularity report identical
+    // mtime/ctime for a rewrite inside one tick, so the stat snapshot alone cannot
+    // see a same-size mutation. Freeze the observed stat to simulate that filesystem.
+    const source = join(root, 'report.md'); await writeFile(source, 'original');
+    const actualOpen = fs.open;
+    vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      const file = await actualOpen(...args);
+      if (args[0] === source) {
+        const actualRead = file.read;
+        const actualStat = file.stat;
+        let frozen: Awaited<ReturnType<typeof file.stat>> | undefined;
+        Object.defineProperty(file, 'stat', { value: async (...statArgs: unknown[]) => {
+          frozen ??= await Reflect.apply(actualStat, file, statArgs);
+          return frozen;
+        } });
+        let changed = false;
+        Object.defineProperty(file, 'read', { value: async (...readArgs: unknown[]) => {
+          const result = await Reflect.apply(actualRead, file, readArgs);
+          if (!changed) {
+            changed = true;
+            await writeFile(source, 'modified');
+          }
+          return result;
+        } });
+      }
+      return file;
+    });
+    await expect(publishArtifact(dir, runId, source)).rejects.toThrow(/changed/i);
+    expect(await listArtifacts(dir, runId)).toEqual([]);
+  });
 });
 
 describe('storage validation', () => {
