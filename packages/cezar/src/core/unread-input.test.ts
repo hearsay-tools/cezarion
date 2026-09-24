@@ -17,7 +17,11 @@ describe('unread agent input is resubmitted (#505)', () => {
       manager.steerWorker(runId, input);
       await waitFor(() => !!store.getRun(runId)?.agentInputs?.[0]?.consumedAt, 15_000);
       expect(store.readEvents(runId).some(e => e.type === 'note' && String(e.message).includes('did not read'))).toBe(true);
-      expect(store.readEvents(runId).filter(e => e.type === 'text' && String(e.text).includes('late parent guidance'))).toHaveLength(1);
+      // Codex marks it read when it enters the thread history, before the reply text lands.
+      const echoes = () => store.readEvents(runId).filter(e => e.type === 'text' && String(e.text).includes('late parent guidance'));
+      await waitFor(() => echoes().length > 0, 15_000);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(echoes()).toHaveLength(1);
     });
   }, 60_000);
 
@@ -31,6 +35,7 @@ describe('unread agent input is resubmitted (#505)', () => {
         await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('late window')));
         manager.steerWorker(runId, late(parentRunId));
         await waitFor(() => !!store.getRun(runId)?.agentInputs?.[0]?.consumedAt, 15_000);
+        await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('late parent guidance')), 15_000);
         // The goal-achieved close never ran over the unread input.
         const closed = store.readEvents(runId).findIndex(e => e.type === 'lifecycle' && String(e.message).includes('goal achieved'));
         const echoed = store.readEvents(runId).findIndex(e => e.type === 'text' && String(e.text).includes('late parent guidance'));
