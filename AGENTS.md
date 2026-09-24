@@ -147,7 +147,23 @@ Rules that follow from that:
 
 A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run `npm ci` in that worktree before the commands below — otherwise Node walks up to the main checkout and typecheck/tests compile against that tree's sources, not this one.
 
-Before any commit or PR, run in order:
+**Iteration is targeted; the full gate is a final checkpoint, not a loop.** During
+implementation, run the affected test files/test names, or `npm run test:changed`.
+Use focused browser specs for affected UI flows, e.g.
+`npm run test:e2e -- smoke.e2e.ts -t 'test name'` (see `packages/web/e2e/README.md`).
+Do not run the entire Vitest or browser suite after each edit or each review round.
+
+Once implementation stabilizes, run the full gate below once before committing or
+opening the PR. Reuse that evidence when opening the PR from the same tested tree;
+a commit or review request alone does not invalidate it. Record the tested revision
+(or uncommitted diff), commands, outcomes, and any subsequent edits in the handoff.
+After later code changes, rerun affected gates; shared configuration, dependencies,
+contract changes, or uncertain impact require the full gate again. Review-only or
+Markdown-only edits do not invalidate successful runtime checks. A targeted run,
+a skipped browser suite, or an old pass for changed inputs never counts as a full
+pass. CI still enforces the required final checks independently.
+
+The final gate, in order:
 
 ```bash
 npm run typecheck   # refresh server declarations, then check all four workspaces
@@ -177,6 +193,16 @@ npm test -- --testTimeout=30000 path/to/one.test.ts
 npm test -- -t "the name of one test"
 ```
 
+`npm run test:changed` compares the branch against the merge-base with local
+`origin/main` (or `main`), including staged, unstaged, and untracked files. Use
+`-- --base=<ref>` to override, or `-- --plan` to inspect without running tests.
+It selects Vitest tests through the import graph for ordinary source changes;
+shared/configuration/unknown inputs, deletions, or unavailable Git/base information
+fall back to full Vitest. Clean or Markdown-only changes explicitly skip iteration
+tests. No matching tests is an error: run `npm test` rather than treating it as a
+pass. Import graphs do not cover every runtime dependency, so this command is only
+iteration feedback, never a replacement for the final six-command gate.
+
 Cockpit browser E2E is a separate command from packaged CLI E2E — it boots the real app and
 drives it in a real Chrome through the `agent-browser` provider (`.ai/browsers/agent-browser.md`):
 
@@ -191,7 +217,7 @@ network), reuses an already-healthy instance instead of double-booting, and writ
 
 | Exit     | Marker                    | Meaning                                                                                                           |
 | -------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| 0        | `TEST_E2E_STATUS=passed`  | every spec passed                                                                                                 |
+| 0        | `TEST_E2E_STATUS=passed`  | every selected spec passed; a filtered run is not a full-suite pass                                                                                                 |
 | 0        | `TEST_E2E_STATUS=skipped` | agent-browser could not be provisioned (no network / unsupported platform); prints a loud banner — **not** a pass |
 | non-zero | `TEST_E2E_STATUS=failed`  | a spec failed, or the env could not boot                                                                          |
 

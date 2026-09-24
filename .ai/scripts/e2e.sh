@@ -3,7 +3,7 @@
 # configured browser provider. Invoked by `npm run test:e2e` — the dispatcher's UI gate.
 #
 # Exit codes (documented contract — the pipeline depends on these):
-#   0  + TEST_E2E_STATUS=passed   every spec passed
+#   0  + TEST_E2E_STATUS=passed   every selected spec passed (filters are not a full gate)
 #   0  + TEST_E2E_STATUS=skipped  the browser provider could not be provisioned on this
 #                                 machine (no network / unsupported platform / sandbox).
 #                                 Loud, greppable, and deliberately non-blocking — a machine
@@ -33,27 +33,39 @@ EOF
   exit 0
 }
 
-# Keep the optional CI shard separate from the existing bootstrap flags.
-# With no shard, the local command still runs the entire sequential suite.
-SHARD=
+# Consume only our bootstrap flags; Vitest owns spec paths, -t, --shard, etc.
+# The for loop snapshots the original arguments. Rotate each retained argument
+# onto the end of "$@" without flattening quoted patterns or evaluating shell text.
+# A literal -- ends wrapper parsing as well as Vitest option parsing.
 FORCE=
 FORCE_REBUILD=
+FORWARD_ONLY=0
 for arg in "$@"; do
+  shift
+  if [ "$FORWARD_ONLY" = 1 ]; then
+    set -- "$@" "$arg"
+    continue
+  fi
   case "$arg" in
-    --shard=*) SHARD="$arg" ;;
     --force) FORCE=--force ;;
     --force-rebuild) FORCE_REBUILD=--force-rebuild ;;
-    *) echo "unknown flag: $arg" >&2; echo "TEST_E2E_STATUS=failed" >&2; exit 2 ;;
+    --) FORWARD_ONLY=1; set -- "$@" "$arg" ;;
+    *) set -- "$@" "$arg" ;;
   esac
 done
-set --
-if [ -n "$FORCE" ]; then set -- "$@" "$FORCE"; fi
-if [ -n "$FORCE_REBUILD" ]; then set -- "$@" "$FORCE_REBUILD"; fi
+
+bootstrap() {
+  # Function positional parameters are separate from the retained Vitest args.
+  set --
+  if [ -n "$FORCE" ]; then set -- "$@" "$FORCE"; fi
+  if [ -n "$FORCE_REBUILD" ]; then set -- "$@" "$FORCE_REBUILD"; fi
+  sh "$SCRIPT_DIR/test-env-up.sh" "$@"
+}
 
 # ---- 1. boot or reuse the environment ---------------------------------------
 # The up script is the single source of truth for how this app boots; it also runs the
 # provider's ensure-installed operation and records the result in the descriptor.
-if ! sh "$SCRIPT_DIR/test-env-up.sh" "$@"; then
+if ! bootstrap; then
   echo "TEST_E2E_STATUS=failed" >&2
   exit 1
 fi
@@ -92,8 +104,6 @@ fi
 
 # ---- 3. run the specs -------------------------------------------------------
 cd "$REPO_ROOT"
-set --
-if [ -n "$SHARD" ]; then set -- "$SHARD"; fi
 if npm test -- --config packages/web/e2e/vitest.config.ts "$@"; then
   echo "TEST_E2E_STATUS=passed"
   exit 0
