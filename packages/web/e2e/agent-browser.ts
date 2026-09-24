@@ -632,6 +632,44 @@ export class AgentBrowser {
     this.run(['mouse', 'wheel', String(deltaY)])
   }
 
+  /** Trusted wheel with explicit coordinates (the CLI wheel command uses 0,0). */
+  async wheelAt(x: number, y: number, deltaY: number): Promise<void> {
+    const { cdpUrl } = this.run(['get', 'cdp-url'])
+    if (typeof cdpUrl !== 'string') throw new Error('agent-browser did not expose its CDP URL')
+    const url = this.url()
+    const socket = new WebSocket(cdpUrl)
+    let sequence = 0
+    const request = (method: string, params: object, sessionId?: string): Promise<any> => new Promise((resolve, reject) => {
+      const id = ++sequence
+      const timeout = setTimeout(() => { socket.removeEventListener('message', receive); reject(new Error(`CDP ${method} timed out`)) }, 5000)
+      const receive = (event: MessageEvent) => {
+        const response = JSON.parse(String(event.data))
+        if (response.id !== id) return
+        clearTimeout(timeout)
+        socket.removeEventListener('message', receive)
+        if (response.error) reject(new Error(JSON.stringify(response.error)))
+        else resolve(response.result)
+      }
+      socket.addEventListener('message', receive)
+      socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }))
+    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('CDP connection timed out')), 5000)
+        socket.addEventListener('open', () => { clearTimeout(timeout); resolve() }, { once: true })
+        socket.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('CDP connection failed')) }, { once: true })
+      })
+      const { targetInfos } = await request('Target.getTargets', {})
+      const target = targetInfos.find((entry: { type: string; url: string }) => entry.type === 'page' && entry.url === url)
+      if (!target) throw new Error(`No agent-browser page at ${url}`)
+      const { sessionId } = await request('Target.attachToTarget', { targetId: target.targetId, flatten: true })
+      await request('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY }, sessionId)
+      await request('Target.detachFromTarget', { sessionId })
+    } finally {
+      socket.close()
+    }
+  }
+
   /** Move a real pointer without clicking, for hover targets whose bounding-box center is covered. */
   moveTo(x: number, y: number): void {
     this.run(['mouse', 'move', String(Math.round(x)), String(Math.round(y))])

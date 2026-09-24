@@ -309,7 +309,7 @@ export function GithubRoute({
   const [githubListWidth, setGithubListWidth] = useState(readStoredGithubListWidth)
   const [mobileListExpanded, setMobileListExpanded] = useState(false)
   const routeRef = useRef<HTMLDivElement>(null)
-  const headerRef = useRef<HTMLElement>(null)
+  const workspaceRef = useRef<HTMLDivElement>(null)
   const changeGithubListWidth = (next: number) => {
     const width = clampGithubListWidth(next)
     setGithubListWidth(width)
@@ -319,25 +319,35 @@ export function GithubRoute({
   useEffect(() => {
     if (!workspaceAvailable) return
     const route = routeRef.current
-    const header = headerRef.current
+    const workspace = workspaceRef.current
     const main = route?.closest<HTMLElement>('[data-slot="main"]')
-    if (!route || !header || !main) return
+    if (!route || !workspace || !main) return
     const desktop = window.matchMedia('(min-width: 768px)')
     const sync = () => {
       if (!desktop.matches || main.clientHeight < 1) {
         route.style.removeProperty('--gh-workspace-height')
-        route.style.removeProperty('--gh-chrome-height')
         return
       }
       route.style.setProperty('--gh-workspace-height', `${Math.round(main.clientHeight)}px`)
-      route.style.setProperty('--gh-chrome-height', `${Math.round(header.offsetHeight)}px`)
     }
     sync()
     const observer = new ResizeObserver(sync)
     observer.observe(main)
-    observer.observe(header)
+    // Keep geometry stable while docking: route wheel input, not layout/overflow.
+    // Once the workspace reaches main's top, native pane scrolling takes over.
+    const wheel = (event: WheelEvent) => {
+      if (!desktop.matches || event.ctrlKey || !event.deltaY ||
+        Math.abs(event.deltaX) > Math.abs(event.deltaY) ||
+        workspace.getBoundingClientRect().top <= main.getBoundingClientRect().top + 1 ||
+        !(event.target instanceof Element) || !event.target.closest('[data-slot="gh-panes"]')) return
+      event.preventDefault()
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? main.clientHeight : 1
+      main.scrollTop += event.deltaY * unit
+    }
+    workspace.addEventListener('wheel', wheel, { passive: false })
     desktop.addEventListener('change', sync)
     return () => {
+      workspace.removeEventListener('wheel', wheel)
       observer.disconnect()
       desktop.removeEventListener('change', sync)
     }
@@ -609,9 +619,10 @@ export function GithubRoute({
 
   return (
     // Desktop: the title/repo line stays in document flow so `main` can scroll it away.
-    // Tabs, filters and the two panes live in a sticky workspace that fills the leftover
-    // viewport. Phone stays stacked document-flow. (#523)
-    <div ref={routeRef} data-route="github" className="flex min-h-full flex-col gap-3 px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))] md:gap-[22px] md:p-9">
+    // The route ends with one scrollport-height workspace, with no bottom padding:
+    // at maximum page scroll its tabs align with main's top without sticky overlap.
+    // Phone stays stacked document-flow. (#523)
+    <div ref={routeRef} data-route="github" className="flex min-h-full flex-col gap-3 px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))] md:gap-[22px] md:p-9 md:pb-0">
         <div data-slot="gh-masthead" className="flex min-w-0 shrink-0 flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight md:text-[30px]">GitHub</h1>
           {gh.repo ? (
@@ -621,11 +632,10 @@ export function GithubRoute({
             </span>
           ) : null}
         </div>
-        <div data-slot="gh-workspace" className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 md:gap-[22px]">
+        <div ref={workspaceRef} data-slot="gh-workspace" className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 md:h-[var(--gh-workspace-height,calc(100dvh-4rem))] md:flex-none md:gap-[22px]">
         <header
-          ref={headerRef}
           data-slot="gh-header"
-          className="flex shrink-0 flex-col gap-3 bg-background md:sticky md:top-0 md:z-20 md:gap-[22px]"
+          className="flex shrink-0 flex-col gap-3 bg-background md:gap-[22px]"
         >
           <div data-slot="gh-tabs" className="flex min-h-11 flex-wrap items-center gap-3">
             <TabLink to="/github" active={view === 'issues'} onClick={() => saveGithubView('issues')}>
@@ -686,7 +696,7 @@ export function GithubRoute({
         </header>
       <div
         data-slot="gh-panes"
-        className="flex min-h-0 min-w-0 flex-1 flex-col items-start gap-[22px] md:sticky md:top-[var(--gh-chrome-height,0px)] md:h-[calc(var(--gh-workspace-height,calc(100dvh-4rem))-var(--gh-chrome-height,0px))] md:max-h-[calc(var(--gh-workspace-height,calc(100dvh-4rem))-var(--gh-chrome-height,0px))] md:flex-row md:items-stretch md:overflow-hidden"
+        className="flex min-h-0 min-w-0 flex-1 flex-col items-start gap-[22px] md:flex-row md:items-stretch md:overflow-hidden"
       >
       {/* Issue list and detail stack on mobile. A selected PR has a full-width review surface. */}
       <section

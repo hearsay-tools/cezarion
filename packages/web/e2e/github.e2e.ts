@@ -312,7 +312,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/github-pr-changes.png`)
   })
 
-  it('on desktop hides the GitHub title then scrolls list and detail independently (#523)', async () => {
+  it.each([900, 540])('on desktop hides the GitHub title then scrolls list and detail independently (#523), height %i', async (height) => {
     if (!forgeAvailable) return
     const gh = await api<GithubPayload>('/api/v1/github')
     const template = gh.issues[0]
@@ -330,7 +330,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     const stub = JSON.stringify({ ...gh, issues, prs: gh.prs ?? [] })
 
     await rememberGithubView('issues')
-    browser.setViewport(DESKTOP.width, DESKTOP.height)
+    browser.setViewport(DESKTOP.width, height)
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
     browser.evaluate(`(() => {
@@ -356,7 +356,30 @@ describe('the GitHub tab against the live dry-run server', () => {
     })()`, (value) => Boolean(value?.titleVisible))
     expect(atTop).toMatchObject({ titleVisible: true })
 
+    // Trusted wheel input must move the page first, even over either scrollable pane.
+    for (const slot of ['gh-list', 'gh-detail']) {
+      browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
+      const point = browser.waitForValue<{ x: number; y: number }>(`(() => {
+        const main = document.querySelector('[data-slot="main"]');
+        const pane = document.querySelector('[data-slot="${slot}"]');
+        if (!main || !pane || main.scrollTop !== 0) return null;
+        const box = pane.getBoundingClientRect();
+        return { x: box.left + box.width / 2, y: box.top + 40 };
+      })()`)
+      await browser.wheelAt(point.x, point.y, 40)
+      const scrolled = browser.waitForValue<{ page: number; list: number; detail: number }>(`(() => {
+        return {
+          page: document.querySelector('[data-slot="main"]').scrollTop,
+          list: document.querySelector('[data-slot="gh-list"]').scrollTop,
+          detail: document.querySelector('[data-slot="gh-detail"]').scrollTop,
+        };
+      })()`, value => Boolean(value && value.page > 0))
+      expect(scrolled.list).toBe(0)
+      expect(scrolled.detail).toBe(0)
+    }
+
     const evidence = browser.waitForValue<{
+      panesUncovered: boolean
       titleGone: boolean
       tabsVisible: boolean
       filtersVisible: boolean
@@ -379,6 +402,11 @@ describe('the GitHub tab against the live dry-run server', () => {
       const tabsBox = tabs.getBoundingClientRect();
       const tabsVisible = tabsBox.top >= mainTop - 2 && tabsBox.bottom > mainTop + 16;
       const filtersVisible = toolbar.getBoundingClientRect().bottom > mainTop + 8;
+      const panesUncovered = [list, detail].every(pane => {
+        const box = pane.getBoundingClientRect();
+        return box.top >= toolbar.getBoundingClientRect().bottom &&
+          box.bottom <= main.getBoundingClientRect().bottom + 1;
+      });
       list.scrollTop = 0;
       detail.scrollTop = 0;
       const detailBefore = detail.scrollTop;
@@ -391,6 +419,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       const listStill = list.scrollTop === listBefore;
       const listHasNoXScroll = getComputedStyle(list).overflowX === 'hidden';
       return {
+        panesUncovered,
         titleGone,
         tabsVisible,
         filtersVisible,
@@ -405,6 +434,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       };
     })()`, (value) => Boolean(
       value &&
+        value.panesUncovered &&
         value.titleGone &&
         value.tabsVisible &&
         value.filtersVisible &&
@@ -415,6 +445,7 @@ describe('the GitHub tab against the live dry-run server', () => {
         value.listHasNoXScroll,
     ))
     expect(evidence).toMatchObject({
+      panesUncovered: true,
       titleGone: true,
       tabsVisible: true,
       filtersVisible: true,
@@ -424,6 +455,23 @@ describe('the GitHub tab against the live dry-run server', () => {
       listStill: true,
       listHasNoXScroll: true,
     })
+    for (const slot of ['gh-list', 'gh-detail']) {
+      const before = browser.waitForValue<{ x: number; y: number; scroll: number; page: number; other: number }>(`(() => {
+        const pane = document.querySelector('[data-slot="${slot}"]');
+        const other = document.querySelector('[data-slot="${slot === 'gh-list' ? 'gh-detail' : 'gh-list'}"]');
+        const box = pane.getBoundingClientRect();
+        return { x: box.left + box.width / 2, y: box.top + 60, scroll: pane.scrollTop,
+          page: document.querySelector('[data-slot="main"]').scrollTop, other: other.scrollTop };
+      })()`)
+      await browser.wheelAt(before.x, before.y, 100)
+      const after = browser.waitForValue<{ scroll: number; page: number; other: number }>(`({
+        scroll: document.querySelector('[data-slot="${slot}"]').scrollTop,
+        page: document.querySelector('[data-slot="main"]').scrollTop,
+        other: document.querySelector('[data-slot="${slot === 'gh-list' ? 'gh-detail' : 'gh-list'}"]').scrollTop
+      })`, value => Boolean(value && value.scroll > before.scroll))
+      expect(after.page).toBe(before.page)
+      expect(after.other).toBe(before.other)
+    }
     browser.screenshot(`${artifactsDir}/github-independent-scroll.png`)
   })
 
