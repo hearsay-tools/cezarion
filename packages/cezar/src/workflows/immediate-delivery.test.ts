@@ -153,4 +153,21 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     await until(() => !manager.isActive(w.id));
     expect(inputOf(w.id, opening.id)?.deliveredAt).toBeUndefined();
   });
+
+  it('flushes held messages that did not fit the answer bundle into the answering turn (#505 local review)', async () => {
+    vi.stubEnv('CEZ_MOCK_STEER_MS', '4000');
+    const p = await parent('mock:ask');
+    await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id);
+    const send = conversation(p.id);
+    const big = (label: string) => `${label} ${'x'.repeat(60_000)}`;
+    const held = [send(w.id, p.id, 'progress', big('first')), send(w.id, p.id, 'progress', big('second'))];
+    manager.deliverConversationInput(p.id);
+    const seq = store.readEvents(p.id).at(-1)!.seq;
+    // The answer opens a long turn; only the first message fits its bundle.
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:steer-tool answer' }])).toBe(true);
+    await until(() => !!inputOf(p.id, held[1]!.id)?.deliveredAt);
+    expect(store.readEvents(p.id).some(event => event.seq > seq && event.type === 'turn-end')).toBe(false);
+  });
 });

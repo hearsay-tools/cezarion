@@ -3933,8 +3933,9 @@ export class RunManager {
         }
         state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
         if (bundle) this.commitBundledDelivery(runId, state, bundle.inputs.map(input => input.id));
-        // A native answer continues the turn: held messages steer right behind it.
-        else if (answeringAskSeq !== undefined && !state.pendingHumanAsk) this.flushAgentInputs(runId);
+        // A native answer continues the turn, and a bundle can leave messages that did not
+        // fit its batch: either way the rest steer right behind the answer.
+        if (answeringAskSeq !== undefined && !state.pendingHumanAsk) this.flushAgentInputs(runId);
       }
       this.resumeParkedRun(runId, state);
     }
