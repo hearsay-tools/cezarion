@@ -83,6 +83,8 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     expect(Date.parse(inputOf(w.id, laterId)!.consumedAt!)).toBeLessThanOrEqual(Date.parse(openingEnd.ts));
     expect(store.readEvents(w.id).filter(event => event.seq > seq && event.type === 'turn-end')).toHaveLength(1);
     await until(() => store.getRun(w.id)?.continuationMessage === undefined);
+    // The opening instruction was handled by that successful turn: its sender sees it read.
+    expect(inputOf(w.id, opening.id)?.consumedAt).toBeTruthy();
   });
 
   it('drains a 40-message burst as FIFO submissions of 32 and 8', async () => {

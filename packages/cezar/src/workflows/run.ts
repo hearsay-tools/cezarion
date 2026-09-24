@@ -4484,8 +4484,12 @@ export class RunManager {
             const id = state.openingAgentInputId;
             const deliveredAt = new Date().toISOString();
             try {
-              this.store.commitAgentInputs(runId, (this.store.getRun(runId)?.agentInputs ?? []).map(input =>
-                input.id === id && !input.deliveredAt ? { ...input, deliveredAt } : input), id);
+              // The successful opening turn handled its instruction: delivered and read (#505).
+              this.store.commitAgentInputs(runId, (this.store.getRun(runId)?.agentInputs ?? []).map(input => {
+                if (input.id !== id) return input;
+                const { awaitingRead: _awaiting, ...handled } = input;
+                return { ...handled, deliveredAt: input.deliveredAt ?? deliveredAt, consumedAt: input.consumedAt ?? deliveredAt };
+              }), id);
             } catch (error) {
               state.agentInputError = `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
               try { state.session.interrupt(); } finally {

@@ -55,7 +55,8 @@ for (const backend of RUNNER_IDS) {
         manager.finish(runId);
         await waitFor(() => !manager.isActive(runId));
         const revision = store.getRun(runId)?.delegation;
-        expect(await service.send(caller, request)).toMatchObject({ delivery: 'delivered', message: first.message });
+        // #505: the successful opening turn handled the resume instruction, so it reads as consumed.
+        expect(await service.send(caller, request)).toMatchObject({ delivery: 'consumed', message: first.message });
         expect(store.getRun(runId)?.delegation).toEqual(revision);
         expect(store.getRun(runId)?.steps.filter(step => step.synthetic === 'continuation')).toHaveLength(1);
       } finally { credentials.close(); }
