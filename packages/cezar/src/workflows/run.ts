@@ -2046,8 +2046,8 @@ export class RunManager {
     // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
     // one — see `reconcileAutoResumes`.
     } finally { this.recovering = false; }
-    // A question committed to its parent just before a crash still records its routing (#505).
-    for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id, true);
+    // A question a crash caught before or after its commit to the parent still gets routed (#505).
+    for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id);
     this.reconcileWorkerWaits();
     // A parent reply accepted just before the crash still answers its worker (#505).
     for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
@@ -3207,14 +3207,14 @@ export class RunManager {
   /** A worker's pending question goes to its owning parent as a conversation request
    * (#505). The worker still parks on its ask; only the parent's reply, or a human after
    * fallback, answers it. Routing is idempotent: the message ID derives from the ask seq. */
-  private routeWorkerQuestion(workerId: string, repairOnly = false): void {
+  private routeWorkerQuestion(workerId: string): void {
     const worker = this.store.getRun(workerId);
     if (worker?.delegation?.role !== 'worker') return;
-    const ask = pendingHumanAsk(this.store.readEvents(workerId));
-    if (!ask) return;
     const events = this.store.readEvents(workerId);
+    const ask = pendingHumanAsk(events);
+    if (!ask) return;
     if (events.some(event => (event.type === 'worker-question-routed' || event.type === 'worker-question-fallback') && event.askSeq === ask.seq)) return;
-    const fallback = (reason: string) => { if (!repairOnly) this.store.appendEvent(workerId, { type: 'worker-question-fallback', askSeq: ask.seq, reason }); };
+    const fallback = (reason: string) => { this.store.appendEvent(workerId, { type: 'worker-question-fallback', askSeq: ask.seq, reason }); };
     const request = askRequestSchema.safeParse({ questions: ask.questions });
     if (!request.success) { fallback('the question cannot be carried to the parent'); return; }
     const parentId = worker.delegation.parentRunId;
@@ -3228,7 +3228,8 @@ export class RunManager {
       this.store.appendEvent(workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: message.id, parentRunId: parentId });
       return;
     }
-    if (repairOnly) return;
+    // Recovery can find a question that never left a worker which has since stopped.
+    if (!['queued', 'running', 'waiting'].includes(worker.status)) { fallback('worker-stopped'); return; }
     if (root?.delegation?.role !== 'root' || !this.parentCanReceive(root)) { fallback('the parent can no longer receive messages'); return; }
     const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
     // Room in the ledger for the question AND its reply, beside the replies other open questions

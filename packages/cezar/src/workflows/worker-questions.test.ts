@@ -312,6 +312,25 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { credentials.close(); }
   });
 
+  it('routes the question on recovery when the crash fell before it reached the parent', async () => {
+    const f = await askedPair();
+    f.close();
+    const events = eventCheckpoint();
+    for (const [path, content] of events) events.set(path, content.split('\n').filter(line => !line.includes('"worker-question-routed"')).join('\n'));
+    type DiskRun = { id: string; agentInputs?: Array<{ id: string }>; delegation?: { conversation?: { messages: Array<{ id: string }> } } };
+    const disk = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as DiskRun[];
+    for (const run of disk) if (run.id === f.p.id) {
+      run.agentInputs = run.agentInputs?.filter(input => input.id !== f.questionId);
+      const conversation = run.delegation?.conversation;
+      if (conversation) conversation.messages = conversation.messages.filter(message => message.id !== f.questionId);
+    }
+    await restart(false, JSON.stringify(disk), events);
+    await until(() => eventsOf(f.w.id, 'worker-question-routed').length === 1);
+    expect(eventsOf(f.w.id, 'worker-question-routed')[0]).toMatchObject({ messageId: f.questionId });
+    expect(conversationOf(f.p.id)?.messages.some(message => message.id === f.questionId)).toBe(true);
+    expect(eventsOf(f.w.id, 'worker-question-fallback')).toEqual([]);
+  });
+
   it('answers a worker that registered a request wait before asking', async () => {
     const f = await askedPair();
     try {
