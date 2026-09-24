@@ -3314,7 +3314,14 @@ export class RunManager {
     const bundle = state.atTurnBoundary === state.session ? this.pendingConversationBatch(runId, state, reply.id) : undefined;
     if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
     this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
-    this.commitBundledDelivery(runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])]);
+    const delivered = [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])];
+    this.commitBundledDelivery(runId, state, delivered);
+    // As in submitAgentInput: the wake that admitted this answer is spent, and a stale one
+    // would hold back every later message until the answer's turn ends.
+    if (delivered.includes(this.workerWait(runId)?.wakeId ?? '')) {
+      state.workerWakeTurn = state.session;
+      try { this.withdrawWorkerWait(runId); } catch { /* reconcileWorkerWaits retires it at the turn end */ }
+    }
     state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
     if (!state.pendingHumanAsk) this.flushAgentInputs(runId);
     this.resumeParkedRun(runId, state);

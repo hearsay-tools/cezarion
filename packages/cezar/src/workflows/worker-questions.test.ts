@@ -86,6 +86,19 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { f.close(); }
   });
 
+  it("retires the answer's wake so later messages still reach the worker", async () => {
+    const f = await askedPair();
+    try {
+      // The answer's turn runs ~25 s, so anything sent now must steer it, not wait it out.
+      await f.reply('mock:slow Use the parser');
+      await until(() => answered(f.w.id).length === 1);
+      expect(waitOf(store.getRun(f.w.id))).toBeUndefined();
+      const later = randomUUID();
+      await f.service.send(f.parentCaller, { id: later, recipientRunId: f.w.id, kind: 'progress', text: 'mock:agent-echo Also lint', timeoutSeconds: 600 });
+      await until(() => !!store.getRun(f.w.id)?.agentInputs?.find(input => input.id === later)?.deliveredAt);
+    } finally { f.close(); }
+  });
+
   it('progress and follow-ups never answer a pending worker question', async () => {
     const f = await askedPair();
     try {

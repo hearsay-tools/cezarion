@@ -330,6 +330,13 @@ describe('AskCard for a worker question routed to its parent (#505)', () => {
     expect(screen.queryByRole('button', { name: /date-fns/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /Send/ })).toBeNull()
     expect(screen.getByRole('link', { name: 'parent task' }).getAttribute('href')).toContain(`/tasks/${parentId}`)
+    cleanup()
+    render(
+      <MemoryRouter initialEntries={['/p/acme/tasks/worker']}>
+        <AskCard ask={{ ...singleAsk, routedToParent: true, parentRunId: parentId }} run={activeRun} />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: 'parent task' }).getAttribute('href')).toBe(`/p/acme/tasks/${parentId}`)
     expect(document.querySelector('[data-slot="ask-routed-hint"]')?.textContent).toContain('Routed to parent')
   })
 
