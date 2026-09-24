@@ -30,9 +30,11 @@ for (const backend of ['codex', 'opencode', 'pi'] as const) {
         expect.soft(store.getRun(runId)?.agentInputs).toEqual([input]);
         const recovered = await fixture.restart();
         expect(recovered.manager.continueRun(runId, { text: 'baseline retry' }).ok).toBe(true);
+        // #505: the replayed input can steer in behind the retry's opening turn and be read by
+        // the next turn, so wait for its echo rather than reading once at the first `waiting`
+        // (raced on CI, Vitest shard 2/2 for pi, run 35969921595 on c1475a33).
+        await waitFor(() => recovered.store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes('reject-owned-turn')), 15_000);
         await waitFor(() => recovered.store.getRun(runId)?.status === 'waiting');
-        const texts = recovered.store.readEvents(runId).filter(event => event.type === 'text').map(event => event.text);
-        expect(texts.some(text => typeof text === 'string' && text.includes('reject-owned-turn'))).toBe(true);
         expect(recovered.store.getRun(runId)?.agentInputs).toEqual([delivered(input, recovered.store.getRun(runId)?.agentInputs?.[0])]);
         expect(recovered.store.readEvents(runId).filter(event => event.type === 'agent-input')).toHaveLength(1);
       });
