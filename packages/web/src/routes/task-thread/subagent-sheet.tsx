@@ -67,12 +67,12 @@ function SheetBody({
   return (
     <>
       <SheetHeader className="gap-1.5 border-b border-border px-5 py-4">
-        <SheetTitle className="flex min-w-0 items-center gap-2 pr-8 text-[15px]">
+        <SheetTitle className="flex min-w-0 items-center gap-2 pr-8 text-[16px]">
           <span className="min-w-0 truncate">{agent.title}</span>
           {agent.agentType !== undefined ? (
             <span
               data-slot="agent-type"
-              className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10.5px] font-semibold tracking-[0.05em] text-muted-foreground uppercase"
+              className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold tracking-[0.05em] text-muted-foreground uppercase"
             >
               {agent.agentType}
             </span>
@@ -119,7 +119,7 @@ function StatusPill({ status }: { status: SubagentSummary['status'] }) {
       data-slot="subagent-status"
       data-status={status}
       className={cn(
-        'rounded-full px-2 py-0.5 text-[10.5px] font-semibold tracking-[0.05em] uppercase',
+        'rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-[0.05em] uppercase',
         status === 'completed' && 'bg-success/15 text-success',
         (status === 'failed' || status === 'declined') && 'bg-danger/15 text-danger',
         (status === 'running' || status === 'pending') && 'bg-muted text-muted-foreground',

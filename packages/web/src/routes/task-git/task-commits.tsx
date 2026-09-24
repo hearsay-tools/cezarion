@@ -158,7 +158,7 @@ function TaskChangedFiles({ run }: { run: ApiRun }) {
   if (changes.isError) return <p role="status" className="mt-[22px] text-xs text-danger">Could not load changed files: {changes.error.message}</p>
   if (changes.data.files.length === 0) return null
   return <section data-slot="task-commit-files" className="mt-[22px] rounded-[10px] border border-border bg-card p-5">
-    <h2 className="mb-4 text-[15px] font-semibold">{changes.data.files.length} changed files</h2>
+    <h2 className="mb-4 text-[16px] font-semibold">{changes.data.files.length} changed files</h2>
     <ul className="space-y-4">
       {changes.data.files.map(file => <li key={file.path}>
         <Link to={`/tasks/${run.id}/changes`} className="flex min-h-11 items-center gap-2 text-xs text-muted-foreground hover:text-foreground">

@@ -148,7 +148,7 @@ export function AddAccountDialog({
                 setSelected(null)
                 create.reset()
               }}
-              className="min-w-0 flex-1 rounded-md border border-input bg-card px-2 py-1 font-mono text-[12.5px] outline-none focus-visible:border-ring"
+              className="min-w-0 flex-1 rounded-md border border-input bg-card px-2 py-1 font-mono text-[13px] outline-none focus-visible:border-ring"
             />
             <Button
               type="button"
@@ -161,7 +161,7 @@ export function AddAccountDialog({
               {browsing ? 'Hide folders' : 'Browse…'}
             </Button>
           </label>
-          <p className="text-[11.5px] text-soft-foreground">
+          <p className="text-[11px] text-soft-foreground">
             A <code>~</code> is kept as written and expanded when the agent runs.
           </p>
         </div>

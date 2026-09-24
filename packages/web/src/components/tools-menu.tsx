@@ -133,7 +133,7 @@ export function ToolsMenu({ health, sessionScope }: { health: HealthResponse | u
           <Link
             to="/settings/agents"
             data-slot="tools-settings"
-            className="gap-2 text-[12.5px] text-muted-foreground"
+            className="gap-2 text-[13px] text-muted-foreground"
           >
             <SettingsIcon className="size-3.5" aria-hidden="true" />
             Tool settings
@@ -155,10 +155,10 @@ function AvailableToolRow({ check }: { check: BackendCheck }) {
       className="flex items-center gap-2 rounded-sm px-2 py-1.5"
     >
       <StatusDot tone="success" />
-      <span className="font-mono text-[12.5px] font-medium">{check.name}</span>
+      <span className="font-mono text-[13px] font-medium">{check.name}</span>
       <span
         data-slot="tool-version"
-        className="ml-auto font-mono text-[11.5px] font-medium text-muted-foreground tabular-nums"
+        className="ml-auto font-mono text-[11px] font-medium text-muted-foreground tabular-nums"
       >
         {check.version ?? 'not found'}
       </span>
@@ -183,10 +183,10 @@ function UnavailableToolRow({ check }: { check: BackendCheck }) {
       >
         <span className="flex items-center gap-2">
           <StatusDot tone="danger" />
-          <span className="font-mono text-[12.5px] font-medium">{check.name}</span>
+          <span className="font-mono text-[13px] font-medium">{check.name}</span>
           <span
             data-slot="tool-version"
-            className="ml-auto font-mono text-[11.5px] font-medium text-muted-foreground"
+            className="ml-auto font-mono text-[11px] font-medium text-muted-foreground"
           >
             not found
           </span>
@@ -197,7 +197,7 @@ function UnavailableToolRow({ check }: { check: BackendCheck }) {
               {check.hint}
             </span>
           ) : null}
-          <span data-slot="tool-setup" className="ml-auto shrink-0 text-[11.5px] font-semibold text-accent-text">
+          <span data-slot="tool-setup" className="ml-auto shrink-0 text-[11px] font-semibold text-accent-text">
             Set up →
           </span>
         </span>

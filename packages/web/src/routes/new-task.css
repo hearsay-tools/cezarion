@@ -3,19 +3,16 @@
 /* Size against the composer: a wide sidebar can leave a desktop viewport narrow. */
 [data-route='new'] [data-slot='composer-agent-options'] { container: new-task-agent-options / inline-size; }
 @container new-task-agent-options (min-width: 550px) {
-  [data-route='new'] .new-task-agent-options { grid-template-columns: 210px minmax(0, 1fr) 180px; }
-  [data-route='new'] .new-task-agent-options:not(:has([data-slot='runner-pill'])) { grid-template-columns: minmax(0, 1fr) 180px; }
+  [data-route='new'] .new-task-agent-options { grid-template-columns: max-content minmax(0, 1fr) max-content; }
+  [data-route='new'] .new-task-agent-options:not(:has([data-slot='runner-pill'])) { grid-template-columns: minmax(0, 1fr) max-content; }
   [data-route='new'] .new-task-agent-options [data-slot='model-pill'] { grid-column: auto; grid-row: auto; }
 }
 @container new-task-agent-options (max-width: 549.99px) {
-  [data-route='new'] .new-task-agent-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-route='new'] .new-task-agent-options { grid-template-columns: max-content minmax(0, 1fr); }
   [data-route='new'] .new-task-agent-options [data-slot='model-pill'] { grid-column: 1 / -1; grid-row: 2; }
   [data-route='new'] .new-task-agent-options [data-slot='effort-pill'] { grid-column: 2; grid-row: 1; }
   [data-route='new'] .new-task-agent-options:not(:has([data-slot='runner-pill'])) [data-slot='effort-pill'] { grid-column: 1 / -1; }
   [data-route='new'] .new-task-agent-options :is([data-slot='runner-pill'], [data-slot='effort-pill']) > svg:first-child { display: none; }
-}
-@container new-task-agent-options (max-width: 299.99px) {
-  [data-route='new'] .new-task-agent-options :is([data-slot='runner-pill'], [data-slot='effort-pill']) > span > span { display: none; }
 }
 [data-route='new'] .new-task-agent-options [data-slot$='pill'] { border-color: var(--border); border-radius: 9px; min-height: 44px; }
 [data-route='new'] .new-task-agent-options [data-slot='model-pill'] { height: 44px; min-height: 44px; padding: 0 12px; }
@@ -26,11 +23,11 @@
 [data-route='new'] [data-slot='source-pill'] { border-color: var(--border); }
 [data-route='new'] [data-slot='followups-options'] { background: transparent; padding: 16px; }
 [data-route='new'] [data-slot='execution-options'] summary { gap: 10px; }
-[data-route='new'] [data-slot='execution-options'] summary > span:first-of-type { font-size: 15px; font-weight: 600; }
+[data-route='new'] [data-slot='execution-options'] summary > span:first-of-type { font-weight: 600; }
 [data-route='new'] [data-slot='execution-options'] > div { border-top: 0; padding-top: 0; }
 [data-route='new'] [data-slot='execution-options'] > div > p:first-child { font-size: 11px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
 [data-route='new'] [data-slot='execution-tip'] { margin-top: 16px; font-size: 11px; line-height: 1.7; }
-[data-route='new'] .new-task-run-settings > button > span:first-child > span:last-child { font-size: 10px; line-height: 1.6; }
+[data-route='new'] .new-task-run-settings > button > span:first-child > span:last-child { line-height: 1.6; }
 [data-route='new'] .new-task-run-settings > button[aria-checked='false'] > span:last-child > span { background: var(--muted-foreground); }
 @media (min-width: 1280px) {
   [data-route='new'] [data-slot='execution-options'][open] { padding: 20px; }
@@ -57,7 +54,7 @@
   [data-route='new'] [data-slot='execution-options'] summary { padding: 20px; }
 }
 @media (max-width: 767px) {
-  [data-route='new'] .new-task-agent-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-route='new'] .new-task-agent-options { grid-template-columns: max-content minmax(0, 1fr); }
   [data-route='new'] .new-task-agent-options [data-slot='model-pill'] { grid-column: 1 / -1; grid-row: 2; }
   [data-route='new'] .new-task-agent-options [data-slot='effort-pill'] { grid-column: 2; grid-row: 1; }
   [data-route='new'] .new-task-agent-options:not(:has([data-slot='runner-pill'])) [data-slot='effort-pill'] { grid-column: 1 / -1; }

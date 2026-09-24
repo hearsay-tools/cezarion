@@ -53,10 +53,10 @@ export function ActivityRow({
         className="flex min-h-11 w-full min-w-0 items-center gap-2.5 px-3.5 py-2 text-left hover:bg-muted/40"
       >
         <span aria-hidden className="flex size-4 shrink-0 items-center justify-center text-accent-text">{icon}</span>
-        <span className="min-w-0 shrink truncate text-[13.5px] font-semibold text-foreground">{title}</span>
+        <span className="min-w-0 shrink truncate text-[14px] font-semibold text-foreground">{title}</span>
         <span
           data-slot="run-activity-meta"
-          className="min-w-0 shrink-[2] truncate text-[12.5px] text-muted-foreground tabular-nums"
+          className="min-w-0 shrink-[2] truncate text-[13px] text-muted-foreground tabular-nums"
         >
           {meta}
         </span>

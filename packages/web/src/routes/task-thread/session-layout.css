@@ -3,7 +3,7 @@
 .session-composer [data-slot='composer-editor'] { border-color: var(--ring); border-radius: 12px; }
 .session-composer [data-slot='session-controls'] { padding: 0 12px 10px; }
 /* Keep Runner and Effort values visible beside their labels, icons and chevrons. */
-.session-engine-controls { display: grid; grid-template-columns: 192px minmax(0, 1fr) 176px; gap: 8px; min-width: 0; }
+.session-engine-controls { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 8px; min-width: 0; }
 .session-engine-controls [data-slot$='pill'] { width: 100%; min-width: 0; }
 .session-engine-controls [data-slot$='pill'] > svg:last-child { margin-left: auto; }
 .session-engine-controls [data-slot='session-runner-value'] { width: 100%; min-width: 0; }
@@ -19,16 +19,14 @@
  * only 348px. Query the dock itself so the pill tracks share its actual width. */
 [data-route='task-thread'] [data-slot='thread-dock'] { container: thread-dock / inline-size; }
 @media (min-width: 768px) {
-  @container thread-dock (max-width: 640px) {
+  @container thread-dock (max-width: 680px) {
     [data-slot='thread-dock'] > div { padding-inline: 8px; }
     /* Keep the three controls in one row (#478), with room for the selected values. */
-    .session-engine-controls { grid-template-columns: 112px minmax(0, 1fr) 104px; }
+    .session-engine-controls { grid-template-columns: max-content minmax(0, 1fr) max-content; }
     .session-engine-controls :is([data-slot='runner-pill'], [data-slot='session-runner-value'], [data-slot='follow-up-effort-pill']) { gap: 6px; padding-inline: 8px; }
-    .session-engine-controls :is([data-slot='runner-pill'], [data-slot='session-runner-value'], [data-slot='follow-up-effort-pill']) > span > span,
     .session-engine-controls :is([data-slot='runner-pill'], [data-slot='follow-up-effort-pill']) > svg:last-child { display: none; }
   }
   @container thread-dock (max-width: 400px) {
-    .session-engine-controls [data-slot='follow-up-model-pill'] > span > span { display: none; }
     /* The full Archive label would sit over Dictation in a 348px dock. */
     .session-composer [data-slot='archive-action'] { width: 44px; min-width: 44px; padding-inline: 0; }
     .session-composer [data-slot='archive-action'] > span { display: none; }
@@ -36,7 +34,7 @@
 }
 @media (max-width: 767px) {
   [data-slot='run-title-row'] > .group { max-width: calc(100% - 52px); }
-  .session-engine-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .session-engine-controls { grid-template-columns: max-content minmax(0, 1fr); }
   .session-engine-controls [data-slot='follow-up-model-pill'] { grid-column: 1 / -1; grid-row: 2; }
   .session-engine-controls [data-slot='follow-up-effort-pill'] { grid-column: 2; grid-row: 1; }
 }
@@ -76,7 +74,7 @@
 }
 
 /* A closed event follows the report; the conversation flex space stays after it. */
-[data-route='task-thread'] [data-slot='thread-footer'][data-state='closed'] { margin-top: 0; border-top: 0; padding-top: 0; font-size: 10px; }
+[data-route='task-thread'] [data-slot='thread-footer'][data-state='closed'] { margin-top: 0; border-top: 0; padding-top: 0; }
 [data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> :is(strong, [data-streamdown="strong"]):only-child) { margin-bottom: calc(var(--spacing) * 1); }
 [data-route='task-thread'] [data-slot='assistant-message'] .thread-markdown > p:has(> :is(strong, [data-streamdown="strong"]):only-child) + p { margin-top: calc(var(--spacing) * 1); }
 

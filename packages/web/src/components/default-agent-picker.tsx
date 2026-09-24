@@ -130,7 +130,7 @@ export function DefaultAgentPicker({
               <span
                 data-slot={row.missing ? 'agents-account-missing' : 'agents-account-dir'}
                 data-runner={row.runner.id}
-                className="ml-2 font-sans text-[11.5px] text-soft-foreground"
+                className="ml-2 font-sans text-[11px] text-soft-foreground"
               >
                 {row.desc}
               </span>

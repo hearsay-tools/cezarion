@@ -587,7 +587,7 @@ function SidebarContent({
         </>
       ) : (
         <div data-slot="single-project-navigation" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {repo ? <div className="mx-4 mb-1 flex min-h-[55px] items-center gap-2 rounded-md bg-muted px-2 text-[13px] font-semibold"><FolderIcon aria-hidden="true" className="size-[18px] shrink-0 text-muted-foreground" /><span className="min-w-0"><span data-slot="repo-chip" className="block truncate">{repo.name}</span><span className="block truncate font-['IBM_Plex_Mono'] text-[10px] font-normal text-soft-foreground">{repo.branch}</span></span></div> : null}
+          {repo ? <div className="mx-4 mb-1 flex min-h-[55px] items-center gap-2 rounded-md bg-muted px-2 text-[13px] font-semibold"><FolderIcon aria-hidden="true" className="size-[18px] shrink-0 text-muted-foreground" /><span className="min-w-0"><span data-slot="repo-chip" className="block truncate">{repo.name}</span><span className="block truncate font-mono text-[12px] font-normal text-soft-foreground">{repo.branch}</span></span></div> : null}
           <nav aria-label="Main" className="flex flex-col gap-0.5 px-4">
             {items.map((item) => {
               const isActive = item.to === activeTo
@@ -614,7 +614,7 @@ function SidebarContent({
                   {item.badge === 'inbox-count' && inboxCount ? (
                     <span
                       data-slot="nav-badge"
-                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10.5px] font-semibold text-accent-strong-foreground"
+                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[11px] font-semibold tabular-nums text-accent-strong-foreground"
                     >
                       {inboxCount}
                     </span>
@@ -625,7 +625,7 @@ function SidebarContent({
                     <span
                       data-slot="nav-unread-badge"
                       title={`${unreadCount} unread finished ${unreadCount === 1 ? 'task' : 'tasks'}`}
-                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10.5px] font-semibold text-accent-strong-foreground"
+                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[11px] font-semibold tabular-nums text-accent-strong-foreground"
                     >
                       {unreadCount}
                     </span>
@@ -822,7 +822,7 @@ function CommandPaletteHint() {
       <span className="truncate">Search…</span>
       <kbd
         aria-hidden="true"
-        className="ml-auto shrink-0 font-sans text-[10px] font-normal text-soft-foreground"
+        className="ml-auto shrink-0 font-sans text-[12px] font-normal text-soft-foreground"
       >
         {commandShortcutHint('k')}
       </kbd>
@@ -843,7 +843,7 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
       data-slot="version-chip"
       data-update-available={updateAvailable ? 'true' : undefined}
       title={updateAvailable ? `v${version} — update available: v${latestVersion}` : `v${version}`}
-      className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
+      className="flex min-w-0 items-center gap-1 text-[12px] text-muted-foreground"
     >
       {updateAvailable ? <StatusDot tone="pending" className="size-[5px] shrink-0" /> : null}
       <span className="truncate">v{version}</span>

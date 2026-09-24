@@ -159,7 +159,7 @@ export function ImportSkillsPanel({ projectId }: { projectId: string }) {
 
   return (
     <div data-slot="skills-import-panel" className="w-full min-w-0 [&_button]:min-h-11">
-      <p className="mb-4 text-[10px] font-medium tracking-wide text-link-foreground">OPEN-MERCATO / SKILLS</p>
+      <p className="mb-4 text-[12px] font-medium tracking-wide text-link-foreground">OPEN-MERCATO / SKILLS</p>
       <h2 className="text-2xl font-medium">Manage skills</h2>
       <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
         Choose which <a href={SKILLS_REPO_URL} target="_blank" rel="noreferrer">open-mercato</a> skills appear in your catalog and composer picker. All are enabled by default; uncheck any you don’t want.

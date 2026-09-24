@@ -756,6 +756,7 @@ export function Composer({
             className={cn(
               'block min-h-11 w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-base leading-normal outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed md:min-h-[54px] md:px-4 md:pt-3 md:text-sm',
               mobileCompact ? 'max-h-11 md:max-h-[220px]' : 'max-h-[220px]',
+              executionOptions && 'md:text-base',
             )}
             onChange={(event) => {
               if (editsBlocked()) return

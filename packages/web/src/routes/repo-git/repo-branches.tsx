@@ -99,7 +99,7 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
                 {current ? (
                   <span
                     data-slot="branch-current"
-                    className="md:ml-auto flex shrink-0 items-center rounded-md bg-accent-strong/10 px-2 py-1.5 text-[10px] font-medium text-accent-text"
+                    className="md:ml-auto flex shrink-0 items-center rounded-md bg-accent-strong/10 px-2 py-1.5 text-[12px] font-medium text-accent-text"
                   >
                     Current
                   </span>
@@ -246,7 +246,7 @@ function ChecksBadge({ checks }: { checks: 'passing' | 'failing' | 'pending' }) 
       data-slot="pr-checks"
       data-checks={checks}
       className={cn(
-        'shrink-0 text-[10px] font-medium',
+        'shrink-0 text-[12px] font-medium',
         checks === 'passing' && 'text-success',
         checks === 'failing' && 'text-danger',
         checks === 'pending' && 'text-muted-foreground',

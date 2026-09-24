@@ -33,7 +33,7 @@
   [data-presentation="summary"] [data-slot="global-tasks-table"] { border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 20px; }
   [data-presentation="summary"] [data-slot="global-summary-head"],
   [data-presentation="summary"] [data-slot="global-task-row"] { display: grid; grid-template-columns: minmax(0, 1fr) 120px 90px 100px 70px; column-gap: 16px; }
-  [data-presentation="summary"] [data-slot="global-summary-head"] { padding-bottom: 16px; color: var(--muted-foreground); font-size: 10px; font-weight: 500; text-transform: uppercase; }
+  [data-presentation="summary"] [data-slot="global-summary-head"] { padding-bottom: 16px; color: var(--muted-foreground); font-weight: 500; text-transform: uppercase; }
   [data-presentation="summary"] [data-slot="global-task-row"] { position: relative; align-items: center; margin: 0; padding: 20px 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
   [data-presentation="summary"] [data-slot="global-task-row"] > [data-slot="global-task-title"] { grid-column: 1; grid-row: 1; }
   [data-presentation="summary"] [data-slot="global-task-title"] > span > a { font-size: 13px; }
@@ -72,7 +72,7 @@
 
 [data-slot="task-summary-row"][data-status="done"] [data-slot="pill"],
 [data-slot="task-card"][data-status="done"] [data-slot="pill"],
-[data-slot="global-task-row"][data-status="done"] [data-slot="pill"] { border-radius: 4px; background: color-mix(in srgb, var(--accent-strong) 13%, transparent); color: var(--accent-text); font-size: 10px; text-transform: capitalize; padding: 6px 8px; }
+[data-slot="global-task-row"][data-status="done"] [data-slot="pill"] { border-radius: 4px; background: color-mix(in srgb, var(--accent-strong) 13%, transparent); color: var(--accent-text); text-transform: capitalize; padding: 6px 8px; }
 [data-slot="task-summary-row"][data-status="done"] [data-slot="pill"] [data-slot="status-dot"],
 [data-slot="task-card"][data-status="done"] [data-slot="pill"] [data-slot="status-dot"],
 [data-slot="global-task-row"][data-status="done"] [data-slot="pill"] [data-slot="status-dot"] { display: none; }
@@ -116,7 +116,7 @@
   [data-presentation="summary"] [data-slot="global-tasks-table"] { border: 1px solid var(--border); border-radius: 12px; padding: 20px; background: var(--card); }
   [data-presentation="summary"] [data-slot="global-task-row"] { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; margin: 0; padding: 20px 0 30px; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
   [data-presentation="summary"] [data-slot="global-task-title"] { grid-column: 1 / -1; }
-  [data-presentation="summary"] [data-slot="global-task-title"] > span > a { font-size: 13.5px; line-height: 1.5; }
+  [data-presentation="summary"] [data-slot="global-task-title"] > span > a { line-height: 1.5; }
   [data-presentation="summary"] [data-slot="global-task-workflow"] { grid-column: 1; grid-row: 2; }
   [data-presentation="summary"] [data-slot="global-task-diff"] { display: block; grid-column: 2; grid-row: 2; }
   [data-presentation="summary"] [data-slot="global-task-age"] { grid-column: 3; grid-row: 2; }

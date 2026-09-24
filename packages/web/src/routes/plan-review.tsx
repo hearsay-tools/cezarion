@@ -185,7 +185,7 @@ export function PlanReview({
                       <span
                         data-slot="plan-badge-skill"
                         title="skill"
-                        className="shrink-0 rounded-full bg-accent-strong/15 px-1.5 py-px font-mono text-[10.5px] font-medium text-accent-text"
+                        className="shrink-0 rounded-full bg-accent-strong/15 px-1.5 py-px font-mono text-[11px] font-medium text-accent-text"
                       >
                         {step.skill}
                       </span>
@@ -193,7 +193,7 @@ export function PlanReview({
                     {step.command ? (
                       <span
                         data-slot="plan-badge-check"
-                        className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10.5px] font-medium text-muted-foreground"
+                        className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[11px] font-medium text-muted-foreground"
                       >
                         check
                       </span>

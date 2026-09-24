@@ -154,7 +154,7 @@ export function QuickListBuckets({
     <>
       {sidebarBuckets.map((bucket) => (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
-          <h2 className="pl-9 pt-3 pb-2 text-[9px] font-medium tracking-[0.14em] text-soft-foreground uppercase">
+          <h2 className="pl-9 pt-3 pb-2 text-[11px] font-medium tracking-[0.14em] text-soft-foreground uppercase">
             {bucket.label}
           </h2>
           {bucket.rows.map((row) => (
@@ -258,7 +258,7 @@ function Row({
           {/* Same width-priority rule as `RunRow`: the shared title has a floor, and the `×N`
               badge and the compare link give way before it does. */}
           <span className="min-w-[7rem] flex-1 truncate text-[13px] font-medium">{row.title}</span>
-          <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-mono text-[10.5px] font-semibold text-muted-foreground">
+          <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-mono text-[11px] font-semibold tabular-nums text-muted-foreground">
             ×{row.members.length}
           </span>
         </button>
@@ -475,7 +475,7 @@ function RunRow({
       {/* The reference, ONCE (#788, option C): the number that used to be both a `775: ` title
           prefix and a trailing `PR ↗` chip is now one leading chip that is itself the link. */}
       {references.length ? <div data-slot="session-references" className="flex flex-wrap items-center gap-1">
-        {references.map(ref => <TaskReferenceChip key={`${ref.kind}-${ref.number}-${ref.url}`} run={run} reference={ref} compact className="h-auto shrink-0 gap-[2px] px-1 py-px text-[10px] no-hover:min-h-11 no-hover:min-w-11" />)}
+        {references.map(ref => <TaskReferenceChip key={`${ref.kind}-${ref.number}-${ref.url}`} run={run} reference={ref} compact className="h-auto shrink-0 gap-[2px] px-1 py-px text-[12px] no-hover:min-h-11 no-hover:min-w-11" />)}
       </div> : null}
       <Link
         to={to}
@@ -487,7 +487,7 @@ function RunRow({
       >
 
         {variant ? (
-          <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-accent-strong/15 font-mono text-[9.5px] font-semibold text-accent-text">
+          <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-accent-strong/15 font-mono text-[11px] font-semibold text-accent-text">
             {run.variant ?? '?'}
           </span>
         ) : null}
@@ -517,7 +517,7 @@ function RunRow({
         {run.diffStat ? (
           <DiffStatLabel
             stat={run.diffStat}
-            className="hidden shrink-0 text-[10.5px] @min-[23rem]/sidebar:inline"
+            className="hidden shrink-0 text-[11px] @min-[23rem]/sidebar:inline"
           />
         ) : null}
         {/* The reference chip takes the AGE's slot when there is one — same as the mockup, and

@@ -142,7 +142,7 @@ export function AppearanceSection() {
         <Segmented slot="appearance-width" label="Reading width" value={width} options={WIDTH_OPTIONS} onChange={setWidth} />
       </Field>
       <div className="settings-appearance-preview settings-readout">
-        <span className="text-[10px] text-soft-foreground">PREVIEW</span>
+        <span className="text-[12px] text-soft-foreground">PREVIEW</span>
         <p className="mt-3 text-base">Review finalization retries</p>
         <p className="mt-3 text-xs text-muted-foreground">Needs you · cezar · Task {'#'}227</p>
         <span className="mt-3 inline-flex rounded-md border border-accent-strong/30 bg-accent-strong/10 px-4 py-3 text-xs text-accent-text">Open task</span>

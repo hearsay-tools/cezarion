@@ -304,7 +304,7 @@ function AgentTab({
       ) : null}
 
       {!canCarryAccounts ? (
-        <p data-slot="accounts-single-only" className="text-[11.5px] text-soft-foreground">
+        <p data-slot="accounts-single-only" className="text-[11px] text-soft-foreground">
           {PROVIDER_LABEL[provider]} can only hold one account here: it keeps its credentials
           outside its config folder, so a second folder would change settings without changing the
           login — which would say “work account” while billing the other one.
@@ -456,7 +456,7 @@ function AccountRow({ account, isMachineDefault, onRemove }: { account: AgentPro
           <div className="flex items-center gap-2">
             <span className="text-[13px] font-medium text-foreground">{account.label}</span>
             {account.isDefault ? (
-              <Badge variant="ghost" className="shrink-0 text-[10px] text-muted-foreground">
+              <Badge variant="ghost" className="shrink-0 text-[12px] text-muted-foreground">
                 discovered
               </Badge>
             ) : null}
@@ -465,7 +465,7 @@ function AccountRow({ account, isMachineDefault, onRemove }: { account: AgentPro
           <div className="settings-account-readout settings-readout">
           <p
             data-slot="account-path"
-            className="mt-0.5 truncate font-mono text-[11.5px] text-soft-foreground"
+            className="mt-0.5 truncate font-mono text-[11px] text-soft-foreground"
             title={account.path}
           >
             {account.configDir}

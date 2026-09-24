@@ -260,7 +260,7 @@ function VariantColumn({
       {/* Honestly labeled: this block is git's own `git diff --stat` output from the variant's
           worktree, not this UI's ± stat — the numbers can disagree with a partial fetch. */}
       <div className="flex min-w-0 flex-col gap-1">
-        <span className="text-[10.5px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
+        <span className="text-[12px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
           git diff --stat
         </span>
         <pre
@@ -272,13 +272,13 @@ function VariantColumn({
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="text-[10.5px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
+        <span className="text-[11px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
           Progress
         </span>
         {variant.handoffExcerpt ? (
           <div
             data-slot="variant-progress"
-            className="max-h-28 min-w-0 overflow-hidden text-[12.5px] text-muted-foreground [mask-image:linear-gradient(to_bottom,black_75%,transparent)]"
+            className="max-h-28 min-w-0 overflow-hidden text-[13px] text-muted-foreground [mask-image:linear-gradient(to_bottom,black_75%,transparent)]"
           >
             <Markdown>{variant.handoffExcerpt}</Markdown>
           </div>

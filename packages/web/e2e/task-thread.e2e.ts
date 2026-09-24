@@ -31,7 +31,7 @@ import { waitForHealth } from './poll'
  * from touching the run.
  */
 
-const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
+const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522')
 const sessionId = `e2e-thread-${process.pid}`
 
 /** The recorded run (`fixtures/thread-run.record.json`, the store's own zod-checked shape),
@@ -45,6 +45,11 @@ const LONG_RUN = {
   model: 'fork-model-' + 'long-model-'.repeat(10), effort: 'high',
   steps: RUN.steps.map((step) => ({ ...step, profileId: 'default' })),
 }
+const TYPO_RUNS = [
+  { ...LONG_RUN, id: 'typography-long-model', runner: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', effort: 'auto' },
+  { ...LONG_RUN, id: 'typography-short-model', runner: 'opencode', model: 'grok-4.6', effort: 'auto' },
+]
+const BARE_COMMAND = 'cd /home/agent/projects/very-long-project && npm run test:e2e -- --reporter verbose --runInBand'
 
 function freePort(): Promise<number> {
   return new Promise((done, fail) => {
@@ -72,7 +77,7 @@ const scoped = (path: string) => `/p/${bootProject}${path}`
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-thread-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, LONG_RUN], null, 2), 'utf8')
+  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, LONG_RUN, ...TYPO_RUNS], null, 2), 'utf8')
   copyFileSync(
     resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'),
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
@@ -80,6 +85,11 @@ beforeAll(async () => {
   writeFileSync(join(dataRoot, '.ai/cezar/runs', `${LONG_RUN.id}.ndjson`),
     readFileSync(resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'), 'utf8')
       .split('\n').filter((line) => !/plan\.updated|TodoWrite|toolu_mock_todo|\"type\":\"plan\"/.test(line)).join('\n'))
+  for (const run of TYPO_RUNS) {
+    writeFileSync(join(dataRoot, '.ai/cezar/runs', `${run.id}.ndjson`),
+      readFileSync(resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'), 'utf8')
+        .replaceAll('Ran git status --short', BARE_COMMAND))
+  }
   // The agent screenshot the transcript's `image` line points at (served by the run itself).
   cpSync(
     resolve(import.meta.dirname, 'fixtures/thread-run-images'),
@@ -729,7 +739,7 @@ const sessionLayoutExpression = `(() => {
     return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height, hit: !!under && el.contains(under) }
   }
   const controls = {
-    runner: select('[data-slot="session-controls"] [aria-label="Runner"]'),
+    runner: select('[data-slot="session-controls"] [aria-label^="Runner · "]'),
     model: select('[data-slot="follow-up-model-pill"]'),
     effort: select('[data-slot="follow-up-effort-pill"]'),
     attach: select('[data-slot="composer"] [aria-label="Attach files"]'),
@@ -744,7 +754,7 @@ const sessionLayoutExpression = `(() => {
     chevron: select('[data-slot="follow-up-model-pill"] > svg:last-child'),
   }
   if (Object.values(modelChrome).some(value => !value)) return null
-  const label = document.querySelector('[data-slot="follow-up-model-pill"] > span')
+  const label = document.querySelector('[data-slot="follow-up-model-pill"] [data-slot="picker-label"]')
   const archive = document.querySelector('[data-slot="composer-actions"] [aria-label="Archive task"]')
   const main = document.querySelector('[data-slot="main"]')
   const group = select('[data-slot="session-controls"]')
@@ -873,23 +883,24 @@ describe('responsive session composer', () => {
 
     // WCAG AA: small text 4.5:1; meaningful icons 3:1, sampled over their painted surfaces.
     const textTargets: Array<[string, string]> = [
-      ['Runner value', '[data-slot="session-controls"] [aria-label="Runner"]'],
-      ['Runner label', '[data-slot="session-controls"] [aria-label="Runner"] .text-muted-foreground'],
+      ['Runner value', '[data-slot="session-controls"] [aria-label^="Runner · "]'],
+      ['Runner label', '[data-slot="session-controls"] [aria-label^="Runner · "] [data-slot="picker-label"] > span'],
       ['Model value', '[data-slot="follow-up-model-pill"]'],
-      ['Model label', '[data-slot="follow-up-model-pill"] .text-muted-foreground'],
+      ['Model label', '[data-slot="follow-up-model-pill"] [data-slot="picker-label"] > span'],
       ['Effort value', '[data-slot="follow-up-effort-pill"]'],
-      ['Effort label', '[data-slot="follow-up-effort-pill"] .text-muted-foreground'],
+      ['Effort label', '[data-slot="follow-up-effort-pill"] [data-slot="picker-label"] > span'],
       ['Send', '[data-slot="composer-actions"] [aria-label="Continue"]'],
     ]
     if (width >= 768) textTargets.push(['Archive task', '[data-slot="composer-actions"] [aria-label="Archive task"]'])
     const textSamples: Array<{ target: string } & ContrastSample> = []
     for (const [name, selector] of textTargets) {
+      if (name.endsWith(' label') && browser.count(selector) === 0) continue
       const sample = browser.evaluate(contrastSampleExpression(selector)) as ContrastSample
       textSamples.push({ target: name, ...sample })
       expect(sample.ratio, `${theme} ${width}px ${name} text contrast`).toBeGreaterThanOrEqual(4.5)
     }
     const iconTargets: Array<[string, string]> = [
-      ['Runner', '[data-slot="session-controls"] [aria-label="Runner"] svg:first-child'],
+      ['Runner', '[data-slot="session-controls"] [aria-label^="Runner · "] svg:first-child'],
       ['Model', '[data-slot="follow-up-model-pill"] svg:first-child'],
       ['Effort', '[data-slot="follow-up-effort-pill"] svg:first-child'],
       ['Attach files', '[data-slot="composer"] [aria-label="Attach files"] svg'],
@@ -975,7 +986,7 @@ describe('responsive session composer', () => {
       const groups = [...document.querySelectorAll('[data-slot="composer"] [data-slot="session-controls"]')]
       if (!overlay || groups.length !== 1) return null
       const group = document.querySelector('[data-slot="composer"] [data-slot="session-controls"]')
-      return { runner: !!group?.querySelector('[aria-label="Runner"]'), model: group?.querySelector('[data-slot="follow-up-model-pill"]')?.textContent ?? null, effort: !!group?.querySelector('[data-slot="follow-up-effort-pill"]') }
+      return { runner: !!group?.querySelector('[aria-label^="Runner · "]'), model: group?.querySelector('[data-slot="follow-up-model-pill"]')?.textContent ?? null, effort: !!group?.querySelector('[data-slot="follow-up-effort-pill"]') }
     })()`) as { runner: boolean; model: string | null; effort: boolean }
     expect(recording.runner).toBe(true)
     expect(recording.model, 'Model stays in the recording settings group').not.toBeNull()
@@ -984,4 +995,97 @@ describe('responsive session composer', () => {
     browser.click('[aria-label="Cancel dictation"]')
     browser.waitForFunction(`document.querySelector('[data-slot="dictation-overlay"]') === null && document.querySelector('[data-slot="composer-toolbar"]') !== null`)
   }, 90_000)
+})
+
+it.each([375, 1280])('uses the readable agent type scale and preserves full tool commands at %ipx (#522)', (width) => {
+  browser.setViewport(width, 800)
+  browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
+  const facts = browser.waitForValue(`(() => {
+    const message = document.querySelector('[data-slot="assistant-message"]');
+    const body = message?.querySelector(':scope > div');
+    const eyebrow = message?.querySelector(':scope > p');
+    const command = document.querySelector('[data-slot="tool-card"][data-kind="execute"] > button code');
+    if (!body || !eyebrow || !command) return null;
+    const style = getComputedStyle(body);
+    return { fontSize: style.fontSize, lineHeight: style.lineHeight,
+      width: body.getBoundingClientRect().width, maxWidth: parseFloat(style.maxWidth),
+      eyebrowLineHeight: getComputedStyle(eyebrow).lineHeight,
+      command: command.textContent, title: command.title,
+      overflow: getComputedStyle(command).textOverflow, whiteSpace: getComputedStyle(command).whiteSpace };
+  })()`) as { fontSize: string; lineHeight: string; width: number; maxWidth: number; eyebrowLineHeight: string; command: string; title: string; overflow: string; whiteSpace: string }
+  expect(facts.fontSize).toBe(width < 768 ? '15px' : '14px')
+  expect(facts.lineHeight).toBe(width < 768 ? '24px' : '22.4px')
+  expect(facts.width).toBeLessThanOrEqual(facts.maxWidth + 1)
+  expect(Number.isFinite(facts.maxWidth)).toBe(true)
+  expect(facts.eyebrowLineHeight).toBe('13.2px')
+  expect(facts.title).toBe(facts.command)
+  expect(facts.overflow).toBe('ellipsis')
+  expect(facts.whiteSpace).toBe('nowrap')
+})
+
+it.each(TYPO_RUNS.flatMap(run => [360, 906, 1280].map(width => ({ run, width }))))(
+  'offers $run.model its available follow-up width at $width px (#522)', ({ run, width }) => {
+    browser.setViewport(width, 800)
+    browser.evaluate(`localStorage.setItem('cez-sidebar-width', '264')`)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${run.id}`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="follow-up-model-pill"]')?.getAttribute('aria-label') === 'Model · ${run.model}'`)
+    const facts = browser.evaluate(`(() => {
+      const group = document.querySelector('.session-engine-controls');
+      const read = (slot) => {
+        const pill = group.querySelector('[data-slot="' + slot + '"]');
+        const label = pill.querySelector('[data-slot="picker-label"]');
+        const full = pill.getAttribute('aria-label');
+        const value = full.slice(full.indexOf(' · ') + 3);
+        const fullWidth = label.previousElementSibling.getBoundingClientRect().width;
+        const available = label.getBoundingClientRect().width;
+        return { full, value, text: label.textContent, fullWidth, available,
+          overflow: getComputedStyle(label).textOverflow, scrollWidth: label.scrollWidth, clientWidth: label.clientWidth };
+      };
+      return { runner: read('runner-pill'), model: read('follow-up-model-pill'), effort: read('follow-up-effort-pill'),
+        groupWidth: group.getBoundingClientRect().width, grid: getComputedStyle(group).gridTemplateColumns,
+        dockWidth: document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect().width,
+        chevronDisplay: getComputedStyle(group.querySelector('[data-slot="runner-pill"] > svg:last-child')).display };
+    })()`) as { runner: { full: string; value: string; text: string; fullWidth: number; available: number }; model: { full: string; value: string; text: string; fullWidth: number; available: number; overflow: string; scrollWidth: number; clientWidth: number }; effort: { full: string; value: string; text: string; fullWidth: number; available: number }; groupWidth: number; grid: string; dockWidth: number; chevronDisplay: string }
+    for (const [field, pill] of Object.entries({ runner: facts.runner, model: facts.model, effort: facts.effort })) {
+      expect(pill.text, `${width}px ${run.model}: ${field} prefix reflects available room`).toBe(
+        pill.fullWidth <= pill.available + 0.5 ? pill.full : pill.value,
+      )
+    }
+    if (width === 906 && run.model === 'grok-4.6') {
+      expect(facts.groupWidth).toBeGreaterThan(300)
+      expect(facts.runner.text).toBe('Runner · opencode')
+      expect(facts.effort.text).toBe('Effort · auto')
+      expect(facts.model.text, JSON.stringify(facts)).toBe('Model · grok-4.6')
+    }
+    if (width === 360 && run.model.startsWith('opencode/')) {
+      expect(facts.model.scrollWidth).toBeGreaterThan(facts.model.clientWidth)
+      expect(facts.model.overflow).toBe('ellipsis')
+    }
+    browser.evaluate(`document.querySelector('[data-slot="composer-editor"]')?.scrollIntoView({ block: 'end' })`)
+    mkdirSync(artifactsDir, { recursive: true })
+    browser.screenshot(`${artifactsDir}/522-followup-${run.model === 'grok-4.6' ? 'short' : 'long'}-${width}.png`, { viewport: true })
+  },
+)
+
+it('ellipsizes a bare OpenCode command and reveals it on expansion (#522)', () => {
+  browser.setViewport(906, 800)
+  browser.goto(`${baseUrl}${scoped('/tasks/typography-short-model')}`)
+  browser.waitForFunction(`document.querySelector('[data-slot="tool-card"][data-kind="execute"]') !== null`)
+  const facts = browser.evaluate(`(() => {
+    const card = document.querySelector('[data-slot="tool-card"][data-kind="execute"]');
+    const button = card.querySelector('button');
+    const code = button.querySelector('code');
+    return { code: code?.textContent, title: code?.title, overflow: code && getComputedStyle(code).textOverflow,
+      width: code?.getBoundingClientRect().width, rowWidth: button.getBoundingClientRect().width };
+  })()`) as { code?: string; title?: string; overflow?: string; width?: number; rowWidth: number }
+  expect(facts.code).toBe(BARE_COMMAND)
+  expect(facts.title).toBe(BARE_COMMAND)
+  expect(facts.overflow).toBe('ellipsis')
+  expect(facts.width).toBeLessThan(facts.rowWidth)
+  browser.evaluate(`document.querySelector('[data-slot="tool-card"][data-kind="execute"]')?.scrollIntoView({ block: 'center' })`)
+  browser.screenshot(`${artifactsDir}/522-opencode-command-collapsed.png`, { viewport: true })
+  browser.click('[data-slot="tool-card"][data-kind="execute"] > button')
+  browser.waitForFunction(`document.querySelector('[data-slot="tool-card"][data-kind="execute"] [data-slot="tool-command"]') !== null`)
+  expect(browser.text('[data-slot="tool-card"][data-kind="execute"] [data-slot="tool-command"]')).toBe(BARE_COMMAND)
+  browser.screenshot(`${artifactsDir}/522-opencode-command-expanded.png`, { viewport: true })
 })

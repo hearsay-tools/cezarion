@@ -120,14 +120,14 @@ export function PromptTemplateMenu({
                   }}
                 >
                   <span className="flex w-full items-center gap-1.5">
-                    <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
                       {template.label}
                     </span>
                     {template.skills && template.skills.length > 0 ? (
                       <span
                         data-slot="prompt-template-assigned"
                         title={`Applied automatically with: ${template.skills.join(', ')}`}
-                        className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-accent-text"
+                        className="inline-flex shrink-0 items-center gap-0.5 text-[12px] font-medium text-accent-text"
                       >
                         <SparklesIcon aria-hidden="true" className="size-2.5" />
                         {template.skills.length}

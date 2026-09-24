@@ -157,7 +157,7 @@ export function RunHeader({
     >
       <div className="w-full">
         <div data-slot="run-title-row" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
-          <p data-slot="session-kind" className="text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase md:hidden">
+          <p data-slot="session-kind" className="text-[12px] font-semibold tracking-[0.14em] text-muted-foreground uppercase md:hidden">
             {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
           </p>
           <EditableTitle run={run} />
@@ -431,7 +431,7 @@ function EditableTitle({ run }: { run: ApiRun }) {
   )
 
   if (editor.editing) {
-    return <TitleEditInput editor={editor} className="flex-1 text-[15px] font-semibold" />
+    return <TitleEditInput editor={editor} className="flex-1 text-[16px] font-semibold" />
   }
 
   return (
@@ -880,7 +880,7 @@ function ActionsKebab({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-slot="run-actions-menu" className="w-[270px] max-w-[calc(100vw-2rem)] p-3">
-        <DropdownMenuLabel className="px-2 py-3 text-[10px] font-normal text-muted-foreground">TASK ACTIONS</DropdownMenuLabel>
+        <DropdownMenuLabel className="px-2 py-3 text-[12px] font-normal text-muted-foreground">TASK ACTIONS</DropdownMenuLabel>
         <DropdownMenuItem onSelect={onToggleNotes}>
           <FileTextIcon aria-hidden="true" /> Notes / handoff
         </DropdownMenuItem>

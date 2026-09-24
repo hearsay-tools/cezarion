@@ -223,7 +223,7 @@ function ProjectGroup({
           <span className="truncate">{project.name}</span>
           <span
             data-slot="project-missing"
-            className="ml-auto shrink-0 rounded-full bg-danger/15 px-[7px] py-px text-[10px] font-medium text-danger"
+            className="ml-auto shrink-0 rounded-full bg-danger/15 px-[7px] py-px text-[12px] font-medium text-danger"
           >
             folder not found
           </span>
@@ -252,12 +252,12 @@ function ProjectGroup({
           aria-label={`Toggle ${project.name}`} data-slot="project-group-header" className="absolute inset-0 rounded-md hover:bg-muted/80" />
         {collapsed ? <FolderIcon className="pointer-events-none relative size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" /> : <FolderOpenIcon className="pointer-events-none relative size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />}
         <Link to={scopeTo(project.id, '/')} onClick={() => { onNavigate?.(); onToggle(project.id) }} className="pointer-events-auto relative min-w-0 flex-1 truncate" aria-label={`Open ${project.name}`}>{project.name}</Link>
-        {project.branch ? <span data-slot="project-branch" className="pointer-events-none relative max-w-[40%] shrink-0 truncate font-['IBM_Plex_Mono'] text-[10px] leading-[14px] font-normal text-soft-foreground">{project.branch}</span> : null}
+        {project.branch ? <span data-slot="project-branch" className="pointer-events-none relative max-w-[40%] shrink-0 truncate font-mono text-[12px] leading-[14px] font-normal text-soft-foreground">{project.branch}</span> : null}
         {waiting ? (
           <span
             data-slot="project-attention"
             title={`${waiting} task${waiting === 1 ? '' : 's'} need${waiting === 1 ? 's' : ''} you`}
-            className="pointer-events-none relative shrink-0 rounded-full bg-pending/15 px-1.5 py-0.5 text-[10px] font-medium text-pending-strong"
+            className="pointer-events-none relative shrink-0 rounded-full bg-pending/15 px-1.5 py-0.5 text-[12px] font-medium text-pending-strong"
           >
             {waiting}
           </span>
@@ -307,7 +307,7 @@ function ProjectGroup({
                   {item.badge === 'inbox-count' && active && inboxCount ? (
                     <span
                       data-slot="nav-badge"
-                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[10.5px] font-semibold text-accent-strong-foreground"
+                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[11px] font-semibold tabular-nums text-accent-strong-foreground"
                     >
                       {inboxCount}
                     </span>
