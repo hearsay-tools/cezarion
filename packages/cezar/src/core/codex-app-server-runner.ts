@@ -153,6 +153,8 @@ class CodexSession implements AgentSession {
   private readonly submissions = new InputSubmissions();
   private inFlightSubmissionId: string | undefined;
   private refusedBeforeStartup = false;
+  private humanPromptsPending = 0;
+  private refusedForHuman = false;
   /** Submissions that opened a turn via turn/start rather than steering one. */
   private readonly turnStartSubmissions = new Set<string>();
   private agentSubmissionPending = false;
@@ -367,6 +369,8 @@ class CodexSession implements AgentSession {
     // Until the thread and its first turn exist there is nothing to steer or start;
     // a refusal here earns one readiness hint when startup completes.
     if (this.open && !this.startupComplete) { this.refusedBeforeStartup = true; return false; }
+    // A human prompt still on its way to the wire goes first (#505 local review).
+    if (this.open && this.humanPromptsPending > 0) { this.refusedForHuman = true; return false; }
     if (!this.open || this.pendingUserInput || this.agentSubmissionPending) return false;
     this.agentInputReady = false;
     this.agentSubmissionPending = true;
@@ -414,13 +418,22 @@ class CodexSession implements AgentSession {
       this.rpc.respond({ id: pending.rpcId, result: { answers: userInputAnswers(pending.questions, text) } });
       return this.open;
     }
-    // Wait for the thread to exist, then steer the live turn or start a new one.
+    // Wait for the thread to exist, then steer the live turn or start a new one. Agent input
+    // waits until this prompt's request settles, so it can never overtake it.
+    this.humanPromptsPending += 1;
     void this.ready
       .then(() => this.startOrSteerTurn(text))
       .catch((err: unknown) => {
         if (this.stdinOpen) {
           const message = err instanceof Error ? err.message : String(err);
           this.emit({ type: 'note', message: `codex: turn failed: ${message}` });
+        }
+      })
+      .finally(() => {
+        this.humanPromptsPending -= 1;
+        if (this.humanPromptsPending === 0 && this.refusedForHuman) {
+          this.refusedForHuman = false;
+          if (this.open && !this.pendingUserInput && !this.agentSubmissionPending) this.opts.onAgentInputReady?.();
         }
       });
     return true;

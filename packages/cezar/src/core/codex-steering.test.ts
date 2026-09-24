@@ -103,4 +103,22 @@ describe('codex agent input steering (#505)', () => {
     expect(methods).toEqual(['turn/start', 'turn/steer']); // the opening turn, then the unanswered steer only
     await session.result.catch(() => undefined);
   });
+
+  it('keeps a human prompt ahead of agent input submitted right behind it (#505 local review)', async () => {
+    let hints = 0;
+    const { session, events, requests } = start('inspect the working tree', { onAgentInputReady: () => { hints += 1; } });
+    await waitUntil(() => events.some(e => e.type === 'turn-end'));
+    const before = hints;
+    expect(session.sendMessage([{ type: 'text', text: 'mock:agent-echo human answer' }])).toBe(true);
+    // The human prompt is not on the wire yet: agent input must wait for it.
+    expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent batch' }], ['batch-2'])).toBe(false);
+    await waitUntil(() => hints > before);
+    const ack = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent batch' }], ['batch-2']);
+    expect(ack).not.toBe(false);
+    await ack;
+    const texts = requests().filter(r => r.method === 'turn/start' || r.method === 'turn/steer')
+      .map(r => JSON.stringify(r.params?.input ?? '')).slice(1);
+    expect(texts.findIndex(t => t.includes('human answer'))).toBeLessThan(texts.findIndex(t => t.includes('agent batch')));
+    session.end(); await session.result;
+  });
 });
