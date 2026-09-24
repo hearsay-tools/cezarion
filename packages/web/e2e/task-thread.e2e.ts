@@ -31,7 +31,7 @@ import { waitForHealth } from './poll'
  * from touching the run.
  */
 
-const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
+const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522')
 const sessionId = `e2e-thread-${process.pid}`
 
 /** The recorded run (`fixtures/thread-run.record.json`, the store's own zod-checked shape),

@@ -123,8 +123,8 @@ it('lays out New Task pickers in reading order without clipping at desktop, narr
       expect(browser.text('[data-slot="effort-pill"]')).toContain('medium')
       const boxes = layout()
       if (theme === 'light' && ((width === 375 && sidebar === 0) || (width === 1440 && sidebar === 420))) {
-        mkdirSync(join(import.meta.dirname, '../../../.ai/qa/artifacts_e2e'), { recursive: true })
-        browser.screenshot(join(import.meta.dirname, `../../../.ai/qa/artifacts_e2e/522-new-task-long-${width}.png`), { viewport: true })
+        mkdirSync(join(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522'), { recursive: true })
+        browser.screenshot(join(import.meta.dirname, `../../../.ai/qa/artifacts_issue-522/522-new-task-long-${width}.png`), { viewport: true })
       }
       if (sidebar === 420) expect(boxes.sidebarWidth).toBe(420)
       if ((width === 1280 && sidebar === 264) || (width === 1440 && sidebar === 420)) {
@@ -249,10 +249,10 @@ it('shows the fractional-width Model prefix when pi / grok-4.6 fits at three-col
   expect(facts.fullWidth).toBeLessThanOrEqual(facts.slotWidth + 0.5)
   expect(facts.text).toBe('Model · grok-4.6')
   expect(layout().incorrectPrefixes).toEqual([])
-  mkdirSync(join(import.meta.dirname, '../../../.ai/qa/artifacts_e2e'), { recursive: true })
-  browser.screenshot(join(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/522-new-task-short-1440.png'), { viewport: true })
+  mkdirSync(join(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522'), { recursive: true })
+  browser.screenshot(join(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522/522-new-task-short-1440.png'), { viewport: true })
   browser.setViewport(375, 800)
   browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]')?.getAttribute('aria-label') === 'Model · grok-4.6'`)
   expect(layout().incorrectPrefixes).toEqual([])
-  browser.screenshot(join(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/522-new-task-short-375.png'), { viewport: true })
+  browser.screenshot(join(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522/522-new-task-short-375.png'), { viewport: true })
 })
