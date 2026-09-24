@@ -521,6 +521,8 @@ const isSettledContextStatus = (status: string | undefined) =>
 export async function deriveRunContextEvents(filePath: string): Promise<RunHistoryContext> {
   let latestPlan: RunHistoryEvent | undefined;
   let pendingAsk: RunHistoryEvent | undefined;
+  /** The pending ask's latest routing transition (#505): routed to the parent or handed back. */
+  let askRouting: RunHistoryEvent | undefined;
   let asOfSeq = 0;
   let turn = 0;
   const boundaries: RunHistoryEvent[] = [];
@@ -575,6 +577,7 @@ export async function deriveRunContextEvents(filePath: string): Promise<RunHisto
       // Match manager delivery receipts: agent/lifecycle input and refused human
       // attempts do not answer a question. Retain one current ask, not its history.
       pendingAsk = advancePendingHumanAsk(pendingAsk, event);
+      if ((event.type === 'worker-question-routed' || event.type === 'worker-question-fallback') && event.askSeq === pendingAsk?.seq) askRouting = event;
       if (event.type === 'plan.updated' || (event.type === 'tool-call' && stringField(event, 'tool') === 'TodoWrite')) {
         latestPlan = event;
         continue;
@@ -640,6 +643,7 @@ export async function deriveRunContextEvents(filePath: string): Promise<RunHisto
   const contextEvents = new Map<number, RunHistoryEvent>();
   if (latestPlan) contextEvents.set(latestPlan.seq, latestPlan);
   if (pendingAsk) contextEvents.set(pendingAsk.seq, pendingAsk);
+  if (pendingAsk && askRouting?.askSeq === pendingAsk.seq) contextEvents.set(askRouting.seq, askRouting);
   for (const event of boundaries) contextEvents.set(event.seq, event);
   for (const item of [...roots.values(), ...relevantChildren]) {
     contextEvents.set(item.first.seq, item.first);

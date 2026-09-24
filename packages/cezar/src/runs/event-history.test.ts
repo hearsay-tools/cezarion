@@ -371,3 +371,14 @@ it('retains an out-of-scan outcome without spending a visible page item on it', 
   expect(page.events.map(event => event.seq)).toContain(103);
   expect(page.events.map(event => event.seq)).toContain(203);
 });
+it('compact context keeps the routing of a pending worker question (#505)', async () => {
+  const later = Array.from({ length: 1000 }, (_, i) => ({ seq: i + 13, type: 'note', message: 'later history' }));
+  const routed = { seq: 11, type: 'worker-question-routed', askSeq: 10, messageId: '11111111-2222-4333-8444-555555555555', parentRunId: '21111111-2222-4333-8444-555555555555' };
+  const context = await deriveRunContextEvents(fixture([question, routed, ...later]));
+  expect(context.contextEvents.map(event => event.type)).toEqual(expect.arrayContaining(['ask.requested', 'worker-question-routed']));
+  const handedBack = await deriveRunContextEvents(fixture([question, routed, { seq: 12, type: 'worker-question-fallback', askSeq: 10, reason: 'parent-done' }, ...later]));
+  expect(handedBack.contextEvents.filter(event => event.type.startsWith('worker-question')).map(event => event.type)).toEqual(['worker-question-fallback']);
+  // An answered question takes its routing with it.
+  const answered = await deriveRunContextEvents(fixture([question, routed, { seq: 12, type: 'human-input-delivered', askSeq: 10, source: 'parent' }, ...later]));
+  expect(answered.contextEvents.some(event => event.type.startsWith('worker-question'))).toBe(false);
+});

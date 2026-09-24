@@ -238,7 +238,14 @@ turn instead of waiting for it. The cockpit distinguishes that confirmation from
 transport ACK time and from the later event projection timestamp.
 Stopped/destroyed workers cannot be resumed by messages; workers cannot resume
 their parent. Parent review and genuine human questions still require a human.
-Only a human can answer an outstanding human ask. Durable queue
+Only a human can answer an outstanding human ask, with one exception (#505): a
+worker's question (native or `CEZ:ASK`) is routed to its parent as a conversation
+request carrying the question (`worker-question-routed`), and the parent's `reply`
+to it answers the ask through the same seam a human answer uses, recording
+`human-input-delivered` with `source: 'parent'`. Progress and follow-ups never
+answer it. When the parent cannot answer (not live, no `steer` grant, at capacity,
+or later settled), the worker records `worker-question-fallback` and the human
+answers as before; until then human input on the worker is refused. Durable queue
 insertion is atomic with acceptance, while provider acceptance and the local ACK
 checkpoint retain the documented crash ambiguity below.
 

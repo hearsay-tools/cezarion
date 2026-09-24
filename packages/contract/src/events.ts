@@ -46,8 +46,28 @@ export type AgentInputEvent = z.infer<typeof agentInputEventSchema>;
 export const humanInputDeliveredEventSchema = runEventSchema.extend({
   type: z.literal('human-input-delivered'),
   askSeq: z.number().int().nonnegative(),
+  /** Who answered: absent (records before #505) or `human` is a person; `parent` is the
+   * owning parent's reply to a routed worker question. */
+  source: z.enum(['human', 'parent']).optional(),
 });
 export type HumanInputDeliveredEvent = z.infer<typeof humanInputDeliveredEventSchema>;
+
+/** A worker's ask was sent to its owning parent as a conversation request (#505). */
+export const workerQuestionRoutedEventSchema = runEventSchema.extend({
+  type: z.literal('worker-question-routed'),
+  askSeq: z.number().int().nonnegative(),
+  messageId: z.uuid(),
+  parentRunId: z.uuid(),
+});
+export type WorkerQuestionRoutedEvent = z.infer<typeof workerQuestionRoutedEventSchema>;
+
+/** The parent can no longer receive a routed question: a human answers it on the worker. */
+export const workerQuestionFallbackEventSchema = runEventSchema.extend({
+  type: z.literal('worker-question-fallback'),
+  askSeq: z.number().int().nonnegative(),
+  reason: z.string().min(1).max(200),
+});
+export type WorkerQuestionFallbackEvent = z.infer<typeof workerQuestionFallbackEventSchema>;
 
 /** Linked terminal outcomes, rather than completion inferred from assistant prose. */
 export const workerOutcomeEventSchema = runEventSchema.extend({

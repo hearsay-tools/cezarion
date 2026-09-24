@@ -1,4 +1,5 @@
 import { reconcileConversationState, projectConversationEvents } from './conversations.ts';
+import { openQuestions } from './questions.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
 import { join } from 'node:path';
 import { prepareWorkerContext, workerContextTask } from './context.ts';
@@ -172,6 +173,8 @@ export class DelegationService {
         ? original.recipientRunId !== sender.id || original.senderRunId !== recipient.id
         : original.senderRunId !== sender.id || original.recipientRunId !== recipient.id))) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
       const settled = state.outcomes.find(outcome => outcome.requestId === request.requestId);
+      // A worker's question has exactly one answer (#505): a second reply is refused, not recorded late.
+      if (request.kind === 'reply' && settled && original?.question) throw new DelegationPolicyError('incompatible_state', 'This question was already answered');
       const now = new Date().toISOString();
       const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
       const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy);
@@ -192,8 +195,17 @@ export class DelegationService {
         ...(resume ? { resumed: true as const } : {}), ...(instruction ? { instruction } : {}),
         state: request.kind === 'reply' && settled ? 'late' : destroyed ? 'destroyed' : resumable && !resume ? 'continuation-required' : 'accepted' };
       const enqueue = !destroyed && (!resumable || resume);
-      if (state.messages.length >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
-        (enqueue && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
+      // Open worker questions reserve ledger room for their replies (#505); the reply spends its
+      // own. The reply is also always admitted to the worker's inbox, one past its soft 32-input
+      // bound: while the question is pending nothing else there can drain, and a worker has at
+      // most one pending question, so this admits at most one extra input.
+      const answering = request.kind === 'reply' && !settled && !!original?.question;
+      // An answer the worker can no longer receive (stopping, stopped, destroyed) would record
+      // the question as replied while nothing delivers it; the human answers it instead.
+      if (answering && !enqueue) throw new DelegationPolicyError('incompatible_state', 'The worker can no longer receive this answer; its question goes back to the human');
+      const reservedMessages = openQuestions(state).length - (answering ? 1 : 0);
+      if (state.messages.length + reservedMessages >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
+        (enqueue && !answering && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
       const outcomes = [...state.outcomes];
       if (request.kind === 'reply' && !settled) outcomes.push({ requestId: request.requestId!, status: 'replied', observedAt: now, replyId: request.id });
       const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,

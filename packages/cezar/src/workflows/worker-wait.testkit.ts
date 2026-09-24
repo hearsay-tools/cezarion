@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
@@ -127,7 +127,14 @@ export async function worker(parentId: string, task = 'mock:hold') {
 export function register(parentId: string, ids: string[], seconds = 600) {
   return manager.registerWorkerWait(parentId, workerWaitRequestSchema.parse({ workerIds: ids, timeoutSeconds: seconds }));
 }
-export async function restart(fakeClock = false, diskCheckpoint?: string) {
+/** Event logs as they stand now: `restart` writes them back, so nothing its own shutdown
+ * appended survives, as after a real crash. */
+export function eventCheckpoint(): Map<string, string> {
+  store.flush();
+  const dir = join(root, '.ai/cezar/runs');
+  return new Map(readdirSync(dir).filter(name => name.endsWith('.ndjson')).map(name => [join(dir, name), readFileSync(join(dir, name), 'utf8')]));
+}
+export async function restart(fakeClock = false, diskCheckpoint?: string, events?: Map<string, string>) {
   checkpoint('restart-stop-start');
   store.flush(); const disk = diskCheckpoint ?? readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8');
   for (const run of store.listRuns()) manager.cancel(run.id);
@@ -135,6 +142,7 @@ export async function restart(fakeClock = false, diskCheckpoint?: string) {
   await Promise.all(executions.splice(0));
   await Promise.all(bookkeeping.splice(0)); manager.dispose(); store.flush(); checkpoint('restart-stopped');
   writeFileSync(join(root, '.ai/cezar/runs.json'), disk);
+  for (const [path, content] of events ?? []) writeFileSync(path, content);
   store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
   if (fakeClock) vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   manager = new RunManager(store, root, { semaphore }); track(); checkpoint('restart-recover-start');
