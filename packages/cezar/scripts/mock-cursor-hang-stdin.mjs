@@ -10,4 +10,5 @@ createInterface({ input: process.stdin }).on('line', line => {
     try { closeSync(0); } catch { /* already closed */ }
   }
 });
+process.on('SIGTERM', () => { /* ignore — review: SIGTERM-only abort must not hang */ });
 setInterval(() => {}, 1e6);

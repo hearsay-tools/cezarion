@@ -15,6 +15,8 @@ import type { UiEvent } from './ui-events.ts';
 export const CURSOR_PROVIDER_MAX_RETRIES = 2;
 /** Unexpected ACP child exit during bootstrap/resume (#529): two respawns, then fatal. */
 export const CURSOR_ACP_SPAWN_MAX_RETRIES = 2;
+/** SIGKILL fallback when a hung bootstrap child ignores SIGTERM. */
+const HUNG_BOOTSTRAP_KILL_MS = 250;
 /** Short fixed backoff for instant-less blips (502, connection reset) — no exponential ladder. */
 export const CURSOR_PROVIDER_RETRY_BACKOFF_MS = 2_000;
 /** A reset instant at most this far out is waited out inline; anything longer fails and lets
@@ -115,6 +117,7 @@ class CursorSession implements AgentSession {
   private deadline?: NodeJS.Timeout;
   private termTimer?: NodeJS.Timeout;
   private killTimer?: NodeJS.Timeout;
+  private hungKillTimer?: NodeJS.Timeout;
   private resolveResult!: (value: AgentRunResult) => void;
   private settled = false;
 
@@ -183,8 +186,18 @@ class CursorSession implements AgentSession {
     });
   }
   private abandonHungBootstrap(): void {
-    if (this.hasExited()) return;
-    this.child.kill();
+    if (this.closing || this.settled) return;
+    const child = this.child;
+    if (!this.hasExited()) {
+      child.kill('SIGTERM');
+      if (this.hungKillTimer) clearTimeout(this.hungKillTimer);
+      this.hungKillTimer = setTimeout(() => {
+        this.hungKillTimer = undefined;
+        child.kill('SIGKILL');
+      }, HUNG_BOOTSTRAP_KILL_MS);
+      this.hungKillTimer.unref();
+    }
+    this.fail('Cursor ACP input stream closed');
   }
   private respawn(): void {
     this.bootstrapGeneration += 1;
@@ -488,7 +501,7 @@ class CursorSession implements AgentSession {
   private finish(): void {
     if (this.settled) return;
     this.isOpen = false;
-    for (const timer of [this.deadline, this.autoEnd, this.termTimer, this.killTimer, this.providerRetryTimer]) if (timer) clearTimeout(timer);
+    for (const timer of [this.deadline, this.autoEnd, this.termTimer, this.killTimer, this.hungKillTimer, this.providerRetryTimer]) if (timer) clearTimeout(timer);
     this.rejectPending();
     if (this.busy && !this.failure) this.mapped(cursorTurnCompleted('cancelled', this.state));
     this.ui({ type: 'session.ended', reason: this.failure ? 'error' : 'end_turn' });
