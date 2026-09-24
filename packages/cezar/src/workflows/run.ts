@@ -282,6 +282,8 @@ const REPOSITORY_ROOT_LOCK_DISABLED_NOTE =
 export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string; effort?: string; agentProfile: string; accountBinding?: WorkerAccountBinding; systemPrompt?: string; allowedTools?: string[]; bashAllowlist?: string[] };
 
 interface ActiveRun {
+  /** Last cumulative Claude report per provider session during this process. */
+  reportedClaudeCost?: Map<string, number>;
   delegationSettings?: DelegationExecutionSettings;
   revokeDelegation?: () => void;
   revokeCiTools?: () => void;
@@ -4687,7 +4689,6 @@ export class RunManager {
     state.openingAnswerAskSeq = openingAnswerAskSeq;
     state.pendingHumanAsk = openingAnswerAskSeq === undefined && this.hasPendingHumanAsk(runId);
 
-    let stepCost = 0;
     let turnText = '';
     let completedAssistantText = '';
     let sawClaudeScheduleWakeup = false;
@@ -4713,6 +4714,7 @@ export class RunManager {
       if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
       if (event.type === 'tool-call' || event.type === 'tool-result') this.clearUnreadInputTimer(state);
       this.store.appendEvent(runId, { ...event, stepId });
+      if (event.type === 'cost') this.recordReportedCost(runId, stepId, state, backend, event.usd);
       if (event.type === 'error') {
         // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
         sessionError ??= state.agentInputError ?? event.message;
@@ -4726,10 +4728,6 @@ export class RunManager {
       }
       if (event.type === 'token-usage') {
         this.store.updateStep(runId, stepId, { tokensUsed: event.tokensUsed });
-      }
-      if (event.type === 'cost') {
-        stepCost += event.usd;
-        this.store.updateStep(runId, stepId, { costUsd: stepCost });
       }
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
@@ -5644,7 +5642,6 @@ export class RunManager {
 
     const stepRecord = this.store.getRun(runId)?.steps.find((s) => s.id === step.id);
     const startTokens = stepRecord?.tokensUsed ?? 0;
-    let stepCost = stepRecord?.costUsd ?? 0;
     let turnText = '';
     let completedAssistantText = '';
     let sawClaudeScheduleWakeup = false;
@@ -5670,6 +5667,7 @@ export class RunManager {
       if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
       if (event.type === 'tool-call' || event.type === 'tool-result') this.clearUnreadInputTimer(state);
       emit({ ...event, stepId: step.id });
+      if (event.type === 'cost') this.recordReportedCost(runId, step.id, state, backend, event.usd);
       if (event.type === 'error') {
         // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
         sessionError ??= state.agentInputError ?? event.message;
@@ -5684,10 +5682,6 @@ export class RunManager {
       }
       if (event.type === 'token-usage') {
         this.store.updateStep(runId, step.id, { tokensUsed: startTokens + event.tokensUsed });
-      }
-      if (event.type === 'cost') {
-        stepCost += event.usd;
-        this.store.updateStep(runId, step.id, { costUsd: stepCost });
       }
       if (isClaudeScheduleWakeup(event, backend)) sawClaudeScheduleWakeup = true;
       if (event.type === 'turn-end') {
@@ -6069,6 +6063,51 @@ export class RunManager {
       startedTurns: new Set(),
       recordedTurns: new Set(),
     };
+  }
+
+  /** Claude's `total_cost_usd` is cumulative for the conversation, including
+   * turns in Continue steps. Other runners emit per-message cost deltas. */
+  private recordReportedCost(runId: string, stepId: string, state: ActiveRun, backend: RunnerId, reportedUsd: number): void {
+    if (!Number.isFinite(reportedUsd) || reportedUsd < 0) return;
+    const run = this.store.getRun(runId);
+    const step = run?.steps.find((candidate) => candidate.id === stepId);
+    if (!run || !step) return;
+    let delta = reportedUsd;
+    if (backend === 'claude') {
+      const sessionKey = step.sessionId ?? step.id;
+      state.reportedClaudeCost ??= new Map();
+      let previous = state.reportedClaudeCost.get(sessionKey);
+      if (previous === undefined) {
+        // The current cost event was appended immediately before this call. Rebuild
+        // the checkpoint from raw reports, since older records summed cumulative
+        // reports into costUsd and cannot be used as the baseline on Continue.
+        const events = this.store.readEvents(runId);
+        let currentReportIndex = -1;
+        for (let index = events.length - 1; index >= 0; index--) {
+          const event = events[index]!;
+          if (event.type === 'cost' && event.stepId === stepId && event.usd === reportedUsd) {
+            currentReportIndex = index;
+            break;
+          }
+        }
+        const sessionStepIds = new Set(run.steps.filter((candidate) =>
+          (candidate.backend === 'claude' || candidate.backend === undefined) && (step.sessionId
+            ? candidate.sessionId === step.sessionId
+            : candidate.id === step.id)).map((candidate) => candidate.id));
+        previous = 0;
+        for (let index = 0; index < events.length; index++) {
+          if (index === currentReportIndex) continue;
+          const event = events[index]!;
+          if (event.type === 'cost' && event.stepId && sessionStepIds.has(event.stepId) &&
+              typeof event.usd === 'number' && Number.isFinite(event.usd)) {
+            previous = Math.max(previous, event.usd);
+          }
+        }
+      }
+      delta = Math.max(0, reportedUsd - previous);
+      state.reportedClaudeCost.set(sessionKey, Math.max(previous, reportedUsd));
+    }
+    this.store.updateStep(runId, stepId, { costUsd: (step.costUsd ?? 0) + delta });
   }
 
   /** Fold backend-neutral completed-turn usage into the current step exactly

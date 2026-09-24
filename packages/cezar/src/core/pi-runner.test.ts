@@ -142,6 +142,8 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     const events: AgentEvent[] = [];
     await runner.run({ userPrompt: 'ask me', cwd, timeoutMs: 10_000 }, (event) => events.push(event));
 
+    expect(events.filter((event) => event.type === 'cost')).toEqual([{ type: 'cost', usd: 0 }]);
+
     const textEvents = events.filter((e): e is Extract<AgentEvent, { type: 'text' }> => e.type === 'text');
     // One complete block — not one event per token delta.
     expect(textEvents).toHaveLength(1);

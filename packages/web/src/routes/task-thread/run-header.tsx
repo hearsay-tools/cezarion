@@ -594,7 +594,7 @@ function MetaRow({
       />,
     )
   }
-  if (showCost && run.costUsd) {
+  if (showCost && run.costUsd !== undefined) {
     usage.push(
       <span key="cost" className="tabular-nums">
         {formatCost(run.costUsd)}

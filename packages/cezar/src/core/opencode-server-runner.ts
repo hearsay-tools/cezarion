@@ -167,7 +167,8 @@ class OpencodeSession implements AgentSession {
   private turnErrored = false;
   private lostWakeTimer: NodeJS.Timeout | undefined;
   private tokensUsed = 0;
-  private lastCost = 0;
+  /** OpenCode reports a cumulative cost for each message, not the session. */
+  private readonly costByMessage = new Map<string, number>();
   /** A prompt was posted and its `session.idle` has not arrived yet. */
   private turnActive = false;
   private agentInputReady = false;
@@ -922,10 +923,18 @@ class OpencodeSession implements AgentSession {
         this.emit({ type: 'token-usage', tokensUsed: this.tokensUsed });
       }
     }
-    const cost = numField(info, 'cost');
-    if (cost > this.lastCost) {
-      this.emit({ type: 'cost', usd: cost - this.lastCost });
-      this.lastCost = cost;
+    const messageId = stringField(info, 'id');
+    const cost = info.cost;
+    if (
+      messageId && info.role === 'assistant' &&
+      (info.sessionID === undefined || info.sessionID === this.sessionId) &&
+      typeof cost === 'number' && Number.isFinite(cost) && cost >= 0
+    ) {
+      const previous = this.costByMessage.get(messageId);
+      if (previous === undefined || cost > previous) {
+        this.emit({ type: 'cost', usd: cost - (previous ?? 0) });
+        this.costByMessage.set(messageId, cost);
+      }
     }
   }
 

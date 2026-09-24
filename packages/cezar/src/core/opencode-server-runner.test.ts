@@ -416,6 +416,35 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     });
   });
 
+  it('adds OpenCode message costs while deduplicating updates to each message', async () => {
+    await withSession({}, async ({ events, mock }) => {
+      await waitFor(() => mock.promptPosts.length === 1);
+      for (const [id, cost] of [
+        ['msg-one', 0.01], ['msg-one', 0.02], ['msg-one', 0.02], ['msg-two', 0.005],
+      ] as const) {
+        mock.send({
+          type: 'message.updated',
+          properties: { info: {
+            id, sessionID: 'ses_test', role: 'assistant', cost,
+            tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 1000, write: 100 } },
+          } },
+        });
+      }
+      mock.send({
+        type: 'message.updated',
+        properties: { info: {
+          id: 'msg-unpriced', sessionID: 'ses_test', role: 'assistant',
+          tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 1000, write: 100 } },
+        } },
+      });
+      await waitFor(() => events.filter((event) => event.type === 'cost').length >= 2);
+      mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
+      await waitFor(() => count(events, 'turn-end') === 1);
+      expect(events.filter((event) => event.type === 'cost').map((event) => event.usd))
+        .toEqual([0.01, 0.01, 0.005]);
+    });
+  });
+
   it('posts a canonical effort pin as variant and omits it when unset (#45)', async () => {
     await withSession({ effort: 'high' }, async ({ mock }) => {
       await waitFor(() => mock.promptBodies.length === 1);

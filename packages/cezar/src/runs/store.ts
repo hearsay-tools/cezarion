@@ -1535,7 +1535,7 @@ export class RunStore extends EventEmitter {
       ? startedAgentSteps.reduce((sum, candidate) => sum + (candidate.outputTokens ?? 0), 0)
       : undefined;
     const cost = run.steps.reduce((sum, s) => sum + (s.costUsd ?? 0), 0);
-    run.costUsd = cost > 0 ? cost : undefined;
+    run.costUsd = run.steps.some((step) => step.costUsd !== undefined) ? cost : undefined;
     this.touch(run);
   }
 
