@@ -19,9 +19,9 @@ export interface SnapshotContext {
   /** `GITHUB_EVENT_NAME` — `pull_request` / `pull_request_target` and `push` publish previews; `schedule`
    *  and `workflow_dispatch` publish only the explicitly requested nightly. */
   eventName: string;
-  /** `GITHUB_REF_NAME` for push events — only `develop` publishes a snapshot;
-   *  `main` is reserved for owner-driven stable releases (see stable.ts) and for
-   *  the nightly channel below, which never moves `latest` either. */
+  /** `GITHUB_REF_NAME` for push events — only `main` publishes the `dev` snapshot;
+   *  stable `latest` releases stay owner-driven (see stable.ts). The nightly
+   *  channel below also cuts from `main` but never moves `latest` either. */
   refName: string;
   /** `CEZ_RELEASE_CHANNEL` — a channel asked for by name rather than derived from
    *  the event. Only `.github/workflows/nightly.yml` sets it (to `nightly`); every
@@ -99,11 +99,11 @@ function resolveChannel(ctx: SnapshotContext): { channel: string; distTag: strin
     return { channel: `pr${n}`, distTag: `pr-${n}` };
   }
   if (ctx.eventName === 'push') {
-    // Only `develop` publishes a snapshot. `main` is deliberately excluded so a
-    // merge to main never touches npm — stable `latest` releases are cut
-    // manually via the Release workflow (stable.ts). Defense in depth: the
-    // workflow's `if` already restricts the push channel to develop.
-    if (ctx.refName === 'develop') return { channel: 'develop', distTag: 'develop' };
+    // Only `main` publishes the trunk preview (`dev`). Merges never move
+    // `latest` — stable releases are cut manually via the Release workflow
+    // (stable.ts). Defense in depth: the workflow's `if` already restricts
+    // the push channel to main.
+    if (ctx.refName === 'main') return { channel: 'dev', distTag: 'dev' };
     return null;
   }
   return null;

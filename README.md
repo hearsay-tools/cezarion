@@ -215,7 +215,7 @@ Every green CI run also publishes an installable npm snapshot
 merged yet:
 
 ```bash
-npx cezarion@develop       # current develop head
+npx cezarion@dev           # current main head
 ```
 
 Every pull request gets its own preview too — the CI bot posts a sticky comment
