@@ -579,7 +579,10 @@ export function GithubRoute({
   )
 
   return (
-    // The list and detail stay in document flow; the shell remains the only page scroller.
+    // Title, tabs and filters stay in document flow so `main` can still scroll them away.
+    // On md+ the pane row docks under the breadcrumb (`md:sticky` + a viewport height cap)
+    // and each column scrolls itself. `md:flex-none` cancels `flex-1` so content cannot grow
+    // the row past the cap. Phone stays stacked document-flow. (#523)
     <div data-route="github" className="flex min-h-full flex-col gap-3 px-[18px] pt-[18px] pb-[calc(90px+env(safe-area-inset-bottom))] md:gap-[22px] md:p-9">
         <header data-slot="gh-header" className="flex shrink-0 flex-col gap-3 md:gap-[22px]">
           <div className="flex min-w-0 flex-col gap-1">
@@ -649,13 +652,13 @@ export function GithubRoute({
             <button type="button" disabled={!filtering} className="min-h-11 min-w-11 rounded-md border border-border bg-card px-4 text-xs disabled:opacity-50" onClick={clearFilters}>Clear filters</button>
           </div>
         </header>
-      <div data-slot="gh-panes" className="flex min-h-0 min-w-0 flex-1 flex-col items-start gap-[22px] md:flex-row">
+      <div data-slot="gh-panes" className="flex min-h-0 min-w-0 flex-1 flex-col items-start gap-[22px] md:sticky md:top-0 md:h-[calc(100dvh-4rem)] md:max-h-[calc(100dvh-4rem)] md:flex-none md:flex-row md:items-stretch md:overflow-hidden">
       {/* Issue list and detail stack on mobile. A selected PR has a full-width review surface. */}
       <section
         data-slot="gh-list"
         data-mobile-preview={compactPreview || undefined}
         style={{ '--github-list-width': `${githubListWidth}px` } as CSSProperties}
-        className="relative flex w-full min-h-0 flex-col rounded-lg border border-border bg-card p-3 md:w-[var(--github-list-width)] md:shrink-0"
+        className="relative flex w-full min-h-0 flex-col rounded-lg border border-border bg-card p-3 md:h-full md:w-[var(--github-list-width)] md:shrink-0 md:overflow-y-auto"
       >
 
 
@@ -733,7 +736,7 @@ export function GithubRoute({
       <section
         data-slot="gh-detail"
         className={cn(
-          'w-full min-w-0 min-h-0 flex-1 flex-col rounded-lg border border-border bg-card',
+          'w-full min-w-0 min-h-0 flex-1 flex-col rounded-lg border border-border bg-card md:h-full md:overflow-y-auto',
           n === undefined ? 'hidden md:flex' : 'flex',
         )}
       >

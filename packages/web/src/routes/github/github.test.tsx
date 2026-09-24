@@ -405,6 +405,43 @@ describe('the GitHub tab lists', () => {
     expect(document.querySelector('[data-slot="gh-detail"]')?.className).toContain('flex')
   })
 
+  // jsdom lays nothing out, so the classes are all this can check. The real-layout proof
+  // (the header can scroll away, then each pane scrolls without moving the other) lives in
+  // e2e/github.e2e.ts.
+  it('docks the pane row under the breadcrumb and gives each column its own scroller (#523)', async () => {
+    stubFetch()
+    renderAt('/github')
+    await screen.findByRole('heading', { name: 'GitHub' })
+
+    const header = document.querySelector('[data-slot="gh-header"]') as HTMLElement
+    const panes = document.querySelector('[data-slot="gh-panes"]') as HTMLElement
+    const detail = document.querySelector('[data-slot="gh-detail"]') as HTMLElement
+
+    expect(header.className.split(' ')).not.toContain('sticky')
+    expect(header.className.split(' ')).not.toContain('md:sticky')
+
+    expect(panes.className).toContain('md:sticky')
+    expect(panes.className).toContain('md:top-0')
+    expect(panes.className).toContain('md:h-[calc(100dvh-4rem)]')
+    expect(panes.className).toContain('md:max-h-[calc(100dvh-4rem)]')
+    expect(panes.className).toContain('md:flex-none')
+    expect(panes.className).toContain('md:overflow-hidden')
+    expect(panes.className.split(' ')).not.toContain('overscroll-contain')
+    expect(panes.className).toContain('md:items-stretch')
+
+    expect(ghList().className).toContain('md:h-full')
+    expect(ghList().className).toContain('md:overflow-y-auto')
+    expect(ghList().className.split(' ')).not.toContain('overscroll-contain')
+    expect(detail.className).toContain('md:h-full')
+    expect(detail.className).toContain('md:overflow-y-auto')
+    expect(detail.className.split(' ')).not.toContain('overscroll-contain')
+
+    // Unprefixed sticky/overflow would lock the stacked phone layout too.
+    expect(panes.className.split(' ')).not.toContain('sticky')
+    expect(ghList().className.split(' ')).not.toContain('overflow-y-auto')
+    expect(detail.className.split(' ')).not.toContain('overflow-y-auto')
+  })
+
   it('compacts the phone header so the first result can share the 360×640 viewport (#325)', async () => {
     stubFetch()
     renderAt('/github')
