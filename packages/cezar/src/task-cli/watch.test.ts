@@ -213,6 +213,45 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(out.map((line) => JSON.parse(line).text)).toEqual(['t1', 't2', 't3']);
   });
 
+  it('log --follow drains events written before a terminal run frame that overtook them', async () => {
+    let historyCalls = 0;
+    handler = (req, res) => {
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) {
+        historyCalls += 1;
+        // The snapshot before connecting saw only seq 1; by the time the run is terminal, 3.
+        return json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: historyCalls === 1 ? 1 : 3, hasOlder: false });
+      }
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/events')) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        const frame = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        const text = (seq: number) => frame('run-event', { seq, ts: '2026-01-01T00:00:00.000Z', type: 'text', text: `t${seq}` });
+        text(1);
+        frame('run', apiRun('done'));
+        setTimeout(() => { text(2); text(3); }, 50);
+        return;
+      }
+      res.statusCode = 404; res.end();
+    };
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(0);
+    const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['t1', 't2', 't3']);
+    expect(lines.at(-1)).toMatchObject({ id: 'r1', status: 'done' });
+  });
+
+  it('log --follow counts loading history against --timeout-seconds', async () => {
+    handler = (req, res) => {
+      if (req.url?.startsWith('/api/v1/p/default/runs/r1/history')) {
+        setTimeout(() => json(res, { events: [], itemCount: 0, liveCursor: 'c', asOfSeq: 0, hasOlder: false }), 4_000);
+        return;
+      }
+      res.statusCode = 404; res.end();
+    };
+    const started = Date.now();
+    expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '1'])).toBe(3);
+    expect(Date.now() - started).toBeLessThan(2_500);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ id: 'r1', timedOut: true });
+  });
+
   it('log --follow prints the whole replay before reporting the terminal status', async () => {
     replayWithEarlyRunFrame();
     expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(0);

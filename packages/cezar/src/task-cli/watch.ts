@@ -184,34 +184,54 @@ async function* sseFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<SseF
 
 /**
  * `log`, read from the run's SSE stream, which replays every event after `afterSeq` and then
- * streams live. The replay ends at `asOfSeq`, the event file's high-water mark read from
- * `GET /history` just before connecting — NOT at the first `run` frame, because the route
- * subscribes to live run updates before it replays, so one can land mid-replay. Everything up to
- * that boundary is the tail, bounded to `maxChars`. Without `follow` the command ends there; with
- * it, live events stream until the run is terminal (exit 0/1, final line is the status) or the
- * deadline (exit 3). Deduped by `seq` throughout.
+ * streams live. The route subscribes to live `run` updates BEFORE it replays, so a `run` frame
+ * says nothing about where the replay is; the only reliable boundary is a `seq`. So:
  *
+ * - the replay ends at `asOfSeq`, the event file's high-water mark read from `GET /history` just
+ *   before connecting — everything up to it is the tail, bounded to `maxChars`, and without
+ *   `follow` the command ends there;
+ * - with `follow`, a terminal status ends the command only once the stream has caught up with a
+ *   SECOND high-water read taken after that status arrived, so events the engine wrote just
+ *   before finishing are not dropped when the status frame overtakes them (exit 0/1, final line
+ *   is the status).
+ *
+ * One `deadline` bounds every request, the history reads included (exit 3). Deduped by `seq`.
  * The stream rather than `GET /history` pages: a history page starts at its first transcript
  * item, so it drops lifecycle events such as the opening `step-start`.
  */
 export async function readLog(
   cockpit: Cockpit,
   id: string,
-  options: { afterSeq: number; maxChars: number; follow: boolean; timeoutMs: number; print: (line: string) => void },
+  options: { afterSeq: number; maxChars: number; follow: boolean; deadline: number; print: (line: string) => void },
 ): Promise<number> {
   const tail = new LineTail(options.maxChars);
-  const history = await request(cockpit, `/runs/${encodeURIComponent(id)}/history`);
-  if (history.status !== 200) refuse(history);
-  const page = runHistoryPageSchema.safeParse(history.data);
-  if (!page.success) invalidResponse('history');
-  const boundarySeq = page.data.asOfSeq;
-  let replaying = boundarySeq > options.afterSeq;
-  if (!replaying && !options.follow) return 0;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+  const remaining = () => options.deadline - Date.now();
   let lastSeq = options.afterSeq;
   let seenSeq = options.afterSeq;
   let status: RunStatus | undefined;
+  let drainSeq: number | undefined;
+
+  /** The event file's high-water mark, or undefined once the deadline has passed. */
+  const highWater = async (): Promise<number | undefined> => {
+    if (remaining() <= 0) return undefined;
+    let history;
+    try {
+      history = await request(cockpit, `/runs/${encodeURIComponent(id)}/history`, { timeoutMs: remaining() });
+    } catch (error) {
+      if (remaining() <= 0) return undefined;
+      throw error;
+    }
+    if (history.status !== 200) refuse(history);
+    const page = runHistoryPageSchema.safeParse(history.data);
+    return page.success ? page.data.asOfSeq : invalidResponse('history');
+  };
+
+  const boundarySeq = await highWater();
+  if (boundarySeq === undefined) return timedOut();
+  let replaying = boundarySeq > options.afterSeq;
+  if (!replaying && !options.follow) return 0;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(remaining(), 0));
   try {
     let response: Response;
     try {
@@ -229,14 +249,11 @@ export async function readLog(
       refuse({ status: response.status, data });
     }
     try {
-      // Before the stream: a replay that is already empty ends here, exactly as below.
-      const early = afterReplay();
-      if (early !== undefined) return early;
       for await (const frame of sseFrames(response.body)) {
         if (frame.event === 'run-event' || frame.event === 'ui-event') {
           const event = JSON.parse(frame.data) as RunHistoryEvent;
           if (typeof event.seq !== 'number') continue;
-          // Both streams share the file's seq space, so either one can reach the boundary;
+          // Both streams share the file's seq space, so either one can reach a boundary;
           // only v1 lines are printed, deduped by seq.
           seenSeq = Math.max(seenSeq, event.seq);
           if (frame.event === 'run-event' && event.seq > lastSeq) {
@@ -251,8 +268,13 @@ export async function readLog(
           const run = runRecordSchema.safeParse(JSON.parse(frame.data));
           if (run.success) status = run.data.status;
         }
-        const exit = afterReplay();
-        if (exit !== undefined) return exit;
+        let exit = step();
+        if (exit === 'drain') {
+          drainSeq = await highWater();
+          if (drainSeq === undefined) return timedOut();
+          exit = step();
+        }
+        if (typeof exit === 'number') return exit;
       }
     } catch (error) {
       if (!controller.signal.aborted) throw error;
@@ -264,14 +286,16 @@ export async function readLog(
     controller.abort();
   }
 
-  /** Ends the replay once the boundary is reached; then a terminal status ends the command. */
-  function afterReplay(): number | undefined {
-    if (replaying && seenSeq >= boundarySeq) {
+  /** Ends the replay at its boundary; then a terminal status ends the command once drained. */
+  function step(): number | 'drain' | undefined {
+    if (replaying && seenSeq >= boundarySeq!) {
       replaying = false;
       for (const line of tail.drain()) options.print(line);
       if (!options.follow) return 0;
     }
     if (replaying || status === undefined || !TERMINAL_STATUSES.includes(status)) return undefined;
+    if (drainSeq === undefined) return 'drain';
+    if (seenSeq < drainSeq) return undefined;
     options.print(JSON.stringify({ id, status, timedOut: false }));
     return SUCCESS_STATUSES.includes(status) ? 0 : 1;
   }

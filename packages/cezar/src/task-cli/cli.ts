@@ -363,11 +363,11 @@ async function execute(
     case 'log': {
       const since = nonNegativeInt(values.since, 'since') ?? 0;
       const maxChars = positiveInt(values['max-chars'], 'max-chars', 1_000_000) ?? 8_000;
-      await getRun(cockpit, id);
+      // An unknown run is the history route's 404, passed through. Without --follow the replay
+      // ends at its boundary; the deadline is only a backstop there.
       return readLog(cockpit, id, {
         afterSeq: since, maxChars, follow: values.follow === true,
-        // Without --follow the replay ends at the first `run` frame; the bound is only a backstop.
-        timeoutMs: values.follow ? timeoutMs(values) : 45_000,
+        deadline: Date.now() + (values.follow ? timeoutMs(values) : 45_000),
         print: (line) => io.stdout(line),
       });
     }
