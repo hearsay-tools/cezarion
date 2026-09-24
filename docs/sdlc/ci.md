@@ -1,8 +1,8 @@
 # Continuous integration
 
 `.github/workflows/ci.yml` uses only `pull_request_target` for PR verification on
-`main`, `develop`, and `release/**` maintenance branches. Pushes to `main` and
-`develop`, and manual dispatch, still run CI.
+`main` and `release/**` maintenance branches. Pushes to `main` and manual
+dispatch still run CI.
 The trusted base defines classification and the required checks; PR code runs
 with read-only repository permissions and no publishing credentials. Each PR
 has one concurrency group, so a new head cancels its predecessor without a

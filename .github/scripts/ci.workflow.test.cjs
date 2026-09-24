@@ -117,7 +117,7 @@ test('CI classifies pull request changes from a trusted base checkout', () => {
   const ci = workflow();
   assert.ok(ci.on.pull_request_target, 'CI must use the trusted pull_request_target trigger');
   assert.equal(ci.on.pull_request, undefined, 'one authoritative PR event, including during migration');
-  assert.deepEqual(ci.on.pull_request_target.branches, ['main', 'develop', 'release/**']);
+  assert.deepEqual(ci.on.pull_request_target.branches, ['main', 'release/**']);
   const job = ci.jobs['change-surface'];
   assert.ok(job, 'expected a change-surface job');
   assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read' });
@@ -258,17 +258,16 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   assert.doesNotMatch(JSON.stringify(ci.jobs), /github\.actor/);
 });
 
-test('CI runs on push to main and still does not publish snapshots from main', () => {
+test('CI runs on push to main and publishes dev snapshots from main', () => {
   const ci = workflow();
-  assert.ok(ci.on.push.branches.includes('main'));
-  assert.ok(ci.on.push.branches.includes('develop'));
+  assert.deepEqual(ci.on.push.branches, ['main']);
   assert.equal(ci.concurrency.group, 'ci-${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}');
   assert.equal(ci.concurrency['cancel-in-progress'], true);
   const publishIf = ci.jobs['publish-snapshot'].if;
-  assert.match(publishIf, /github\.ref == 'refs\/heads\/develop'/);
+  assert.match(publishIf, /github\.ref == 'refs\/heads\/main'/);
   assert.doesNotMatch(publishIf, /pull_request/);
   assert.doesNotMatch(publishIf, /pull_request_target/);
-  assert.doesNotMatch(publishIf, /heads\/main/);
+  assert.doesNotMatch(publishIf, /heads\/develop/);
 });
 
 test('verification bindings name packaged and cockpit E2E separately', () => {
@@ -309,9 +308,7 @@ test('genuine failure and cancellation never green the aggregate', () => {
 test('event routing keeps one PR verifier and preserves push/manual publication policy', () => {
   const { runInNewContext } = require('node:vm');
   const ci = workflow();
-  for (const base of ['main', 'develop']) {
-    // The introducing head supplies legacy-event routing; the installed base
-    // already supplies target routing. Both supported bases have the same filter.
+  for (const base of ['main']) {
     const authoritative = ['pull_request', 'pull_request_target'].filter(event => ci.on[event]?.branches.includes(base));
     assert.deepEqual(authoritative, ['pull_request_target']);
     assert.ok(ci.on.push.branches.includes(base));
@@ -319,11 +316,10 @@ test('event routing keeps one PR verifier and preserves push/manual publication 
   assert.ok(Object.hasOwn(ci.on, 'workflow_dispatch'));
   for (const [event, ref, fork, prepare, publish] of [
     ['pull_request_target', 'refs/heads/main', false, true, false],
-    ['pull_request_target', 'refs/heads/develop', false, true, false],
     ['pull_request_target', 'refs/heads/main', true, false, false],
-    ['push', 'refs/heads/main', false, false, false],
-    ['push', 'refs/heads/develop', false, false, true],
-    ['workflow_dispatch', 'refs/heads/develop', false, false, false],
+    ['push', 'refs/heads/main', false, false, true],
+    ['push', 'refs/heads/develop', false, false, false],
+    ['workflow_dispatch', 'refs/heads/main', false, false, false],
   ]) {
     const github = { event_name: event, ref, repository: 'o/n', event: { pull_request: { head: { repo: { full_name: fork ? 'fork/n' : 'o/n' } } } } };
     assert.equal(runInNewContext(ci.jobs['prepare-pr-snapshot'].if, { github }), prepare);

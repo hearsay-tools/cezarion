@@ -6,11 +6,9 @@ on:
   pull_request_target:
     branches:
       - main
-      - develop
       - release/**
   push:
     branches:
-      - develop
       - main
   # Release finalization explicitly dispatches bot-created PRs at their head branch.
   # Resolve the optional PR through the API before allowing the release-bump skip.
@@ -404,16 +402,16 @@ jobs:
           fi
 
   # npm preview publishing (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482).
-  # Publishes develop snapshots after a fully green verify run.
-  # PR archives below are published separately by publish-pr-snapshot.yml. `main` pushes do
-  # NOT publish — stable `latest` releases are owner-driven and manual via
-  # release.yml, so CI never moves `latest`. Without the NPM_TOKEN secret the
+  # Publishes `dev` snapshots from `main` after a fully green verify run.
+  # PR archives below are published separately by publish-pr-snapshot.yml.
+  # Stable `latest` releases are owner-driven and manual via release.yml, so CI
+  # never moves `latest`. Without the NPM_TOKEN secret the
   # script degrades to a loud dry run, so this job stays green on unconfigured forks.
   publish-snapshot:
     name: Publish npm snapshot
     needs: verify
     if: >-
-      github.event_name == 'push' && github.ref == 'refs/heads/develop'
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

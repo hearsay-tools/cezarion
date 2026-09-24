@@ -47,15 +47,14 @@ describe('computeSnapshot', () => {
     expect(computeSnapshot({ ...base, prNumber: 1.5 })).toBeNull();
   });
 
-  it('publishes push events only for develop', () => {
+  it('publishes push events only for main under the dev channel', () => {
     const push = { ...base, eventName: 'push', prNumber: undefined };
-    expect(computeSnapshot({ ...push, refName: 'develop' })).toEqual({
-      channel: 'develop',
-      version: '0.1.5-develop.123',
-      distTag: 'develop',
+    expect(computeSnapshot({ ...push, refName: 'main' })).toEqual({
+      channel: 'dev',
+      version: '0.1.5-dev.123',
+      distTag: 'dev',
     });
-    // main never publishes a snapshot — stable releases are owner-driven.
-    expect(computeSnapshot({ ...push, refName: 'main' })).toBeNull();
+    expect(computeSnapshot({ ...push, refName: 'develop' })).toBeNull();
     expect(computeSnapshot({ ...push, refName: 'feat/other' })).toBeNull();
   });
 
@@ -129,7 +128,7 @@ describe('computeSnapshot', () => {
   it('never resolves to the latest dist-tag on any publishing input', () => {
     const events: SnapshotContext[] = [
       base,
-      { ...base, eventName: 'push', refName: 'develop', prNumber: undefined },
+      { ...base, eventName: 'push', refName: 'main', prNumber: undefined },
       {
         ...base,
         eventName: 'schedule',

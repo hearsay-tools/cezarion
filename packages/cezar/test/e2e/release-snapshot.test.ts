@@ -178,7 +178,7 @@ test('OIDC without a token still forces a snapshot dry run', { timeout: 120_000 
     await writeFile(join(root, 'github-output.txt'), '');
     const { stdout } = await runScript(root, {
       GITHUB_EVENT_NAME: 'push',
-      GITHUB_REF_NAME: 'develop',
+      GITHUB_REF_NAME: 'main',
       GITHUB_REPOSITORY: 'open-mercato/cezar',
       GITHUB_RUN_NUMBER: '8',
       ACTIONS_ID_TOKEN_REQUEST_URL: 'https://example.invalid/oidc',
@@ -197,14 +197,14 @@ test('a missing NPM token forces a dry run instead of failing the job', { timeou
     // No --dry-run flag and no NODE_AUTH_TOKEN: the script must degrade, not throw.
     const { stdout } = await runScript(root, {
       GITHUB_EVENT_NAME: 'push',
-      GITHUB_REF_NAME: 'develop',
+      GITHUB_REF_NAME: 'main',
       GITHUB_REPOSITORY: 'open-mercato/cezar',
       GITHUB_RUN_NUMBER: '8',
     });
     assert.match(stdout, /forcing --dry-run/);
     const output = await readFile(join(root, 'github-output.txt'), 'utf8');
     assert.match(output, /^dryRun=true$/m);
-    assert.match(output, /"distTag":"develop"/);
+    assert.match(output, /"distTag":"dev"/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
