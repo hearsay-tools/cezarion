@@ -2,6 +2,15 @@
 
 How to review a diff in this repository. Applies to humans and to the `om-code-review` skill alike. The full validation gate in `.ai/agentic.config.json` must be green before a review verdict is meaningful: typecheck, the vitest unit/component suites (`npm test`), the node:test core-module suite (`npm run test:unit`), build (which includes the `check:pack` tarball gate), the packaged CLI E2E (`npm run test:package`), and the cockpit browser E2E (`npm run test:e2e`). The unit/component suites are the fast correctness gate. Packaged CLI E2E and cockpit browser E2E are separate checks; pull request CI rejects a skipped or failed cockpit suite.
 
+Reviewers reuse recorded successful validation for unchanged tested inputs; do not
+ask for the entire suite again merely because a commit, PR, or review round began.
+During fixes, run targeted tests (`npm run test:changed` or explicit files/names).
+Before sign-off, rerun gates affected by later code edits; shared configuration,
+dependency/contract changes or uncertain impact require the full gate. Review-only
+and Markdown-only edits do not invalidate runtime evidence. Evidence must identify
+the tested revision/diff, commands and outcomes; targeted tests and browser skips
+are not full passes. See `SDLC.md` § Validation gate. Required CI is unchanged.
+
 ## CI surface rules
 
 Docs/process-only PRs may have skipped Vitest and cockpit browser E2E only when the required build/package aggregate is green and `verify` succeeds; docs-only `review-complete` succeeds with `wait-for-ci` skipped. CI uses the trusted `pull_request_target` workflow definition and checks out PR code only in the jobs that execute it. The exact allowlist is root-level `*.md` and root-level `LICENSE*`; recursive `docs/`, `.ai/specs/`, and `.ai/analysis/`; and `AGENT_PROTOCOL.md`, `AGENTS.md`, `BACKWARD_COMPATIBILITY.md`, `CODE_REVIEW.md`, and `SDLC.md`. Any mixed change, unlisted path, malformed input, or classifier failure is full-matrix and must pass every check plus automated review. Build/package verification is never skipped.

@@ -978,10 +978,18 @@ npm run build        # tsc → packages/cezar/dist/, vite build → packages/cez
 npm run typecheck    # refresh server declarations, then check all four workspaces
 npm run typecheck:web # refresh server declarations, then check web sources
 npm test             # vitest — server + cockpit unit suites
+npm run test:changed # iteration only: tests related to branch + working-tree changes
 npm run test:unit    # node:test — fast core-module tests
 npm run test:package # pack/install and exercise the built CLI
 npm run test:e2e     # real-browser cockpit suite (agent-browser)
 ```
+
+For iteration, run affected test files or `npm run test:changed` (inspect with
+`-- --plan`; override the local main comparison with `-- --base=<ref>`).
+The changed-test command includes staged, unstaged and untracked changes and
+falls back to full Vitest on shared/configuration/unknown input or missing Git
+history. It is not a substitute for final verification. See `AGENTS.md` § Validation
+for targeted browser commands and the final-gate/evidence-reuse policy.
 
 Both `npm run typecheck:web` and
 `npm run typecheck -w @open-mercato/cezar-web` rebuild server declarations from

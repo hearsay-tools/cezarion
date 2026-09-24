@@ -92,7 +92,13 @@ The claim is released when the work finishes — on success and on failure alike
 
 ## Validation gate
 
-Every PR passes the full validation gate before review sign-off, in this order:
+During implementation, use affected test files/names or `npm run test:changed`,
+and focused browser specs for changed UI flows. Do not repeat all suites for each
+edit or review round. `test:changed` is iteration feedback only; an import graph
+cannot establish complete runtime coverage.
+
+Run the full gate once when implementation stabilizes, before committing/opening
+the PR and before review sign-off, in this order:
 
 - `npm run typecheck`
 - `npm test`
@@ -102,6 +108,16 @@ Every PR passes the full validation gate before review sign-off, in this order:
 - `npm run test:e2e`
 
 Any non-zero exit fails the gate and blocks the PR. `npm test` is the fast server + cockpit unit/component suite (vitest) and `npm run test:unit` the node:test core-module suite; the build includes the `check:pack` tarball gate, and `npm run test:package` builds a release tarball, installs it into an isolated consumer, and exercises the offline CLI workflow. Packaged CLI E2E (`npm run test:package`) and cockpit browser E2E (`npm run test:e2e`) are separate checks; pull request CI rejects a skipped or failed cockpit suite. The implementing skills run the configured gate before opening a PR, and `om-check-and-commit` runs it before pushing a hand-worked branch. The command list lives in `.ai/agentic.config.json`; when it changes, update it there and in this section together.
+
+Reuse successful evidence for the same tested tree across commit, PR creation,
+and review; those actions do not themselves require another run. Record the tested
+revision (or uncommitted diff), commands/results, and subsequent changes in the
+handoff. Later code changes invalidate affected gates. Shared configuration,
+dependency or contract changes, or uncertain impact invalidate the full gate.
+Review-only or Markdown-only edits leave successful runtime evidence valid. Never
+reuse failed/inconclusive evidence or count a targeted run as a full pass. CI's
+independent required checks remain unchanged. The iteration command does not
+replace any entry in `.ai/agentic.config.json`'s final `validation.commands` list.
 
 ### PR change surface
 

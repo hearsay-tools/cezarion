@@ -23,6 +23,45 @@ contract, API client, and server, so it builds declarations once. Direct
 `tsc --noEmit` calls bypass preparation; use the npm commands for verification.
 The nested-worktree regression runs with `npm run test:unit`.
 
+### Local iteration versus final verification
+
+Use explicit affected tests or `npm run test:changed` during implementation, and
+focused browser specs for affected UI flows. Run the final six-command gate once
+when implementation stabilizes; reuse recorded success across commit, PR creation,
+and review of unchanged inputs. Later code edits require affected gates again;
+shared configuration, dependencies, contract changes, or uncertain impact require
+the full gate. Review-only/Markdown-only edits do not invalidate runtime results.
+The handoff records revision/diff, commands, results and subsequent changes.
+
+`test:changed` uses the merge-base against local `origin/main` (falling back to
+`main`), plus staged, unstaged and untracked files; it never fetches. Override with
+`npm run test:changed -- --base=<ref>`. `--plan` prints the selection and command
+without executing it. Ordinary TS/JS source changes use Vitest's import graph.
+Contract/configuration/unknown input, removed paths, missing base or failed Git
+inspection run full Vitest. Clean and Markdown-only changes explicitly skip.
+No matching tests fails rather than reporting a pass; run `npm test` in that case.
+This does not cover all runtime dependencies, Node tests, or browser tests and is
+not a final gate. `.ai/agentic.config.json` retains the complete final command list.
+
+### Local worker-count measurement
+
+A local comparison on a 16-CPU host ran the unchanged 444-file / 9,283-test
+Vitest inventory twice, sequentially (default first, then `--maxWorkers=4`):
+
+| Invocation | Wall time | User + system CPU time | Result |
+| --- | ---: | ---: | --- |
+| `npm test` | 188.80 s | 1,360.37 s | 9,283 passed |
+| `npm test -- --maxWorkers=4` | 418.22 s | 1,142.88 s | 9,283 passed |
+
+Measured with `/usr/bin/time -p` after installing dependencies and typechecking.
+These are single samples with normal host activity, not controlled repeated
+benchmarks. They do not establish a universal optimum. Four workers reduced total
+CPU time by about 16% but more than doubled wall time here; CI's per-VM four-worker
+limit should not be assumed to improve local latency. Use `--maxWorkers=4` when
+intentionally trading single-run latency for lower concurrency on a shared host.
+
+### CI verification
+
 Verification runs in seven parallel jobs with the current Node LTS:
 
 - Two Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/2 --maxWorkers=4`.
