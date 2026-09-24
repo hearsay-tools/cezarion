@@ -3544,12 +3544,22 @@ export class RunManager {
    * it is submitted right away; at a turn-end the handler's own flush submits it. */
   private retireUnreadInputs(runId: string, state: ActiveRun, ids: readonly string[], outOfTurn: boolean): void {
     if (!ids.length || state.cancelled || this.active.get(runId) !== state) return;
+    // Durable first: a failed checkpoint must never let this boundary finish (DONE, park)
+    // over input that is still marked delivered but was never read.
+    try { this.store.requeueUnconsumedAgentInputs(runId, ids); }
+    catch (error) {
+      if (state.agentInputError) return;
+      state.agentInputError = `agent input requeue checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
+      try { state.session?.interrupt(); } finally {
+        try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
+        catch { console.error(`[cez] ${state.agentInputError}`); }
+      }
+      return;
+    }
     for (const id of ids) state.unreadInputIds?.delete(id);
     // Reported before its own acknowledgement landed: that acknowledgement must not
     // mark it delivered again.
     for (const id of ids) if (state.agentInputFlight?.inputIds.includes(id)) (state.retiredInFlight ??= new Set()).add(id);
-    try { this.store.requeueUnconsumedAgentInputs(runId, ids); }
-    catch (error) { console.warn(`[cez] agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); return; }
     this.store.appendEvent(runId, { type: 'note', message: `resubmitting ${ids.length} message${ids.length === 1 ? '' : 's'} the agent did not read` });
     if (outOfTurn) this.flushAgentInputs(runId);
   }
