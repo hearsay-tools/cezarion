@@ -35,7 +35,10 @@ describe('unread agent input is resubmitted (#505)', () => {
         const closed = store.readEvents(runId).findIndex(e => e.type === 'lifecycle' && String(e.message).includes('goal achieved'));
         const echoed = store.readEvents(runId).findIndex(e => e.type === 'text' && String(e.text).includes('late parent guidance'));
         expect(echoed).toBeGreaterThan(-1);
-        if (closed >= 0) expect(closed).toBeGreaterThan(echoed);
+        // The run did not close over the unread input: any close comes after it was read.
+        expect(closed === -1 || closed > echoed).toBe(true);
+        const reads = store.readEvents(runId).filter(e => e.type === 'text' && String(e.text).includes('late parent guidance'));
+        expect(reads).toHaveLength(1);
       });
     } finally { adapter.scenarios['steer-late'] = original; }
   }, 60_000);
@@ -56,6 +59,11 @@ describe('unread agent input is resubmitted (#505)', () => {
         if (!manager.isActive(runId)) expect(manager.continueRun(runId, { text: 'mock:agent-echo resume' }).ok).toBe(true);
         await waitFor(() => !!store.getRun(runId)?.agentInputs?.[0]?.consumedAt, 15_000);
         expect(store.getRun(runId)?.agentInputs?.[0]?.awaitingRead).toBeUndefined();
+        // Re-delivered exactly once after the restart.
+        const echoes = () => store.readEvents(runId).filter(e => e.type === 'text' && String(e.text).includes('late parent guidance'));
+        await waitFor(() => echoes().length > 0, 15_000);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        expect(echoes()).toHaveLength(1);
       });
     } finally { if (saved === undefined) delete process.env.CEZ_MOCK_STEER_MS; else process.env.CEZ_MOCK_STEER_MS = saved; }
   }, 60_000);

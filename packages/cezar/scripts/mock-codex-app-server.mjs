@@ -72,6 +72,8 @@ rl.on('line', async (line) => {
       ? { method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } }
       : { method: 'turn/failed', params: { turn: { id: 'turn_mock_1', status: 'failed' }, error: { message: 'bad answer' } } });
   } else if (msg.method === 'turn/steer') {
+    // #505 ambiguity: the transport dies with the steer unanswered.
+    if (process.env.CEZ_MOCK_CODEX_EXIT_ON_STEER === '1') process.exit(1);
     const turn = steerTurn;
     if (!turn && activeTurnId && msg.params?.expectedTurnId === activeTurnId) {
       pendingSteers.push({ clientId: msg.params?.clientUserMessageId ?? null, text: msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '' });

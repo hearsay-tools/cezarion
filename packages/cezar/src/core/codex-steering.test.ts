@@ -92,4 +92,15 @@ describe('codex agent input steering (#505)', () => {
     expect(events.filter(e => e.type === 'turn-end')[1]).toEqual({ type: 'turn-end', unconsumedInputIds: ['in-failed'] });
     session.end(); await session.result.catch(() => undefined);
   });
+
+  it('rejects a steer whose transport closed unanswered, without retrying it as turn/start (#505 review)', async () => {
+    const { session, events, requests } = start('mock:steer-tool', {}, { CEZ_MOCK_CODEX_EXIT_ON_STEER: '1' });
+    await waitUntil(() => events.some(e => e.type === 'tool-call'));
+    const ack = session.sendAgentMessage([{ type: 'text', text: 'ambiguous' }], ['in-ambiguous']);
+    expect(ack).not.toBe(false);
+    await expect(ack).rejects.toThrow();
+    const methods = requests().map(r => r.method).filter(m => m === 'turn/steer' || m === 'turn/start');
+    expect(methods).toEqual(['turn/start', 'turn/steer']); // the opening turn, then the unanswered steer only
+    await session.result.catch(() => undefined);
+  });
 });
