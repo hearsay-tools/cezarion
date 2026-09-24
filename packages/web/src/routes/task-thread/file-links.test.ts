@@ -13,6 +13,19 @@ describe('task file links', () => {
     expect(taskFileHref('docs/a%20b.md', context)).toBe('/p/project/tasks/task/files?path=docs%2Fa%20b.md')
     expect(taskFileHref('docs/literal%2520.md', context)).toBe('/p/project/tasks/task/files?path=docs%2Fliteral%2520.md')
   })
+  it.each([
+    ['guide.md#install', 'guide.md', '#install'],
+    ['notes%23draft.md#details', 'notes#draft.md', '#details'],
+    ['file:///tmp/guide.md#install', 'file:///tmp/guide.md', '#install'],
+  ])('keeps the fragment separate from the file selector for %s', (href, path, hash) => {
+    const target = new URL(taskFileHref(href, context)!, 'https://cockpit.test')
+    expect(target.searchParams.get('path')).toBe(path)
+    expect(target.hash).toBe(hash)
+  })
+  it('preserves fragments when scoping a published artifact link', () => {
+    const id = '4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
+    expect(taskFileHref(`/tasks/task/files?artifact=${id}#install`, context)).toBe(`/p/project/tasks/task/files?artifact=${id}#install`)
+  })
   it('scopes a generated artifact link without treating it as a file', () => {
     const id = '4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
     expect(taskFileHref(`/tasks/task/files?artifact=${id}`, context)).toBe(`/p/project/tasks/task/files?artifact=${id}`)

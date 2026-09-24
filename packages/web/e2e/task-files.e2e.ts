@@ -88,7 +88,7 @@ beforeAll(async () => {
     await fetch(`${baseUrl}/api/v1/runs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ task: `Improve the project notes. [Review ADR](${join(dataRoot, 'README.md')})`, workflow: 'quick-task' }),
+      body: JSON.stringify({ task: `Improve the project notes. [Review ADR](${join(dataRoot, 'README.md')}#files-tab-e2e-fixture-repo)`, workflow: 'quick-task' }),
     })
   ).json()) as { id: string }
   runId = created.id
@@ -181,6 +181,7 @@ describe('the Files tab against a live dry-run worktree', () => {
     const text = browser.waitForValue(`document.querySelector('[data-slot="file-preview"]')?.textContent`, value => typeof value === 'string' && value.includes('files-tab e2e fixture repo'))
     expect(text).toContain('files-tab e2e fixture repo')
     expect(browser.url()).toContain('/files?path=')
+    expect(browser.url()).toContain('#files-tab-e2e-fixture-repo')
     browser.goto(browser.url())
     browser.waitForFunction(`document.querySelector('[data-slot="file-preview"]')?.textContent.includes('files-tab e2e fixture repo')`)
   })

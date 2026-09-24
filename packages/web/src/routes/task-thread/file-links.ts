@@ -6,14 +6,18 @@ export const TaskFileContext = createContext<TaskFileContextValue | null>(null)
 const COCKPIT_PATH = /^\/(?:api|p|tasks|new|settings|skills|workflows|git|github|inbox|automations)(?:\/|[?#]|$)/
 
 /** Classify before the Markdown sanitizer drops file: URLs; never broaden its protocol list. */
-export function taskFileHref(href: string, context: TaskFileContextValue): string | null {
-  if (!href || /[\u0000-\u001f]/.test(href) || href.startsWith('#') || href.startsWith('//')) return null
-  try { decodeURIComponent(href) } catch { return null }
+export function taskFileHref(destination: string, context: TaskFileContextValue): string | null {
+  if (!destination || /[\u0000-\u001f]/.test(destination) || destination.startsWith('#') || destination.startsWith('//')) return null
+  try { decodeURIComponent(destination) } catch { return null }
+  // Split before decoding: %23 belongs to the filename; a literal # starts a fragment.
+  const fragmentAt = destination.indexOf('#')
+  const href = fragmentAt < 0 ? destination : destination.slice(0, fragmentAt)
+  const fragment = fragmentAt < 0 ? '' : destination.slice(fragmentAt)
   const prefix = context.projectId ? `/p/${encodeURIComponent(context.projectId)}` : ''
   const files = `/tasks/${encodeURIComponent(context.runId)}/files`
   if (href.startsWith(`${files}?artifact=`)) {
     const query = new URLSearchParams(href.slice(files.length + 1))
-    if ([...query.keys()].length === 1 && /^[0-9a-f-]{36}$/i.test(query.get('artifact') ?? '')) return prefix + href
+    if ([...query.keys()].length === 1 && /^[0-9a-f-]{36}$/i.test(query.get('artifact') ?? '')) return prefix + href + fragment
     return null
   }
   if (COCKPIT_PATH.test(href)) return null
@@ -27,5 +31,5 @@ export function taskFileHref(href: string, context: TaskFileContextValue): strin
     const base = context.basePath.replaceAll('\\', '/')
     path = base.slice(0, base.lastIndexOf('/') + 1) + path
   }
-  return `${prefix}${files}?path=${encodeURIComponent(path)}`
+  return `${prefix}${files}?path=${encodeURIComponent(path)}${fragment}`
 }
