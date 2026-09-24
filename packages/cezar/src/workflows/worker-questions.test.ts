@@ -146,4 +146,31 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       expect(answered(f.w.id)).toHaveLength(1);
     } finally { f.close(); }
   });
+
+  it('keeps a routed question parent-only until it falls back to the human', async () => {
+    const f = await askedPair();
+    try {
+      const refusals = () => eventsOf(f.w.id, 'note').filter(event => event.message === 'This question was sent to the parent task; answer it there.');
+      expect(manager.sendMessage(f.w.id, [{ type: 'text', text: 'mock:agent-echo human answer' }])).toBe(false);
+      expect(refusals()).toHaveLength(1);
+      expect(eventsOf(f.w.id, 'human-input-delivered')).toEqual([]);
+      expect(eventsOf(f.w.id, 'user-message').some(event => String(event.text).includes('human answer'))).toBe(false);
+      // The fallback hands the question back to the human, who can then answer it.
+      store.appendEvent(f.w.id, { type: 'worker-question-fallback', askSeq: eventsOf(f.w.id, 'ask.requested')[0]!.seq, reason: 'test' });
+      expect(manager.sendMessage(f.w.id, [{ type: 'text', text: 'mock:agent-echo human answer' }])).toBe(true);
+      await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+      expect(eventsOf(f.w.id, 'human-input-delivered')[0]!.source).toBeUndefined();
+    } finally { f.close(); }
+  });
+
+  it('refuses a human Continue on a routed question whose session is gone', async () => {
+    const f = await askedPair();
+    f.close();
+    await restart();
+    await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting');
+    expect(manager.continueRun(f.w.id, { text: 'human answer' })).toEqual({ ok: false, error: 'This question was sent to the parent task; answer it there.' });
+    store.appendEvent(f.w.id, { type: 'worker-question-fallback', askSeq: eventsOf(f.w.id, 'ask.requested')[0]!.seq, reason: 'test' });
+    expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' }).ok).toBe(true);
+    await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+  });
 });

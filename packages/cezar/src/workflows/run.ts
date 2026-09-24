@@ -181,6 +181,8 @@ function stripDoneMarker(text: string): string {
 function stripMonitoringMarker(text: string): string {
   return text.replace(/\s*CEZ:MONITORING\s*$/, '');
 }
+/** #505: a worker question routed to its parent is answered there until it falls back. */
+const ROUTED_QUESTION_REFUSAL = 'This question was sent to the parent task; answer it there.';
 /** Emit the v2 `ask.requested` event for a parsed marker (the cockpit renders
  *  it as an ask card, #473). Returns the minted request id. */
 function emitAskRequested(sink: UiEventSink, ask: AskRequest): string {
@@ -3982,6 +3984,10 @@ export class RunManager {
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
 
     if (!userAuthored && run.ciWait) return false;
+    if (userAuthored && this.routedAsk(runId)) {
+      this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: ROUTED_QUESTION_REFUSAL });
+      return false;
+    }
     const text = content
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
@@ -4181,6 +4187,7 @@ export class RunManager {
     }
     if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && run.delegation.destroy)) return { ok: false, error: 'worker cannot continue' };
     if (this.executionBlockedByRootFinish(run)) return { ok: false, error: 'parent finish is pending' };
+    if (pendingHumanAsk && !deferForCapacity && !opts.answerInputId && this.routedAsk(runId)) return { ok: false, error: ROUTED_QUESTION_REFUSAL };
     const answers = deferForCapacity ? [run.continuationMessage, ...(run.queuedMessages ?? [])] : [opts];
     if (pendingHumanAsk && (conversation || (deferForCapacity && run.continuationMessage?.origin !== 'human') ||
       !answers.some(answer => answer?.text?.trim() || answer?.images?.length))) {
