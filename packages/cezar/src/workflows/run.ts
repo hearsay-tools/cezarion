@@ -3595,9 +3595,14 @@ export class RunManager {
    * goes back to the queue so a later session delivers it; never shown as delivered. */
   private requeueUnreadAtClose(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
     this.clearUnreadInputTimer(state);
-    const ids = [...(state.unreadInputIds ?? [])];
+    // Everything this session accepted but never saw read: steered input, messages bundled
+    // behind a human answer, and an opening instruction whose turn never succeeded.
+    const opening = state.openingAgentInputId && this.store.getRun(runId)?.agentInputs?.some(input =>
+      input.id === state.openingAgentInputId && input.deliveredAt && !input.consumedAt) ? [state.openingAgentInputId] : [];
+    const ids = [...new Set([...(state.unreadInputIds ?? []), ...(state.bundledInputIds ?? []), ...opening])];
     if (!session || !ids.length || this.active.get(runId) !== state || state.session !== session) return;
     state.unreadInputIds?.clear();
+    state.bundledInputIds = undefined;
     try { this.store.requeueUnconsumedAgentInputs(runId, ids); }
     catch (error) { console.warn(`[cez] agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); }
   }

@@ -121,4 +121,34 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
     await until(() => held.every(input => !!inputOf(p.id, input.id)?.consumedAt));
   });
+
+  it('returns bundled messages to the queue when the answer turn fails (#505 review)', async () => {
+    const p = await parent('mock:ask');
+    await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id);
+    const held = conversation(p.id)(w.id, p.id, 'progress', 'finding held behind the question');
+    manager.deliverConversationInput(p.id);
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:auth-error answer' }])).toBe(true);
+    await until(() => !manager.isActive(p.id));
+    expect(inputOf(p.id, held.id)?.deliveredAt).toBeUndefined();
+    expect(inputOf(p.id, held.id)?.awaitingRead).toBeUndefined();
+  });
+
+  it('returns a resumed opening input to the queue when its opening turn fails (#505 review)', async () => {
+    const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id, 'inspect the working tree'); manager.enqueueOwnedRun(w.id);
+    await until(() => store.getRun(w.id)?.status === 'waiting');
+    manager.finish(w.id); await until(() => !manager.isActive(w.id));
+    const now = new Date().toISOString();
+    const opening: ConversationMessage = { id: randomUUID(), senderRunId: p.id, recipientRunId: w.id, kind: 'request',
+      text: 'mock:auth-error resume instruction', createdAt: now, deadline: new Date(Date.now() + 600_000).toISOString(),
+      requestHash: 'a'.repeat(64), state: 'accepted', resumed: true };
+    const openingInput: AgentInput = { id: opening.id, source: 'agent', parentRunId: p.id, text: opening.text, createdAt: now,
+      conversation: { senderRunId: p.id, recipientRunId: w.id, kind: 'request' } };
+    expect(manager.continueRun(w.id, { text: opening.text }, true, { rootId: p.id, state: { messages: [opening], outcomes: [] }, input: openingInput }).ok).toBe(true);
+    await until(() => store.readEvents(w.id).some(event => event.type === 'error'));
+    await until(() => !manager.isActive(w.id));
+    expect(inputOf(w.id, opening.id)?.deliveredAt).toBeUndefined();
+  });
 });
