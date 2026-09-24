@@ -109,6 +109,46 @@ it('exhausts protocol retries with the provider detail and total attempt count',
     expect(v1.some(e => e.type === 'turn-end')).toBe(false);
   }, fastRetry());
 });
+it('recovers a resource_exhausted failure on the same session without a premature handoff', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cursor-resource-exhausted-retry-'));
+  const file = join(dir, 'wire.ndjson');
+  vi.stubEnv('CEZ_MOCK_STDIN_FILE', file);
+  try {
+    await withSession('mock:provider-error-resource-exhausted', async (session, v1, v2) => {
+      await waitFor(() => v1.some(e => e.type === 'turn-end' || e.type === 'error'));
+      expect(v1.filter(e => e.type === 'error')).toEqual([]);
+      expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
+      expect(v1.some(e => e.type === 'text' && e.text.includes('Cursor inspected the workspace.'))).toBe(true);
+      expect(session.open).toBe(true);
+      expect(v2.some(e => e.type === 'ask.requested' || e.type === 'session.ended')).toBe(false);
+      const notes = v2.filter((e): e is Extract<UiEvent, { type: 'session.error' }> => e.type === 'session.error');
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toMatchObject({ fatal: false });
+      expect(notes[0]?.message).toContain('[resource_exhausted] Error; retrying (1/2)');
+      const completions = v2.filter((e): e is Extract<UiEvent, { type: 'turn.completed' }> => e.type === 'turn.completed');
+      expect(completions.map(e => e.stopReason)).toEqual(['error', 'end_turn']);
+      const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      expect(rows.filter(row => row.method === 'session/new')).toHaveLength(1);
+      const prompts = rows.filter(row => row.method === 'session/prompt');
+      expect(prompts).toHaveLength(2);
+      expect(prompts[1].params).toEqual(prompts[0].params);
+    }, fastRetry());
+  } finally { vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); }
+});
+it('exhausts resource_exhausted retries with the provider detail and total attempt count', async () => {
+  await withSession('mock:provider-error-resource-exhausted-exhaust', async (session, v1, v2) => {
+    await session.result.catch(() => {});
+    const notes = v2.filter((e): e is Extract<UiEvent, { type: 'session.error' }> => e.type === 'session.error' && !e.fatal);
+    expect(notes.map(e => e.message.match(/retrying \(\d\/2\)/)?.[0])).toEqual(['retrying (1/2)', 'retrying (2/2)']);
+    expect(v1.find(e => e.type === 'error')).toMatchObject({
+      message: 'Cursor provider request failed after 3 attempts: RetriableError: [resource_exhausted] Error',
+    });
+    expect(v2.filter(e => e.type === 'turn.started')).toHaveLength(3);
+    expect(v2.filter(e => e.type === 'turn.completed' && e.stopReason === 'error')).toHaveLength(3);
+    expect(v2.some(e => e.type === 'session.error' && e.fatal)).toBe(true);
+    expect(v1.some(e => e.type === 'turn-end')).toBe(false);
+  }, fastRetry());
+});
 it('fails unknown non-retriable protocol errors without retrying', async () => {
   await withSession('mock:provider-error-unknown-protocol', async (session, v1, v2) => {
     await session.result.catch(() => {});
