@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runTaskCommand, type TaskIo } from './cli.ts';
+import { pollHitDeadline, abortedPoll, TIMEOUT_GRACE_MS } from './watch.ts';
+import { TaskCliError } from './http.ts';
 import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
 
 /** `cez task wait` / `log` / `log --follow` / `start --wait` (#504). */
@@ -185,6 +187,17 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: true, runs: [{ id: 'r1' }] });
   });
 
+  it('wait reports a connection lost mid-budget as unavailable (exit 2), not a timeout', async () => {
+    // The socket dies 750ms into a 1s budget — inside the abort grace window,
+    // but not an abort, so the exact deadline check still applies.
+    handler = (req, res) => {
+      if (req.url === '/api/v1/p/default/runs') setTimeout(() => res.destroy(), 750);
+      else { res.statusCode = 404; res.end(); }
+    };
+    expect(await run(['wait', 'r1', '--timeout-seconds', '1'])).toBe(2);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ code: 'unavailable' });
+  });
+
   /** Replay of seq 1..3 with a live `run` frame (already terminal) arriving after seq 1. */
   const replayWithEarlyRunFrame = () => {
     handler = (req, res) => {
@@ -258,5 +271,39 @@ describe('cez task watching against a scripted cockpit', () => {
     const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.slice(0, 3).map((line) => line.text)).toEqual(['t1', 't2', 't3']);
     expect(lines.at(-1)).toMatchObject({ id: 'r1', status: 'done' });
+  });
+});
+
+/**
+ * The deadline boundary (#538): a budget-bounded poll whose abort lands a
+ * millisecond short of the deadline still failed *at* the deadline, so `wait`
+ * answers timeout (exit 3), not unavailable (exit 2).
+ */
+describe('pollHitDeadline', () => {
+  const start = 1_000_000;
+  const budget = 1_000;
+
+  it('holds at and just before the deadline', () => {
+    expect(pollHitDeadline(start, budget, start + budget)).toBe(true);
+    expect(pollHitDeadline(start, budget, start + budget - 1)).toBe(true);
+    expect(pollHitDeadline(start, budget, start + budget - TIMEOUT_GRACE_MS)).toBe(true);
+  });
+
+  it('lets a fast failure through as a genuine cockpit error', () => {
+    expect(pollHitDeadline(start, budget, start + 5)).toBe(false);
+    expect(pollHitDeadline(start, budget, start + budget - TIMEOUT_GRACE_MS - 1)).toBe(false);
+  });
+});
+
+describe('abortedPoll', () => {
+  it('recognises the budget abort fetchJson folds into unavailable', () => {
+    const abort = new TaskCliError(2, { code: 'unavailable', error: 'cockpit request failed: The operation was aborted due to timeout' });
+    expect(abortedPoll(abort)).toBe(true);
+  });
+
+  it('rejects genuine failures and non-CLI errors', () => {
+    const refused = new TaskCliError(2, { code: 'unavailable', error: 'cockpit request failed: fetch failed' });
+    expect(abortedPoll(refused)).toBe(false);
+    expect(abortedPoll(new Error('boom'))).toBe(false);
   });
 });

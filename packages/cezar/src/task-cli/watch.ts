@@ -60,6 +60,34 @@ function isFailure(entry: WaitEntry): boolean {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Grace for the millisecond race between a budget-bounded poll's abort and the
+ * deadline check (#538): `AbortSignal.timeout(budget)` can fire while
+ * `Date.now()` still reads just under the deadline, turning a timeout into an
+ * `unavailable` error (exit 2 instead of 3). A poll whose own abort consumed
+ * (almost) all of its budget failed *at* the deadline, so it answers "timed
+ * out". The grace never applies to other errors: a genuine failure stays
+ * `unavailable` even when it lands inside the grace window.
+ */
+export const TIMEOUT_GRACE_MS = 250;
+
+export function pollHitDeadline(startedAt: number, budgetMs: number, now: number = Date.now()): boolean {
+  return now - startedAt >= budgetMs - TIMEOUT_GRACE_MS;
+}
+
+/**
+ * True when the wrapped cockpit error came from the poll's own abort (its
+ * budget running out) rather than a fast failure such as a refused
+ * connection. `fetchJson` folds every fetch failure into `unavailable`, so the
+ * abort surfaces only through the original message it preserves (`TimeoutError:
+ * The operation was aborted due to timeout`).
+ */
+export function abortedPoll(error: unknown): boolean {
+  if (!(error instanceof TaskCliError)) return false;
+  const body = error.body as { error?: unknown };
+  return /abort|timeout/i.test(String(body.error ?? ''));
+}
+
+/**
  * Polls `GET /runs`: one call covers any number of runs and holds no socket open. Each poll is
  * bounded by what is left of the deadline, so a slow cockpit answers "timed out" on time rather
  * than holding the caller for a full request timeout.
@@ -74,11 +102,13 @@ export async function waitForRuns(
   for (;;) {
     const budget = deadline - Date.now();
     if (budget <= 0) return { exitCode: 3, runs: entries, timedOut: true };
+    const pollStart = Date.now();
     let result;
     try {
       result = await request(cockpit, '/runs', { timeoutMs: budget });
     } catch (error) {
       if (Date.now() >= deadline) return { exitCode: 3, runs: entries, timedOut: true };
+      if (abortedPoll(error) && pollHitDeadline(pollStart, budget)) return { exitCode: 3, runs: entries, timedOut: true };
       throw error;
     }
     if (result.status !== 200) refuse(result);
@@ -213,12 +243,15 @@ export async function readLog(
 
   /** The event file's high-water mark, or undefined once the deadline has passed. */
   const highWater = async (): Promise<number | undefined> => {
-    if (remaining() <= 0) return undefined;
+    const budget = remaining();
+    if (budget <= 0) return undefined;
+    const startedAt = Date.now();
     let history;
     try {
-      history = await request(cockpit, `/runs/${encodeURIComponent(id)}/history`, { timeoutMs: remaining() });
+      history = await request(cockpit, `/runs/${encodeURIComponent(id)}/history`, { timeoutMs: budget });
     } catch (error) {
       if (remaining() <= 0) return undefined;
+      if (abortedPoll(error) && pollHitDeadline(startedAt, budget)) return undefined;
       throw error;
     }
     if (history.status !== 200) refuse(history);
