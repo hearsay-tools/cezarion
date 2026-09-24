@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -84,6 +84,40 @@ describe('pi agent input steering (#505)', () => {
     await session.sendAgentMessage([{ type: 'text', text: 'mock:provider-error guidance' }], ['in-failed']);
     await waitUntil(() => events.filter(e => e.type === 'turn-end').length === 2);
     expect(consumed).toEqual([]);
+    session.end(); await session.result.catch(() => undefined);
+  });
+
+  it('does not count a steer pi had not acknowledged when a turn started as carried by it (#505 CI race)', async () => {
+    // A scripted pi: the opening turn starts 300 ms after its ack, before pi reads the steer
+    // the runner wrote meanwhile; pi then runs the steer as its own next turn.
+    const dir = mkdtempSync(join(tmpdir(), 'cez-pi-carried-')); dirs.push(dir);
+    const script = join(dir, 'pi-scripted.mjs');
+    writeFileSync(script, `#!/usr/bin/env node
+import readline from 'node:readline';
+const send = v => process.stdout.write(JSON.stringify(v) + '\\n');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let n = 0;
+for await (const line of readline.createInterface({ input: process.stdin })) {
+  const c = JSON.parse(line);
+  if (c.type === 'get_state') { send({ id: c.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 's' } }); continue; }
+  if (c.type !== 'prompt') continue;
+  send({ ...(c.id ? { id: c.id } : {}), type: 'response', command: 'prompt', success: true });
+  if (++n === 1) await sleep(300);
+  send({ type: 'agent_start' }); send({ type: 'turn_start' });
+  if (n > 1) send({ type: 'message_start', message: { role: 'user', content: [{ type: 'text', text: c.message }] } });
+  send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: 'turn ' + n } });
+  send({ type: 'message_end', message: { role: 'assistant', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } } });
+  send({ type: 'agent_settled' });
+}
+`, { mode: 0o755 });
+    const events: AgentEvent[] = []; const order: string[] = [];
+    const session = new PiRunner({ bin: script, timeoutMs: 0 }).startSession({ userPrompt: 'opening', cwd: dir },
+      event => { events.push(event); if (event.type === 'turn-end') order.push('turn-end'); },
+      { onAgentInputConsumed: ids => order.push('read:' + ids.join(',')), onAgentInputReady: () => undefined });
+    await waitUntil(() => session.sendAgentMessage([{ type: 'text', text: 'steer' }], ['late']) !== false);
+    await waitUntil(() => order.includes('read:late'));
+    // Read by the second turn, never credited to the opening turn's settle.
+    expect(order.indexOf('read:late')).toBeGreaterThan(order.indexOf('turn-end'));
     session.end(); await session.result.catch(() => undefined);
   });
 });

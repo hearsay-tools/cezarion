@@ -204,6 +204,7 @@ export class PiRunner implements AgentRunner {
     // drops an acknowledged steer — one sent as a turn settles runs as the next
     // prompt — so pi reports no unconsumed input (#505).
     let carried = new Set<string>();
+    const acked = new Set<string>();
     let turnFailed = false;
     const sendMessage = (content: ContentBlock[], requestId?: string, inputIds: readonly string[] = []): boolean => {
       if (!open) return false;
@@ -326,7 +327,7 @@ export class PiRunner implements AgentRunner {
             const pending = agentAck;
             if (pending && value.id === pending.id) {
               agentAck = undefined;
-              if (value.success === true) pending.resolve();
+              if (value.success === true) { acked.add(pending.id); pending.resolve(); }
               else {
                 const message = rpcError(value);
                 if (open) onEvent?.({ type: 'error', message });
@@ -364,7 +365,9 @@ export class PiRunner implements AgentRunner {
               latchedProviderError = undefined;
             }
           } else if (value.type === 'agent_start') {
-            carried = new Set(submissions.pendingIds());
+            // Pi handles commands in stream order: only a prompt it acknowledged before this
+            // agent_start can be in the turn it starts (#505 CI race).
+            carried = new Set(submissions.pendingIds().filter(id => acked.has(id)));
             turnFailed = false;
           } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
             // The model received this prompt now (#505).
