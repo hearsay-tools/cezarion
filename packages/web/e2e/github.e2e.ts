@@ -312,7 +312,7 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/github-pr-changes.png`)
   })
 
-  it('on desktop docks the panes so the list and detail scroll independently (#523)', async () => {
+  it('on desktop the list and detail scroll independently under a standing header (#523)', async () => {
     if (!forgeAvailable) return
     const gh = await api<GithubPayload>('/api/v1/github')
     const template = gh.issues[0]
@@ -347,49 +347,26 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelectorAll('[data-slot="gh-row"]').length === 40`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-detail"]') !== null`)
 
-    const beforeDock = browser.waitForValue<{
-      pageCanScroll: boolean
-      listDidNotInnerScroll: boolean
-      detailDidNotInnerScroll: boolean
-    }>(`(() => {
-      const main = document.querySelector('[data-slot="main"]');
-      const header = document.querySelector('[data-slot="gh-header"]');
-      const panes = document.querySelector('[data-slot="gh-panes"]');
-      const list = document.querySelector('[data-slot="gh-list"]');
-      const detail = document.querySelector('[data-slot="gh-detail"]');
-      if (!main || !header || !panes || !list || !detail) return null;
-      main.scrollTop = 0;
-      list.scrollTop = 160;
-      detail.scrollTop = 160;
-      return {
-        pageCanScroll: main.scrollHeight > main.clientHeight + 40,
-        listDidNotInnerScroll: list.scrollTop < 80,
-        detailDidNotInnerScroll: detail.scrollTop < 80,
-      };
-    })()`, (value) => Boolean(value?.pageCanScroll && value.listDidNotInnerScroll && value.detailDidNotInnerScroll))
-    expect(beforeDock).toMatchObject({
-      pageCanScroll: true,
-      listDidNotInnerScroll: true,
-      detailDidNotInnerScroll: true,
-    })
-
     const evidence = browser.waitForValue<{
+      headerVisible: boolean
       listMoved: boolean
       detailStill: boolean
       detailMoved: boolean
       listStill: boolean
-      headerMoved: boolean
     }>(`(() => {
       const main = document.querySelector('[data-slot="main"]');
       const header = document.querySelector('[data-slot="gh-header"]');
-      const panes = document.querySelector('[data-slot="gh-panes"]');
       const list = document.querySelector('[data-slot="gh-list"]');
       const detail = document.querySelector('[data-slot="gh-detail"]');
-      if (!main || !header || !panes || !list || !detail) {
-        return { listMoved: false, detailStill: false, detailMoved: false, listStill: false, headerMoved: false };
-      }
-      main.scrollTop = main.scrollHeight;
-      if (!panes.hasAttribute('data-docked')) return null;
+      if (!main || !header || !list || !detail) return null;
+      const mainTop = main.getBoundingClientRect().top;
+      const headerVisible = header.getBoundingClientRect().bottom > mainTop + 8;
+      if (!headerVisible) return null;
+      if (getComputedStyle(list).overflowY !== 'auto') return null;
+      if (getComputedStyle(detail).overflowY !== 'auto') return null;
+      if (list.scrollHeight <= list.clientHeight) return null;
+      if (detail.scrollHeight <= detail.clientHeight) return null;
+      main.scrollTop = 0;
       list.scrollTop = 0;
       detail.scrollTop = 0;
       const detailBefore = detail.scrollTop;
@@ -400,19 +377,15 @@ describe('the GitHub tab against the live dry-run server', () => {
       detail.scrollTop = 160;
       const detailMoved = detail.scrollTop >= 80;
       const listStill = list.scrollTop === listBefore;
-      const mainTop = main.getBoundingClientRect().top;
-      const headerMoved =
-        header.getBoundingClientRect().bottom <= mainTop + 2 ||
-        panes.getBoundingClientRect().top <= mainTop + 4;
-      if (!listMoved || !detailStill || !detailMoved || !listStill || !headerMoved) return null;
-      return { listMoved, detailStill, detailMoved, listStill, headerMoved };
+      if (!listMoved || !detailStill || !detailMoved || !listStill) return null;
+      return { headerVisible, listMoved, detailStill, detailMoved, listStill };
     })()`)
     expect(evidence).toMatchObject({
+      headerVisible: true,
       listMoved: true,
       detailStill: true,
       detailMoved: true,
       listStill: true,
-      headerMoved: true,
     })
     browser.screenshot(`${artifactsDir}/github-independent-scroll.png`)
   })

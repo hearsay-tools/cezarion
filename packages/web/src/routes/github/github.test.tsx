@@ -406,27 +406,34 @@ describe('the GitHub tab lists', () => {
   })
 
   // jsdom lays nothing out, so the classes are all this can check. The real-layout proof
-  // (main scrolls first; after the row docks, each pane scrolls without moving the other)
-  // lives in e2e/github.e2e.ts.
-  it('keeps the pane row in document flow until it docks (#523)', async () => {
+  // (header stays put, each pane scrolls without moving the other) lives in e2e/github.e2e.ts.
+  it('fills the remaining desktop height so list and detail scroll on their own (#523)', async () => {
     stubFetch()
     renderAt('/github')
     await screen.findByRole('heading', { name: 'GitHub' })
 
+    const route = document.querySelector('[data-route="github"]') as HTMLElement
     const header = document.querySelector('[data-slot="gh-header"]') as HTMLElement
     const panes = document.querySelector('[data-slot="gh-panes"]') as HTMLElement
     const detail = document.querySelector('[data-slot="gh-detail"]') as HTMLElement
 
+    expect(route.className).toContain('md:h-full')
+    expect(header.className).toContain('shrink-0')
     expect(header.className.split(' ')).not.toContain('sticky')
     expect(header.className.split(' ')).not.toContain('md:sticky')
     expect(panes.getAttribute('data-docked')).toBeNull()
     expect(panes.className.split(' ')).not.toContain('md:sticky')
-    expect(panes.className.split(' ')).not.toContain('sticky')
-    expect(ghList().className.split(' ')).not.toContain('md:overflow-y-auto')
-    expect(ghList().className.split(' ')).not.toContain('overflow-y-auto')
-    expect(detail.className.split(' ')).not.toContain('md:overflow-y-auto')
-    expect(detail.className.split(' ')).not.toContain('overflow-y-auto')
+    expect(panes.className).toContain('min-h-0')
+    expect(panes.className).toContain('flex-1')
+    expect(panes.className).toContain('md:overflow-hidden')
+    expect(panes.className).toContain('md:items-stretch')
+    expect(ghList().className).toContain('min-h-0')
+    expect(ghList().className).toContain('md:overflow-y-auto')
+    expect(detail.className).toContain('min-h-0')
+    expect(detail.className).toContain('md:overflow-y-auto')
     expect(panes.className.split(' ')).not.toContain('overscroll-contain')
+    expect(ghList().className.split(' ')).not.toContain('overflow-y-auto')
+    expect(detail.className.split(' ')).not.toContain('overflow-y-auto')
   })
 
   it('compacts the phone header so the first result can share the 360×640 viewport (#325)', async () => {
@@ -1350,19 +1357,6 @@ describe('GitHub handoff field chrome (#243)', () => {
   ].find((file) => existsSync(file))
   if (!cssPath) throw new Error(`github-layout.css not found from ${process.cwd()}`)
   const css = readFileSync(cssPath, 'utf8')
-
-  it('docks sticky inner scroll behind data-docked so main can scroll first (#523)', () => {
-    const panes = cascadeCss(css, ["[data-slot='gh-panes'][data-docked]"])
-    expect(panes.position).toBe('sticky')
-    expect(panes.top).toBe('0')
-    expect(panes.height).toBe('var(--gh-panes-height)')
-    expect(panes.overflow).toBe('hidden')
-    const cols = cascadeCss(css, [
-      "[data-slot='gh-panes'][data-docked] [data-slot='gh-list'], [data-slot='gh-panes'][data-docked] [data-slot='gh-detail']",
-    ])
-    expect(cols.height).toBe('100%')
-    expect(cols['overflow-y']).toBe('auto')
-  })
 
   it('keeps phone filters wrapping instead of stacking a column that hides the first row (#325)', () => {
     expect(css).not.toMatch(/\[data-slot='gh-issue-filters'\]\s*\{[^}]*flex-direction:\s*column/)
