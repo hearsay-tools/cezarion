@@ -74,7 +74,7 @@ import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { reconcileConversationState, projectConversationEvents } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
-import { answersQuestion, questionMessage } from '../delegation/questions.ts';
+import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import type { QueuedMessage, RunRecord, RunStore, StepState } from '../runs/store.ts';
@@ -3231,7 +3231,10 @@ export class RunManager {
     if (repairOnly) return;
     if (root?.delegation?.role !== 'root' || !this.parentCanReceive(root)) { fallback('the parent can no longer receive messages'); return; }
     const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
-    if (state.messages.length >= 1024 || (root.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32 ||
+    // Room for the question AND its reply, beside the replies other open questions reserve; the
+    // reply lands in this worker's inbox, so that needs room too.
+    if (state.messages.length + openQuestions(state).length + 2 > 1024 || (root.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32 ||
+      (worker.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32 ||
       state.messages.filter(m => m.kind === 'request' && m.state === 'accepted' && !state.outcomes.some(o => o.requestId === m.id)).length >= 32) {
       fallback('the parent conversation is at capacity'); return;
     }

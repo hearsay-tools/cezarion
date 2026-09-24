@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AgentInput, AskRequest, ConversationMessage } from '@open-mercato/cezar-contract';
+import type { AgentInput, AskRequest, ConversationMessage, ConversationState } from '@open-mercato/cezar-contract';
 
 /** A worker's question travels to its owning parent as a conversation request (#505). Its ID
  * derives from the worker and the ask's event seq, so routing it again after a restart finds
@@ -34,6 +34,13 @@ export function formatQuestionText(workerRunId: string, messageId: string, reque
 /** Only a reply naming this question answers it; progress and follow-ups never do. */
 export function answersQuestion(message: ConversationMessage, input: AgentInput): boolean {
   return !!message.question && input.conversation?.kind === 'reply' && input.conversation.requestId === message.id;
+}
+
+/** Routed questions still awaiting an answer. Each one holds a reserved conversation slot, and
+ * a slot in its worker's inbox, for its reply: otherwise ordinary traffic could fill both and
+ * leave a question nobody can answer (#505). */
+export function openQuestions(state: ConversationState): ConversationMessage[] {
+  return state.messages.filter(message => message.question && !state.outcomes.some(outcome => outcome.requestId === message.id));
 }
 
 /** A UUID-shaped (version 4 layout) identifier derived from a stable key. */

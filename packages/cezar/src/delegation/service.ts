@@ -1,4 +1,5 @@
 import { reconcileConversationState, projectConversationEvents } from './conversations.ts';
+import { openQuestions } from './questions.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
 import { join } from 'node:path';
 import { prepareWorkerContext, workerContextTask } from './context.ts';
@@ -194,8 +195,13 @@ export class DelegationService {
         ...(resume ? { resumed: true as const } : {}), ...(instruction ? { instruction } : {}),
         state: request.kind === 'reply' && settled ? 'late' : destroyed ? 'destroyed' : resumable && !resume ? 'continuation-required' : 'accepted' };
       const enqueue = !destroyed && (!resumable || resume);
-      if (state.messages.length >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
-        (enqueue && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
+      // Open worker questions reserve room for their replies (#505); the reply spends its own.
+      const open = openQuestions(state);
+      const answering = request.kind === 'reply' && !settled && !!original?.question;
+      const reservedMessages = open.length - (answering ? 1 : 0);
+      const reservedInbox = answering ? 0 : open.filter(question => question.senderRunId === recipient.id).length;
+      if (state.messages.length + reservedMessages >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
+        (enqueue && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length + reservedInbox >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
       const outcomes = [...state.outcomes];
       if (request.kind === 'reply' && !settled) outcomes.push({ requestId: request.requestId!, status: 'replied', observedAt: now, replyId: request.id });
       const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,

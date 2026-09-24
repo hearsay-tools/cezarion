@@ -327,4 +327,41 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       await until(() => said(f.w.id, 'Use the parser'));
     } finally { f.close(); }
   });
+
+  /** Historical parent→worker traffic filling the family ledger to `count` messages. */
+  function fillConversation(parentId: string, workerId: string, count: number) {
+    const now = new Date().toISOString();
+    const state = conversationOf(parentId) ?? { messages: [], outcomes: [] };
+    store.commitConversation(parentId, { ...state, messages: [...state.messages, ...Array.from({ length: count - state.messages.length }, () => ({
+      id: randomUUID(), senderRunId: parentId, recipientRunId: workerId, kind: 'progress' as const, text: 'old', createdAt: now, requestHash: 'd'.repeat(64), state: 'accepted' as const,
+    }))] });
+  }
+
+  it('leaves the question with the human when the conversation has no room for its reply', async () => {
+    process.env.CEZ_DELEGATION = '1';
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id, 'mock:ask');
+    fillConversation(p.id, w.id, 1023);
+    manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);
+    expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
+  });
+
+  it("keeps room for an open question's reply in the conversation and the worker's inbox", async () => {
+    const f = await askedPair();
+    try {
+      const progress = () => f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'progress', text: 'mock:agent-echo more', timeoutSeconds: 600 });
+      const capacity = (error: unknown) => error instanceof DelegationPolicyError && error.code === 'capacity_limit';
+      // Inbox: 31 held inputs plus the reply's reserved slot fill the worker's 32.
+      const now = new Date().toISOString();
+      fixtureUpdateRun(f.w.id, { agentInputs: [...(store.getRun(f.w.id)?.agentInputs ?? []), ...Array.from({ length: 31 }, () => ({ id: randomUUID(), source: 'agent' as const, parentRunId: f.p.id, text: 'held', createdAt: now }))] });
+      await expect(progress()).rejects.toSatisfy(capacity);
+      fixtureUpdateRun(f.w.id, { agentInputs: (store.getRun(f.w.id)?.agentInputs ?? []).filter(input => input.text !== 'held') });
+      // Conversation: 1,023 messages plus the reply's reserved slot fill the 1,024.
+      fillConversation(f.p.id, f.w.id, 1023);
+      await expect(progress()).rejects.toSatisfy(capacity);
+      await f.reply('mock:agent-echo Use the parser');
+      await until(() => answered(f.w.id).length === 1);
+    } finally { f.close(); }
+  });
 });
