@@ -34,6 +34,9 @@ async function prompt(id, content) {
   if (input.includes('mock:rpc-error')) { emit({ id, error: { code: -32603, message: 'Provider rejected request' } }); return; }
   // #443 provider-error envelopes: the specific scenarios must be matched BEFORE the
   // bare 'mock:provider-error' prefix, which every one of them contains.
+  // #508: observed Cursor 2026.09.18-9a7762b error envelope, followed by end_turn.
+  if (input.includes('mock:provider-error-protocol') && (input.includes('-exhaust') || prompts === 1)) { text('\n\nError: RetriableError: [invalid_argument] protocol error: missing EndStreamResponse'); complete(id); return; }
+  if (input.includes('mock:provider-error-unknown-protocol')) { text('\n\nError: [invalid_argument] protocol error: unknown frame'); complete(id); return; }
   if (input.includes('mock:provider-error-transient') && prompts === 1) { text('\n\nError: 502 bad gateway.'); complete(id); return; }
   if (input.includes('mock:provider-error-bare')) { text('\n\nError: 502 bad gateway.'); complete(id); return; }
   if (input.includes('mock:provider-error-instant-near') && prompts === 1) { text(`\n\nError: 429 rate limited, try again at ${new Date(Date.now() + 300).toISOString()}.`); complete(id); return; }

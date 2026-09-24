@@ -25,9 +25,11 @@ const CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
  * the cost of a false positive is two wasted prompts (bounded below), while the
  * cost of a false negative is a dead run that needed a human Continue. Fatal
  * prose like "context length exceeded" or "model not found" matches none of these.
+ * Cursor's explicit RetriableError includes stream-protocol failures (#508);
+ * the word boundary keeps NonRetriableError and unknown protocol errors fatal.
  */
 const TRANSIENT_SIGNAL_RE =
-  /\b(?:429|500|502|503|504|rate[ _-]?limit(?:ed)?|overloaded|temporar(?:y|ily)|timed?[ _-]?out|bad gateway|service unavailable|internal server error|connection (?:reset|refused|closed|error)|econn(?:reset|refused|aborted)|socket hang up|try again|retry)\b/i;
+  /\b(?:429|500|502|503|504|rate[ _-]?limit(?:ed)?|overloaded|temporar(?:y|ily)|timed?[ _-]?out|bad gateway|service unavailable|internal server error|connection (?:reset|refused|closed|error)|econn(?:reset|refused|aborted)|socket hang up|try again|retry|RetriableError)\b/i;
 
 /**
  * Strip the envelope prefix, control characters and runs of whitespace. Uncapped — this is the
