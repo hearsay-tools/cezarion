@@ -818,6 +818,42 @@ describe('reduceThread — AskUser cards (#473)', () => {
     expect(ask).toMatchObject({ resolved: true, answer: 'Library: date-fns' })
   })
 
+  // #505: a worker's question travels to its parent, and the parent's reply answers it.
+  it('a routed worker question is read-only until the parent answers it', () => {
+    const parentRunId = '11111111-2222-4333-8444-555555555555'
+    const routed = allItems([
+      line(2, 'ask.requested', ASK),
+      line(3, 'worker-question-routed', { askSeq: 2, messageId: '21111111-2222-4333-8444-555555555555', parentRunId }),
+    ]).find((i) => i.kind === 'ask')
+    expect(routed).toMatchObject({ resolved: false, routedToParent: true, parentRunId })
+    const answered = allItems([
+      line(2, 'ask.requested', ASK),
+      line(3, 'worker-question-routed', { askSeq: 2, messageId: '21111111-2222-4333-8444-555555555555', parentRunId }),
+      line(4, 'human-input-delivered', { askSeq: 2, source: 'parent' }),
+    ]).find((i) => i.kind === 'ask')
+    expect(answered).toMatchObject({ resolved: true, answeredBy: 'parent' })
+  })
+
+  it('a fallback hands the routed question back to the human', () => {
+    const ask = allItems([
+      line(2, 'ask.requested', ASK),
+      line(3, 'worker-question-routed', { askSeq: 2, messageId: '21111111-2222-4333-8444-555555555555', parentRunId: '11111111-2222-4333-8444-555555555555' }),
+      line(4, 'worker-question-fallback', { askSeq: 2, reason: 'parent-cancelled' }),
+      line(5, 'user-message', { text: 'Library: Luxon', imageCount: 0 }),
+    ]).find((i) => i.kind === 'ask')
+    expect(ask).toMatchObject({ resolved: true, routedToParent: false, answeredBy: 'human', answer: 'Library: Luxon' })
+  })
+
+  it('a routing event for another ask leaves this card alone', () => {
+    const ask = allItems([
+      line(2, 'ask.requested', ASK),
+      line(3, 'worker-question-routed', { askSeq: 1, messageId: '21111111-2222-4333-8444-555555555555', parentRunId: '11111111-2222-4333-8444-555555555555' }),
+      line(4, 'human-input-delivered', { askSeq: 1, source: 'parent' }),
+    ]).find((i) => i.kind === 'ask')
+    expect(ask).toMatchObject({ resolved: false })
+    expect((ask as { routedToParent?: boolean }).routedToParent).toBeUndefined()
+  })
+
   it('drops an ask.requested with no valid questions', () => {
     expect(
       allItems([line(1, 'ask.requested', { requestId: 'x', questions: [] })]).some(

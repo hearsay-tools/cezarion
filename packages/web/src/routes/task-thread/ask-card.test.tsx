@@ -320,3 +320,27 @@ describe('AskCard — answering after the session has ended', () => {
     expect(continueAsync).not.toHaveBeenCalled()
   })
 })
+
+describe('AskCard for a worker question routed to its parent (#505)', () => {
+  const parentId = '11111111-2222-4333-8444-555555555555'
+  it('renders the question read-only with a link to the parent task', () => {
+    renderAsk({ ...singleAsk, routedToParent: true, parentRunId: parentId })
+    expect(screen.getByText('Which date library should I standardize on?')).toBeTruthy()
+    expect(screen.getByText('date-fns')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /date-fns/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Send/ })).toBeNull()
+    expect(screen.getByRole('link', { name: 'parent task' }).getAttribute('href')).toContain(`/tasks/${parentId}`)
+    expect(document.querySelector('[data-slot="ask-routed-hint"]')?.textContent).toContain('Routed to parent')
+  })
+
+  it('shows the chips again once the question falls back to the human', () => {
+    renderAsk({ ...singleAsk, routedToParent: false, parentRunId: parentId })
+    expect(screen.getByRole('button', { name: /date-fns/ })).toBeTruthy()
+    expect(document.querySelector('[data-slot="ask-routed-hint"]')).toBeNull()
+  })
+
+  it('says the parent answered it', () => {
+    renderAsk({ ...singleAsk, resolved: true, answeredBy: 'parent' })
+    expect(screen.getByText('Answered by parent')).toBeTruthy()
+  })
+})
