@@ -2,7 +2,7 @@ import type { ApiRun } from '@open-mercato/cezar-contract';
 import { DelegationService } from '../delegation/service.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
-import { workerEmptyRequestSchema, runRelationshipsSchema, runDelegationSummarySchema } from '@open-mercato/cezar-contract';
+import { CLIENT_REQUEST_VARIANTS_ERROR, workerEmptyRequestSchema, runRelationshipsSchema, runDelegationSummarySchema } from '@open-mercato/cezar-contract';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
@@ -93,6 +93,7 @@ import {
   validateLiveCursor,
 } from '../runs/event-history.ts';
 import { readRunIndexFromDisk } from '../runs/run-index.ts';
+import { clientRequestHash } from '../runs/client-request.ts';
 import { ColdRepoHandles } from './cold-repo-handles.ts';
 import { isV2WireEventType } from '../runs/ui-event-sink.ts';
 import {
@@ -628,9 +629,14 @@ const startRunSchema = z
     // audit trail survives the composer detour. Bounded like every other
     // string here; a todo id is a short generated key.
     todoId: z.string().min(1).max(200, 'must be at most 200 characters').optional(),
+    // Idempotent start (#504): the same id and payload answer 200 with the existing run.
+    clientRequestId: z.string().uuid().optional(),
   })
   .refine((b) => Boolean(b.workflow) !== Boolean(b.steps), {
     message: 'provide either "workflow" or "steps", not both',
+  })
+  .refine((b) => !(b.clientRequestId && (b.variants ?? 1) > 1), {
+    message: CLIENT_REQUEST_VARIANTS_ERROR,
   });
 
 const pickSchema = z.object({
@@ -3672,6 +3678,18 @@ export function createApp(deps: ServerDeps) {
         // CEZ_TODOS_FILE alike (RunManager.agentEnv).
         generateFollowups: capabilities().followups ? parsed.data.generateFollowups : false,
       };
+      if (parsed.data.clientRequestId) {
+        // Idempotent start (#504). The lookup and the create are one synchronous call in the
+        // manager, after every await above, so two concurrent retries cannot both create.
+        const result = manager.startRunIdempotent(workflow, input, {
+          id: parsed.data.clientRequestId,
+          hash: clientRequestHash(parsed.data),
+        });
+        if ('conflict' in result) return c.json({ error: 'request id payload conflict' }, 409);
+        if (!result.created) return c.json(result.run, 200 as const);
+        if (parsed.data.todoId) await noteTodoStarted(dataDir, parsed.data.todoId, result.run.id);
+        return c.json(result.run, 201 as const);
+      }
       const variants = parsed.data.variants ?? 1;
       if (variants > 1) {
         // Variants live in worktrees — without git there's nothing to isolate

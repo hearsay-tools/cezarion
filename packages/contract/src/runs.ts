@@ -740,6 +740,9 @@ export type AttachmentInput = z.input<typeof attachmentInputSchema>;
 export const imageInputSchema = attachmentInputSchema;
 export type ImageInput = AttachmentInput;
 
+/** A request id names one run, so it cannot ask for ×2/×3. */
+export const CLIENT_REQUEST_VARIANTS_ERROR = 'clientRequestId names one run; it cannot be combined with variants > 1';
+
 /**
  * The KEYS of `POST /runs`' body, before the XOR refinement that `createRunInputSchema` adds.
  *
@@ -795,10 +798,20 @@ export const createRunInputBaseSchema = z
  * Every bound here is the server's own (#429): an unbounded body must never reach a spawned
  * process, so a client that validates before sending gets the same answer the route would give.
  */
-export const createRunInputSchema = createRunInputBaseSchema.refine(
-  (b) => Boolean(b.workflow) !== Boolean(b.steps),
-  { message: 'provide either "workflow" or "steps", not both' },
-);
+export const createRunInputSchema = createRunInputBaseSchema
+  .extend({
+    /** Idempotent start (#504): a retry with the same id and payload answers `200` with the run
+     *  the first request created; a different payload answers `409`. Scoped to the project. Not
+     *  on the base schema, so an automation's task definition cannot carry one. */
+    clientRequestId: z.string().uuid().optional(),
+  })
+  .refine(
+    (b) => Boolean(b.workflow) !== Boolean(b.steps),
+    { message: 'provide either "workflow" or "steps", not both' },
+  )
+  .refine((b) => !(b.clientRequestId && (b.variants ?? 1) > 1), {
+    message: CLIENT_REQUEST_VARIANTS_ERROR,
+  });
 export type CreateRunInput = z.input<typeof createRunInputSchema>;
 
 /**

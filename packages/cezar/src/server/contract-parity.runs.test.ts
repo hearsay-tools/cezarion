@@ -56,6 +56,7 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
   type RunsList200 = InferResponseType<Runs['$get'], 200>;
   type RunGet200 = InferResponseType<Run['$get'], 200>;
   type RunCreate201 = InferResponseType<Runs['$post'], 201>;
+  type RunCreate200 = InferResponseType<Runs['$post'], 200>;
   type RunArchive200 = InferResponseType<Run['archive']['$post'], 200>;
   type RunPin200 = InferResponseType<Run['pin']['$post'], 200>;
   type RunRead200 = InferResponseType<Run['read']['$post'], 200>;
@@ -102,6 +103,8 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
         | { runs: Extract<RunCreate201, { runs: unknown }>['runs'][number][] }
       >
     >,
+    // an idempotent retry (#504) answers 200 with the stored record the first request created
+    Assert<Exact<z.infer<typeof runRecordSchema>, RunCreate200>>,
     // lifecycle
     Assert<Exact<z.infer<typeof archiveFinishedResponseSchema>, ArchiveFinished200>>,
     Assert<Exact<z.infer<typeof cancelResponseSchema>, Cancel200>>,
