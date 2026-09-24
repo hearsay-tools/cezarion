@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { classifyCursorProviderError, sanitizeCursorProviderError } from './cursor-provider-error.ts';
+import { appendCursorStderr, classifyCursorProviderError, CURSOR_PROVIDER_ERROR_MAX_CHARS, sanitizeCursorProviderError } from './cursor-provider-error.ts';
 
 describe('sanitizeCursorProviderError', () => {
   it('strips the Cursor error-envelope prefix and collapses whitespace', () => {
@@ -17,6 +17,16 @@ describe('sanitizeCursorProviderError', () => {
 
   it('leaves text without the envelope prefix intact apart from sanitization', () => {
     expect(sanitizeCursorProviderError('plain 429 failure')).toBe('plain 429 failure');
+  });
+});
+
+describe('appendCursorStderr', () => {
+  it('keeps only the last cap as chunks arrive, so a live session cannot grow unbounded', () => {
+    let buf = appendCursorStderr('', 'a'.repeat(400));
+    buf = appendCursorStderr(buf, 'b'.repeat(200));
+    expect(buf.length).toBe(CURSOR_PROVIDER_ERROR_MAX_CHARS);
+    expect(buf.endsWith('b'.repeat(200))).toBe(true);
+    expect(buf.startsWith('a'.repeat(300))).toBe(true);
   });
 });
 

@@ -456,7 +456,7 @@ describe('Cursor ACP spawn retry (#529)', () => {
   });
 
   it('includes capped stderr when an unexpected bootstrap exit exhausts retries', async () => {
-    const stderr = `boom ${'x'.repeat(2000)}`;
+    const stderr = `${'x'.repeat(2000)} boom`;
     await driveCrash({ remaining: 10, resume: true, stderr }, async (session, v1) => {
       await session.result.catch(() => {});
       const error = v1.find((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error');

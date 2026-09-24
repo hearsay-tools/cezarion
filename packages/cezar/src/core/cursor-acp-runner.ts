@@ -8,7 +8,7 @@ import { parseAskMarker, parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
 import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, EOF_TERM_GRACE_MS, EOF_KILL_GRACE_MS } from './runner-runtime.ts';
 import { createCursorUiState, mapCursorMessage, cursorTurnStarted, cursorTurnCompleted } from './cursor-ui-mapper.ts';
-import { classifyCursorProviderError, sanitizeCursorProviderError, type CursorProviderErrorClassification } from './cursor-provider-error.ts';
+import { appendCursorStderr, classifyCursorProviderError, sanitizeCursorProviderError, type CursorProviderErrorClassification } from './cursor-provider-error.ts';
 import type { UiEvent } from './ui-events.ts';
 
 /** Transient provider failures recover on their own (#443): two inline retries, then fatal. */
@@ -86,7 +86,7 @@ class CursorSession implements AgentSession {
   private readonly bin: string;
   private child!: ChildProcessWithoutNullStreams;
   private hasExited!: () => boolean;
-  private stderrChunks: string[] = [];
+  private stderrBuf = '';
   private spawnAttempts = 0;
   private bootstrapGeneration = 0;
   private isOpen = true;
@@ -132,7 +132,7 @@ class CursorSession implements AgentSession {
   /** One ACP child. Unexpected close before `session.started` respawns and re-bootstraps (#529). */
   private spawnAcp(): void {
     this.spawnAttempts += 1;
-    this.stderrChunks = [];
+    this.stderrBuf = '';
     const spec = this.spec;
     this.attachChild(spawn(this.bin, ['--force', ...(spec.model ? ['--model', spec.model] : []), ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp'], {
       cwd: spec.cwd, env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
@@ -142,7 +142,7 @@ class CursorSession implements AgentSession {
     this.child = child;
     this.hasExited = trackChildExit(child);
     child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => { this.stderrChunks.push(chunk); });
+    child.stderr.on('data', (chunk: string) => { this.stderrBuf = appendCursorStderr(this.stderrBuf, chunk); });
     child.stdin.on('error', () => {
       if (this.closing || this.child !== child || !this.ready) return;
       this.fail('Cursor ACP input stream closed');
@@ -192,7 +192,7 @@ class CursorSession implements AgentSession {
   }
   private unexpectedExitMessage(code: number | null, signal: NodeJS.Signals | null): string {
     const reason = signal ?? code ?? 'unknown';
-    const detail = sanitizeCursorProviderError(this.stderrChunks.join(''));
+    const detail = sanitizeCursorProviderError(this.stderrBuf);
     const attempts = this.spawnAttempts;
     return `Cursor ACP exited unexpectedly (${reason}) after ${attempts} attempt${attempts === 1 ? '' : 's'}${detail ? `: ${detail}` : ''}`;
   }
