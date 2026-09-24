@@ -58,3 +58,10 @@ describe('conversation delivery labels (#505)', () => {
     expect(conversationDeliveryLabel('consumed')).toBe('Read')
   })
 })
+
+describe('worker question outcome labels (#505)', () => {
+  it('names a question the parent could not receive', async () => {
+    const { conversationOutcomeLabel } = await import('./conversation-presentation')
+    expect(conversationOutcomeLabel('human-fallback')).toBe('Sent to a human')
+  })
+})

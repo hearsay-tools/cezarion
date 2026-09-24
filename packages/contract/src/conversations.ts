@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { askRequestSchema } from './ask-schema.ts';
 
 export const conversationAttributionSchema = z.object({
   senderRunId: z.uuid(), recipientRunId: z.uuid(),
@@ -11,10 +12,12 @@ export const conversationMessageSchema = conversationAttributionSchema.extend({
   /** A parent-authorized new execution; retained on exact message retries. */
   resumed: z.literal(true).optional(),
   instruction: z.string().max(2048).optional(),
+  /** A worker's question routed to its parent (#505): answered only by a reply naming it. */
+  question: askRequestSchema.optional(),
 });
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
 export const requestOutcomeSchema = z.object({
-  requestId: z.uuid(), status: z.enum(['replied', 'completed-without-reply', 'failed', 'cancelled', 'destroyed', 'timed-out', 'sender-closed']),
+  requestId: z.uuid(), status: z.enum(['replied', 'completed-without-reply', 'failed', 'cancelled', 'destroyed', 'timed-out', 'sender-closed', 'human-fallback']),
   observedAt: z.iso.datetime(), replyId: z.uuid().optional(),
 }).strict();
 export type RequestOutcome = z.infer<typeof requestOutcomeSchema>;

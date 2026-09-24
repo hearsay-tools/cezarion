@@ -55,6 +55,8 @@ export function conversationOutcomeLabel(status: NonNullable<ThreadConversationM
       return 'Destroyed'
     case 'sender-closed':
       return 'Sender closed'
+    case 'human-fallback':
+      return 'Sent to a human'
     default:
       return status
   }
