@@ -144,7 +144,8 @@ class CursorSession implements AgentSession {
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => { this.stderrBuf = appendCursorStderr(this.stderrBuf, chunk); });
     child.stdin.on('error', () => {
-      if (this.closing || this.child !== child || !this.ready) return;
+      if (this.closing || this.child !== child) return;
+      if (!this.ready) { this.abandonHungBootstrap(); return; }
       this.fail('Cursor ACP input stream closed');
     });
     child.once('error', () => {
@@ -171,11 +172,19 @@ class CursorSession implements AgentSession {
     const gen = this.bootstrapGeneration;
     void this.bootstrap().catch(error => {
       if (this.closing || gen !== this.bootstrapGeneration) return;
-      // Process death during bootstrap is the close handler's job (#529). A still-writable
-      // stdin means a real init error (bad protocol, missing session id) and must fail.
-      if (!this.ready && (this.hasExited() || this.child.stdin.destroyed || !this.child.stdin.writable)) return;
+      // Process death during bootstrap is the close handler's job (#529). A live child with
+      // a dead stdin is not that path — kill it so close can retry or fail instead of hanging.
+      if (!this.ready && this.hasExited()) return;
+      if (!this.ready && (this.child.stdin.destroyed || !this.child.stdin.writable)) {
+        this.abandonHungBootstrap();
+        return;
+      }
       this.fail(error instanceof Error ? error.message : 'Cursor ACP initialization failed');
     });
+  }
+  private abandonHungBootstrap(): void {
+    if (this.hasExited()) return;
+    this.child.kill();
   }
   private respawn(): void {
     this.bootstrapGeneration += 1;

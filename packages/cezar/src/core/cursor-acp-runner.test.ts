@@ -469,6 +469,18 @@ describe('Cursor ACP spawn retry (#529)', () => {
     });
   });
 
+  it('does not hang when stdin dies during bootstrap while the child stays up', async () => {
+    const hang = fileURLToPath(new URL('../../scripts/mock-cursor-hang-stdin.mjs', import.meta.url));
+    const v1: AgentEvent[] = [];
+    const started = Date.now();
+    const session = new CursorAcpRunner({ bin: hang }).startSession({ cwd: process.cwd(), userPrompt: 'hang', timeoutMs: 8000 }, e => v1.push(e));
+    try {
+      await waitFor(() => v1.some(e => e.type === 'error'), 3000);
+      expect(v1.some(e => e.type === 'error')).toBe(true);
+      expect(Date.now() - started).toBeLessThan(3000);
+    } finally { session.interrupt(); await session.result.catch(() => {}); }
+  });
+
   it('does not retry a clean session close after end_turn', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cursor-clean-close-'));
     const wire = join(dir, 'wire.ndjson');
