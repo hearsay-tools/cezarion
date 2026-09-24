@@ -428,4 +428,31 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       expect(waitOf(store.getRun(f.w.id))?.requestIds).toBeUndefined();
     } finally { credentials2.close(); }
   });
+
+  it('refuses an answer the stopping worker can no longer receive', async () => {
+    const f = await askedPair();
+    try {
+      manager.cancel(f.w.id);
+      await expect(f.reply('mock:agent-echo Use the parser')).rejects.toSatisfy(error =>
+        error instanceof DelegationPolicyError && error.code === 'incompatible_state');
+      await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
+    } finally { f.close(); }
+  });
+
+  it('hands the question back when the worker stops before an accepted reply lands', async () => {
+    const f = await askedPair();
+    try {
+      const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
+      await until(() => store.getRun(blocker.id)?.status === 'running' && semaphore.busy() === 1);
+      await f.reply('mock:agent-echo Use the parser');
+      manager.cancel(f.w.id);
+      await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
+      expect(eventsOf(f.w.id, 'worker-question-fallback')[0]).toMatchObject({ reason: 'worker-stopped' });
+      manager.cancel(blocker.id);
+      await until(() => !manager.isActive(f.w.id) && !manager.isActive(blocker.id));
+      expect(answered(f.w.id)).toEqual([]);
+      expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' })).toEqual({ ok: true });
+      await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+    } finally { f.close(); }
+  });
 });

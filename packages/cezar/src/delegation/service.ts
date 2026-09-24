@@ -200,6 +200,9 @@ export class DelegationService {
       // bound: while the question is pending nothing else there can drain, and a worker has at
       // most one pending question, so this admits at most one extra input.
       const answering = request.kind === 'reply' && !settled && !!original?.question;
+      // An answer the worker can no longer receive (stopping, stopped, destroyed) would record
+      // the question as replied while nothing delivers it; the human answers it instead.
+      if (answering && !enqueue) throw new DelegationPolicyError('incompatible_state', 'The worker can no longer receive this answer; its question goes back to the human');
       const reservedMessages = openQuestions(state).length - (answering ? 1 : 0);
       if (state.messages.length + reservedMessages >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
         (enqueue && !answering && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');

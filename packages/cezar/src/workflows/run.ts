@@ -3327,10 +3327,13 @@ export class RunManager {
     if (!conversation) return;
     for (const message of conversation.messages) {
       const outcome = message.question && conversation.outcomes.find(entry => entry.requestId === message.id);
-      if (!outcome || outcome.status === 'replied') continue;
+      // A reply still waiting for a live worker answers it; one a stopped worker never took does not.
+      const worker = this.store.getRun(message.senderRunId);
+      const live = !!worker && ['queued', 'running', 'waiting'].includes(worker.status) && !worker.stopping;
+      if (!outcome || (outcome.status === 'replied' && live)) continue;
       const routed = this.routedAsk(message.senderRunId);
       if (routed?.message.id === message.id) {
-        this.store.appendEvent(message.senderRunId, { type: 'worker-question-fallback', askSeq: routed.askSeq, reason: outcome.status === 'human-fallback' ? `parent-${root!.status}` : `question-${outcome.status}` });
+        this.store.appendEvent(message.senderRunId, { type: 'worker-question-fallback', askSeq: routed.askSeq, reason: outcome.status === 'human-fallback' ? `parent-${root!.status}` : outcome.status === 'replied' ? 'worker-stopped' : `question-${outcome.status}` });
       }
     }
   }
@@ -3356,7 +3359,7 @@ export class RunManager {
       const ask = run.delegation?.role === 'worker' && run.delegation.parentRunId === parentId ? this.routedAsk(run.id) : undefined;
       // An accepted reply still on its way to a live worker answers it; no human card beside it.
       const replied = ask && state.outcomes.some(outcome => outcome.requestId === ask.message.id && outcome.status === 'replied');
-      return ask && !(replied && ['queued', 'running', 'waiting'].includes(run.status)) ? [{ workerId: run.id, ...ask }] : [];
+      return ask && !(replied && ['queued', 'running', 'waiting'].includes(run.status) && !run.stopping) ? [{ workerId: run.id, ...ask }] : [];
     });
     if (!routed.length) return;
     const observedAt = new Date().toISOString();
