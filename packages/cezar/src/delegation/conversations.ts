@@ -14,6 +14,8 @@ export function reconcileConversationState(root: RunRecord, runs: readonly RunRe
     let status: RequestOutcome['status'] | undefined;
     const deletedRecipient = !recipient && root.delegation.receipts.some(receipt => receipt.workerId === request.recipientRunId && receipt.deletion?.phase === 'complete');
     if (deletedRecipient || (recipient?.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete')) status = 'destroyed';
+    // A worker's question outlives its parent: the human answers it instead (#505).
+    else if (closed(recipient) && request.question) status = 'human-fallback';
     else if (closed(recipient)) status = recipient!.status === 'done' ? 'completed-without-reply' : recipient!.status as 'failed' | 'cancelled';
     else if (closed(root) || closed(sender)) status = 'sender-closed';
     else if (request.deadline && request.deadline <= now) status = 'timed-out';

@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { fixtureUpdateRun, manager, parent, restart, root, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
 describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () => {
@@ -104,7 +106,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   it('a parent reply answers the worker after a restart', async () => {
     const f = await askedPair();
     f.close();
-    await restart();
+    await restart(false, undefined, eventCheckpoint());
     const credentials = new CredentialRegistry();
     try {
       const parentCaller = credentials.authenticate(credentials.issue('project', f.p.id, randomUUID()))!;
@@ -166,11 +168,75 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   it('refuses a human Continue on a routed question whose session is gone', async () => {
     const f = await askedPair();
     f.close();
-    await restart();
+    await restart(false, undefined, eventCheckpoint());
     await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting');
     expect(manager.continueRun(f.w.id, { text: 'human answer' })).toEqual({ ok: false, error: 'This question was sent to the parent task; answer it there.' });
     store.appendEvent(f.w.id, { type: 'worker-question-fallback', askSeq: eventsOf(f.w.id, 'ask.requested')[0]!.seq, reason: 'test' });
     expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' }).ok).toBe(true);
     await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+  });
+
+  it('holds parent completion on an unanswered worker question without waiting on that worker', async () => {
+    const f = await askedPair();
+    try {
+      await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === f.questionId)?.deliveredAt);
+      const engine = manager as unknown as { deferParentCompletion(id: string): boolean };
+      expect(engine.deferParentCompletion(f.p.id)).toBe(true);
+      const notes = eventsOf(f.p.id, 'note').map(event => String(event.message));
+      expect(notes.at(-1)).toBe(`Completion blocked: answer your workers' questions first: ${f.w.id} (request ${f.questionId}).`);
+      // Waiting on the worker would deadlock: the worker waits on this parent.
+      expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
+      expect(manager.finishBlockedReason(f.p.id)).toContain(f.w.id);
+    } finally { f.close(); }
+  });
+
+  it("hands a routed question back to the human when the parent is cancelled", async () => {
+    const f = await askedPair();
+    f.close();
+    const askSeq = eventsOf(f.w.id, 'ask.requested')[0]!.seq;
+    manager.cancel(f.p.id);
+    await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
+    expect(eventsOf(f.w.id, 'worker-question-fallback')[0]).toMatchObject({ askSeq, reason: 'parent-cancelled' });
+    expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: 'human-fallback' })]);
+    await until(() => !manager.isActive(f.w.id));
+    // The cancelled worker is now the human's to answer.
+    expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' }).ok).toBe(true);
+    await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+  });
+
+  it('wakes a parent parked on its worker when the worker asks, within maxParallel', async () => {
+    process.env.CEZ_DELEGATION = '1';
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id, 'mock:ask');
+    register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'worker-question-routed').length === 1);
+    const questionId = String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId);
+    await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === questionId)?.deliveredAt);
+    expect(semaphore.busy()).toBeLessThanOrEqual(1);
+  });
+
+  it('hands a routed question to the human while the parent rests at review, keeping the worker live', async () => {
+    const f = await askedPair();
+    f.close();
+    fixtureUpdateRun(f.p.id, { status: 'review' });
+    manager.reconcileWorkerWaits();
+    expect(eventsOf(f.w.id, 'worker-question-fallback')).toEqual([expect.objectContaining({ reason: 'parent-review' })]);
+    expect(store.getRun(f.w.id)?.status).toBe('waiting');
+    expect(manager.sendMessage(f.w.id, [{ type: 'text', text: 'mock:agent-echo human answer' }])).toBe(true);
+    await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+  });
+
+  it('hands a routed question to the human on recovery when the parent closed before the crash', async () => {
+    const f = await askedPair();
+    f.close();
+    const events = eventCheckpoint();
+    const disk = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as Array<{ id: string; status: string }>;
+    for (const run of disk) if (run.id === f.p.id) run.status = 'done';
+    await restart(false, JSON.stringify(disk), events);
+    await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
+    expect(eventsOf(f.w.id, 'worker-question-fallback')[0]).toMatchObject({ reason: 'parent-done' });
+    expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: 'human-fallback' })]);
   });
 });

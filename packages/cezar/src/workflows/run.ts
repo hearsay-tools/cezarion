@@ -2920,6 +2920,8 @@ export class RunManager {
     const parent = this.store.getRun(runId);
     if (parent?.delegation?.role !== 'root') return undefined;
     if (this.hasPendingHumanAsk(runId) || this.active.get(runId)?.pendingHumanAsk) return 'Answer the pending human question before finishing.';
+    const questions = this.unansweredQuestions(runId);
+    if (questions.length) return `Answer your workers' questions before finishing: ${questions.map(q => q.workerId).join(', ')}`;
     const blockers = this.parentCompletionBlockers(runId);
     return blockers.length ? `Workers must finish or be stopped, prove termination, and have their latest results collected before finishing: ${blockers.map(b => `${b.workerId} (${b.reason})`).join(', ')}` : undefined;
   }
@@ -2959,6 +2961,8 @@ export class RunManager {
     const state = this.active.get(runId);
     const blockers = this.parentCompletionBlockers(runId);
     const pendingAsk = this.hasPendingHumanAsk(runId) || state?.pendingHumanAsk;
+    // A worker waiting on this parent's answer (#505): waiting on that worker would deadlock.
+    const questions = pendingAsk ? [] : this.unansweredQuestions(runId);
     if (!blockers.length && !pendingAsk) { this.resetParentCompletion(runId); return false; }
     if (parent.delegation.finishRequestedAt) {
       // Legacy accepted Finish cannot strand the new gate behind an execution ban.
@@ -2967,17 +2971,18 @@ export class RunManager {
       parent = { ...parent, delegation };
     }
     if (parent.delegation?.role !== 'root') return false;
-    if (parent.delegation.wait && !pendingAsk) {
+    if (parent.delegation.wait && !pendingAsk && !questions.length) {
       if (state?.session?.open) this.parkWorkerWait(runId, state);
       else this.store.updateRun(runId, { status: 'waiting', activity: undefined, finishedAt: undefined });
       this.store.flush();
       return true;
     }
-    const message = pendingAsk ? 'Completion blocked: answer the pending human question.' :
+    const message = pendingAsk ? 'Completion blocked: answer the pending human question.' : questions.length
+      ? `Completion blocked: answer your workers' questions first: ${questions.map(q => `${q.workerId} (request ${q.messageId})`).join(', ')}.` :
       `Completion blocked: finish or explicitly stop outstanding workers, then collect their latest settled results: ${blockers.map(b => `${b.workerId} (${b.reason})`).join(', ')}.`;
     this.store.appendEvent(runId, { type: 'note', tone: 'warning', message });
     const workerIds = blockers.map(b => b.workerId).filter(id => this.store.getRun(id)?.delegation?.role === 'worker');
-    if (!pendingAsk && !parent.delegation.completion && workerIds.length) {
+    if (!pendingAsk && !questions.length && !parent.delegation.completion && workerIds.length) {
       const wait: WorkerWait = { id: randomUUID(), mode: 'all', workerIds,
         revisions: workerIds.map(workerId => { const d = this.store.getRun(workerId)!.delegation; return { workerId, revision: d?.role === 'worker' ? d.executionRevision ?? 0 : 0 }; }),
         deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'parked', outcomes: [] };
@@ -2987,7 +2992,7 @@ export class RunManager {
       if (state?.session?.open) this.parkWorkerWait(runId, state);
       else this.reconcileWorkerWaits();
     } else {
-      const monitoring = !pendingAsk && !!state?.session?.open && this.hasLiveWorkers(runId);
+      const monitoring = !pendingAsk && !questions.length && !!state?.session?.open && this.hasLiveWorkers(runId);
       this.store.commitDelegation([{ id: runId, delegation: { ...parent.delegation, completion: { ...parent.delegation.completion, phase: 'attention' } } }]);
       this.store.updateRun(runId, { status: monitoring ? 'running' : 'waiting', activity: monitoring ? 'monitoring' : undefined, finishedAt: undefined });
       this.store.flush();
@@ -3261,6 +3266,38 @@ export class RunManager {
     this.resumeParkedRun(runId, state);
   }
 
+  /** Routed questions this parent has not answered yet, by asking worker. */
+  private unansweredQuestions(parentId: string): { workerId: string; messageId: string }[] {
+    return this.store.listRuns().flatMap(run => {
+      if (run.delegation?.role !== 'worker' || run.delegation.parentRunId !== parentId) return [];
+      const routed = this.routedAsk(run.id);
+      const root = this.store.getRun(parentId);
+      const answered = root?.delegation?.role === 'root' && root.delegation.conversation?.outcomes.some(outcome => outcome.requestId === routed?.message.id);
+      return routed && !answered ? [{ workerId: run.id, messageId: routed.message.id }] : [];
+    });
+  }
+
+  /** The parent can no longer answer: its workers' routed questions go back to the human
+   * (#505). The outcome lands first, so a crash before the worker's event repeats this. */
+  private fallbackRoutedQuestions(parentId: string, reason: string): void {
+    const parent = this.store.getRun(parentId);
+    if (parent?.delegation?.role !== 'root') return;
+    const routed = this.store.listRuns().flatMap(run => {
+      const ask = run.delegation?.role === 'worker' && run.delegation.parentRunId === parentId ? this.routedAsk(run.id) : undefined;
+      return ask ? [{ workerId: run.id, ...ask }] : [];
+    });
+    if (!routed.length) return;
+    const state = parent.delegation.conversation ?? { messages: [], outcomes: [] };
+    const observedAt = new Date().toISOString();
+    const missing = routed.filter(entry => !state.outcomes.some(outcome => outcome.requestId === entry.message.id));
+    if (missing.length) {
+      this.store.commitConversation(parentId, { ...state, outcomes: [...state.outcomes,
+        ...missing.map(entry => ({ requestId: entry.message.id, status: 'human-fallback' as const, observedAt }))] });
+      projectConversationEvents(this.store, this.store.getRun(parentId)!);
+    }
+    for (const entry of routed) this.store.appendEvent(entry.workerId, { type: 'worker-question-fallback', askSeq: entry.askSeq, reason });
+  }
+
   /** The parent can still read and answer a routed question; answering needs its steer grant. */
   private parentCanReceive(parent: RunRecord): boolean {
     return parent.delegation?.role === 'root' && parent.delegation.permissions.includes('steer') &&
@@ -3368,6 +3405,7 @@ export class RunManager {
         if (!['queued', 'running', 'waiting'].includes(parent.status)) {
           if (!this.recovering) {
             this.withdrawWorkerWait(parent.id);
+            this.fallbackRoutedQuestions(parent.id, `parent-${parent.status}`);
             for (const child of this.store.listRuns().filter(child => parent.delegation?.role === 'root' && parent.status !== 'review' && child.delegation?.role === 'worker' && child.delegation.parentRunId === parent.id)) {
               if (['queued', 'running', 'waiting'].includes(child.status)) this.cancel(child.id);
             }
