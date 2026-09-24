@@ -712,3 +712,20 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', u
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+describe('Claude queued-turn announcement with a synchronous follow-up (#505 local review)', () => {
+  const mockBin = fileURLToPath(new URL('../../scripts/mock-claude.mjs', import.meta.url));
+  it('announces a turn submitted from the turn-end callback exactly once', async () => {
+    const ui: UiEvent[] = []; let ends = 0;
+    let session!: ReturnType<ClaudeCliRunner['startSession']>;
+    session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
+      { userPrompt: 'inspect the working tree', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
+      event => { if (event.type === 'turn-end' && ++ends === 1) session.sendMessage([{ type: 'text', text: 'mock:agent-echo nudge' }]); },
+      { onUiEvent: event => ui.push(event) });
+    const start = Date.now();
+    while (ends < 2) { if (Date.now() - start > 10_000) throw new Error('no second turn-end'); await new Promise(r => setTimeout(r, 10)); }
+    await new Promise(r => setTimeout(r, 200));
+    expect(ui.filter(e => e.type === 'turn.started')).toHaveLength(ui.filter(e => e.type === 'turn.completed').length);
+    session.end(); await session.result;
+  });
+});

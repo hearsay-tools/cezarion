@@ -350,13 +350,14 @@ export class ClaudeCliRunner implements AgentRunner {
             if (covered.length) opts.onAgentInputConsumed?.(covered);
             // A result is not idle if human stdin messages already queued later turns.
             agentInputReady = unsettled.size === 0;
-            onEvent?.({ type: 'turn-end' });
-            scheduleAutoEnd();
             // A line written after this turn's last model call runs as the CLI's next
             // queued turn; its replay/result reports consumption then (#505). Announce
             // that turn when its first frame arrives, never speculatively: a line the
-            // CLI never runs must not look like activity.
+            // CLI never runs must not look like activity. Decided before the turn-end
+            // callback, which may itself submit (and announce) the next prompt.
             queuedTurnPending = unsettled.size > 0;
+            onEvent?.({ type: 'turn-end' });
+            scheduleAutoEnd();
           }
         }
       } catch (err) {
