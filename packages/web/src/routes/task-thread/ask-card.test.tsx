@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -156,6 +156,71 @@ describe('AskCard', () => {
     fireEvent.click(send)
     expect(mutateAsync).toHaveBeenCalledTimes(1)
     expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: date-fns\nStyle: Relative' })
+  })
+
+  it('combines a chip answer and per-question Other text in one message', () => {
+    renderAsk(twoQuestionAsk)
+    const send = screen.getByRole('button', { name: 'Send answer' }) as HTMLButtonElement
+    const styleQuestion = screen.getByRole('group', { name: 'Which style?' })
+
+    fireEvent.click(screen.getByRole('button', { name: /date-fns/ }))
+    fireEvent.click(within(styleQuestion).getByRole('button', { name: 'Other' }))
+    const answer = within(styleQuestion).getByRole('textbox', { name: 'Your answer' })
+    expect(send.disabled).toBe(true)
+
+    fireEvent.change(answer, { target: { value: '   ' } })
+    expect(send.disabled).toBe(true)
+    fireEvent.change(answer, { target: { value: 'A short custom style' } })
+    expect(send.disabled).toBe(false)
+    fireEvent.click(send)
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      text: 'Library: date-fns\nStyle: A short custom style',
+    })
+  })
+
+  it('a single single-select question sends Other text with an explicit Send', () => {
+    renderAsk(singleAsk)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Other' }))
+    const send = screen.getByRole('button', { name: 'Send answer' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your answer' }), {
+      target: { value: 'A custom library' },
+    })
+    expect(send.disabled).toBe(false)
+    fireEvent.click(send)
+
+    expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: A custom library' })
+  })
+
+  it('a multi-select question accepts Other text without a chip selection', () => {
+    renderAsk(multiAsk)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Other' }))
+    const send = screen.getByRole('button', { name: 'Send answer' }) as HTMLButtonElement
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your answer' }), {
+      target: { value: 'Only the account summary' },
+    })
+    expect(send.disabled).toBe(false)
+    fireEvent.click(send)
+
+    expect(mutateAsync).toHaveBeenCalledWith({ text: 'Sections: Only the account summary' })
+  })
+
+  it('keeps a custom answer in the field when delivery fails', async () => {
+    mutateAsync.mockRejectedValueOnce(new Error('temporary failure'))
+    renderAsk(twoQuestionAsk)
+    const styleQuestion = screen.getByRole('group', { name: 'Which style?' })
+
+    fireEvent.click(within(styleQuestion).getByRole('button', { name: 'Other' }))
+    const answer = within(styleQuestion).getByRole('textbox', { name: 'Your answer' })
+    fireEvent.change(answer, { target: { value: 'A short custom style' } })
+    fireEvent.click(screen.getByRole('button', { name: /date-fns/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }))
+
+    expect((await screen.findByRole('alert')).textContent).toBe('temporary failure')
+    expect(answer).toHaveProperty('value', 'A short custom style')
   })
 
   it('multi-select: Send is disabled until options are picked, then sends the comma-joined labels', () => {
