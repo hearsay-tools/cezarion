@@ -24,6 +24,14 @@ The envelope prefix is reconstructed from Cursor's `agent_message_chunk`
 format; this is not a raw wire capture. Classifier tests read the fixture,
 and the offline ACP mock emits the same text for recovery and exhaustion.
 
+`ssl-record-layer-error.txt` preserves the error text reported in run
+`4bcd5420-e242-4422-af56-9ca558402aba`, sequence 2667, at
+2026-09-24T13:55:50.274Z (Cursor CLI serving `@wjarka/cezarion@0.14.8`, #528).
+The live fatal line was `Cursor provider request failed: RetriableError: [internal] … SSL routines:tls_get_more_records:decryption failed or bad record mac …`;
+the fixture is that provider envelope with the reconstructed `\n\nError: `
+prefix, not a raw wire capture. Classifier tests read the fixture, and the
+offline ACP mock emits the same text for recovery and exhaustion.
+
 `acp-lifecycle.ndjson` is a **constructed, source/schema-derived** sequence,
 not a captured model session. Text, paths, ids, tool arguments and outputs
 are synthetic. Its expected events are hand-authored from the normalized
