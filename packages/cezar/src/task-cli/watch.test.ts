@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runTaskCommand, type TaskIo } from './cli.ts';
+import { pollHitDeadline, TIMEOUT_GRACE_MS } from './watch.ts';
 import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
 
 /** `cez task wait` / `log` / `log --follow` / `start --wait` (#504). */
@@ -258,5 +259,26 @@ describe('cez task watching against a scripted cockpit', () => {
     const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.slice(0, 3).map((line) => line.text)).toEqual(['t1', 't2', 't3']);
     expect(lines.at(-1)).toMatchObject({ id: 'r1', status: 'done' });
+  });
+});
+
+/**
+ * The deadline boundary (#538): a budget-bounded poll whose abort lands a
+ * millisecond short of the deadline still failed *at* the deadline, so `wait`
+ * answers timeout (exit 3), not unavailable (exit 2).
+ */
+describe('pollHitDeadline', () => {
+  const start = 1_000_000;
+  const budget = 1_000;
+
+  it('holds at and just before the deadline', () => {
+    expect(pollHitDeadline(start, budget, start + budget)).toBe(true);
+    expect(pollHitDeadline(start, budget, start + budget - 1)).toBe(true);
+    expect(pollHitDeadline(start, budget, start + budget - TIMEOUT_GRACE_MS)).toBe(true);
+  });
+
+  it('lets a fast failure through as a genuine cockpit error', () => {
+    expect(pollHitDeadline(start, budget, start + 5)).toBe(false);
+    expect(pollHitDeadline(start, budget, start + budget - TIMEOUT_GRACE_MS - 1)).toBe(false);
   });
 });
