@@ -3231,10 +3231,9 @@ export class RunManager {
     if (repairOnly) return;
     if (root?.delegation?.role !== 'root' || !this.parentCanReceive(root)) { fallback('the parent can no longer receive messages'); return; }
     const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
-    // Room for the question AND its reply, beside the replies other open questions reserve; the
-    // reply lands in this worker's inbox, so that needs room too.
+    // Room in the ledger for the question AND its reply, beside the replies other open questions
+    // reserve. The reply itself is always admitted to this worker's inbox (service.send).
     if (state.messages.length + openQuestions(state).length + 2 > 1024 || (root.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32 ||
-      (worker.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32 ||
       state.messages.filter(m => m.kind === 'request' && m.state === 'accepted' && !state.outcomes.some(o => o.requestId === m.id)).length >= 32) {
       fallback('the parent conversation is at capacity'); return;
     }
@@ -3690,11 +3689,7 @@ export class RunManager {
       throw new DelegationPolicyError('denied_scope', 'not an owned worker');
     }
     if (this.executionBlockedByRootFinish(run)) throw new DelegationPolicyError('incompatible_state', 'parent finish is pending');
-    // A steer never takes the inbox slot an open question holds for its reply (#505).
-    const root = this.store.getRun(run.delegation.parentRunId);
-    const reserved = root?.delegation?.role === 'root' && root.delegation.conversation
-      ? openQuestions(root.delegation.conversation).filter(question => question.senderRunId === runId).length : 0;
-    const queue = enqueueAgentInput(run, input, reserved);
+    const queue = enqueueAgentInput(run, input);
     this.store.commitAgentInputs(runId, queue);
     this.store.appendEvent(runId, { type: 'agent-input', input: queue[queue.length - 1] });
     this.flushAgentInputs(runId);

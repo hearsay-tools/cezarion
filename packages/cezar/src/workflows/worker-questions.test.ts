@@ -352,11 +352,10 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     try {
       const progress = () => f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'progress', text: 'mock:agent-echo more', timeoutSeconds: 600 });
       const capacity = (error: unknown) => error instanceof DelegationPolicyError && error.code === 'capacity_limit';
-      // Inbox: 31 held inputs plus the reply's reserved slot fill the worker's 32.
+      // Inbox: 32 held inputs from any producer; ordinary messages are refused, the reply is not.
       const now = new Date().toISOString();
-      fixtureUpdateRun(f.w.id, { agentInputs: [...(store.getRun(f.w.id)?.agentInputs ?? []), ...Array.from({ length: 31 }, () => ({ id: randomUUID(), source: 'agent' as const, parentRunId: f.p.id, text: 'held', createdAt: now }))] });
+      fixtureUpdateRun(f.w.id, { agentInputs: [...(store.getRun(f.w.id)?.agentInputs ?? []), ...Array.from({ length: 32 }, () => ({ id: randomUUID(), source: 'lifecycle' as const, parentRunId: f.p.id, text: 'held', createdAt: now }))] });
       await expect(progress()).rejects.toSatisfy(capacity);
-      fixtureUpdateRun(f.w.id, { agentInputs: (store.getRun(f.w.id)?.agentInputs ?? []).filter(input => input.text !== 'held') });
       // Conversation: 1,023 messages plus the reply's reserved slot fill the 1,024.
       fillConversation(f.p.id, f.w.id, 1023);
       await expect(progress()).rejects.toSatisfy(capacity);
@@ -376,11 +375,11 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
   });
 
-  it("keeps the reply's inbox slot free of steering too", async () => {
+  it('admits the reply even when steering filled the worker inbox', async () => {
     const f = await askedPair();
     try {
       const steer = () => manager.steerWorker(f.w.id, { id: randomUUID(), source: 'agent', parentRunId: f.p.id, text: 'mock:agent-echo steer', createdAt: new Date().toISOString() });
-      for (let i = 0; i < 31; i++) steer();
+      for (let i = 0; i < 32; i++) steer();
       expect(() => steer()).toThrow(expect.objectContaining({ code: 'capacity_limit' }));
       await f.reply('mock:agent-echo Use the parser');
       await until(() => answered(f.w.id).length === 1);

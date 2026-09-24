@@ -195,13 +195,14 @@ export class DelegationService {
         ...(resume ? { resumed: true as const } : {}), ...(instruction ? { instruction } : {}),
         state: request.kind === 'reply' && settled ? 'late' : destroyed ? 'destroyed' : resumable && !resume ? 'continuation-required' : 'accepted' };
       const enqueue = !destroyed && (!resumable || resume);
-      // Open worker questions reserve room for their replies (#505); the reply spends its own.
-      const open = openQuestions(state);
+      // Open worker questions reserve ledger room for their replies (#505); the reply spends its
+      // own. The reply is also always admitted to the worker's inbox, one past its soft 32-input
+      // bound: while the question is pending nothing else there can drain, and a worker has at
+      // most one pending question, so this admits at most one extra input.
       const answering = request.kind === 'reply' && !settled && !!original?.question;
-      const reservedMessages = open.length - (answering ? 1 : 0);
-      const reservedInbox = answering ? 0 : open.filter(question => question.senderRunId === recipient.id).length;
+      const reservedMessages = openQuestions(state).length - (answering ? 1 : 0);
       if (state.messages.length + reservedMessages >= 1024 || (enqueue && request.kind === 'request' && state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length >= 32) ||
-        (enqueue && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length + reservedInbox >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
+        (enqueue && !answering && (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
       const outcomes = [...state.outcomes];
       if (request.kind === 'reply' && !settled) outcomes.push({ requestId: request.requestId!, status: 'replied', observedAt: now, replyId: request.id });
       const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
