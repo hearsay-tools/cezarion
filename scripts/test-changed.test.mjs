@@ -144,6 +144,21 @@ test('changed mode executes only related tests with the installed Vitest', t => 
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /1 passed/);
   assert.doesNotMatch(result.stdout, /unrelated must not run/);
+
+  // A tracked change must not hide a failing untracked test/source pair.
+  put('packages/web/src/added.ts', 'export const added = 3;');
+  put('packages/web/src/added.test.ts', 'import { added } from "./added"; test("untracked regression", () => expect(added).toBe(2));');
+  const untracked = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8', timeout: 30_000 });
+  assert.equal(untracked.status, 1, untracked.stdout + untracked.stderr);
+  assert.match(untracked.stdout + untracked.stderr, /untracked regression/);
+  assert.doesNotMatch(untracked.stdout + untracked.stderr, /unrelated must not run/);
+  put('packages/web/src/added.ts', 'export const added = 2;');
+  const fixed = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8', timeout: 30_000 });
+  assert.equal(fixed.status, 0, fixed.stdout + fixed.stderr);
+  assert.match(fixed.stdout, /2 passed/);
+  rmSync(join(cwd, 'packages/web/src/added.ts'));
+  rmSync(join(cwd, 'packages/web/src/added.test.ts'));
+
   put('packages/web/src/a.ts', 'export const value = 3;');
   const failed = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8', timeout: 30_000 });
   assert.equal(failed.status, 1, failed.stdout + failed.stderr);
