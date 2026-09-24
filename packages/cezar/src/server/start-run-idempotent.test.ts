@@ -61,6 +61,19 @@ describe('POST /api/v1/runs clientRequestId', () => {
     expect(store.listRuns()).toHaveLength(1);
   });
 
+  it.each([
+    [{ images: [{ mediaType: 'image/png', data: 'YQ==' }] }, { images: [{ mediaType: 'image/png', data: 'Yg==' }] }],
+    [{ generateFollowups: false }, { generateFollowups: true }],
+  ])('rejects changed behavior inputs on a retry: %j', async (original, changed) => {
+    const payload = { ...body, ...original };
+    expect((await post(payload)).status).toBe(201);
+    expect((await post(payload)).status).toBe(200);
+    const conflict = await post({ ...body, ...changed });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ error: 'request id payload conflict' });
+    expect(store.listRuns()).toHaveLength(1);
+  });
+
   it('creates exactly one run for two concurrent identical retries', async () => {
     const statuses = (await Promise.all([post(body), post(body)])).map((res) => res.status).sort();
     expect(statuses).toEqual([200, 201]);

@@ -22,9 +22,10 @@ The only API change. Everything else is client-side.
   record, so old `runs.json` files parse unchanged.
 - **Hash.** `packages/cezar/src/runs/client-request.ts` computes sha256 over the
   canonical JSON (sorted keys, `undefined` dropped) of `task`, `workflow` or
-  `steps`, `runner`, `model`, `effort`, `agentProfile`, `autonomous`, `worktree`
-  and `systemPrompt`, taken from the validated request body. The record stores
-  the hash, never the payload.
+  `steps`, `runner`, `model`, `effort`, `agentProfile`, `autonomous`, `worktree`,
+  `systemPrompt`, `images` and `generateFollowups`, taken from the validated
+  request body. Attachments and follow-up generation affect agent behavior, so
+  changed values conflict too. The record stores the hash, never the payload.
 - **Dedupe.** `RunManager.startRunIdempotent(workflow, input, { id, hash })`
   reads the project store for a run carrying that `clientRequestId`, and creates
   one when there is none, on one synchronous path. The route's awaits

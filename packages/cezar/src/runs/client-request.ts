@@ -4,11 +4,10 @@ import { createHash } from 'node:crypto';
  * Idempotent `POST /runs` (#504, spec 2026-09-24-cez-task-cli): the fingerprint of a start
  * request, so a retry carrying the same `clientRequestId` can prove it is the SAME request.
  *
- * Only the keys that decide what the run does. Attachments, the inbox bookkeeping id and the
- * follow-ups flag stay out: none of them changes the task, and a retry that differs only there
- * is still the same start. The record stores this hash, never the payload.
+ * Include every behavior-affecting input, including attachments and follow-up generation.
+ * Only bookkeeping (the inbox id) stays out. The record stores this hash, never the payload.
  */
-const KEYS = ['task', 'workflow', 'steps', 'runner', 'model', 'effort', 'agentProfile', 'autonomous', 'worktree', 'systemPrompt'] as const;
+const KEYS = ['task', 'workflow', 'steps', 'runner', 'model', 'effort', 'agentProfile', 'autonomous', 'worktree', 'systemPrompt', 'images', 'generateFollowups'] as const;
 
 export type ClientRequestPayload = Partial<Record<(typeof KEYS)[number], unknown>> & Record<string, unknown>;
 

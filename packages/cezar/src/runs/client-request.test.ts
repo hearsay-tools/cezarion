@@ -17,14 +17,13 @@ describe('clientRequestHash', () => {
   it.each([
     ['task', 'b'], ['workflow', 'review'], ['steps', [{ id: 'x', prompt: '{{task}}' }]], ['runner', 'codex'],
     ['model', 'm'], ['effort', 'high'], ['agentProfile', 'p'], ['autonomous', true], ['worktree', false],
-    ['systemPrompt', 's'],
+    ['systemPrompt', 's'], ['images', [{ mediaType: 'image/png', data: 'x' }]], ['generateFollowups', false],
   ])('changes with %s', (key, value) => {
     expect(clientRequestHash({ ...base, [key]: value })).not.toBe(clientRequestHash(base));
   });
 
   it.each([
-    ['images', [{ name: 'a.png', mediaType: 'image/png', data: 'x' }]], ['todoId', 't1'], ['variants', 1],
-    ['generateFollowups', false], ['clientRequestId', '0b0f9a4e-8c1e-4b8a-9a52-4b3f1d0c9e11'],
+    ['todoId', 't1'], ['variants', 1], ['clientRequestId', '0b0f9a4e-8c1e-4b8a-9a52-4b3f1d0c9e11'],
   ])('ignores %s', (key, value) => {
     expect(clientRequestHash({ ...base, [key]: value } as Parameters<typeof clientRequestHash>[0])).toBe(clientRequestHash(base));
   });
