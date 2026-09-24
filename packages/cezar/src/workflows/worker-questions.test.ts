@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { DelegationService } from '../delegation/service.ts';
+import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
@@ -238,5 +239,54 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
     expect(eventsOf(f.w.id, 'worker-question-fallback')[0]).toMatchObject({ reason: 'parent-done' });
     expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: 'human-fallback' })]);
+  });
+
+  it('answers the worker after a crash between accepting the reply and delivering it', async () => {
+    const f = await askedPair();
+    f.close();
+    // The accepted reply, committed exactly as the service does, before any delivery attempt.
+    const id = randomUUID(); const now = new Date().toISOString();
+    const attribution = { senderRunId: f.p.id, recipientRunId: f.w.id, kind: 'reply' as const, requestId: f.questionId };
+    const state = conversationOf(f.p.id)!;
+    store.commitConversation(f.p.id, { messages: [...state.messages, { id, ...attribution, text: 'mock:agent-echo Use the parser', createdAt: now, requestHash: 'c'.repeat(64), state: 'accepted' }],
+      outcomes: [...state.outcomes, { requestId: f.questionId, status: 'replied', observedAt: now, replyId: id }] },
+    { recipientRunId: f.w.id, input: { id, source: 'agent', parentRunId: f.p.id, text: 'mock:agent-echo Use the parser', createdAt: now, conversation: attribution } });
+    await restart(false, undefined, eventCheckpoint());
+    await until(() => answered(f.w.id).length === 1);
+    await until(() => said(f.w.id, 'Use the parser'));
+  });
+
+  it("waits for capacity before a parent's answer resumes the worker", async () => {
+    const f = await askedPair();
+    try {
+      const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
+      await until(() => store.getRun(blocker.id)?.status === 'running' && semaphore.busy() === 1);
+      let peak = 0;
+      const sample = setInterval(() => { peak = Math.max(peak, semaphore.busy()); }, 5);
+      try {
+        await f.reply('mock:agent-echo Use the parser');
+        await new Promise(resolve => setTimeout(resolve, 300));
+        expect(answered(f.w.id)).toEqual([]);
+        // Freeing the slot admits the worker, and the held answer goes in.
+        manager.cancel(blocker.id);
+        await until(() => answered(f.w.id).length === 1);
+      } finally { clearInterval(sample); }
+      expect(peak).toBeLessThanOrEqual(1);
+    } finally { f.close(); }
+  });
+
+  it('lets the human answer a question handed back by a reviewing parent after the session closed', async () => {
+    const f = await askedPair();
+    f.close();
+    const events = eventCheckpoint();
+    const disk = JSON.parse(readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')) as Array<{ id: string; status: string }>;
+    for (const run of disk) if (run.id === f.p.id) run.status = 'review';
+    await restart(false, JSON.stringify(disk), events);
+    await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
+    await until(() => !manager.isActive(f.w.id));
+    expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' })).toEqual({ ok: true });
+    await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+    // Without the fallback, a reviewing parent still gates its worker's Continue.
+    expect(manager.continueRun(f.w.id).ok).toBe(false);
   });
 });

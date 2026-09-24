@@ -1696,6 +1696,10 @@ export class RunManager {
               // Reserve the existing session's slot BEFORE any backend call.
               this.workerWakeAdmitted.add(runId);
               this.flushAgentInputs(runId);
+            } else if (state.pendingHumanAsk && this.routedAsk(runId) && this.workerWaiting.delete(runId)) {
+              // A parent's answer to the worker's routed question (#505).
+              this.workerWakeAdmitted.add(runId);
+              this.answerRoutedQuestion(runId, true);
             }
             continue;
           }
@@ -2043,6 +2047,8 @@ export class RunManager {
     // one — see `reconcileAutoResumes`.
     } finally { this.recovering = false; }
     this.reconcileWorkerWaits();
+    // A parent reply accepted just before the crash still answers its worker (#505).
+    for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
     for (const run of this.store.listRuns()) {
       if (run.ciWait && !['running', 'waiting', 'queued'].includes(run.status)) this.withdrawCiWait(run.id);
       else if (run.ciWait) this.queueCiWake(run.id);
@@ -3229,6 +3235,15 @@ export class RunManager {
     this.deliverConversationInput(parentId);
   }
 
+  /** A human answering a worker question its parent handed back (#505): the reviewing parent
+   * can no longer answer it, so it must not also block the human. */
+  private answersFallenBackAsk(runId: string, opts: { text?: string; images?: PastedContent[] }, deferred: boolean): boolean {
+    if (deferred || !(opts.text?.trim() || opts.images?.length)) return false;
+    const events = this.store.readEvents(runId);
+    const ask = pendingHumanAsk(events);
+    return !!ask && events.some(event => event.type === 'worker-question-fallback' && event.askSeq === ask.seq);
+  }
+
   /** The worker's pending ask when it went to the parent and has not fallen back to a human. */
   private routedAsk(runId: string): { askSeq: number; message: ConversationMessage } | undefined {
     const run = this.store.getRun(runId);
@@ -3245,19 +3260,34 @@ export class RunManager {
 
   /** The parent's reply answers the routed question like a human answer would: through the
    * live session's native answer seam, or by reopening a session that is gone (#505). */
-  private answerRoutedQuestion(runId: string): void {
+  private answerRoutedQuestion(runId: string, admitted = false): void {
     const routed = this.routedAsk(runId);
-    const reply = routed && this.store.getRun(runId)?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
-    if (!routed || !reply) return;
+    const run = this.store.getRun(runId);
+    const reply = routed && run?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
+    if (!routed || !reply || run?.delegation?.role !== 'worker') return;
     // Verbatim: a native answer seam parses `Header: label` lines, exactly as a human's.
     const text = reply.text;
     const state = this.active.get(runId);
     if (!state) {
-      const result = this.continueRun(runId, { text, answerInputId: reply.id });
+      // An automated answer is not a human override: the reopened session waits for capacity.
+      if (this.isActive(runId)) return;
+      const result = this.continueRun(runId, { text, answerInputId: reply.id }, true);
       if (!result.ok) this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `parent answer not delivered: ${result.error}` });
       return;
     }
     if (!state.session?.open || state.cancelled || state.openingAgentInputId === reply.id) return;
+    if (!admitted && (this.waiting.has(runId) || this.monitoring.has(runId))) {
+      // The parked worker released its slot: the answer rides the ordinary message wake,
+      // which delivers it here once the scheduler admits the worker.
+      if (this.workerWait(runId)) return;
+      const wait: WorkerWait = { id: randomUUID(), workerIds: [], outcomes: [],
+        deadline: new Date().toISOString(), phase: 'wake-pending', reason: 'message', wakeId: reply.id };
+      this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, wait } }]);
+      this.clearIdleTimer(state); this.clearMonitoringWakeTimer(state, runId);
+      this.waiting.delete(runId); this.monitoring.delete(runId); this.workerWaiting.add(runId);
+      this.queueWorkerWake(runId);
+      return;
+    }
     const bundle = state.atTurnBoundary === state.session ? this.pendingConversationBatch(runId, state, reply.id) : undefined;
     if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
     this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
@@ -3567,7 +3597,9 @@ export class RunManager {
     // Rebuild ordinary queued work before appending new wake admissions on restart.
     if (this.recovering) return;
     const state = this.active.get(parentId);
-    if (this.hasPendingHumanAsk(parentId) || state?.pendingHumanAsk || this.workerWakeQueuedAt.has(parentId)) return;
+    // A parent's reply to a routed question (#505) is the one message a pending ask admits.
+    const parentAnswer = wait.reason === 'message' && this.routedAsk(parentId) !== undefined;
+    if ((!parentAnswer && (this.hasPendingHumanAsk(parentId) || state?.pendingHumanAsk)) || this.workerWakeQueuedAt.has(parentId)) return;
     if (state) {
       // Expiring a registered intent NEVER exempts a still-executing turn.
       if (!this.workerWaiting.has(parentId)) return;
@@ -4199,7 +4231,7 @@ export class RunManager {
       !['done', 'review', 'failed'].includes(run.status))) return { ok: false, error: 'Only a settled owned worker can be resumed by its parent message' };
     if (run.stopping) return { ok: false, error: 'run is still stopping' };
     if (this.historyDeletionPending(runId)) return { ok: false, error: 'Parent history deletion is pending; retry deletion' };
-    if (run.delegation?.role === 'worker' && this.store.getRun(run.delegation.parentRunId)?.status === 'review') {
+    if (run.delegation?.role === 'worker' && this.store.getRun(run.delegation.parentRunId)?.status === 'review' && !this.answersFallenBackAsk(runId, opts, deferForCapacity)) {
       return { ok: false, error: 'Continue the reviewing parent before continuing its worker' };
     }
     // Held against the identity of the step this continuation extends (#452), which for a mixed
@@ -4228,7 +4260,7 @@ export class RunManager {
     if (this.executionBlockedByRootFinish(run)) return { ok: false, error: 'parent finish is pending' };
     if (pendingHumanAsk && !deferForCapacity && !opts.answerInputId && this.routedAsk(runId)) return { ok: false, error: ROUTED_QUESTION_REFUSAL };
     const answers = deferForCapacity ? [run.continuationMessage, ...(run.queuedMessages ?? [])] : [opts];
-    if (pendingHumanAsk && (conversation || (deferForCapacity && run.continuationMessage?.origin !== 'human') ||
+    if (pendingHumanAsk && !opts.answerInputId && (conversation || (deferForCapacity && run.continuationMessage?.origin !== 'human') ||
       !answers.some(answer => answer?.text?.trim() || answer?.images?.length))) {
       return { ok: false, error: 'pending human question requires an explicit answer' };
     }
@@ -4370,7 +4402,7 @@ export class RunManager {
     const stepId = `continue-${continuationNumber}`;
     const continuationStep = { id: stepId, name: 'Continue', kind: 'agent' as const, synthetic: 'continuation' as const };
     if (run.delegation?.role !== 'worker') this.store.addStep(runId, continuationStep);
-    const recovered = deferForCapacity && !conversation ? run.continuationMessage : undefined;
+    const recovered = deferForCapacity && !conversation && !opts.answerInputId ? run.continuationMessage : undefined;
     const message = recovered ?? this.toQueuedMessage(runId, [
       ...(opts.text?.trim() ? [{ type: 'text' as const, text: opts.text.trim() }] : []),
       ...(opts.images ?? []),
@@ -4381,7 +4413,8 @@ export class RunManager {
     const acceptedPatch = {
       continuationMessage: { ...message, id: stepId, text: prompt,
         ...(conversation ? { agentInputId: conversation.input.id } : opts.answerInputId ? { agentInputId: opts.answerInputId } : {}),
-        origin: recovered ? recovered.origin : deferForCapacity ? 'lifecycle' as const : 'human' as const },
+        // A parent's answer (#505) answers the ask exactly like a human's.
+        origin: recovered ? recovered.origin : deferForCapacity && !opts.answerInputId ? 'lifecycle' as const : 'human' as const },
       status: deferForCapacity ? 'queued' as const : 'running' as const,
       error: undefined,
       finishedAt: undefined,
