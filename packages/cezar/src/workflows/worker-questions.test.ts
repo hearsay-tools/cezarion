@@ -1,15 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { fixtureUpdateRun, manager, parent, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { CredentialRegistry } from '../delegation/credentials.ts';
+import { DelegationPolicyError } from '../delegation/policy.ts';
+import { DelegationService } from '../delegation/service.ts';
+import { fixtureUpdateRun, manager, parent, restart, root, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
 describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () => {
   useWorkerWaitFixture();
   const conversationOf = (rootId: string) => { const d = store.getRun(rootId)?.delegation; return d?.role === 'root' ? d.conversation : undefined; };
   const eventsOf = (runId: string, type: string) => store.readEvents(runId).filter(event => event.type === type);
+  /** A root that may message its workers, as provisioned roots are. */
+  async function steeringParent(task = 'mock:hold') {
+    const p = await parent(task);
+    const delegation = store.getRun(p.id)!.delegation!;
+    if (delegation.role !== 'root') throw Error('missing root');
+    store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
+    return p;
+  }
 
   it("sends a worker's CEZ:ASK question to its active parent as a request", async () => {
-    const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-routed').length === 1);
     const ask = eventsOf(w.id, 'ask.requested')[0]!;
@@ -23,7 +34,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   });
 
   it('leaves the question with the human when the parent cannot take another message', async () => {
-    const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     // 32 undelivered inputs fill the parent's inbox (plain input, so nothing wakes it).
     const now = new Date().toISOString();
     fixtureUpdateRun(p.id, { agentInputs: Array.from({ length: 32 }, () => ({ id: randomUUID(), source: 'agent' as const, parentRunId: p.id, text: 'queued', createdAt: now })) });
@@ -33,5 +44,106 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(conversationOf(p.id)?.messages.some(m => m.question) ?? false).toBe(false);
     await until(() => store.getRun(w.id)?.status === 'waiting');
+  });
+
+  it('leaves the question with the human when the parent may not message its workers', async () => {
+    const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);
+    expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
+  });
+
+  /** A parent and a worker that has asked; the question is routed and the worker waits. */
+  async function askedPair(parentTask = 'mock:hold') {
+    process.env.CEZ_DELEGATION = '1';
+    const p = await steeringParent(parentTask); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'worker-question-routed').length === 1 && store.getRun(w.id)?.status === 'waiting');
+    const questionId = String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId);
+    const credentials = new CredentialRegistry();
+    const [parentCaller, workerCaller] = [p, w].map(run => credentials.authenticate(credentials.issue('project', run.id, randomUUID()))!);
+    const service = new DelegationService();
+    service.registerProject({ id: 'project', root, store, manager });
+    const reply = (text: string, id = randomUUID()) => service.send(parentCaller!, { id, recipientRunId: w.id, kind: 'reply', requestId: questionId, text, timeoutSeconds: 600 });
+    return { p, w, questionId, service, parentCaller: parentCaller!, workerCaller: workerCaller!, reply, close: () => credentials.close() };
+  }
+  const answered = (runId: string) => eventsOf(runId, 'human-input-delivered').filter(event => event.source === 'parent');
+  const said = (runId: string, text: string) => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes(text));
+
+  it('a correlated parent reply unblocks the worker without human input', async () => {
+    const f = await askedPair();
+    try {
+      const reply = randomUUID();
+      await f.reply('mock:agent-echo Use the parser', reply);
+      await until(() => answered(f.w.id).length === 1);
+      expect(answered(f.w.id)[0]).toMatchObject({ askSeq: eventsOf(f.w.id, 'ask.requested')[0]!.seq });
+      await until(() => said(f.w.id, 'Use the parser'));
+      expect(store.getRun(f.w.id)?.agentInputs?.find(input => input.id === reply)?.deliveredAt).toBeDefined();
+      expect(eventsOf(f.w.id, 'user-message').some(event => String(event.text).includes('Use the parser'))).toBe(false);
+    } finally { f.close(); }
+  });
+
+  it('progress and follow-ups never answer a pending worker question', async () => {
+    const f = await askedPair();
+    try {
+      const request = randomUUID(); const progress = randomUUID(); const followUp = randomUUID();
+      await f.service.send(f.parentCaller, { id: request, recipientRunId: f.w.id, kind: 'request', text: 'mock:agent-echo Also check lint', timeoutSeconds: 600 });
+      await f.service.send(f.parentCaller, { id: progress, recipientRunId: f.w.id, kind: 'progress', text: 'mock:agent-echo Still thinking', timeoutSeconds: 600 });
+      await f.service.send(f.parentCaller, { id: followUp, recipientRunId: f.w.id, kind: 'follow-up', requestId: request, text: 'mock:agent-echo Only src', timeoutSeconds: 600 });
+      manager.deliverConversationInput(f.w.id);
+      const held = () => store.getRun(f.w.id)?.agentInputs?.filter(input => [request, progress, followUp].some(id => id === input.id)) ?? [];
+      expect(held().every(input => !input.deliveredAt)).toBe(true);
+      expect(answered(f.w.id)).toEqual([]);
+      expect(store.getRun(f.w.id)?.status).toBe('waiting');
+      await f.reply('mock:agent-echo Use the parser');
+      await until(() => answered(f.w.id).length === 1 && held().every(input => !!input.deliveredAt));
+      await until(() => said(f.w.id, 'Only src'));
+    } finally { f.close(); }
+  });
+
+  it('a parent reply answers the worker after a restart', async () => {
+    const f = await askedPair();
+    f.close();
+    await restart();
+    const credentials = new CredentialRegistry();
+    try {
+      const parentCaller = credentials.authenticate(credentials.issue('project', f.p.id, randomUUID()))!;
+      const service = new DelegationService();
+      service.registerProject({ id: 'project', root, store, manager });
+      // Recovery resumes the parent; the worker's session stays closed on its pending question.
+      await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting');
+      expect(manager.isActive(f.w.id)).toBe(false);
+      await service.send(parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: f.questionId, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
+      await until(() => answered(f.w.id).length === 1);
+      await until(() => said(f.w.id, 'Use the parser'));
+      expect(eventsOf(f.w.id, 'user-message').some(event => String(event.text).includes('Use the parser'))).toBe(false);
+    } finally { credentials.close(); }
+  });
+
+  it('holds a worker question while the parent waits on the human, then delivers it behind the answer', async () => {
+    process.env.CEZ_DELEGATION = '1';
+    const p = await steeringParent('mock:ask'); await until(() => eventsOf(p.id, 'ask.requested').length === 1 && store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'worker-question-routed').length === 1);
+    const questionId = String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId);
+    const question = () => store.getRun(p.id)?.agentInputs?.find(input => input.id === questionId);
+    expect(question()).toBeDefined();
+    expect(question()?.deliveredAt).toBeUndefined();
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+    await until(() => !!question()?.deliveredAt);
+    const human = eventsOf(p.id, 'human-input-delivered');
+    expect(human).toHaveLength(1);
+    expect(human[0]!.source).toBeUndefined();
+  });
+
+  it('refuses a second reply to an answered question', async () => {
+    const f = await askedPair();
+    try {
+      await f.reply('mock:agent-echo Use the parser');
+      await until(() => answered(f.w.id).length === 1);
+      await expect(f.reply('mock:agent-echo Use the lexer')).rejects.toSatisfy(error =>
+        error instanceof DelegationPolicyError && error.message === 'This question was already answered');
+      expect(answered(f.w.id)).toHaveLength(1);
+    } finally { f.close(); }
   });
 });

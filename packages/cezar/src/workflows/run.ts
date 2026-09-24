@@ -46,6 +46,7 @@ import {
   type WorkerStopResult,
   type WorkerWait,
   type WorkerWaitRequest,
+  type ConversationMessage,
   type RequestWaitRequest,
   requestWaitRequestSchema,
   workerWaitRequestSchema,
@@ -73,7 +74,7 @@ import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { reconcileConversationState, projectConversationEvents } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
-import { questionMessage } from '../delegation/questions.ts';
+import { answersQuestion, questionMessage } from '../delegation/questions.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import type { QueuedMessage, RunRecord, RunStore, StepState } from '../runs/store.ts';
@@ -3164,7 +3165,10 @@ export class RunManager {
     const run = this.store.getRun(runId);
     if (!run?.delegation || run.delegation.role === 'invalid' || this.historyDeletionPending(runId) ||
       this.executionBlockedByRootFinish(run) || !['queued', 'running', 'waiting'].includes(run.status) ||
-      this.workerExecutionStopped(runId) || this.hasPendingHumanAsk(runId)) return;
+      this.workerExecutionStopped(runId)) return;
+    // A pending question holds every other input; only the parent's reply to a routed one
+    // answers it (#505), and the held inputs follow right behind that answer.
+    if (this.hasPendingHumanAsk(runId)) { this.answerRoutedQuestion(runId); return; }
     // Retain conversation input until the registered CI wait receives scheduler admission.
     // Converting this monitor into a worker wake would strand both admission paths.
     if (run.ciWait) { this.queueCiWake(runId); return; }
@@ -3218,9 +3222,47 @@ export class RunManager {
     this.deliverConversationInput(parentId);
   }
 
-  /** The parent can still read and answer a routed question. */
+  /** The worker's pending ask when it went to the parent and has not fallen back to a human. */
+  private routedAsk(runId: string): { askSeq: number; message: ConversationMessage } | undefined {
+    const run = this.store.getRun(runId);
+    if (run?.delegation?.role !== 'worker') return undefined;
+    const events = this.store.readEvents(runId);
+    const ask = pendingHumanAsk(events);
+    if (!ask || events.some(event => event.type === 'worker-question-fallback' && event.askSeq === ask.seq)) return undefined;
+    const routed = events.find(event => event.type === 'worker-question-routed' && event.askSeq === ask.seq);
+    const root = this.store.getRun(run.delegation.parentRunId);
+    const message = routed && root?.delegation?.role === 'root'
+      ? root.delegation.conversation?.messages.find(entry => entry.id === routed.messageId) : undefined;
+    return message ? { askSeq: ask.seq, message } : undefined;
+  }
+
+  /** The parent's reply answers the routed question like a human answer would: through the
+   * live session's native answer seam, or by reopening a session that is gone (#505). */
+  private answerRoutedQuestion(runId: string): void {
+    const routed = this.routedAsk(runId);
+    const reply = routed && this.store.getRun(runId)?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
+    if (!routed || !reply) return;
+    const text = `Your parent answered your question:\n${reply.text}`;
+    const state = this.active.get(runId);
+    if (!state) {
+      const result = this.continueRun(runId, { text, answerInputId: reply.id });
+      if (!result.ok) this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `parent answer not delivered: ${result.error}` });
+      return;
+    }
+    if (!state.session?.open || state.cancelled || state.openingAgentInputId === reply.id) return;
+    const bundle = state.atTurnBoundary === state.session ? this.pendingConversationBatch(runId, state, reply.id) : undefined;
+    if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
+    this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
+    this.commitBundledDelivery(runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])]);
+    state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
+    if (!state.pendingHumanAsk) this.flushAgentInputs(runId);
+    this.resumeParkedRun(runId, state);
+  }
+
+  /** The parent can still read and answer a routed question; answering needs its steer grant. */
   private parentCanReceive(parent: RunRecord): boolean {
-    return ['queued', 'running', 'waiting'].includes(parent.status) && !parent.stopping &&
+    return parent.delegation?.role === 'root' && parent.delegation.permissions.includes('steer') &&
+      ['queued', 'running', 'waiting'].includes(parent.status) && !parent.stopping &&
       !this.rootFinishRequested(parent.id) && !this.historyDeletionPending(parent.id);
   }
 
@@ -3621,10 +3663,10 @@ export class RunManager {
 
   /** The conversation messages the next submission would carry, if nothing but
    * conversation input leads the queue (lifecycle input stays a barrier). */
-  private pendingConversationBatch(runId: string, state: ActiveRun): { inputs: AgentInput[]; text: string } | undefined {
+  private pendingConversationBatch(runId: string, state: ActiveRun, answerId?: string): { inputs: AgentInput[]; text: string } | undefined {
     const run = this.store.getRun(runId);
     if (!run || run.ciWait || state.agentInputFlight || this.workerWait(runId)) return undefined;
-    const batch = agentInputBatch((run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId),
+    const batch = agentInputBatch((run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && input.id !== answerId),
       input => this.formatAgentInput(runId, input));
     return batch?.inputs.every(input => input.conversation) ? batch : undefined;
   }
@@ -4094,6 +4136,8 @@ export class RunManager {
       /** Agent account for the reopened session (spec 2026-07-29-agent-profiles). Omitted = the
        *  account the run is already on. */
       agentProfile?: string;
+      /** #505: the parent reply this continuation delivers as the answer to a routed question. */
+      answerInputId?: string;
     } = {},
     /** Restart recovery may discover several interrupted tasks at once. Those
      *  continuations are queued; an explicit user Continue remains immediate. */
@@ -4290,7 +4334,7 @@ export class RunManager {
     // and the original prompt/URLs must reach disk before the first startup await.
     const acceptedPatch = {
       continuationMessage: { ...message, id: stepId, text: prompt,
-        ...(conversation ? { agentInputId: conversation.input.id } : {}),
+        ...(conversation ? { agentInputId: conversation.input.id } : opts.answerInputId ? { agentInputId: opts.answerInputId } : {}),
         origin: recovered ? recovered.origin : deferForCapacity ? 'lifecycle' as const : 'human' as const },
       status: deferForCapacity ? 'queued' as const : 'running' as const,
       error: undefined,
@@ -4472,13 +4516,16 @@ export class RunManager {
     const openingInput = record?.agentInputs?.find(input => input.id === checkpoint?.agentInputId);
     // Hydration has already included later human updates and task edits. Append
     // the current obligation outcome without replacing that composed prompt.
-    if (openingInput) prompt += this.agentInputOutcomeText(openingInput);
+    // A parent's answer to a routed question (#505) is shown as its conversation reply, not
+    // as a human message, and its own reply outcome is not news to the worker.
+    const parentAnswer = openingInput?.conversation?.kind === 'reply' && this.routedAsk(runId) !== undefined;
+    if (openingInput && !parentAnswer) prompt += this.agentInputOutcomeText(openingInput);
     const saved = this.readPersistedAttachments(
       runId, checkpoint?.id === stepId ? checkpoint.images ?? [] : [], 'continuation',
     );
     const openingImages = [...(images.length ? contentBlocksOf(images) : saved.blocks), ...persistedImages];
     const attachments = [...saved.attachments, ...persistedAttachments];
-    if (checkpoint?.origin !== 'lifecycle') this.store.appendEvent(runId, {
+    if (checkpoint?.origin !== 'lifecycle' && !parentAnswer) this.store.appendEvent(runId, {
       type: 'user-message',
       stepId,
       text: prompt,
@@ -4566,7 +4613,7 @@ export class RunManager {
             this.reconcileWorkerWaits();
           }
           if (openingAnswerAskSeq !== undefined && state.session?.open) {
-            this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: openingAnswerAskSeq });
+            this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: openingAnswerAskSeq, ...(parentAnswer ? { source: 'parent' } : {}) });
             openingAnswerAskSeq = undefined;
             state.openingAnswerAskSeq = undefined;
           }

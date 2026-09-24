@@ -71,9 +71,9 @@ for (const backend of RUNNER_IDS) {
       }
       const projections = store.readEvents(runId).filter(event => event.type === 'conversation-message' &&
         inputs.some(input => input.id === (event.message as ConversationMessage).id));
-      // The worker's own ask also travels to its parent as a routed question (#505), and
-      // that message projects here too; only the parent's two messages are counted.
-      expect(store.readEvents(runId).filter(event => event.type === 'worker-question-routed')).toHaveLength(1);
+      // The worker's own ask is routed to its parent or left with the human (#505); a routed
+      // question projects here too, so only the parent's two messages are counted.
+      expect(store.readEvents(runId).filter(event => event.type === 'worker-question-routed' || event.type === 'worker-question-fallback')).toHaveLength(1);
       // One queued and one delivered projection per message; an observable harness adds
       // at most one consumed projection per message (#505).
       expect(projections.filter(event => event.delivery !== 'consumed')).toHaveLength(4);

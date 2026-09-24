@@ -172,6 +172,8 @@ export class DelegationService {
         ? original.recipientRunId !== sender.id || original.senderRunId !== recipient.id
         : original.senderRunId !== sender.id || original.recipientRunId !== recipient.id))) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
       const settled = state.outcomes.find(outcome => outcome.requestId === request.requestId);
+      // A worker's question has exactly one answer (#505): a second reply is refused, not recorded late.
+      if (request.kind === 'reply' && settled && original?.question) throw new DelegationPolicyError('incompatible_state', 'This question was already answered');
       const now = new Date().toISOString();
       const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
       const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy);
