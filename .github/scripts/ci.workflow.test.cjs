@@ -134,6 +134,7 @@ test('CI classifies pull request changes from a trusted base checkout', () => {
   assert.match(classify.run, /previous_filename/);
   assert.match(classify.run, /node [^\n]*\.github\/scripts\/change-surface\.cjs/);
   assert.match(classify.run, /surface=full-matrix/);
+  assert.match(classify.run, /docs-only\|infra-only\|full-matrix/);
   assert.match(classify.run, /if ! files=/);
 });
 
@@ -155,6 +156,14 @@ test('change-surface fails closed when the API or classifier fails', () => {
   const mixed = runClassification({ apiOutput: ['"README.md"', '"src/app.js"'] });
   assert.equal(mixed.result.status, 0, mixed.result.stderr);
   assert.equal(mixed.output, 'surface=full-matrix\n');
+
+  const infraOnly = runClassification({ apiOutput: '".github/workflows/release.yml"' });
+  assert.equal(infraOnly.result.status, 0, infraOnly.result.stderr);
+  assert.equal(infraOnly.output, 'surface=infra-only\n');
+
+  const infraMixed = runClassification({ apiOutput: ['".github/workflows/release.yml"', '"packages/cezar/src/index.ts"'] });
+  assert.equal(infraMixed.result.status, 0, infraMixed.result.stderr);
+  assert.equal(infraMixed.output, 'surface=full-matrix\n');
 
   const apiFailure = runClassification({ apiFails: true });
   assert.equal(apiFailure.result.status, 0, apiFailure.result.stderr);
@@ -197,7 +206,7 @@ test('test jobs require full-matrix classification without losing the bot bump s
   }
 });
 
-test('verify requires the classifier and permits skipped tests only for docs-only or bump PRs', () => {
+test('verify requires the classifier and permits skipped tests only for docs-only, infra-only, or bump PRs', () => {
   const verify = workflow().jobs.verify;
   assert.ok(verify.needs.includes('change-surface'));
   assert.equal(verify.if, 'always()');
@@ -207,10 +216,15 @@ test('verify requires the classifier and permits skipped tests only for docs-onl
   assert.match(JSON.stringify(gate.env), /BUMP_PR/);
   assert.match(gate.run, /CHANGE_SURFACE/);
   assert.match(gate.run, /docs-only/);
+  assert.match(gate.run, /infra-only/);
   assert.match(gate.run, /BUMP_PR/);
 
   const cases = [
     { name: 'docs-only skipped tests', surface: 'docs-only', bump: 'false', vitest: 'skipped', cockpit: 'skipped', status: 0 },
+    { name: 'infra-only skipped tests', surface: 'infra-only', bump: 'false', vitest: 'skipped', cockpit: 'skipped', status: 0 },
+    { name: 'infra-only successful tests', surface: 'infra-only', bump: 'false', vitest: 'success', cockpit: 'success', status: 0 },
+    { name: 'infra-only failed tests', surface: 'infra-only', bump: 'false', vitest: 'failed', cockpit: 'skipped', status: 1 },
+    { name: 'unknown surface skipped tests', surface: 'weird-surface', bump: 'false', vitest: 'skipped', cockpit: 'skipped', status: 1 },
     { name: 'full-matrix skipped tests', surface: 'full-matrix', bump: 'false', vitest: 'skipped', cockpit: 'skipped', status: 1 },
     { name: 'full-matrix successful tests', surface: 'full-matrix', bump: 'false', vitest: 'success', cockpit: 'success', status: 0 },
     { name: 'release bump skipped tests', surface: 'full-matrix', bump: 'true', vitest: 'skipped', cockpit: 'skipped', status: 0 },
