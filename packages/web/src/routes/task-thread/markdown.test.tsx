@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Markdown } from './markdown'
+import { TaskFileContext } from './file-links'
 
 afterEach(cleanup)
 
@@ -13,6 +14,38 @@ afterEach(cleanup)
  * crashing the message.
  */
 describe('Markdown', () => {
+  it('opens absolute and file URL links in this task Files view', () => {
+    render(<TaskFileContext.Provider value={{ runId: 'task-one', projectId: 'other' }}>
+      <Markdown>{'[ADR](/tmp/decision.md) and [spaced](file:///tmp/a%20b.md)'}</Markdown>
+    </TaskFileContext.Provider>)
+    expect(screen.getByRole('link', { name: 'ADR' }).getAttribute('href')).toBe('/p/other/tasks/task-one/files?path=%2Ftmp%2Fdecision.md')
+    expect(screen.getByRole('link', { name: 'spaced' }).getAttribute('href')).toBe('/p/other/tasks/task-one/files?path=file%3A%2F%2F%2Ftmp%2Fa%2520b.md')
+  })
+
+  it('retains external link semantics and confirmation inside task context', () => {
+    render(<TaskFileContext.Provider value={{ runId: 'task-one' }}><Markdown>{'[Website](https://example.com)'}</Markdown></TaskFileContext.Provider>)
+    fireEvent.click(screen.getByRole('link', { name: 'Website' }))
+    expect(document.querySelector('[data-slot="link-safety-dialog"]')).not.toBeNull()
+  })
+
+  it('does not embed active HTML or remote media in document previews', () => {
+    const { container } = render(<Markdown document>{'<iframe src="https://example.com"></iframe>\n<video src="https://example.com/movie" autoplay></video>\n<script>window.bad = true</script>\n<object data="https://example.com"></object>'}</Markdown>)
+    expect(container.querySelector('iframe, video, script, object')).toBeNull()
+  })
+
+  it('keeps snapshot-relative paths inert without losing their labels', () => {
+    const { container } = render(<Markdown document>{'[Sibling](next.md) and [absolute](/tmp/report.txt)'}</Markdown>)
+    expect(container.querySelector('a, button')).toBeNull()
+    expect(container.textContent).toContain('Sibling')
+    expect(container.textContent).toContain('absolute')
+  })
+
+  it('does not fetch embedded images when previewing a document', () => {
+    const { container } = render(<Markdown document>{'![private](https://example.com/tracker.png)'}</Markdown>)
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.textContent).toContain('private')
+  })
+
   it('renders a ts fence as a code block with language chip and copy button, tokens on --syn-*', async () => {
     render(<Markdown>{'Before.\n\n```ts\nconst answer: number = 42;\n```'}</Markdown>)
 

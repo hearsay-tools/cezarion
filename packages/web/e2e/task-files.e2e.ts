@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, waitForStatus } from './poll'
+import { focusWithKeyboard } from './contrast'
 
 /**
  * The Files tab (R5 Step 1.6) end-to-end against a LIVE dry run, same doctrine as
@@ -87,7 +88,7 @@ beforeAll(async () => {
     await fetch(`${baseUrl}/api/v1/runs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ task: 'Improve the project notes.', workflow: 'quick-task' }),
+      body: JSON.stringify({ task: `Improve the project notes. [Review ADR](${join(dataRoot, 'README.md')}#files-tab-e2e-fixture-repo)`, workflow: 'quick-task' }),
     })
   ).json()) as { id: string }
   runId = created.id
@@ -159,12 +160,59 @@ describe('the Files tab against a live dry-run worktree', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="file-preview-image"]') !== null`)
     expect(
       browser.evaluate(`document.querySelector('[data-slot="file-preview-image"]').getAttribute('src')`),
-    ).toBe(`/api/v1/runs/${runId}/files?path=logo.png&raw=1`)
+    ).toBe(`/api/v1/runs/${runId}/file-link?path=logo.png&raw=1`)
     // naturalWidth is only non-zero once the browser has fetched AND decoded the bytes.
     browser.waitForFunction(
       `document.querySelector('[data-slot="file-preview-image"]').naturalWidth === 1`,
     )
     browser.screenshot(`${artifactsDir}/files-image.png`)
+    browser.evaluate('history.back()')
+    browser.waitForFunction(`document.querySelector('[data-slot="file-preview-code"]')?.textContent.includes('hello from the files tab')`)
+    expect(browser.evaluate(`document.querySelector('input[aria-label="File path in the worktree"]').value`)).toBe('src/hello.ts')
+    browser.evaluate('history.forward()')
+    browser.waitForFunction(`document.querySelector('[data-slot="file-preview-image"]')?.naturalWidth === 1`)
+  })
+
+  it('follows a transcript file link into a bookmarkable Markdown preview', () => {
+    browser.goto(`${baseUrl}${scoped(`/tasks/${runId}`)}`)
+    const selector = '[data-slot="user-bubble"] a[data-streamdown="link"]'
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(selector)}) !== null`)
+    browser.click(selector)
+    const text = browser.waitForValue(`document.querySelector('[data-slot="file-preview"]')?.textContent`, value => typeof value === 'string' && value.includes('files-tab e2e fixture repo'))
+    expect(text).toContain('files-tab e2e fixture repo')
+    expect(browser.url()).toContain('/files?path=')
+    expect(browser.url()).toContain('#files-tab-e2e-fixture-repo')
+    browser.goto(browser.url())
+    browser.waitForFunction(`document.querySelector('[data-slot="file-preview"]')?.textContent.includes('files-tab e2e fixture repo')`)
+  })
+
+  it('opens an external CLI-published snapshot after its source is removed, in both themes on mobile', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'cezar-e2e-published-'))
+    try {
+      const source = join(outside, 'decision.md')
+      writeFileSync(source, '# Published ADR\n\nSnapshot survives source removal.\n![blocked](https://example.invalid/tracker.png)\n')
+      const artifact = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
+        env: { ...fixtureServeEnv(dataRoot), CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(dataRoot, '.ai/cezar/runs', `${runId}-artifacts`) }, encoding: 'utf8',
+      })) as { id: string; link: string }
+      rmSync(outside, { recursive: true, force: true })
+      browser.setViewport(360, 640)
+      for (const theme of ['light', 'dark']) {
+        browser.goto(`${baseUrl}${scoped(artifact.link)}`)
+        browser.waitForFunction(`document.querySelector('[data-slot="file-preview"]')?.textContent.includes('Snapshot survives source removal.')`)
+        browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'}); document.documentElement.classList.toggle('dark', ${theme === 'dark'})`)
+        const evidence = browser.waitForValue(`(() => { const pane = document.querySelector('[data-slot="file-preview"]'); if (!pane) return null; pane.scrollIntoView({ block: 'start' }); return { text: pane.textContent, images: pane.querySelectorAll('img').length, overflow: document.documentElement.scrollWidth > innerWidth, download: pane.querySelector('a[href$="/download"]')?.getAttribute('href') } })()`)
+        expect(evidence).toMatchObject({ images: 0, overflow: false, download: `/api/v1/runs/${runId}/artifacts/${artifact.id}/download` })
+        browser.screenshot(`${artifactsDir}/published-${theme}-360.png`)
+      }
+      focusWithKeyboard(browser, '[data-slot="file-preview"] button')
+      browser.press('Enter')
+      browser.waitForFunction(`document.querySelector('[data-slot="file-preview-code"]')?.textContent.includes('# Published ADR')`)
+      browser.press('Enter')
+      browser.waitForFunction(`document.querySelector('[data-slot="file-preview"] h1')?.textContent === 'Published ADR'`)
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+      browser.setViewport(1440, 900)
+    }
   })
 
   it('below md the columns stack, the tree stays usable, and nothing overflows sideways', () => {

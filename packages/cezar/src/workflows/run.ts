@@ -1,5 +1,6 @@
 import { ciWaitRequestSchema, ciWaitResultSchema, type CiWait, type CiWaitRequest, type CiWaitResult } from '@open-mercato/cezar-contract';
 import { acquireCiResources } from '../ci-wait/resources.ts';
+import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding, type WorkerExecutionIdentity, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
@@ -1042,6 +1043,7 @@ export class RunManager {
    *  turning into empty command output inside a running agent. */
   private agentEnv(runId: string, generateFollowups = true): Record<string, string> {
     return {
+      CEZ_ARTIFACTS_DIR: provisionArtifactDirectory(this.dataDir, runId),
       CEZ_HANDOFF_FILE: handoffPath(this.dataDir, runId),
       CEZ_TASK_ID: runId,
       CEZ_TODOS_FILE: generateFollowups ? todosPath(this.dataDir) : '',
@@ -4574,6 +4576,7 @@ export class RunManager {
         systemPrompt: composeSystemPrompt(
           record?.systemPrompt,
           delegation?.instructions,
+          artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
           generateFollowups ? HANDOFF_INSTRUCTIONS : HANDOFF_ONLY_INSTRUCTIONS,
         ),
         userPrompt: attachments.length
@@ -5409,6 +5412,7 @@ export class RunManager {
             systemPrompt,
             extraSystemPrompt,
             delegation?.instructions,
+            artifactInstructions(stepProfile.env.CEZ_ARTIFACTS_DIR),
             followupsEnabled() && input.generateFollowups !== false
               ? HANDOFF_INSTRUCTIONS
               : HANDOFF_ONLY_INSTRUCTIONS,

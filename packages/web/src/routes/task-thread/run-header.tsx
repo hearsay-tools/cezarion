@@ -69,6 +69,7 @@ import { cn, isHttpUrl } from '@/lib/utils'
 
 import { ArchiveButton } from './archive-action'
 import { Markdown } from './markdown'
+import { TaskFileScope } from './task-file-scope'
 import { cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
 import { RunRelationshipsPanel } from './run-relationships'
 import { WorkflowSteps } from './step-rail'
@@ -965,7 +966,7 @@ function NotesPanel({ runId, onClose }: { runId: string; onClose: () => void }) 
       ) : handoff.isError ? (
         <p className="text-xs text-danger">{handoff.error.message}</p>
       ) : handoff.data.trim().length > 0 ? (
-        <Markdown>{handoff.data}</Markdown>
+        <TaskFileScope runId={runId}><Markdown>{handoff.data}</Markdown></TaskFileScope>
       ) : (
         <p className="text-xs text-soft-foreground">
           No notes yet — the handoff file is seeded when the task starts.

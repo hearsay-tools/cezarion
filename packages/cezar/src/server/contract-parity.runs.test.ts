@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import type {
   apiRunSchema,
+  fileLinkResultSchema,
+  filePreviewDataSchema,
+  artifactListSchema,
   archiveFinishedResponseSchema,
   cancelResponseSchema,
   continueResponseSchema,
@@ -110,6 +113,10 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
     Assert<Exact<z.infer<typeof messageResponseSchema>, Message200>>,
     Assert<Exact<z.infer<typeof editQueuedMessageResponseSchema>, QueuedPatch200>>,
     Assert<Exact<z.infer<typeof removeQueuedMessageResponseSchema>, QueuedDelete200>>,
+    // Task link JSON and published snapshots (the raster branch is ArrayBuffer).
+    Assert<Exact<z.infer<typeof fileLinkResultSchema>, Exclude<InferResponseType<Run['file-link']['$get'], 200>, ArrayBuffer>>>,
+    Assert<Exact<z.infer<typeof filePreviewDataSchema>, InferResponseType<Run['artifacts'][':artifactId']['$get'], 200>>>,
+    Assert<Exact<z.infer<typeof artifactListSchema>, InferResponseType<Run['artifacts']['$get'], 200>>>,
     // artifacts + local handoff
     Assert<Exact<z.infer<typeof openInCliResponseSchema>, OpenInCli200>>,
     Assert<Exact<z.infer<typeof runCommitsResponseSchema>, Commits200>>,

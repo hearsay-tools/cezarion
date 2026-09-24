@@ -1,4 +1,7 @@
 import type {
+  FileLinkResult,
+  FilePreviewData,
+  PublishedArtifact,
   AgentConfigFileContent,
   AgentAccountDetailsResponse,
   AgentAccountStatusResponse,
@@ -1011,6 +1014,25 @@ export async function getRunFile(id: string, path: string, opts?: ReadOptions): 
     ),
     '/runs/:id/files',
   )
+}
+
+export async function getFileLink(id: string, path: string, opts?: ReadOptions): Promise<FileLinkResult> {
+  return unwrap(await cez.api.v1.p[':projectId'].runs[':id']['file-link'].$get(
+    { param: { projectId: queryScope(), id }, query: { path } }, init(opts)), '/runs/:id/file-link')
+}
+export async function getArtifacts(id: string, opts?: ReadOptions): Promise<{ artifacts: PublishedArtifact[] }> {
+  return unwrap(await cez.api.v1.p[':projectId'].runs[':id'].artifacts.$get(
+    { param: { projectId: queryScope(), id } }, init(opts)), '/runs/:id/artifacts')
+}
+export async function getArtifact(id: string, artifactId: string, opts?: ReadOptions): Promise<FilePreviewData> {
+  return unwrap(await cez.api.v1.p[':projectId'].runs[':id'].artifacts[':artifactId'].$get(
+    { param: { projectId: queryScope(), id, artifactId } }, init(opts)), '/runs/:id/artifacts/:artifactId')
+}
+export function artifactUrl(id: string, artifactId: string, representation: 'download' | 'image'): string {
+  return apiPath(runPath(id, `/artifacts/${encodeURIComponent(artifactId)}/${representation}`))
+}
+export function fileLinkImageUrl(id: string, path: string): string {
+  return apiPath(runPath(id, `/file-link?path=${encodeURIComponent(path)}&raw=1`))
 }
 
 /** The same-origin URL an `<img>` can load an image file's bytes from (R5 Files tab). The

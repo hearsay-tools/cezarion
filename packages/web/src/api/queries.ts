@@ -43,6 +43,9 @@ import {
   getRunChanges,
   getRunDiff,
   getRunFile,
+  getFileLink,
+  getArtifact,
+  getArtifacts,
   getRunHandoff,
   getRuns,
   getRunsIndex,
@@ -931,6 +934,16 @@ export function useRunFile(id: string | undefined, path: string | undefined) {
     enabled: Boolean(id) && path !== undefined,
     retry: false,
   })
+}
+
+export function useFileLink(id: string, path: string | null) {
+  return useQuery({ queryKey: [queryScope(), 'runs', 'file-link', id, path], queryFn: ({ signal }) => getFileLink(id, path!, { signal }), enabled: path !== null, retry: false })
+}
+export function useArtifact(id: string, artifactId: string | null) {
+  return useQuery({ queryKey: [queryScope(), 'runs', 'artifact', id, artifactId], queryFn: ({ signal }) => getArtifact(id, artifactId!, { signal }), enabled: artifactId !== null, retry: false })
+}
+export function useArtifacts(id: string) {
+  return useQuery({ queryKey: [queryScope(), 'runs', 'artifacts', id], queryFn: ({ signal }) => getArtifacts(id, { signal }), retry: false, staleTime: 0, refetchOnWindowFocus: true })
 }
 
 /** The variant-compare data for `/compare/:groupId` (spec 010). Freshness while variants are

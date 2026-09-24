@@ -10,6 +10,7 @@ import { highlight, highlightSync, langForPath, type SynToken } from '@/lib/high
 import { cn } from '@/lib/utils'
 
 import { formatFileSize, previewKind } from './worktree-files'
+import { Markdown } from '../task-thread/markdown'
 
 /**
  * The Files tab's preview pane (R5 Step 1.6). Every state is honest about WHY there is no
@@ -76,16 +77,27 @@ export function FilePreview({ runId, path, className }: { runId: string; path: s
   return <FileEntryView runId={runId} entry={entry.data} className={className} />
 }
 
-function FileEntryView({
+export function FileEntryView({
   runId,
   entry,
   className,
+  imageUrl,
+  downloadUrl,
+  snapshot,
+  documentPreview = false,
 }: {
   runId: string
   entry: Extract<WorktreeEntry, { type: 'file' }>
   className?: string
+  imageUrl?: string
+  downloadUrl?: string
+  snapshot?: string
+  documentPreview?: boolean
 }) {
-  const kind = previewKind(entry)
+  const [source, setSource] = useState(false)
+  const markdown = documentPreview && /\.(?:md|markdown)$/i.test(entry.path)
+  const safeImage = /\.(?:png|jpe?g|gif|webp|bmp|ico|avif)$/i.test(entry.path)
+  const kind = documentPreview && safeImage && entry.size <= 10 * 1024 * 1024 ? 'image' : previewKind(entry)
   return (
     <Pane className={className}>
       <header
@@ -95,12 +107,17 @@ function FileEntryView({
         <span className="min-w-0 truncate font-mono font-medium">{entry.path}</span>
         <span className="ml-auto shrink-0 tabular-nums text-soft-foreground">{formatFileSize(entry.size)}</span>
       </header>
-      {kind === 'image' ? (
+      {snapshot || downloadUrl || markdown ? <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-2 text-xs">
+        {snapshot ? <span>Published snapshot · {snapshot}</span> : null}
+        {downloadUrl ? <a className="inline-flex min-h-11 items-center text-accent-text underline" href={downloadUrl}>Download</a> : null}
+        {markdown ? <button className="min-h-11 rounded px-2 text-accent-text underline focus-visible:ring-2" onClick={() => setSource(value => !value)}>{source ? 'Preview' : 'View source'}</button> : null}
+      </div> : null}
+      {kind === 'image' && (!documentPreview || safeImage) ? (
         <div className="flex justify-center p-4">
           {/* Raw bytes from the same origin the JSON came from — no auth story to get wrong. */}
           <img
             data-slot="file-preview-image"
-            src={runFileRawUrl(runId, entry.path)}
+            src={imageUrl ?? runFileRawUrl(runId, entry.path)}
             alt={entry.path}
             className="max-h-[70vh] max-w-full rounded-sm"
           />
@@ -121,6 +138,8 @@ function FileEntryView({
           title="Binary file"
           subtitle={`${formatFileSize(entry.size)} of binary data — no text preview.`}
         />
+      ) : markdown && !source ? (
+        <div className="p-4"><Markdown document>{entry.content ?? ''}</Markdown></div>
       ) : (
         <CodeLines path={entry.path} text={entry.content ?? ''} />
       )}

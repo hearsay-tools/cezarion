@@ -6,6 +6,7 @@ import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
+import { artifactDirectory, publishArtifact } from '../artifacts/store.ts';
 
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -66,6 +67,16 @@ describe('parent-owned collected worker results', () => {
     const result = await f.service.collect(f.caller, { workerId: run.id });
     expect(result).toMatchObject({ revision: 1, partial: true, summary: { state: 'unavailable' } });
     expect(() => f.store.commitWorkerResult(f.parent.id, old)).toThrow();
+  });
+  it('collects published output through worktree cleanup and marks it deleted with history', async () => {
+    const run = await worker();
+    const source = join(f.root, 'published.md'); writeFileSync(source, '# output');
+    const artifact = await publishArtifact(artifactDirectory(join(f.root, '.ai/cezar'), run.id), run.id, source);
+    await f.service.destroy(f.caller, { workerId: run.id });
+    const result = await f.service.collect(f.caller, { workerId: run.id });
+    expect(result.artifacts).toMatchObject({ state: 'available', items: [{ state: 'available', id: `published:${artifact.id}` }] });
+    expect(f.store.deleteRun(run.id)).toBe(true);
+    expect((await f.service.collect(f.caller, { workerId: run.id })).artifacts).toMatchObject({ state: 'available', items: [{ state: 'deleted', id: `published:${artifact.id}` }] });
   });
   it('bounds artifact descriptors and reports missing bytes honestly', async () => {
     const run = await worker();
