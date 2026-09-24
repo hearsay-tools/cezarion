@@ -347,6 +347,32 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelectorAll('[data-slot="gh-row"]').length === 40`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-detail"]') !== null`)
 
+    const beforeDock = browser.waitForValue<{
+      pageCanScroll: boolean
+      listDidNotInnerScroll: boolean
+      detailDidNotInnerScroll: boolean
+    }>(`(() => {
+      const main = document.querySelector('[data-slot="main"]');
+      const header = document.querySelector('[data-slot="gh-header"]');
+      const panes = document.querySelector('[data-slot="gh-panes"]');
+      const list = document.querySelector('[data-slot="gh-list"]');
+      const detail = document.querySelector('[data-slot="gh-detail"]');
+      if (!main || !header || !panes || !list || !detail) return null;
+      main.scrollTop = 0;
+      list.scrollTop = 160;
+      detail.scrollTop = 160;
+      return {
+        pageCanScroll: main.scrollHeight > main.clientHeight + 40,
+        listDidNotInnerScroll: list.scrollTop < 80,
+        detailDidNotInnerScroll: detail.scrollTop < 80,
+      };
+    })()`, (value) => Boolean(value?.pageCanScroll && value.listDidNotInnerScroll && value.detailDidNotInnerScroll))
+    expect(beforeDock).toMatchObject({
+      pageCanScroll: true,
+      listDidNotInnerScroll: true,
+      detailDidNotInnerScroll: true,
+    })
+
     const evidence = browser.waitForValue<{
       listMoved: boolean
       detailStill: boolean
@@ -362,9 +388,10 @@ describe('the GitHub tab against the live dry-run server', () => {
       if (!main || !header || !panes || !list || !detail) {
         return { listMoved: false, detailStill: false, detailMoved: false, listStill: false, headerMoved: false };
       }
+      main.scrollTop = main.scrollHeight;
+      if (!panes.hasAttribute('data-docked')) return null;
       list.scrollTop = 0;
       detail.scrollTop = 0;
-      main.scrollTop = 0;
       const detailBefore = detail.scrollTop;
       list.scrollTop = 160;
       const listMoved = list.scrollTop >= 80;
@@ -373,26 +400,13 @@ describe('the GitHub tab against the live dry-run server', () => {
       detail.scrollTop = 160;
       const detailMoved = detail.scrollTop >= 80;
       const listStill = list.scrollTop === listBefore;
-      main.scrollTop = main.scrollHeight;
       const mainTop = main.getBoundingClientRect().top;
       const headerMoved =
         header.getBoundingClientRect().bottom <= mainTop + 2 ||
         panes.getBoundingClientRect().top <= mainTop + 4;
-      return {
-        panesPosition: getComputedStyle(panes).position,
-        panesHeight: Math.round(panes.getBoundingClientRect().height),
-        listOverflow: getComputedStyle(list).overflowY,
-        detailOverflow: getComputedStyle(detail).overflowY,
-        listSizes: [list.scrollHeight, list.clientHeight],
-        detailSizes: [detail.scrollHeight, detail.clientHeight],
-        listMoved,
-        detailStill,
-        detailMoved,
-        listStill,
-        headerMoved,
-        mainScroll: [main.scrollTop, main.scrollHeight, main.clientHeight],
-      };
-    })()`, (value) => Boolean(value && value.listMoved && value.detailStill && value.detailMoved && value.listStill && value.headerMoved))
+      if (!listMoved || !detailStill || !detailMoved || !listStill || !headerMoved) return null;
+      return { listMoved, detailStill, detailMoved, listStill, headerMoved };
+    })()`)
     expect(evidence).toMatchObject({
       listMoved: true,
       detailStill: true,

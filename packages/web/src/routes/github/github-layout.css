@@ -95,3 +95,20 @@
   [data-route='github'] [data-slot='gh-tabs'] { gap: 12px; }
   [data-route='github'] [data-slot='gh-filter-toolbar'] > div:first-child { width: 100%; flex-basis: auto; }
 }
+
+/* #523: inner scroll only after the pane row has reached the top of `main`. */
+@media (min-width: 768px) {
+  [data-slot='gh-panes'][data-docked] {
+    position: sticky;
+    top: 0;
+    height: var(--gh-panes-height);
+    max-height: var(--gh-panes-height);
+    overflow: hidden;
+    align-items: stretch;
+    flex: none;
+  }
+  [data-slot='gh-panes'][data-docked] [data-slot='gh-list'], [data-slot='gh-panes'][data-docked] [data-slot='gh-detail'] {
+    height: 100%;
+    overflow-y: auto;
+  }
+}
