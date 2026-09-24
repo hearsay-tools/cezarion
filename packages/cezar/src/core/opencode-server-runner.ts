@@ -392,6 +392,11 @@ class OpencodeSession implements AgentSession {
       !this.questionReply && this.pendingPromptRequests === 0) {
       this.agentInputReady = true;
       this.opts.onAgentInputReady?.();
+    } else if (this.serverOpen && this.turnActive && !this.pendingQuestion && !this.questionReply &&
+      this.pendingPromptRequests === 0 && !this.agentRequest) {
+      // A reply or prompt acknowledgement cleared the last barrier mid-turn: held agent
+      // input can steer the running turn now, not after it (#505 local review).
+      this.opts.onAgentInputReady?.();
     }
   }
 

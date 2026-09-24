@@ -14,11 +14,11 @@ const waitUntil = async (cond: () => boolean) => {
 };
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const start = (prompt: string, opts: SessionOptions = {}) => {
+const start = (prompt: string, opts: SessionOptions = {}, env: Record<string, string> = {}) => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-opencode-steer-')); dirs.push(dir);
   const events: AgentEvent[] = []; const ui: UiEvent[] = [];
   const session = new OpencodeServerRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-    { userPrompt: prompt, cwd: dir }, event => events.push(event), { ...opts, onUiEvent: event => { ui.push(event); opts.onUiEvent?.(event); } });
+    { userPrompt: prompt, cwd: dir, env }, event => events.push(event), { ...opts, onUiEvent: event => { ui.push(event); opts.onUiEvent?.(event); } });
   return { session, events, ui };
 };
 
@@ -85,6 +85,20 @@ describe('opencode agent input steering (#505)', () => {
     await session.sendAgentMessage([{ type: 'text', text: 'mock:provider-error-early guidance' }], ['in-failed']);
     await waitUntil(() => events.filter(e => e.type === 'turn-end').length === 2);
     expect(consumed).toEqual([]);
+    session.end(); await session.result.catch(() => undefined);
+  });
+
+  it('admits held agent input during the turn a native-question answer resumes (#505 local review)', async () => {
+    let hints = 0;
+    const { session, events, ui } = start('mock:ask', { onAgentInputReady: () => { hints += 1; } }, { CEZ_MOCK_OPENCODE_REPLY_HOLD_MS: '1500' });
+    await waitUntil(() => ui.some(e => e.type === 'ask.requested'));
+    expect(session.sendMessage([{ type: 'text', text: 'Library: Vitest' }])).toBe(true);
+    expect(session.sendAgentMessage([{ type: 'text', text: 'held' }], ['held-1'])).toBe(false); // reply ACK pending
+    await waitUntil(() => hints > 0);
+    expect(events.some(e => e.type === 'turn-end')).toBe(false); // the answered turn is still running
+    const ack = session.sendAgentMessage([{ type: 'text', text: 'held' }], ['held-1']);
+    expect(ack).not.toBe(false);
+    await ack;
     session.end(); await session.result.catch(() => undefined);
   });
 });

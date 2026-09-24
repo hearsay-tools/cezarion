@@ -116,7 +116,8 @@ const server = createServer((req, res) => {
         send({ type: 'message.part.updated', properties: { part: {
           id: 'prt_answer', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: `human answer: ${body}${answerDone ? '\n\nCEZ:DONE' : ''}`,
         } } });
-        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+        // #505 review: CEZ_MOCK_OPENCODE_REPLY_HOLD_MS keeps the answered turn running.
+        setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), Number(process.env.CEZ_MOCK_OPENCODE_REPLY_HOLD_MS ?? 0));
       }, 30);
       const acknowledge = () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); };
       if (lateQuestionReply) setTimeout(acknowledge, 250);
