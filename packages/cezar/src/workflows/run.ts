@@ -52,6 +52,7 @@ import {
   attachmentExtension,
   delegationStateSchema,
   pendingHumanAsk,
+  askRequestSchema,
   isImageAttachmentName,
   isImageMediaType,
 } from '@open-mercato/cezar-contract';
@@ -72,6 +73,7 @@ import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
 import { reconcileConversationState, projectConversationEvents } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
+import { questionMessage } from '../delegation/questions.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import type { QueuedMessage, RunRecord, RunStore, StepState } from '../runs/store.ts';
@@ -3183,6 +3185,45 @@ export class RunManager {
     } else if (!this.recovering) this.flushAgentInputs(runId);
   }
 
+  /** A worker's pending question goes to its owning parent as a conversation request
+   * (#505). The worker still parks on its ask; only the parent's reply, or a human after
+   * fallback, answers it. Routing is idempotent: the message ID derives from the ask seq. */
+  private routeWorkerQuestion(workerId: string): void {
+    const worker = this.store.getRun(workerId);
+    if (worker?.delegation?.role !== 'worker') return;
+    const ask = pendingHumanAsk(this.store.readEvents(workerId));
+    if (!ask) return;
+    const events = this.store.readEvents(workerId);
+    if (events.some(event => (event.type === 'worker-question-routed' || event.type === 'worker-question-fallback') && event.askSeq === ask.seq)) return;
+    const fallback = (reason: string) => this.store.appendEvent(workerId, { type: 'worker-question-fallback', askSeq: ask.seq, reason });
+    const request = askRequestSchema.safeParse({ questions: ask.questions });
+    if (!request.success) { fallback('the question cannot be carried to the parent'); return; }
+    const parentId = worker.delegation.parentRunId;
+    const root = this.store.getRun(parentId);
+    if (root?.delegation?.role !== 'root' || !this.parentCanReceive(root)) { fallback('the parent can no longer receive messages'); return; }
+    const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
+    const now = new Date().toISOString();
+    const message = questionMessage({ workerRunId: workerId, parentRunId: parentId, askSeq: ask.seq, request: request.data, now });
+    if (state.messages.length >= 1024 || (root.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32 ||
+      state.messages.filter(m => m.kind === 'request' && m.state === 'accepted' && !state.outcomes.some(o => o.requestId === m.id)).length >= 32) {
+      fallback('the parent conversation is at capacity'); return;
+    }
+    if (!state.messages.some(m => m.id === message.id)) {
+      const input = { id: message.id, source: 'agent' as const, parentRunId: parentId, text: message.text, createdAt: now,
+        conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'request' as const } };
+      this.store.commitConversation(parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input });
+    }
+    projectConversationEvents(this.store, this.store.getRun(parentId)!);
+    this.store.appendEvent(workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: message.id, parentRunId: parentId });
+    this.deliverConversationInput(parentId);
+  }
+
+  /** The parent can still read and answer a routed question. */
+  private parentCanReceive(parent: RunRecord): boolean {
+    return ['queued', 'running', 'waiting'].includes(parent.status) && !parent.stopping &&
+      !this.rootFinishRequested(parent.id) && !this.historyDeletionPending(parent.id);
+  }
+
   /** Cancel only the wait; persist its settlement before ordinary wake admission. */
   cancelWorkerWait(parentId: string, waitId: string): WorkerWait {
     const run = this.store.getRun(parentId);
@@ -4600,7 +4641,7 @@ export class RunManager {
             // `ScheduleWakeup` → non-attention `running`/`activity:'monitoring'`
             // (#490, #46). Both free the slot; only genuine user waits keep the
             // idle timer. The autonomous nudge above still wins over either.
-            if (ask) emitAskRequested(sink, ask);
+            if (ask) { emitAskRequested(sink, ask); this.routeWorkerQuestion(runId); }
             if (monitoring) {
               this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
               this.store.updateStep(runId, stepId, { status: 'running' });
@@ -5509,7 +5550,7 @@ export class RunManager {
           // still working through `CEZ:MONITORING` or Claude's native
           // `ScheduleWakeup`. Monitoring parks as `running` with no user-wait
           // idle timer, so the cockpit stays non-attention (#490, #46).
-          if (ask) emitAskRequested(sink, ask);
+          if (ask) { emitAskRequested(sink, ask); this.routeWorkerQuestion(runId); }
           if (monitoring) {
             this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
             this.store.updateStep(runId, step.id, { status: 'running' });
@@ -5802,6 +5843,7 @@ export class RunManager {
       this.store.updateRun(runId, { status: 'waiting', activity: undefined });
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
       this.releaseSlot();
+      this.routeWorkerQuestion(runId);
       return;
     }
     // Pi can resume autonomously when an async subagent completes — the mapper
