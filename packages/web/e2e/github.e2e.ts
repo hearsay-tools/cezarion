@@ -312,6 +312,177 @@ describe('the GitHub tab against the live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/github-pr-changes.png`)
   })
 
+  it.each([900, 540])('on desktop hides the GitHub title then scrolls list and detail independently (#523), height %i', async (height) => {
+    if (!forgeAvailable) return
+    const gh = await api<GithubPayload>('/api/v1/github')
+    const template = gh.issues[0]
+    expect(template).toBeDefined()
+    if (!template) return
+
+    const longBody = Array.from({ length: 80 }, (_, index) => `Fixture paragraph ${index}.`).join('\n\n')
+    const issues = Array.from({ length: 40 }, (_, index) => ({
+      ...template,
+      number: 9000 + index,
+      title: `Fixture overflow issue ${index}`,
+      url: `https://github.com/mock/repo/issues/${9000 + index}`,
+      body: index === 0 ? longBody : 'short',
+    }))
+    const stub = JSON.stringify({ ...gh, issues, prs: gh.prs ?? [] })
+
+    await rememberGithubView('issues')
+    browser.setViewport(DESKTOP.width, height)
+    browser.goto(`${baseUrl}${scoped('/')}`)
+    browser.waitForFunction(`document.querySelector('a[href="${scoped('/github')}"]') !== null`)
+    browser.evaluate(`(() => {
+      const nativeFetch = window.fetch;
+      window.fetch = (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+        if (new URL(url, location.href).pathname.endsWith('/github')) {
+          return Promise.resolve(new Response(${JSON.stringify(stub)}, { status: 200, headers: { 'content-type': 'application/json' } }));
+        }
+        return nativeFetch(input, init);
+      };
+      document.querySelector('a[href="${scoped('/github')}"]').click();
+    })()`)
+    browser.waitForFunction(`document.querySelectorAll('[data-slot="gh-row"]').length === 40`)
+    browser.waitForFunction(`document.querySelector('[data-slot="gh-detail"]') !== null`)
+
+    const atTop = browser.waitForValue<{ titleVisible: boolean }>(`(() => {
+      const main = document.querySelector('[data-slot="main"]');
+      const masthead = document.querySelector('[data-slot="gh-masthead"]');
+      if (!main || !masthead) return null;
+      main.scrollTop = 0;
+      return { titleVisible: masthead.getBoundingClientRect().bottom > main.getBoundingClientRect().top + 8 };
+    })()`, (value) => Boolean(value?.titleVisible))
+    expect(atTop).toMatchObject({ titleVisible: true })
+
+    // Trusted wheel input must move the page first, even over either scrollable pane.
+    for (const slot of ['gh-list', 'gh-detail']) {
+      browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
+      const point = browser.waitForValue<{ x: number; y: number }>(`(() => {
+        const main = document.querySelector('[data-slot="main"]');
+        const pane = document.querySelector('[data-slot="${slot}"]');
+        if (!main || !pane || main.scrollTop !== 0) return null;
+        const box = pane.getBoundingClientRect();
+        return { x: box.left + box.width / 2, y: box.top + 40 };
+      })()`)
+      await browser.wheelAt(point.x, point.y, 40)
+      const scrolled = browser.waitForValue<{ page: number; list: number; detail: number }>(`(() => {
+        return {
+          page: document.querySelector('[data-slot="main"]').scrollTop,
+          list: document.querySelector('[data-slot="gh-list"]').scrollTop,
+          detail: document.querySelector('[data-slot="gh-detail"]').scrollTop,
+        };
+      })()`, value => Boolean(value && value.page > 0))
+      expect(scrolled.list).toBe(0)
+      expect(scrolled.detail).toBe(0)
+    }
+
+    const evidence = browser.waitForValue<{
+      bottomGap: number
+      panesUncovered: boolean
+      titleGone: boolean
+      tabsVisible: boolean
+      filtersVisible: boolean
+      listMoved: boolean
+      detailStill: boolean
+      detailMoved: boolean
+      listStill: boolean
+      listHasNoXScroll: boolean
+    }>(`(() => {
+      const main = document.querySelector('[data-slot="main"]');
+      const masthead = document.querySelector('[data-slot="gh-masthead"]');
+      const tabs = document.querySelector('[data-slot="gh-tabs"]');
+      const toolbar = document.querySelector('[data-slot="gh-header"]');
+      const list = document.querySelector('[data-slot="gh-list"]');
+      const detail = document.querySelector('[data-slot="gh-detail"]');
+      if (!main || !masthead || !tabs || !toolbar || !list || !detail) return null;
+      main.scrollTop = main.scrollHeight;
+      const mainTop = main.getBoundingClientRect().top;
+      const titleGone = masthead.getBoundingClientRect().bottom <= mainTop + 2;
+      const tabsBox = tabs.getBoundingClientRect();
+      const tabsVisible = tabsBox.top >= mainTop - 2 && tabsBox.bottom > mainTop + 16;
+      const filtersVisible = toolbar.getBoundingClientRect().bottom > mainTop + 8;
+      const mainBottom = main.getBoundingClientRect().bottom;
+      const bottomGap = Math.round(mainBottom - Math.max(
+        list.getBoundingClientRect().bottom,
+        detail.getBoundingClientRect().bottom,
+      ));
+      const panesUncovered = [list, detail].every(pane => {
+        const box = pane.getBoundingClientRect();
+        return box.top >= toolbar.getBoundingClientRect().bottom && box.bottom <= mainBottom - 15;
+      });
+      list.scrollTop = 0;
+      detail.scrollTop = 0;
+      const detailBefore = detail.scrollTop;
+      list.scrollTop = 160;
+      const listMoved = list.scrollTop >= 80;
+      const detailStill = detail.scrollTop === detailBefore;
+      const listBefore = list.scrollTop;
+      detail.scrollTop = 160;
+      const detailMoved = detail.scrollTop >= 80;
+      const listStill = list.scrollTop === listBefore;
+      const listHasNoXScroll = getComputedStyle(list).overflowX === 'hidden';
+      return {
+        bottomGap,
+        panesUncovered,
+        titleGone,
+        tabsVisible,
+        filtersVisible,
+        listMoved,
+        detailStill,
+        detailMoved,
+        listStill,
+        listHasNoXScroll,
+        mainScroll: [main.scrollTop, main.scrollHeight, main.clientHeight],
+        listOverflow: getComputedStyle(list).overflowY,
+        listSizes: [list.scrollHeight, list.clientHeight, list.scrollWidth, list.clientWidth],
+      };
+    })()`, (value) => Boolean(
+      value &&
+        value.bottomGap >= 15 && value.bottomGap <= 17 &&
+        value.panesUncovered &&
+        value.titleGone &&
+        value.tabsVisible &&
+        value.filtersVisible &&
+        value.listMoved &&
+        value.detailStill &&
+        value.detailMoved &&
+        value.listStill &&
+        value.listHasNoXScroll,
+    ))
+    expect(evidence).toMatchObject({
+      bottomGap: 16,
+      panesUncovered: true,
+      titleGone: true,
+      tabsVisible: true,
+      filtersVisible: true,
+      listMoved: true,
+      detailStill: true,
+      detailMoved: true,
+      listStill: true,
+      listHasNoXScroll: true,
+    })
+    for (const slot of ['gh-list', 'gh-detail']) {
+      const before = browser.waitForValue<{ x: number; y: number; scroll: number; page: number; other: number }>(`(() => {
+        const pane = document.querySelector('[data-slot="${slot}"]');
+        const other = document.querySelector('[data-slot="${slot === 'gh-list' ? 'gh-detail' : 'gh-list'}"]');
+        const box = pane.getBoundingClientRect();
+        return { x: box.left + box.width / 2, y: box.top + 60, scroll: pane.scrollTop,
+          page: document.querySelector('[data-slot="main"]').scrollTop, other: other.scrollTop };
+      })()`)
+      await browser.wheelAt(before.x, before.y, 100)
+      const after = browser.waitForValue<{ scroll: number; page: number; other: number }>(`({
+        scroll: document.querySelector('[data-slot="${slot}"]').scrollTop,
+        page: document.querySelector('[data-slot="main"]').scrollTop,
+        other: document.querySelector('[data-slot="${slot === 'gh-list' ? 'gh-detail' : 'gh-list'}"]').scrollTop
+      })`, value => Boolean(value && value.scroll > before.scroll))
+      expect(after.page).toBe(before.page)
+      expect(after.other).toBe(before.other)
+    }
+    browser.screenshot(`${artifactsDir}/github-independent-scroll.png`)
+  })
+
   it('below md the list and selected detail stack in document flow with a way back', async () => {
     if (!forgeAvailable) return
     const gh = await api<GithubPayload>('/api/v1/github')
