@@ -763,13 +763,15 @@ export function ToolCard({
     setUserOpenState(open)
   }
   const busy = item.status === 'running' || item.status === 'pending'
-  const hasDetail =
+  const { verb, detail } = splitToolTitle(item.title)
+  const hasContent =
     (item.output !== undefined && item.output !== '') ||
     (item.error !== undefined && item.error !== '') ||
     (item.diffs !== undefined && item.diffs.length > 0) ||
     nested.length > 0
-  const open = hasDetail && (userOpen ?? defaultOpen(item))
-  const { verb, detail } = splitToolTitle(item.title)
+  const hasDetail = detail !== undefined || hasContent
+  // Commands are expandable even when silent, without auto-opening a running empty card.
+  const open = hasDetail && (userOpen ?? (hasContent && defaultOpen(item)))
 
   const Icon = TOOL_ICONS[item.toolKind] ?? WrenchIcon
   return (

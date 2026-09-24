@@ -91,15 +91,30 @@ describe('ToolCard — states', () => {
     expect(document.querySelector('[data-slot="tool-command"]')?.textContent).toBe(command)
   })
 
-  it('running without output: shimmering verb, spinner, locked (disabled trigger, no chevron)', () => {
+  it.each([undefined, ''])('expands a completed command with no output (%s)', (output) => {
+    const command = 'cd /home/agent/projects/a-very-long-project-path && git diff --check'
+    const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'completed')
+    render(<ToolCard item={{ ...item, title: `Ran ${command}`, output }} />)
+    const button = trigger(/Ran.*git diff --check/)
+    expect((button as HTMLButtonElement).disabled).toBe(false)
+    expect(document.querySelector('[data-slot="tool-command"]')).toBeNull()
+    fireEvent.click(button)
+    expect(document.querySelector('[data-slot="tool-command"]')?.textContent).toBe(command)
+    expect(document.querySelector('[data-slot="tool-output"]')).toBeNull()
+  })
+
+  it('running without output: shimmering verb and spinner; command stays closed but expandable', () => {
     const item = goldenItem(bashAndScreenshot, 'toolu_mock_1', 'running')
     render(<ToolCard item={item} />)
     expect(card().getAttribute('data-status')).toBe('running')
     const button = trigger(/Ran.*git status --short/)
-    expect((button as HTMLButtonElement).disabled).toBe(true)
+    expect((button as HTMLButtonElement).disabled).toBe(false)
     expect(button.querySelector('.shimmer')?.textContent).toBe('Ran')
     expect(screen.getByRole('status', { name: 'Running' })).toBeTruthy()
     expect(document.querySelector('[data-slot="tool-output"]')).toBeNull()
+    expect(document.querySelector('[data-slot="tool-command"]')).toBeNull()
+    fireEvent.click(button)
+    expect(document.querySelector('[data-slot="tool-command"]')?.textContent).toBe('git status --short')
   })
 
   it('completed execute: closed by default, expands to the mono output on click', () => {
@@ -138,11 +153,20 @@ describe('ToolCard — states', () => {
     expect(error?.className).toContain('text-danger')
   })
 
-  it('declined: labeled, and locked when the backend reported no detail', () => {
+  it('declined: labeled, with the full command available on expansion', () => {
     const item = goldenItem(failedAndDenied, 'toolu_denied_01', 'declined')
     render(<ToolCard item={item} />)
     expect(card().getAttribute('data-status')).toBe('declined')
     expect(screen.getByText('declined')).toBeTruthy()
+    const button = screen.getByRole('button', { name: /declined/ })
+    expect((button as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(button)
+    expect(document.querySelector('[data-slot="tool-command"]')?.textContent).toBe(button.querySelector('code')?.textContent)
+  })
+
+  it('stays locked when neither command detail nor content exists', () => {
+    const item = goldenItem(failedAndDenied, 'toolu_denied_01', 'declined')
+    render(<ToolCard item={{ ...item, title: 'Tool' }} />)
     expect((screen.getByRole('button', { name: /declined/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
