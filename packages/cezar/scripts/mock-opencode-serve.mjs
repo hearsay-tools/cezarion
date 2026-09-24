@@ -240,6 +240,12 @@ const server = createServer((req, res) => {
         }, 60);
         return;
       }
+      if (body.includes('mock:provider-error-early')) {
+        // #505 review: the provider rejects before any assistant message exists.
+        send({ type: 'session.error', properties: { sessionID: SESSION_ID, error: { name: 'ProviderAuthError', data: { message: 'API key expired' } } } });
+        setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+        return;
+      }
       if (body.includes('mock:provider-error')) {
         // The session-level error frame, wire shape copied verbatim from
         // `__fixtures__/opencode/session-error.ndjson`. #53: a bare upstream

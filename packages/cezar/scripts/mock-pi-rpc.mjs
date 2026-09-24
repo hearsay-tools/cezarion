@@ -19,7 +19,7 @@ const send = (value) => {
   if (value?.type === 'turn_start' && !activeTurn) {
     activeTurn = { steers: [], late: false };
     write(value);
-    if (currentPrompt !== undefined) {
+    if (currentPrompt !== undefined && process.env.CEZ_MOCK_PI_NO_USER_START !== '1') {
       const message = { role: 'user', content: [{ type: 'text', text: currentPrompt }] };
       currentPrompt = undefined;
       write({ type: 'message_start', message });

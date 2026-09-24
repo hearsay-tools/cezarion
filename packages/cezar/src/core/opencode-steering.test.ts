@@ -77,4 +77,14 @@ describe('opencode agent input steering (#505)', () => {
     expect(consumed).toEqual([['in-idle']]);
     session.end(); await session.result;
   });
+
+  it('never marks an idle prompt read when its turn fails before any assistant message (#505 review)', async () => {
+    const consumed: string[][] = [];
+    const { session, events } = start('inspect the working tree', { onAgentInputConsumed: ids => consumed.push([...ids]) });
+    await waitUntil(() => events.some(e => e.type === 'turn-end'));
+    await session.sendAgentMessage([{ type: 'text', text: 'mock:provider-error-early guidance' }], ['in-failed']);
+    await waitUntil(() => events.filter(e => e.type === 'turn-end').length === 2);
+    expect(consumed).toEqual([]);
+    session.end(); await session.result.catch(() => undefined);
+  });
 });

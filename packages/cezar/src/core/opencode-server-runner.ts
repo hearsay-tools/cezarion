@@ -164,6 +164,7 @@ class OpencodeSession implements AgentSession {
   private readonly userMessageSubmission = new Map<string, string>();
   private readonly turnOpeners = new Set<string>();
   private refusedBeforeOpening = false;
+  private turnErrored = false;
   private lostWakeTimer: NodeJS.Timeout | undefined;
   private tokensUsed = 0;
   private lastCost = 0;
@@ -635,8 +636,11 @@ class OpencodeSession implements AgentSession {
     this.agentInputReady = true;
     // A prompt that opened this turn was processed by it; steered input the turn never
     // answered (no assistant message named it as parentID) is a lost wake (#505).
-    const opened = [...this.turnOpeners].flatMap(id => this.submissions.consume(id));
+    // A turn that failed may never have reached the model: its opener stays pending, so a
+    // closing session returns it to the queue (#505 review).
+    const opened = this.turnErrored ? [] : [...this.turnOpeners].flatMap(id => this.submissions.consume(id));
     this.turnOpeners.clear();
+    this.turnErrored = false;
     if (opened.length) this.opts.onAgentInputConsumed?.(opened);
     this.emit({ type: 'turn-end' });
     // Steered input the server holds is read by a follow-on run, or stranded by the
@@ -818,6 +822,7 @@ class OpencodeSession implements AgentSession {
       // follows still closes the turn.
       const sid = stringField(props, 'sessionID');
       if (sid === undefined || sid === this.sessionId) {
+        this.turnErrored = true;
         this.emit({ type: 'error', message: this.sessionErrorMessage(props.error) });
       }
     }

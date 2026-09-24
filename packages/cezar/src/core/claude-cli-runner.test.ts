@@ -674,3 +674,20 @@ describe('Claude result coverage prefers the lines it names (#505 review)', () =
     } finally { session.interrupt(); close(); await session.result; }
   });
 });
+
+describe('Claude failed result (#505 review)', () => {
+  const mockBin = fileURLToPath(new URL('../../scripts/mock-claude.mjs', import.meta.url));
+  it('never marks a line read by an error result', async () => {
+    const events: AgentEvent[] = []; const consumed: string[][] = [];
+    const session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
+      { userPrompt: 'inspect the working tree', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_CLAUDE_NO_REPLAY: '1' } },
+      event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]) });
+    const start = Date.now();
+    while (!events.some(e => e.type === 'turn-end')) { if (Date.now() - start > 10_000) throw new Error('no turn-end'); await new Promise(r => setTimeout(r, 10)); }
+    await session.sendAgentMessage([{ type: 'text', text: 'mock:auth-error guidance' }], ['in-failed']);
+    while (!events.some(e => e.type === 'error') && events.filter(e => e.type === 'turn-end').length < 2) { if (Date.now() - start > 10_000) throw new Error('no second turn'); await new Promise(r => setTimeout(r, 10)); }
+    await new Promise(r => setTimeout(r, 200));
+    expect(consumed).toEqual([]);
+    session.interrupt(); await session.result.catch(() => undefined);
+  });
+});

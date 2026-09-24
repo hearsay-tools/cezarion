@@ -27,7 +27,7 @@ emit({ type: 'system', subtype: 'init' });
 
 let turn = 0;
 // #505: `--replay-user-messages` echoes each stdin line when the model consumes it.
-const replay = process.argv.includes('--replay-user-messages');
+const replay = process.argv.includes('--replay-user-messages') && process.env.CEZ_MOCK_CLAUDE_NO_REPLAY !== '1';
 const emitReplay = (uuid, text) => {
   if (replay && uuid) emit({ type: 'user', isReplay: true, uuid, message: { role: 'user', content: [{ type: 'text', text }] } });
 };

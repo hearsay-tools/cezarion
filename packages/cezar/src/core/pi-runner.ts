@@ -204,6 +204,7 @@ export class PiRunner implements AgentRunner {
     // drops an acknowledged steer — one sent as a turn settles runs as the next
     // prompt — so pi reports no unconsumed input (#505).
     let carried = new Set<string>();
+    let turnFailed = false;
     const sendMessage = (content: ContentBlock[], requestId?: string, inputIds: readonly string[] = []): boolean => {
       if (!open) return false;
       // A steer joins the running turn; only an idle prompt opens one (#505).
@@ -357,12 +358,14 @@ export class PiRunner implements AgentRunner {
               if (usage.cost > 0) onEvent?.({ type: 'cost', usd: usage.cost });
             }
             if (string(value.message.stopReason) === 'error') {
+              turnFailed = true;
               latchedProviderError = piProviderErrorMessage(value.message);
             } else {
               latchedProviderError = undefined;
             }
           } else if (value.type === 'agent_start') {
             carried = new Set(submissions.pendingIds());
+            turnFailed = false;
           } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
             // The model received this prompt now (#505).
             const ids = submissions.consumeOldestByText(piMessageText(value.message));
@@ -392,8 +395,10 @@ export class PiRunner implements AgentRunner {
             pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
             agentInputReady = true;
             // Input queued before this turn began was processed by it, even when pi
-            // emitted no user message_start for it (#505).
-            const read = [...carried].flatMap(id => submissions.consume(id));
+            // emitted no user message_start for it (#505) — unless a provider error ended
+            // the turn, which may never have reached the model.
+            const read = turnFailed ? [] : [...carried].flatMap(id => submissions.consume(id));
+            turnFailed = false;
             carried = new Set();
             if (read.length) opts.onAgentInputConsumed?.(read);
             onEvent?.({ type: 'turn-end' });

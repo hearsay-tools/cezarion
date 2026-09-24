@@ -73,4 +73,17 @@ describe('pi agent input steering (#505)', () => {
     expect(consumed).toEqual([['in-idle']]);
     session.end(); await session.result;
   });
+
+  it('never marks carried input read by a turn that failed on a provider error (#505 review)', async () => {
+    const consumed: string[][] = [];
+    const dir = mkdtempSync(join(tmpdir(), 'cez-pi-steer-fail-')); dirs.push(dir);
+    const events: AgentEvent[] = [];
+    const session = new PiRunner({ bin: mockBin, timeoutMs: 0 }).startSession({ userPrompt: 'inspect the working tree', cwd: dir, env: { CEZ_MOCK_PI_NO_USER_START: '1' } },
+      event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]) });
+    await waitUntil(() => events.some(e => e.type === 'turn-end'));
+    await session.sendAgentMessage([{ type: 'text', text: 'mock:provider-error guidance' }], ['in-failed']);
+    await waitUntil(() => events.filter(e => e.type === 'turn-end').length === 2);
+    expect(consumed).toEqual([]);
+    session.end(); await session.result.catch(() => undefined);
+  });
 });
