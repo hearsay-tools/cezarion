@@ -426,7 +426,7 @@ describe('the GitHub tab lists', () => {
     expect(workspace.contains(header)).toBe(true)
     expect(workspace.className).toContain('md:sticky')
     expect(workspace.className).toContain('md:top-0')
-    expect(workspace.className).toContain('md:h-[calc(100dvh-4rem)]')
+    expect(workspace.className).toContain('md:h-[var(--gh-workspace-height,calc(100dvh-4rem))]')
     expect(ghList().className).toContain('min-w-0')
     expect(ghList().className).toContain('md:overflow-x-hidden')
     expect(ghList().className).toContain('md:overflow-y-auto')

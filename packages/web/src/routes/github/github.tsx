@@ -308,11 +308,35 @@ export function GithubRoute({
   const [engine, setEngine] = useState<EnginePick>({ runner: null, model: null, effort: null, account: null })
   const [githubListWidth, setGithubListWidth] = useState(readStoredGithubListWidth)
   const [mobileListExpanded, setMobileListExpanded] = useState(false)
+  const workspaceRef = useRef<HTMLDivElement>(null)
   const changeGithubListWidth = (next: number) => {
     const width = clampGithubListWidth(next)
     setGithubListWidth(width)
     writeStoredGithubListWidth(width)
   }
+  const workspaceAvailable = list.data?.available === true
+  useEffect(() => {
+    if (!workspaceAvailable) return
+    const workspace = workspaceRef.current
+    const main = workspace?.closest<HTMLElement>('[data-slot="main"]')
+    if (!workspace || !main) return
+    const desktop = window.matchMedia('(min-width: 768px)')
+    const sync = () => {
+      if (!desktop.matches || main.clientHeight < 1) {
+        workspace.style.removeProperty('--gh-workspace-height')
+        return
+      }
+      workspace.style.setProperty('--gh-workspace-height', `${Math.round(main.clientHeight)}px`)
+    }
+    sync()
+    const observer = new ResizeObserver(sync)
+    observer.observe(main)
+    desktop.addEventListener('change', sync)
+    return () => {
+      observer.disconnect()
+      desktop.removeEventListener('change', sync)
+    }
+  }, [workspaceAvailable])
   useEffect(() => {
     writeFollowupSelection({ workflow, skills: [...selectedSkills] })
   }, [workflow, selectedSkills])
@@ -593,8 +617,9 @@ export function GithubRoute({
           ) : null}
         </div>
         <div
+          ref={workspaceRef}
           data-slot="gh-workspace"
-          className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 md:sticky md:top-0 md:h-[calc(100dvh-4rem)] md:max-h-[calc(100dvh-4rem)] md:flex-none md:overflow-hidden md:gap-[22px]"
+          className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 md:sticky md:top-0 md:h-[var(--gh-workspace-height,calc(100dvh-4rem))] md:max-h-[var(--gh-workspace-height,calc(100dvh-4rem))] md:flex-none md:overflow-hidden md:gap-[22px]"
         >
         <header data-slot="gh-header" className="flex shrink-0 flex-col gap-3 md:gap-[22px]">
           <div data-slot="gh-tabs" className="flex min-h-11 flex-wrap items-center gap-3">
