@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { constants, realpathSync, type BigIntStats } from 'node:fs';
 import { mkdir, open, opendir, realpath, lstat, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
-import { basename, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { hostname } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
@@ -59,10 +59,11 @@ type Directory = { path: string; check: () => Promise<void>; close: () => Promis
 async function storageDirectory(path: string, create = false): Promise<Directory> {
   const absolute = resolve(path);
   let file: FileHandle | undefined;
-  let current: string = sep;
+  const root = parse(absolute).root;
+  let current = root;
   try {
-    file = await open(sep, readFlags | constants.O_DIRECTORY);
-    for (const part of absolute.split(sep).filter(Boolean)) {
+    file = await open(root, readFlags | constants.O_DIRECTORY);
+    for (const part of absolute.slice(root.length).split(sep).filter(Boolean)) {
       current = join(current, part);
       const anchored = process.platform === 'linux' ? join(`/proc/self/fd/${file.fd}`, part) : current;
       if (create) await mkdir(anchored, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
