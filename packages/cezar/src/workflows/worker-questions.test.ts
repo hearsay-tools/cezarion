@@ -385,4 +385,20 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       await until(() => answered(f.w.id).length === 1);
     } finally { f.close(); }
   });
+
+  it("delivers an accepted reply instead of falling back when the parent settles before admission", async () => {
+    const f = await askedPair();
+    try {
+      const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
+      await until(() => store.getRun(blocker.id)?.status === 'running' && semaphore.busy() === 1);
+      await f.reply('mock:agent-echo Use the parser');
+      // The parent rests at review while its reply still waits for capacity.
+      fixtureUpdateRun(f.p.id, { status: 'review' });
+      manager.reconcileWorkerWaits();
+      expect(eventsOf(f.w.id, 'worker-question-fallback')).toEqual([]);
+      manager.cancel(blocker.id);
+      await until(() => answered(f.w.id).length === 1);
+      expect(eventsOf(f.w.id, 'worker-question-fallback')).toEqual([]);
+    } finally { f.close(); }
+  });
 });

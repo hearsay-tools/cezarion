@@ -3274,7 +3274,8 @@ export class RunManager {
     const routed = this.routedAsk(runId);
     const run = this.store.getRun(runId);
     const reply = routed && run?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
-    if (!routed || !reply || run?.delegation?.role !== 'worker') return;
+    // A stopped worker is the human's to continue; a parent answer never revives it.
+    if (!routed || !reply || run?.delegation?.role !== 'worker' || !['queued', 'running', 'waiting'].includes(run.status)) return;
     // Verbatim: a native answer seam parses `Header: label` lines, exactly as a human's.
     const text = reply.text;
     const state = this.active.get(runId);
@@ -3348,12 +3349,14 @@ export class RunManager {
   private fallbackRoutedQuestions(parentId: string, reason: string): void {
     const parent = this.store.getRun(parentId);
     if (parent?.delegation?.role !== 'root') return;
+    const state = parent.delegation.conversation ?? { messages: [], outcomes: [] };
     const routed = this.store.listRuns().flatMap(run => {
       const ask = run.delegation?.role === 'worker' && run.delegation.parentRunId === parentId ? this.routedAsk(run.id) : undefined;
-      return ask ? [{ workerId: run.id, ...ask }] : [];
+      // An accepted reply still on its way to a live worker answers it; no human card beside it.
+      const replied = ask && state.outcomes.some(outcome => outcome.requestId === ask.message.id && outcome.status === 'replied');
+      return ask && !(replied && ['queued', 'running', 'waiting'].includes(run.status)) ? [{ workerId: run.id, ...ask }] : [];
     });
     if (!routed.length) return;
-    const state = parent.delegation.conversation ?? { messages: [], outcomes: [] };
     const observedAt = new Date().toISOString();
     const missing = routed.filter(entry => !state.outcomes.some(outcome => outcome.requestId === entry.message.id));
     if (missing.length) {
@@ -4267,7 +4270,7 @@ export class RunManager {
       !['done', 'review', 'failed'].includes(run.status))) return { ok: false, error: 'Only a settled owned worker can be resumed by its parent message' };
     if (run.stopping) return { ok: false, error: 'run is still stopping' };
     if (this.historyDeletionPending(runId)) return { ok: false, error: 'Parent history deletion is pending; retry deletion' };
-    if (run.delegation?.role === 'worker' && this.store.getRun(run.delegation.parentRunId)?.status === 'review' && !this.answersFallenBackAsk(runId, opts, deferForCapacity)) {
+    if (run.delegation?.role === 'worker' && this.store.getRun(run.delegation.parentRunId)?.status === 'review' && !opts.answerInputId && !this.answersFallenBackAsk(runId, opts, deferForCapacity)) {
       return { ok: false, error: 'Continue the reviewing parent before continuing its worker' };
     }
     // Held against the identity of the step this continuation extends (#452), which for a mixed
