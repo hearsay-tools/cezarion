@@ -3317,6 +3317,22 @@ export class RunManager {
     this.resumeParkedRun(runId, state);
   }
 
+  /** A routed question settled without a reply (its worker stopped, a deadline, fallback) can
+   * never be answered by the parent any more: hand it to the human on the worker (#505). */
+  private retireSettledQuestions(parentId: string): void {
+    const root = this.store.getRun(parentId);
+    const conversation = root?.delegation?.role === 'root' ? root.delegation.conversation : undefined;
+    if (!conversation) return;
+    for (const message of conversation.messages) {
+      const outcome = message.question && conversation.outcomes.find(entry => entry.requestId === message.id);
+      if (!outcome || outcome.status === 'replied') continue;
+      const routed = this.routedAsk(message.senderRunId);
+      if (routed?.message.id === message.id) {
+        this.store.appendEvent(message.senderRunId, { type: 'worker-question-fallback', askSeq: routed.askSeq, reason: outcome.status === 'human-fallback' ? `parent-${root!.status}` : `question-${outcome.status}` });
+      }
+    }
+  }
+
   /** Routed questions this parent has not answered yet, by asking worker. */
   private unansweredQuestions(parentId: string): { workerId: string; messageId: string }[] {
     return this.store.listRuns().flatMap(run => {
@@ -3419,6 +3435,7 @@ export class RunManager {
         run.delegation?.role === 'worker' ? this.store.readWorkerExecution(run.id)?.phase === 'complete' : !this.isActive(run.id));
       if (next && next !== root.delegation.conversation) this.store.commitConversation(root.id, next);
       projectConversationEvents(this.store, this.store.getRun(root.id)!);
+      this.retireSettledQuestions(root.id);
       const key = `conversation:${root.id}`;
       const timer = this.workerWaitTimers.get(key);
       if (timer) { clearTimeout(timer); this.workerWaitTimers.delete(key); }
@@ -3673,7 +3690,11 @@ export class RunManager {
       throw new DelegationPolicyError('denied_scope', 'not an owned worker');
     }
     if (this.executionBlockedByRootFinish(run)) throw new DelegationPolicyError('incompatible_state', 'parent finish is pending');
-    const queue = enqueueAgentInput(run, input);
+    // A steer never takes the inbox slot an open question holds for its reply (#505).
+    const root = this.store.getRun(run.delegation.parentRunId);
+    const reserved = root?.delegation?.role === 'root' && root.delegation.conversation
+      ? openQuestions(root.delegation.conversation).filter(question => question.senderRunId === runId).length : 0;
+    const queue = enqueueAgentInput(run, input, reserved);
     this.store.commitAgentInputs(runId, queue);
     this.store.appendEvent(runId, { type: 'agent-input', input: queue[queue.length - 1] });
     this.flushAgentInputs(runId);

@@ -364,4 +364,26 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       await until(() => answered(f.w.id).length === 1);
     } finally { f.close(); }
   });
+
+  it("hands the question to the human when the asking worker itself stops", async () => {
+    const f = await askedPair();
+    f.close();
+    manager.cancel(f.w.id);
+    await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
+    expect(eventsOf(f.w.id, 'worker-question-fallback')[0]).toMatchObject({ reason: 'question-sender-closed' });
+    await until(() => !manager.isActive(f.w.id));
+    expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' })).toEqual({ ok: true });
+    await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+  });
+
+  it("keeps the reply's inbox slot free of steering too", async () => {
+    const f = await askedPair();
+    try {
+      const steer = () => manager.steerWorker(f.w.id, { id: randomUUID(), source: 'agent', parentRunId: f.p.id, text: 'mock:agent-echo steer', createdAt: new Date().toISOString() });
+      for (let i = 0; i < 31; i++) steer();
+      expect(() => steer()).toThrow(expect.objectContaining({ code: 'capacity_limit' }));
+      await f.reply('mock:agent-echo Use the parser');
+      await until(() => answered(f.w.id).length === 1);
+    } finally { f.close(); }
+  });
 });
