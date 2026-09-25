@@ -29,7 +29,7 @@ function recencyKey(run: RunRecord): string {
 export function isReclaimable(run: RunRecord, runs: readonly RunRecord[] = []): boolean {
   if (run.delegation?.role === 'invalid') return false;
   if (run.delegation?.role === 'worker' && run.delegation.destroy) return false;
-  if (!FINISHED.has(run.status) || !run.worktreePath || run.worktreeReclaimedAt) return false;
+  if (!FINISHED.has(run.status) || !run.worktreePath || !existsSync(run.worktreePath) || run.worktreeReclaimedAt) return false;
   if (run.delegation?.role === 'worker') {
     const parentId = run.delegation.parentRunId;
     const parent = runs.find((candidate) => candidate.id === parentId);

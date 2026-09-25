@@ -4,10 +4,10 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
-- Last scan: 2026-09-18 to `4763447f` ([report](scans/2026-09-18.md))
-- Entries: 44 · pending: 8 · planned: 13 · ported: 10 · diverged: 6 · n/a: 7
+- Last scan: 2026-09-25 to `6a919f82` ([report](scans/2026-09-25.md))
+- Entries: 55 · pending: 19 · planned: 13 · ported: 10 · diverged: 6 · n/a: 7
 
-## Pending (8)
+## Pending (19)
 
 | Upstream | Date | Title | Conflicts | Note |
 | --- | --- | --- | --- | --- |
@@ -19,6 +19,17 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#986](https://github.com/open-mercato/cezar/pull/986) | 2026-09-15 | fix(thread): a reply typed into a task that looks done, but is running, lands (#986) | 7 | partially present: ask-answer.ts already refetches on 409 and run-reconcile heals one direction; missing the workspace-stream watchdog and the reverse healing direction |
 | [#1016](https://github.com/open-mercato/cezar/pull/1016) | 2026-09-18 | feat(automations): PR review triggers, agent account and skill pickers (#1016) | 5 |  |
 | [#1012](https://github.com/open-mercato/cezar/pull/1012) | 2026-09-18 | fix(attachments): file named image uploads in the attachment library too (#1012) | 10 |  |
+| [#1063](https://github.com/open-mercato/cezar/pull/1063) | 2026-09-23 | docs(readme): add Open Mercato Cloud banner for 24/7 cloud sandbox (#1063) | 1 |  |
+| [#1061](https://github.com/open-mercato/cezar/pull/1061) | 2026-09-23 | fix(claude): detect a native-installer claude that is off the process PATH (#1061) | 5 |  |
+| [#1030](https://github.com/open-mercato/cezar/pull/1030) | 2026-09-23 | docs(specs): runner seam native backends — seam de-dup, codex providers, Gemini and Copilot over ACP (#1030) | 0 |  |
+| [#1025](https://github.com/open-mercato/cezar/pull/1025) | 2026-09-23 | fix(runs): a save no longer drops the runs another process wrote (#1025) | 2 |  |
+| [#1033](https://github.com/open-mercato/cezar/pull/1033) | 2026-09-23 | docs(specs): dispatch admission cap - an opt-in ceiling on dispatch children (#1033) | 0 |  |
+| [#1026](https://github.com/open-mercato/cezar/pull/1026) | 2026-09-24 | docs(specs): browse Jira and Linear tasks alongside GitHub (#1026) | 0 |  |
+| [#1056](https://github.com/open-mercato/cezar/pull/1056) | 2026-09-24 | fix: dedupe review request automation bursts (#1056) | 2 |  |
+| [#1057](https://github.com/open-mercato/cezar/pull/1057) | 2026-09-24 | fix(workspace): stop listing the launch folder as a project once the registry has one (#1057) | 7 |  |
+| [#1064](https://github.com/open-mercato/cezar/pull/1064) | 2026-09-24 | fix(claude): keep .cmd shims away from the spawn sites, and validate CEZ_CLAUDE_BIN for the handoff (#1064) | 2 |  |
+| [#1069](https://github.com/open-mercato/cezar/pull/1069) | 2026-09-24 | feat(thread): live clock on the Working… indicator (#1069) | 3 |  |
+| [#1045](https://github.com/open-mercato/cezar/pull/1045) | 2026-09-25 | feat(trackers): browse Jira and Linear issues and automate tracker events (#1045) | 32 |  |
 
 ## Planned (13)
 
