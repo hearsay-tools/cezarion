@@ -118,6 +118,25 @@ describe('selectReclaimableWorktrees (#483)', () => {
     expect(isReclaimable(run({ id: 'w', status: 'cancelled', role: 'worker' }))).toBe(true);
   });
 
+  it('keeps a finished worker while its parent is still live so collect can verify the workspace', () => {
+    const parent = run({ id: 'parent', status: 'waiting' });
+    const worker = run({
+      id: 'w',
+      status: 'done',
+      role: 'worker',
+      finishedAt: '2026-07-01T00:00:00Z',
+    });
+    expect(isReclaimable(worker, [parent, worker])).toBe(false);
+    expect(selectReclaimableWorktrees([parent, worker], 1)).toEqual([]);
+    const finishedParent = run({
+      id: 'parent',
+      status: 'done',
+      finishedAt: '2026-07-02T00:00:00Z',
+    });
+    expect(isReclaimable(worker, [finishedParent, worker])).toBe(true);
+    expect(selectReclaimableWorktrees([finishedParent, worker], 1)).toEqual(['w']);
+  });
+
   it('leaves live, review, destroying, and invalid workers non-reclaimable (#575)', () => {
     expect(isReclaimable(run({ id: 'w', status: 'running', role: 'worker' }))).toBe(false);
     expect(isReclaimable(run({ id: 'w', status: 'queued', role: 'worker' }))).toBe(false);

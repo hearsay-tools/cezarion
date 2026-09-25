@@ -345,8 +345,9 @@ restart without a new request.
 
 Existing retention/orphan sweeps must respect worker ownership and destruction
 state. Finished owned-worker *directories* are reclaimable under the same keep-N
-budget as other finished runs (#575: directory only, branch kept). Live workers,
-`review`, `invalid`, and workers mid-destroy stay excluded. Unowned deletion
+budget as other finished runs (#575: directory only, branch kept) once the parent
+is gone or finished, so collect/diff can still verify a live parent's workspace.
+Live workers, `review`, `invalid`, and workers mid-destroy stay excluded. Unowned deletion
 paths still skip owned resources; verified destroy owns branch/process/history
 cleanup. Human deletion of a related run must not erase the ownership evidence
 while owned resources or live descendants remain. Ordinary unrelated-run

@@ -22,11 +22,19 @@ function recencyKey(run: RunRecord): string {
 
 /** A run is reclaimable when it is finished, still has a materialized worktree
  *  directory, and has not already been reclaimed. Finished owned workers count
- *  (#575); live runs, `review`, `invalid`, and workers mid-destroy do not. */
-export function isReclaimable(run: RunRecord): boolean {
+ *  (#575) once their parent is gone or finished — a live parent still needs the
+ *  dir to collect/diff. Live runs, `review`, `invalid`, and workers mid-destroy
+ *  do not. */
+export function isReclaimable(run: RunRecord, runs: readonly RunRecord[] = []): boolean {
   if (run.delegation?.role === 'invalid') return false;
   if (run.delegation?.role === 'worker' && run.delegation.destroy) return false;
-  return FINISHED.has(run.status) && !!run.worktreePath && !run.worktreeReclaimedAt;
+  if (!FINISHED.has(run.status) || !run.worktreePath || run.worktreeReclaimedAt) return false;
+  if (run.delegation?.role === 'worker') {
+    const parentId = run.delegation.parentRunId;
+    const parent = runs.find((candidate) => candidate.id === parentId);
+    if (parent && !FINISHED.has(parent.status)) return false;
+  }
+  return true;
 }
 
 /**
@@ -40,7 +48,7 @@ export function isReclaimable(run: RunRecord): boolean {
 export function selectReclaimableWorktrees(runs: readonly RunRecord[], keep: number): string[] {
   if (!Number.isFinite(keep) || keep <= 0) return [];
   const reclaimable = runs
-    .filter(isReclaimable)
+    .filter((run) => isReclaimable(run, runs))
     .sort((a, b) => (recencyKey(a) < recencyKey(b) ? 1 : recencyKey(a) > recencyKey(b) ? -1 : 0));
   return reclaimable.slice(keep).map((r) => r.id);
 }
