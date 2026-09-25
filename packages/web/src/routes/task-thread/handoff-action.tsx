@@ -43,7 +43,7 @@ export function HandoffAction({ run }: { run: ApiRun }) {
   const notify = useNotifyRun(run.id)
   const [dialog, setDialog] = useState<'handoff' | 'note' | null>(null)
 
-  const entry = projects.data?.projects.find((project) => project.id === (projectId ?? projects.data?.bootProject))
+  const entry = projects.data?.projects?.find((project) => project.id === (projectId ?? projects.data?.bootProject))
   const url = entry?.webhook?.url
   const notifying = run.notify === true
   if (!url && !notifying) return null

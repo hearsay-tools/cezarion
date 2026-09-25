@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
+import { waitForHealth } from './poll'
 import { applyContrastQaVariant, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
 
 // "Hand off" (#589) against the real server: the project webhook is set through the same PATCH
@@ -43,13 +44,7 @@ beforeAll(async () => {
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
-  let healthy = false
-  for (let attempt = 0; attempt < 60; attempt++) {
-    try { healthy = (await fetch(`${baseUrl}/api/v1/health`)).ok } catch { /* booting */ }
-    if (healthy) break
-    await new Promise(done => setTimeout(done, 250))
-  }
-  if (!healthy) throw new Error('Hand-off fixture did not start')
+  await waitForHealth(baseUrl, 'the hand-off fixture')
   project = await bootProjectId(baseUrl)
   const saved = await fetch(`${baseUrl}/api/v1/projects/${project}`, {
     method: 'PATCH',
