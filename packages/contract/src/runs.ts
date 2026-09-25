@@ -138,6 +138,14 @@ export const processUsageSchema = z.object({
 });
 export type ProcessUsage = z.infer<typeof processUsageSchema>;
 
+/** What the last task-webhook delivery did (#589). A success clears `lastError`; a failure after
+ *  every attempt keeps `lastDeliveredAt` from the last one that worked. */
+export const runWebhookOutcomeSchema = z.object({
+  lastDeliveredAt: z.string().optional(),
+  lastError: z.string().max(512).optional(),
+});
+export type RunWebhookOutcome = z.infer<typeof runWebhookOutcomeSchema>;
+
 /**
  * The stored run record, as `runs.json` holds it (`src/runs/store.ts`).
  *
@@ -209,6 +217,12 @@ export const runRecordSchema = z.object({
       githubUrl: z.string(),
     })
     .optional(),
+  /** Task webhook opt-in (#589): the project's webhook receives this run's status changes.
+   *  Absent = off. Changes after start through `POST /runs/:id/notify`, which is why it is not
+   *  part of the idempotent-start hash. */
+  notify: z.boolean().optional(),
+  /** The last webhook delivery's outcome (#589). Absent until a delivery was attempted. */
+  webhook: runWebhookOutcomeSchema.optional(),
   status: runStatusSchema,
   /** `monitoring` while `status === 'running'` and the agent is working on downstream work.
    *  Absent on old runs; cleared on resume/end. */
@@ -804,6 +818,9 @@ export const createRunInputSchema = createRunInputBaseSchema
      *  the first request created; a different payload answers `409`. Scoped to the project. Not
      *  on the base schema, so an automation's task definition cannot carry one. */
     clientRequestId: z.string().uuid().optional(),
+    /** Task webhook opt-in (#589). Absent = off. `true` on a project with no webhook is a 400.
+     *  Not on the base schema, and not part of the idempotent-start hash: it can change later. */
+    notify: z.boolean().optional(),
   })
   .refine(
     (b) => Boolean(b.workflow) !== Boolean(b.steps),
@@ -844,3 +861,14 @@ export type PatchRunInput = z.input<typeof patchRunInputSchema>;
 /** Per-project pin mutation. An absent flag pins; false removes both pin fields. */
 export const pinRunInputSchema = z.object({ pinned: z.boolean().optional() });
 export type PinRunInput = z.infer<typeof pinRunInputSchema>;
+
+/**
+ * `POST /runs/:id/notify` (#589) — turn the task webhook on or off for one run, in any state.
+ * `message` is the hand-off note: it goes to the webhook only (never into the agent session)
+ * and is recorded as a `handoff` thread event. Bounded like a session message.
+ */
+export const notifyRunInputSchema = z.object({
+  notify: z.boolean(),
+  message: z.string().trim().max(100_000).optional().transform((text) => (text ? text : undefined)),
+});
+export type NotifyRunInput = z.input<typeof notifyRunInputSchema>;

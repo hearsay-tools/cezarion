@@ -22,6 +22,9 @@ export interface Cockpit {
   projectId: string;
   /** `${origin}/api/v1/p/${projectId}` */
   api: string;
+  /** The project has a task webhook (#589), read from the registry discovery already fetched.
+   *  Absent = unknown, which `start` treats as "do not opt in". */
+  hasWebhook?: boolean;
 }
 
 export function threadUrl(cockpit: Cockpit, runId: string): string {
