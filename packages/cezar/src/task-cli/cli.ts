@@ -299,12 +299,18 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
   const requestId = (values['request-id'] as string | undefined) ?? randomUUID();
   const skill = values.skill as string | undefined;
   if (skill !== undefined) {
-    const result = await request(cockpit, '/skills');
-    if (result.status !== 200) refuse(result);
-    const skills = skillSchema.array().safeParse(result.data);
-    if (!skills.success) invalidResponse('skills');
-    if (!skills.data.some((entry) => entry.name === skill)) {
-      throw new TaskCliError(EXIT.refused, { code: 'refused', status: 404, error: `unknown skill: ${skill}` });
+    // An explicit request id may name an accepted run whose skill has since disappeared.
+    // Skip the mutable catalog check and let POST /runs verify the payload hash (#504).
+    const alreadyStarted = values['request-id'] !== undefined &&
+      (await listRuns(cockpit)).some((run) => run.clientRequestId === requestId);
+    if (!alreadyStarted) {
+      const catalog = await request(cockpit, '/skills?wait=1');
+      if (catalog.status !== 200) refuse(catalog);
+      const skills = skillSchema.array().safeParse(catalog.data);
+      if (!skills.success) invalidResponse('skills');
+      if (!skills.data.some((entry) => entry.name === skill)) {
+        throw new TaskCliError(EXIT.refused, { code: 'refused', status: 404, error: `unknown skill: ${skill}` });
+      }
     }
   }
   const result = await request(cockpit, '/runs', {
