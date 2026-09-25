@@ -42,6 +42,25 @@ test('classifies every allowlisted path group as docs-only', () => {
   }
 });
 
+test('generated upstream ledger files skip the matrix without allowing arbitrary upstream code', () => {
+  const files = ['.ai/upstream/ledger.yaml', '.ai/upstream/LEDGER.md', '.ai/upstream/scans/2026-09-25.md'];
+  assert.equal(classifyPaths(files), 'docs-only');
+  for (const file of files) assert.equal(classifyPaths([file]), 'docs-only', file);
+  // reportPath preserves prior same-day reports with suffixes starting at 2.
+  for (const suffix of ['2', '3', '10', '20']) {
+    assert.equal(classifyPaths([...files, `.ai/upstream/scans/2026-09-25-${suffix}.md`]), 'docs-only');
+  }
+  for (const unsafe of [
+    '.ai/upstream/run.cjs', '.ai/upstream/ledger.yml', '.ai/upstream/scans/run.js',
+    '.ai/upstream/scans/nested/2026-09-25.md', '.ai/upstream/scans/notes.md',
+    '.ai/upstream/scans/2026-09-25-1.md', '.ai/upstream/scans/2026-09-25-02.md',
+    '.ai/upstream/scans/2026-09-25-0.md', '.ai/upstream/scans/2026-09-25-extra.md',
+    '.ai/upstream/scans/../ledger.yaml', '.ai/upstream/scans/2026-09-25.md/extra',
+    '.github/scripts/upstream-scan.cjs', '.github/scripts/upstream-ledger.cjs',
+    'packages/cezar/src/index.ts', '.github/workflows/ci.yml',
+  ]) assert.equal(classifyPaths([...files, unsafe]), 'full-matrix', unsafe);
+});
+
 test('classifies every infra allowlisted path as infra-only', () => {
   for (const workflow of infraWorkflows) {
     assert.equal(classifyPaths([workflow]), 'infra-only', workflow);

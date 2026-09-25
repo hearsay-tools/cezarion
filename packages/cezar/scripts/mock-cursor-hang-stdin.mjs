@@ -6,8 +6,10 @@ const emit = value => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', .
 createInterface({ input: process.stdin }).on('line', line => {
   let msg; try { msg = JSON.parse(line); } catch { return; }
   if (msg.method === 'initialize') {
-    emit({ id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
+    // Close before replying: a fast parent sends session/new as soon as it
+    // reads initialize, and that write must encounter the dead input pipe.
     try { closeSync(0); } catch { /* already closed */ }
+    emit({ id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
   }
 });
 process.on('SIGTERM', () => { /* ignore — review: SIGTERM-only abort must not hang */ });

@@ -87,7 +87,13 @@ No new commits means no file changes and `added: 0`.
 `.github/workflows/upstream-scan.yml` runs weekly and on dispatch, from the default branch only,
 with the trusted-checkout shape the other scheduled workflows use. It runs the scan, and when
 `added > 0` commits the ledger and report to `upstream-scan/<date>` and opens a PR against `main`.
-An existing open PR for that branch is updated, never duplicated. The PR body lists the new rows
+Any existing open scan PR is left untouched, never duplicated or overwritten, so reviewer
+edits survive reruns. PR creation uses the repository's configured release App token to start
+native CI; git pushes and PR lookup keep `GITHUB_TOKEN`. Only generated ledger files qualify
+for the docs-only matrix skip, and the unconditional build/package job still validates the
+ledger and rendered view. Legacy bot-created PRs need a maintainer close/reopen once after the
+fix reaches `main`; diagnostic dispatch does not satisfy required PR checks (#579).
+The PR body lists the new rows
 with upstream links so the reviewer can decide each one by editing `status`, `fork`, `reason` and
 `decided` in the ledger before merging.
 
