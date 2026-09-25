@@ -5,8 +5,9 @@
 // recoverable) and the thin I/O enforcer that performs the reclaim. The selector
 // is pure and unit-testable; the enforcer never throws (helper discipline).
 import { existsSync } from 'node:fs';
+import { collectWorkerEvidence } from '../delegation/results.ts';
 import { createWorktree, removeWorktree } from '../git-worktree.ts';
-import type { RunRecord, RunStatus } from './store.ts';
+import type { RunRecord, RunStatus, RunStore } from './store.ts';
 
 /** The "finished" status set — mirrors `RunStore.archiveFinished`. A run at the
  *  `review` gate is deliberately excluded: it still needs its worktree to render
@@ -22,9 +23,9 @@ function recencyKey(run: RunRecord): string {
 
 /** A run is reclaimable when it is finished, still has a materialized worktree
  *  directory, and has not already been reclaimed. Finished owned workers count
- *  (#575) once their parent is gone or finished — a live parent still needs the
- *  dir to collect/diff. Live runs, `review`, `invalid`, and workers mid-destroy
- *  do not. */
+ *  (#575) once their parent is gone or `done` (collection-gated). A live,
+ *  failed, or cancelled parent can still collect/diff from the dir. Live runs,
+ *  `review`, `invalid`, and workers mid-destroy do not. */
 export function isReclaimable(run: RunRecord, runs: readonly RunRecord[] = []): boolean {
   if (run.delegation?.role === 'invalid') return false;
   if (run.delegation?.role === 'worker' && run.delegation.destroy) return false;
@@ -32,7 +33,8 @@ export function isReclaimable(run: RunRecord, runs: readonly RunRecord[] = []): 
   if (run.delegation?.role === 'worker') {
     const parentId = run.delegation.parentRunId;
     const parent = runs.find((candidate) => candidate.id === parentId);
-    if (parent && !FINISHED.has(parent.status)) return false;
+    // `done` is collection-gated. failed/cancelled parents can still collect later.
+    if (parent && parent.status !== 'done') return false;
   }
   return true;
 }
@@ -116,6 +118,16 @@ export interface ReclaimOptions {
   remove?: (repoRoot: string, worktreePath: string) => Promise<void>;
 }
 
+/** Snapshot parent-owned worker evidence before the checkout goes. Best-effort:
+ *  a missing `commitWorkerResult` (test fakes) or a collect failure still reclaims. */
+async function preserveWorkerResult(repoRoot: string, store: RetentionStore, run: RunRecord): Promise<void> {
+  if (run.delegation?.role !== 'worker') return;
+  const commit = (store as Partial<RunStore>).commitWorkerResult;
+  if (typeof commit !== 'function') return;
+  const evidence = await collectWorkerEvidence(repoRoot, store as RunStore, run);
+  commit.call(store, run.delegation.parentRunId, evidence.result, evidence.diffSnapshot);
+}
+
 export async function reclaimWorktrees(
   repoRoot: string,
   store: RetentionStore,
@@ -131,6 +143,7 @@ export async function reclaimWorktrees(
     const run = byId.get(id);
     if (!run?.worktreePath) continue;
     try {
+      await preserveWorkerResult(repoRoot, store, run).catch(() => undefined);
       await remove(repoRoot, run.worktreePath);
       if (existsSync(run.worktreePath)) continue; // reclaim failed; retry next pass
       store.updateRun(id, { worktreeReclaimedAt: now() });

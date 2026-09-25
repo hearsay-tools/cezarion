@@ -45,8 +45,10 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
     const snapshotId = randomUUID();
     diff = { state: 'available', snapshotId, path: store.workerResultSnapshotPath(delegation.parentRunId, run.id, snapshotId), truncated: observation.truncated };
   } catch { if (!destroyed) diff = { state: 'unavailable', reason: 'unverified' }; }
-  // A retained snapshot guarantees bytes even after cleanup; live availability is represented by cleanup/workspace and HEAD.
-  if (diffSnapshot === undefined && delegation.destroy && previous?.revision === workerRevision(run) && previous.diff.state === 'available') {
+  // A retained snapshot guarantees bytes after destroy or retention reclaim (#575).
+  const reuseRetainedDiff = previous?.revision === workerRevision(run) && previous.diff.state === 'available'
+    && (destroyed || workspaceRemoved || !!run.worktreeReclaimedAt);
+  if (diffSnapshot === undefined && reuseRetainedDiff) {
     const retained = store.readWorkerResultDiff(delegation.parentRunId, run.id);
     if (retained !== undefined) { diffSnapshot = retained; diff = { ...previous.diff, snapshotId: randomUUID() }; }
   }
