@@ -16,7 +16,7 @@ test('the weekly scan runs from the default branch with the trusted-checkout sha
   assert.ok(w.on.workflow_dispatch !== undefined, 'manual dispatch');
   assert.deepEqual(w.permissions, {});
   const job = w.jobs.scan;
-  assert.deepEqual(job.permissions, { contents: 'write', 'pull-requests': 'write' });
+  assert.deepEqual(job.permissions, { contents: 'write', 'pull-requests': 'read' });
   assert.match(job.if, /github\.ref.*github\.event\.repository\.default_branch/);
   assert.ok(w.concurrency?.group, 'serialized so two scans never race the same branch');
   const checkout = job.steps.find((s) => s.uses?.startsWith('actions/checkout@'));
@@ -33,9 +33,63 @@ test('the weekly scan runs from the default branch with the trusted-checkout sha
   assert.equal(pr.env.BASE_BRANCH, '${{ github.event.repository.default_branch }}');
 });
 
+test('scan PR creation uses the scoped App client without giving it branch credentials', async () => {
+  const job = workflow().jobs.scan;
+  const mint = job.steps.find(step => step.id === 'scan_app');
+  assert.ok(mint, 'mint a PR-only installation token for native CI');
+  assert.match(mint.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
+  assert.equal(mint.with['permission-pull-requests'], 'write');
+  assert.equal(mint.with['permission-contents'], undefined);
+  assert.equal(mint.with.repositories, '${{ github.event.repository.name }}');
+  const prStep = job.steps.find(step => step.id === 'pr');
+  assert.equal(prStep.env.SCAN_PR_TOKEN, '${{ steps.scan_app.outputs.token }}');
+  const { runInNewContext } = require('node:vm');
+  const github = { name: 'workflow client' };
+  const appClient = { name: 'App client' };
+  let invocation;
+  await runInNewContext(`(async () => { ${prStep.with.script} })()`, {
+    github, context: {}, core: {}, process: { env: { SCAN_PR_TOKEN: 'test-token' } },
+    getOctokit: token => { assert.equal(token, 'test-token'); return appClient; },
+    require: module => {
+      assert.equal(module, './.github/scripts/upstream-scan-pr.cjs');
+      return { openScanPr: async args => { invocation = args; } };
+    },
+  });
+  assert.equal(invocation.github, github, 'lookups keep the workflow token');
+  assert.equal(invocation.prGithub, appClient, 'only PR creation uses the App');
+  const checkout = job.steps.find(step => step.uses?.startsWith('actions/checkout@'));
+  assert.equal(checkout.with.token, undefined, 'git push keeps GITHUB_TOKEN');
+});
+
+test('scan App configuration fails before PR creation rather than falling back to suppressed CI', () => {
+  const { spawnSync } = require('node:child_process');
+  const job = workflow().jobs.scan;
+  const validate = job.steps.find(step => step.id === 'validate_scan_app');
+  assert.ok(validate, 'validate the existing release App settings');
+  assert.ok(job.steps.indexOf(validate) < job.steps.findIndex(step => step.id === 'pr'));
+  for (const [id, login, key, success] of [
+    ['123', 'cezarion-release[bot]', 'true', true],
+    ['', 'cezarion-release[bot]', 'true', false],
+    ['123', 'human', 'true', false],
+    ['123', 'cezarion-release[bot]', 'false', false],
+  ]) {
+    const result = spawnSync('bash', ['-e', '-c', validate.run], { encoding: 'utf8',
+      env: { ...process.env, RELEASE_APP_ID: id, RELEASE_APP_BOT_LOGIN: login, HAS_PRIVATE_KEY: key } });
+    assert.equal(result.status === 0, success, result.stderr);
+  }
+  const identity = job.steps.find(step => step.name === 'Check scan App identity');
+  assert.ok(identity);
+  for (const slug of ['cezarion-release', 'wrong-app']) {
+    const result = spawnSync('bash', ['-e', '-c', identity.run], { encoding: 'utf8',
+      env: { ...process.env, APP_SLUG: slug, EXPECTED_LOGIN: 'cezarion-release[bot]' } });
+    assert.equal(result.status === 0, slug === 'cezarion-release', result.stderr);
+  }
+});
+
 function harness({ prs = [], summary, report = '# Upstream scan 2026-09-18\n\n| row |\n' } = {}) {
   const calls = [];
   const created = [];
+  const workflowTokenCreates = [];
   const outputs = {};
   const git = (...args) => {
     calls.push(args);
@@ -47,15 +101,18 @@ function harness({ prs = [], summary, report = '# Upstream scan 2026-09-18\n\n| 
     rest: {
       pulls: {
         list: 'pulls.list',
-        create: async (params) => { created.push(params); return { data: { html_url: 'https://example.test/pull/1', number: 1 } }; },
+        create: async (params) => { workflowTokenCreates.push(params); return { data: { html_url: 'https://example.test/pull/1', number: 1 } }; },
       },
     },
   };
+  const prGithub = { rest: { pulls: {
+    create: async (params) => { created.push(params); return { data: { html_url: 'https://example.test/pull/1', number: 1 } }; },
+  } } };
   const core = { setOutput: (k, v) => { outputs[k] = v; }, info: () => {}, setFailed: (m) => { outputs.failed = m; } };
   const context = { repo: { owner: 'hearsay-tools', repo: 'cezarion' }, sha: 'f'.repeat(40) };
   const env = { SCAN_JSON: JSON.stringify(summary), BASE_BRANCH: 'main' };
   const readFile = (file) => { calls.push(['readFile', file]); return report; };
-  return { calls, created, outputs, run: () => require('./upstream-scan-pr.cjs').openScanPr({ github, context, core, env, git, readFile }) };
+  return { calls, created, workflowTokenCreates, outputs, run: () => require('./upstream-scan-pr.cjs').openScanPr({ github, prGithub, context, core, env, git, readFile }) };
 }
 
 const ADDED = { added: 12, date: '2026-09-18', upstreamHead: '4763447f36b05e0c3934c77798335827f4398de4', since: '0e9dfd76456e0abf44fd0037d4d1b52b43b9e8f7', report: '.ai/upstream/scans/2026-09-18.md' };
@@ -76,6 +133,7 @@ test('openScanPr commits the ledger on a dated branch and opens exactly one PR a
   assert.ok(flat.some((c) => c === 'add .ai/upstream'), 'only the ledger directory is staged');
   assert.ok(flat.some((c) => c.startsWith('commit -m chore(upstream): scan 2026-09-18')), flat.join('\n'));
   assert.ok(flat.some((c) => c === 'push --force origin HEAD:refs/heads/upstream-scan/2026-09-18'), flat.join('\n'));
+  assert.equal(h.workflowTokenCreates.length, 0, 'GITHUB_TOKEN suppresses native PR CI; only the App may create the PR');
   assert.equal(h.created.length, 1);
   const pr = h.created[0];
   assert.equal(pr.base, 'main');

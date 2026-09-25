@@ -240,6 +240,11 @@ describe('ProjectGroups', () => {
     expect(within(shopNav).queryByRole('link', { current: 'page' })).toBeNull()
     const nav = within(group('cezar')).getByRole('navigation')
     expect(within(nav).getByRole('link', { current: 'page' }).textContent).toBe('Tasks')
+    for (const link of within(nav).getAllByRole('link')) {
+      expect(link.className).toContain('text-[13px]')
+      expect(link.className).not.toContain('text-xs')
+      expect(link.className).toContain('md:h-[30px]')
+    }
   })
 
   it('collapses an unpinned previous project when another project is selected', async () => {
@@ -362,6 +367,8 @@ describe('ProjectGroups', () => {
       expect(group('cezar').querySelector('[data-slot="project-attention"]')?.textContent).toBe('2'),
     )
     expect(group('cezar').querySelector('[data-slot="project-attention"]')?.classList.contains('sr-only')).toBe(false)
+    expect(group('cezar').querySelector('[data-slot="project-attention"]')?.className).toContain('text-[11px]')
+    expect(group('cezar').querySelector('[data-slot="project-attention"]')?.className).not.toContain('text-[12px]')
     expect(group('cezar').querySelector('[data-slot="project-group-more"]')?.classList.contains('sr-only')).toBe(false)
     // Nothing waiting, nothing to badge — a "0" here is noise, not information.
     expect(group('shop').querySelector('[data-slot="project-attention"]')).toBeNull()

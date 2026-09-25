@@ -414,6 +414,7 @@ describe('TaskQuickList', () => {
       const title = rowEl.querySelector('[data-slot="task-row-title"]') as HTMLElement
       expect(title.className).toContain('min-w-[7rem]')
       expect(title.className).toContain('flex-1')
+      expect(title.className).toContain('text-[13px]')
       expect(title.textContent).toBe('implementing comment threads across the whole thread view')
 
       const diff = rowEl.querySelector('[data-slot="diff-stat"]') as HTMLElement
@@ -421,6 +422,8 @@ describe('TaskQuickList', () => {
       // the width at which the pair fits without costing the name any of its default budget.
       expect(diff.className).toContain('hidden')
       expect(diff.className).toContain('@min-[23rem]/sidebar:inline')
+      expect(diff.className).toContain('text-[12px]')
+      expect(diff.className).not.toContain('text-[11px]')
       // Dropped from view, never from reach — the exact numbers stay in its tooltip.
       expect(diff.getAttribute('title')).toBe('+59514 −12160 across 208 files')
 
@@ -456,7 +459,9 @@ describe('TaskQuickList', () => {
         ],
       })
       expect(metadataText(row('old'))).toBe('Old2h')
-      expect(Array.from(row('old')!.querySelectorAll('span')).find(el => el.textContent === '2h')?.classList.contains('sr-only')).toBe(false)
+      const age = Array.from(row('old')!.querySelectorAll('span')).find(el => el.textContent === '2h') as HTMLElement
+      expect(age.classList.contains('sr-only')).toBe(false)
+      expect(age.className).toContain('text-[12px]')
       expect(metadataText(row('new'))).toBe('New4m')
     })
 

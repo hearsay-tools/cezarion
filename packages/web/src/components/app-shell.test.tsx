@@ -243,6 +243,13 @@ describe('AppShell', () => {
       '/workflows',
       '/settings',
     ])
+    // #581: primary nav is 13px at every breakpoint, 30px tall on desktop.
+    for (const link of links) {
+      expect(link.className).toContain('text-[13px]')
+      expect(link.className).not.toContain('text-xs')
+      expect(link.className).not.toContain('md:text-[11px]')
+      expect(link.className).toContain('md:h-[30px]')
+    }
   })
 
   // R6 Step 1.1: no forge, no GitHub tab — the nav item disappears entirely (spec's
@@ -297,7 +304,9 @@ describe('AppShell', () => {
   describe('New task button', () => {
     it('links to /new', () => {
       renderShell()
-      expect(within(sidebar()).getByRole('link', { name: /New task/ }).getAttribute('href')).toBe('/new')
+      const link = within(sidebar()).getByRole('link', { name: /New task/ })
+      expect(link.getAttribute('href')).toBe('/new')
+      expect(link.className).toContain('text-[13px]')
     })
 
     it('renders the C hint (the browser-usable accelerator; ⌘N only fires in the desktop shell)', () => {
@@ -368,8 +377,11 @@ describe('AppShell', () => {
       const search = within(sidebar()).getByRole('button', { name: 'Search…' })
       expect(search.dataset.slot).toBe('command-palette-hint')
       expect(search.className).toContain('w-full')
+      expect(search.className).toContain('text-[13px]')
+      expect(search.className).not.toContain('text-xs')
       expect(search.textContent).toContain('Search…')
       expect(search.querySelector('kbd')?.textContent).toBe('Ctrl+K')
+      expect(search.querySelector('kbd')?.className).toContain('text-[12px]')
 
       const opened = vi.fn()
       window.addEventListener('cezar:open-command-palette', opened)

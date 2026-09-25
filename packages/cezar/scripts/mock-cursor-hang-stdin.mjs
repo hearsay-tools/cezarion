@@ -7,12 +7,13 @@ const rl = createInterface({ input: process.stdin });
 rl.on('line', line => {
   let msg; try { msg = JSON.parse(line); } catch { return; }
   if (msg.method === 'initialize') {
-    emit({ id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
-    // Drop readline's hold on stdin before closing fd 0. closeSync(0) while readline still
-    // owns the stream can throw EBADF and get swallowed, leaving the parent's write end
-    // writable so session/new buffers and the hang test waits out 15s (#587).
+    // Close before replying: a fast parent sends session/new as soon as it
+    // reads initialize, and that write must encounter the dead input pipe.
+    // Drop readline's hold first so closeSync(0) cannot throw EBADF and get
+    // swallowed, leaving the parent write end writable (#587).
     rl.close();
     try { closeSync(0); } catch { /* already closed */ }
+    emit({ id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
   }
 });
 process.on('SIGTERM', () => { /* ignore — review: SIGTERM-only abort must not hang */ });

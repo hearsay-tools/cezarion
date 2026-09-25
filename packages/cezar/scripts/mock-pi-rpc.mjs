@@ -13,6 +13,9 @@ const write = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 // turn. Steers accepted by a scripted turn are read just before it settles: a user
 // message_start/end, then an echo, unless the turn is `late` (never read).
 let activeTurn = null;
+// Pi 0.87 defaults steeringMode to one-at-a-time (#551). Cezar's runner must
+// send set_steering_mode all for a burst to reach the same next step.
+let steeringMode = 'one-at-a-time';
 // The prompt a queued handler is running; pi records it as the turn's user message.
 let currentPrompt;
 const send = (value) => {
@@ -29,15 +32,17 @@ const send = (value) => {
   }
   if (value?.type === 'agent_settled' && activeTurn) {
     const turn = activeTurn; activeTurn = null;
-    if (!turn.late) for (const text of turn.steers) {
+    const deliverNow = turn.late ? [] : (steeringMode === 'all' ? turn.steers : turn.steers.slice(0, 1));
+    const defer = turn.late ? turn.steers : (steeringMode === 'all' ? [] : turn.steers.slice(1));
+    for (const text of deliverNow) {
       write({ type: 'message_start', message: { role: 'user', content: [{ type: 'text', text }] } });
       write({ type: 'message_end', message: { role: 'user', content: [{ type: 'text', text }] } });
       sendText([text]);
       write({ type: 'message_end', message: { role: 'assistant', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } } });
     }
     write(value);
-    // A steer that arrived after the final model call runs as the next prompt.
-    if (turn.late) for (const text of turn.steers) queue = queue.then(() => { currentPrompt = text; return handle({ type: 'prompt', message: text }); });
+    // one-at-a-time leftover, or a late steer, runs as the next prompt.
+    for (const text of defer) queue = queue.then(() => { currentPrompt = text; return handle({ type: 'prompt', message: text }); });
     return;
   }
   write(value);
@@ -101,7 +106,7 @@ async function handle(command) {
         thinkingLevel: 'medium',
         isStreaming: false,
         isCompacting: false,
-        steeringMode: 'all',
+        steeringMode,
         followUpMode: 'one-at-a-time',
         autoCompactionEnabled: true,
         messageCount: 0,
@@ -306,6 +311,12 @@ async function handle(command) {
         });
       }, 250);
     }
+  } else if (command.type === 'set_steering_mode') {
+    if (command.mode === 'all' || command.mode === 'one-at-a-time') steeringMode = command.mode;
+    if (process.env.CEZ_MOCK_STDIN_FILE) {
+      try { appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ type: 'set_steering_mode', mode: command.mode })}\n`); } catch { /* best effort */ }
+    }
+    send({ ...(command.id ? { id: command.id } : {}), type: 'response', command: 'set_steering_mode', success: true });
   } else if (command.type === 'abort') {
     send({ type: 'response', command: 'abort', success: true });
   }

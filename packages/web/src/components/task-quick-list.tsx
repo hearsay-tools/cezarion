@@ -517,7 +517,7 @@ function RunRow({
         {run.diffStat ? (
           <DiffStatLabel
             stat={run.diffStat}
-            className="hidden shrink-0 text-[11px] @min-[23rem]/sidebar:inline"
+            className="hidden shrink-0 text-[12px] @min-[23rem]/sidebar:inline"
           />
         ) : null}
         {/* The reference chip takes the AGE's slot when there is one — same as the mockup, and
@@ -530,7 +530,7 @@ function RunRow({
             reference" alone would have silently deleted the queue position from every
             issue-driven queued row. */}
         {age && (queuePosition !== null || !reference) ? (
-          <span className="shrink-0 text-[11px] text-supporting-foreground tabular-nums">{age}</span>
+          <span className="shrink-0 text-[12px] text-supporting-foreground tabular-nums">{age}</span>
         ) : null}
         {/* The unread marker (#unread-done-items): a trailing violet dot, opposite end and
             different hue from the leading status dot, so the two read as two signals. */}

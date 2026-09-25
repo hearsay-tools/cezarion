@@ -1828,7 +1828,7 @@ export class RunManager {
       const sameAccount = agentProfile === undefined || agentProfile === sessionAccount;
       this.pendingContinuations.set(run.id, {
         stepId: queuedContinuation.id,
-        sessionId: sessionBackend === backend && sameAccount ? sessionStep.sessionId : undefined,
+        sessionId: sessionBackend === backend && sameAccount ? this.resumableSessionId(run.id, sessionStep) : undefined,
         backend,
         prompt: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
         images: [],
@@ -4268,6 +4268,21 @@ export class RunManager {
   }
 
   /**
+   * Session ids Cursor will accept on `session/load`. A launch UUID written
+   * before `session.started` is only for the step rail (#583).
+   */
+  private resumableSessionId(runId: string, sessionStep: StepState | undefined): string | undefined {
+    if (!sessionStep?.sessionId) return undefined;
+    if ((sessionStep.backend ?? this.store.getRun(runId)?.runner) === 'cursor') {
+      const confirmed = this.store.readEvents(runId).some(
+        (event) => event.type === 'session' && event.sessionId === sessionStep.sessionId,
+      );
+      if (!confirmed) return undefined;
+    }
+    return sessionStep.sessionId;
+  }
+
+  /**
    * "Continue" (spec 003): reopen a finished run's claude session in-process
    * (`claude --resume <sessionId>`) as a new synthetic step. The session then
    * behaves exactly like an interactive step: `waiting` after each turn,
@@ -4370,6 +4385,7 @@ export class RunManager {
     // account is what decides whether the session can be reattached (#452).
     const accountSwitched = (opts.agentProfile ?? resumeIdentity?.account.profileId ?? run.agentProfile ?? sessionAccount) !== sessionAccount;
     const resume = sessionBackend === targetRunner && !accountSwitched;
+    const resumeSessionId = resume ? this.resumableSessionId(runId, sessionStep) : undefined;
 
     // Follow-up runner/model/account override (#401, spec 2026-07-29-agent-profiles): the composer
     // lets the user pick which backend, model and login handle this continuation — the same flat
@@ -4512,7 +4528,7 @@ export class RunManager {
     if (deferForCapacity) {
       this.pendingContinuations.set(runId, {
         stepId,
-        sessionId: resume ? sessionStep?.sessionId : undefined,
+        sessionId: resumeSessionId,
         backend: targetRunner,
         prompt,
         images,
@@ -4533,7 +4549,7 @@ export class RunManager {
     void this.runContinuation(
       runId,
       stepId,
-      resume ? sessionStep?.sessionId : undefined,
+      resumeSessionId,
       targetRunner,
       prompt,
       images,
