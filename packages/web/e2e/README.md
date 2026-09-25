@@ -17,10 +17,14 @@ command lands. The seam closes that gap in two places:
 | `click` / `hover` / `fill` | The selector is attached with a non-zero box (`wait <selector>`, #405) | nothing |
 | `waitForFunction(js)` | A predicate becomes truthy | nothing — **the read that follows is a second call** |
 | `waitForValue(js, matcher?)` | An expression yields a value the matcher accepts (#409) | **that sample** |
+| `waitForStable(js, { holdMs })` | The matcher holds across consecutive polls spanning `holdMs` (#415). `waitForValue` is this with `holdMs: 0`. | **the held sample** |
 
 `waitForValue` is the one to reach for whenever a test needs a value the page has to reach
 first. The value it hands back is the very sample the matcher accepted, so the state checked
-and the state read are the same one. `hoverVisiblePoint` in `contrast.ts` is the worked
+and the state read are the same one. Use `waitForStable` when that first truth can leave
+again inside one CLI round-trip — the hold is what `#409` could not see. The suite build
+sets `VITE_CEZ_E2E=1` so `useNow` and every `refetchInterval` stay off, and the cockpit
+exposes `window.__cezIdle` (false while a query, SSE reconcile, or WS topic is in flight). `hoverVisiblePoint` in `contrast.ts` is the worked
 example: scroll, hit-test and the point come from one polled expression, and the pointer
 moves to that point. Its predecessor polled a predicate and then recomputed the point in a
 second `eval`, and any layout shift between the two failed as `no visible hover point`.
