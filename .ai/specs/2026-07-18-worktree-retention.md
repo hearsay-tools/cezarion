@@ -43,8 +43,9 @@ An always-on **count-based retention policy** layered on the existing
 - **Reclaimable** = a run whose status is `done`, `failed`, or `cancelled`
   (the same "finished" set `archiveFinished` already uses) **and** whose worktree
   directory still exists. Finished owned workers (`delegation.role === 'worker'`)
-  count under the same keep-N budget (#575) once their parent is gone or also
-  finished — a live parent still needs the dir to collect/diff. They are most
+  count under the same keep-N budget (#575) once their parent is gone or `done`
+  (collection-gated). A live, failed, or cancelled parent can still collect/diff.
+  They are most
   of the on-disk directories on a busy cockpit. `running`, `queued`, and `waiting` are live work;
   **`review` is deliberately excluded** — a run at the review gate still needs
   its worktree to render the diff and open a draft PR. Reclaiming it would
