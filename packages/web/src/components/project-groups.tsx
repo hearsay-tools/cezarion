@@ -257,7 +257,7 @@ function ProjectGroup({
           <span
             data-slot="project-attention"
             title={`${waiting} task${waiting === 1 ? '' : 's'} need${waiting === 1 ? 's' : ''} you`}
-            className="pointer-events-none relative shrink-0 rounded-full bg-pending/15 px-1.5 py-0.5 text-[12px] font-medium text-pending-strong"
+            className="pointer-events-none relative shrink-0 rounded-full bg-pending/15 px-1.5 py-0.5 text-[11px] font-medium text-pending-strong"
           >
             {waiting}
           </span>
@@ -295,7 +295,7 @@ function ProjectGroup({
                   onClick={onNavigate}
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
-                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-xs md:text-[11px] font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
+                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
                     isActive && 'bg-[var(--task-brand-selected)] text-accent-text',
                   )}
                 >
