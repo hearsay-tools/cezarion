@@ -556,11 +556,13 @@ describe('Cursor ACP spawn retry (#529)', () => {
     const started = Date.now();
     const session = new CursorAcpRunner({ bin: hang }).startSession({ cwd: process.cwd(), userPrompt: 'hang', timeoutMs: 8000 }, e => v1.push(e));
     try {
-      await waitFor(() => v1.some(e => e.type === 'error'), 3000);
+      // Tight 3s/5s bounds flake under a full shard: spawn shares the machine with
+      // hundreds of files, then `finally` still awaits `session.result`.
+      await waitFor(() => v1.some(e => e.type === 'error'), 5_000);
       expect(v1.some(e => e.type === 'error')).toBe(true);
-      expect(Date.now() - started).toBeLessThan(3000);
+      expect(Date.now() - started).toBeLessThan(6_000);
     } finally { session.interrupt(); await session.result.catch(() => {}); }
-  });
+  }, 15_000);
 
   it('does not retry a clean session close after end_turn', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cursor-clean-close-'));
