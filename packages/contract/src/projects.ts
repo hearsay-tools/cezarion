@@ -60,6 +60,8 @@ export const projectListEntrySchema = z.object({
    * directly.
    */
   tags: z.array(z.string()).optional(),
+  /** The task webhook (#589). The token is write-only: the wire says only whether one is set. */
+  webhook: z.object({ url: z.string(), tokenSet: z.boolean() }).optional(),
 });
 export type ProjectListEntry = z.infer<typeof projectListEntrySchema>;
 
@@ -110,6 +112,42 @@ export type UpdateProjectResponse = z.infer<typeof updateProjectResponseSchema>;
 export const PROJECT_TAG_MAX_LENGTH = 32;
 export const PROJECT_TAGS_MAX = 20;
 
+/** Bounds shared by the PATCH body and the registry schema, so a stored value can never be
+ *  degraded away by the next load's `.catch`. */
+export const PROJECT_WEBHOOK_URL_MAX_LENGTH = 2048;
+export const PROJECT_WEBHOOK_TOKEN_MAX_LENGTH = 1024;
+
+/** An `http(s)` URL. Anything else (`file:`, `javascript:`) is refused before it is stored. */
+export const projectWebhookUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(PROJECT_WEBHOOK_URL_MAX_LENGTH)
+  .refine((value) => {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, 'webhook url must be an http(s) URL');
+
+export const projectWebhookInputSchema = z.object({
+  url: projectWebhookUrlSchema,
+  token: z.string().trim().max(PROJECT_WEBHOOK_TOKEN_MAX_LENGTH).optional(),
+});
+export type ProjectWebhookInput = z.infer<typeof projectWebhookInputSchema>;
+
+/** `POST /api/v1/projects/:projectId/webhook/test` (#589) — one `task.test` delivery, sent now
+ *  with the same timeout the real deliveries use. `status` is the endpoint's HTTP status. */
+export const testProjectWebhookResponseSchema = z.object({
+  ok: z.boolean(),
+  status: z.number().optional(),
+  error: z.string().optional(),
+  dryRun: z.boolean().optional(),
+});
+export type TestProjectWebhookResponse = z.infer<typeof testProjectWebhookResponseSchema>;
+
 /**
  * `PATCH /api/v1/projects/:projectId` body — the two per-project registry fields the cockpit
  * edits. Each key is optional and a body may carry either or both: a PATCH names the fields it
@@ -138,10 +176,16 @@ export const updateProjectInputSchema = z
       .max(PROJECT_TAGS_MAX)
       .nullable()
       .optional(),
+    /**
+     * The task webhook (#589). `null` removes it. An omitted `token` keeps the stored one, so the
+     * settings form can change the URL without asking for a secret it never shows again; `''`
+     * clears the token.
+     */
+    webhook: projectWebhookInputSchema.nullable().optional(),
   })
   .refine(
-    (body) => body.maxParallel !== undefined || body.tags !== undefined,
-    'specify maxParallel or tags',
+    (body) => body.maxParallel !== undefined || body.tags !== undefined || body.webhook !== undefined,
+    'specify maxParallel, tags or webhook',
   );
 export type UpdateProjectInput = z.infer<typeof updateProjectInputSchema>;
 

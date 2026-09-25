@@ -24,6 +24,8 @@ describe('clientRequestHash', () => {
 
   it.each([
     ['todoId', 't1'], ['variants', 1], ['clientRequestId', '0b0f9a4e-8c1e-4b8a-9a52-4b3f1d0c9e11'],
+    // Mutable after start through POST /runs/:id/notify (#589), so a retry must not conflict on it.
+    ['notify', true],
   ])('ignores %s', (key, value) => {
     expect(clientRequestHash({ ...base, [key]: value } as Parameters<typeof clientRequestHash>[0])).toBe(clientRequestHash(base));
   });

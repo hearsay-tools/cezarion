@@ -182,7 +182,15 @@ export function normalizeProjectTags(tags: readonly string[] | null | undefined)
 
 export type ProjectStatus = 'ok' | 'missing' | 'not-git';
 
-export interface ProjectListEntry extends WorkspaceProject {
+/** `Omit` would collapse the registry's passthrough index signature and drop every known key;
+ *  a key-remapped homomorphic type keeps them. */
+type WorkspaceProjectWithoutWebhook = {
+  [K in keyof WorkspaceProject as K extends 'webhook' ? never : K]: WorkspaceProject[K];
+};
+
+export interface ProjectListEntry extends WorkspaceProjectWithoutWebhook {
+  /** The task webhook (#589), token redacted: the wire only says whether one is set. */
+  webhook?: { url: string; tokenSet: boolean };
   /** `missing` = root gone/unreadable; `not-git` = exists but no `.git`. */
   status: ProjectStatus;
   /** Current branch when cheaply available (omitted e.g. on an unborn HEAD). */
@@ -199,11 +207,25 @@ export interface ProjectListEntry extends WorkspaceProject {
   repoUrl?: string;
 }
 
-interface RootProbe {
+export interface RootProbe {
   status: ProjectStatus;
   branch?: string;
   forge?: ForgeKind;
   repoUrl?: string;
+}
+
+/**
+ * One registry entry as it may leave the server: the webhook token is swapped for `tokenSet`
+ * (#589). Every route and CLI that prints an entry goes through here — the registry is
+ * `.passthrough()`, so spreading a raw entry onto the wire is how a secret would leak.
+ */
+export function toProjectListEntry(project: WorkspaceProject, probe: RootProbe): ProjectListEntry {
+  const { webhook, ...rest } = project;
+  return {
+    ...rest,
+    ...probe,
+    ...(webhook ? { webhook: { url: webhook.url, tokenSet: Boolean(webhook.token) } } : {}),
+  };
 }
 
 /** Probe TTL — long enough to coalesce a burst of sidebar renders, short
@@ -281,7 +303,7 @@ export async function listProjects(selector?: ProjectListSelector): Promise<Proj
     ? config.projects.filter((project) => project.id === selector.projectId)
     : config.projects;
   return Promise.all(
-    projects.map(async (project) => ({ ...project, ...(await probeRoot(project.root)) })),
+    projects.map(async (project) => toProjectListEntry(project, await probeRoot(project.root))),
   );
 }
 

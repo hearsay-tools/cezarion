@@ -16,8 +16,8 @@ function health(repoRoot: string) {
     projects: [], bootProject: 'boot',
   };
 }
-function project(id: string, root: string) {
-  return { id, name: id, root, addedAt: '2026-01-01T00:00:00Z', lastOpenedAt: '2026-01-01T00:00:00Z', source: 'local', status: 'ok' };
+function project(id: string, root: string, webhook?: { url: string; tokenSet: boolean }) {
+  return { id, name: id, root, addedAt: '2026-01-01T00:00:00Z', lastOpenedAt: '2026-01-01T00:00:00Z', source: 'local', status: 'ok', ...(webhook ? { webhook } : {}) };
 }
 
 describe('discoverCockpit', () => {
@@ -53,7 +53,13 @@ describe('discoverCockpit', () => {
     const repo = gitRepo();
     const port = await cockpit([project('other', '/nowhere'), project('mine', repo)]);
     const found = await discoverCockpit({ repoDir: repo, ports: [port] });
-    expect(found).toEqual({ origin: `http://127.0.0.1:${port}`, projectId: 'mine', api: `http://127.0.0.1:${port}/api/v1/p/mine` });
+    expect(found).toEqual({ origin: `http://127.0.0.1:${port}`, projectId: 'mine', api: `http://127.0.0.1:${port}/api/v1/p/mine`, hasWebhook: false });
+  });
+
+  it('carries whether the matched project has a task webhook (#589)', async () => {
+    const repo = gitRepo();
+    const port = await cockpit([project('mine', repo, { url: 'https://bot.example/hook', tokenSet: true })]);
+    expect((await discoverCockpit({ repoDir: repo, ports: [port] })).hasWebhook).toBe(true);
   });
 
   it('skips a cockpit that serves a different repo', async () => {
@@ -100,7 +106,7 @@ describe('discoverCockpit', () => {
     const repo = gitRepo();
     const port = await cockpit([project('remote-a', '/srv/a'), project('remote-b', '/srv/b')], 'remote-b');
     const found = await discoverCockpit({ url: `http://127.0.0.1:${port}/`, repoDir: repo });
-    expect(found).toEqual({ origin: `http://127.0.0.1:${port}`, projectId: 'remote-b', api: `http://127.0.0.1:${port}/api/v1/p/remote-b` });
+    expect(found).toEqual({ origin: `http://127.0.0.1:${port}`, projectId: 'remote-b', api: `http://127.0.0.1:${port}/api/v1/p/remote-b`, hasWebhook: false });
   });
 
   it('with --url pointing at nothing, reports the url as unreachable (exit 2)', async () => {

@@ -11,6 +11,7 @@ import {
   runHistoryContextSchema,
   runRecordSchema,
   runStatusSchema,
+  type RunRecord,
   skillSchema,
   type ApiRun,
 } from '@open-mercato/cezar-contract';
@@ -75,6 +76,8 @@ export const OPERATIONS: Record<string, Operation> = {
       'no-worktree': { type: 'boolean', help: '      Run in the repo working tree, not a worktree.' },
       wait: { type: 'boolean', help: '               Then wait until the task settles (see wait).' },
       'timeout-seconds': TIMEOUT_FLAG,
+      notify: { type: 'boolean', help: '             POST status changes to the project webhook (default when it has one).' },
+      'no-notify': { type: 'boolean', help: '          Do not notify the project webhook.' },
     },
   },
   list: {
@@ -122,6 +125,17 @@ export const OPERATIONS: Record<string, Operation> = {
     flags: {
       'text-file': { type: 'string', help: '<path|->     Read the text from a file, or stdin with -.' },
       resume: { type: 'boolean', help: '             Reopen a closed session with this text.' },
+      notify: { type: 'boolean', help: '             Also turn the project webhook on for this task.' },
+    },
+  },
+  notify: {
+    args: "<id> [--message '<note>' | --message-file <path|->]",
+    description: 'Hand a task to the project webhook (on), or stop notifying it (--off).',
+    positionals: [1, 1],
+    flags: {
+      off: { type: 'boolean', help: '                Stop notifying the webhook about this task.' },
+      message: { type: 'string', help: "'<note>'       Note for the webhook's task.subscribed delivery." },
+      'message-file': { type: 'string', help: '<path|->  Read the note from a file, or stdin with -.' },
     },
   },
   stop: { args: '<id>', description: 'Cancel a task.', positionals: [1, 1], flags: {} },
@@ -161,6 +175,8 @@ export function taskHelp(operation?: string): string {
     }), '', 'Options:',
     ...[...flags].map(([flag, spec]) => `  --${flag} ${spec.help}`), '',
     'Commands find the running cockpit that serves this checkout (ports 4321-4370) and print JSON.',
+    'notify: with a task webhook set in Settings → General, start notifies it unless --no-notify;',
+    'the webhook gets task.status, task.question, task.activity and task.subscribed POSTs.',
     'Exit codes: 0 ok · 1 task failed/cancelled or message not delivered · 2 no cockpit or refused ·',
     '3 timed out · 64 usage error.',
   ].join('\n');
@@ -258,6 +274,11 @@ function validateFlags(name: string, values: Values): void {
   if (name === 'start') {
     if (values.skill !== undefined && values.workflow !== undefined) usageError('--skill and --workflow cannot be used together');
     if (typeof values.skill === 'string' && !values.skill.trim()) usageError('--skill must name a skill');
+    if (values.notify && values['no-notify']) usageError('--notify and --no-notify cannot be used together');
+  }
+  if (name === 'notify') {
+    if (values.message !== undefined && values['message-file'] !== undefined) usageError('notify takes the note as --message or --message-file, not both');
+    if (values.off && (values.message !== undefined || values['message-file'] !== undefined)) usageError('--off takes no note');
   }
   if (name === 'list') { statuses(values.status); positiveInt(values.limit, 'limit', 1_000); }
   if (name === 'wait') {
@@ -298,6 +319,10 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
   const waitMs = values.wait ? timeoutMs(values) : undefined;
   const requestId = (values['request-id'] as string | undefined) ?? randomUUID();
   const skill = values.skill as string | undefined;
+  // `--notify` is an explicit opt-in the server may refuse (no webhook: 400 with a hint). The
+  // implicit default only opts in where the project has a webhook, so a bot on a fresh project
+  // is never blocked (#589).
+  const notify = values['no-notify'] ? false : values.notify ? true : cockpit.hasWebhook ? true : undefined;
   let warning: string | undefined;
   if (skill !== undefined) {
     // Discovery is advisory: the catalog can change before a queued run executes. The server
@@ -330,6 +355,7 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
       ...(values.effort === undefined ? {} : { effort: values.effort }),
       ...(values.autonomous ? { autonomous: true } : {}),
       ...(values['no-worktree'] ? { worktree: false } : {}),
+      ...(notify === undefined ? {} : { notify }),
       clientRequestId: requestId,
     },
   });
@@ -342,6 +368,7 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
     status: run.data.status,
     created: result.status === 201,
     requestId,
+    notify: run.data.notify === true,
     ...(warning === undefined ? {} : { warning }),
     ...(run.data.branch === undefined ? {} : { branch: run.data.branch }),
   };
@@ -352,25 +379,36 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
   return waited.exitCode;
 }
 
+async function setNotify(cockpit: Cockpit, id: string, notify: boolean, message: string | undefined): Promise<RunRecord> {
+  const result = await request(cockpit, `/runs/${encodeURIComponent(id)}/notify`, {
+    body: { notify, ...(message === undefined ? {} : { message }) },
+  });
+  if (result.status !== 200) refuse(result);
+  const run = runRecordSchema.safeParse(result.data);
+  return run.success ? run.data : invalidResponse('notify');
+}
+
 async function send(cockpit: Cockpit, values: Values, id: string, text: string, print: Printer): Promise<number> {
   const path = `/runs/${encodeURIComponent(id)}`;
+  // Before the message, so the status change it causes is already reported.
+  const notified = values.notify ? { notify: (await setNotify(cockpit, id, true, undefined)).notify === true } : {};
   const delivered = await request(cockpit, `${path}/messages`, { body: { text } });
   if (delivered.status === 200) {
     const answer = messageResponseSchema.safeParse(delivered.data);
     if (!answer.success) invalidResponse('message');
     const delivery = 'delivered' in answer.data ? 'delivered' : 'queued' in answer.data ? 'queued' : 'deferred';
-    print({ id, delivery });
+    print({ id, delivery, ...notified });
     return EXIT.ok;
   }
   const closed = delivered.status === 409 && (delivered.data as { error?: unknown } | undefined)?.error === 'session closed';
   if (!closed) refuse(delivered);
   if (!values.resume) {
-    print({ id, delivery: 'not-delivered', reason: 'session closed', next: `cez task send ${id} '…' --resume` });
+    print({ id, delivery: 'not-delivered', reason: 'session closed', next: `cez task send ${id} '…' --resume`, ...notified });
     return EXIT.failed;
   }
   const resumed = await request(cockpit, `${path}/continue`, { body: { text } });
   if (resumed.status !== 200) refuse(resumed);
-  print({ id, delivery: 'resumed' });
+  print({ id, delivery: 'resumed', ...notified });
   return EXIT.ok;
 }
 
@@ -384,6 +422,11 @@ async function execute(
       return start(cockpit, io, values, text!, print);
     case 'send':
       return send(cockpit, values, id, text!, print);
+    case 'notify': {
+      const run = await setNotify(cockpit, id, !values.off, text);
+      print({ id, notify: run.notify === true, ...(text === undefined ? {} : { message: true }) });
+      return EXIT.ok;
+    }
     case 'wait': {
       const mode = oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
       const until = oneOf<WaitUntil>(values.until, 'until', ['settled', 'attention'], 'settled');
@@ -478,7 +521,9 @@ export async function runTaskCommand(argv: string[], env: NodeJS.ProcessEnv, io:
       ? await textArgument(io, 'start', positionals[0], values['task-file'] as string | undefined, 'task')
       : name === 'send'
         ? await textArgument(io, 'send', positionals[1], values['text-file'] as string | undefined, 'text')
-        : undefined;
+        : name === 'notify' && (values.message !== undefined || values['message-file'] !== undefined)
+          ? await textArgument(io, 'notify', values.message as string | undefined, values['message-file'] as string | undefined, 'note')
+          : undefined;
     validateFlags(name, values);
     const cockpit = await (io.discover ?? discoverCockpit)({
       url: (values.url as string | undefined) ?? (env.CEZ_URL?.trim() || undefined),

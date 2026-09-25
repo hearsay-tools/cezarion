@@ -28,11 +28,14 @@ import { serve, type ServerType } from '@hono/node-server';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { jsonZodValidator, paramZodValidator, queryZodValidator } from './validators.ts';
+import { deliverOnce, TaskWebhook } from '../runs/webhook.ts';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import {
   repoPullInputSchema,
   pinRunInputSchema,
+  notifyRunInputSchema,
+  type TestProjectWebhookResponse,
   githubSearchQuerySchema,
   setWorkspaceUiStateInputSchema,
   type GroupResponse,
@@ -165,6 +168,7 @@ import {
   listProjects,
   normalizeProjectTags,
   probeProjectStatus,
+  toProjectListEntry,
   registerProject,
   removeProject,
   shouldRegisterProject,
@@ -204,6 +208,11 @@ import {
 } from './static-ui.ts';
 
 export interface ServerDeps {
+  /** The cockpit origin the task webhook links threads to (#589). `startServer` derives it from
+   *  the port it binds; an embedded app without it sends a path-only link. */
+  taskWebhookOrigin?: string;
+  /** Test seam for task-webhook deliveries (#589): the `fetch` they POST with. */
+  taskWebhookFetch?: typeof fetch;
   /** Same-process optional private listener; attached to managers before recovery. */
   delegation?: DelegationController;
   repoRoot: string;
@@ -631,6 +640,8 @@ const startRunSchema = z
     todoId: z.string().min(1).max(200, 'must be at most 200 characters').optional(),
     // Idempotent start (#504): the same id and payload answer 200 with the existing run.
     clientRequestId: z.string().uuid().optional(),
+    // Task webhook opt-in (#589). Absent = off; not part of the idempotency hash.
+    notify: z.boolean().optional(),
   })
   .refine((b) => Boolean(b.workflow) !== Boolean(b.steps), {
     message: 'provide either "workflow" or "steps", not both',
@@ -1243,6 +1254,32 @@ export function createApp(deps: ServerDeps) {
   }
   contexts.onStoreCreated((store) => providerRuntimeAuth.watch(store));
   contexts.onContextBuilt((ctx) => providerRuntimeAuth.watch(ctx.store));
+
+  // The task webhook (#589): one subscriber per project store, attached the same way the
+  // provider observer above is. A disposed context's `store.removeAllListeners()` detaches it.
+  const projectRegistryEntry = async (projectId: string): Promise<WorkspaceProject | undefined> => {
+    const id = projectId === 'default' ? await resolveBootProject() : projectId;
+    return (await loadWorkspaceConfig()).projects.find((entry) => entry.id === id);
+  };
+  const taskWebhooks = new WeakMap<RunStore, TaskWebhook>();
+  const attachTaskWebhook = (ctx: ProjectContext): void => {
+    if (taskWebhooks.has(ctx.store)) return;
+    taskWebhooks.set(ctx.store, new TaskWebhook(ctx.store, {
+      resolveProject: async () => {
+        const entry = await projectRegistryEntry(ctx.id);
+        return entry ? { id: entry.id, webhook: entry.webhook } : undefined;
+      },
+      origin: () => deps.taskWebhookOrigin,
+      dataDir: ctx.dataDir,
+      fetch: deps.taskWebhookFetch,
+    }));
+  };
+  attachTaskWebhook(bootContext);
+  for (const id of contexts.ids()) {
+    const ctx = contexts.peek(id);
+    if (ctx) attachTaskWebhook(ctx);
+  }
+  contexts.onContextBuilt(attachTaskWebhook);
 
   const app = new Hono();
 
@@ -2497,7 +2534,7 @@ export function createApp(deps: ServerDeps) {
       const parsed = { data: c.req.valid('json') };
       // `default` is the boot alias the cockpit is allowed to use everywhere else.
       const id = raw === 'default' ? await resolveBootProject() : raw;
-      const { maxParallel, tags } = parsed.data;
+      const { maxParallel, tags, webhook } = parsed.data;
 
       // Read-first (mirroring DELETE, server.ts:1252-1258): a well-formed but
       // unknown id must 404 WITHOUT rewriting the config — otherwise it would both
@@ -2534,6 +2571,15 @@ export function createApp(deps: ServerDeps) {
             if (normalized === undefined) delete entry.tags;
             else entry.tags = normalized;
           }
+          if (webhook !== undefined) {
+            // The token is write-only (#589): the form never has it back, so an omitted token
+            // keeps the stored one and only `''` clears it.
+            if (webhook === null) delete entry.webhook;
+            else {
+              const token = webhook.token === undefined ? entry.webhook?.token : webhook.token || undefined;
+              entry.webhook = { url: webhook.url, ...(token ? { token } : {}) };
+            }
+          }
           updated = entry;
         });
       } catch (err) {
@@ -2548,7 +2594,40 @@ export function createApp(deps: ServerDeps) {
       // `PUT /api/workspace/config` fires for a workspace-cap change.
       await deps.semaphore?.refresh();
       const body: UpdateProjectResponse = {
-        project: { ...updated, ...(await probeProjectStatus(updated.root)) },
+        project: toProjectListEntry(updated, await probeProjectStatus(updated.root)),
+      };
+      return c.json(body);
+    })
+
+    // "Send test" (#589): one `task.test` delivery to the STORED webhook, now, with the timeout
+    // the real deliveries use and no retries — the settings page wants the answer, not a queue.
+    // Refused in single-project mode like every other registry edit route.
+    .post('/projects/:projectId/webhook/test', async (c) => {
+      if (capabilities().singleProject) {
+        return c.json(singleProjectRefusal('editing projects'), 409);
+      }
+      const raw = c.req.param('projectId');
+      if (!projectIdSchema.safeParse(raw).success) {
+        return c.json({ error: `unknown project: ${raw}` }, 404);
+      }
+      const entry = await projectRegistryEntry(raw).catch(() => undefined);
+      if (!entry) return c.json({ error: `unknown project: ${raw}` }, 404);
+      if (!entry.webhook) return c.json({ error: NO_WEBHOOK_ERROR }, 400);
+      const payload = {
+        event: 'task.test' as const,
+        deliveryId: randomUUID(),
+        projectId: entry.id,
+        occurredAt: new Date().toISOString(),
+      };
+      if (process.env.CEZ_DRY_RUN === '1') {
+        const body: TestProjectWebhookResponse = { ok: true, dryRun: true };
+        return c.json(body);
+      }
+      const result = await deliverOnce(entry.webhook, payload, { fetch: deps.taskWebhookFetch });
+      const body: TestProjectWebhookResponse = {
+        ok: result.ok,
+        ...(result.status === undefined ? {} : { status: result.status }),
+        ...(result.error === undefined ? {} : { error: result.error }),
       };
       return c.json(body);
     })
@@ -2699,7 +2778,7 @@ export function createApp(deps: ServerDeps) {
     let project: ProjectListEntry;
     try {
       const entry = await registerProject(requested, source);
-      project = { ...entry, ...(await probeProjectStatus(entry.root)) };
+      project = toProjectListEntry(entry, await probeProjectStatus(entry.root));
     } catch (err) {
       // e.g. a read-only home — nothing was persisted (atomic tmp+rename).
       return {
@@ -3599,6 +3678,31 @@ export function createApp(deps: ServerDeps) {
       return run ? c.json(run) : c.json({ error: 'not found' }, 404);
     })
 
+    // Task webhook opt-in for one run (#589), valid in every state — handing a finished task to a
+    // bot for follow-up is a real case. Turning it on sends one `task.subscribed` delivery with
+    // the note; the note never reaches the agent session. Either direction leaves a durable
+    // `handoff` event so the thread shows when and why. Idempotent: repeating `true` with a
+    // new note is how "Send a note…" works.
+    .post('/runs/:id/notify', paramZodValidator(runIdParamSchema), jsonZodValidator(notifyRunInputSchema), async (c) => {
+      const project = c.get('project');
+      const { id } = c.req.valid('param');
+      const { notify, message } = c.req.valid('json');
+      if (!project.store.getRun(id)) return c.json({ error: 'not found' }, 404);
+      if (notify) {
+        const entry = await projectRegistryEntry(project.id).catch(() => undefined);
+        if (!entry?.webhook) return c.json({ error: NO_WEBHOOK_ERROR }, 400);
+      }
+      const run = project.store.updateRun(id, { notify: notify ? true : undefined });
+      if (!run) return c.json({ error: 'not found' }, 404);
+      project.store.appendEvent(id, {
+        type: 'handoff',
+        notify,
+        ...(message === undefined ? {} : { message }),
+      });
+      if (notify) taskWebhooks.get(project.store)?.subscribed(id, message);
+      return c.json(run);
+    })
+
     // The per-task off switch for that resume (the workspace setting is Settings → Resources).
     // Idempotent: a run with nothing pending answers 200 too, because "this task will not
     // resume itself" is equally true either way.
@@ -3672,9 +3776,15 @@ export function createApp(deps: ServerDeps) {
         const account = await resolveWorkspaceProfile(fallback, parsed.data.agentProfile);
         if ('error' in account) return c.json({ error: account.error }, 400);
       }
+      // Task webhook (#589): an explicit `true` on a project with no webhook is refused, so a
+      // bot learns in one round trip. `cez task start`'s implicit default never sends it there.
+      if (parsed.data.notify === true && !(await projectRegistryEntry(c.get('project').id).catch(() => undefined))?.webhook) {
+        return c.json({ error: NO_WEBHOOK_ERROR }, 400);
+      }
       const images = parsed.data.images?.map(toPastedContent);
       const input = {
         task: parsed.data.task,
+        notify: parsed.data.notify,
         model: parsed.data.model,
         effort: parsed.data.effort,
         runner: parsed.data.runner,
@@ -5756,6 +5866,15 @@ export function createApp(deps: ServerDeps) {
   return routed;
 }
 
+/** The host a thread link names (#589): the bound one, or loopback for a wildcard bind. */
+function taskWebhookHost(bindHost: string | undefined): string {
+  if (!bindHost || bindHost === '0.0.0.0' || bindHost === '::') return '127.0.0.1';
+  return bindHost.includes(':') ? `[${bindHost}]` : bindHost;
+}
+
+const NO_WEBHOOK_ERROR =
+  'this project has no task webhook — set one in Settings → General → Task webhook, or start without notify';
+
 export function startServer(deps: ServerDeps, port: number): ServerType & { shutdownForRestart: () => Promise<void> } {
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
   const skillsUpdate = deps.skillsUpdate ?? new SkillsUpdateService({ invalidateCatalog: refreshTeamSkills });
@@ -5779,6 +5898,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   let rescheduleAutomations = () => {};
   const app = createApp({
     ...deps,
+    taskWebhookOrigin: deps.taskWebhookOrigin ?? `http://${taskWebhookHost(deps.bindHost)}:${port}`,
     contexts: sharedContexts,
     automationStore: bootAutomationStore,
     workspaceEvents,
