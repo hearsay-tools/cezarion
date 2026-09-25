@@ -36,6 +36,11 @@ async function prompt(id, content) {
   // bare 'mock:provider-error' prefix, which every one of them contains.
   // #508: observed Cursor 2026.09.18-9a7762b error envelope, followed by end_turn.
   if (input.includes('mock:provider-error-protocol') && (input.includes('-exhaust') || prompts === 1)) { text('\n\nError: RetriableError: [invalid_argument] protocol error: missing EndStreamResponse'); complete(id); return; }
+  // #531: observed run 2f891027 seq 2005 capacity envelope. Match before the bare prefix.
+  // Do not reuse the protocol mock's `includes('-exhaust')` check: that token is a
+  // substring of `resource-exhausted` and would never recover.
+  if (input.includes('mock:provider-error-resource-exhausted-exhaust')) { text('\n\nError: RetriableError: [resource_exhausted] Error'); complete(id); return; }
+  if (input.includes('mock:provider-error-resource-exhausted') && prompts === 1) { text('\n\nError: RetriableError: [resource_exhausted] Error'); complete(id); return; }
   if (input.includes('mock:provider-error-unknown-protocol')) { text('\n\nError: [invalid_argument] protocol error: unknown frame'); complete(id); return; }
   if (input.includes('mock:provider-error-transient') && prompts === 1) { text('\n\nError: 502 bad gateway.'); complete(id); return; }
   if (input.includes('mock:provider-error-bare')) { text('\n\nError: 502 bad gateway.'); complete(id); return; }

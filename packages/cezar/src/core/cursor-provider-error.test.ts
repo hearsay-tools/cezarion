@@ -53,6 +53,20 @@ describe('classifyCursorProviderError', () => {
     expect(classifyCursorProviderError('\n\nError: context length exceeded', now)).toEqual({ kind: 'fatal' });
   });
 
+  it('classes the recorded resource_exhausted envelope as transient', () => {
+    const envelope = readFileSync(new URL('./__fixtures__/cursor/resource-exhausted.txt', import.meta.url), 'utf8');
+    expect(classifyCursorProviderError(envelope, now)).toEqual({ kind: 'transient' });
+    expect(sanitizeCursorProviderError(envelope)).toBe('RetriableError: [resource_exhausted] Error');
+  });
+
+  it('classes bare [resource_exhausted] prose as transient without RetriableError', () => {
+    expect(classifyCursorProviderError('\n\nError: [resource_exhausted] Error', now)).toEqual({ kind: 'transient' });
+  });
+
+  it('keeps unknown Cursor [internal] codes fatal', () => {
+    expect(classifyCursorProviderError('\n\nError: [internal] Error', now)).toEqual({ kind: 'fatal' });
+  });
+
   it('classes the recorded RetriableError stream-protocol envelope as transient', () => {
     const envelope = readFileSync(new URL('./__fixtures__/cursor/retriable-protocol-error.txt', import.meta.url), 'utf8');
     expect(classifyCursorProviderError(envelope, now)).toEqual({ kind: 'transient' });
