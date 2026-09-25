@@ -139,7 +139,7 @@ describe('task thread', () => {
     })()`) as { rightGap: number; bubbleLeft: number; mid: number; messageLeft: number }
     expect(geometry.rightGap).toBeLessThan(40) // only the column padding separates them
     expect(geometry.bubbleLeft).toBeLessThan(geometry.mid)
-    expect(browser.evaluate(`document.querySelector('[data-slot="user-bubble"] > p').textContent`)).toBe('YOUR MESSAGE')
+    expect(browser.evaluate(`document.querySelector('[data-slot="user-bubble"] > p > span:first-child').textContent`)).toBe('YOUR MESSAGE')
     expect(geometry.messageLeft).toBeLessThan(40)
   })
 
