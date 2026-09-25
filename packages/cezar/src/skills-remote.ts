@@ -414,6 +414,10 @@ async function excludeFromGit(repoRoot: string, pattern: string): Promise<void> 
 // is recorded on disk (the stamp) so a later TTL expiry in this process can
 // still fetch. "Refresh" always retries.
 const cloneAttempted = new Set<string>();
+// One in-flight clone/fetch per source so two project roots that share a
+// skills repo cannot both start a fetch and have the loser mark the source
+// failed after the winner already stamped it.
+const fetchInFlight = new Map<string, Promise<void>>();
 // Isolated review worktrees have no local `.agents/skills` (gitignored, absent
 // in a fresh checkout), so codex reads skills straight from this global bare
 // cache. The last successful fetch is stamped inside the bare clone so every
@@ -477,6 +481,25 @@ export function shouldPassiveFetch(opts: {
   return opts.fetchedAt == null || opts.now - opts.fetchedAt > opts.ttlMs;
 }
 
+/**
+ * A failed clone/fetch is sticky only while the stamp is still missing or
+ * stale. A concurrent sibling that already wrote a fresh stamp must not be
+ * recorded as a local failure — that would suppress the next TTL in this
+ * process (#367 review).
+ */
+export function shouldRecordFetchFailure(opts: {
+  fetchedAt: number | null;
+  now: number;
+  ttlMs: number;
+}): boolean {
+  return shouldPassiveFetch(opts);
+}
+
+/** Test hook: simulate a process-local failed attempt for this source. */
+export function __markCloneAttemptedForTests(repo: string): void {
+  cloneAttempted.add(repo);
+}
+
 // Both maps are keyed by `repoRoot` (multi-project workspace, step 2.6): each
 // project resolves its own `.ai/cezar/config.json` → `skillsRepos`, so one
 // project's team-skill list must never be served under another project's scope.
@@ -518,36 +541,66 @@ export async function refreshTeamSkills(repoRoot: string): Promise<Skill[]> {
   return load;
 }
 
+function stampIsFresh(repo: string, now: number): boolean {
+  return !shouldPassiveFetch({
+    fetchedAt: readLastFetchAt(bareDirFor(repo)),
+    now,
+    ttlMs: PASSIVE_FETCH_TTL_MS,
+  });
+}
+
+/** Clone/fetch one source, coalesced across concurrent catalog loads. */
+function fetchBareSource(repo: string): Promise<void> {
+  const existing = fetchInFlight.get(repo);
+  if (existing) return existing;
+  const work = Promise.resolve()
+    .then(async () => {
+      const { bareDir, created } = await ensureBareClone(repo);
+      if (!created) await fetchAll(bareDir);
+      await writeLastFetchAt(bareDir, Date.now());
+      cloneAttempted.delete(repo);
+    })
+    .catch((error: unknown) => {
+      // A concurrent sibling may already have written a fresh stamp. Recording
+      // that as a local failure would suppress the next TTL in this process.
+      if (shouldRecordFetchFailure({
+        fetchedAt: readLastFetchAt(bareDirFor(repo)),
+        now: Date.now(),
+        ttlMs: PASSIVE_FETCH_TTL_MS,
+      })) {
+        cloneAttempted.add(repo);
+      }
+      throw error;
+    })
+    .finally(() => {
+      if (fetchInFlight.get(repo) === work) fetchInFlight.delete(repo);
+    });
+  fetchInFlight.set(repo, work);
+  return work;
+}
+
 async function loadTeamSkills(repoRoot: string, refresh: boolean): Promise<Skill[]> {
   const config = await loadConfig(repoRoot);
   const out: Skill[] = [];
   const seen = new Set<string>();
   for (const src of config.skillsRepos) {
+    const now = Date.now();
+    if (stampIsFresh(src.repo, now)) cloneAttempted.delete(src.repo);
     try {
       if (refresh) {
-        const { bareDir, created } = await ensureBareClone(src.repo);
-        if (!created) await fetchAll(bareDir);
-        await writeLastFetchAt(bareDir, Date.now());
-        cloneAttempted.delete(src.repo);
+        await fetchBareSource(src.repo);
       } else if (
         shouldPassiveFetch({
           fetchedAt: readLastFetchAt(bareDirFor(src.repo)),
-          now: Date.now(),
+          now,
           ttlMs: PASSIVE_FETCH_TTL_MS,
         }) &&
         !cloneAttempted.has(src.repo)
       ) {
-        const { bareDir, created } = await ensureBareClone(src.repo);
-        // A clone left by an earlier run is very likely behind origin; fetch it
-        // so worktree reviews never read a stale skills template.
-        if (!created) await fetchAll(bareDir);
-        await writeLastFetchAt(bareDir, Date.now());
+        await fetchBareSource(src.repo);
       }
     } catch {
-      // offline / no access — list whatever an older clone has (or nothing).
-      // Remember the failure so a hung DNS/TCP is not retried on every catalog
-      // read this process. A successful stamp write is what unblocks the TTL.
-      cloneAttempted.add(src.repo);
+      // offline / no access — list whatever an older clone has (or nothing)
     }
     try {
       for (const skill of await listRemoteSkills(src)) {

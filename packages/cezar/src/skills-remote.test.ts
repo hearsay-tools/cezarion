@@ -8,6 +8,7 @@ import {
   lastFetchStampPath,
   readLastFetchAt,
   shouldPassiveFetch,
+  shouldRecordFetchFailure,
   writeLastFetchAt,
 } from './skills-remote.ts';
 
@@ -34,6 +35,17 @@ describe('shouldPassiveFetch', () => {
   it('treats exactly-TTL as still fresh (strictly greater re-fetches)', () => {
     const now = 10 * 60 * 60 * 1_000;
     expect(shouldPassiveFetch({ fetchedAt: now - TTL, now, ttlMs: TTL })).toBe(false);
+  });
+});
+
+describe('shouldRecordFetchFailure', () => {
+  it('does not record a local failure when a sibling already stamped the clone', () => {
+    const now = 10 * 60 * 60 * 1_000;
+    expect(shouldRecordFetchFailure({ fetchedAt: now - 1_000, now, ttlMs: TTL })).toBe(false);
+  });
+
+  it('records a failure when there is still no usable stamp', () => {
+    expect(shouldRecordFetchFailure({ fetchedAt: null, now: 1_000, ttlMs: TTL })).toBe(true);
   });
 });
 

@@ -16,6 +16,8 @@ import {
   materializeSkillDir,
   refreshTeamSkills,
   safeRemoteFor,
+  waitForTeamSkills,
+  __markCloneAttemptedForTests,
 } from '../../src/skills-remote.js';
 
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
@@ -373,6 +375,28 @@ test('a new process with a stale stamp fetches once and rewrites the stamp (#367
   assert.equal(seen, sha2);
   const after = Number(readFileSync(stampPath, 'utf8').trim());
   assert.ok(after > before, 'stale-stamp fetch must rewrite the stamp');
+});
+
+test('a concurrent sibling success does not block the later TTL fetch (#367)', async (t) => {
+  const ctx = makeSkillsRepoWithHome(t);
+  await Promise.all([waitForTeamSkills(ctx.makeProjectRoot()), waitForTeamSkills(ctx.makeProjectRoot())]);
+  // Reproduce the review race: a loser recorded cloneAttempted after a
+  // sibling already wrote a fresh stamp. The next catalog read must drop
+  // that flag so a later TTL still fetches.
+  __markCloneAttemptedForTests(ctx.srcDir);
+  await waitForTeamSkills(ctx.makeProjectRoot());
+
+  const sha2 = ctx.commit('second');
+  const stampPath = lastFetchStampPath(bareDirFor(ctx.srcDir));
+  const before = Number(readFileSync(stampPath, 'utf8').trim());
+  writeFileSync(stampPath, `${before - PASSIVE_FETCH_TTL_MS - 1}\n`);
+
+  const loaded = await waitForTeamSkills(ctx.makeProjectRoot());
+  assert.equal(
+    loaded.find((s) => s.name === 'greeter')?.team?.commit,
+    sha2,
+    'a failed concurrent first-load must not leave cloneAttempted blocking the TTL',
+  );
 });
 
 test('refreshTeamSkills fetches even when the stamp is still fresh (#367)', async (t) => {
