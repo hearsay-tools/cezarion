@@ -69,11 +69,17 @@ describe('classifyCursorProviderError', () => {
 
   it.each([
     '[internal] C0AC9346CC7B0000:error:0A000119:SSL routines:tls_get_more_records:decryption failed or bad record mac:../deps/openssl/openssl/ssl/record/methods/tls_common.c:869:',
-    '[internal] SSL routines:tls_read:fatal',
     '[internal] tls_get_more_records failed',
     '[internal] decryption failed or bad record mac',
   ])('classes bare SSL/TLS OpenSSL record-layer prose as transient without RetriableError: %s', detail => {
     expect(classifyCursorProviderError(`\n\nError: ${detail}`, now)).toEqual({ kind: 'transient' });
+  });
+
+  it.each([
+    '[internal] SSL routines:tls_process_server_certificate:certificate verify failed',
+    '[internal] SSL routines:tls_read:fatal',
+  ])('keeps permanent TLS setup errors fatal even when they mention SSL routines: %s', detail => {
+    expect(classifyCursorProviderError(`\n\nError: ${detail}`, now)).toEqual({ kind: 'fatal' });
   });
 
   it('keeps a bare [internal] Cursor code fatal when it is not an SSL/TLS record-layer failure', () => {
