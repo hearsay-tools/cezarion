@@ -757,7 +757,10 @@ function AgentBadge({ run }: { run: ApiRun }) {
   const { accounts } = useAgentAccounts()
   const runner = run.runner ?? config.data?.defaultRunner ?? 'claude'
   const model = run.model ?? 'auto'
-  const effort = run.effort || undefined
+  // Unset effort means the harness default, the same way unset model reads `auto` (#411):
+  // the badge answers "what am I running here?" and names the default instead of pretending
+  // the question was never asked (#52's omit decision, superseded for the unpinned case).
+  const effort = run.effort || 'auto'
   // The account is read from the STEP that actually spawned, never from the run's composer
   // override or the project's current selection (spec 2026-07-29-agent-profiles): the override is
   // absent whenever the run just followed the project, and the project's selection can have been
@@ -780,16 +783,26 @@ function AgentBadge({ run }: { run: ApiRun }) {
   // an account must not retroactively erase which one a historical run ran under. A FAILED query
   // never settles, so silence there would be permanent; the recorded id shows verbatim, without
   // a `(removed)` claim the unreadable catalog cannot back.
-  const known = profiles.data?.profiles.find((p) => p.id === accountId)
+  // The row must match on id AND backend: ids are unique per provider only, so a same-id
+  // account on another backend is a different login (#411) — matching it would let the badge
+  // claim "not removed" for a folder that is gone.
+  const known = profiles.data?.profiles.find(
+    (p) => p.id === accountId && p.provider === accountBackend,
+  )
   const account = accountId === undefined || profiles.isPending
     ? undefined
     : profiles.isError
       ? accountId
-      : known
-        ? hasAccountChoice(accounts, accountBackend)
-          ? accountId === DEFAULT_AGENT_ACCOUNT_ID ? 'default' : known.label
-          : undefined
-        : `${accountId} (removed)`
+      : accountId === DEFAULT_AGENT_ACCOUNT_ID
+        // The recorded `default` is the backend's own home: discovered, never deletable — so an
+        // empty or failed catalog cannot make it "(removed)" (#411), and a lone default stays
+        // omitted exactly as the count rule above intends.
+        ? hasAccountChoice(accounts, accountBackend) ? 'default' : undefined
+        : known
+          ? hasAccountChoice(accounts, accountBackend)
+            ? known.label
+            : undefined
+          : `${accountId} (removed)`
   // The canonical `provider/model` the run actually resolved to (#405), shown only when it says
   // something `model` does not (#546). `model` is the free-text the caller ASKED for — `opus`,
   // `auto`, a gateway id — so on a repo whose Claude runner points at a custom endpoint the two

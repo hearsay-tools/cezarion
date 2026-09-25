@@ -135,9 +135,17 @@ export function useContinueAction(run: ApiRun): ContinueAction {
         // server keeps the run's current backend/model. If that backend disconnected, the
         // connected fallback must be explicit even when the pills were untouched.
         runner: continuation.runnerOverride,
-        model: !modelsLocked && pickedModel !== null ? model : undefined,
+        // The model and effort the pills DISPLAY (#411): a picked pill always writes its value,
+        // and a runner switch — pick or connected fallback — writes what the pills now show even
+        // when untouched, because the switch re-resolves both against the new runner
+        // (`modelDefaults`/`resolveEffort` above) and the record must match the display.
+        // `undefined` = keep the run's value, `''` = auto.
+        model:
+          !modelsLocked && (pickedModel !== null || runnerChanged)
+            ? model
+            : undefined,
         effort:
-          !modelsLocked && pickedEffort !== null
+          !modelsLocked && (pickedEffort !== null || runnerChanged)
             ? effort
             : mustClearStoredEffort
               ? ''

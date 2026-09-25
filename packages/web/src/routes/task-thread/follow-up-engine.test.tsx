@@ -367,7 +367,57 @@ describe('follow-up ContinueAction runner/model selection (#401)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /continue/i }))
     await waitFor(() => expect(continueBody()).toBeDefined())
-    expect(continueBody()).toEqual({ runner: 'codex', model: 'gpt-future' })
+    // The switch also writes the effort the pill displays (auto here) — the run record must
+    // match the composer, not keep a pin the pills no longer show (#411).
+    expect(continueBody()).toEqual({ runner: 'codex', model: 'gpt-future', effort: '' })
+  })
+
+  it('writes the displayed model and effort when a runner switch leaves the pills untouched (#411)', async () => {
+    // The reported bug: switching runners put the project's claude default on the model pill
+    // and `auto` on the effort pill, but the POST omitted both — the record kept `auto`/no
+    // effort and the badge disagreed with the composer. What is displayed is what is sent.
+    serve(HEALTH_MULTI, { claude: 'opus' })
+    renderAction(makeRun({ runner: 'codex' }))
+
+    fireEvent.pointerDown(await screen.findByRole('button', { name: /^Runner · / }))
+    const options = await screen.findAllByRole('menuitemradio')
+    fireEvent.click(options.find((o) => o.textContent?.includes('claude')) as HTMLElement)
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^Model · / }).textContent).toContain('opus'))
+    expect(screen.getByRole('button', { name: /^Effort · / }).textContent).toContain('auto')
+
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }))
+    await waitFor(() => expect(continueBody()).toBeDefined())
+    expect(continueBody()).toEqual({ runner: 'claude', model: 'opus', effort: '' })
+  })
+
+  it('clears an effort pin the switched runner cannot honour, pills untouched (#411)', async () => {
+    // Cursor has no effort levels of its own, so a `high` pin from the claude run is not a
+    // choice the pills can still show — the switch writes the displayed auto back to the
+    // record instead of letting the old pin ride along on the wire.
+    serve(
+      HEALTH_MULTI,
+      {},
+      {
+        providers: [
+          { provider: 'claude', status: 'connected', enabled: true },
+          { provider: 'cursor', status: 'connected', enabled: true },
+        ],
+      },
+    )
+    renderAction(makeRun({ runner: 'claude', effort: 'high' }))
+
+    fireEvent.pointerDown(await screen.findByRole('button', { name: /^Runner · / }))
+    const options = await screen.findAllByRole('menuitemradio')
+    fireEvent.click(options.find((o) => o.textContent?.includes('cursor')) as HTMLElement)
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^Effort · / }).textContent).toContain('auto'))
+
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }))
+    await waitFor(() => expect(continueBody()).toBeDefined())
+    expect(continueBody()).toEqual({ runner: 'cursor', model: '', effort: '' })
   })
 
   it('shows a read-only native model while locked and still permits switching runners', async () => {
@@ -491,7 +541,9 @@ describe('follow-up ContinueAction runner/model selection (#401)', () => {
     fireEvent.click(button)
 
     await waitFor(() => expect(continueBody()).toBeDefined())
-    expect(continueBody()).toEqual({ runner: 'codex' })
+    // The fallback is a runner switch too: the pills display auto/auto for codex, so the record
+    // must lose the claude model pin and any effort pin they no longer show (#411).
+    expect(continueBody()).toEqual({ runner: 'codex', model: '', effort: '' })
   })
 
   it('excludes a connected disabled current runner and sends the enabled fallback', async () => {
@@ -513,7 +565,8 @@ describe('follow-up ContinueAction runner/model selection (#401)', () => {
     fireEvent.click(button)
 
     await waitFor(() => expect(continueBody()).toBeDefined())
-    expect(continueBody()).toEqual({ runner: 'codex' })
+    // Same fallback rule as the disconnected case: the displayed auto/auto is what is sent.
+    expect(continueBody()).toEqual({ runner: 'codex', model: '', effort: '' })
   })
 
   it('shows project-aware setup guidance instead of controls when none are connected', async () => {
@@ -701,8 +754,9 @@ describe('the follow-up runner pill carries the account', () => {
     await waitFor(() => expect(runnerPill()?.querySelector('[data-slot="picker-label"]')?.textContent?.trim()).toBe('Runner · codex'))
 
     fireEvent.click(screen.getByRole('button', { name: /continue/i }))
-    // A Claude login means nothing to codex, so it must not ride along.
-    await waitFor(() => expect(continueBody()).toEqual({ runner: 'codex' }))
+    // A Claude login means nothing to codex, so it must not ride along. The switch writes the
+    // auto/auto the pills now display, so the record matches them (#411).
+    await waitFor(() => expect(continueBody()).toEqual({ runner: 'codex', model: '', effort: '' }))
   })
 
   it('leaves the zero-config thread exactly as it was', async () => {

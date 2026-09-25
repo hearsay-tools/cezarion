@@ -913,7 +913,7 @@ describe('meta line, tabs, pill and resume hint', () => {
     // labelled breakdown.
     const badge = within(meta).getByRole('button', { name: /Agent: codex, model gpt-5.2-codex/ })
     expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent)
-      .toBe('codex · gpt-5.2-codex')
+      .toBe('codex · gpt-5.2-codex · auto')
     // Still not loose text: everything runner/model-shaped is inside the badge, nowhere else.
     expect(meta.textContent?.replace(badge.textContent ?? '', '')).not.toContain('codex')
     expect(within(meta).getByText('cez/r1').getAttribute('data-slot')).toBe('branch-chip')
@@ -941,18 +941,37 @@ describe('meta line, tabs, pill and resume hint', () => {
     expect(menu.querySelector('[data-slot="agent-badge-effort"]')?.textContent).toBe('effort: high')
   })
 
-  it('omits effort metadata when the run has no saved effort (#52)', async () => {
+  it('reads effort auto in the badge when the run has no saved effort (#52, #411)', async () => {
+    // #52 pinned the effort line to saved pins only; #411 superseded that for the UNPINNED
+    // case — the run still runs at the harness default, and a badge that answers "what am I
+    // running here?" must say so, exactly as the model line already reads `auto` when unset.
     stubFetch()
     renderHeader(run('done', { runner: 'codex', model: 'gpt-5.2-codex' }))
 
-    const badge = screen.getByRole('button', { name: 'Agent: codex, model gpt-5.2-codex' })
+    const badge = screen.getByRole('button', { name: 'Agent: codex, model gpt-5.2-codex, effort auto' })
     expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent)
-      .toBe('codex · gpt-5.2-codex')
+      .toBe('codex · gpt-5.2-codex · auto')
 
     fireEvent.pointerDown(badge, { button: 0, ctrlKey: false, pointerType: 'mouse' })
     const menu = await screen.findByRole('menu')
-    expect(menu.querySelector('[data-slot="agent-badge-effort"]')).toBeNull()
-    expect(menu.textContent).not.toContain('effort:')
+    expect(menu.querySelector('[data-slot="agent-badge-effort"]')?.textContent).toBe('effort: auto')
+  })
+
+  it('shows the chosen model and effort auto when a switch wrote the effective settings (#411)', async () => {
+    // The composer writes the DISPLAYED model and effort when the runner switch leaves the
+    // pills untouched (follow-up-engine), so the record carries them and the badge must show
+    // them — not the bare `auto` fallback with no effort row, the state #411 reports.
+    stubFetch()
+    renderHeader(run('done', { runner: 'claude', model: 'claude-fable-5' }))
+    const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+    const badge = within(meta).getByRole('button', { name: 'Agent: claude, model claude-fable-5, effort auto' })
+    expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent)
+      .toBe('claude · claude-fable-5 · auto')
+
+    fireEvent.pointerDown(badge, { button: 0, ctrlKey: false, pointerType: 'mouse' })
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).getByText('model: claude-fable-5')).not.toBeNull()
+    expect(menu.querySelector('[data-slot="agent-badge-effort"]')?.textContent).toBe('effort: auto')
   })
 
   // #801: automation provenance is history — a run launched while automations were on keeps it
@@ -1248,7 +1267,7 @@ describe('meta line, tabs, pill and resume hint', () => {
       // could find it without knowing to open a menu.
       await waitFor(() => expect(
         badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent,
-      ).toBe('claude · Klaudiusz · opus'))
+      ).toBe('claude · Klaudiusz · opus · auto'))
     })
 
     it('prefers what RAN over what the composer asked for', async () => {
@@ -1282,6 +1301,69 @@ describe('meta line, tabs, pill and resume hint', () => {
       }))
       const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
       await within(meta).findByRole('button', { name: /account deleted-one \(removed\)/ })
+    })
+
+    it('never claims (removed) for the discovered default, not even when the catalog cannot list it (#411)', async () => {
+      // The recorded `default` is the backend's own home: present whenever the backend is and
+      // never deletable — so a catalog that fails to list it (hosted mode answers an empty one)
+      // cannot turn the run's account into `default (removed)`, the false claim #411 reports.
+      stubFetch({
+        '/api/v1/workspace/agent-profiles': () => jsonResponse({
+          editable: false,
+          profileCapableProviders: [],
+          selections: {},
+          defaults: {},
+          profiles: [],
+        }),
+      })
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', backend: 'claude', profileId: 'default' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      const badge = within(meta).getByRole('button', { name: 'Agent: claude, model auto, effort auto' })
+      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent)
+        .toBe('claude · auto · auto')
+      expect(meta.textContent).not.toContain('(removed)')
+    })
+
+    it('names the default account when its backend has a choice (#411)', async () => {
+      // The mirror of the lone rule above: two Claude logins make `default` a choice worth the
+      // word, shown as the literal recorded id rather than the catalog's display label.
+      withAccounts()
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', backend: 'claude', profileId: 'default' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      const badge = await within(meta).findByRole('button', { name: 'Agent: claude, account default, model auto, effort auto' })
+      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent)
+        .toBe('claude · default · auto · auto')
+    })
+
+    it('judges a recorded account against its own backend — a same-id row elsewhere is not it (#411)', async () => {
+      // Claude's `work` login was deleted while a Codex account reuses the id. The id-only
+      // lookup matched the Codex row — a different login — and let the lone-Claude count hide
+      // the pointer; the badge must name `work (removed)`: the folder this run's sessions live
+      // in is Claude's deleted one.
+      stubFetch({
+        '/api/v1/workspace/agent-profiles': () => jsonResponse({
+          editable: true,
+          profileCapableProviders: ['claude', 'codex'],
+          selections: {},
+          defaults: {},
+          profiles: [
+            { id: 'default', provider: 'claude', label: 'Default', configDir: '~/.claude', path: '/home/u/.claude', exists: true, looksValid: true, isDefault: true, files: [] },
+            { id: 'work', provider: 'codex', label: 'Work', configDir: '~/.codex-work', path: '/home/u/.codex-work', exists: true, looksValid: true, isDefault: false, files: [] },
+          ],
+        }),
+      })
+      renderHeader(run('done', {
+        runner: 'claude',
+        steps: [step({ sessionId: 'sess-1', backend: 'claude', profileId: 'work' })],
+      }))
+      const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+      await within(meta).findByRole('button', { name: /account work \(removed\)/ })
     })
 
     // One login is not a choice (#251): the badge counts DEFINED accounts for the CHOSEN runner
@@ -1335,9 +1417,9 @@ describe('meta line, tabs, pill and resume hint', () => {
         steps: [step({ sessionId: 'sess-1', profileId: 'default' })],
       }))
       const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
-      const badge = within(meta).getByRole('button', { name: 'Agent: claude, model opus' })
+      const badge = within(meta).getByRole('button', { name: 'Agent: claude, model opus, effort auto' })
       expect(badge.getAttribute('aria-label')).not.toContain('account')
-      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · opus')
+      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · opus · auto')
     })
 
     it('still names a removed account once the runner is down to one login (#251)', async () => {
@@ -1394,8 +1476,8 @@ describe('meta line, tabs, pill and resume hint', () => {
       const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
       await waitFor(() => expect(sent.map((r) => r.path)).toContain('/api/v1/workspace/agent-profiles'))
       await act(async () => {})
-      const badge = within(meta).getByRole('button', { name: 'Agent: claude, model auto' })
-      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · auto')
+      const badge = within(meta).getByRole('button', { name: 'Agent: claude, model auto, effort auto' })
+      expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · auto · auto')
     })
 
     it('falls back to the recorded id when the profiles query fails (#251)', async () => {
@@ -1410,7 +1492,7 @@ describe('meta line, tabs, pill and resume hint', () => {
         steps: [step({ sessionId: 'sess-1', profileId: 'work' })],
       }))
       const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
-      await within(meta).findByRole('button', { name: 'Agent: claude, account work, model auto' })
+      await within(meta).findByRole('button', { name: 'Agent: claude, account work, model auto, effort auto' })
     })
   })
 
@@ -1472,7 +1554,7 @@ describe('meta line, tabs, pill and resume hint', () => {
     const badge = within(meta).getByRole('button', { name: /Agent: claude, model auto/ })
     // Named on the badge like any other agent — claude being the default is not a reason to leave
     // "what produced this?" unanswered.
-    expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · auto')
+    expect(badge.querySelector('[data-slot="agent-badge-summary"]')?.textContent).toBe('claude · auto · auto')
   })
 
   it('tabs: Session is current; Changes and Files link to the routed surfaces', () => {
