@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 
-const allowlisted = [
+const docsAllowlisted = [
   /^[^/]+\.md$/,
   /^docs\/(?:[^/]+\/)*[^/]+$/,
   /^\.ai\/specs\/(?:[^/]+\/)*[^/]+$/,
@@ -9,7 +9,25 @@ const allowlisted = [
   /^LICENSE[^/]*$/,
 ];
 
-function isValidPath(path) {
+// Ops workflows that never run product-test suites, plus the engine scripts of
+// the allowlisted workflows, each with its .test.cjs sibling (#468; spec
+// docs/superpowers/specs/2026-09-25-infra-only-change-surface-design.md).
+// Exact-file allowlist on purpose: a new or renamed file fails closed to
+// full-matrix until deliberately listed here, and harness files — ci.yml,
+// automated-code-review.yml, recover-automated-review.yml, ci-benchmark.yml,
+// release.yml and nightly.yml (both run `npm test` themselves — #565 review),
+// change-surface.cjs, require-e2e-passed.cjs, ci-test-sequencer.mjs,
+// automated-review.cjs, release-bump-pr.cjs, the *.workflow.test.cjs pins —
+// must never appear (issue constraint #5: a PR that widens skips or alters a
+// harness that executes product suites runs the suites it affects).
+// Engine-script tests stay covered: they run under `npm run test:unit` inside
+// the unconditional build-and-package job.
+const infraAllowlisted = [
+  /^\.github\/workflows\/(?:report-workflow-failure|sweep-ci-failures|upstream-scan|npm-preview-cleanup|publish-pr-snapshot|issue-intake)\.yml$/,
+  /^\.github\/scripts\/(?:ci-sweep-api|ci-sweep-collect|ci-sweep-patterns|ci-sweep-report|apply-issue-intake)(?:\.test)?\.cjs$/,
+];
+
+function isSafePath(path) {
   return typeof path === 'string'
     && path.length > 0
     && !path.startsWith('/')
@@ -17,14 +35,21 @@ function isValidPath(path) {
     && !path.includes('\0')
     && !path.split('/').includes('..')
     && !path.split('/').includes('')
-    && allowlisted.some((pattern) => pattern.test(path));
+    && (docsAllowlisted.some((pattern) => pattern.test(path))
+      || infraAllowlisted.some((pattern) => pattern.test(path)));
 }
 
 function classifyPaths(paths) {
-  if (!Array.isArray(paths) || paths.length === 0 || !paths.every(isValidPath)) {
+  if (!Array.isArray(paths) || paths.length === 0 || !paths.every(isSafePath)) {
     return 'full-matrix';
   }
-  return 'docs-only';
+  if (paths.every((path) => docsAllowlisted.some((pattern) => pattern.test(path)))) {
+    return 'docs-only';
+  }
+  if (paths.every((path) => infraAllowlisted.some((pattern) => pattern.test(path)))) {
+    return 'infra-only';
+  }
+  return 'full-matrix';
 }
 
 function classifyJsonLines(input) {
