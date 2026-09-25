@@ -1,11 +1,12 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import type { RunManager, StartRunInput } from '../workflows/run.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
-import { loadWorkspaceConfig } from '../workspace/config.ts';
+import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { workspaceConfigPath } from '../paths.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, type ServerDeps } from './server.ts';
@@ -179,6 +180,38 @@ describe('task webhook API', () => {
       expect((await send('/api/v1/runs/nope/notify', 'POST', { notify: false })).status).toBe(404);
       expect((await send(`/api/v1/runs/${id}/notify`, 'POST', { notify: 'yes' })).status).toBe(400);
       expect((await send(`/api/v1/runs/${id}/notify`, 'POST', { notify: false, message: 'x'.repeat(100_001) })).status).toBe(400);
+    });
+  });
+
+  describe('recovery (#589 review)', () => {
+    it('reports the transitions a lazily built project makes while recovering', async () => {
+      const other = mkdtempSync(join(realpathSync(tmpdir()), 'cez-webhook-other-'))
+      try {
+        // A run that was live when the last process exited: recovery moves it on, and that move
+        // is exactly what an opted-in bot is waiting for.
+        mkdirSync(join(other, '.ai/cezar'), { recursive: true });
+        writeFileSync(join(other, '.ai/cezar/runs.json'), JSON.stringify([{
+          id: 'live', title: 'live', task: 'live', workflow: 'quick-task', status: 'running', notify: true,
+          createdAt: '2026-09-25T10:00:00.000Z', tokensUsed: 0, archived: false, steps: [],
+        }]));
+        const entry = await registerProject(other);
+        await mergeWriteWorkspaceConfig((config) => {
+          config.projects.find((p) => p.id === entry.id)!.webhook = { url: 'https://bot.example/hook', token: 't' };
+        });
+        const app = makeApp({ semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+        const res = await apiRequest(app, `/api/v1/p/${entry.id}/runs/live`);
+        const after = (await res.json()) as RunRecord;
+        expect(after.status).not.toBe('running');
+        await vi.waitFor(() => {
+          const events = RunStore.open(join(other, '.ai/cezar')).readEvents('live');
+          expect(events.find((event) => event.type === 'webhook.dry-run')).toMatchObject({
+            event: 'task.status',
+            payload: { previousStatus: 'running', status: after.status },
+          });
+        });
+      } finally {
+        rmSync(other, { recursive: true, force: true });
+      }
     });
   });
 

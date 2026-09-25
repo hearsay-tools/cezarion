@@ -28,7 +28,7 @@ import { serve, type ServerType } from '@hono/node-server';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { jsonZodValidator, paramZodValidator, queryZodValidator } from './validators.ts';
-import { deliverOnce, TaskWebhook } from '../runs/webhook.ts';
+import { deliverOnce, TaskWebhooks } from '../runs/webhook.ts';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import {
@@ -208,10 +208,12 @@ import {
 } from './static-ui.ts';
 
 export interface ServerDeps {
-  /** The cockpit origin the task webhook links threads to (#589). `startServer` derives it from
-   *  the port it binds; an embedded app without it sends a path-only link. */
-  taskWebhookOrigin?: string;
-  /** Test seam for task-webhook deliveries (#589): the `fetch` they POST with. */
+  /** The task-webhook subscribers (#589). Boot creates it and attaches the boot store BEFORE
+   *  `manager.recover()`, so recovery's transitions are reported; `startServer` sets its origin
+   *  from the port it binds. Absent (tests, embedded apps), `createApp` makes its own. */
+  taskWebhooks?: TaskWebhooks;
+  /** Test seam for task-webhook deliveries (#589): the `fetch` they POST with. Used only when
+   *  `createApp` builds its own `TaskWebhooks`. */
   taskWebhookFetch?: typeof fetch;
   /** Same-process optional private listener; attached to managers before recovery. */
   delegation?: DelegationController;
@@ -1214,6 +1216,11 @@ export function createApp(deps: ServerDeps) {
     automationStore: deps.automationStore ?? AutomationStore.open(bootDataDir),
     launchKey: ensureLaunchKey(bootDataDir), // bookmarklet auto-start secret (spec 011)
   };
+  // The task webhook (#589): attached before any recovery — the boot store by `index.ts`, lazy
+  // projects through `prepareManager` below. Attaching is idempotent, so the calls here only
+  // cover an app built without boot's wiring (tests, embedded servers).
+  const taskWebhooks = deps.taskWebhooks ?? new TaskWebhooks({ fetch: deps.taskWebhookFetch, origin: '' });
+  taskWebhooks.attach(bootContext);
   // Non-boot projects build lazily on first scoped request; their managers
   // count against the same workspace semaphore as the boot manager (step 2.5).
   const contexts = deps.contexts ?? new ProjectContexts({
@@ -1224,7 +1231,10 @@ export function createApp(deps: ServerDeps) {
       return listProjects(selector);
     },
     semaphore: deps.semaphore,
-    prepareManager: project => deps.delegation?.attachProject(project),
+    prepareManager: (project) => {
+      taskWebhooks.attach(project);
+      return deps.delegation?.attachProject(project);
+    },
   });
   // Workspace-level SSE bus (step 2.8) — the registry mutators and the
   // checkout flow (Phase 4) emit here; /api/workspace/events relays.
@@ -1255,31 +1265,16 @@ export function createApp(deps: ServerDeps) {
   contexts.onStoreCreated((store) => providerRuntimeAuth.watch(store));
   contexts.onContextBuilt((ctx) => providerRuntimeAuth.watch(ctx.store));
 
-  // The task webhook (#589): one subscriber per project store, attached the same way the
-  // provider observer above is. A disposed context's `store.removeAllListeners()` detaches it.
+  // Injected contexts (tests) skip `prepareManager`; attach those when they are built.
+  for (const id of contexts.ids()) {
+    const ctx = contexts.peek(id);
+    if (ctx) taskWebhooks.attach(ctx);
+  }
+  contexts.onContextBuilt((ctx) => taskWebhooks.attach(ctx));
   const projectRegistryEntry = async (projectId: string): Promise<WorkspaceProject | undefined> => {
     const id = projectId === 'default' ? await resolveBootProject() : projectId;
     return (await loadWorkspaceConfig()).projects.find((entry) => entry.id === id);
   };
-  const taskWebhooks = new WeakMap<RunStore, TaskWebhook>();
-  const attachTaskWebhook = (ctx: ProjectContext): void => {
-    if (taskWebhooks.has(ctx.store)) return;
-    taskWebhooks.set(ctx.store, new TaskWebhook(ctx.store, {
-      resolveProject: async () => {
-        const entry = await projectRegistryEntry(ctx.id);
-        return entry ? { id: entry.id, webhook: entry.webhook } : undefined;
-      },
-      origin: () => deps.taskWebhookOrigin,
-      dataDir: ctx.dataDir,
-      fetch: deps.taskWebhookFetch,
-    }));
-  };
-  attachTaskWebhook(bootContext);
-  for (const id of contexts.ids()) {
-    const ctx = contexts.peek(id);
-    if (ctx) attachTaskWebhook(ctx);
-  }
-  contexts.onContextBuilt(attachTaskWebhook);
 
   const app = new Hono();
 
@@ -3699,7 +3694,7 @@ export function createApp(deps: ServerDeps) {
         notify,
         ...(message === undefined ? {} : { message }),
       });
-      if (notify) taskWebhooks.get(project.store)?.subscribed(id, message);
+      if (notify) taskWebhooks.attach(project).subscribed(id, message);
       return c.json(run);
     })
 
@@ -5884,11 +5879,16 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   const automationCoordinator = new AutomationCoordinator({ listProjects });
   const bootProjectId = deps.bootProjectId ?? 'default';
   const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
+  const taskWebhooks = deps.taskWebhooks ?? new TaskWebhooks({ fetch: deps.taskWebhookFetch });
+  taskWebhooks.setOrigin(`http://${taskWebhookHost(deps.bindHost)}:${port}`);
   const sharedContexts = deps.contexts ?? new ProjectContexts({
     listProjects,
     semaphore: deps.semaphore,
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
-    prepareManager: project => deps.delegation?.attachProject(project),
+    prepareManager: (project) => {
+      taskWebhooks.attach(project);
+      return deps.delegation?.attachProject(project);
+    },
   });
   // #801: GitHub automations are opt-in. Off, the flag must remove the BEHAVIOR and not merely
   // the UI — no scheduler, no GitHub polling, no launched runs — so every entry point into the
@@ -5898,7 +5898,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   let rescheduleAutomations = () => {};
   const app = createApp({
     ...deps,
-    taskWebhookOrigin: deps.taskWebhookOrigin ?? `http://${taskWebhookHost(deps.bindHost)}:${port}`,
+    taskWebhooks,
     contexts: sharedContexts,
     automationStore: bootAutomationStore,
     workspaceEvents,

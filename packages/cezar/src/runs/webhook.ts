@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ApiRun, RunActivity, RunStatus } from '@open-mercato/cezar-contract';
 import { projectStatus } from '../task-cli/projections.ts';
+import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { deriveRunContextEvents } from './event-history.ts';
 import type { RunRecord, RunStore } from './store.ts';
 
@@ -60,6 +62,9 @@ export interface TaskWebhookOptions {
   resolveProject: () => Promise<{ id: string; webhook?: TaskWebhookTarget } | undefined>;
   /** The cockpit origin (`http://127.0.0.1:4321`) for the thread link; unknown before listen. */
   origin: () => string | undefined;
+  /** Resolves once the origin is known. Recovery runs before the server listens, and its
+   *  transitions queue behind this rather than going out with a path-only link. */
+  ready?: () => Promise<void>;
   /** Where the run's NDJSON lives, for the pending question. */
   dataDir: string;
   /** `CEZ_DRY_RUN=1` by default: log the payload as a run event, send nothing. */
@@ -229,6 +234,7 @@ export class TaskWebhook {
   }
 
   private async deliver(pending: Pending): Promise<void> {
+    await this.options.ready?.();
     const project = await this.options.resolveProject().catch(() => undefined);
     // Removed since the run opted in: nothing to send to, and nobody to tell.
     if (!project?.webhook) return;
@@ -269,4 +275,60 @@ export class TaskWebhook {
       ...(result.status === undefined ? {} : { status: result.status }),
     });
   }
+}
+
+/**
+ * Every project's `TaskWebhook`, keyed by store (#589). It exists so the subscriber can be
+ * attached BEFORE `manager.recover()`: recovery re-queues, resumes or fails the runs that were
+ * live when the last process exited, and a subscriber attached after it would seed those new
+ * statuses as the starting state and never report them. `index.ts` attaches the boot project
+ * right after opening its store; every lazily built project attaches through
+ * `ProjectContexts`' `prepareManager` hook, which runs before that project's recovery.
+ *
+ * Deliveries wait for `setOrigin`, which `startServer` calls once it knows its port.
+ */
+export class TaskWebhooks {
+  private readonly hooks = new WeakMap<RunStore, TaskWebhook>();
+  private origin: string | undefined;
+  private markReady!: () => void;
+  private readonly ready = new Promise<void>((done) => { this.markReady = done; });
+
+  constructor(private readonly options: { fetch?: typeof fetch; origin?: string } = {}) {
+    if (options.origin !== undefined) this.setOrigin(options.origin);
+  }
+
+  setOrigin(origin: string): void {
+    this.origin = origin;
+    this.markReady();
+  }
+
+  /** Idempotent: a store already attached keeps its subscriber and its queue. `id` may be the
+   *  reserved `default` alias, which resolves to the registry entry holding `root`. */
+  attach(project: { id: string; root: string; store: RunStore }): TaskWebhook {
+    const existing = this.hooks.get(project.store);
+    if (existing) return existing;
+    const hook = new TaskWebhook(project.store, {
+      resolveProject: () => registryWebhook(project.id, project.root),
+      origin: () => this.origin,
+      ready: () => this.ready,
+      dataDir: join(project.root, '.ai/cezar'),
+      fetch: this.options.fetch,
+    });
+    this.hooks.set(project.store, hook);
+    return hook;
+  }
+
+  get(store: RunStore): TaskWebhook | undefined {
+    return this.hooks.get(store);
+  }
+}
+
+/** The registry entry this project is, read per delivery so a settings change applies at once. */
+async function registryWebhook(id: string, root: string): Promise<{ id: string; webhook?: TaskWebhookTarget } | undefined> {
+  const projects = (await loadWorkspaceConfig()).projects;
+  const real = id === 'default' ? await realpath(root).catch(() => root) : root;
+  const entry = id === 'default'
+    ? projects.find((project) => project.root === real || project.root === root)
+    : projects.find((project) => project.id === id);
+  return entry ? { id: entry.id, ...(entry.webhook ? { webhook: entry.webhook } : {}) } : undefined;
 }

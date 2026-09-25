@@ -1,9 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from './store.ts';
-import { TaskWebhook, WEBHOOK_ATTEMPTS, type TaskWebhookOptions } from './webhook.ts';
+import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
+import { registerProject } from '../workspace/projects.ts';
+import { TaskWebhook, TaskWebhooks, WEBHOOK_ATTEMPTS, type TaskWebhookOptions } from './webhook.ts';
 
 /** The task webhook (#589): what a store transition turns into on the wire, and what a failing
  *  endpoint is allowed to change (the record's `webhook` outcome and one thread event — never
@@ -189,5 +191,45 @@ describe('TaskWebhook', () => {
     store.updateRun(run.id, { title: 'renamed' });
     await webhook.idle();
     expect(calls).toEqual([]);
+  });
+});
+
+describe('TaskWebhooks', () => {
+  let dataDir: string;
+  let root: string;
+  const savedDryRun = process.env.CEZ_DRY_RUN;
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'cez-webhooks-')));
+    dataDir = join(root, '.ai/cezar');
+    delete process.env.CEZ_DRY_RUN;
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
+    else process.env.CEZ_DRY_RUN = savedDryRun;
+  });
+
+  it('holds recovery-time deliveries until the origin is known, and resolves the default alias by root', async () => {
+    const entry = await registerProject(root);
+    await mergeWriteWorkspaceConfig((config) => {
+      config.projects.find((p) => p.id === entry.id)!.webhook = { url: 'https://bot.example/hook', token: 't' };
+    });
+    const store = RunStore.open(dataDir);
+    const { calls, fetchImpl } = recorder();
+    const hooks = new TaskWebhooks({ fetch: fetchImpl });
+    const hook = hooks.attach({ id: 'default', root, store });
+    expect(hooks.attach({ id: 'default', root, store })).toBe(hook);
+
+    const run = store.createRun({ title: 't', workflow: 'quick-task', task: 't', notify: true, steps: [] });
+    store.updateRun(run.id, { status: 'running' });
+    await new Promise((done) => setTimeout(done, 20));
+    expect(calls).toEqual([]);
+
+    hooks.setOrigin('http://127.0.0.1:4321');
+    await hook.idle();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.body).toMatchObject({ projectId: entry.id, url: `http://127.0.0.1:4321/p/${entry.id}/tasks/${run.id}` });
+    hook.dispose();
+    store.flush();
   });
 });
