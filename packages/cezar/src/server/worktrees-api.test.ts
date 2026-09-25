@@ -156,6 +156,36 @@ describe('the worktrees API', () => {
     expect(existsSync(wtPath)).toBe(false);
     expect((await getWorktrees()).worktrees.map((w) => w.runId)).not.toContain(id);
   });
+  it('lists a finished worker as reclaimable and Reclaim now frees it when over keep (#575)', async () => {
+    writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ worktreeRetention: 1 }), 'utf8');
+    const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    store.updateRun(parent.id, { status: 'done', finishedAt: '2026-07-09T00:00:00Z', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    const sha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
+    const oldWorkspace = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
+    const newWorkspace = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
+    const oldWorker = store.createOwnedRun({ title: 'old worker', task: 'worker', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(),
+      { role: 'worker', parentRunId: parent.id, permissions: [], workspace: oldWorkspace }, 'a'.repeat(64));
+    const newWorker = store.createOwnedRun({ title: 'new worker', task: 'worker', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(),
+      { role: 'worker', parentRunId: parent.id, permissions: [], workspace: newWorkspace }, 'b'.repeat(64));
+    store.updateRun(oldWorker.id, { status: 'done', finishedAt: '2026-07-01T00:00:00Z', worktreePath: oldWorkspace.path, branch: oldWorkspace.branch });
+    store.updateRun(newWorker.id, { status: 'done', finishedAt: '2026-07-09T00:00:00Z', worktreePath: newWorkspace.path, branch: newWorkspace.branch });
+
+    const listed = await getWorktrees();
+    const byRun = Object.fromEntries(listed.worktrees.map((w) => [w.runId, w]));
+    expect(byRun[oldWorker.id]?.reclaimable).toBe(true);
+    expect(byRun[newWorker.id]?.reclaimable).toBe(true);
+
+    const res = await apiRequest(app, '/api/v1/worktrees/reclaim', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ reclaimed: [oldWorker.id] });
+    expect(existsSync(oldWorkspace.path)).toBe(false);
+    expect(existsSync(newWorkspace.path)).toBe(true);
+  });
+
   it('human deletion and worktree removal preserve worker and parent ownership evidence', async () => {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     store.updateRun(parent.id, { status: 'done', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });

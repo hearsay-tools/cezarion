@@ -111,8 +111,8 @@ const overKeep: WorktreesResponse = {
 }
 
 /**
- * Live #566 snapshot: 23 finished workers (not reclaimable) + 7 reclaimable
- * finished + 1 running, keep 8. Retention would reclaim 0.
+ * Honesty fixture (#566): the listing marks 23 finished-looking worker rows
+ * not reclaimable. Footer/button follow those flags, not on-disk count.
  */
 const workerMajority: WorktreesResponse = {
   worktrees: [
@@ -212,6 +212,19 @@ describe('Settings → Resources: worktrees panel (#483)', () => {
     expect(footer()?.textContent).toBe('31 worktrees · 8.1 GB on disk · 7 reclaimable, keeping the last 8')
     expect(footer()?.className).toContain('text-soft-foreground')
     expect(reclaimNow()?.disabled).toBe(true)
+  })
+
+  it('counts finished workers toward Reclaim now when the listing marks them reclaimable (#575)', async () => {
+    serve({
+      ...workerMajority,
+      worktrees: workerMajority.worktrees.map((row) =>
+        row.runId.startsWith('worker-') ? { ...row, reclaimable: true } : row,
+      ),
+    })
+    renderPanel()
+    await waitFor(() => expect(rows()).toHaveLength(31))
+    expect(footer()?.textContent).toBe('31 worktrees · 8.1 GB on disk · 30 reclaimable, keeping the last 8')
+    expect(reclaimNow()?.disabled).toBe(false)
   })
 
   it('empty reclaim toast does not claim every worktree is within the limit (#566)', async () => {

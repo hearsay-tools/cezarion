@@ -344,10 +344,13 @@ restart and permits a later retry; no autonomous destructive retry after a
 restart without a new request.
 
 Existing retention/orphan sweeps must respect worker ownership and destruction
-state. Exclude owned worker worktrees from ordinary best-effort retention and
-unowned deletion paths; worker cleanup uses the verified path. Human deletion
-of a related run must not erase the ownership evidence while owned resources or
-live descendants remain. Ordinary unrelated-run retention remains unchanged.
+state. Finished owned-worker *directories* are reclaimable under the same keep-N
+budget as other finished runs (#575: directory only, branch kept). Live workers,
+`review`, `invalid`, and workers mid-destroy stay excluded. Unowned deletion
+paths still skip owned resources; verified destroy owns branch/process/history
+cleanup. Human deletion of a related run must not erase the ownership evidence
+while owned resources or live descendants remain. Ordinary unrelated-run
+retention remains unchanged aside from counting finished workers in keep-N.
 
 ## Cockpit
 

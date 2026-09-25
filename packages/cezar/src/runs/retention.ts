@@ -21,9 +21,12 @@ function recencyKey(run: RunRecord): string {
 }
 
 /** A run is reclaimable when it is finished, still has a materialized worktree
- *  directory, and has not already been reclaimed. */
+ *  directory, and has not already been reclaimed. Finished owned workers count
+ *  (#575); live runs, `review`, `invalid`, and workers mid-destroy do not. */
 export function isReclaimable(run: RunRecord): boolean {
-  return run.delegation?.role !== 'worker' && run.delegation?.role !== 'invalid' && FINISHED.has(run.status) && !!run.worktreePath && !run.worktreeReclaimedAt;
+  if (run.delegation?.role === 'invalid') return false;
+  if (run.delegation?.role === 'worker' && run.delegation.destroy) return false;
+  return FINISHED.has(run.status) && !!run.worktreePath && !run.worktreeReclaimedAt;
 }
 
 /**
@@ -64,6 +67,8 @@ export interface RematerializeStore {
  * without it the run would keep a directory on disk while staying invisible to
  * the enforcer forever (a leak). Returns true when it re-materialized.
  * Best-effort: never throws (the caller falls back to the repo root).
+ * Owned workers still refuse this path: continue verifies the owned workspace
+ * instead of recreating an unverified tree. `invalid` is never rematerialized.
  */
 export async function rematerializeReclaimedWorktree(
   repoRoot: string,
@@ -110,13 +115,12 @@ export async function reclaimWorktrees(
   opts: ReclaimOptions = {},
 ): Promise<string[]> {
   const now = opts.now ?? (() => new Date().toISOString());
-  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path)); // branch kept
+  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true })); // branch kept
   const runs = store.listRuns();
   const byId = new Map(runs.map((r) => [r.id, r]));
   const reclaimed: string[] = [];
   for (const id of selectReclaimableWorktrees(runs, keep)) {
     const run = byId.get(id);
-    if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'invalid') continue;
     if (!run?.worktreePath) continue;
     try {
       await remove(repoRoot, run.worktreePath);

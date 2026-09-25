@@ -42,10 +42,14 @@ An always-on **count-based retention policy** layered on the existing
   auto-reclaim".
 - **Reclaimable** = a run whose status is `done`, `failed`, or `cancelled`
   (the same "finished" set `archiveFinished` already uses) **and** whose worktree
-  directory still exists. `running`, `queued`, and `waiting` are live work;
+  directory still exists. Finished owned workers (`delegation.role === 'worker'`)
+  count under the same keep-N budget (#575) — they are most of the on-disk
+  directories on a busy cockpit. `running`, `queued`, and `waiting` are live work;
   **`review` is deliberately excluded** — a run at the review gate still needs
   its worktree to render the diff and open a draft PR. Reclaiming it would
-  break the gate.
+  break the gate. `invalid` ownership and workers mid-destroy stay excluded;
+  verified destroy still owns branch/process/history cleanup. The Settings
+  panel reclaimable count and **Reclaim now** follow this selector (#570).
 - **Reclaim = directory only.** Call `removeWorktree(repoRoot, path)` *without*
   the branch argument, so the `cez/<id8>` branch (and every autosave commit on
   it) survives. The work is fully recoverable — re-materialize with
@@ -269,8 +273,9 @@ Each step leaves the app working and is unit-testable.
   (`src/runs/store.ts`). Test: old `runs.json` without the field still parses;
   `updateRun` sets it.
 - 1.3 Write `selectReclaimableWorktrees(runs, keep)` in `src/runs/retention.ts`
-  (pure). Tests: keeps newest N, excludes `review`/live/reclaimed, `keep=0`
-  returns none, recency ordering by `finishedAt ?? createdAt`.
+  (pure). Tests: keeps newest N, excludes `review`/live/reclaimed/`invalid`/
+  mid-destroy, includes finished workers (#575), `keep=0` returns none, recency
+  ordering by `finishedAt ?? createdAt`.
 - 1.4 Write `reclaimWorktrees(repoRoot, store, keep)` (I/O wrapper over the
   selector + `removeWorktree` dir-only + stamp). Test with a temp git repo:
   dir removed, branch present, field stamped, failure leaves field unset.
