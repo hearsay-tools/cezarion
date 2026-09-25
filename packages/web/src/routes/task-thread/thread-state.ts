@@ -113,7 +113,9 @@ export interface ThreadProviderAuthRequired {
   authFailureId: string
 }
 
-export type ThreadEntry = UiItem | ThreadNote | ThreadImage | ThreadAsk | ThreadProviderAuthRequired | ThreadConversationMessage
+/** Event time belongs to the web transcript, not the backend UiItem protocol. */
+export type ThreadMessage = Extract<UiItem, { kind: 'message' }> & { ts?: string }
+export type ThreadEntry = Exclude<UiItem, { kind: 'message' }> | ThreadMessage | ThreadNote | ThreadImage | ThreadAsk | ThreadProviderAuthRequired | ThreadConversationMessage
 
 export interface ThreadTurn {
   /** Stable source-derived render key. The opening event sequence survives prepended pages;

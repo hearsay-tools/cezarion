@@ -341,6 +341,7 @@ function WorkerConversationBatchCard({
   const headingPrefix = direction === 'outbound' ? 'SENT to' : 'RECEIVED from'
   const heading = `${headingPrefix} ${counterpartIds.map((id) => taskTitleFor(id, taskTitles)).join(', ')}`
   const soleMessage = batch.messages[0]
+  const sentAt = soleMessage?.createdAt ?? soleMessage?.recordedAt
   const soleStatus = soleMessage ? conversationStatusLabel(soleMessage) : undefined
   return (
     <article
@@ -373,6 +374,11 @@ function WorkerConversationBatchCard({
       <div className="min-w-0 break-words text-[14px] leading-[1.6] text-foreground select-text [overflow-wrap:anywhere]">
         <Markdown breaks>{batch.text}</Markdown>
       </div>
+      {sentAt !== undefined ? (
+        <span className="flex justify-end">
+          <MessageTime ts={sentAt} />
+        </span>
+      ) : null}
       {[...new Set(batch.messages.map(message =>
         message.instruction ?? (message.delivery === 'queued'
           ? 'Queued for the next safe turn. Pending messages are delivered together within the batch size limit; human questions and scheduler capacity can delay delivery.'

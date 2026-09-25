@@ -5,7 +5,7 @@
 - Recover structured questions missing only closing brackets, with a persistent warning to check options and selection count; preserve fork monitoring and Claude wakeups (#88).
 
 ## ✨ Features
-- Each task-thread turn now shows a short local time on the user bubble and the agent's completion time plus duration (`14:36 · 4m 12s`). Turns on different local days are parted by a dated rule. Times follow the browser locale, never tick, and omit themselves when a stamp is missing. Queued messages keep their own queued-at time but do not date the older conversation they sit above. (#435; port of upstream #942)
+- Each task-thread turn now shows a short local time on the user bubble, agent responses, and parent/worker messages, plus the agent's completion time and duration (`14:36 · 4m 12s`). Turns on different local days are parted by a dated rule. Times follow the browser locale, never tick, and omit themselves when a stamp is missing or invalid. Queued messages keep their own queued-at time but do not date the older conversation they sit above. (#435; port of upstream #942)
 - Pin tasks from project sidebars, task tables, mobile cards and thread actions. A visible pinned variant promotes its entire group once; pins keep status/attention indicators and spend no recent-row budget. Pins persist per project, archive clears them, and failed updates retain the prior state with retry feedback. (#93; port of upstream #938)
 
 - ✨ **Claude permission mode is an env var, not a wrapper.** Agent runs still default to

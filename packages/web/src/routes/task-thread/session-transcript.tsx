@@ -428,9 +428,9 @@ function ThreadEntryRenderer({
   switch (entry.kind) {
     case 'message':
       return entry.role === 'assistant' ? (
-        <AssistantMessage text={entry.text} />
+        <AssistantMessage text={entry.text} ts={entry.ts} />
       ) : (
-        <UserBubble text={entry.text} />
+        <UserBubble text={entry.text} ts={entry.ts} />
       )
     case 'reasoning':
       return <ReasoningItem text={entry.text} />

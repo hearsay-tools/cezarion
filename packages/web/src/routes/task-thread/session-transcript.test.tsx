@@ -275,42 +275,74 @@ describe('transcript adapters and row building', () => {
       expect(document.querySelector('[data-slot="turn-time"]')?.textContent).toContain('· 4m 12s')
     })
 
-    it('stamps the agent response and a worker/parent card from their own persisted times', () => {
+    it('stamps the agent response and both parent/worker directions from their own persisted times', () => {
       const startedAt = localIso(2026, 7, 31, 14, 32)
       const replyAt = new Date(new Date(startedAt).getTime() + 252_000).toISOString()
       const queuedAt = localIso(2026, 7, 31, 15, 0)
+      const workerReplyAt = localIso(2026, 7, 31, 15, 2)
       render(
         <MemoryRouter>
-        <SessionTranscript
-          runId="parent"
-          viewId="main"
-          mode="document"
-          sections={[
-            {
-              id: 'turn-1',
-              startedAt,
-              completedAt: replyAt,
-              entries: [
-                { kind: 'message', id: 'answer', role: 'assistant', text: 'Done', ts: replyAt },
-                {
-                  kind: 'conversation',
-                  id: 'req',
-                  messageId: 'req',
-                  messageKind: 'request',
-                  senderRunId: 'parent',
-                  recipientRunId: 'worker',
-                  text: 'Inspect the parser',
-                  delivery: 'delivered',
-                  createdAt: queuedAt,
-                },
-              ],
-            },
-          ]}
-        />
+          <SessionTranscript
+            runId="parent"
+            viewId="main"
+            mode="document"
+            sections={[
+              {
+                id: 'turn-1',
+                startedAt,
+                completedAt: replyAt,
+                entries: [
+                  { kind: 'message', id: 'answer', role: 'assistant', text: 'Done', ts: replyAt },
+                  {
+                    kind: 'conversation',
+                    id: 'req',
+                    messageId: 'req',
+                    messageKind: 'request',
+                    senderRunId: 'parent',
+                    recipientRunId: 'worker',
+                    text: 'Inspect the parser',
+                    delivery: 'delivered',
+                    createdAt: queuedAt,
+                  },
+                  {
+                    kind: 'conversation',
+                    id: 'reply',
+                    messageId: 'reply',
+                    messageKind: 'reply',
+                    requestId: 'req',
+                    senderRunId: 'worker',
+                    recipientRunId: 'parent',
+                    text: 'Parser inspected',
+                    delivery: 'delivered',
+                    createdAt: workerReplyAt,
+                  },
+                ],
+              },
+            ]}
+          />
         </MemoryRouter>,
       )
       expect(document.querySelector('[data-slot="assistant-message"] [data-slot="message-time"]')?.getAttribute('datetime')).toBe(replyAt)
-      expect(document.querySelector('[data-slot="worker-conversation-card"] [data-slot="message-time"]')?.getAttribute('datetime')).toBe(queuedAt)
+      expect(document.querySelector('[data-slot="worker-conversation-card"][data-direction="outbound"] [data-slot="message-time"]')?.getAttribute('datetime')).toBe(queuedAt)
+      expect(document.querySelector('[data-slot="worker-conversation-card"][data-direction="inbound"] [data-slot="message-time"]')?.getAttribute('datetime')).toBe(workerReplyAt)
+    })
+
+    it('omits message clocks when assistant and worker timestamps are invalid or missing', () => {
+      render(
+        <MemoryRouter>
+          <SessionTranscript runId="parent" viewId="main" mode="document" sections={[{
+            id: 'turn-1',
+            entries: [
+              { kind: 'message', id: 'answer', role: 'assistant', text: 'Done', ts: 'not-a-date' },
+              { kind: 'conversation', id: 'req', messageId: 'req', messageKind: 'request',
+                senderRunId: 'parent', recipientRunId: 'worker', text: 'Inspect', delivery: 'delivered',
+                createdAt: 'not-a-date' },
+            ],
+          }]} />
+        </MemoryRouter>,
+      )
+      expect(document.querySelectorAll('[data-slot="message-time"]')).toHaveLength(0)
+      expect(document.body.textContent).not.toContain('Invalid Date')
     })
   })
 

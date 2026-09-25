@@ -115,7 +115,7 @@ describe('reduceThread — item ids across workflow steps', () => {
       { kind: 'reasoning', id: 'item_1', text: 'Earlier thinking survives.' },
     ])
     expect(turns[1]!.items).toEqual([
-      { kind: 'message', id: 'item_1', role: 'assistant', text: 'Resumed response.' },
+      { kind: 'message', id: 'item_1', role: 'assistant', text: 'Resumed response.', ts: '2026-07-14T12:00:00.000Z' },
     ])
   })
 
@@ -132,7 +132,7 @@ describe('reduceThread — item ids across workflow steps', () => {
     ])
 
     expect(turns[0]!.items).toEqual([
-      { kind: 'message', id: 'item_1', role: 'assistant', text: 'Legacy response.' },
+      { kind: 'message', id: 'item_1', role: 'assistant', text: 'Legacy response.', ts: '2026-07-14T12:00:00.000Z' },
     ])
   })
 })
@@ -683,7 +683,7 @@ describe('the v1 vocabulary sweep (cezar-code-map §3.2) — every persisted typ
 
   it('text → an assistant message', () => {
     const items = allItems([line(1, 'text', { text: 'hello' })])
-    expect(items).toEqual([{ kind: 'message', id: 'v1:1', role: 'assistant', text: 'hello' }])
+    expect(items).toEqual([{ kind: 'message', id: 'v1:1', role: 'assistant', text: 'hello', ts: '2026-07-14T12:00:00.000Z' }])
   })
 
   it('tool-call + tool-result → one tool card, honest 2-state status', () => {
