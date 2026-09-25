@@ -164,7 +164,7 @@ test('review-round classifies from trusted base before merge checkout and skips 
   });
 
   await t.test('infra-only PRs skip review without a patch id', () => {
-    const outputs = runRound({ event: 'pull_request_target', files: ['.github/workflows/release.yml', '.github/scripts/ci-sweep-collect.cjs'] });
+    const outputs = runRound({ event: 'pull_request_target', files: ['.github/workflows/sweep-ci-failures.yml', '.github/scripts/ci-sweep-collect.cjs'] });
     assert.equal(outputs.change_surface, 'infra-only');
     assert.equal(outputs.can_review, 'false');
     assert.equal(outputs.patch_id, '');

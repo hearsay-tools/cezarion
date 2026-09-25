@@ -8,10 +8,13 @@ Status: approved in chat · Date: 2026-09-25 · Issue: #468
 automated review while `build-and-package` and the required `verify` aggregate
 stay green. That policy deliberately sent every `.github/**` change to the full
 matrix (#356 constraint #4: "Changing CI itself is not a skip"). The overshoot
-is waste, not safety: a one-line runner swap in `release.yml` (#467) cannot
-regress a product suite yet still schedules two Vitest shards and four cockpit
-E2E shards. `SDLC.md` already treats CI-only changes as `skip-qa` candidates;
-the CI job graph now gains the counterpart surface.
+is waste, not safety: a one-line runner swap in a pure-ops workflow (#467's
+`release.yml` edit) cannot regress a product suite yet still schedules two
+Vitest shards and four cockpit E2E shards. `SDLC.md` already treats CI-only
+changes as `skip-qa` candidates; the CI job graph now gains the counterpart
+surface. Note: `release.yml` itself turned out to execute `npm test` (release
+verification), so the landed allowlist excludes it and `nightly.yml` — the
+waste fix applies to the workflows that never run product suites.
 
 ## Policy
 
@@ -19,8 +22,7 @@ Classification still uses the pull request file list, never labels. A PR is
 `infra-only` only when the list is non-empty, every entry is a valid path, and
 every path is one of:
 
-- `.github/workflows/release.yml`, `nightly.yml`,
-  `report-workflow-failure.yml`, `sweep-ci-failures.yml`,
+- `.github/workflows/report-workflow-failure.yml`, `sweep-ci-failures.yml`,
   `upstream-scan.yml`, `npm-preview-cleanup.yml`, `publish-pr-snapshot.yml`,
   or `issue-intake.yml` — workflows that never run product-test suites;
 - `.github/scripts/ci-sweep-api.cjs`, `ci-sweep-collect.cjs`,
@@ -30,13 +32,18 @@ every path is one of:
 
 Anything else under `.github/**` stays full-matrix: `ci.yml`,
 `automated-code-review.yml`, `recover-automated-review.yml`,
-`ci-benchmark.yml`, every harness script (`change-surface.cjs`,
-`require-e2e-passed.cjs`, `ci-test-sequencer.mjs`, `automated-review.cjs`,
-`release-bump-pr.cjs`, and the `*.workflow.test.cjs` pins), application and
-package code, lockfiles, and any path not named above — a new or renamed file
-fails closed to the full matrix until deliberately listed. A PR mixing docs
-with infra paths, or infra with product paths, is full-matrix: each skip
-surface stays pure.
+`ci-benchmark.yml`, `release.yml` and `nightly.yml` (both execute product
+suites themselves — release verification runs `npm test`, the nightly job
+runs `npm run test:unit`, `npm test`, and `npm run test:package`, so a PR
+editing them cannot silently skip the suites they gate; constraint #5
+outranks the #467 counterexample, which the review of #565 caught), every
+harness script (`change-surface.cjs`, `require-e2e-passed.cjs`,
+`ci-test-sequencer.mjs`, `automated-review.cjs`, `release-bump-pr.cjs`,
+and the `*.workflow.test.cjs` pins), application and package code,
+lockfiles, and any path not named above — a new or renamed file fails closed
+to the full matrix until deliberately listed. A PR mixing docs with infra
+paths, or infra with product paths, is full-matrix: each skip surface stays
+pure.
 
 The policy matrix gains one row:
 

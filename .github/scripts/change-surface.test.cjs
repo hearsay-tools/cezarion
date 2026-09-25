@@ -13,8 +13,6 @@ const rootProcessDocuments = [
 ];
 
 const infraWorkflows = [
-  '.github/workflows/release.yml',
-  '.github/workflows/nightly.yml',
   '.github/workflows/report-workflow-failure.yml',
   '.github/workflows/sweep-ci-failures.yml',
   '.github/workflows/upstream-scan.yml',
@@ -52,13 +50,17 @@ test('classifies every infra allowlisted path as infra-only', () => {
     assert.equal(classifyPaths([script]), 'infra-only', script);
     assert.equal(classifyPaths([`${script.replace(/\.cjs$/, '')}.test.cjs`]), 'infra-only', script);
   }
-  // #468 prototype: #467's single-file release.yml runner edit.
-  assert.equal(classifyPaths(['.github/workflows/release.yml']), 'infra-only');
+  // Release verification (#467's runner-label edit) and the nightly build run
+  // `npm test` themselves, so they stay full-matrix — issue #468 constraint #5.
+  assert.equal(classifyPaths(['.github/workflows/release.yml']), 'full-matrix');
+  assert.equal(classifyPaths(['.github/workflows/nightly.yml']), 'full-matrix');
 });
 
 test('classifies infra harness and unnamed github paths as full-matrix', () => {
   for (const harness of [
     '.github/workflows/ci.yml',
+    '.github/workflows/release.yml',
+    '.github/workflows/nightly.yml',
     '.github/workflows/automated-code-review.yml',
     '.github/workflows/recover-automated-review.yml',
     '.github/workflows/ci-benchmark.yml',
@@ -121,8 +123,9 @@ test('classifies valid JSON-lines input and tolerates one final newline', () => 
   assert.equal(classifyJsonLines('"README.md"\n'), 'docs-only');
   assert.equal(classifyJsonLines('"README.md"\n"docs/guide.md"\n'), 'docs-only');
   assert.equal(classifyJsonLines('"README.md"\n"package.json"\n'), 'full-matrix');
-  assert.equal(classifyJsonLines('".github/workflows/release.yml"\n'), 'infra-only');
-  assert.equal(classifyJsonLines('".github/workflows/release.yml"\n".github/scripts/ci-sweep-api.cjs"\n'), 'infra-only');
+  assert.equal(classifyJsonLines('".github/workflows/sweep-ci-failures.yml"\n'), 'infra-only');
+  assert.equal(classifyJsonLines('".github/workflows/sweep-ci-failures.yml"\n".github/scripts/ci-sweep-api.cjs"\n'), 'infra-only');
+  assert.equal(classifyJsonLines('".github/workflows/release.yml"\n'), 'full-matrix');
   assert.equal(classifyJsonLines('".github/workflows/release.yml"\n"README.md"\n'), 'full-matrix');
 });
 

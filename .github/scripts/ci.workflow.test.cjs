@@ -157,9 +157,13 @@ test('change-surface fails closed when the API or classifier fails', () => {
   assert.equal(mixed.result.status, 0, mixed.result.stderr);
   assert.equal(mixed.output, 'surface=full-matrix\n');
 
-  const infraOnly = runClassification({ apiOutput: '".github/workflows/release.yml"' });
+  const infraOnly = runClassification({ apiOutput: '".github/workflows/sweep-ci-failures.yml"' });
   assert.equal(infraOnly.result.status, 0, infraOnly.result.stderr);
   assert.equal(infraOnly.output, 'surface=infra-only\n');
+
+  const releaseRunnerEdit = runClassification({ apiOutput: '".github/workflows/release.yml"' });
+  assert.equal(releaseRunnerEdit.result.status, 0, releaseRunnerEdit.result.stderr);
+  assert.equal(releaseRunnerEdit.output, 'surface=full-matrix\n', 'release.yml runs npm test and stays full-matrix');
 
   const infraMixed = runClassification({ apiOutput: ['".github/workflows/release.yml"', '"packages/cezar/src/index.ts"'] });
   assert.equal(infraMixed.result.status, 0, infraMixed.result.stderr);

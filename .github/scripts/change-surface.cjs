@@ -15,13 +15,15 @@ const docsAllowlisted = [
 // Exact-file allowlist on purpose: a new or renamed file fails closed to
 // full-matrix until deliberately listed here, and harness files — ci.yml,
 // automated-code-review.yml, recover-automated-review.yml, ci-benchmark.yml,
+// release.yml and nightly.yml (both run `npm test` themselves — #565 review),
 // change-surface.cjs, require-e2e-passed.cjs, ci-test-sequencer.mjs,
 // automated-review.cjs, release-bump-pr.cjs, the *.workflow.test.cjs pins —
-// must never appear (issue constraint #5: a PR that widens skips runs the
-// suites it affects). Engine-script tests stay covered: they run under
-// `npm run test:unit` inside the unconditional build-and-package job.
+// must never appear (issue constraint #5: a PR that widens skips or alters a
+// harness that executes product suites runs the suites it affects).
+// Engine-script tests stay covered: they run under `npm run test:unit` inside
+// the unconditional build-and-package job.
 const infraAllowlisted = [
-  /^\.github\/workflows\/(?:release|nightly|report-workflow-failure|sweep-ci-failures|upstream-scan|npm-preview-cleanup|publish-pr-snapshot|issue-intake)\.yml$/,
+  /^\.github\/workflows\/(?:report-workflow-failure|sweep-ci-failures|upstream-scan|npm-preview-cleanup|publish-pr-snapshot|issue-intake)\.yml$/,
   /^\.github\/scripts\/(?:ci-sweep-api|ci-sweep-collect|ci-sweep-patterns|ci-sweep-report|apply-issue-intake)(?:\.test)?\.cjs$/,
 ];
 
