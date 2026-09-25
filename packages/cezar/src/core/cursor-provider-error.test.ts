@@ -84,6 +84,33 @@ describe('classifyCursorProviderError', () => {
       .toBe('RetriableError: [invalid_argument] protocol error: missing EndStreamResponse');
   });
 
+  it('classes the recorded SSL record-layer envelope as transient', () => {
+    const envelope = readFileSync(new URL('./__fixtures__/cursor/ssl-record-layer-error.txt', import.meta.url), 'utf8');
+    expect(classifyCursorProviderError(envelope, now)).toEqual({ kind: 'transient' });
+    expect(sanitizeCursorProviderError(envelope))
+      .toBe('RetriableError: [internal] C0AC9346CC7B0000:error:0A000119:SSL routines:tls_get_more_records:decryption failed or bad record mac:../deps/openssl/openssl/ssl/record/methods/tls_common.c:869:');
+  });
+
+  it.each([
+    '[internal] C0AC9346CC7B0000:error:0A000119:SSL routines:tls_get_more_records:decryption failed or bad record mac:../deps/openssl/openssl/ssl/record/methods/tls_common.c:869:',
+    '[internal] tls_get_more_records failed',
+    '[internal] decryption failed or bad record mac',
+  ])('classes bare SSL/TLS OpenSSL record-layer prose as transient without RetriableError: %s', detail => {
+    expect(classifyCursorProviderError(`\n\nError: ${detail}`, now)).toEqual({ kind: 'transient' });
+  });
+
+  it.each([
+    '[internal] SSL routines:tls_process_server_certificate:certificate verify failed',
+    '[internal] SSL routines:tls_read:fatal',
+  ])('keeps permanent TLS setup errors fatal even when they mention SSL routines: %s', detail => {
+    expect(classifyCursorProviderError(`\n\nError: ${detail}`, now)).toEqual({ kind: 'fatal' });
+  });
+
+  it('keeps a bare [internal] Cursor code fatal when it is not an SSL/TLS record-layer failure', () => {
+    expect(classifyCursorProviderError('\n\nError: [internal] C0AC9346CC7B0000:error:0A000001:unknown provider fault', now))
+      .toEqual({ kind: 'fatal' });
+  });
+
   it.each([
     '[invalid_argument] protocol error: missing EndStreamResponse',
     '[invalid_argument] protocol error: unknown frame',
@@ -94,6 +121,11 @@ describe('classifyCursorProviderError', () => {
 
   it('keeps authentication failures fatal even when marked RetriableError', () => {
     expect(classifyCursorProviderError('\n\nError: RetriableError: [unauthenticated] request rejected', now))
+      .toEqual({ kind: 'auth' });
+  });
+
+  it('keeps authentication failures fatal even when the envelope also has SSL record-layer prose', () => {
+    expect(classifyCursorProviderError('\n\nError: [unauthenticated] SSL routines:tls_get_more_records', now))
       .toEqual({ kind: 'auth' });
   });
 

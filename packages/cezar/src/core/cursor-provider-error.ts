@@ -27,12 +27,14 @@ const CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
  * prose like "context length exceeded" or "model not found" matches none of these.
  * Cursor's explicit RetriableError includes stream-protocol failures (#508);
  * the word boundary keeps NonRetriableError and unknown protocol errors fatal.
+ * SSL/TLS OpenSSL record-layer prose is transient even without that token (#528);
+ * a bare `[internal]` code is not, and neither is a generic `SSL routines` hit — that
+ * phrase also wraps permanent TLS setup errors such as certificate verify failed.
  * `[resource_exhausted]` is the capacity class (#531) and must stay transient
- * even when Cursor omits the RetriableError wrapper. Do not treat every
- * Cursor `[internal]` code as transient.
+ * even when Cursor omits the RetriableError wrapper.
  */
 const TRANSIENT_SIGNAL_RE =
-  /\b(?:429|500|502|503|504|rate[ _-]?limit(?:ed)?|overloaded|temporar(?:y|ily)|timed?[ _-]?out|bad gateway|service unavailable|internal server error|connection (?:reset|refused|closed|error)|econn(?:reset|refused|aborted)|socket hang up|try again|retry|RetriableError|resource_exhausted)\b/i;
+  /\b(?:429|500|502|503|504|rate[ _-]?limit(?:ed)?|overloaded|temporar(?:y|ily)|timed?[ _-]?out|bad gateway|service unavailable|internal server error|connection (?:reset|refused|closed|error)|econn(?:reset|refused|aborted)|socket hang up|try again|retry|RetriableError|tls_get_more_records|decryption failed or bad record mac|resource_exhausted)\b/i;
 
 /**
  * Strip the envelope prefix, control characters and runs of whitespace. Uncapped — this is the

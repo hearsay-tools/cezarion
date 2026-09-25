@@ -47,6 +47,9 @@ async function prompt(id, content) {
   // bare 'mock:provider-error' prefix, which every one of them contains.
   // #508: observed Cursor 2026.09.18-9a7762b error envelope, followed by end_turn.
   if (input.includes('mock:provider-error-protocol') && (input.includes('-exhaust') || prompts === 1)) { text('\n\nError: RetriableError: [invalid_argument] protocol error: missing EndStreamResponse'); complete(id); return; }
+  // #528: observed Cursor SSL record-layer envelope (run 4bcd5420 seq 2667). Matched
+  // before the bare mock:provider-error prefix, same pattern as protocol.
+  if (input.includes('mock:provider-error-ssl') && (input.includes('-exhaust') || prompts === 1)) { text('\n\nError: RetriableError: [internal] C0AC9346CC7B0000:error:0A000119:SSL routines:tls_get_more_records:decryption failed or bad record mac:../deps/openssl/openssl/ssl/record/methods/tls_common.c:869:'); complete(id); return; }
   // #531: observed run 2f891027 seq 2005 capacity envelope. Match before the bare prefix.
   // Do not reuse the protocol mock's `includes('-exhaust')` check: that token is a
   // substring of `resource-exhausted` and would never recover.
