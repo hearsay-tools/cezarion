@@ -5880,7 +5880,6 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
   const bootProjectId = deps.bootProjectId ?? 'default';
   const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
   const taskWebhooks = deps.taskWebhooks ?? new TaskWebhooks({ fetch: deps.taskWebhookFetch });
-  taskWebhooks.setOrigin(`http://${taskWebhookHost(deps.bindHost)}:${port}`);
   const sharedContexts = deps.contexts ?? new ProjectContexts({
     listProjects,
     semaphore: deps.semaphore,
@@ -6029,6 +6028,16 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       if ('closeAllConnections' in server) server.closeAllConnections();
     });
   };
+  // The task webhook's thread links name the port the listener BOUND (#594 review): `--port 0`
+  // asks for an ephemeral one, so the requested number is not an address. Deliveries queue
+  // behind this, so none goes out before it is set.
+  const setTaskWebhookOrigin = () => {
+    const address = server.address();
+    const bound = address && typeof address === 'object' ? address.port : port;
+    taskWebhooks.setOrigin(`http://${taskWebhookHost(deps.bindHost)}:${bound}`);
+  };
+  if (server.listening) setTaskWebhookOrigin();
+  else server.once('listening', setTaskWebhookOrigin);
   return Object.assign(server, { shutdownForRestart });
 }
 

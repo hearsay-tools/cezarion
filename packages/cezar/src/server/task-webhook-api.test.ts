@@ -9,7 +9,10 @@ import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/con
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { workspaceConfigPath } from '../paths.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
-import { createApp, type ServerDeps } from './server.ts';
+import { createApp, startServer, type ServerDeps } from './server.ts';
+import { TaskWebhooks } from '../runs/webhook.ts';
+import { once } from 'node:events';
+import type { AddressInfo } from 'node:net';
 
 /**
  * The task webhook's HTTP surface (#589): the registry field and its write-only token, the
@@ -217,6 +220,28 @@ describe('task webhook API', () => {
         });
       } finally {
         rmSync(other, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('startServer origin (#594 review)', () => {
+    it('links threads to the port the listener actually bound, not the requested 0', async () => {
+      delete process.env.CEZ_DRY_RUN;
+      // Straight into the registry: `setWebhook` builds a second app, whose own subscriber would
+      // also attach to this store and deliver with that app's empty origin.
+      await mergeWriteWorkspaceConfig((config) => {
+        config.projects.find((p) => p.id === projectId)!.webhook = { url: 'https://bot.example/hook', token: 't' };
+      });
+      const taskWebhooks = new TaskWebhooks({ fetch: fakeFetch });
+      const server = startServer({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bootProjectId: projectId, taskWebhooks }, 0);
+      try {
+        if (!server.listening) await once(server, 'listening');
+        const port = (server.address() as AddressInfo).port;
+        const run = store.createRun({ title: 't', workflow: 'quick-task', task: 't', notify: true, steps: [] });
+        await taskWebhooks.get(store)!.idle();
+        expect(posted[0]!.body.url).toBe(`http://127.0.0.1:${port}/p/${projectId}/tasks/${run.id}`);
+      } finally {
+        await new Promise((done) => server.close(done));
       }
     });
   });
