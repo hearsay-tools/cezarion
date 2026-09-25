@@ -13,14 +13,15 @@ const waitUntil = async (cond: () => boolean) => {
 };
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const start = (prompt: string, opts: SessionOptions = {}) => {
+const start = (prompt: string, opts: SessionOptions = {}, extraEnv: Record<string, string> = {}) => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-pi-steer-')); dirs.push(dir);
   const stdinLog = join(dir, 'stdin.ndjson');
   const events: AgentEvent[] = [];
   const session = new PiRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-    { userPrompt: prompt, cwd: dir, env: { CEZ_MOCK_STDIN_FILE: stdinLog } }, event => events.push(event), opts);
-  const prompts = () => readFileSync(stdinLog, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { userText: string; streamingBehavior?: string });
-  return { session, events, prompts };
+    { userPrompt: prompt, cwd: dir, env: { CEZ_MOCK_STDIN_FILE: stdinLog, ...extraEnv } }, event => events.push(event), opts);
+  const stdin = () => readFileSync(stdinLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+  const prompts = () => stdin().filter(row => typeof row.userText === 'string') as Array<{ userText: string; streamingBehavior?: string }>;
+  return { session, events, prompts, stdin };
 };
 
 describe('pi agent input steering (#505)', () => {
@@ -119,5 +120,20 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     // Read by the second turn, never credited to the opening turn's settle.
     expect(order.indexOf('read:late')).toBeGreaterThan(order.indexOf('turn-end'));
     session.end(); await session.result.catch(() => undefined);
+  });
+
+  it('sends set_steering_mode all at session start so a burst shares the next step (#551)', async () => {
+    const consumed: string[][] = [];
+    const { session, events, stdin } = start('mock:steer-tool', { onAgentInputConsumed: ids => consumed.push([...ids]) }, { CEZ_MOCK_STEER_MS: '2000' });
+    await waitUntil(() => events.some(e => e.type === 'tool-call'));
+    await session.sendAgentMessage([{ type: 'text', text: 'burst-one' }], ['b1']);
+    await session.sendAgentMessage([{ type: 'text', text: 'burst-two' }], ['b2']);
+    await session.sendAgentMessage([{ type: 'text', text: 'burst-three' }], ['b3']);
+    await session.sendAgentMessage([{ type: 'text', text: 'burst-four' }], ['b4']);
+    await waitUntil(() => events.some(e => e.type === 'turn-end'));
+    expect(stdin().find(row => row.type === 'set_steering_mode')).toEqual({ type: 'set_steering_mode', mode: 'all' });
+    expect(consumed.flat()).toEqual(['b1', 'b2', 'b3', 'b4']);
+    expect(events.filter(e => e.type === 'turn-end')).toHaveLength(1);
+    session.end(); await session.result;
   });
 });

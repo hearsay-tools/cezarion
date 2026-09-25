@@ -65,7 +65,7 @@ export class PiRunner implements AgentRunner {
   readonly specSupport = PI_SPEC_SUPPORT;
   readonly inputDelivery: InputDelivery = {
     mode: 'steer', consumption: 'observable',
-    via: 'prompt with streamingBehavior steer; user message_start with the submitted text',
+    via: 'prompt with streamingBehavior steer; set_steering_mode all at session start; user message_start with the submitted text',
   };
   private readonly bin: string;
   private readonly timeoutMs: number;
@@ -264,6 +264,11 @@ export class PiRunner implements AgentRunner {
     };
 
     write({ id: 'cezar-state', type: 'get_state' });
+    // #551: Pi defaults steeringMode to one-at-a-time (one steer per completed
+    // assistant turn). This session is cezar's, and sendAgentMessage requires every
+    // accepted steer at the next model call. get_state cannot tell that default
+    // from an explicit user setting, so we always set all rather than guess.
+    write({ type: 'set_steering_mode', mode: 'all' });
     sendMessage([
       ...(spec.images ?? []),
       {
@@ -322,6 +327,10 @@ export class PiRunner implements AgentRunner {
             if (discovered && discovered !== sessionId) {
               sessionId = discovered;
               onEvent?.({ type: 'session', sessionId: discovered });
+            }
+          } else if (value.type === 'response' && value.command === 'set_steering_mode') {
+            if (value.success !== true) {
+              onEvent?.({ type: 'note', message: `pi: set_steering_mode failed: ${rpcError(value)}` });
             }
           } else if (value.type === 'response' && value.command === 'prompt') {
             const pending = agentAck;
