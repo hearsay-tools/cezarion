@@ -561,6 +561,13 @@ describe('owned resources bypass generic cleanup', () => {
     expect(existsSync(workspace.path)).toBe(false);
     expect(git(root, 'branch', '--list', workspace.branch)).not.toBe('');
   });
+  it('does not recursively delete a substituted owned path on directory reclaim (#575)', async () => {
+    const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    git(root, 'worktree', 'remove', '--force', workspace.path);
+    await mkdir(workspace.path); await writeFile(join(workspace.path, 'unrelated'), 'keep');
+    await removeWorktree(root, workspace.path, undefined, { reclaimOwnedDirectory: true });
+    expect(await readFile(join(workspace.path, 'unrelated'), 'utf8')).toBe('keep');
+  });
   it('preserves receipt-owned substituted paths from generic recursive removal', async () => {
     const { root, first } = await fixture(); const workspace = await createOwnedWorkspace(root, randomUUID(), first);
     git(root, 'worktree', 'remove', '--force', workspace.path);

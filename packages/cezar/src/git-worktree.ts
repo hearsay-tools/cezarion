@@ -328,7 +328,20 @@ export async function removeWorktree(
   if (protection.uncertain) return;
   if (protection.paths.has(worktreePath) && !reclaimOwnedDirectory) return;
   if (branch !== undefined && protection.branches.has(branch)) return;
-  await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
+  if (reclaimOwnedDirectory && protection.paths.has(worktreePath)) {
+    const listed = await git(repoRoot, ['worktree', 'list', '--porcelain', '-z']);
+    if (!listed.ok) return;
+    const registered = listed.stdout.split('
+').join('
+').split(' ').some(
+      (entry) => entry.startsWith('worktree ') && canonicalPath(entry.slice(9)) === canonicalPath(worktreePath),
+    );
+    if (!registered) return;
+  }
+  const removed = await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
+  // Owned-path reclaim must not `rm` a receipt path that is no longer a git
+  // worktree — the directory may have been replaced with unrelated files.
+  if (reclaimOwnedDirectory && protection.paths.has(worktreePath) && !removed.ok) return;
   await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
   if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
   if (branch) await git(repoRoot, ['branch', '-D', branch]);
