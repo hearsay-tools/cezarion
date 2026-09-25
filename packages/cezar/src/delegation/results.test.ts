@@ -56,9 +56,12 @@ describe('parent-owned collected worker results', () => {
     expect((await f.service.collect(f.caller, { workerId: run.id })).diff.state).toBe('available');
 
     await removeWorktree(f.root, path, undefined, { reclaimOwnedDirectory: true });
-    f.store.updateRun(run.id, { worktreeReclaimedAt: '2026-07-18T00:00:00.000Z' });
     expect(existsSync(path)).toBe(false);
+    // In-flight collect may not see worktreeReclaimedAt yet; dir gone is enough.
+    const racing = await f.service.collect(f.caller, { workerId: run.id });
+    expect(racing.diff.state).toBe('available');
 
+    f.store.updateRun(run.id, { worktreeReclaimedAt: '2026-07-18T00:00:00.000Z' });
     const result = await f.service.collect(f.caller, { workerId: run.id });
     expect(result.diff.state).toBe('available');
     expect(result.summary).toMatchObject({ state: 'available', text: 'Older worker done' });
