@@ -68,6 +68,8 @@ import {
   patchRun,
   pinProjectRun,
   pinRun,
+  notifyRun,
+  testProjectWebhook,
   removeQueuedMessage,
   registerProject,
   openAgentAccountFile,
@@ -106,6 +108,7 @@ import type {
   SetAgentConfigInput,
   UpdateAgentProfileInput,
   UpdateProjectInput,
+  NotifyRunInput,
 } from '@open-mercato/cezar-api-client'
 import { subscribeTopic } from './ws'
 
@@ -534,7 +537,34 @@ function applyProjectPatch(
   const tags = 'tags' in patch && patch.tags !== undefined ? patch.tags : project.tags
   const normalized = tags === null || tags === undefined ? [] : normalizeTagsForDisplay(tags)
   if (normalized.length > 0) next.tags = normalized
+  // The token is write-only (#589): an omitted one keeps whatever was set, `''` clears it.
+  if ('webhook' in patch && patch.webhook !== undefined) {
+    if (patch.webhook === null) delete next.webhook
+    else {
+      const tokenSet = patch.webhook.token === undefined ? project.webhook?.tokenSet ?? false : patch.webhook.token !== ''
+      next.webhook = { url: patch.webhook.url, tokenSet }
+    }
+  }
   return next
+}
+
+/** "Send test" (#589) — the answer is the result; nothing cached changes. */
+export function useTestProjectWebhook() {
+  return useMutation({ mutationFn: (projectId: string) => testProjectWebhook(projectId), retry: false })
+}
+
+/**
+ * Hand a task to the project webhook, send it another note, or stop notifying it (#589). The
+ * record comes back with `notify` flipped and also rides the `run` SSE; the invalidation covers
+ * a tab whose stream is between reconnects.
+ */
+export function useNotifyRun(id: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: NotifyRunInput) => notifyRun(id, input),
+    retry: false,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+  })
 }
 
 /**

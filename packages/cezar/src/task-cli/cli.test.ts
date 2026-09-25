@@ -7,6 +7,8 @@ import type { RunManager } from '../workflows/run.ts';
 import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
 import { runTaskCommand, type TaskIo } from './cli.ts';
 import { TaskCliError, type Cockpit } from './http.ts';
+import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
+import { registerProject } from '../workspace/projects.ts';
 
 /** `cez task` against a real cockpit app on a real socket (#504). */
 describe('cez task', () => {
@@ -33,6 +35,14 @@ describe('cez task', () => {
     open: () => {},
   });
   const run = (argv: string[], stdin?: string) => runTaskCommand(argv, {}, io(stdin));
+  /** Register the harness repo with a task webhook (#589); CEZ_HOME is a per-worker sandbox. */
+  const withWebhook = async () => {
+    const entry = await registerProject(harness.repoRoot);
+    await mergeWriteWorkspaceConfig((config) => {
+      const found = config.projects.find((p) => p.id === entry.id)!;
+      found.webhook = { url: 'https://bot.example/hook', token: 't' };
+    });
+  };
   const last = () => JSON.parse(out.at(-1) ?? 'null') as Record<string, unknown>;
   const start = async (task = 'do the thing') => {
     expect(await run(['start', task])).toBe(0);
@@ -211,6 +221,32 @@ describe('cez task', () => {
       expect(last()).toMatchObject({ code: 'invalid_input' });
     });
 
+    it('does not opt in on a project without a webhook, and prints notify:false (#589)', async () => {
+      const id = await start();
+      expect(last().notify).toBe(false);
+      expect(store.getRun(id)?.notify).toBeUndefined();
+    });
+
+    it('refuses an explicit --notify on a project without a webhook with the hint, exit 2', async () => {
+      expect(await run(['start', 'do it', '--notify'])).toBe(2);
+      expect(String(last().error)).toContain('no task webhook');
+    });
+
+    it('opts in by default when discovery saw a webhook, and --no-notify opts out', async () => {
+      await withWebhook();
+      const hooked: TaskIo = { ...io(), discover: async () => ({ ...cockpit, hasWebhook: true }) };
+      expect(await runTaskCommand(['start', 'do it'], {}, hooked)).toBe(0);
+      expect(last().notify).toBe(true);
+      expect(store.getRun(last().id as string)?.notify).toBe(true);
+      expect(await runTaskCommand(['start', 'do it', '--no-notify'], {}, hooked)).toBe(0);
+      expect(last().notify).toBe(false);
+    });
+
+    it('rejects --notify with --no-notify before discovering a cockpit', async () => {
+      expect(await run(['start', 'do it', '--notify', '--no-notify'])).toBe(64);
+      expect(discoveries).toBe(0);
+    });
+
     it('forwards --no-worktree and --autonomous', async () => {
       expect(await run(['start', '--no-worktree', '--autonomous', 'x'])).toBe(0);
       const record = store.getRun(last().id as string);
@@ -309,6 +345,32 @@ describe('cez task', () => {
   });
 
   describe('stop, finish, diff, open', () => {
+    it('notify hands a task to the webhook with a note, and --off stops it (#589)', async () => {
+      await withWebhook();
+      const id = await start();
+      expect(await run(['notify', id, '--message', 'take over'])).toBe(0);
+      expect(last()).toEqual({ id, notify: true, message: true });
+      expect(store.readEvents(id).find((event) => event.type === 'handoff')).toMatchObject({ notify: true, message: 'take over' });
+      expect(await run(['notify', id, '--off'])).toBe(0);
+      expect(last()).toEqual({ id, notify: false });
+    });
+
+    it('notify reads the note from stdin, and refuses --off with a note', async () => {
+      await withWebhook();
+      const id = await start();
+      expect(await run(['notify', id, '--message-file', '-'], 'from stdin')).toBe(0);
+      expect(store.readEvents(id).find((event) => event.type === 'handoff')).toMatchObject({ message: 'from stdin' });
+      expect(await run(['notify', id, '--off', '--message', 'x'])).toBe(64);
+    });
+
+    it('send --notify turns the webhook on before delivering', async () => {
+      await withWebhook();
+      const id = await start();
+      expect(await run(['send', id, 'more', '--notify'])).toBe(0);
+      expect(last()).toMatchObject({ id, notify: true });
+      expect(store.getRun(id)?.notify).toBe(true);
+    });
+
     it('stops a run', async () => {
       const id = await start();
       expect(await run(['stop', id])).toBe(0);
@@ -346,6 +408,19 @@ describe('cez task', () => {
       expect(out.at(-1)).toContain('--request-id');
       expect(out.at(-1)).toMatch(/--workflow[^\n]*\n  --skill /);
       expect(discoveries).toBe(0);
+    });
+
+    it('describes the webhook flags and the notify operation (#589)', async () => {
+      expect(await run(['--help'])).toBe(0);
+      const all = out.at(-1)!;
+      expect(all).toContain('cez task notify <id>');
+      expect(all).toContain('--notify');
+      expect(all).toContain('--no-notify');
+      expect(all).toContain('--off');
+      expect(await run(['start', '--help'])).toBe(0);
+      expect(out.at(-1)).toMatch(/--notify .*webhook/);
+      expect(out.at(-1)).toMatch(/--no-notify .*webhook/);
+      expect(out.at(-1)).toContain('notify:');
     });
 
     it.each([[['frobnicate']], [['start', '--bogus', 'x']], [['status']], [[]]])(

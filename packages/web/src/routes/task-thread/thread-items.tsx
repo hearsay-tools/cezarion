@@ -1,4 +1,4 @@
-import { BrainIcon, FileTextIcon, FolderInputIcon, GlobeIcon, LoaderCircleIcon, MessageSquareIcon, SquarePenIcon, SquareTerminalIcon } from 'lucide-react'
+import { BrainIcon, FileTextIcon, FolderInputIcon, GlobeIcon, LoaderCircleIcon, MessageSquareIcon, SendIcon, SquarePenIcon, SquareTerminalIcon } from 'lucide-react'
 import { BotIcon, ChevronRightIcon, ListTodoIcon, PaperclipIcon, SearchIcon, Trash2Icon, WrenchIcon } from '@/components/design-icons'
 import { useContext, useEffect, useId, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
 
@@ -506,6 +506,16 @@ function uniqueIds(ids: readonly string[]): string[] {
 
 /** A dim (lifecycle/note) or danger (error) transcript line. */
 export function NoteLine({ note }: { note: ThreadNote }) {
+  if (note.icon === 'handoff') {
+    return (
+      <div data-slot="note-line" data-tone={note.tone} data-icon="handoff" className="flex items-start gap-2 px-0.5 text-xs text-muted-foreground">
+        <span aria-hidden="true" className="mt-[-1px] flex size-5 shrink-0 items-center justify-center rounded-full border border-border text-success">
+          <SendIcon className="size-3" />
+        </span>
+        <span className="min-w-0 break-words">{note.text}</span>
+      </div>
+    )
+  }
   return (
     <div
       data-slot="note-line"

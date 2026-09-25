@@ -9,6 +9,7 @@ import { ProjectFolderField } from './project-location'
 import { MaxParallelSelect, STATUS_LABEL } from './projects-section'
 import { RemoveProjectDialog, useProjectRemoval } from './remove-project'
 import { SettingsField } from './settings-field'
+import { TaskWebhookField } from './task-webhook'
 
 /**
  * Project settings → General: what THIS project is, and the few knobs that belong to the project
@@ -103,7 +104,7 @@ export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilit
               <p className="text-[13px] text-soft-foreground">Loading the workspace limit…</p>
             )}
           </SettingsField>
-
+          <TaskWebhookField key={project.id} project={project} />
         </>
       ) : null}
       </section>

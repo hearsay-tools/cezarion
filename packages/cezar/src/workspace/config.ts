@@ -6,7 +6,12 @@ import { z } from 'zod';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the tag bounds this
 // file must not `.catch` away are the same constants the PATCH route validates against, so they
 // are imported rather than repeated.
-import { PROJECT_TAGS_MAX, PROJECT_TAG_MAX_LENGTH } from '@open-mercato/cezar-contract';
+import {
+  PROJECT_TAGS_MAX,
+  PROJECT_TAG_MAX_LENGTH,
+  PROJECT_WEBHOOK_TOKEN_MAX_LENGTH,
+  projectWebhookUrlSchema,
+} from '@open-mercato/cezar-contract';
 import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
 import { assertCezarHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.ts';
 
@@ -60,6 +65,18 @@ const workspaceProjectSchema = z
     tags: z
       .array(z.string().trim().min(1).max(PROJECT_TAG_MAX_LENGTH))
       .max(PROJECT_TAGS_MAX)
+      .optional()
+      .catch(undefined),
+    /** The task webhook (#589): where this project's opted-in runs POST their status changes,
+     *  and the Bearer token they send. The token lives here, in the per-user 0600 registry, and
+     *  never in the repo's own `.ai/cezar/config.json`, which some teams commit. It never leaves
+     *  the server either: `redactProjectEntry` (projects.ts) swaps it for `tokenSet`. */
+    webhook: z
+      .object({
+        url: projectWebhookUrlSchema,
+        token: z.string().max(PROJECT_WEBHOOK_TOKEN_MAX_LENGTH).optional().catch(undefined),
+      })
+      .passthrough()
       .optional()
       .catch(undefined),
   })

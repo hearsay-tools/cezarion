@@ -19,6 +19,7 @@ import { DEFAULT_WORKTREE_RETENTION, loadConfig, resolveWorktreeRetention } from
 import { reclaimWorktrees } from './runs/retention.ts';
 import { armRepoHandle } from './runs/arm-repo-handle.ts';
 import { RunStore } from './runs/store.ts';
+import { TaskWebhooks } from './runs/webhook.ts';
 import { RunManager } from './workflows/run.ts';
 import { loadWorkflows } from './workflows/load.ts';
 import { startServer, WorkspaceEventBus } from './server/server.ts';
@@ -243,6 +244,10 @@ async function serveCommand(
   // keepLive + recover() (#367): runs that were queued/running/waiting when
   // the previous process exited are re-queued or resumed instead of failed.
   const store = openStore(repoRoot, { keepLive: true });
+  // Before recovery (#589): the runs recovery re-queues, resumes or fails are exactly the
+  // transitions an opted-in bot is waiting for. Deliveries wait until startServer knows its port.
+  const taskWebhooks = new TaskWebhooks();
+  taskWebhooks.attach({ id: bootProjectId ?? 'default', root: repoRoot, store });
   const manager = new RunManager(store, repoRoot, { semaphore });
   const delegation = await DelegationController.start();
   delegation.attachProject({ id: bootProjectId ?? 'default', root: repoRoot, store, manager });
@@ -335,6 +340,7 @@ async function serveCommand(
     providerAuth,
     providerRuntimeAuth,
     workspaceEvents,
+    taskWebhooks,
   }, port);
   if (!server.listening) await once(server, 'listening');
   const address = server.address();

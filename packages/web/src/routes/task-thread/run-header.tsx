@@ -68,6 +68,7 @@ import { usageMetricVisibility } from '@/lib/token-metrics'
 import { cn, isHttpUrl } from '@/lib/utils'
 
 import { ArchiveButton } from './archive-action'
+import { HandoffAction } from './handoff-action'
 import { Markdown } from './markdown'
 import { TaskFileScope } from './task-file-scope'
 import { cliTargetResumes, cliTargetRunner, lastSessionBackend, resumeHint, runActionFlags } from './run-actions'
@@ -189,6 +190,7 @@ export function RunHeader({
                 design. The three git tabs have no composer, so the header carries it there, and
                 exactly one surface offers it on any given screen. */}
             {tab !== 'session' && flags.archive ? <ArchiveButton run={run} /> : null}
+            <HandoffAction run={run} />
             <ActionsKebab
               run={run}
               actions={actions}

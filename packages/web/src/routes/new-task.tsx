@@ -60,6 +60,7 @@ import {
   skillKeywords,
 } from '@/lib/skills'
 import { submitShortcutHint } from '@/lib/use-submit-shortcut'
+import { webhookLabel } from '@/lib/webhook'
 import { cn } from '@/lib/utils'
 import { usableRunners } from '@/lib/provider-status'
 
@@ -80,6 +81,7 @@ import {
 } from './new-task-draft'
 import {
   buildCreateRunBody,
+  withNotify,
   effortOptionsForModel,
   modelsForRunner,
   modelCatalogStatus,
@@ -192,6 +194,13 @@ export function NewTaskRoute() {
   // The registry the project pill offers. Empty while it loads or when it errors — the pill
   // simply does not render, which is the honest state: there is no second project to offer.
   const projectList = projects.data?.projects ?? []
+  // Task webhook (#589): the toggle exists only where there is somewhere to notify. Off by default
+  // and not remembered — a hand-off is a per-task decision, and the thread's "Hand off" covers
+  // turning it on later.
+  const webhookProject = projectList.find((entry) => entry.id === (urlProjectId ?? projects.data?.bootProject))
+  const webhookUrl = webhookProject?.webhook?.url
+  const [notifyChoice, setNotifyChoice] = useState(false)
+  const notifyOn = webhookUrl !== undefined && notifyChoice
   const sourcesReady =
     skills.data !== undefined && workflows.data !== undefined && !uiState.isPending
   // The draft's pick alone — a fresh `/new` selects nothing (see `resolveSource` for what the
@@ -463,7 +472,7 @@ export function NewTaskRoute() {
       }
       return
     }
-    const created = await createRun(
+    const created = await createRun(withNotify(
       buildCreateRunBody({
         task: text,
         source,
@@ -486,7 +495,8 @@ export function NewTaskRoute() {
         // generation for THIS task must not stop the entry it came from being marked started.
         todoId: deepLink.todo,
       }),
-    )
+      notifyOn,
+    ))
     // Remember what was actually run so the next visit preselects it (legacy
     // `saveLastTaskSource`) and float it to the top of the picker next time
     // (recency sort) — fire-and-forget: a failed write only costs the convenience.
@@ -521,7 +531,7 @@ export function NewTaskRoute() {
     const submittedRevision = draftRevision(draftProjectId)
     setStarting(true)
     try {
-      const created = await createRun(
+      const created = await createRun(withNotify(
         buildPlannedRunBody({
           task: plan.task,
           steps: plan.steps,
@@ -536,7 +546,8 @@ export function NewTaskRoute() {
           generateFollowups: generateFollowupsOn,
           todoId: deepLink.todo, // #374: planning first must not lose the inbox entry
         }),
-      )
+        notifyOn,
+      ))
       // Run-mode choices live in the current draft; stable defaults come from workspace policy.
       // persisting the forced `false` would overwrite their real preference, so turning
       // CEZ_FOLLOWUPS back on later would silently come up off.
@@ -781,6 +792,9 @@ export function NewTaskRoute() {
                     disabled={draft.planFirst}
                     onChange={(on) => update({ autonomous: on })}
                   />
+                  {webhookUrl !== undefined ? (
+                    <NotifyWebhookToggle on={notifyOn} url={webhookUrl} onChange={setNotifyChoice} />
+                  ) : null}
                   {selectedSkill?.interactive && (draft.autonomous === null || draft.worktree === null) ? (
                     <p className="basis-full text-xs text-muted-foreground" data-slot="interactive-skill-hint">
                       This skill recommends an interactive run in the current checkout. You can change either setting.
@@ -922,6 +936,34 @@ function AutonomousToggle({
       className="flex items-center justify-between gap-3 px-0 py-3 text-left disabled:opacity-50"
     >
       <span><span className="block text-[13px] font-medium">Autonomous</span><span className="block text-[12px] text-muted-foreground">Let the agent proceed without prompts</span></span>
+      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
+    </button>
+  )
+}
+
+/** Notify webhook toggle (#589): checked = the project's task webhook receives this task's
+ *  status changes from the start. Rendered only when the project has a webhook. */
+function NotifyWebhookToggle({
+  on,
+  url,
+  onChange,
+}: {
+  on: boolean
+  url: string
+  onChange: (on: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={on}
+      aria-label="Notify webhook"
+      data-slot="notify-webhook-toggle"
+      onClick={() => onChange(!on)}
+      title={on ? `Status changes go to ${webhookLabel(url)}` : `Check to send this task's status changes to ${webhookLabel(url)}`}
+      className="flex min-h-11 items-center justify-between gap-3 px-0 py-3 text-left"
+    >
+      <span className="min-w-0"><span className="block text-[13px] font-medium">Notify webhook</span><span className="block truncate text-[12px] text-muted-foreground">Send status changes to {webhookLabel(url)}</span></span>
       <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
     </button>
   )

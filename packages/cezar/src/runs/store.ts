@@ -201,6 +201,10 @@ export const runRecordSchema = z.object({
    *  group-pick winner-park read it). Additive-safe: absent = falsy = not
    *  autonomous. Set at creation from `WorkflowInput.autonomous`. */
   autonomous: z.boolean().optional(),
+  /** Task webhook opt-in (#589). Absent = off; `POST /runs/:id/notify` flips it at any time. */
+  notify: z.boolean().optional().catch(undefined),
+  /** The last task-webhook delivery's outcome (#589), written by `runs/webhook.ts`. */
+  webhook: contractRunRecordSchema.shape.webhook.catch(undefined),
   /** Optional provenance for tasks launched by a project GitHub automation. */
   automation: z
     .object({
@@ -866,6 +870,8 @@ export class RunStore extends EventEmitter {
     agentProfile?: string;
     generateFollowups?: boolean;
     autonomous?: boolean;
+    /** Task webhook opt-in (#589), set at creation so the first transition is already covered. */
+    notify?: boolean;
     worktree?: false;
     groupId?: string;
     variant?: string;
@@ -901,6 +907,7 @@ export class RunStore extends EventEmitter {
       agentProfile: input.agentProfile,
       generateFollowups: input.generateFollowups,
       autonomous: input.autonomous,
+      ...(input.notify ? { notify: true } : {}),
       worktree: input.worktree,
       groupId: input.groupId,
       variant: input.variant,
