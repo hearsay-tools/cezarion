@@ -1046,6 +1046,18 @@ describe('meta line, tabs, pill and resume hint', () => {
     expect(within(meta).getByRole('button', { name: /Agent:/ })).not.toBeNull()
   })
 
+  it('shows a backend-reported zero cost and omits an unreported cost', () => {
+    stubFetch()
+    renderHeader(run('done', { costUsd: 0 }))
+    let meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+    expect(meta.textContent).toContain('$0.00')
+
+    cleanup()
+    renderHeader(run('done', { costUsd: undefined }))
+    meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+    expect(meta.textContent).not.toContain('$0.00')
+  })
+
   it.each([
     {
       name: 'both',

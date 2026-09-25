@@ -34,10 +34,10 @@ export function formatMem(bytes: number | undefined): string {
   return `${Math.round(bytes / 1024)} kB`
 }
 
-/** `$0.31` / `$12` — two decimals until the cents stop mattering. Legacy `fmtCost`; '' when the
- *  run has no recorded spend, because `$0.00` reads as "measured: free" and it was not measured. */
+/** `$0.31` / `$12` — two decimals until the cents stop mattering. An absent
+ *  report stays blank; a backend-reported zero is a measured free turn. */
 export function formatCost(usd: number | undefined): string {
-  if (!usd) return ''
+  if (usd === undefined) return ''
   return `$${usd >= 10 ? usd.toFixed(0) : usd.toFixed(2)}`
 }
 
