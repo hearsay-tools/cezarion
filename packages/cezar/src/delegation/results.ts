@@ -47,8 +47,7 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
   } catch { if (!destroyed) diff = { state: 'unavailable', reason: 'unverified' }; }
   // A retained snapshot guarantees bytes after destroy or retention reclaim (#575).
   // Keep the `previous.diff.state === 'available'` check inline so TypeScript narrows the spread.
-  if (diffSnapshot === undefined && previous?.revision === workerRevision(run) && previous.diff.state === 'available'
-    && (destroyed || workspaceRemoved || !!run.worktreeReclaimedAt)) {
+  if (diffSnapshot === undefined && previous?.revision === workerRevision(run) && previous.diff.state === 'available') {
     const retained = store.readWorkerResultDiff(delegation.parentRunId, run.id);
     if (retained !== undefined) { diffSnapshot = retained; diff = { ...previous.diff, snapshotId: randomUUID() }; }
   }

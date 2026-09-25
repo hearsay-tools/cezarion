@@ -118,14 +118,16 @@ export interface ReclaimOptions {
   remove?: (repoRoot: string, worktreePath: string) => Promise<void>;
 }
 
-/** Snapshot parent-owned worker evidence before the checkout goes. Best-effort:
- *  a missing `commitWorkerResult` (test fakes) or a collect failure still reclaims. */
-async function preserveWorkerResult(repoRoot: string, store: RetentionStore, run: RunRecord): Promise<void> {
-  if (run.delegation?.role !== 'worker') return;
+/** Snapshot parent-owned worker evidence before the checkout goes.
+ *  Test fakes without `commitWorkerResult` skip this. A collect/commit failure
+ *  returns false so the directory is left for the next pass. */
+async function preserveWorkerResult(repoRoot: string, store: RetentionStore, run: RunRecord): Promise<boolean> {
+  if (run.delegation?.role !== 'worker') return true;
   const commit = (store as Partial<RunStore>).commitWorkerResult;
-  if (typeof commit !== 'function') return;
+  if (typeof commit !== 'function') return true;
   const evidence = await collectWorkerEvidence(repoRoot, store as RunStore, run);
   commit.call(store, run.delegation.parentRunId, evidence.result, evidence.diffSnapshot);
+  return evidence.diffSnapshot !== undefined || evidence.result.diff.state === 'available';
 }
 
 export async function reclaimWorktrees(
@@ -143,7 +145,7 @@ export async function reclaimWorktrees(
     const run = byId.get(id);
     if (!run?.worktreePath) continue;
     try {
-      await preserveWorkerResult(repoRoot, store, run).catch(() => undefined);
+      if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) continue;
       await remove(repoRoot, run.worktreePath);
       if (existsSync(run.worktreePath)) continue; // reclaim failed; retry next pass
       store.updateRun(id, { worktreeReclaimedAt: now() });
