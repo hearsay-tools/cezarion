@@ -17,6 +17,11 @@ scans:
     since: 0e9dfd76456e0abf44fd0037d4d1b52b43b9e8f7
     added: 12
     report: scans/2026-09-18.md
+  - date: 2026-09-25
+    upstreamHead: 6a919f82c41b15c7564c9208db383e2e608f0f10
+    since: 4763447f36b05e0c3934c77798335827f4398de4
+    added: 11
+    report: scans/2026-09-25.md
 entries:
   - sha: 3c8657688d48b7391d985560e1b0acda28e5ad9e
     pr: 943
@@ -451,3 +456,80 @@ entries:
       conflicts: 6
     decided: 2026-09-18
     reason: upstream release bump; the fork has its own version line (cezarion 0.11+)
+  - sha: 36dd4326206905b30a7d7270932da47040b8bf15
+    pr: 1063
+    title: "docs(readme): add Open Mercato Cloud banner for 24/7 cloud sandbox (#1063)"
+    date: 2026-09-23
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 9e726e71bd8c4a9963a8a9722a04a3a64757eadd
+    pr: 1061
+    title: "fix(claude): detect a native-installer claude that is off the process PATH (#1061)"
+    date: 2026-09-23
+    status: pending
+    hint:
+      conflicts: 5
+  - sha: 9510b51653ec4481f827705addcfe1c7e50c1a53
+    pr: 1030
+    title: "docs(specs): runner seam native backends — seam de-dup, codex providers, Gemini and Copilot over ACP (#1030)"
+    date: 2026-09-23
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 9df5a66c5f0c5fb82fbf2f1214a0c0dfb772c4e5
+    pr: 1025
+    title: "fix(runs): a save no longer drops the runs another process wrote (#1025)"
+    date: 2026-09-23
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 8d5c6e195207dbc97bdd861804b94f91d4eb3ca3
+    pr: 1033
+    title: "docs(specs): dispatch admission cap - an opt-in ceiling on dispatch children (#1033)"
+    date: 2026-09-23
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 3416647d3b33a3d78d55310b27549c64aa2acef9
+    pr: 1026
+    title: "docs(specs): browse Jira and Linear tasks alongside GitHub (#1026)"
+    date: 2026-09-24
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: f4b04ab4eaa6e0d00625b30228cab4d6ab1e3818
+    pr: 1056
+    title: "fix: dedupe review request automation bursts (#1056)"
+    date: 2026-09-24
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 585d28d3c894c4b53e4991a14df89023a41ee67c
+    pr: 1057
+    title: "fix(workspace): stop listing the launch folder as a project once the registry has one (#1057)"
+    date: 2026-09-24
+    status: pending
+    hint:
+      conflicts: 7
+  - sha: b1319ce6e75b35aab0a79f11ab182c29e8cae868
+    pr: 1064
+    title: "fix(claude): keep .cmd shims away from the spawn sites, and validate CEZ_CLAUDE_BIN for the handoff (#1064)"
+    date: 2026-09-24
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: e62c5bf89a00a7d47eb202925555f3390ecdc34a
+    pr: 1069
+    title: "feat(thread): live clock on the Working… indicator (#1069)"
+    date: 2026-09-24
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 6a919f82c41b15c7564c9208db383e2e608f0f10
+    pr: 1045
+    title: "feat(trackers): browse Jira and Linear issues and automate tracker events (#1045)"
+    date: 2026-09-25
+    status: pending
+    hint:
+      conflicts: 32
