@@ -3,10 +3,15 @@
 import { createInterface } from 'node:readline';
 import { closeSync } from 'node:fs';
 const emit = value => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...value })}\n`);
-createInterface({ input: process.stdin }).on('line', line => {
+const rl = createInterface({ input: process.stdin });
+rl.on('line', line => {
   let msg; try { msg = JSON.parse(line); } catch { return; }
   if (msg.method === 'initialize') {
     emit({ id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
+    // Drop readline's hold on stdin before closing fd 0. closeSync(0) while readline still
+    // owns the stream can throw EBADF and get swallowed, leaving the parent's write end
+    // writable so session/new buffers and the hang test waits out 15s (#587).
+    rl.close();
     try { closeSync(0); } catch { /* already closed */ }
   }
 });
