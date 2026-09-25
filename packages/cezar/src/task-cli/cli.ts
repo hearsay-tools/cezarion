@@ -11,6 +11,7 @@ import {
   runHistoryContextSchema,
   runRecordSchema,
   runStatusSchema,
+  skillSchema,
   type ApiRun,
 } from '@open-mercato/cezar-contract';
 import { openUrl } from '../open-url.ts';
@@ -66,6 +67,7 @@ export const OPERATIONS: Record<string, Operation> = {
       'task-file': { type: 'string', help: '<path|->     Read the task from a file, or stdin with -.' },
       'request-id': { type: 'string', help: '<UUID>     Retry-safe id; reuse it when retrying this start.' },
       workflow: { type: 'string', help: '<name>       Workflow (default quick-task).' },
+      skill: { type: 'string', help: '<name>          Run one discovered skill instead of a workflow.' },
       backend: { type: 'string', help: '<id>          claude | codex | opencode | pi | cursor.' },
       model: { type: 'string', help: '<model>         Model override.' },
       effort: { type: 'string', help: '<level>       Reasoning effort.' },
@@ -253,6 +255,10 @@ function statuses(value: string | boolean | undefined) {
 
 /** Every flag check `execute` makes, run up front so a bad flag never waits on discovery. */
 function validateFlags(name: string, values: Values): void {
+  if (name === 'start') {
+    if (values.skill !== undefined && values.workflow !== undefined) usageError('--skill and --workflow cannot be used together');
+    if (typeof values.skill === 'string' && !values.skill.trim()) usageError('--skill must name a skill');
+  }
   if (name === 'list') { statuses(values.status); positiveInt(values.limit, 'limit', 1_000); }
   if (name === 'wait') {
     oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
@@ -291,10 +297,22 @@ type Printer = (value: unknown) => void;
 async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string, print: Printer): Promise<number> {
   const waitMs = values.wait ? timeoutMs(values) : undefined;
   const requestId = (values['request-id'] as string | undefined) ?? randomUUID();
+  const skill = values.skill as string | undefined;
+  if (skill !== undefined) {
+    const result = await request(cockpit, '/skills');
+    if (result.status !== 200) refuse(result);
+    const skills = skillSchema.array().safeParse(result.data);
+    if (!skills.success) invalidResponse('skills');
+    if (!skills.data.some((entry) => entry.name === skill)) {
+      throw new TaskCliError(EXIT.refused, { code: 'refused', status: 404, error: `unknown skill: ${skill}` });
+    }
+  }
   const result = await request(cockpit, '/runs', {
     body: {
       task,
-      workflow: (values.workflow as string | undefined) ?? 'quick-task',
+      ...(skill === undefined
+        ? { workflow: (values.workflow as string | undefined) ?? 'quick-task' }
+        : { steps: [{ id: 'task', name: skill, skill, prompt: '{{task}}' }] }),
       ...(values.backend === undefined ? {} : { runner: values.backend }),
       ...(values.model === undefined ? {} : { model: values.model }),
       ...(values.effort === undefined ? {} : { effort: values.effort }),

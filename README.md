@@ -584,6 +584,11 @@ cez task send "$id" 'Use the retry helper instead'            # queued, delivere
 cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it ends
 ```
 
+`cez task start '<task>' --skill <name>` runs one discovered skill as the task's agent step;
+`--skill` and `--workflow` are mutually exclusive. An unknown skill fails by name without
+starting a run (exit `2`). CLI starts do not change the cockpit composer's recent picks or
+skill-usage ranking. Without either flag, `start` still runs `quick-task`.
+
 `start` is retry-safe: it sends a request id (`--request-id <UUID>` to pick your own), and a
 retry with the same id and task answers with the run the first one created (`created: false`)
 instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`. Exit codes:

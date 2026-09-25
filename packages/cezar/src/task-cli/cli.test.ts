@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { apiRunSchema } from '@open-mercato/cezar-contract';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunStore } from '../runs/store.ts';
@@ -44,6 +46,49 @@ describe('cez task', () => {
       expect(printed).toMatchObject({ status: 'queued', created: true });
       expect(printed.url).toBe(`${cockpit.origin}/p/default/tasks/${printed.id as string}`);
       expect(store.getRun(printed.id as string)?.task).toBe('do the thing');
+    });
+
+    it('starts a run with the selected discovered skill as its agent step', async () => {
+      const dir = join(harness.repoRoot, '.ai/skills');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'cli-sample-skill.md'), '# CLI sample skill\n');
+      expect(await run(['start', 'do the thing', '--skill', 'cli-sample-skill'])).toBe(0);
+      const record = store.getRun(last().id as string);
+      expect(record?.workflowDef?.steps).toEqual([
+        { id: 'task', name: 'cli-sample-skill', skill: 'cli-sample-skill', prompt: '{{task}}' },
+      ]);
+      expect(record?.task).toBe('do the thing');
+    });
+
+    it('retries a skill start with the same request id without creating another run', async () => {
+      const dir = join(harness.repoRoot, '.ai/skills');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'cli-sample-skill.md'), '# CLI sample skill\n');
+      const args = ['start', 'x', '--skill', 'cli-sample-skill', '--request-id', '2b7e1c9a-5d4f-4a3b-8c2d-1e0f9a8b7c6d'];
+      expect(await run(args)).toBe(0);
+      const first = last();
+      expect(await run(args)).toBe(0);
+      expect(last()).toMatchObject({ id: first.id, created: false });
+      expect(store.listRuns()).toHaveLength(1);
+    });
+
+    it('rejects an unknown skill by name without creating a run', async () => {
+      expect(await run(['start', 'x', '--skill', 'not-a-real-cli-skill'])).toBe(2);
+      expect(last()).toMatchObject({ error: 'unknown skill: not-a-real-cli-skill' });
+      expect(store.listRuns()).toHaveLength(0);
+    });
+
+    it('rejects an empty --skill before discovering a cockpit', async () => {
+      expect(await run(['start', 'x', '--skill', '  '])).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input' });
+      expect(discoveries).toBe(0);
+    });
+
+    it('rejects --skill with --workflow before discovering a cockpit', async () => {
+      expect(await run(['start', 'x', '--skill', 'cli-sample-skill', '--workflow', 'quick-task'])).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input' });
+      expect(discoveries).toBe(0);
+      expect(store.listRuns()).toHaveLength(0);
     });
 
     it('reports created:false for a retry with the same request id', async () => {
@@ -216,6 +261,7 @@ describe('cez task', () => {
       expect(out.join('\n')).toContain('cez task start');
       expect(await run(['start', '--help'])).toBe(0);
       expect(out.at(-1)).toContain('--request-id');
+      expect(out.at(-1)).toMatch(/--workflow[^\n]*\n  --skill /);
       expect(discoveries).toBe(0);
     });
 
