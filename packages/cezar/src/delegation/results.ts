@@ -45,10 +45,14 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
     const snapshotId = randomUUID();
     diff = { state: 'available', snapshotId, path: store.workerResultSnapshotPath(delegation.parentRunId, run.id, snapshotId), truncated: observation.truncated };
   } catch { if (!destroyed) diff = { state: 'unavailable', reason: 'unverified' }; }
-  // A retained snapshot guarantees bytes even after cleanup; live availability is represented by cleanup/workspace and HEAD.
-  if (diffSnapshot === undefined && delegation.destroy && previous?.revision === workerRevision(run) && previous.diff.state === 'available') {
-    const retained = store.readWorkerResultDiff(delegation.parentRunId, run.id);
-    if (retained !== undefined) { diffSnapshot = retained; diff = { ...previous.diff, snapshotId: randomUUID() }; }
+  // Re-read after the live workspace checks. A concurrent reclaim can commit a
+  // snapshot while this collect still holds a `previous` captured as undefined.
+  if (diffSnapshot === undefined) {
+    const stored = store.readWorkerResult(delegation.parentRunId, run.id);
+    if (stored?.revision === workerRevision(run) && stored.diff.state === 'available') {
+      const retained = store.readWorkerResultDiff(delegation.parentRunId, run.id);
+      if (retained !== undefined) { diffSnapshot = retained; diff = { ...stored.diff, snapshotId: randomUUID() }; }
+    }
   }
   const dataDir = join(repoRoot, '.ai/cezar');
   const ids = new Set<string>();

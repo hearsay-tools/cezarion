@@ -5,8 +5,9 @@
 // recoverable) and the thin I/O enforcer that performs the reclaim. The selector
 // is pure and unit-testable; the enforcer never throws (helper discipline).
 import { existsSync } from 'node:fs';
+import { collectWorkerEvidence } from '../delegation/results.ts';
 import { createWorktree, removeWorktree } from '../git-worktree.ts';
-import type { RunRecord, RunStatus } from './store.ts';
+import type { RunRecord, RunStatus, RunStore } from './store.ts';
 
 /** The "finished" status set — mirrors `RunStore.archiveFinished`. A run at the
  *  `review` gate is deliberately excluded: it still needs its worktree to render
@@ -21,9 +22,21 @@ function recencyKey(run: RunRecord): string {
 }
 
 /** A run is reclaimable when it is finished, still has a materialized worktree
- *  directory, and has not already been reclaimed. */
-export function isReclaimable(run: RunRecord): boolean {
-  return run.delegation?.role !== 'worker' && run.delegation?.role !== 'invalid' && FINISHED.has(run.status) && !!run.worktreePath && !run.worktreeReclaimedAt;
+ *  directory, and has not already been reclaimed. Finished owned workers count
+ *  (#575) once their parent is gone or `done` (collection-gated). A live,
+ *  failed, or cancelled parent can still collect/diff from the dir. Live runs,
+ *  `review`, `invalid`, and workers mid-destroy do not. */
+export function isReclaimable(run: RunRecord, runs: readonly RunRecord[] = []): boolean {
+  if (run.delegation?.role === 'invalid') return false;
+  if (run.delegation?.role === 'worker' && run.delegation.destroy) return false;
+  if (!FINISHED.has(run.status) || !run.worktreePath || run.worktreeReclaimedAt) return false;
+  if (run.delegation?.role === 'worker') {
+    const parentId = run.delegation.parentRunId;
+    const parent = runs.find((candidate) => candidate.id === parentId);
+    // `done` is collection-gated. failed/cancelled parents can still collect later.
+    if (parent && parent.status !== 'done') return false;
+  }
+  return true;
 }
 
 /**
@@ -37,7 +50,7 @@ export function isReclaimable(run: RunRecord): boolean {
 export function selectReclaimableWorktrees(runs: readonly RunRecord[], keep: number): string[] {
   if (!Number.isFinite(keep) || keep <= 0) return [];
   const reclaimable = runs
-    .filter(isReclaimable)
+    .filter((run) => isReclaimable(run, runs))
     .sort((a, b) => (recencyKey(a) < recencyKey(b) ? 1 : recencyKey(a) > recencyKey(b) ? -1 : 0));
   return reclaimable.slice(keep).map((r) => r.id);
 }
@@ -64,6 +77,8 @@ export interface RematerializeStore {
  * without it the run would keep a directory on disk while staying invisible to
  * the enforcer forever (a leak). Returns true when it re-materialized.
  * Best-effort: never throws (the caller falls back to the repo root).
+ * Owned workers still refuse this path: continue verifies the owned workspace
+ * instead of recreating an unverified tree. `invalid` is never rematerialized.
  */
 export async function rematerializeReclaimedWorktree(
   repoRoot: string,
@@ -103,6 +118,18 @@ export interface ReclaimOptions {
   remove?: (repoRoot: string, worktreePath: string) => Promise<void>;
 }
 
+/** Snapshot parent-owned worker evidence before the checkout goes.
+ *  Test fakes without `commitWorkerResult` skip this. A collect/commit failure
+ *  returns false so the directory is left for the next pass. */
+async function preserveWorkerResult(repoRoot: string, store: RetentionStore, run: RunRecord): Promise<boolean> {
+  if (run.delegation?.role !== 'worker') return true;
+  const commit = (store as Partial<RunStore>).commitWorkerResult;
+  if (typeof commit !== 'function') return true;
+  const evidence = await collectWorkerEvidence(repoRoot, store as RunStore, run);
+  commit.call(store, run.delegation.parentRunId, evidence.result, evidence.diffSnapshot);
+  return evidence.diffSnapshot !== undefined || evidence.result.diff.state === 'available';
+}
+
 export async function reclaimWorktrees(
   repoRoot: string,
   store: RetentionStore,
@@ -110,15 +137,15 @@ export async function reclaimWorktrees(
   opts: ReclaimOptions = {},
 ): Promise<string[]> {
   const now = opts.now ?? (() => new Date().toISOString());
-  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path)); // branch kept
+  const remove = opts.remove ?? ((root, path) => removeWorktree(root, path, undefined, { reclaimOwnedDirectory: true })); // branch kept
   const runs = store.listRuns();
   const byId = new Map(runs.map((r) => [r.id, r]));
   const reclaimed: string[] = [];
   for (const id of selectReclaimableWorktrees(runs, keep)) {
     const run = byId.get(id);
-    if (run?.delegation?.role === 'worker' || run?.delegation?.role === 'invalid') continue;
     if (!run?.worktreePath) continue;
     try {
+      if (!(await preserveWorkerResult(repoRoot, store, run).catch(() => false))) continue;
       await remove(repoRoot, run.worktreePath);
       if (existsSync(run.worktreePath)) continue; // reclaim failed; retry next pass
       store.updateRun(id, { worktreeReclaimedAt: now() });

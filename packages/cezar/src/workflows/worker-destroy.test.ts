@@ -325,11 +325,11 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     const w = await worker(); store.updateRun(w.id, { status: 'done', worktreePath: workspace(w).path, worktreeReclaimedAt: new Date().toISOString() });
     destroy(w);
     expect(manager.continueRun(w.id, { text: 'resume' }).ok).toBe(false);
-    expect(isReclaimable({ ...w, worktreeReclaimedAt: undefined })).toBe(false);
+    expect(isReclaimable({ ...store.getRun(w.id)!, worktreeReclaimedAt: undefined })).toBe(false);
     expect(await rematerializeReclaimedWorktree(root, store, w.id)).toBe(false);
     expect(store.deleteRun(w.id)).toBe(false); expect(store.deleteRun(parent.id)).toBe(false);
     store.updateRun(w.id, { delegation: { role: 'invalid' } });
-    expect(isReclaimable({ ...w, worktreeReclaimedAt: undefined })).toBe(false);
+    expect(isReclaimable({ ...store.getRun(w.id)!, worktreeReclaimedAt: undefined })).toBe(false);
     expect(await rematerializeReclaimedWorktree(root, store, w.id)).toBe(false);
     expect(manager.continueRun(w.id, { text: 'resume' }).ok).toBe(false);
     expect(store.deleteRun(w.id)).toBe(false);

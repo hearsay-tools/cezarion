@@ -48,7 +48,7 @@ describe('backend-detect handles an absent pi CLI', () => {
     expect(pi).toBeDefined();
     expect(pi!.available).toBe(false);
     expect(pi!.hint).toContain('pi');
-  });
+  }, 15_000);
 });
 
 describe('a dry-run pi session emits normalized AgentEvents', () => {

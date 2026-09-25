@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, rmSync, fsyncSync, fstatSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, fsyncSync, fstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace } from './workspace.ts';
+import { removeWorktree } from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
 import { artifactDirectory, publishArtifact } from '../artifacts/store.ts';
 
@@ -42,6 +43,29 @@ describe('parent-owned collected worker results', () => {
     expect(reopened.readWorkerResultDiff(f.parent.id, run.id)).toContain('[REDACTED]');
     expect(readFileSync(join(f.root, '.ai/cezar/runs.json'), 'utf8')).not.toContain('diff --git');
     reopened.flush();
+  });
+  it('reuses the retained diff after retention reclaims the worker directory (#575)', async () => {
+    const run = await worker(); await ensureOwnedWorkspace(f.root, run);
+    const path = run.delegation?.role === 'worker' ? run.delegation.workspace.path : '';
+    writeFileSync(join(path, 'older.txt'), 'older work');
+    execFileSync('git', ['add', '.'], { cwd: path });
+    execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '-qm', 'older'], { cwd: path });
+    f.store.appendEvent(run.id, { type: 'text', text: 'Older worker done' });
+    const generation = f.store.commitWorkerExecutionStart(run.id); f.store.commitWorkerExecutionComplete(run.id, generation);
+    f.store.updateRun(run.id, { status: 'done', worktreePath: path });
+    expect((await f.service.collect(f.caller, { workerId: run.id })).diff.state).toBe('available');
+
+    await removeWorktree(f.root, path, undefined, { reclaimOwnedDirectory: true });
+    expect(existsSync(path)).toBe(false);
+    // In-flight collect may not see worktreeReclaimedAt yet; dir gone is enough.
+    const racing = await f.service.collect(f.caller, { workerId: run.id });
+    expect(racing.diff.state).toBe('available');
+
+    f.store.updateRun(run.id, { worktreeReclaimedAt: '2026-07-18T00:00:00.000Z' });
+    const result = await f.service.collect(f.caller, { workerId: run.id });
+    expect(result.diff.state).toBe('available');
+    expect(result.summary).toMatchObject({ state: 'available', text: 'Older worker done' });
+    expect(f.store.readWorkerResultDiff(f.parent.id, run.id)).toContain('older.txt');
   });
   it('never turns tool output into a summary and marks failures and running evidence partial', async () => {
     const run = await worker(); f.store.appendEvent(run.id, { type: 'tool-result', result: 'Success!' });

@@ -13,7 +13,28 @@ function run(partial: {
   createdAt?: string;
   finishedAt?: string;
   worktreeReclaimedAt?: string;
+  role?: 'worker' | 'invalid';
+  destroying?: boolean;
 }): RunRecord {
+  const delegation =
+    partial.role === 'invalid'
+      ? { role: 'invalid' as const }
+      : partial.role === 'worker'
+        ? {
+            role: 'worker' as const,
+            parentRunId: 'parent',
+            permissions: [] as const,
+            ...(partial.destroying
+              ? {
+                  destroy: {
+                    requestedAt: '2026-07-01T00:00:00.000Z',
+                    phase: 'requested' as const,
+                    remaining: ['worktree'],
+                  },
+                }
+              : {}),
+          }
+        : undefined;
   return {
     id: partial.id,
     status: partial.status,
@@ -22,6 +43,7 @@ function run(partial: {
     worktreePath: partial.worktreePath === null ? undefined : partial.worktreePath ?? `/wt/${partial.id}`,
     worktreeReclaimedAt: partial.worktreeReclaimedAt,
     steps: [],
+    delegation,
   } as unknown as RunRecord;
 }
 
@@ -88,5 +110,64 @@ describe('selectReclaimableWorktrees (#483)', () => {
     expect(isReclaimable(run({ id: 'x', status: 'review' }))).toBe(false);
     expect(isReclaimable(run({ id: 'x', status: 'done', worktreePath: null }))).toBe(false);
     expect(isReclaimable(run({ id: 'x', status: 'done', worktreeReclaimedAt: '2026-07-05T00:00:00Z' }))).toBe(false);
+  });
+
+  it('treats a finished worker with an existing dir as reclaimable (#575)', () => {
+    expect(isReclaimable(run({ id: 'w', status: 'done', role: 'worker' }))).toBe(true);
+    expect(isReclaimable(run({ id: 'w', status: 'failed', role: 'worker' }))).toBe(true);
+    expect(isReclaimable(run({ id: 'w', status: 'cancelled', role: 'worker' }))).toBe(true);
+  });
+
+  it('keeps a finished worker while its parent is still live so collect can verify the workspace', () => {
+    const parent = run({ id: 'parent', status: 'waiting' });
+    const worker = run({
+      id: 'w',
+      status: 'done',
+      role: 'worker',
+      finishedAt: '2026-07-01T00:00:00Z',
+    });
+    expect(isReclaimable(worker, [parent, worker])).toBe(false);
+    expect(selectReclaimableWorktrees([parent, worker], 1)).toEqual([]);
+    const finishedParent = run({
+      id: 'parent',
+      status: 'done',
+      finishedAt: '2026-07-02T00:00:00Z',
+    });
+    expect(isReclaimable(worker, [finishedParent, worker])).toBe(true);
+    expect(selectReclaimableWorktrees([finishedParent, worker], 1)).toEqual(['w']);
+  });
+
+  it('leaves live, review, destroying, and invalid workers non-reclaimable (#575)', () => {
+    expect(isReclaimable(run({ id: 'w', status: 'running', role: 'worker' }))).toBe(false);
+    expect(isReclaimable(run({ id: 'w', status: 'queued', role: 'worker' }))).toBe(false);
+    expect(isReclaimable(run({ id: 'w', status: 'waiting', role: 'worker' }))).toBe(false);
+    expect(isReclaimable(run({ id: 'w', status: 'review', role: 'worker' }))).toBe(false);
+    expect(isReclaimable(run({ id: 'w', status: 'done', role: 'worker', destroying: true }))).toBe(false);
+    expect(isReclaimable(run({ id: 'w', status: 'done', role: 'invalid' }))).toBe(false);
+  });
+
+  it('reclaims a finished-worker majority when over keep (#575)', () => {
+    // Operator snapshot: 23 finished workers (June) + 7 finished parents (July), keep 8.
+    const workers = Array.from({ length: 23 }, (_, i) =>
+      run({
+        id: `w${String(i).padStart(2, '0')}`,
+        status: 'done',
+        role: 'worker',
+        finishedAt: `2026-06-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+      }),
+    );
+    const parents = Array.from({ length: 7 }, (_, i) =>
+      run({
+        id: `p${i}`,
+        status: 'done',
+        finishedAt: `2026-07-0${i + 1}T00:00:00Z`,
+      }),
+    );
+    const reclaimed = selectReclaimableWorktrees([...workers, ...parents], 8);
+    // 30 reclaimable; keep the 7 July parents + newest worker (w22). Reclaim the other 22 workers.
+    expect(reclaimed).toHaveLength(22);
+    expect(reclaimed.every((id) => id.startsWith('w'))).toBe(true);
+    expect(reclaimed).not.toContain('w22');
+    expect(parents.every((p) => !reclaimed.includes(p.id))).toBe(true);
   });
 });

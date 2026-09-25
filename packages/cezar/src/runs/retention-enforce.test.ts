@@ -49,7 +49,12 @@ function fakeStore(runs: RunRecord[]): RetentionStore & { runs: RunRecord[] } {
   };
 }
 
-function finishedRun(id: string, path: string, finishedAt: string): RunRecord {
+function finishedRun(
+  id: string,
+  path: string,
+  finishedAt: string,
+  role?: 'worker',
+): RunRecord {
   return {
     id,
     status: 'done',
@@ -57,6 +62,9 @@ function finishedRun(id: string, path: string, finishedAt: string): RunRecord {
     finishedAt,
     worktreePath: path,
     steps: [],
+    ...(role === 'worker'
+      ? { delegation: { role: 'worker', parentRunId: 'parent', permissions: [] } }
+      : {}),
   } as unknown as RunRecord;
 }
 
@@ -118,5 +126,29 @@ describe('reclaimWorktrees (real git, #483)', () => {
     const store = fakeStore([finishedRun(id, wt.path, '2026-07-01T00:00:00.000Z')]);
     expect(await reclaimWorktrees(repo, store, 0)).toEqual([]);
     expect(existsSync(wt.path)).toBe(true);
+  });
+
+  it('reclaims an over-limit finished worker worktree (#575)', async () => {
+    const repo = await fixtureRepo();
+    const oldId = '77777777-7777-4777-8777-777777777777';
+    const newId = '88888888-8888-4888-8888-888888888888';
+    const oldWt = await createWorktree(repo, oldId, 'main');
+    const newWt = await createWorktree(repo, newId, 'main');
+    const store = fakeStore([
+      finishedRun(oldId, oldWt.path, '2026-07-01T00:00:00.000Z', 'worker'),
+      finishedRun(newId, newWt.path, '2026-07-09T00:00:00.000Z', 'worker'),
+    ]);
+
+    const reclaimed = await reclaimWorktrees(repo, store, 1, {
+      now: () => '2026-07-18T00:00:00.000Z',
+    });
+
+    expect(reclaimed).toEqual([oldId]);
+    expect(existsSync(oldWt.path)).toBe(false);
+    expect(await branchExists(repo, oldId)).toBe(true);
+    expect(store.runs.find((r) => r.id === oldId)?.worktreeReclaimedAt).toBe(
+      '2026-07-18T00:00:00.000Z',
+    );
+    expect(existsSync(newWt.path)).toBe(true);
   });
 });
