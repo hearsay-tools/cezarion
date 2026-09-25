@@ -279,10 +279,15 @@ export function UserBubble({
 }
 
 /** An assistant message item, as markdown. */
-export function AssistantMessage({ text }: { text: string }) {
+export function AssistantMessage({ text, ts }: { text: string; ts?: string }) {
   return (
     <ConversationMessage role="agent" data-slot="assistant-message">
       <Markdown>{text}</Markdown>
+      {ts !== undefined ? (
+        <span className="mt-1 flex justify-end">
+          <MessageTime ts={ts} />
+        </span>
+      ) : null}
     </ConversationMessage>
   )
 }

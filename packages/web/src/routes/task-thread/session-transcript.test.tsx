@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ApiRun, RunEvent, UiToolItem } from '@open-mercato/cezar-api-client'
@@ -272,6 +273,44 @@ describe('transcript adapters and row building', () => {
       )
       expect(document.querySelector('[data-slot="user-bubble"] [data-slot="message-time"]')).not.toBeNull()
       expect(document.querySelector('[data-slot="turn-time"]')?.textContent).toContain('· 4m 12s')
+    })
+
+    it('stamps the agent response and a worker/parent card from their own persisted times', () => {
+      const startedAt = localIso(2026, 7, 31, 14, 32)
+      const replyAt = new Date(new Date(startedAt).getTime() + 252_000).toISOString()
+      const queuedAt = localIso(2026, 7, 31, 15, 0)
+      render(
+        <MemoryRouter>
+        <SessionTranscript
+          runId="parent"
+          viewId="main"
+          mode="document"
+          sections={[
+            {
+              id: 'turn-1',
+              startedAt,
+              completedAt: replyAt,
+              entries: [
+                { kind: 'message', id: 'answer', role: 'assistant', text: 'Done', ts: replyAt },
+                {
+                  kind: 'conversation',
+                  id: 'req',
+                  messageId: 'req',
+                  messageKind: 'request',
+                  senderRunId: 'parent',
+                  recipientRunId: 'worker',
+                  text: 'Inspect the parser',
+                  delivery: 'delivered',
+                  createdAt: queuedAt,
+                },
+              ],
+            },
+          ]}
+        />
+        </MemoryRouter>,
+      )
+      expect(document.querySelector('[data-slot="assistant-message"] [data-slot="message-time"]')?.getAttribute('datetime')).toBe(replyAt)
+      expect(document.querySelector('[data-slot="worker-conversation-card"] [data-slot="message-time"]')?.getAttribute('datetime')).toBe(queuedAt)
     })
   })
 

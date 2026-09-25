@@ -403,9 +403,10 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
     return stepId === undefined ? itemId : `${stepId}:${itemId}`
   }
 
-  const upsertV2 = (turn: DraftTurn, raw: UiItem, key: string) => {
+  const upsertV2 = (turn: DraftTurn, raw: UiItem, key: string, ts?: string) => {
     // Clone: deltas append in place, and the event object off the wire must stay untouched.
-    const item = { ...raw }
+    // Assistant (and rare in-stream user) messages carry the completing event's clock (#435).
+    const item = raw.kind === 'message' && ts !== undefined ? { ...raw, ts } : { ...raw }
     if (!turn.v2Items) {
       // The dedup latch flips: this turn is v2-covered, so every v1-synthesized TOOL in it is
       // a duplicate of something v2 already describes (or is about to). Tools can be dropped
@@ -612,7 +613,12 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         const item = event.item as unknown as UiItem
         const key = itemKey(event, item.id)
         const located = itemsById.get(key)
-        upsertV2(located?.turn ?? currentTurn(), item, key)
+        upsertV2(
+          located?.turn ?? currentTurn(),
+          item,
+          key,
+          event.type === 'item.completed' ? stamp(event.ts) : undefined,
+        )
         break
       }
       case 'item.delta': {
@@ -637,9 +643,16 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         const turn = currentTurn()
         const text = str(event.text) ?? ''
         if (text === '') break
+        const ts = stamp(event.ts)
         turn.entries.push({
           origin: 'v1',
-          entry: { kind: 'message', id: `v1:${event.seq}`, role: 'assistant', text },
+          entry: {
+            kind: 'message',
+            id: `v1:${event.seq}`,
+            role: 'assistant',
+            text,
+            ...(ts !== undefined ? { ts } : {}),
+          },
         })
         break
       }

@@ -1108,6 +1108,29 @@ describe('reduceThread — turn timestamps (#941)', () => {
     expect(turns[0]!.userMessage?.ts).toBeUndefined()
     expect(turns[0]!.startedAt).toBeUndefined()
     expect(turns[0]!.completed?.ts).toBeUndefined()
+    expect(turns[0]!.items[0]).not.toHaveProperty('ts')
+  })
+
+  it('stamps an assistant message from the item.completed event, not from item.started', () => {
+    const { turns } = reduceThread([
+      at(1, 'turn.started', '2026-07-14T12:00:00.000Z', { turnId: 'turn_1' }),
+      at(2, 'item.started', '2026-07-14T12:00:01.000Z', {
+        item: { kind: 'message', id: 'm1', role: 'assistant', text: '' },
+      }),
+      at(3, 'item.completed', '2026-07-14T12:03:00.000Z', {
+        item: { kind: 'message', id: 'm1', role: 'assistant', text: 'ok' },
+      }),
+    ])
+    expect(turns[0]!.items[0]).toMatchObject({
+      kind: 'message',
+      text: 'ok',
+      ts: '2026-07-14T12:03:00.000Z',
+    })
+  })
+
+  it('stamps a v1 text line from its event ts', () => {
+    const { turns } = reduceThread([at(1, 'text', '2026-07-14T12:03:00.000Z', { text: 'ok' })])
+    expect(turns[0]!.items[0]).toMatchObject({ kind: 'message', text: 'ok', ts: '2026-07-14T12:03:00.000Z' })
   })
 
   it('recovers the start from turn.started when the user-message line has none', () => {
