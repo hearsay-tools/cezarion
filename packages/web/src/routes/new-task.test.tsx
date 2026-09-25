@@ -1994,6 +1994,19 @@ describe('the Notify webhook toggle (#589)', () => {
     await startTask()
     expect(postedBody()).toMatchObject({ notify: true })
   })
+
+  it('never shows the query string in the label or the tooltip (#594 review)', async () => {
+    serve({ projects: registry({ url: 'https://bot.example/hooks/cez?key=secret', tokenSet: true }) })
+    renderNewTask()
+    await pillReady()
+    await waitFor(() => expect(toggle()).not.toBeNull())
+    for (const on of [false, true]) {
+      if (on) fireEvent.click(toggle()!)
+      expect(toggle()!.getAttribute('aria-checked')).toBe(String(on))
+      expect(toggle()!.outerHTML).not.toContain('secret')
+      expect(toggle()!.getAttribute('title')).toContain('bot.example/hooks/cez')
+    }
+  })
 })
 
 describe('the plan flow', () => {

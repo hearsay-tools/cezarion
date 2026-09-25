@@ -960,7 +960,7 @@ function NotifyWebhookToggle({
       aria-label="Notify webhook"
       data-slot="notify-webhook-toggle"
       onClick={() => onChange(!on)}
-      title={on ? `Status changes go to ${url}` : `Check to send this task's status changes to ${url}`}
+      title={on ? `Status changes go to ${webhookLabel(url)}` : `Check to send this task's status changes to ${webhookLabel(url)}`}
       className="flex min-h-11 items-center justify-between gap-3 px-0 py-3 text-left"
     >
       <span className="min-w-0"><span className="block text-[13px] font-medium">Notify webhook</span><span className="block truncate text-[12px] text-muted-foreground">Send status changes to {webhookLabel(url)}</span></span>
