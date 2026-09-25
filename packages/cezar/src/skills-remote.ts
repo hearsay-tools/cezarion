@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { loadConfig, type SkillsRepoSource } from './config.ts';
@@ -408,34 +409,74 @@ async function excludeFromGit(repoRoot: string, pattern: string): Promise<void> 
 
 // ---- in-process cache ----------------------------------------------------------
 
-// Clone attempts are expensive when the network is down (git can hang on
-// DNS/TCP), so each source gets one implicit attempt per process. "Refresh"
-// always retries.
+// A failed clone/fetch is expensive when the network is down (git can hang on
+// DNS/TCP), so each source gets one implicit retry budget per process. Success
+// is recorded on disk (the stamp) so a later TTL expiry in this process can
+// still fetch. "Refresh" always retries.
 const cloneAttempted = new Set<string>();
 // Isolated review worktrees have no local `.agents/skills` (gitignored, absent
 // in a fresh checkout), so codex reads skills straight from this global bare
-// cache. A clone left by an earlier run — or one this long-running process
-// fetched hours ago — silently serves a stale template. Passive loads therefore
-// fetch on the first touch per process and then at most once per TTL, keeping
-// the cache current without a manual "Refresh" and without fetching on every
-// catalog read. `refresh` (the explicit button / #613's post-update
-// invalidateCatalog) still fetches unconditionally.
+// cache. The last successful fetch is stamped inside the bare clone so every
+// process sharing `~/.cache/cez/skills` observes the same six-hour TTL — a
+// new `cez run` or a second cockpit does not fetch again on first touch.
+// `refresh` (the explicit button / #613's post-update invalidateCatalog) still
+// fetches unconditionally. The stamp is written with the workspace-config
+// discipline: a unique per-writer tmp + rename, so two processes cannot
+// truncate each other's staging file (#367).
 const PASSIVE_FETCH_TTL_MS = 6 * 60 * 60 * 1_000;
-const lastFetchByRepo = new Map<string, number>();
+const LAST_FETCH_STAMP = 'cez-last-fetch';
+
+/** Path of the last-fetch stamp that lives inside a bare clone directory. */
+export function lastFetchStampPath(bareDir: string): string {
+  return join(bareDir, LAST_FETCH_STAMP);
+}
 
 /**
- * Whether a passive (non-`refresh`) load should `git fetch` an existing bare
- * clone: yes on the first touch this process, and yes once the last fetch is
- * older than `ttlMs`. Pure so the freshness policy is unit-tested without git.
+ * Last successful fetch time for this bare clone, or `null` when the stamp is
+ * missing or unreadable. Fail-open: a corrupt stamp is treated as stale.
+ */
+export function readLastFetchAt(bareDir: string): number | null {
+  try {
+    const n = Number(readFileSync(lastFetchStampPath(bareDir), 'utf8').trim());
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist a last-fetch time inside `bareDir`. Unique tmp + rename (the same
+ * cross-process write discipline as workspace config). Fail-open on a
+ * read-only cache: listing still works, the next process may fetch again.
+ */
+export async function writeLastFetchAt(bareDir: string, at: number): Promise<void> {
+  const path = lastFetchStampPath(bareDir);
+  const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    await writeFile(tmp, `${at}\n`, { encoding: 'utf8', mode: 0o600 });
+    await rename(tmp, path);
+  } catch {
+    try {
+      await unlink(tmp);
+    } catch {
+      // staging file may never have been created
+    }
+  }
+}
+
+/**
+ * Whether a passive (non-`refresh`) load should `git fetch`: yes when there is
+ * no stamp, and yes once the stamp is older than `ttlMs`. Pure so the
+ * freshness policy is unit-tested without git.
  */
 export function shouldPassiveFetch(opts: {
-  attempted: boolean;
-  fetchedAt: number;
+  fetchedAt: number | null;
   now: number;
   ttlMs: number;
 }): boolean {
-  return !opts.attempted || opts.now - opts.fetchedAt > opts.ttlMs;
+  return opts.fetchedAt == null || opts.now - opts.fetchedAt > opts.ttlMs;
 }
+
 // Both maps are keyed by `repoRoot` (multi-project workspace, step 2.6): each
 // project resolves its own `.ai/cezar/config.json` → `skillsRepos`, so one
 // project's team-skill list must never be served under another project's scope.
@@ -486,25 +527,27 @@ async function loadTeamSkills(repoRoot: string, refresh: boolean): Promise<Skill
       if (refresh) {
         const { bareDir, created } = await ensureBareClone(src.repo);
         if (!created) await fetchAll(bareDir);
-        cloneAttempted.add(src.repo);
-        lastFetchByRepo.set(src.repo, Date.now());
+        await writeLastFetchAt(bareDir, Date.now());
+        cloneAttempted.delete(src.repo);
       } else if (
         shouldPassiveFetch({
-          attempted: cloneAttempted.has(src.repo),
-          fetchedAt: lastFetchByRepo.get(src.repo) ?? 0,
+          fetchedAt: readLastFetchAt(bareDirFor(src.repo)),
           now: Date.now(),
           ttlMs: PASSIVE_FETCH_TTL_MS,
-        })
+        }) &&
+        !cloneAttempted.has(src.repo)
       ) {
-        cloneAttempted.add(src.repo);
         const { bareDir, created } = await ensureBareClone(src.repo);
         // A clone left by an earlier run is very likely behind origin; fetch it
         // so worktree reviews never read a stale skills template.
         if (!created) await fetchAll(bareDir);
-        lastFetchByRepo.set(src.repo, Date.now());
+        await writeLastFetchAt(bareDir, Date.now());
       }
     } catch {
-      // offline / no access — list whatever an older clone has (or nothing)
+      // offline / no access — list whatever an older clone has (or nothing).
+      // Remember the failure so a hung DNS/TCP is not retried on every catalog
+      // read this process. A successful stamp write is what unblocks the TTL.
+      cloneAttempted.add(src.repo);
     }
     try {
       for (const skill of await listRemoteSkills(src)) {
