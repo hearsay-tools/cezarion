@@ -602,7 +602,7 @@ every flag.
 **A bot that lives behind an HTTP endpoint** does not have to poll. Set a **Task webhook** (URL
 and an optional Bearer token) in the project's **Settings → General**, and every task that opts
 in POSTs `task.status` on each status change, `task.question` when it asks something,
-`task.activity` when monitoring starts or ends, and `task.subscribed` when it is handed off. Each
+`task.activity` when monitoring starts or ends, and `task.subscribed` when it opts in (at start, or when it is handed off). Each
 body carries the same slim projection `cez task status` prints, under `task`. `cez task start`
 opts in whenever the project has a webhook (`--no-notify` to skip it); the cockpit's New task form
 has a **Notify webhook** toggle; and a running task's **Hand off** button (or

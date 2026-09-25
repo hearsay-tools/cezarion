@@ -17,6 +17,9 @@ import type { RunRecord, RunStore } from './store.ts';
  * to feed it. The subscriber diffs each record against the last one it saw and queues a delivery
  * for what changed.
  *
+ * A record created opted in sends `task.subscribed` once; a record created without it sends
+ * nothing until `POST /runs/:id/notify` opts it in.
+ *
  * Delivery is best-effort and never touches the run's lifecycle: one in-order queue per run, a
  * 10 s timeout, 3 attempts with backoff, and the outcome written to `run.webhook` plus a
  * `webhook.failed` thread event when every attempt failed. The queue is in memory; a restart
@@ -156,7 +159,8 @@ export class TaskWebhook {
     this.store.off('deleted', this.onDeleted);
   }
 
-  /** The hand-off delivery (`POST /runs/:id/notify` turning notify on). */
+  /** The hand-off delivery (`POST /runs/:id/notify` turning notify on). A run created with
+   *  `notify: true` gets the same delivery from `observe`. */
   subscribed(runId: string, message?: string): void {
     const run = this.store.getRun(runId);
     if (!run) return;
@@ -172,9 +176,14 @@ export class TaskWebhook {
     const before = this.seen.get(run.id);
     const now = seenOf(run);
     this.seen.set(run.id, now);
-    // A new record is not a transition: the caller that created it has its answer already.
-    if (!before || !run.notify || this.disposed) return;
+    if (!run.notify || this.disposed) return;
     const occurredAt = new Date().toISOString();
+    // A run created opted in (the New task toggle, `cez task start`) announces itself once, as
+    // `POST /runs/:id/notify` does, so the bot learns the id and link while the run is queued.
+    if (!before) {
+      this.enqueue({ event: 'task.subscribed', run, previousStatus: null, occurredAt });
+      return;
+    }
     if (before.status !== now.status) {
       this.enqueue({ event: 'task.status', run, previousStatus: before.status, occurredAt });
     }

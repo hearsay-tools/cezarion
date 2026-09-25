@@ -39,6 +39,11 @@ describe('TaskWebhook', () => {
 
   const create = (notify: boolean) =>
     store.createRun({ title: 't', workflow: 'quick-task', task: 'do it', notify, steps: [{ id: 's', name: 's', kind: 'agent' }] });
+  /** Opted in AFTER creation, so a case about transitions sees no creation-time task.subscribed. */
+  const optedIn = () => {
+    const run = create(false);
+    return store.updateRun(run.id, { notify: true })!;
+  };
 
   const attach = (fetchImpl: typeof fetch, extra: Partial<TaskWebhookOptions> = {}) => {
     hook = new TaskWebhook(store, {
@@ -62,13 +67,14 @@ describe('TaskWebhook', () => {
     await webhook.idle();
 
     expect(calls.map((call) => [call.body.event, call.body.previousStatus, call.body.status])).toEqual([
+      ['task.subscribed', null, 'queued'],
       ['task.status', 'queued', 'running'],
       ['task.status', 'running', 'waiting'],
     ]);
     expect(calls[0]!.url).toBe('https://bot.example/hook');
     expect(calls[0]!.headers.authorization).toBe('Bearer secret-token');
-    expect(calls.map((call) => call.body.seq)).toEqual([1, 2]);
-    expect(calls[1]!.body).toMatchObject({
+    expect(calls.map((call) => call.body.seq)).toEqual([1, 2, 3]);
+    expect(calls[2]!.body).toMatchObject({
       projectId: 'proj',
       runId: run.id,
       url: `http://127.0.0.1:4321/p/proj/tasks/${run.id}`,
@@ -77,20 +83,29 @@ describe('TaskWebhook', () => {
     expect(store.getRun(run.id)?.webhook?.lastDeliveredAt).toBeTruthy();
   });
 
-  it('sends nothing for a run that did not opt in, and nothing for the creation itself', async () => {
+  it('sends nothing for a run that did not opt in', async () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
     const quiet = create(false);
     store.updateRun(quiet.id, { status: 'running' });
-    create(true);
     await webhook.idle();
     expect(calls).toEqual([]);
+  });
+
+  it('sends task.subscribed when a run is created opted in, so a queued run is announced (#594 review)', async () => {
+    const { calls, fetchImpl } = recorder();
+    const webhook = attach(fetchImpl);
+    const run = create(true);
+    await webhook.idle();
+    expect(calls.map((call) => call.body.event)).toEqual(['task.subscribed']);
+    expect(calls[0]!.body).toMatchObject({ runId: run.id, status: 'queued', previousStatus: null, seq: 1 });
+    expect(calls[0]!.body).not.toHaveProperty('message');
   });
 
   it('reports monitoring on and off as task.activity, and a new question as task.question', async () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
-    const run = create(true);
+    const run = optedIn();
     store.updateRun(run.id, { status: 'running' });
     store.updateRun(run.id, { activity: 'monitoring' });
     store.updateRun(run.id, { activity: undefined });
@@ -108,7 +123,7 @@ describe('TaskWebhook', () => {
   it('sends task.subscribed with the hand-off note', async () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
-    const run = create(true);
+    const run = optedIn();
     webhook.subscribed(run.id, 'take over from here');
     await webhook.idle();
     expect(calls).toHaveLength(1);
@@ -118,7 +133,7 @@ describe('TaskWebhook', () => {
   it('retries a 5xx three times, then records the failure without touching the status', async () => {
     const { calls, fetchImpl } = recorder(() => new Response('down', { status: 503 }));
     const webhook = attach(fetchImpl);
-    const run = create(true);
+    const run = optedIn();
     store.updateRun(run.id, { status: 'running' });
     await webhook.idle();
 
@@ -143,7 +158,7 @@ describe('TaskWebhook', () => {
       });
     }) as unknown as typeof fetch;
     const webhook = attach(timeoutFetch, { timeoutMs: 10 });
-    const run = create(true);
+    const run = optedIn();
     store.updateRun(run.id, { status: 'running' });
     await webhook.idle();
     expect(calls).toHaveLength(WEBHOOK_ATTEMPTS);
@@ -154,7 +169,7 @@ describe('TaskWebhook', () => {
   it('does not retry a 4xx the endpoint meant', async () => {
     const { calls, fetchImpl } = recorder(() => new Response(null, { status: 401 }));
     const webhook = attach(fetchImpl);
-    const run = create(true);
+    const run = optedIn();
     store.updateRun(run.id, { status: 'running' });
     await webhook.idle();
     expect(calls).toHaveLength(1);
@@ -164,7 +179,7 @@ describe('TaskWebhook', () => {
   it('under dry run sends nothing and logs the payload as a run event', async () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl, { dryRun: true });
-    const run = create(true);
+    const run = optedIn();
     store.updateRun(run.id, { status: 'running' });
     await webhook.idle();
     expect(calls).toEqual([]);
@@ -227,8 +242,8 @@ describe('TaskWebhooks', () => {
 
     hooks.setOrigin('http://127.0.0.1:4321');
     await hook.idle();
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.body).toMatchObject({ projectId: entry.id, url: `http://127.0.0.1:4321/p/${entry.id}/tasks/${run.id}` });
+    expect(calls.map((call) => call.body.event)).toEqual(['task.subscribed', 'task.status']);
+    expect(calls[1]!.body).toMatchObject({ projectId: entry.id, url: `http://127.0.0.1:4321/p/${entry.id}/tasks/${run.id}` });
     hook.dispose();
     store.flush();
   });
