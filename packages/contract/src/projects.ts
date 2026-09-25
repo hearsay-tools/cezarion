@@ -122,7 +122,10 @@ export const projectWebhookUrlSchema = z
   .string()
   .trim()
   .max(PROJECT_WEBHOOK_URL_MAX_LENGTH)
-  .pipe(z.url({ protocol: /^https?$/, error: 'webhook url must be an http(s) URL' }));
+  .pipe(z.url({ protocol: /^https?$/, error: 'webhook url must be an http(s) URL' }))
+  // Node's `fetch` refuses a URL carrying userinfo before it sends anything, so a webhook saved
+  // with one could never deliver. The Bearer token is the credential.
+  .refine((value) => !/^https?:\/\/[^/?#]*@/i.test(value), 'webhook url must not contain credentials; put the secret in the token');
 
 export const projectWebhookInputSchema = z.object({
   url: projectWebhookUrlSchema,

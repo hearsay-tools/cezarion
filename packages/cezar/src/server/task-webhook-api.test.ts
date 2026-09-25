@@ -105,6 +105,12 @@ describe('task webhook API', () => {
       expect(removed.status).toBe(200);
       expect((removed.body.project as Record<string, unknown>).webhook).toBeUndefined();
       expect((await setWebhook({ url: 'file:///etc/passwd' })).status).toBe(400);
+      // Node's fetch refuses a URL with userinfo before sending, so it could be saved and never
+      // deliver (#594 review). The token is the credential.
+      const withCredentials = await setWebhook({ url: 'https://user:secret@bot.example/hook' });
+      expect(withCredentials.status).toBe(400);
+      expect(String(withCredentials.body.error)).toContain('credentials');
+      expect((await setWebhook({ url: 'https://user@bot.example/hook' })).status).toBe(400);
     });
   });
 
