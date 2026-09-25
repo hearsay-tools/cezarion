@@ -3,6 +3,10 @@ name: Upstream Scan
 # Weekly: append every new open-mercato/cezar commit to .ai/upstream/ledger.yaml
 # as `pending` and open a draft PR with the rows, so the decision (port, reject,
 # diverged, n/a) is made in review. Spec: .ai/specs/2026-09-18-upstream-ledger.md.
+# Create the PR with the existing release App: GITHUB_TOKEN suppresses native
+# pull_request_target CI. The App starts ci.yml's required aggregate check;
+# workflow_dispatch alone is not merge-eligible (see docs/sdlc/ci.md).
+# Ledger-only diffs skip the matrices, not build-and-package / ledger validation.
 
 on:
   schedule:
@@ -24,7 +28,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write # push upstream-scan/<date>
-      pull-requests: write # open the draft PR
+      pull-requests: read # find existing PRs; the App creates the draft PR
     steps:
       - name: Check out trusted scan code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,15 +54,55 @@ jobs:
           echo "$summary"
           echo "summary=$summary" >> "$GITHUB_OUTPUT"
 
+      # Reuse the repository's release App settings and restrict its token to
+      # PR creation. Branch pushes still use the checkout's GITHUB_TOKEN.
+      - name: Validate scan App settings
+        id: validate_scan_app
+        if: fromJSON(steps.scan.outputs.summary).added > 0
+        env:
+          RELEASE_APP_ID: ${{ vars.RELEASE_APP_ID }}
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+          HAS_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+        run: |
+          if ! [[ "$RELEASE_APP_ID" =~ ^[1-9][0-9]*$ ]] \
+            || ! [[ "$RELEASE_APP_BOT_LOGIN" =~ ^[a-z0-9][a-z0-9-]*\[bot\]$ ]] \
+            || [ "$HAS_PRIVATE_KEY" != true ]; then
+            echo '::error::Configure RELEASE_APP_ID and RELEASE_APP_BOT_LOGIN variables and RELEASE_APP_PRIVATE_KEY secret. See docs/publishing.md#release-app-setup.'
+            exit 1
+          fi
+
+      - name: Create scan PR token
+        id: scan_app
+        if: fromJSON(steps.scan.outputs.summary).added > 0
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+
+      - name: Check scan App identity
+        if: fromJSON(steps.scan.outputs.summary).added > 0
+        env:
+          APP_SLUG: ${{ steps.scan_app.outputs.app-slug }}
+          EXPECTED_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+        run: |
+          if [ "$APP_SLUG[bot]" != "$EXPECTED_LOGIN" ]; then
+            echo '::error::RELEASE_APP_BOT_LOGIN does not match the installed App slug.'
+            exit 1
+          fi
+
       - name: Open the scan PR
         id: pr
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           SCAN_JSON: ${{ steps.scan.outputs.summary }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          SCAN_PR_TOKEN: ${{ steps.scan_app.outputs.token }}
         with:
           script: |
-            await require('./.github/scripts/upstream-scan-pr.cjs').openScanPr({ github, context, core });
+            const prGithub = process.env.SCAN_PR_TOKEN ? getOctokit(process.env.SCAN_PR_TOKEN) : undefined;
+            await require('./.github/scripts/upstream-scan-pr.cjs').openScanPr({ github, prGithub, context, core });
 
       - name: Write workflow summary
         if: always()

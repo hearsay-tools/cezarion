@@ -128,6 +128,29 @@ CI, review, and review recovery recognize the configured `RELEASE_APP_BOT_LOGIN`
 as well as legacy `github-actions[bot]` bumps, with the same file and version
 checks. See [release App setup](../publishing.md#release-app-setup).
 
+### Upstream scan PRs
+
+The weekly upstream scan also creates PRs with the repository's existing release
+App token. `GITHUB_TOKEN` still pushes the branch and lists open PRs; the App has
+only Pull requests write permission and starts native `pull_request_target` CI
+through PR creation. Missing App settings stop creation rather than falling back
+to a token that suppresses CI. Existing scan PRs are never overwritten.
+
+The change-surface classifier treats only `.ai/upstream/ledger.yaml`,
+`.ai/upstream/LEDGER.md`, and `.ai/upstream/scans/YYYY-MM-DD.md` (including numeric
+same-day suffixes starting at `-2`) as scan data eligible for `docs-only`. A complete allowlisted diff skips Vitest and cockpit
+browser shards; mixed code changes, unsafe renames, and incomplete API results
+keep the full matrix. `build-and-package` stays unconditional, so malformed ledger
+entries, missing reports, and an out-of-date render fail its Node unit tests and
+the required **Unit, build, E2E, and package** check.
+
+A maintainer must close/reopen legacy `GITHUB_TOKEN`-created scan PRs once after
+this change reaches `main`, including PR #577. This starts native CI without
+changing ledger decisions or branch protection. Confirm the required check on
+the current head before merging; a scan rerun will not reopen an existing PR.
+
+### Diagnostic dispatch
+
 Manual dispatch remains diagnostic verification. When `pr_number` is supplied,
 both classification jobs resolve the live PR before checkout: its head must match
 `github.sha`, use a same-repository `release/v*` branch, target `main` or `develop`,

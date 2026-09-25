@@ -191,6 +191,37 @@ test('change-surface fails closed when the API or classifier fails', () => {
   assert.equal(push.apiCalled, false);
 });
 
+test('ledger-only PRs skip both matrices but cannot bypass the required build and ledger validation', () => {
+  const { runInNewContext } = require('node:vm');
+  const files = ['.ai/upstream/ledger.yaml', '.ai/upstream/LEDGER.md', '.ai/upstream/scans/2026-09-25.md'];
+  const classified = runClassification({ apiOutput: files.map(file => JSON.stringify(file)) });
+  assert.equal(classified.result.status, 0, classified.result.stderr);
+  assert.equal(classified.output, 'surface=docs-only\n');
+  const ci = workflow();
+  const surface = classified.output.trim().split('=')[1];
+  for (const name of ['vitest', 'cockpit-browser']) {
+    // Actions permits hyphens in property names; JavaScript requires brackets.
+    const condition = ci.jobs[name].if.replace(/needs\.([a-z]+-[a-z]+)/g, "needs['$1']");
+    assert.equal(runInNewContext(condition, { needs: {
+      'change-surface': { outputs: { surface } }, 'classify-pr': { outputs: { bump_pr: 'false' } },
+    } }), false, name);
+  }
+  const gate = ci.jobs.verify.steps.find(step => step.name === 'Require every verification job');
+  for (const buildResult of ['success', 'failure', 'skipped']) {
+    const result = runShell(gate.run, {
+      BUILD_AND_PACKAGE_RESULT: buildResult, VITEST_RESULT: 'skipped', COCKPIT_BROWSER_RESULT: 'skipped',
+      CHANGE_SURFACE: surface, BUMP_PR: 'false',
+    });
+    assert.equal(result.status === 0, buildResult === 'success');
+  }
+  const renamed = runClassification({ fileObjects: [{
+    filename: '.ai/upstream/scans/2026-09-25.md', previous_filename: 'packages/cezar/src/index.ts',
+  }] });
+  assert.equal(renamed.output, 'surface=full-matrix\n');
+  assert.ok(ci.jobs['build-and-package'].steps.some(step => step.run === 'npm run test:unit'));
+  assert.equal(ci.jobs['build-and-package'].if, undefined);
+});
+
 test('classification is not a path filter and build-and-package stays unconditional', () => {
   const ci = workflow();
   assert.equal(ci.on.pull_request_target.paths, undefined);

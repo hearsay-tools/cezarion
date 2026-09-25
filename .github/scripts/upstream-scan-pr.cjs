@@ -2,6 +2,8 @@
 // Runs inside actions/github-script after upstream-scan.cjs printed its summary
 // into SCAN_JSON. Nothing new → no git, no PR. Otherwise commit `.ai/upstream`
 // on `upstream-scan/<date>` and open one draft PR against BASE_BRANCH.
+// Only PR creation uses prGithub (the installation-token client), so native
+// pull_request_target CI starts; git and lookups retain the workflow token.
 //
 // Any OPEN upstream-scan/* PR blocks a new one: its branch may already carry a
 // reviewer's status edits, and a later scan would start from main's ledger and
@@ -34,7 +36,7 @@ function body(summary, report) {
   ].join('\n');
 }
 
-async function openScanPr({ github, context, core, env = process.env, git = defaultGit, readFile = (f) => fs.readFileSync(f, 'utf8') }) {
+async function openScanPr({ github, prGithub, context, core, env = process.env, git = defaultGit, readFile = (f) => fs.readFileSync(f, 'utf8') }) {
   const summary = JSON.parse(env.SCAN_JSON || '{}');
   const base = env.BASE_BRANCH;
   if (!summary.added) {
@@ -59,7 +61,7 @@ async function openScanPr({ github, context, core, env = process.env, git = defa
   git('add', '.ai/upstream');
   git('commit', '-m', `chore(upstream): scan ${summary.date} — ${summary.added} new upstream commits`);
   git('push', '--force', 'origin', `HEAD:refs/heads/${branch}`);
-  const { data } = await github.rest.pulls.create({
+  const { data } = await prGithub.rest.pulls.create({
     ...context.repo,
     base,
     head: branch,

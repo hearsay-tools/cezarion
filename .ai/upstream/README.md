@@ -24,8 +24,22 @@ The scan fetches upstream into `refs/cez-upstream/main`. Never add a git remote 
 `upstream` in this repository: `gh` prefers it over `origin`, and cezar's own GitHub tab
 would start showing the upstream repository.
 
-`.github/workflows/upstream-scan.yml` runs the scan weekly and opens a pull request with the new
-rows. Decide each row by editing `ledger.yaml` in that PR, then merge.
+`.github/workflows/upstream-scan.yml` runs the scan weekly and opens a draft pull request with the
+new rows. PR creation uses the existing [release App](../../docs/publishing.md#release-app-setup)
+to start native CI; branch pushes still use `GITHUB_TOKEN`. Missing App settings fail visibly
+instead of opening a PR without merge-eligible checks. An open scan PR is left untouched so
+reviewer edits survive reruns. Decide each row by editing `ledger.yaml` in that PR, then merge.
+
+Changes limited to `ledger.yaml`, `LEDGER.md`, and `scans/YYYY-MM-DD.md` (including the `-2`, `-3`,
+etc. suffixes for same-day scans) skip Vitest and cockpit browser shards. The required **Unit, build, E2E, and package** check still requires the
+build/package job, including ledger validation. Other files under this directory are not
+covered by the scan-file allowlist.
+
+For a legacy scan PR created with `GITHUB_TOKEN` (including PR #577), after this fix lands on
+`main`, a maintainer must close and reopen the PR once to start native CI. Confirm the required
+aggregate passes on the current head before merging. Re-running the scan leaves an existing PR
+alone; manually dispatching CI is diagnostic verification, not a substitute for required PR
+checks. Ledger decisions and merge approval remain with the reviewer.
 
 ## Deciding an entry
 
