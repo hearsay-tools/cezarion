@@ -52,6 +52,14 @@ export function sanitizeCursorProviderError(text: string): string {
   return collapseCursorProviderError(text).slice(0, CURSOR_PROVIDER_ERROR_MAX_CHARS);
 }
 
+/** Keep only the last `max` characters of captured ACP stderr. Cursor sessions
+ *  stay alive across turns, so appending unbounded chunks would grow until exit. */
+export function appendCursorStderr(previous: string, chunk: string, max = CURSOR_PROVIDER_ERROR_MAX_CHARS): string {
+  if (!chunk) return previous;
+  const next = previous + chunk;
+  return next.length <= max ? next : next.slice(-max);
+}
+
 /**
  * Classify a raw envelope chunk. Auth wins first (login guidance, fatal);
  * a limit phrase with a usable reset instant makes it transient-with-instant;
