@@ -319,6 +319,21 @@ describe('prependSystemPrompt (codex/opencode delivery)', () => {
 });
 
 describe('ClaudeCliRunner token usage', () => {
+  it('forwards a reported zero-dollar result even when Claude reports an error', async () => {
+    const mockBin = fileURLToPath(new URL('../../scripts/mock-claude.mjs', import.meta.url));
+    const events: AgentEvent[] = [];
+    const cwd = mkdtempSync(join(tmpdir(), 'cez-claude-zero-cost-'));
+    try {
+      await new ClaudeCliRunner({ bin: mockBin, timeoutMs: 10_000 }).run(
+        { userPrompt: 'mock:auth-error', cwd, sessionId: '5f701b42-382a-4a6e-b831-0ab9e56eff58' },
+        (event) => events.push(event),
+      ).catch(() => undefined);
+      expect(events.filter((event) => event.type === 'cost')).toEqual([{ type: 'cost', usd: 0 }]);
+    } finally {
+      rmSync(cwd, { force: true, recursive: true });
+    }
+  });
+
   it('counts the aggregate result usage without re-adding assistant-frame snapshots', async () => {
     const mockBin = fileURLToPath(new URL('../../scripts/mock-claude.mjs', import.meta.url));
     const runner = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 60_000 });

@@ -150,6 +150,46 @@ it('exhausts SSL record-layer retries with the provider detail and total attempt
     expect(v1.some(e => e.type === 'turn-end')).toBe(false);
   }, fastRetry());
 });
+it('recovers a resource_exhausted failure on the same session without a premature handoff', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cursor-resource-exhausted-retry-'));
+  const file = join(dir, 'wire.ndjson');
+  vi.stubEnv('CEZ_MOCK_STDIN_FILE', file);
+  try {
+    await withSession('mock:provider-error-resource-exhausted', async (session, v1, v2) => {
+      await waitFor(() => v1.some(e => e.type === 'turn-end' || e.type === 'error'));
+      expect(v1.filter(e => e.type === 'error')).toEqual([]);
+      expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
+      expect(v1.some(e => e.type === 'text' && e.text.includes('Cursor inspected the workspace.'))).toBe(true);
+      expect(session.open).toBe(true);
+      expect(v2.some(e => e.type === 'ask.requested' || e.type === 'session.ended')).toBe(false);
+      const notes = v2.filter((e): e is Extract<UiEvent, { type: 'session.error' }> => e.type === 'session.error');
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toMatchObject({ fatal: false });
+      expect(notes[0]?.message).toContain('[resource_exhausted] Error; retrying (1/2)');
+      const completions = v2.filter((e): e is Extract<UiEvent, { type: 'turn.completed' }> => e.type === 'turn.completed');
+      expect(completions.map(e => e.stopReason)).toEqual(['error', 'end_turn']);
+      const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      expect(rows.filter(row => row.method === 'session/new')).toHaveLength(1);
+      const prompts = rows.filter(row => row.method === 'session/prompt');
+      expect(prompts).toHaveLength(2);
+      expect(prompts[1].params).toEqual(prompts[0].params);
+    }, fastRetry());
+  } finally { vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); }
+});
+it('exhausts resource_exhausted retries with the provider detail and total attempt count', async () => {
+  await withSession('mock:provider-error-resource-exhausted-exhaust', async (session, v1, v2) => {
+    await session.result.catch(() => {});
+    const notes = v2.filter((e): e is Extract<UiEvent, { type: 'session.error' }> => e.type === 'session.error' && !e.fatal);
+    expect(notes.map(e => e.message.match(/retrying \(\d\/2\)/)?.[0])).toEqual(['retrying (1/2)', 'retrying (2/2)']);
+    expect(v1.find(e => e.type === 'error')).toMatchObject({
+      message: 'Cursor provider request failed after 3 attempts: RetriableError: [resource_exhausted] Error',
+    });
+    expect(v2.filter(e => e.type === 'turn.started')).toHaveLength(3);
+    expect(v2.filter(e => e.type === 'turn.completed' && e.stopReason === 'error')).toHaveLength(3);
+    expect(v2.some(e => e.type === 'session.error' && e.fatal)).toBe(true);
+    expect(v1.some(e => e.type === 'turn-end')).toBe(false);
+  }, fastRetry());
+});
 it('fails unknown non-retriable protocol errors without retrying', async () => {
   await withSession('mock:provider-error-unknown-protocol', async (session, v1, v2) => {
     await session.result.catch(() => {});
@@ -392,7 +432,7 @@ it('keeps queued human input ahead of reentrant worker input at turn end', async
   } finally { session.interrupt(); await session.result; vi.unstubAllEnvs(); }
 });
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CursorAcpRunner } from './cursor-acp-runner.ts';
@@ -449,5 +489,92 @@ it('refuses a config acknowledgement that does not confirm the requested value',
 describe('Cursor input delivery (#505)', () => {
   it('declares boundary delivery: a second session/prompt would cancel the running turn', () => {
     expect(new CursorAcpRunner().inputDelivery).toEqual({ mode: 'boundary', consumption: 'unobservable', via: expect.stringContaining('session/prompt') });
+  });
+});
+
+describe('Cursor ACP spawn retry (#529)', () => {
+  const crashRunner = () => new CursorAcpRunner({ bin: mock, providerRetry: { backoffMs: 10 } });
+
+  async function driveCrash(opts: {
+    remaining: number;
+    resume?: boolean;
+    sessionId?: string;
+    stderr?: string;
+    prompt?: string;
+  }, body: (session: AgentSession, v1: AgentEvent[], v2: UiEvent[], wire: string) => Promise<void>) {
+    const dir = mkdtempSync(join(tmpdir(), 'cursor-spawn-retry-'));
+    const crash = join(dir, 'crash-remaining');
+    const wire = join(dir, 'wire.ndjson');
+    writeFileSync(crash, String(opts.remaining));
+    const v1: AgentEvent[] = [];
+    const v2: UiEvent[] = [];
+    const session = crashRunner().startSession({
+      cwd: dir,
+      userPrompt: opts.prompt ?? 'mock:done',
+      timeoutMs: 8000,
+      ...(opts.resume ? { resume: true, sessionId: opts.sessionId ?? 'sess-529' } : {}),
+      env: {
+        CEZ_MOCK_CURSOR_CRASH_ON_LOAD: crash,
+        CEZ_MOCK_STDIN_FILE: wire,
+        ...(opts.stderr ? { CEZ_MOCK_CURSOR_CRASH_STDERR: opts.stderr } : {}),
+      },
+    }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
+    try { await body(session, v1, v2, wire); }
+    finally { session.interrupt(); await session.result.catch(() => {}); rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  it('respawns and session/loads after an unexpected resume exit', async () => {
+    await driveCrash({ remaining: 1, resume: true, sessionId: 'sess-529' }, async (session, v1, v2, wire) => {
+      await waitFor(() => v1.some(e => e.type === 'turn-end') || v1.some(e => e.type === 'error'));
+      expect(v1.filter(e => e.type === 'error')).toEqual([]);
+      expect(v2.some(e => e.type === 'session.started' && e.sessionId === 'sess-529')).toBe(true);
+      expect(v1.some(e => e.type === 'text' && e.text.includes('Done.'))).toBe(true);
+      const rows = readFileSync(wire, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      expect(rows.filter(row => row.method === 'session/load')).toHaveLength(2);
+      expect(rows.filter(row => row.method === 'session/new')).toHaveLength(0);
+      expect(session.open).toBe(true);
+    });
+  });
+
+  it('includes capped stderr when an unexpected bootstrap exit exhausts retries', async () => {
+    const stderr = `${'x'.repeat(2000)} boom`;
+    await driveCrash({ remaining: 10, resume: true, stderr }, async (session, v1) => {
+      await session.result.catch(() => {});
+      const error = v1.find((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error');
+      expect(error?.message).toMatch(/exited unexpectedly \(1\)/);
+      expect(error?.message).toMatch(/after 3 attempts/);
+      expect(error?.message).toContain('boom');
+      expect(error?.message).not.toMatch(/x{501}/);
+      const detail = error?.message.split(': ').slice(1).join(': ') ?? '';
+      expect(detail.length).toBeLessThanOrEqual(500);
+    });
+  });
+
+  it('does not hang when stdin dies during bootstrap while the child stays up', async () => {
+    const hang = fileURLToPath(new URL('../../scripts/mock-cursor-hang-stdin.mjs', import.meta.url));
+    const v1: AgentEvent[] = [];
+    const started = Date.now();
+    const session = new CursorAcpRunner({ bin: hang }).startSession({ cwd: process.cwd(), userPrompt: 'hang', timeoutMs: 8000 }, e => v1.push(e));
+    try {
+      await waitFor(() => v1.some(e => e.type === 'error'), 3000);
+      expect(v1.some(e => e.type === 'error')).toBe(true);
+      expect(Date.now() - started).toBeLessThan(3000);
+    } finally { session.interrupt(); await session.result.catch(() => {}); }
+  });
+
+  it('does not retry a clean session close after end_turn', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cursor-clean-close-'));
+    const wire = join(dir, 'wire.ndjson');
+    try {
+      const v1: AgentEvent[] = [];
+      const result = await crashRunner().run({
+        cwd: dir, userPrompt: 'mock:done', timeoutMs: 5000, env: { CEZ_MOCK_STDIN_FILE: wire },
+      }, e => v1.push(e));
+      expect(v1.some(e => e.type === 'error')).toBe(false);
+      expect(result.text).toContain('Done.');
+      const rows = readFileSync(wire, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      expect(rows.filter(row => row.method === 'initialize')).toHaveLength(1);
+      expect(rows.filter(row => row.method === 'session/new')).toHaveLength(1);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

@@ -51,7 +51,7 @@ test('Codex receives resolved review metadata for PR and manual triggers', async
   assert.doesNotMatch(prompt, /Read `\$GITHUB_EVENT_PATH`/);
 });
 
-test('review-round classifies from trusted base before merge checkout and skips only docs-only PRs', async (t) => {
+test('review-round classifies from trusted base before merge checkout and skips only docs-only and infra-only PRs', async (t) => {
   const { parse } = await import('yaml');
   const { execFileSync } = require('node:child_process');
   const { tmpdir } = require('node:os');
@@ -75,9 +75,11 @@ test('review-round classifies from trusted base before merge checkout and skips 
   assert.match(classifier.run, /previous_filename/);
   assert.match(classifier.run, /change-surface\.cjs/);
   assert.match(classifier.run, /full-matrix/);
+  assert.match(classifier.run, /docs-only\|infra-only\|full-matrix/);
   assert.match(round.env.CHANGE_SURFACE, /steps\.change-surface\.outputs\.change_surface/);
   assert.equal(roundJob.outputs.change_surface, '${{ steps.review-round.outputs.change_surface }}');
-  assert.match(round.run, /\[ "\$EVENT_NAME" = pull_request_target \] && \[ "\$change_surface" = docs-only \]/);
+  assert.match(round.run, /docs-only\|infra-only\|full-matrix/);
+  assert.match(round.run, /\[ "\$EVENT_NAME" = pull_request_target \] && \{ \[ "\$change_surface" = docs-only \] \|\| \[ "\$change_surface" = infra-only \]; \};/);
   assert.match(round.run, /can_review=false/);
 
   const head = 'a'.repeat(40);
@@ -157,6 +159,13 @@ test('review-round classifies from trusted base before merge checkout and skips 
   await t.test('docs-only PRs skip review without a patch id', () => {
     const outputs = runRound({ event: 'pull_request_target', files: ['README.md', 'docs/guide.md'] });
     assert.equal(outputs.change_surface, 'docs-only');
+    assert.equal(outputs.can_review, 'false');
+    assert.equal(outputs.patch_id, '');
+  });
+
+  await t.test('infra-only PRs skip review without a patch id', () => {
+    const outputs = runRound({ event: 'pull_request_target', files: ['.github/workflows/sweep-ci-failures.yml', '.github/scripts/ci-sweep-collect.cjs'] });
+    assert.equal(outputs.change_surface, 'infra-only');
     assert.equal(outputs.can_review, 'false');
     assert.equal(outputs.patch_id, '');
   });

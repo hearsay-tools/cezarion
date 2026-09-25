@@ -149,6 +149,24 @@ describe('RunStore — directional usage persistence', () => {
     });
   });
 
+  it('distinguishes a reported zero-dollar cost from a run with no USD report', () => {
+    const store = RunStore.open(dataDir);
+    const reported = store.createRun({
+      title: 'reported free turn', workflow: 'quick-task', task: 'reported free turn',
+      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+    });
+    const unreported = store.createRun({
+      title: 'unreported turn', workflow: 'quick-task', task: 'unreported turn',
+      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+    });
+    store.updateStep(reported.id, 'task', { costUsd: 0 });
+    store.flush();
+
+    const reopened = RunStore.open(dataDir);
+    expect(reopened.getRun(reported.id)?.costUsd).toBe(0);
+    expect(reopened.getRun(unreported.id)?.costUsd).toBeUndefined();
+  });
+
   it('keeps aggregates absent for old records and incomplete invocation or turn checkpoints', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([LEGACY_RUN]), 'utf8');
     expect(RunStore.open(dataDir).getRun(LEGACY_RUN.id)?.inputTokens).toBeUndefined();

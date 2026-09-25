@@ -8,11 +8,15 @@ import { parseAskMarker, parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
 import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, EOF_TERM_GRACE_MS, EOF_KILL_GRACE_MS } from './runner-runtime.ts';
 import { createCursorUiState, mapCursorMessage, cursorTurnStarted, cursorTurnCompleted } from './cursor-ui-mapper.ts';
-import { classifyCursorProviderError, sanitizeCursorProviderError, type CursorProviderErrorClassification } from './cursor-provider-error.ts';
+import { appendCursorStderr, classifyCursorProviderError, sanitizeCursorProviderError, type CursorProviderErrorClassification } from './cursor-provider-error.ts';
 import type { UiEvent } from './ui-events.ts';
 
 /** Transient provider failures recover on their own (#443): two inline retries, then fatal. */
 export const CURSOR_PROVIDER_MAX_RETRIES = 2;
+/** Unexpected ACP child exit during bootstrap/resume (#529): two respawns, then fatal. */
+export const CURSOR_ACP_SPAWN_MAX_RETRIES = 2;
+/** SIGKILL fallback when a hung bootstrap child ignores SIGTERM. */
+const HUNG_BOOTSTRAP_KILL_MS = 250;
 /** Short fixed backoff for instant-less blips (502, connection reset) — no exponential ladder. */
 export const CURSOR_PROVIDER_RETRY_BACKOFF_MS = 2_000;
 /** A reset instant at most this far out is waited out inline; anything longer fails and lets
@@ -81,8 +85,12 @@ interface PendingProviderRetry { classification: CursorProviderErrorClassificati
 /** One ACP process; prompt responses, never notifications, own turn completion. */
 class CursorSession implements AgentSession {
   readonly result: Promise<AgentRunResult>;
-  private readonly child: ChildProcessWithoutNullStreams;
-  private readonly hasExited: () => boolean;
+  private readonly bin: string;
+  private child!: ChildProcessWithoutNullStreams;
+  private hasExited!: () => boolean;
+  private stderrBuf = '';
+  private spawnAttempts = 0;
+  private bootstrapGeneration = 0;
   private isOpen = true;
   private closing = false;
   private busy = true;
@@ -109,30 +117,106 @@ class CursorSession implements AgentSession {
   private deadline?: NodeJS.Timeout;
   private termTimer?: NodeJS.Timeout;
   private killTimer?: NodeJS.Timeout;
+  private hungKillTimer?: NodeJS.Timeout;
   private resolveResult!: (value: AgentRunResult) => void;
   private settled = false;
 
   constructor(bin: string, private readonly spec: AgentRunSpec, timeoutMs: number, private readonly onEvent: ((event: AgentEvent) => void) | undefined, private readonly opts: SessionOptions, private readonly providerRetry: ProviderRetryOptions) {
+    this.bin = bin;
     this.result = new Promise(resolve => { this.resolveResult = resolve; });
-    this.child = spawn(bin, ['--force', ...(spec.model ? ['--model', spec.model] : []), ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp'], {
-      cwd: spec.cwd, env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
-    });
-    this.hasExited = trackChildExit(this.child);
-    // Always drain stderr, but never echo credentials or unbounded provider logs.
-    this.child.stderr.resume();
-    this.child.stdin.on('error', () => { if (!this.closing) this.fail('Cursor ACP input stream closed'); });
-    this.child.once('error', () => { this.fail('Unable to start Cursor CLI; install it or check CEZ_CURSOR_BIN'); this.finish(); });
-    this.child.once('close', (code, signal) => {
-      if (!this.closing) this.fail(`Cursor ACP exited unexpectedly (${signal ?? code ?? 'unknown'})`);
-      this.finish();
-    });
+    this.spawnAcp();
     const limit = spec.timeoutMs ?? timeoutMs;
     if (limit > 0) {
       this.deadline = setTimeout(() => { this.fail('Cursor ACP timed out and was terminated'); this.interrupt(); }, limit);
       this.deadline.unref();
     }
-    void this.read().catch(() => { if (!this.closing) this.fail('Cursor ACP output stream failed'); });
-    void this.bootstrap().catch(error => { if (!this.closing) this.fail(error instanceof Error ? error.message : 'Cursor ACP initialization failed'); });
+    this.startBootstrap();
+  }
+  /** One ACP child. Unexpected close before `session.started` respawns and re-bootstraps (#529). */
+  private spawnAcp(): void {
+    this.spawnAttempts += 1;
+    this.stderrBuf = '';
+    const spec = this.spec;
+    this.attachChild(spawn(this.bin, ['--force', ...(spec.model ? ['--model', spec.model] : []), ...(spec.additionalDirectories ?? []).flatMap(path => ['--add-dir', path]), 'acp'], {
+      cwd: spec.cwd, env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
+    }));
+  }
+  private attachChild(child: ChildProcessWithoutNullStreams): void {
+    this.child = child;
+    this.hasExited = trackChildExit(child);
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => { this.stderrBuf = appendCursorStderr(this.stderrBuf, chunk); });
+    child.stdin.on('error', () => {
+      if (this.closing || this.child !== child) return;
+      if (!this.ready) { this.abandonHungBootstrap(); return; }
+      this.fail('Cursor ACP input stream closed');
+    });
+    child.once('error', () => {
+      if (this.child !== child) return;
+      this.fail('Unable to start Cursor CLI; install it or check CEZ_CURSOR_BIN');
+      this.finish();
+    });
+    child.once('close', (code, signal) => {
+      if (this.child !== child) return;
+      if (this.closing) { this.finish(); return; }
+      if (!this.ready && this.spawnAttempts <= CURSOR_ACP_SPAWN_MAX_RETRIES) {
+        this.respawn();
+        return;
+      }
+      this.fail(this.unexpectedExitMessage(code, signal));
+      this.finish();
+    });
+    void this.read().catch(() => {
+      if (this.closing || this.child !== child || !this.ready) return;
+      this.fail('Cursor ACP output stream failed');
+    });
+  }
+  private startBootstrap(): void {
+    const gen = this.bootstrapGeneration;
+    void this.bootstrap().catch(error => {
+      if (this.closing || gen !== this.bootstrapGeneration) return;
+      // Process death during bootstrap is the close handler's job (#529). A live child with
+      // a dead stdin is not that path — kill it so close can retry or fail instead of hanging.
+      if (!this.ready && this.hasExited()) return;
+      if (!this.ready && (this.child.stdin.destroyed || !this.child.stdin.writable)) {
+        this.abandonHungBootstrap();
+        return;
+      }
+      this.fail(error instanceof Error ? error.message : 'Cursor ACP initialization failed');
+    });
+  }
+  private abandonHungBootstrap(): void {
+    if (this.closing || this.settled) return;
+    const child = this.child;
+    if (!this.hasExited()) {
+      child.kill('SIGTERM');
+      if (this.hungKillTimer) clearTimeout(this.hungKillTimer);
+      this.hungKillTimer = setTimeout(() => {
+        this.hungKillTimer = undefined;
+        child.kill('SIGKILL');
+      }, HUNG_BOOTSTRAP_KILL_MS);
+      this.hungKillTimer.unref();
+    }
+    this.fail('Cursor ACP input stream closed');
+  }
+  private respawn(): void {
+    this.bootstrapGeneration += 1;
+    this.rejectPending('Cursor ACP process exited');
+    this.spawnAcp();
+    this.startBootstrap();
+  }
+  private rejectPending(message = 'Cursor session closed'): void {
+    for (const request of this.pending.values()) {
+      if (request.timer) clearTimeout(request.timer);
+      request.reject(new Error(message));
+    }
+    this.pending.clear();
+  }
+  private unexpectedExitMessage(code: number | null, signal: NodeJS.Signals | null): string {
+    const reason = signal ?? code ?? 'unknown';
+    const detail = sanitizeCursorProviderError(this.stderrBuf);
+    const attempts = this.spawnAttempts;
+    return `Cursor ACP exited unexpectedly (${reason}) after ${attempts} attempt${attempts === 1 ? '' : 's'}${detail ? `: ${detail}` : ''}`;
   }
   get pid(): number | undefined { return this.child.pid; }
   get open(): boolean { return this.isOpen; }
@@ -417,9 +501,8 @@ class CursorSession implements AgentSession {
   private finish(): void {
     if (this.settled) return;
     this.isOpen = false;
-    for (const timer of [this.deadline, this.autoEnd, this.termTimer, this.killTimer, this.providerRetryTimer]) if (timer) clearTimeout(timer);
-    for (const request of this.pending.values()) { if (request.timer) clearTimeout(request.timer); request.reject(new Error('Cursor session closed')); }
-    this.pending.clear();
+    for (const timer of [this.deadline, this.autoEnd, this.termTimer, this.killTimer, this.hungKillTimer, this.providerRetryTimer]) if (timer) clearTimeout(timer);
+    this.rejectPending();
     if (this.busy && !this.failure) this.mapped(cursorTurnCompleted('cancelled', this.state));
     this.ui({ type: 'session.ended', reason: this.failure ? 'error' : 'end_turn' });
     this.emit({ type: 'done' });

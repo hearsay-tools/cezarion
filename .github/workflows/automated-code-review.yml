@@ -115,7 +115,7 @@ jobs:
             fi
           fi
           case "$change_surface" in
-            docs-only|full-matrix) ;;
+            docs-only|infra-only|full-matrix) ;;
             *) change_surface=full-matrix ;;
           esac
           echo "change_surface=$change_surface" >> "$GITHUB_OUTPUT"
@@ -154,7 +154,7 @@ jobs:
           patch_id=""
           change_surface="${CHANGE_SURFACE:-full-matrix}"
           case "$change_surface" in
-            docs-only|full-matrix) ;;
+            docs-only|infra-only|full-matrix) ;;
             *) change_surface=full-matrix ;;
           esac
           # Empty on workflow_dispatch (no pull_request payload); keep -u safe.
@@ -208,7 +208,9 @@ jobs:
               patch_id=""
             fi
           fi
-          if [ "$EVENT_NAME" = pull_request_target ] && [ "$change_surface" = docs-only ]; then
+          # Docs-only and infra-only PRs have nothing to review (#356, #468):
+          # skip the round entirely so review-complete can finish green.
+          if [ "$EVENT_NAME" = pull_request_target ] && { [ "$change_surface" = docs-only ] || [ "$change_surface" = infra-only ]; }; then
             can_review=false
             patch_id=""
           fi

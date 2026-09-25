@@ -227,6 +227,106 @@ describe('RunManager directional usage accounting', () => {
   });
 });
 
+describe('RunManager reported cost accounting', () => {
+  let repoRoot: string;
+  let store: RunStore;
+  let manager: RunManager;
+  const workflow: WorkflowDef = {
+    name: 'cost-task', source: 'built-in', steps: [{ id: 'task', name: 'Task', prompt: '{{task}}' }],
+  };
+
+  beforeEach(async () => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'cez-cost-accounting-'));
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
+    await run('git', ['add', '-A'], { cwd: repoRoot });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    store = RunStore.open(join(repoRoot, '.ai/cezar'));
+    manager = new RunManager(store, repoRoot);
+  });
+
+  afterEach(() => {
+    runnerHook.runner = undefined;
+    manager.dispose();
+    store.flush();
+    rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  it.each(['fresh', 'legacy-inflated', 'missed-persist'] as const)('counts cumulative Claude USD across Continue steps (%s)', async (priorState) => {
+    let launches = 0;
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT,
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
+      interrupt: async () => undefined,
+      startSession(spec, onEvent, opts): AgentSession {
+        const reports = launches++ === 0 ? [1.67, 1.74, 3.94] : [4.13, 5.01];
+        let open = true;
+        let finish!: (result: AgentRunResult) => void;
+        const result = new Promise<AgentRunResult>((resolve) => { finish = resolve; });
+        queueMicrotask(() => {
+          opts?.onUiEvent?.({ type: 'session.started', sessionId: spec.sessionId!, backend: 'claude' });
+          reports.forEach((usd, index) => {
+            opts?.onUiEvent?.({ type: 'turn.started', turnId: `turn-${index}` });
+            opts?.onUiEvent?.({
+              type: 'turn.completed', turnId: `turn-${index}`, stopReason: 'end_turn',
+              usage: { input: 1, output: 1, total: 100_002, cacheRead: 100_000 }, costUsd: usd,
+            });
+            onEvent?.({ type: 'cost', usd });
+          });
+          onEvent?.({ type: 'text', text: 'Finished.\nCEZ:DONE' });
+          onEvent?.({ type: 'turn-end' });
+        });
+        const close = () => {
+          if (!open) return;
+          open = false;
+          finish({ text: 'Finished.', toolCalls: [], tokensUsed: 0, sessionId: spec.sessionId });
+        };
+        return {
+          result, sendMessage: () => false, sendAgentMessage: () => false,
+          discardQueuedMessages: () => undefined, end: close, interrupt: close,
+          get open() { return open; },
+        };
+      },
+    };
+
+    const record = manager.startRun(workflow, { task: 'cost accounting', runner: 'claude', worktree: false });
+    const waitForCost = async (cost: number) => {
+      const deadline = Date.now() + 15_000;
+      while (store.getRun(record.id)?.status !== 'done' || (store.getRun(record.id)?.steps.length ?? 0) < launches) {
+        if (Date.now() > deadline) throw new Error('cost run did not finish');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(store.getRun(record.id)?.costUsd).toBeCloseTo(cost);
+    };
+    await waitForCost(3.94);
+    if (priorState === 'legacy-inflated') store.updateStep(record.id, record.steps[0]!.id, { costUsd: 7.35, backend: undefined });
+    if (priorState === 'missed-persist') store.updateStep(record.id, record.steps[0]!.id, { costUsd: 1.74 });
+    expect(manager.continueRun(record.id, { text: 'continue' })).toEqual({ ok: true });
+    await waitForCost(priorState === 'legacy-inflated' ? 8.42 : 5.01);
+    expect(store.getRun(record.id)?.steps[0]?.costUsd).toBeCloseTo(priorState === 'legacy-inflated' ? 7.35 : 3.94);
+    expect(store.getRun(record.id)?.steps[1]?.costUsd).toBeCloseTo(1.07);
+  }, 30_000);
+
+  it('persists a reported cost from a Claude error result', async () => {
+    const previous = process.env.CEZ_DRY_RUN;
+    process.env.CEZ_DRY_RUN = '1';
+    try {
+      const record = manager.startRun(workflow, {
+        task: 'mock:auth-error', runner: 'claude', worktree: false,
+      });
+      const deadline = Date.now() + 15_000;
+      while (store.getRun(record.id)?.status !== 'failed') {
+        if (Date.now() > deadline) throw new Error('Claude error run did not finish');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(store.getRun(record.id)?.costUsd).toBe(0);
+    } finally {
+      if (previous === undefined) delete process.env.CEZ_DRY_RUN;
+      else process.env.CEZ_DRY_RUN = previous;
+    }
+  }, 30_000);
+});
+
 it('parallel variants ignore a worktree opt-out and retain isolated mode', () => {
   const repoRoot = mkdtempSync(join(tmpdir(), 'cez-variant-isolation-'));
   const store = RunStore.open(join(repoRoot, '.ai/cezar'));

@@ -87,7 +87,7 @@ describe('scheduledResume', () => {
 describe('formatCost', () => {
   const cases: Array<[input: number | undefined, expected: string]> = [
     [undefined, ''],
-    [0, ''],
+    [0, '$0.00'],
     [0.004, '$0.00'],
     [0.31, '$0.31'],
     [9.999, '$10.00'],

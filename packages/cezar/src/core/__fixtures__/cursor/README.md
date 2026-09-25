@@ -32,6 +32,15 @@ the fixture is that provider envelope with the reconstructed `\n\nError: `
 prefix, not a raw wire capture. Classifier tests read the fixture, and the
 offline ACP mock emits the same text for recovery and exhaustion.
 
+`resource-exhausted.txt` preserves the error text reported in run
+`2f891027-0bdf-4b40-af01-b31c9e2ee697`, sequence 2005, at
+2026-09-24T14:39:58.388Z (Cursor CLI serving `@wjarka/cezarion@0.14.8`, #531).
+The live fatal message was `Cursor provider request failed: RetriableError: [resource_exhausted] Error`
+with no attempt count — the envelope prefix is reconstructed the same way.
+Classifier tests read the fixture, and the offline ACP mock emits the same
+text for recovery and exhaustion. Bare `[resource_exhausted]` without the
+`RetriableError` wrapper is covered in the classifier tests.
+
 `acp-lifecycle.ndjson` is a **constructed, source/schema-derived** sequence,
 not a captured model session. Text, paths, ids, tool arguments and outputs
 are synthetic. Its expected events are hand-authored from the normalized

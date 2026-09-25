@@ -117,7 +117,7 @@ jobs:
           fi
 
           case "$surface" in
-            docs-only|full-matrix) ;;
+            docs-only|infra-only|full-matrix) ;;
             *) surface=full-matrix ;;
           esac
           echo "surface=$surface" >> "$GITHUB_OUTPUT"
@@ -255,8 +255,10 @@ jobs:
 
   vitest:
     name: Vitest shard ${{ matrix.shard }}/2
-    # Docs-only changes and verified manifest-only bot release bumps do not need
-    # to repeat the suites already covered by the relevant release or docs gate.
+    # Docs-only and infra-only changes, and verified manifest-only bot release
+    # bumps, do not need to repeat the suites already covered by the relevant
+    # release or docs gate; infra-only diffs cannot reach the package sources
+    # Vitest covers, and their script tests run under build-and-package.
     needs: [change-surface, classify-pr]
     if: >-
       needs.change-surface.outputs.surface == 'full-matrix' &&
@@ -303,7 +305,7 @@ jobs:
   # contract; this job pipes the log through require-e2e-passed.cjs.
   cockpit-browser:
     name: Cockpit browser E2E shard ${{ matrix.shard }}/4
-    # Same docs-only and verified bump-PR skips as Vitest.
+    # Same docs-only, infra-only, and verified bump-PR skips as Vitest.
     needs: [change-surface, classify-pr]
     if: >-
       needs.change-surface.outputs.surface == 'full-matrix' &&
@@ -389,11 +391,12 @@ jobs:
           COCKPIT_BROWSER_RESULT: ${{ needs['cockpit-browser'].result }}
           CHANGE_SURFACE: ${{ needs.change-surface.outputs.surface }}
           # Same output as classify-pr / release-bump-pr.cjs: only a verified
-          # manifest-only bot release/v* PR may leave Vitest and cockpit skipped.
+          # manifest-only bot release/v* PR, or a docs-only / infra-only
+          # classification, may leave Vitest and cockpit browser skipped.
           BUMP_PR: ${{ needs.classify-pr.outputs.bump_pr }}
         run: |
           test "$BUILD_AND_PACKAGE_RESULT" = success
-          if [ "$CHANGE_SURFACE" = docs-only ] || [ "$BUMP_PR" = true ]; then
+          if [ "$CHANGE_SURFACE" = docs-only ] || [ "$CHANGE_SURFACE" = infra-only ] || [ "$BUMP_PR" = true ]; then
             test "$VITEST_RESULT" = success -o "$VITEST_RESULT" = skipped
             test "$COCKPIT_BROWSER_RESULT" = success -o "$COCKPIT_BROWSER_RESULT" = skipped
           else

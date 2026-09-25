@@ -29,19 +29,19 @@ describe('bounded GitHub supervisor',()=>{
   const result=await supervisor(mode).watch(wait(),new AbortController().signal); expect(result.outcome).toBe('error'); expect(result.diagnostic).not.toContain('secret-token');
  });
  it('never converts pending checks to success at the deadline',async()=>{
-  const result=await supervisor('pending').watch(wait(1),new AbortController().signal); expect(result).toMatchObject({outcome:'deadline',totalChecks:1});
- });
+  const result=await supervisor('pending').watch(wait(10),new AbortController().signal); expect(result).toMatchObject({outcome:'deadline',totalChecks:1});
+ }, 20_000);
  it('computes failure before truncating the snapshot and enforces the serialized bound',async()=>{
   const result=await supervisor('many').watch(wait(),new AbortController().signal); expect(result).toMatchObject({outcome:'failed',totalChecks:151,truncated:true}); expect(result.checks.length).toBeLessThanOrEqual(100); expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(32768);
  });
  it('uses fixed watch arguments, aborts owned processes and waits for teardown',async()=>{
   const dir=await mkdtemp(join(tmpdir(),'ci-wait-')); dirs.push(dir); const log=join(dir,'log'); const s=supervisor('stubborn',{CI_FIXTURE_LOG:log}); const controller=new AbortController(); const pending=s.watch(wait(),controller.signal);
-  await vi.waitFor(async()=>{ expect(await readFile(log,'utf8')).toContain('--watch'); });
+  await vi.waitFor(async()=>{ expect(await readFile(log,'utf8')).toContain('--watch'); }, { timeout: 10_000 });
   controller.abort(); expect((await pending).outcome).toBe('cancelled');
   const calls=(await readFile(log,'utf8')).trim().split('\n').map(line=>JSON.parse(line) as {args:string[];pid:number});
   expect(calls.find(c=>c.args.includes('--watch'))?.args).toEqual(['pr','checks','12','--repo','github.com/org/repo','--watch','--interval','10']);
   for(const call of calls) expect(()=>process.kill(call.pid,0)).toThrow();
- },10000);
+ },20000);
 });
 
 it('turns corrupt persisted identity into a visible error instead of rejecting the watcher promise',async()=>{

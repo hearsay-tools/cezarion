@@ -1,9 +1,20 @@
 #!/usr/bin/env node
 // Offline Cursor ACP wire. Shapes: cursor.com/docs/cli/acp; ACP v1 schema.
 import { createInterface } from 'node:readline';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 const record = (file, value) => { if (file) appendFileSync(file, `${JSON.stringify(value, (key, value) => key === 'env' && Array.isArray(value) ? value.map(item => item.name?.startsWith('CEZ_TOOL_') ? { ...item, value: '[redacted]' } : item) : value)}\n`); };
 record(process.env.CEZ_MOCK_ARGS_FILE, process.argv.slice(2));
+/** #529: remaining-count file. Each session/new or session/load decrements; at >0 the process writes stderr and exits 1 before the reply. */
+function consumeBootstrapCrash() {
+  const file = process.env.CEZ_MOCK_CURSOR_CRASH_ON_LOAD;
+  if (!file) return;
+  let remaining = 0;
+  try { remaining = Number(readFileSync(file, 'utf8')); } catch { return; }
+  if (!Number.isFinite(remaining) || remaining <= 0) return;
+  writeFileSync(file, String(remaining - 1));
+  process.stderr.write(`${process.env.CEZ_MOCK_CURSOR_CRASH_STDERR ?? 'Cursor ACP mock bootstrap crash'}\n`);
+  process.exit(1);
+}
 const emit = value => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...value })}\n`);
 const reply = (id, result) => emit({ id, result });
 let sessionId = 'cursor-offline-session';
@@ -39,6 +50,11 @@ async function prompt(id, content) {
   // #528: observed Cursor SSL record-layer envelope (run 4bcd5420 seq 2667). Matched
   // before the bare mock:provider-error prefix, same pattern as protocol.
   if (input.includes('mock:provider-error-ssl') && (input.includes('-exhaust') || prompts === 1)) { text('\n\nError: RetriableError: [internal] C0AC9346CC7B0000:error:0A000119:SSL routines:tls_get_more_records:decryption failed or bad record mac:../deps/openssl/openssl/ssl/record/methods/tls_common.c:869:'); complete(id); return; }
+  // #531: observed run 2f891027 seq 2005 capacity envelope. Match before the bare prefix.
+  // Do not reuse the protocol mock's `includes('-exhaust')` check: that token is a
+  // substring of `resource-exhausted` and would never recover.
+  if (input.includes('mock:provider-error-resource-exhausted-exhaust')) { text('\n\nError: RetriableError: [resource_exhausted] Error'); complete(id); return; }
+  if (input.includes('mock:provider-error-resource-exhausted') && prompts === 1) { text('\n\nError: RetriableError: [resource_exhausted] Error'); complete(id); return; }
   if (input.includes('mock:provider-error-unknown-protocol')) { text('\n\nError: [invalid_argument] protocol error: unknown frame'); complete(id); return; }
   if (input.includes('mock:provider-error-transient') && prompts === 1) { text('\n\nError: 502 bad gateway.'); complete(id); return; }
   if (input.includes('mock:provider-error-bare')) { text('\n\nError: 502 bad gateway.'); complete(id); return; }
@@ -95,8 +111,8 @@ createInterface({ input: process.stdin }).on('line', async line => {
   switch (msg.method) {
     case 'initialize': reply(msg.id, { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: true } } }); break;
     case 'cursor/list_available_models': reply(msg.id, { models: [{ value: model, name: model, configOptions: configOptions().filter(option => option.id !== 'model') }] }); break;
-    case 'session/new': reply(msg.id, { sessionId, ...configuration() }); break;
-    case 'session/load': sessionId = msg.params.sessionId; reply(msg.id, configuration()); break;
+    case 'session/new': consumeBootstrapCrash(); reply(msg.id, { sessionId, ...configuration() }); break;
+    case 'session/load': consumeBootstrapCrash(); sessionId = msg.params.sessionId; reply(msg.id, configuration()); break;
     case 'session/set_model': model = msg.params.modelId; reply(msg.id, {}); break;
     case 'session/set_config_option':
       if (msg.params.configId === 'model') model = msg.params.value;
