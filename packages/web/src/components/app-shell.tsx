@@ -549,7 +549,7 @@ function SidebarContent({
       </div>
 
       <div className="flex gap-1.5 px-4 pb-2">
-        <Button asChild variant="ghost" className={cn("relative h-[42px] min-w-0 flex-1 justify-start gap-2.5 px-2.5 font-medium text-muted-foreground", activeTo === "/new" && "bg-[var(--task-brand-selected)] text-accent-text")}>
+        <Button asChild variant="ghost" className={cn("relative h-[42px] min-w-0 flex-1 justify-start gap-2.5 px-2.5 text-[13px] font-medium text-muted-foreground", activeTo === "/new" && "bg-[var(--task-brand-selected)] text-accent-text")}>
           {/* A Router Link since R4 Step 1.1: the React /new composer is real, so deliberate
               New task affordances stay inside the SPA. Full document loads of /new (the
               bookmarklet contract) land on the shell like any route (static-ui.ts) — the
@@ -605,7 +605,7 @@ function SidebarContent({
                   className={cn(
                     // h-[34px] is the mockup's desktop row. In the drawer these are touch targets, so
                     // they relax to 44px — the one place the two framings legitimately differ.
-                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-xs md:text-[11px] font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
+                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
                     isActive && 'bg-[var(--task-brand-selected)] text-[var(--accent-text)]'
                   )}
                 >
@@ -816,7 +816,7 @@ function CommandPaletteHint() {
       data-slot="command-palette-hint"
       title="Search — command palette (⌘K / Ctrl+K)"
       onClick={() => openCommandPalette()}
-      className="flex h-11 w-full items-center gap-2 rounded-lg border border-border bg-[var(--task-brand-bg)] px-2.5 text-left text-xs font-normal text-muted-foreground transition-colors hover:border-[var(--composer-border)] hover:text-foreground md:h-10"
+      className="flex h-11 w-full items-center gap-2 rounded-lg border border-border bg-[var(--task-brand-bg)] px-2.5 text-left text-[13px] font-normal text-muted-foreground transition-colors hover:border-[var(--composer-border)] hover:text-foreground md:h-10"
     >
       <SearchIcon className="size-4 shrink-0" aria-hidden="true" />
       <span className="truncate">Search…</span>
