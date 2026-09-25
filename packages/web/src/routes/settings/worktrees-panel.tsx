@@ -26,8 +26,9 @@ type Confirming = { kind: 'reclaim' } | { kind: 'delete'; runId: string; title: 
  * Settings → Resources: the worktrees management panel (#483). Lists every task
  * worktree materialized on disk with its size, age and retention state; a
  * per-row Delete (reclaims the directory AND branch, the spec-006 route), a
- * footer with the total disk used and the keep-limit, and a "Reclaim now" button
- * that runs the count-based enforcer immediately. Both destructive actions
+ * footer with disk used and the reclaimable-vs-keep budget (#566), and a
+ * "Reclaim now" button that runs the count-based enforcer when reclaimable
+ * finished worktrees exceed keep. Both destructive actions
  * confirm through the design-system AlertDialog (native confirm() is banned).
  * Live-updates through the global event stream (queryKeys.worktrees).
  */
@@ -49,7 +50,7 @@ export function WorktreesPanel() {
       void refresh()
       toast(
         result.reclaimed.length === 0
-          ? 'Nothing to reclaim — all worktrees are within the limit'
+          ? 'Nothing to reclaim — no finished worktrees exceed the keep limit'
           : `Reclaimed ${result.reclaimed.length} worktree${result.reclaimed.length === 1 ? '' : 's'} (branch kept)`,
       )
     },
@@ -82,6 +83,9 @@ export function WorktreesPanel() {
 
   const { worktrees: rows, totalBytes, keep } = worktrees.data
   const busy = reclaim.isPending || remove.isPending
+  // Keep budget is reclaimable finished worktrees, not every on-disk dir (#566).
+  const reclaimableCount = rows.filter((row) => row.reclaimable).length
+  const canReclaim = keep > 0 && reclaimableCount > keep
 
   const runConfirmed = () => {
     if (confirming?.kind === 'reclaim') reclaim.mutate()
@@ -129,14 +133,14 @@ export function WorktreesPanel() {
           {rows.length} worktree{rows.length === 1 ? '' : 's'}
           {totalBytes !== null ? ` · ${formatMem(totalBytes) || '0 kB'} on disk` : ' · size unavailable'}
           {' · '}
-          {keep === 0 ? 'keeping all (unlimited)' : `keeping the last ${keep}`}
+          {keep === 0 ? 'keeping all (unlimited)' : `${reclaimableCount} reclaimable, keeping the last ${keep}`}
         </p>
         <Button
           type="button"
           variant="outline"
           size="sm"
           data-action="worktrees-reclaim-now"
-          disabled={busy}
+          disabled={busy || !canReclaim}
           onClick={() => setConfirming({ kind: 'reclaim' })}
         >
           Reclaim now
