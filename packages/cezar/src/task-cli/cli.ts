@@ -298,19 +298,25 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
   const waitMs = values.wait ? timeoutMs(values) : undefined;
   const requestId = (values['request-id'] as string | undefined) ?? randomUUID();
   const skill = values.skill as string | undefined;
+  let warning: string | undefined;
   if (skill !== undefined) {
-    // An explicit request id may name an accepted run whose skill has since disappeared.
-    // Skip the mutable catalog check and let POST /runs verify the payload hash (#504).
-    const alreadyStarted = values['request-id'] !== undefined &&
-      (await listRuns(cockpit)).some((run) => run.clientRequestId === requestId);
-    if (!alreadyStarted) {
+    // Discovery is advisory: the catalog can change before a queued run executes. The server
+    // handles missing skills with a plain prompt, and idempotent retries still go to POST /runs.
+    const unverified = `could not check whether skill "${skill}" is available; the run may use the plain prompt`;
+    try {
       const catalog = await request(cockpit, '/skills?wait=1');
-      if (catalog.status !== 200) refuse(catalog);
-      const skills = skillSchema.array().safeParse(catalog.data);
-      if (!skills.success) invalidResponse('skills');
-      if (!skills.data.some((entry) => entry.name === skill)) {
-        throw new TaskCliError(EXIT.refused, { code: 'refused', status: 404, error: `unknown skill: ${skill}` });
+      if (catalog.status === 200) {
+        const skills = skillSchema.array().safeParse(catalog.data);
+        warning = skills.success
+          ? skills.data.some((entry) => entry.name === skill)
+            ? undefined
+            : `skill "${skill}" is not currently available; the run may use the plain prompt`
+          : unverified;
+      } else {
+        warning = unverified;
       }
+    } catch {
+      warning = unverified;
     }
   }
   const result = await request(cockpit, '/runs', {
@@ -336,6 +342,7 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
     status: run.data.status,
     created: result.status === 201,
     requestId,
+    ...(warning === undefined ? {} : { warning }),
     ...(run.data.branch === undefined ? {} : { branch: run.data.branch }),
   };
   if (waitMs === undefined) { print(started); return EXIT.ok; }

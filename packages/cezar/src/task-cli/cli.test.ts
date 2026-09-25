@@ -55,7 +55,8 @@ describe('cez task', () => {
       const fetchSpy = vi.spyOn(globalThis, 'fetch');
       try {
         expect(await run(['start', 'do the thing', '--skill', 'cli-sample-skill'])).toBe(0);
-        expect(fetchSpy.mock.calls.some(([url]) => String(url) === `${cockpit.api}/skills?wait=1`)).toBe(true);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/skills?wait=1`, `${cockpit.api}/runs`]);
+        expect(last()).not.toHaveProperty('warning');
       } finally { fetchSpy.mockRestore(); }
       const record = store.getRun(last().id as string);
       expect(record?.workflowDef?.steps).toEqual([
@@ -85,35 +86,66 @@ describe('cez task', () => {
       expect(await run(args)).toBe(0);
       const first = last();
       unlinkSync(path);
-      expect(await run(args)).toBe(0);
-      expect(last()).toMatchObject({ id: first.id, created: false });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        expect(await run(args)).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/skills?wait=1`, `${cockpit.api}/runs`]);
+      } finally { fetchSpy.mockRestore(); }
+      expect(last()).toMatchObject({
+        id: first.id, created: false,
+        warning: 'skill "cli-sample-skill" is not currently available; the run may use the plain prompt',
+      });
       expect(store.listRuns()).toHaveLength(1);
     });
 
-    it('lets the server resolve an accepted retry when the skill catalog is unavailable', async () => {
-      const dir = join(harness.repoRoot, '.ai/skills');
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'cli-sample-skill.md'), '# CLI sample skill\n');
-      const args = ['start', 'x', '--skill', 'cli-sample-skill', '--request-id', '2b7e1c9a-5d4f-4a3b-8c2d-1e0f9a8b7c6d'];
-      expect(await run(args)).toBe(0);
-      const first = last();
+    it('warns on an unknown skill, starts the run, and never downloads run history', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        expect(await run(['start', 'x', '--skill', 'not-a-real-cli-skill', '--request-id', '2b7e1c9a-5d4f-4a3b-8c2d-1e0f9a8b7c6d'])).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/skills?wait=1`, `${cockpit.api}/runs`]);
+      } finally { fetchSpy.mockRestore(); }
+      expect(last()).toMatchObject({
+        created: true,
+        warning: 'skill "not-a-real-cli-skill" is not currently available; the run may use the plain prompt',
+      });
+      expect(store.getRun(last().id as string)?.workflowDef?.steps).toEqual([
+        { id: 'task', name: 'not-a-real-cli-skill', skill: 'not-a-real-cli-skill', prompt: '{{task}}' },
+      ]);
+      expect(store.listRuns()).toHaveLength(1);
+    });
+
+    it('warns and still starts when the skill catalog is unavailable', async () => {
       const originalFetch = globalThis.fetch;
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) =>
         String(url) === `${cockpit.api}/skills?wait=1`
           ? Promise.resolve(new Response(JSON.stringify({ error: 'catalog unavailable' }), { status: 503, headers: { 'content-type': 'application/json' } }))
           : originalFetch(url, init));
       try {
-        expect(await run(args)).toBe(0);
-        expect(last()).toMatchObject({ id: first.id, created: false });
-        expect(fetchSpy.mock.calls.some(([url]) => String(url) === `${cockpit.api}/skills?wait=1`)).toBe(false);
+        expect(await run(['start', 'x', '--skill', 'maybe-there'])).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/skills?wait=1`, `${cockpit.api}/runs`]);
       } finally { fetchSpy.mockRestore(); }
+      expect(last()).toMatchObject({
+        created: true,
+        warning: 'could not check whether skill "maybe-there" is available; the run may use the plain prompt',
+      });
       expect(store.listRuns()).toHaveLength(1);
     });
 
-    it('rejects an unknown skill by name without creating a run', async () => {
-      expect(await run(['start', 'x', '--skill', 'not-a-real-cli-skill', '--request-id', '2b7e1c9a-5d4f-4a3b-8c2d-1e0f9a8b7c6d'])).toBe(2);
-      expect(last()).toMatchObject({ error: 'unknown skill: not-a-real-cli-skill' });
-      expect(store.listRuns()).toHaveLength(0);
+    it('warns and still starts when the catalog request fails', async () => {
+      const originalFetch = globalThis.fetch;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) =>
+        String(url) === `${cockpit.api}/skills?wait=1`
+          ? Promise.reject(new TypeError('catalog offline'))
+          : originalFetch(url, init));
+      try {
+        expect(await run(['start', 'x', '--skill', 'maybe-there'])).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/skills?wait=1`, `${cockpit.api}/runs`]);
+      } finally { fetchSpy.mockRestore(); }
+      expect(last()).toMatchObject({
+        created: true,
+        warning: 'could not check whether skill "maybe-there" is available; the run may use the plain prompt',
+      });
+      expect(store.listRuns()).toHaveLength(1);
     });
 
     it('rejects a changed retry payload even after its skill disappears', async () => {
