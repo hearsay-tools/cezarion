@@ -195,9 +195,17 @@ class CursorSession implements AgentSession {
    * While the bootstrap is in flight, prove the child's stdin is still alive with an empty
    * probe write (#587). The data write for a pending request can succeed into the kernel
    * buffer just before the child closes its end of the pipe; without a follow-up write, only
-   * the 15s request timeout can surface the death. The probe is invisible to the agent (zero
-   * bytes, no framing) and routes EPIPE through the same fast stdin 'error' path as a
-   * data-write failure.
+   * the 15s request timeout can surface the death.
+   *
+   * The probe is deliberately zero bytes: it must be invisible to the agent, because any
+   * delivered byte would land in the middle of the line-delimited JSON-RPC stream and break
+   * the framing the agent parses. Zero bytes is the only non-invasive write. On Linux/
+   * Node 24 an empty pipe write still reaches the kernel and reports EPIPE once the read
+   * end is closed (verified: callback error + stdin 'error' event, 5/5), so the EPIPE routes
+   * through the same fast stdin 'error' path as a data-write failure. The probe is a
+   * best-effort fast path, not a replacement for the backstop: on a platform where an
+   * empty pipe write is a no-op the EPIPE never fires and the 15s request timeout (the
+   * pre-existing detection) still bounds the hang.
    */
   private startStdinProbe(): void {
     this.stopStdinProbe();
