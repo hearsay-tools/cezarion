@@ -1,5 +1,7 @@
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { apiRunSchema } from '@open-mercato/cezar-contract';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
@@ -44,6 +46,132 @@ describe('cez task', () => {
       expect(printed).toMatchObject({ status: 'queued', created: true });
       expect(printed.url).toBe(`${cockpit.origin}/p/default/tasks/${printed.id as string}`);
       expect(store.getRun(printed.id as string)?.task).toBe('do the thing');
+    });
+
+    it('starts a run with the selected discovered skill as its agent step', async () => {
+      const dir = join(harness.repoRoot, '.ai/skills');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'cli-sample-skill.md'), '# CLI sample skill\n');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        expect(await run(['start', 'do the thing', '--skill', 'cli-sample-skill'])).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/skills?wait=1`, `${cockpit.api}/runs`]);
+        expect(last()).not.toHaveProperty('warning');
+      } finally { fetchSpy.mockRestore(); }
+      const record = store.getRun(last().id as string);
+      expect(record?.workflowDef?.steps).toEqual([
+        { id: 'task', name: 'cli-sample-skill', skill: 'cli-sample-skill', prompt: '{{task}}' },
+      ]);
+      expect(record?.task).toBe('do the thing');
+    });
+
+    it('retries a skill start with the same request id without creating another run', async () => {
+      const dir = join(harness.repoRoot, '.ai/skills');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'cli-sample-skill.md'), '# CLI sample skill\n');
+      const args = ['start', 'x', '--skill', 'cli-sample-skill', '--request-id', '2b7e1c9a-5d4f-4a3b-8c2d-1e0f9a8b7c6d'];
+      expect(await run(args)).toBe(0);
+      const first = last();
+      expect(await run(args)).toBe(0);
+      expect(last()).toMatchObject({ id: first.id, created: false });
+      expect(store.listRuns()).toHaveLength(1);
+    });
+
+    it('retries an accepted skill start after the skill disappears', async () => {
+      const dir = join(harness.repoRoot, '.ai/skills');
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, 'cli-sample-skill.md');
+      writeFileSync(path, '# CLI sample skill\n');
+      const args = ['start', 'x', '--skill', 'cli-sample-skill', '--request-id', '2b7e1c9a-5d4f-4a3b-8c2d-1e0f9a8b7c6d'];
+      expect(await run(args)).toBe(0);
+      const first = last();
+      unlinkSync(path);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        expect(await run(args)).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/skills?wait=1`, `${cockpit.api}/runs`]);
+      } finally { fetchSpy.mockRestore(); }
+      expect(last()).toMatchObject({
+        id: first.id, created: false,
+        warning: 'skill "cli-sample-skill" is not currently available; the run may use the plain prompt',
+      });
+      expect(store.listRuns()).toHaveLength(1);
+    });
+
+    it('warns on an unknown skill, starts the run, and never downloads run history', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      try {
+        expect(await run(['start', 'x', '--skill', 'not-a-real-cli-skill', '--request-id', '2b7e1c9a-5d4f-4a3b-8c2d-1e0f9a8b7c6d'])).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/skills?wait=1`, `${cockpit.api}/runs`]);
+      } finally { fetchSpy.mockRestore(); }
+      expect(last()).toMatchObject({
+        created: true,
+        warning: 'skill "not-a-real-cli-skill" is not currently available; the run may use the plain prompt',
+      });
+      expect(store.getRun(last().id as string)?.workflowDef?.steps).toEqual([
+        { id: 'task', name: 'not-a-real-cli-skill', skill: 'not-a-real-cli-skill', prompt: '{{task}}' },
+      ]);
+      expect(store.listRuns()).toHaveLength(1);
+    });
+
+    it('warns and still starts when the skill catalog is unavailable', async () => {
+      const originalFetch = globalThis.fetch;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) =>
+        String(url) === `${cockpit.api}/skills?wait=1`
+          ? Promise.resolve(new Response(JSON.stringify({ error: 'catalog unavailable' }), { status: 503, headers: { 'content-type': 'application/json' } }))
+          : originalFetch(url, init));
+      try {
+        expect(await run(['start', 'x', '--skill', 'maybe-there'])).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/skills?wait=1`, `${cockpit.api}/runs`]);
+      } finally { fetchSpy.mockRestore(); }
+      expect(last()).toMatchObject({
+        created: true,
+        warning: 'could not check whether skill "maybe-there" is available; the run may use the plain prompt',
+      });
+      expect(store.listRuns()).toHaveLength(1);
+    });
+
+    it('warns and still starts when the catalog request fails', async () => {
+      const originalFetch = globalThis.fetch;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) =>
+        String(url) === `${cockpit.api}/skills?wait=1`
+          ? Promise.reject(new TypeError('catalog offline'))
+          : originalFetch(url, init));
+      try {
+        expect(await run(['start', 'x', '--skill', 'maybe-there'])).toBe(0);
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([`${cockpit.api}/skills?wait=1`, `${cockpit.api}/runs`]);
+      } finally { fetchSpy.mockRestore(); }
+      expect(last()).toMatchObject({
+        created: true,
+        warning: 'could not check whether skill "maybe-there" is available; the run may use the plain prompt',
+      });
+      expect(store.listRuns()).toHaveLength(1);
+    });
+
+    it('rejects a changed retry payload even after its skill disappears', async () => {
+      const dir = join(harness.repoRoot, '.ai/skills');
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, 'cli-sample-skill.md');
+      writeFileSync(path, '# CLI sample skill\n');
+      const id = '2b7e1c9a-5d4f-4a3b-8c2d-1e0f9a8b7c6d';
+      expect(await run(['start', 'x', '--skill', 'cli-sample-skill', '--request-id', id])).toBe(0);
+      unlinkSync(path);
+      expect(await run(['start', 'different task', '--skill', 'cli-sample-skill', '--request-id', id])).toBe(2);
+      expect(last()).toMatchObject({ error: 'request id payload conflict' });
+      expect(store.listRuns()).toHaveLength(1);
+    });
+
+    it('rejects an empty --skill before discovering a cockpit', async () => {
+      expect(await run(['start', 'x', '--skill', '  '])).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input' });
+      expect(discoveries).toBe(0);
+    });
+
+    it('rejects --skill with --workflow before discovering a cockpit', async () => {
+      expect(await run(['start', 'x', '--skill', 'cli-sample-skill', '--workflow', 'quick-task'])).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input' });
+      expect(discoveries).toBe(0);
+      expect(store.listRuns()).toHaveLength(0);
     });
 
     it('reports created:false for a retry with the same request id', async () => {
@@ -216,6 +344,7 @@ describe('cez task', () => {
       expect(out.join('\n')).toContain('cez task start');
       expect(await run(['start', '--help'])).toBe(0);
       expect(out.at(-1)).toContain('--request-id');
+      expect(out.at(-1)).toMatch(/--workflow[^\n]*\n  --skill /);
       expect(discoveries).toBe(0);
     });
 
