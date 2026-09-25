@@ -186,6 +186,34 @@ describe('the worktrees API', () => {
     expect(existsSync(newWorkspace.path)).toBe(true);
   });
 
+  it('does not mark a finished worker reclaimable while its parent is live without a worktree dir', async () => {
+    const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    store.updateRun(parent.id, {
+      status: 'waiting',
+      worktree: false,
+      delegation: { role: 'root', permissions: ['spawn'], receipts: [] },
+    });
+    const sha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
+    const workspace = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
+    const worker = store.createOwnedRun(
+      { title: 'worker', task: 'worker', workflow: 'quick-task', steps: [] },
+      parent.id,
+      randomUUID(),
+      { role: 'worker', parentRunId: parent.id, permissions: [], workspace },
+      'a'.repeat(64),
+    );
+    store.updateRun(worker.id, {
+      status: 'done',
+      finishedAt: '2026-07-01T00:00:00Z',
+      worktreePath: workspace.path,
+      branch: workspace.branch,
+    });
+    const listed = await getWorktrees();
+    const byRun = Object.fromEntries(listed.worktrees.map((w) => [w.runId, w]));
+    expect(byRun[worker.id]?.reclaimable).toBe(false);
+    expect(listed.worktrees.map((w) => w.runId)).not.toContain(parent.id);
+  });
+
   it('human deletion and worktree removal preserve worker and parent ownership evidence', async () => {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     store.updateRun(parent.id, { status: 'done', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });

@@ -4643,7 +4643,10 @@ export function createApp(deps: ServerDeps) {
       // The keep-limit the panel reports is the one the enforcer will actually
       // apply — inherited from the workspace default when this repo sets none.
       const keep = await resolveWorktreeRetention(repoRoot);
-      const runs = store.listRuns().filter((r) => r.worktreePath && existsSync(r.worktreePath));
+      const allRuns = store.listRuns();
+      // Listing is on-disk dirs only; parent liveness for #575 uses the full store
+      // so a live `worktree: false` parent is not treated as gone (#570 honesty).
+      const runs = allRuns.filter((r) => r.worktreePath && existsSync(r.worktreePath));
       const worktrees = await Promise.all(
         runs.map(async (r) => ({
           runId: r.id,
@@ -4653,7 +4656,7 @@ export function createApp(deps: ServerDeps) {
           // POSIX `du` — degrades to null (Windows / du missing / error); never blocks.
           sizeBytes: await worktreeSizeBytes(r.worktreePath as string),
           finishedAt: r.finishedAt ?? null,
-          reclaimable: isReclaimable(r, runs),
+          reclaimable: isReclaimable(r, allRuns),
         })),
       );
       // Total is null when any size degraded, so the panel never shows a wrong sum.
