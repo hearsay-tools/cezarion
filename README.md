@@ -599,6 +599,18 @@ instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `
 refused (its `error` is passed through), `3` timed out, `64` usage error. `cez task --help` lists
 every flag.
 
+**A bot that lives behind an HTTP endpoint** does not have to poll. Set a **Task webhook** (URL
+and an optional Bearer token) in the project's **Settings → General**, and every task that opts
+in POSTs `task.status` on each status change, `task.question` when it asks something,
+`task.activity` when monitoring starts or ends, and `task.subscribed` when it is handed off. Each
+body carries the same slim projection `cez task status` prints, under `task`. `cez task start`
+opts in whenever the project has a webhook (`--no-notify` to skip it); the cockpit's New task form
+has a **Notify webhook** toggle; and a running task's **Hand off** button (or
+`cez task notify <id> --message '…'`) turns it on later with a note for the bot. The note goes to
+the webhook only, never to the agent. Delivery is best-effort: 10 s timeout, 3 attempts, and a
+failure shows in the thread without touching the task. The token is stored in `~/.cezar` and never
+sent back to a browser. Under `CEZ_DRY_RUN=1` nothing is sent; the payload is logged in the thread.
+
 ## Workflow format
 
 A workflow is a small YAML file in `.ai/cezar/workflows/`:

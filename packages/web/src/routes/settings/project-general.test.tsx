@@ -22,6 +22,9 @@ const ROOT = '/Users/me/code/demo-project'
 const BOOT_ROOT = '/Users/me/code/cezar'
 
 let requests: Array<{ method: string; url: string; body?: unknown }> = []
+/** When set, `GET /api/v1/projects` answers it and a webhook PATCH updates it — the refetch the
+ *  registry mutation awaits on settle would otherwise never answer. */
+let liveRegistry: ProjectListEntry[] | null = null
 
 function serve() {
   requests = []
@@ -37,6 +40,19 @@ function serve() {
       if (url.endsWith('/open-targets')) return json({ targets: [] })
       if (url.startsWith('/api/v1/projects/') && method === 'DELETE') {
         return json({ removed: true, id: url.split('/').pop() })
+      }
+      if (url.endsWith('/webhook/test') && method === 'POST') return json({ ok: true, status: 204 })
+      if (liveRegistry && url === '/api/v1/projects' && method === 'GET') {
+        return json({ projects: liveRegistry, bootProject: 'boot', projectsDir: '~/cezar/projects' })
+      }
+      if (liveRegistry && url.startsWith('/api/v1/projects/') && method === 'PATCH') {
+        const webhook = (body as { webhook: { url: string; token?: string } | null }).webhook
+        const current = liveRegistry.find((entry) => entry.id === 'demo')!
+        const { webhook: previous, ...rest } = current
+        const tokenSet = webhook ? (webhook.token === undefined ? previous?.tokenSet ?? false : webhook.token !== '') : false
+        const next: ProjectListEntry = { ...rest, ...(webhook ? { webhook: { url: webhook.url, tokenSet } } : {}) }
+        liveRegistry = liveRegistry.map((entry) => (entry.id === 'demo' ? next : entry))
+        return json({ project: next })
       }
       if (url.startsWith('/api/v1/projects/') && method === 'PATCH') {
         return json({ project: { ...project('demo'), maxParallel: 3 } })
@@ -131,6 +147,7 @@ const general = () => document.querySelector('[data-slot="project-general"]')
 beforeEach(() => serve())
 
 afterEach(() => {
+  liveRegistry = null
   cleanup()
   vi.unstubAllGlobals()
 })
@@ -164,6 +181,45 @@ describe('the General page', () => {
       const patch = requests.find((r) => r.method === 'PATCH')
       expect(patch?.url).toBe('/api/v1/projects/demo')
       expect(patch?.body).toEqual({ maxParallel: 3 })
+    })
+  })
+
+  it('saves the task webhook URL and token, then sends a test (#589)', async () => {
+    liveRegistry = [project('boot'), project('demo')]
+    renderAt('/p/demo/settings', { registry: liveRegistry })
+    const url = await screen.findByLabelText('URL')
+    fireEvent.change(url, { target: { value: 'https://bot.example/hooks/cez' } })
+    fireEvent.change(screen.getByLabelText('Token'), { target: { value: 'secret-token' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const patch = requests.find((r) => r.method === 'PATCH')
+      expect(patch?.body).toEqual({ webhook: { url: 'https://bot.example/hooks/cez', token: 'secret-token' } })
+    })
+    // The token field empties once saved: it is write-only, and says so instead of echoing it.
+    await waitFor(() => expect((screen.getByLabelText('Token') as HTMLInputElement).value).toBe(''))
+    expect(screen.getByLabelText('Token').getAttribute('placeholder')).toContain('Token set')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send test' }))
+    await waitFor(() => expect(requests.some((r) => r.method === 'POST' && r.url === '/api/v1/projects/demo/webhook/test')).toBe(true))
+    expect((await screen.findByRole('status')).textContent).toContain('Delivered (HTTP 204)')
+  })
+
+  it('keeps the stored token when only the URL changes, and removes the webhook', async () => {
+    liveRegistry = [project('boot'), { ...project('demo'), webhook: { url: 'https://bot.example/a', tokenSet: true } }]
+    renderAt('/p/demo/settings', { registry: liveRegistry })
+    const url = await screen.findByLabelText('URL')
+    expect((url as HTMLInputElement).value).toBe('https://bot.example/a')
+    fireEvent.change(url, { target: { value: 'https://bot.example/b' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(requests.find((r) => r.method === 'PATCH')?.body).toEqual({ webhook: { url: 'https://bot.example/b' } })
+    })
+    const remove = screen.getByRole('button', { name: 'Remove' })
+    await waitFor(() => expect(remove.hasAttribute('disabled')).toBe(false))
+    fireEvent.click(remove)
+    await waitFor(() => {
+      expect(requests.filter((r) => r.method === 'PATCH').at(-1)?.body).toEqual({ webhook: null })
     })
   })
 

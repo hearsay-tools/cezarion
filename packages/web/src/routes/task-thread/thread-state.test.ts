@@ -1025,3 +1025,32 @@ describe('reduceThread — parent/worker conversation', () => {
     expect(turns[0]!.items[0]).toMatchObject({ kind: 'conversation', outcome: { status: 'destroyed' } })
   })
 })
+
+describe('reduceThread — task webhook lines (#589)', () => {
+  const notes = (events: RunEvent[]) =>
+    reduceThread(events).turns.flatMap((turn) => turn.items).filter((item) => item.kind === 'note')
+
+  it('renders the hand-off, a later note and the stop as hand-off lines', () => {
+    const items = notes([
+      line(1, 'handoff', { notify: true, message: 'Take over from here' }),
+      line(2, 'handoff', { notify: true, message: 'PR is up' }),
+      line(3, 'handoff', { notify: false }),
+    ])
+    expect(items.map((item) => item.kind === 'note' && item.icon)).toEqual(['handoff', 'handoff', 'handoff'])
+    const texts = items.map((item) => (item.kind === 'note' ? item.text : ''))
+    expect(texts[0]).toMatch(/^Handed off to webhook · .+ — Take over from here$/)
+    expect(texts[1]).toMatch(/^Note sent to webhook · .+ — PR is up$/)
+    expect(texts[2]).toMatch(/^Stopped notifying the webhook · /)
+  })
+
+  it('renders a failed delivery as a danger line and a dry run as a dim one', () => {
+    const items = notes([
+      line(1, 'webhook.failed', { event: 'task.status', attempts: 3, error: 'HTTP 503' }),
+      line(2, 'webhook.dry-run', { event: 'task.status', payload: { status: 'waiting' } }),
+    ])
+    expect(items).toMatchObject([
+      { tone: 'danger', text: 'Webhook delivery failed (task.status) after 3 attempts: HTTP 503' },
+      { tone: 'dim', text: 'Webhook (dry run, nothing sent): task.status · waiting' },
+    ])
+  })
+})

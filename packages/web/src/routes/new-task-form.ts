@@ -379,6 +379,13 @@ export function buildCreateRunBody(opts: {
   }
 }
 
+/** Add the task-webhook opt-in (#589) to a start body. Kept out of `buildCreateRunBody` on
+ *  purpose: an automation's task is built from that too, and has no `notify`. Sent only when on —
+ *  the server's rule is "absent = off". */
+export function withNotify(body: CreateRunInput, notify: boolean): CreateRunInput {
+  return notify ? { ...body, notify: true } : body
+}
+
 /** The automation editor persists the exact New task serialization, with only the transport-
  * specific `task` key renamed to `prompt`. Images and inbox provenance are deliberately absent:
  * an automation is a reusable template, not one browser submission. */

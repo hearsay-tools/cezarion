@@ -77,6 +77,8 @@ import type {
   RemoveProjectResponse,
   UpdateProjectInput,
   UpdateProjectResponse,
+  NotifyRunInput,
+  TestProjectWebhookResponse,
   RemoveTodoResponse,
   RepoBranchResponse,
   RepoPullBranchesResponse,
@@ -1198,7 +1200,30 @@ export async function updateProject(
   )
 }
 
+/** "Send test" for the project's task webhook (#589): one `task.test` delivery, answered with
+ *  the endpoint's status — the settings page reports it, it does not throw on a failed POST. */
+export async function testProjectWebhook(projectId: string): Promise<TestProjectWebhookResponse> {
+  return unwrap(
+    await cez.api.v1.projects[':projectId'].webhook.test.$post({
+      param: { projectId: encodeURIComponent(projectId) },
+    }),
+    `/projects/${encodeURIComponent(projectId)}/webhook/test`,
+  )
+}
+
 // ---- run mutations ------------------------------------------------------------------------
+
+/** Hand a task to the project webhook, or stop notifying it (#589). The note goes to the
+ *  webhook only, never into the agent session. */
+export async function notifyRun(id: string, input: NotifyRunInput): Promise<RunRecord> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].runs[':id'].notify.$post({
+      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+      json: input,
+    }),
+    runPath(id, '/notify'),
+  )
+}
 
 /** ×1 answers the run record; ×2/×3 answers `{ runs }` — narrow on `'runs' in result`. */
 export async function createRun(input: CreateRunInput): Promise<CreateRunResponse> {

@@ -121,16 +121,8 @@ export const PROJECT_WEBHOOK_TOKEN_MAX_LENGTH = 1024;
 export const projectWebhookUrlSchema = z
   .string()
   .trim()
-  .min(1)
   .max(PROJECT_WEBHOOK_URL_MAX_LENGTH)
-  .refine((value) => {
-    try {
-      const protocol = new URL(value).protocol;
-      return protocol === 'http:' || protocol === 'https:';
-    } catch {
-      return false;
-    }
-  }, 'webhook url must be an http(s) URL');
+  .pipe(z.url({ protocol: /^https?$/, error: 'webhook url must be an http(s) URL' }));
 
 export const projectWebhookInputSchema = z.object({
   url: projectWebhookUrlSchema,

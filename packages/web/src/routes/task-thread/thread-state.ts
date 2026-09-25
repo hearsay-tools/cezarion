@@ -46,6 +46,8 @@ export interface ThreadNote {
   text: string
   tone: 'dim' | 'danger'
   attribution?: { source: 'agent' | 'lifecycle'; parentRunId: string }
+  /** A task-webhook hand-off line (#589) — rendered with the send glyph, not the dim bullet. */
+  icon?: 'handoff'
 }
 
 export type ThreadConversationDelivery = 'queued' | 'delivered' | 'consumed' | 'not-delivered'
@@ -225,6 +227,13 @@ interface DraftTurn {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** ` · 14:02` in the reader's locale, or nothing for an unparseable stamp. */
+function clockTime(ts: unknown): string {
+  const at = typeof ts === 'string' ? new Date(ts) : undefined
+  if (!at || Number.isNaN(at.getTime())) return ''
+  return ` · ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
 }
 
 function str(value: unknown): string | undefined {
@@ -481,8 +490,38 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
     currentTurn().entries.push({ origin: 'meta', entry })
     return entry
   }
+  /** Whether a `handoff` event already turned notify on, so a later one reads as a note (#589). */
+  let handedOff = false
   for (const event of events) {
     switch (event.type) {
+      // ---- task webhook (#589) --------------------------------------------------------
+      case 'handoff': {
+        const at = clockTime(event.ts)
+        const message = str(event.message)
+        const text = event.notify === false
+          ? `Stopped notifying the webhook${at}`
+          : `${handedOff ? 'Note sent to webhook' : 'Handed off to webhook'}${at}${message ? ` — ${message}` : ''}`
+        handedOff = event.notify !== false
+        currentTurn().entries.push({
+          origin: 'meta',
+          entry: { kind: 'note', id: `v1:${event.seq}`, text, tone: 'dim', icon: 'handoff' },
+        })
+        break
+      }
+      case 'webhook.failed': {
+        const attempts = typeof event.attempts === 'number' ? event.attempts : undefined
+        const text = `Webhook delivery failed${str(event.event) ? ` (${str(event.event)})` : ''}${
+          attempts ? ` after ${attempts} attempt${attempts === 1 ? '' : 's'}` : ''
+        }: ${str(event.error) ?? 'unknown error'}`
+        currentTurn().entries.push({ origin: 'meta', entry: { kind: 'note', id: `v1:${event.seq}`, text, tone: 'danger' } })
+        break
+      }
+      case 'webhook.dry-run': {
+        const payload = (event.payload ?? {}) as { status?: unknown }
+        const text = `Webhook (dry run, nothing sent): ${str(event.event) ?? 'delivery'}${str(payload.status) ? ` · ${str(payload.status)}` : ''}`
+        currentTurn().entries.push({ origin: 'meta', entry: { kind: 'note', id: `v1:${event.seq}`, text, tone: 'dim' } })
+        break
+      }
       // ---- turn boundaries ------------------------------------------------------------
       case 'conversation-message': {
         const parsed = conversationMessageEventSchema.safeParse(event)

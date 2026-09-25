@@ -240,6 +240,8 @@ function serve(overrides: {
   /** Agent accounts (spec 2026-07-29-agent-profiles). Omitted answers a 404, which is how every
    *  pre-existing test here keeps a composer with no account pill at all. */
   agentProfiles?: AgentProfilesResponse
+  /** `GET /api/v1/projects`. Omitted answers a 404 — no registry, so no task webhook (#589). */
+  projects?: unknown
 } = {}) {
   const data = {
     health: HEALTH,
@@ -308,6 +310,7 @@ function serve(overrides: {
       if (url === '/api/v1/config' && method === 'PUT')
         return json({ baseBranch: (body as { baseBranch: string | null }).baseBranch, defaultRunner: 'claude' })
       if (url === '/api/v1/workspace/config' && method === 'GET') return json(data.workspaceConfig)
+      if (url === '/api/v1/projects' && method === 'GET' && data.projects) return json(data.projects)
       if (url === '/api/v1/workspace/agent-profiles' && method === 'GET' && data.agentProfiles) {
         return json(data.agentProfiles)
       }
@@ -1953,6 +1956,43 @@ describe('the Start | Plan first toggle', () => {
     renderNewTask()
     await pillReady()
     expect(planToggle().getAttribute('aria-checked')).toBe('true')
+  })
+})
+
+describe('the Notify webhook toggle (#589)', () => {
+  const registry = (webhook?: { url: string; tokenSet: boolean }) => ({
+    projects: [{
+      id: 'demo', name: 'demo', root: '/repo', addedAt: '', lastOpenedAt: '', source: 'local', status: 'ok',
+      ...(webhook ? { webhook } : {}),
+    }],
+    bootProject: 'demo',
+    projectsDir: '~/cezar/projects',
+  })
+  const toggle = () => document.querySelector('[data-slot="notify-webhook-toggle"]') as HTMLButtonElement | null
+
+  it('is not rendered when the project has no webhook, and the start body says nothing', async () => {
+    serve({ projects: registry() })
+    renderNewTask()
+    await pillReady()
+    await waitFor(() => expect(requests.some((r) => r.url === '/api/v1/projects')).toBe(true))
+    expect(toggle()).toBeNull()
+    fireEvent.change(textarea(), { target: { value: 'do it' } })
+    await startTask()
+    expect(postedBody()).not.toHaveProperty('notify')
+  })
+
+  it('renders off when the project has a webhook, and sends notify:true once checked', async () => {
+    serve({ projects: registry({ url: 'https://bot.example/hooks/cez', tokenSet: true }) })
+    renderNewTask()
+    await pillReady()
+    await waitFor(() => expect(toggle()).not.toBeNull())
+    expect(toggle()!.getAttribute('aria-checked')).toBe('false')
+    expect(toggle()!.textContent).toContain('bot.example/hooks/cez')
+    fireEvent.click(toggle()!)
+    expect(toggle()!.getAttribute('aria-checked')).toBe('true')
+    fireEvent.change(textarea(), { target: { value: 'do it' } })
+    await startTask()
+    expect(postedBody()).toMatchObject({ notify: true })
   })
 })
 
