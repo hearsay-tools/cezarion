@@ -18,7 +18,7 @@ const bravo = '33333333-3333-4333-8333-333333333333'
 const large = '44444444-4444-4444-8444-444444444444'
 const diagnostics = '55555555-5555-4555-8555-555555555555'
 const reqA = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', senderRunId: parent, recipientRunId: alpha, kind: 'request', text: 'Inspect the parser and report findings.', createdAt: '2026-09-20T12:00:00Z', state: 'accepted', requestHash: 'a'.repeat(64) }
-const reqB = { ...reqA, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', recipientRunId: bravo }
+const reqB = { ...reqA, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', recipientRunId: bravo, createdAt: '2026-09-20T12:03:00Z' }
 const reply = { ...reqA, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', senderRunId: alpha, recipientRunId: parent, kind: 'reply', requestId: reqA.id, text: 'Alpha found one parser edge case.', createdAt: '2026-09-20T12:05:00Z' }
 const follow = { ...reqA, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', kind: 'follow-up', requestId: reqA.id, text: 'Also check empty input.' }
 const projection = (message: object) => ({ type: 'conversation-message', message, delivery: 'delivered' })
@@ -114,6 +114,9 @@ describe('chronological worker conversation', () => {
             return { top: clock.top - box.top, right: box.right - clock.right, overflow: card.scrollWidth > card.clientWidth };
           });
         })()`, value => Array.isArray(value) && value.length === 4)
+        const batchTimes = browser.waitForValue<string[]>(`[...document.querySelectorAll('${request} ul li time')].map(el => el.dateTime)`, value => value.length === 2)
+        expect(batchTimes).toEqual([reqA.createdAt, reqB.createdAt])
+        expect(browser.waitForValue<string>(`document.querySelector('${request} > div.grid')?.textContent`, value => value.includes('First sent'))).toContain('First sent')
         if (width === 360) {
           const wrappedHeading = browser.waitForValue<number>(`document.querySelector('${request} > div > div > p')?.getBoundingClientRect().height`)
           expect(wrappedHeading).toBeGreaterThan(50)

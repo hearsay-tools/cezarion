@@ -370,7 +370,8 @@ function WorkerConversationBatchCard({
           ) : null}
         </div>
         {sentAt !== undefined && clockLabel(sentAt) !== undefined ? (
-          <span className="justify-self-end whitespace-nowrap">
+          <span className="flex shrink-0 items-center justify-self-end gap-1 whitespace-nowrap text-[11px] text-soft-foreground">
+            {batch.messages.length > 1 ? 'First sent' : null}
             <MessageTime ts={sentAt} />
           </span>
         ) : null}
@@ -389,6 +390,7 @@ function WorkerConversationBatchCard({
         <ul className="grid min-w-0 gap-1 text-xs text-muted-foreground">
           {batch.messages.map((message) => {
             const status = conversationStatusLabel(message)
+            const sentAt = message.createdAt ?? message.recordedAt
             return (
               <li key={message.id} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2">
                 <Link
@@ -400,6 +402,9 @@ function WorkerConversationBatchCard({
                 </Link>
                 {status ? <span data-slot="conversation-outcome">{status}</span> : null}
                 <ConversationReference message={message} runId={runId} taskTitles={taskTitles} />
+                {sentAt !== undefined && clockLabel(sentAt) !== undefined ? (
+                  <span className="ml-auto whitespace-nowrap"><MessageTime ts={sentAt} /></span>
+                ) : null}
               </li>
             )
           })}

@@ -615,6 +615,29 @@ describe('parent/worker conversation transcript', () => {
     expect(document.activeElement).toBe(rows[2])
   })
 
+  it('shows each batched request time beside its recipient and identifies the first send in the corner', () => {
+    const parent = '11111111-1111-4111-8111-111111111111'
+    const alpha = '22222222-2222-4222-8222-222222222222'
+    const bravo = '55555555-5555-4555-8555-555555555555'
+    const first = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', senderRunId: parent, recipientRunId: alpha,
+      kind: 'request', text: 'Ping both workers', createdAt: '2026-09-08T12:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' }
+    const second = { ...first, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', recipientRunId: bravo,
+      createdAt: '2026-09-08T12:03:00.000Z' }
+    const entries = reduceThread(asRunEvents([
+      { type: 'conversation-message', message: first, delivery: 'delivered' },
+      { type: 'conversation-message', message: second, delivery: 'delivered' },
+    ])).turns.flatMap(turn => turn.items)
+    render(<MemoryRouter><SessionTranscript runId={parent} viewId="main" sections={[{ id: 'turn', entries }]}
+      mode="document" taskTitles={{ [alpha]: 'Alpha', [bravo]: 'Bravo' }} /></MemoryRouter>)
+
+    const batch = document.querySelector('[data-slot="worker-conversation-card"]')!
+    expect(document.querySelectorAll('[data-slot="worker-conversation-card"]')).toHaveLength(1)
+    expect(batch.querySelector('div.grid')?.textContent).toContain('First sent')
+    expect(batch.querySelector('div.grid time')?.getAttribute('datetime')).toBe(first.createdAt)
+    expect(screen.getByRole('link', { name: 'Alpha — Pending' }).closest('li')?.querySelector('time')?.getAttribute('datetime')).toBe(first.createdAt)
+    expect(screen.getByRole('link', { name: 'Bravo — Pending' }).closest('li')?.querySelector('time')?.getAttribute('datetime')).toBe(second.createdAt)
+  })
+
   it.each(['timed-out', 'cancelled'])('links a late reply without rewriting a %s outcome', (status) => {
     const parent = '11111111-1111-4111-8111-111111111111'
     const alpha = '22222222-2222-4222-8222-222222222222'
