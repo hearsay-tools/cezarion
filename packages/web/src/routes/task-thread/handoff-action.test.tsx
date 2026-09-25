@@ -155,6 +155,20 @@ describe('Notifying chip', () => {
     })
   })
 
+  it('opens "Send a note…" empty after a note was sent (#594 review)', async () => {
+    serve(WEBHOOK)
+    renderHeader(run({ notify: true }))
+    fireEvent.click((await openMenu()).getByRole('menuitem', { name: /Send a note/ }))
+    let dialog = within(await screen.findByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText('Note'), { target: { value: 'PR is green' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Send note' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    fireEvent.click((await openMenu()).getByRole('menuitem', { name: /Send a note/ }))
+    dialog = within(await screen.findByRole('dialog'))
+    expect((dialog.getByLabelText('Note') as HTMLTextAreaElement).value).toBe('')
+  })
+
   it('stops notifying', async () => {
     const sent = serve(WEBHOOK)
     renderHeader(run({ notify: true }))

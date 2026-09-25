@@ -1,5 +1,5 @@
 import { BellOffIcon, InfoIcon, MessageSquareIcon, SendIcon } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 
 import { useNotifyRun, useProjects } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
@@ -149,6 +149,10 @@ function HandoffDialog({
   const noteId = useId()
   const hintId = useId()
   const [note, setNote] = useState('')
+  // The dialog stays mounted between uses, so a note already sent must not reopen with it.
+  useEffect(() => {
+    if (mode !== null) setNote('')
+  }, [mode])
   const isNote = mode === 'note'
   const label = webhookLabel(url)
 
