@@ -10,8 +10,8 @@ const fixture = fileURLToPath(new URL('./fixtures/gh.mjs', import.meta.url));
 const supervisors: CiWatcherSupervisor[] = [];
 const dirs: string[] = [];
 const wait = (seconds = 30): CiWait => ({id:crypto.randomUUID(),generation:'generation',turnId:'turn',prUrl:'https://github.com/org/repo/pull/12',repository:'org/repo',prNumber:12,headSha:'a'.repeat(40),registeredAt:new Date().toISOString(),deadline:new Date(Date.now()+seconds*1000).toISOString(),timeoutSeconds:seconds,phase:'registered'});
-function supervisor(mode: string, env: Record<string,string> = {}) {
- const s = new CiWatcherSupervisor({github:new GithubCiClient({command:{file:process.execPath,args:[fixture]},env:{...process.env,CI_FIXTURE_MODE:mode,...env}})}); supervisors.push(s); return s;
+function supervisor(mode: string, env: Record<string,string> = {}, github?: GithubCiClient) {
+ const s = new CiWatcherSupervisor({github: github ?? new GithubCiClient({command:{file:process.execPath,args:[fixture]},env:{...process.env,CI_FIXTURE_MODE:mode,...env}})}); supervisors.push(s); return s;
 }
 afterEach(async()=>{for(const s of supervisors.splice(0)) s.close(); vi.useRealTimers(); for(const dir of dirs.splice(0)) await rm(dir,{recursive:true,force:true});});
 describe('bounded GitHub supervisor',()=>{
@@ -35,7 +35,16 @@ describe('bounded GitHub supervisor',()=>{
   const result=await supervisor('many').watch(wait(),new AbortController().signal); expect(result).toMatchObject({outcome:'failed',totalChecks:151,truncated:true}); expect(result.checks.length).toBeLessThanOrEqual(100); expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(32768);
  });
  it('uses fixed watch arguments, aborts owned processes and waits for teardown',async()=>{
-  const dir=await mkdtemp(join(tmpdir(),'ci-wait-')); dirs.push(dir); const log=join(dir,'log'); const s=supervisor('stubborn',{CI_FIXTURE_LOG:log}); const controller=new AbortController(); const pending=s.watch(wait(),controller.signal);
+  const dir=await mkdtemp(join(tmpdir(),'ci-wait-')); dirs.push(dir); const log=join(dir,'log');
+  // github.watch() starts only after a pending snapshot (three sequential fixture spawns),
+  // so waiting on a fixed budget for the log line loses under load. Resolve the instant
+  // the call itself happens; the log wait below then spans only the spawned fixture's boot.
+  const github=new GithubCiClient({command:{file:process.execPath,args:[fixture]},env:{...process.env,CI_FIXTURE_MODE:'stubborn',CI_FIXTURE_LOG:log}});
+  let onWatch!: ()=>void; const watchInvoked=new Promise<void>(resolve=>{onWatch=resolve;});
+  const realWatch=github.watch.bind(github);
+  github.watch=(pr,signal)=>{const pendingWatch=realWatch(pr,signal); onWatch(); return pendingWatch;};
+  const s=supervisor('stubborn',{},github); const controller=new AbortController(); const pending=s.watch(wait(),controller.signal);
+  await watchInvoked;
   await vi.waitFor(async()=>{ expect(await readFile(log,'utf8')).toContain('--watch'); }, { timeout: 10_000 });
   controller.abort(); expect((await pending).outcome).toBe('cancelled');
   const calls=(await readFile(log,'utf8')).trim().split('\n').map(line=>JSON.parse(line) as {args:string[];pid:number});
