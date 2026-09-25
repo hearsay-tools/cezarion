@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { RunRecord, RunStatus } from './store.ts';
 import { isReclaimable, selectReclaimableWorktrees } from './retention.ts';
@@ -40,7 +41,7 @@ function run(partial: {
     status: partial.status,
     createdAt: partial.createdAt ?? '2026-01-01T00:00:00.000Z',
     finishedAt: partial.finishedAt,
-    worktreePath: partial.worktreePath === null ? undefined : partial.worktreePath ?? `/wt/${partial.id}`,
+    worktreePath: partial.worktreePath === null ? undefined : partial.worktreePath ?? process.cwd(),
     worktreeReclaimedAt: partial.worktreeReclaimedAt,
     steps: [],
     delegation,
@@ -90,6 +91,24 @@ describe('selectReclaimableWorktrees (#483)', () => {
     expect(selectReclaimableWorktrees(runs, 5)).toEqual([]);
     // With keep below the single reclaimable count it still never selects the excluded ones.
     // (live-dir is the only candidate; keeping 0 finished means "unlimited", see next test.)
+  });
+
+  it('does not let a missing worktree directory occupy a keep slot (#571)', () => {
+    const missingPath = join(process.cwd(), '.missing-retention-worktree-571');
+    const stale = run({
+      id: 'stale',
+      status: 'done',
+      worktreePath: missingPath,
+      finishedAt: '2026-07-02T00:00:00Z',
+    });
+    const live = run({
+      id: 'live',
+      status: 'done',
+      finishedAt: '2026-07-01T00:00:00Z',
+    });
+
+    expect(isReclaimable(stale)).toBe(false);
+    expect(selectReclaimableWorktrees([stale, live], 1)).toEqual([]);
   });
 
   it('treats keep=0 as unlimited (never reclaims)', () => {
