@@ -561,6 +561,28 @@ describe('Cursor ACP spawn retry (#529)', () => {
       await waitFor(() => v1.some(e => e.type === 'error'), 10_000);
       expect(v1.some(e => e.type === 'error')).toBe(true);
       expect(Date.now() - started).toBeLessThan(15_000);
+      // #587: pin the detection path — the write must fail with EPIPE, not the
+      // child aborting (a SIGABRT respawn-exhaustion error would also satisfy the
+      // wait above while the fixture's "child stays up" premise is broken).
+      const error = v1.find((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error');
+      expect(error?.message).toMatch(/input stream closed/i);
+    } finally { session.interrupt(); await session.result.catch(() => {}); }
+  }, 20_000);
+
+  it('surfaces a stdin death that outlives the pending bootstrap write', async () => {
+    const hang = fileURLToPath(new URL('../../scripts/mock-cursor-hang-stdin-late.mjs', import.meta.url));
+    const v1: AgentEvent[] = [];
+    const started = Date.now();
+    // session/new is written while the pipe's read end is still open, so no data
+    // write can fail; only the bootstrap stdin probe surfaces the death before the
+    // 15s request timeout (session timeoutMs stays well above the wait).
+    const session = new CursorAcpRunner({ bin: hang }).startSession({ cwd: process.cwd(), userPrompt: 'hang', timeoutMs: 30_000 }, e => v1.push(e));
+    try {
+      await waitFor(() => v1.some(e => e.type === 'error'), 10_000);
+      expect(v1.some(e => e.type === 'error')).toBe(true);
+      expect(Date.now() - started).toBeLessThan(15_000);
+      const error = v1.find((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error');
+      expect(error?.message).toMatch(/input stream closed/i);
     } finally { session.interrupt(); await session.result.catch(() => {}); }
   }, 20_000);
 

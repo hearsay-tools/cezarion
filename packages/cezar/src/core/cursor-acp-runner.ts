@@ -17,6 +17,10 @@ export const CURSOR_PROVIDER_MAX_RETRIES = 2;
 export const CURSOR_ACP_SPAWN_MAX_RETRIES = 2;
 /** SIGKILL fallback when a hung bootstrap child ignores SIGTERM. */
 const HUNG_BOOTSTRAP_KILL_MS = 250;
+/** Cadence of the empty bootstrap stdin probe writes (#587): a data write can land in the
+ *  kernel buffer just before the child closes its end of the pipe, and the next real write
+ *  may not come until the turn — the probe is what turns that EPIPE into a fast failure. */
+const BOOTSTRAP_STDIN_PROBE_MS = 500;
 /** Short fixed backoff for instant-less blips (502, connection reset) — no exponential ladder. */
 export const CURSOR_PROVIDER_RETRY_BACKOFF_MS = 2_000;
 /** A reset instant at most this far out is waited out inline; anything longer fails and lets
@@ -118,6 +122,7 @@ class CursorSession implements AgentSession {
   private termTimer?: NodeJS.Timeout;
   private killTimer?: NodeJS.Timeout;
   private hungKillTimer?: NodeJS.Timeout;
+  private stdinProbe?: NodeJS.Timeout;
   private resolveResult!: (value: AgentRunResult) => void;
   private settled = false;
 
@@ -173,6 +178,7 @@ class CursorSession implements AgentSession {
   }
   private startBootstrap(): void {
     const gen = this.bootstrapGeneration;
+    this.startStdinProbe();
     void this.bootstrap().catch(error => {
       if (this.closing || gen !== this.bootstrapGeneration) return;
       // Process death during bootstrap is the close handler's job (#529). A live child with
@@ -184,6 +190,29 @@ class CursorSession implements AgentSession {
       }
       this.fail(error instanceof Error ? error.message : 'Cursor ACP initialization failed');
     });
+  }
+  /**
+   * While the bootstrap is in flight, prove the child's stdin is still alive with an empty
+   * probe write (#587). The data write for a pending request can succeed into the kernel
+   * buffer just before the child closes its end of the pipe; without a follow-up write, only
+   * the 15s request timeout can surface the death. The probe is invisible to the agent (zero
+   * bytes, no framing) and routes EPIPE through the same fast stdin 'error' path as a
+   * data-write failure.
+   */
+  private startStdinProbe(): void {
+    this.stopStdinProbe();
+    const child = this.child;
+    this.stdinProbe = setInterval(() => {
+      if (this.closing || this.settled || this.ready || this.child !== child || child.stdin.destroyed) {
+        this.stopStdinProbe();
+        return;
+      }
+      child.stdin.write(Buffer.alloc(0), () => { /* the stdin 'error' event owns the failure */ });
+    }, BOOTSTRAP_STDIN_PROBE_MS);
+    this.stdinProbe.unref();
+  }
+  private stopStdinProbe(): void {
+    if (this.stdinProbe) { clearInterval(this.stdinProbe); this.stdinProbe = undefined; }
   }
   private abandonHungBootstrap(): void {
     if (this.closing || this.settled) return;
@@ -300,6 +329,7 @@ class CursorSession implements AgentSession {
     this.emit({ type: 'session', sessionId: this.sessionId });
     this.ui({ type: 'session.started', backend: 'cursor', sessionId: this.sessionId, cwd: this.spec.cwd, ...(this.spec.model ? { model: this.spec.model } : {}) });
     this.ready = true;
+    this.stopStdinProbe();
     this.startTurn([{ type: 'text', text: prependSystemPrompt(this.spec.systemPrompt, this.spec.userPrompt) }, ...(this.spec.images ?? [])]);
   }
   private async setConfigOption(configId: string, value: string): Promise<void> {
@@ -400,7 +430,7 @@ class CursorSession implements AgentSession {
   interrupt(): void { this.closeInput(); this.terminate(); }
   private closeInput(): void {
     if (this.closing) return;
-    this.closing = true; this.isOpen = false; this.clearAutoEnd(); this.discardQueuedMessages();
+    this.closing = true; this.isOpen = false; this.clearAutoEnd(); this.discardQueuedMessages(); this.stopStdinProbe();
     if (this.pendingAsk) this.write({ id: this.pendingAsk.id, result: { outcome: { outcome: 'cancelled' } } });
     this.pendingAsk = undefined;
     if (this.sessionId && this.busy) this.write({ method: 'session/cancel', params: { sessionId: this.sessionId } });
@@ -501,6 +531,7 @@ class CursorSession implements AgentSession {
   private finish(): void {
     if (this.settled) return;
     this.isOpen = false;
+    this.stopStdinProbe();
     for (const timer of [this.deadline, this.autoEnd, this.termTimer, this.killTimer, this.hungKillTimer, this.providerRetryTimer]) if (timer) clearTimeout(timer);
     this.rejectPending();
     if (this.busy && !this.failure) this.mapped(cursorTurnCompleted('cancelled', this.state));
