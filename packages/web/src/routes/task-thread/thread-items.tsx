@@ -13,6 +13,7 @@ import { splitToolTitle, streakLabel, type ContextGroupBlock, type WorkerConvers
 import { useThreadCardCache } from './thread-open-cards'
 import { ConversationNavigation } from './conversation-navigation'
 import { isNearBottom } from './thread-scroll'
+import { MessageTime } from './thread-time'
 import type { ThreadConversationMessage, ThreadEntry, ThreadImage, ThreadNote, ThreadProviderAuthRequired } from './thread-state'
 import {
   conversationDeliveryLabel,
@@ -99,6 +100,7 @@ export function UserBubble({
   text,
   imageCount = 0,
   images = [],
+  ts,
   onEdit,
   onRemove,
   editLabel = 'Edit message',
@@ -107,6 +109,9 @@ export function UserBubble({
   text: string
   imageCount?: number
   images?: readonly string[]
+  /** When it was sent (#941) — a small stamp at the foot of the bubble. Omitted (and nothing
+   *  rendered) whenever the source had no usable timestamp. */
+  ts?: string
   onEdit?: (text: string) => Promise<void>
   onRemove?: () => Promise<void>
   editLabel?: string
@@ -262,6 +267,11 @@ export function UserBubble({
       {missing > 0 ? (
         <span className="mt-1 block text-xs text-soft-foreground">
           {missing} image{missing > 1 ? 's' : ''} attached
+        </span>
+      ) : null}
+      {ts !== undefined ? (
+        <span className="mt-1 flex justify-end">
+          <MessageTime ts={ts} />
         </span>
       ) : null}
     </ConversationMessage>

@@ -23,6 +23,10 @@ const RUN = {
   task: 'Inspect a long session without downloading the archive.',
   status: 'running',
   finishedAt: undefined,
+  // Same local day as the rewritten event `ts` below. A 16-day gap would insert a day
+  // separator between the task bubble and the first turn, and that thin row is not a
+  // stable history anchor (#435).
+  createdAt: '2026-07-30T00:00:00.000Z',
   steps: [record.steps[0]],
   pullRequestUrl: undefined,
 }
