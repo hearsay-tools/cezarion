@@ -331,9 +331,7 @@ export async function removeWorktree(
   if (reclaimOwnedDirectory && protection.paths.has(worktreePath)) {
     const listed = await git(repoRoot, ['worktree', 'list', '--porcelain', '-z']);
     if (!listed.ok) return;
-    const registered = listed.stdout.split('
-').join('
-').split(' ').some(
+    const registered = listed.stdout.split(' ').some(
       (entry) => entry.startsWith('worktree ') && canonicalPath(entry.slice(9)) === canonicalPath(worktreePath),
     );
     if (!registered) return;
