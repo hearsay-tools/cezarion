@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
+import { stopChild } from './stop-child.js';
 
 const execFile = promisify(execFileCallback);
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -83,8 +84,7 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     const headless = await execFile(process.execPath, [cli, 'run', 'mock:done', '--repo', repo], { cwd: repo, env, timeout: 60_000 });
     assert.match(headless.stderr, /a cockpit is running at http:\/\/127\.0\.0\.1:\d+; use "cez task start"/);
   } finally {
-    server.kill('SIGTERM');
-    if (server.exitCode === null) await new Promise<void>((done) => server.once('exit', () => done()));
+    await stopChild(server, 'cockpit server');
   }
 
   const gone = await task(['list']);
