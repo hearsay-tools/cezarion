@@ -845,29 +845,35 @@ export class RunManager {
   // Private and overridable so tests need not wait out production cadence.
   private orphanReprobeMs = 15_000;
   private orphanReprobeLimitMs = 15 * 60_000;
+  private orphanReprobeSlowMs = 60_000;
   private orphanTermGraceMs = 10_000;
 
   /** #469: a survivor that dies after recovery has no other wake source (no exit callback for a
-   * process another cezar spawned). Bounded and unref'd; finalization's `run` event then lets
-   * worker waits and outcomes observe it. A tick while this manager holds the run is skipped;
-   * only terminal reasons (proof settled, generation changed, run gone, unknown record, cap,
-   * dispose) stop it. */
+   * process another cezar spawned). Unref'd; finalization's `run` event then lets worker waits and
+   * outcomes observe it. Fast for the first window, then slow but uncapped, so a long-lived
+   * survivor is still noticed when it exits. A tick while this manager holds the run is skipped;
+   * only terminal reasons (proof settled, generation changed, run gone, unknown record, dispose)
+   * stop it. */
   private armOrphanReprobe(runId: string): void {
     const armed = this.orphanedWorkerGeneration(runId);
     if (this.disposed || this.orphanReprobes.has(runId) || !armed) return;
-    const giveUpAt = Date.now() + this.orphanReprobeLimitMs;
-    const timer = setInterval(() => {
-      const orphan = this.orphanState(runId);
-      if (orphan.state === 'busy' && Date.now() < giveUpAt) return;
-      if (orphan.state !== 'orphan' || orphan.generation !== armed.generation || Date.now() >= giveUpAt || this.settleOrphanedWorkerExecution(runId)) this.clearOrphanReprobe(runId);
-    }, this.orphanReprobeMs);
-    timer.unref?.();
-    this.orphanReprobes.set(runId, timer);
+    const slowAfter = Date.now() + this.orphanReprobeLimitMs;
+    const schedule = () => {
+      const timer = setTimeout(() => {
+        const orphan = this.orphanState(runId);
+        if (orphan.state === 'busy') return schedule();
+        if (orphan.state !== 'orphan' || orphan.generation !== armed.generation || this.settleOrphanedWorkerExecution(runId)) this.clearOrphanReprobe(runId);
+        else schedule();
+      }, Date.now() < slowAfter ? this.orphanReprobeMs : this.orphanReprobeSlowMs);
+      timer.unref?.();
+      this.orphanReprobes.set(runId, timer);
+    };
+    schedule();
   }
 
   private clearOrphanReprobe(runId: string): void {
     const timer = this.orphanReprobes.get(runId);
-    if (timer) clearInterval(timer);
+    if (timer) clearTimeout(timer);
     this.orphanReprobes.delete(runId);
   }
 

@@ -709,9 +709,12 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       } finally { other.dispose(); reopened.flush(); }
     });
 
-    it('a parked parent wait resolves once a survivor dies after recovery', async () => {
+    it.each(['inside', 'after'] as const)('a parked parent wait resolves once a survivor dies %s the fast re-probe window', async window => {
       const { w, child, reopened, other } = await crashed('failed');
-      (other as unknown as { orphanReprobeMs: number }).orphanReprobeMs = 100;
+      const cadence = other as unknown as { orphanReprobeMs: number; orphanReprobeLimitMs: number; orphanReprobeSlowMs: number };
+      // After the fast window a slow probe remains the wake source; it never gives up.
+      if (window === 'inside') cadence.orphanReprobeMs = 100;
+      else Object.assign(cadence, { orphanReprobeMs: 600_000, orphanReprobeLimitMs: 0, orphanReprobeSlowMs: 100 });
       const owner = reopened.getRun(parent.id)!;
       if (owner.delegation?.role !== 'root') throw Error('fixture');
       reopened.commitDelegation([{ id: parent.id, delegation: { ...owner.delegation, wait: { id: randomUUID(), workerIds: [w.id],

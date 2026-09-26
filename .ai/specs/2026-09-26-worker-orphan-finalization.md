@@ -141,10 +141,11 @@ Callers:
 - **`awaitRunTermination`** runs it when there is neither an execution nor a
   `finalizedWorkers` entry.
 - **The re-probe timer** is what fires when a survivor dies after recovery. `recover()`
-  arms one unref'd timer (every 15 s) for each orphan it could not finalize (`alive`,
-  `unknown`, or a failed commit). It skips a tick
-  while the run is queued or active, and it stops on finalization, a changed generation, a
-  deleted run, an unknown record, dispose, or after 15 minutes. Finalization emits `run`,
+  arms one unref'd timer for each orphan it could not finalize (`alive`, `unknown`, or a
+  failed commit). It probes every 15 s for the first 15 minutes, then every 60 s with no cap,
+  so a survivor that lives for hours is still noticed when it exits. It skips a tick while the
+  run is queued or active, and it stops on finalization, a changed generation, a deleted run,
+  an unknown record, or dispose. Finalization emits `run`,
   which reconciles the parent's worker waits, so a parked parent wakes.
 
 ### 4. Reaping on destroy
