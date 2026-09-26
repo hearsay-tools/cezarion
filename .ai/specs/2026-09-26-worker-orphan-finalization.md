@@ -137,6 +137,14 @@ belongs to another cezar. The second is the ordinary `cancel` path.
 - No new env var, no config, no HTTP or contract change. An unsupported platform keeps
   today's behaviour.
 
+## Known limitations
+
+- Reaping signals only the recorded session leader. Runners do not spawn detached, so there
+  is no process group to kill. A descendant that survives the leader keeps its cwd in the
+  worktree, and the scan keeps destroy `incomplete` (naming the PIDs) until it exits.
+- The scan sees only same-user processes in this PID namespace. A process in another
+  container that holds the worktree is invisible to it.
+
 ## Tests
 
 - `process-liveness.test.ts`:
