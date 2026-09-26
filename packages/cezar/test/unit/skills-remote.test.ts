@@ -2,18 +2,27 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
+  bareDirFor,
   ensureBareClone,
   getTeamSkillsCached,
   isPinnedSha,
   isSafeRef,
+  lastFetchStampPath,
   listRemoteSkills,
   materializeSkillDir,
   refreshTeamSkills,
   safeRemoteFor,
+  waitForTeamSkills,
+  __markCloneAttemptedForTests,
 } from '../../src/skills-remote.js';
+
+const SRC_DIR = dirname(fileURLToPath(import.meta.url));
+const SKILLS_REMOTE = join(SRC_DIR, '../../src/skills-remote.ts');
+const PASSIVE_FETCH_TTL_MS = 6 * 60 * 60 * 1_000;
 
 // ---- safeRemoteFor: repo/URL injection guard (#428) --------------------------
 
@@ -274,3 +283,132 @@ test('team-skills cache is keyed by repoRoot — projects never see each other\'
   assert.deepEqual(getTeamSkillsCached(rootA).map((s) => s.name), ['alpha-skill']);
   assert.deepEqual(getTeamSkillsCached(rootB).map((s) => s.name), ['beta-skill']);
 });
+
+// ---- cross-process last-fetch stamp (#367) ------------------------------------
+
+function makeSkillsRepoWithHome(t: { after: (fn: () => void) => void }): {
+  home: string;
+  srcDir: string;
+  makeProjectRoot: () => string;
+  commit: (message: string) => string;
+} {
+  const home = mkdtempSync(join(tmpdir(), 'cez-home-'));
+  const srcDir = mkdtempSync(join(tmpdir(), 'cez-src-'));
+  const dirs = [home, srcDir];
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  const g = (args: string[]) =>
+    execFileSync('git', args, { cwd: srcDir, encoding: 'utf8' }).trim();
+  g(['-c', 'init.defaultBranch=main', 'init']);
+  g(['config', 'user.email', 'test@example.com']);
+  g(['config', 'user.name', 'Test']);
+  mkdirSync(join(srcDir, 'greeter'));
+  writeFileSync(join(srcDir, 'greeter', 'SKILL.md'), '---\ndescription: hi\n---\nsay hi\n');
+  g(['add', '-A']);
+  g(['commit', '-m', 'init']);
+
+  return {
+    home,
+    srcDir,
+    makeProjectRoot() {
+      const root = mkdtempSync(join(tmpdir(), 'cez-root-'));
+      dirs.push(root);
+      mkdirSync(join(root, '.ai/cezar'), { recursive: true });
+      writeFileSync(
+        join(root, '.ai/cezar', 'config.json'),
+        JSON.stringify({ skillsRepos: [{ repo: srcDir, ref: 'main' }] }),
+      );
+      return root;
+    },
+    commit(message: string) {
+      writeFileSync(join(srcDir, 'greeter', 'SKILL.md'), `---\ndescription: ${message}\n---\n${message}\n`);
+      g(['add', '-A']);
+      g(['commit', '-m', message]);
+      return g(['rev-parse', 'HEAD']);
+    },
+  };
+}
+
+function childTeamSkillCommit(home: string, repoRoot: string): string {
+  const script = `
+    process.env.HOME = ${JSON.stringify(home)};
+    const { waitForTeamSkills } = await import(${JSON.stringify(SKILLS_REMOTE)});
+    const skills = await waitForTeamSkills(${JSON.stringify(repoRoot)});
+    const greeter = skills.find((s) => s.name === 'greeter');
+    process.stdout.write(greeter?.team?.commit ?? '');
+  `;
+  return execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  }).trim();
+}
+
+test('a new process with a fresh stamp does not git-fetch on first catalog read (#367)', async (t) => {
+  const ctx = makeSkillsRepoWithHome(t);
+  const sha1 = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ctx.srcDir, encoding: 'utf8' }).trim();
+  await refreshTeamSkills(ctx.makeProjectRoot());
+  const stampPath = lastFetchStampPath(bareDirFor(ctx.srcDir));
+  assert.ok(existsSync(stampPath), 'refresh must persist a last-fetch stamp');
+
+  const sha2 = ctx.commit('second');
+  assert.notEqual(sha2, sha1);
+
+  const seen = childTeamSkillCommit(ctx.home, ctx.makeProjectRoot());
+  assert.equal(seen, sha1, 'fresh stamp must suppress fetch in a brand-new process');
+});
+
+test('a new process with a stale stamp fetches once and rewrites the stamp (#367)', async (t) => {
+  const ctx = makeSkillsRepoWithHome(t);
+  await refreshTeamSkills(ctx.makeProjectRoot());
+  const sha2 = ctx.commit('second');
+  const stampPath = lastFetchStampPath(bareDirFor(ctx.srcDir));
+  const before = Number(readFileSync(stampPath, 'utf8').trim());
+  writeFileSync(stampPath, `${before - PASSIVE_FETCH_TTL_MS - 1}\n`);
+
+  const seen = childTeamSkillCommit(ctx.home, ctx.makeProjectRoot());
+  assert.equal(seen, sha2);
+  const after = Number(readFileSync(stampPath, 'utf8').trim());
+  assert.ok(after > before, 'stale-stamp fetch must rewrite the stamp');
+});
+
+test('a concurrent sibling success does not block the later TTL fetch (#367)', async (t) => {
+  const ctx = makeSkillsRepoWithHome(t);
+  await Promise.all([waitForTeamSkills(ctx.makeProjectRoot()), waitForTeamSkills(ctx.makeProjectRoot())]);
+  // Reproduce the review race: a loser recorded cloneAttempted after a
+  // sibling already wrote a fresh stamp. The next catalog read must drop
+  // that flag so a later TTL still fetches.
+  __markCloneAttemptedForTests(ctx.srcDir);
+  await waitForTeamSkills(ctx.makeProjectRoot());
+
+  const sha2 = ctx.commit('second');
+  const stampPath = lastFetchStampPath(bareDirFor(ctx.srcDir));
+  const before = Number(readFileSync(stampPath, 'utf8').trim());
+  writeFileSync(stampPath, `${before - PASSIVE_FETCH_TTL_MS - 1}\n`);
+
+  const loaded = await waitForTeamSkills(ctx.makeProjectRoot());
+  assert.equal(
+    loaded.find((s) => s.name === 'greeter')?.team?.commit,
+    sha2,
+    'a failed concurrent first-load must not leave cloneAttempted blocking the TTL',
+  );
+});
+
+test('refreshTeamSkills fetches even when the stamp is still fresh (#367)', async (t) => {
+  const ctx = makeSkillsRepoWithHome(t);
+  const sha1 = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ctx.srcDir, encoding: 'utf8' }).trim();
+  const root = ctx.makeProjectRoot();
+  await refreshTeamSkills(root);
+  const sha2 = ctx.commit('second');
+  assert.notEqual(sha2, sha1);
+
+  const loaded = await refreshTeamSkills(root);
+  const greeter = loaded.find((s) => s.name === 'greeter');
+  assert.equal(greeter?.team?.commit, sha2);
+});
+
