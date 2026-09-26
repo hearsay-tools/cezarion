@@ -36,7 +36,7 @@ process holds, or signal a process cezar cannot tie to that generation.
 ### 1. Durable process record — `<id>.processes.json`
 
 A second private file next to `<id>.execution.json`, written with the same discipline
-(`0600`, `O_NOFOLLOW`, tmp + fsync + rename, strict zod, size cap, unreadable → absent):
+(`0600`, `O_NOFOLLOW`, tmp + fsync + rename, strict zod, size cap):
 
 ```json
 { "generation": "<uuid>",
@@ -52,12 +52,20 @@ A second private file next to `<id>.execution.json`, written with the same disci
   below still covers that process.
 - `processes` is capped (32). Past the cap, the generation cannot be proven by record and
   falls back to the working-directory scan. It never drops an entry.
-- A record whose `generation` differs from the execution proof is ignored.
+- Reading is tri-state. Only `ENOENT` is **absent** (legacy: scan only). A record that is
+  present but unreadable, has the wrong mode or size, fails the schema, or names another
+  generation is **unknown**: no finalization and no reap. Destroy then reports
+  `worker process record is unreadable; termination cannot be proven`.
 
 `startToken` identifies one process incarnation, so a reused PID never matches:
 
-- Linux: field 22 (`starttime`) of `/proc/<pid>/stat`, parsed after the last `)`;
-- macOS: `ps -o lstart= -p <pid>`;
+- Linux: `<boot_id>:<starttime>`, from `/proc/sys/kernel/random/boot_id` and field 22 of
+  `/proc/<pid>/stat` (parsed after the last `)`). The prefix rules out a match across a
+  reboot. If `boot_id` is unreadable, the token is the start time alone. For liveness only,
+  a token that has the prefix and one that lacks it are compared by start time; reaping
+  requires an exact match;
+- macOS: `ps -o lstart= -p <pid>` with `LC_ALL=C TZ=UTC`, so locale and zone cannot change
+  the token;
 - elsewhere, or on failure: absent. A token-less entry counts as alive while the PID
   exists.
 
@@ -66,9 +74,12 @@ A second private file next to `<id>.execution.json`, written with the same disci
 A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync):
 
 - `processStartToken(pid)` as above.
-- `processesWithCwdUnder(dir)`: Linux reads `/proc/*/cwd`, skipping `ENOENT`/`EACCES`
+- `processesWithCwdUnder(dirs)`: the worker's worktree and every agent tmp dir location
+  (`agentTmpDirLocations`), because finalization deletes that scratch. Linux reads `/proc/*/cwd`, skipping `ENOENT`/`EACCES`
   per entry. macOS uses `lsof -a -d cwd -Fpn` with a bounded timeout. It excludes
-  `process.pid`, compares realpaths, and matches `dir` itself or `dir + sep`. If
+  `process.pid`, compares realpaths, and matches a dir itself or anything beneath it. cezar's own
+  `git` children in the worktree make the scan read `alive` for a moment; that is
+  conservative, and it clears on the next probe. If
   `/proc` is unreadable, `lsof` is missing, or the platform is anything else, it
   returns `unknown`.
 - `probeGeneration({ record, worktreePath }) → 'gone' | 'alive' | 'unknown'`:
@@ -97,19 +108,31 @@ missing or malformed proof stays unproven, as the existing tests pin. On `gone` 
 1. calls `store.commitWorkerExecutionComplete(runId, generation)`, which rechecks the
    generation;
 2. appends a lifecycle event:
-   `cezar restarted — the interrupted worker's processes are gone; its execution was finalized`;
+   `the interrupted worker's processes are gone; its execution was finalized`;
 3. removes the run's agent tmp dir, as `persistWorkerCompletion` does.
+
+A result other than `gone` is cached per run and generation for 2 s, so polling callers
+(`collect`, inspect, the re-probe timer) do not rescan: a scan on macOS runs `lsof`
+synchronously. Callers that act once pass `fresh`: admission, and each step of the destroy
+reap.
 
 Callers:
 
 - **`recover()`** runs it for every worker before computing `retained` and before the
   live loop, so an interrupted worker re-launches through the ordinary `continueRun` path.
-- **`beginWorkerExecution`** runs it first when no execution exists. This one site covers
-  Continue, `--resume`, parent replies (#505) and queued revival.
+- **`beginWorkerExecution`** runs it first (`fresh`) when no execution exists. This one
+  site covers Continue, `--resume`, parent replies (#505) and queued revival. Over a live
+  orphan, the refusal names the process:
+  `a process of the previous execution is still running (pid N)`.
 - **`collect` / inspect** in `DelegationService` run it before computing `settled`, so an
   orphan that died after recovery settles without a destroy.
 - **`awaitRunTermination`** runs it when there is neither an execution nor a
   `finalizedWorkers` entry.
+- **The re-probe timer** is what fires when a survivor dies after recovery. `recover()`
+  arms one unref'd timer (every 15 s) for each orphan that probed `alive`. It skips a tick
+  while the run is queued or active, and it stops on finalization, a changed generation, a
+  deleted run, an unknown record, dispose, or after 15 minutes. Finalization emits `run`,
+  which reconciles the parent's worker waits, so a parked parent wakes.
 
 ### 4. Reaping on destroy
 
@@ -121,8 +144,12 @@ Callers:
    **re-verify the token**, then SIGKILL, all inside the caller's timeout (30 s).
 2. Processes found only by the working-directory scan are **never signalled**. The probe
    waits for them until the deadline.
-3. Re-probe, and finalize on `gone`. Otherwise it returns false, and destroy stays
-   `incomplete` with `process` remaining, exactly as today.
+3. Poll every 500 ms, re-probing, and finalize on `gone`. Otherwise it returns false,
+   and destroy stays `incomplete` with `process` remaining. The error names the blocker:
+   `process N still holds the worker's worktree or scratch` (plural: `processes N, M still
+   hold`), or `the worker is still controlled by a live cezar (pid N)`. A
+   `destroy blocked: …` lifecycle event is appended only when the blocker set changes, so
+   a retry loop does not flood the history.
 
 A live controller, or a controller that is this process, is never reaped from. The first
 belongs to another cezar. The second is the ordinary `cancel` path.
