@@ -575,7 +575,7 @@ project), or you point it at one with `--url` / `CEZ_URL`.
 
 ```bash
 id=$(cez task start --task-file - <<'EOF' | jq -r .id
-Fix the flaky login test. Quote "anything" you like here.
+Fix the `cez task` docs. Keep $(example) and "quotes" literal.
 EOF
 )
 cez task wait "$id" --until attention --timeout-seconds 900   # 0 done/review · 1 failed · 3 timeout
@@ -584,7 +584,18 @@ cez task send "$id" 'Use the retry helper instead'            # queued, delivere
 cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it ends
 ```
 
-`cez task start '<task>' --skill <name>` names one skill as the task's agent step;
+Use `--task-file PATH` to read a saved task (for example, `cez task start --task-file task.md`),
+or `--task-file -` to read stdin as above. The quoted heredoc delimiter (`<<'EOF'`) keeps
+backticks and `$()` literal in the task text.
+
+POSIX shells, including Bash, expand backticks and `$()` in double-quoted arguments before
+cez receives the text. **Do not put raw backticks in double-quoted task arguments.** This can
+execute parts of your prompt as shell commands and leave holes in the stored task, including
+when starting tasks through SSH and `bash -lc`. Prefer a task file or stdin with a quoted
+heredoc delimiter. A single-quoted positional argument still works for short tasks:
+`cez task start 'Fix the typo'`.
+
+`cez task start --task-file task.md --skill <name>` names one skill as the task's agent step;
 `--skill` and `--workflow` are mutually exclusive. The CLI checks `GET /skills` first and
 includes a `warning` in its JSON result if the skill is missing or the catalog cannot be
 checked; it still starts the run. Like a cockpit skill start, if the skill is missing at
