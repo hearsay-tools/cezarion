@@ -82,7 +82,8 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   conservative, and it clears on the next probe. If
   `/proc` is unreadable, `lsof` is missing, or the platform is anything else, it
   returns `unknown`.
-- `probeGeneration({ record, worktreePath }) → 'gone' | 'alive' | 'unknown'`:
+- `inspectGeneration({ record, paths }) → { liveness: 'gone' | 'alive' | 'unknown', controller?, pids }`
+  (`probeGeneration` returns only `liveness`):
   - `alive` when the controller is live and is not this process, when any recorded
     process is live with a matching token, or when any process has a working directory
     under the worktree;
@@ -123,13 +124,15 @@ Callers:
 - **`beginWorkerExecution`** runs it first (`fresh`) when no execution exists. This one
   site covers Continue, `--resume`, parent replies (#505) and queued revival. Over a live
   orphan, the refusal names the process:
-  `a process of the previous execution is still running (pid N)`.
+  `a process of the previous execution is still running (pid N)`, or
+  `the worker is still controlled by a live cezar (pid N)` when a foreign controller lives.
 - **`collect` / inspect** in `DelegationService` run it before computing `settled`, so an
   orphan that died after recovery settles without a destroy.
 - **`awaitRunTermination`** runs it when there is neither an execution nor a
   `finalizedWorkers` entry.
 - **The re-probe timer** is what fires when a survivor dies after recovery. `recover()`
-  arms one unref'd timer (every 15 s) for each orphan that probed `alive`. It skips a tick
+  arms one unref'd timer (every 15 s) for each orphan it could not finalize (`alive`,
+  `unknown`, or a failed commit). It skips a tick
   while the run is queued or active, and it stops on finalization, a changed generation, a
   deleted run, an unknown record, dispose, or after 15 minutes. Finalization emits `run`,
   which reconciles the parent's worker waits, so a parked parent wakes.

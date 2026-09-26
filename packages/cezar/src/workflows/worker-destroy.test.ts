@@ -659,7 +659,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         setController(w.id, { pid: foreign.proc.pid!, ...(token ? { startToken: token } : {}) });
         await other.recover();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
-        expect(other.continueRun(w.id, { text: 'try again' })).toEqual({ ok: false, error: `a process of the previous execution is still running (pid ${foreign.proc.pid})` });
+        expect(other.continueRun(w.id, { text: 'try again' })).toEqual({ ok: false, error: `the worker is still controlled by a live cezar (pid ${foreign.proc.pid})` });
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process']),
           error: `Worker termination is not proven: the worker is still controlled by a live cezar (pid ${foreign.proc.pid}); retry cleanup later` });
         expect(existsSync(workspace(w).path)).toBe(true);

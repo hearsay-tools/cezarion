@@ -746,6 +746,8 @@ export class RunManager {
     const promise = new Promise<void>(done => { resolve = done; });
     this.executions.set(runId, { generation, admitted, promise, resolve, sessions: new Set(), turns: new Set(), deliveries: new Set() });
     this.finalizedWorkers.delete(runId);
+    // #469: an earlier generation's destroy blocker never describes this one.
+    this.orphanBlockers.delete(runId); this.reportedOrphanBlockers.delete(runId);
     this.stoppedWorkers.delete(runId);
   }
 
@@ -825,6 +827,8 @@ export class RunManager {
     if (!opts.fresh && cached?.generation === orphan.generation && Date.now() - cached.at < ORPHAN_PROBE_CACHE_MS) return false;
     const probe = inspectGeneration(orphan);
     if (probe.liveness !== 'gone') { this.orphanProbes.set(runId, { generation: orphan.generation, at: Date.now(), probe }); return false; }
+    // A stale `alive` must not outlive a `gone` probe, even when the commit below fails.
+    this.orphanProbes.delete(runId);
     try { if (!this.store.commitWorkerExecutionComplete(runId, orphan.generation)) return false; } catch { return false; }
     this.orphanProbes.delete(runId); this.orphanBlockers.delete(runId); this.reportedOrphanBlockers.delete(runId); this.clearOrphanReprobe(runId);
     this.store.appendEvent(runId, { type: 'lifecycle', message: "the interrupted worker's processes are gone; its execution was finalized" });
@@ -881,7 +885,8 @@ export class RunManager {
     const orphan = this.orphanedWorkerGeneration(runId, true);
     const probe = orphan && this.orphanProbes.get(runId);
     if (!probe || probe.generation !== orphan.generation) return undefined;
-    const pid = probe.probe.pids[0] ?? probe.probe.controller;
+    if (probe.probe.controller !== undefined) return `the worker is still controlled by a live cezar (pid ${probe.probe.controller})`;
+    const pid = probe.probe.pids[0];
     return pid === undefined ? undefined : `a process of the previous execution is still running (pid ${pid})`;
   }
 
