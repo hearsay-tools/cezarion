@@ -1,6 +1,7 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 
+import { trackSseReconcile } from '@/lib/cez-idle'
 import { applyProviderStatusRow, parseProviderStatusEventRow } from '@/lib/provider-status'
 import {
   applyRunDeleted,
@@ -157,27 +158,29 @@ function isRunListQueryKey(queryKey: readonly unknown[]): boolean {
 }
 
 function reconcile(queryClient: QueryClient): void {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-  // Sidebar groups keep per-project list caches. `queryKeys.runs.all` is scope-led, so a
-  // reconnect would otherwise leave an expanded non-active group's patched list stale (#129).
-  void queryClient.invalidateQueries({
-    predicate: (query) => isRunListQueryKey(query.queryKey),
-  })
-  // Events happened while we were disconnected, and the index is cross-project — nothing else
-  // here covers it.
-  void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
-  void queryClient.invalidateQueries({ queryKey: queryKeys.todos })
-  void queryClient.invalidateQueries({ queryKey: queryKeys.health })
-  // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
-  void queryClient.invalidateQueries({ queryKey: queryKeys.worktrees })
-  void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.providerStatus })
-  // GitHub edits never enter this stream. Reconnect (including server restart) must
-  // invalidate every project's list, leaving inactive caches stale until revisited.
-  // Restrict this to list keys: comments/checks/search have separate cache policies.
-  void queryClient.invalidateQueries({
-    predicate: ({ queryKey }) => queryKey.length === 3 && queryKey[1] === 'github'
-      && (queryKey[2] === null || typeof queryKey[2] === 'number'),
-  })
+  trackSseReconcile(() => [
+    queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+    // Sidebar groups keep per-project list caches. `queryKeys.runs.all` is scope-led, so a
+    // reconnect would otherwise leave an expanded non-active group's patched list stale (#129).
+    queryClient.invalidateQueries({
+      predicate: (query) => isRunListQueryKey(query.queryKey),
+    }),
+    // Events happened while we were disconnected, and the index is cross-project — nothing else
+    // here covers it.
+    queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.todos }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.health }),
+    // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
+    queryClient.invalidateQueries({ queryKey: queryKeys.worktrees }),
+    queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.providerStatus }),
+    // GitHub edits never enter this stream. Reconnect (including server restart) must
+    // invalidate every project's list, leaving inactive caches stale until revisited.
+    // Restrict this to list keys: comments/checks/search have separate cache policies.
+    queryClient.invalidateQueries({
+      predicate: ({ queryKey }) => queryKey.length === 3 && queryKey[1] === 'github'
+        && (queryKey[2] === null || typeof queryKey[2] === 'number'),
+    }),
+  ])
 }
 
 /**

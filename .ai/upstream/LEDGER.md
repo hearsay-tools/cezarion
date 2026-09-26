@@ -5,7 +5,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
 - Last scan: 2026-09-25 to `6a919f82` ([report](scans/2026-09-25.md))
-- Entries: 55 · pending: 19 · planned: 12 · ported: 11 · diverged: 6 · n/a: 7
+- Entries: 55 · pending: 19 · planned: 11 · ported: 12 · diverged: 6 · n/a: 7
 
 ## Pending (19)
 
@@ -31,7 +31,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1069](https://github.com/open-mercato/cezar/pull/1069) | 2026-09-24 | feat(thread): live clock on the Working… indicator (#1069) | 3 |  |
 | [#1045](https://github.com/open-mercato/cezar/pull/1045) | 2026-09-25 | feat(trackers): browse Jira and Linear issues and automate tracker events (#1045) | 32 |  |
 
-## Planned (12)
+## Planned (11)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
@@ -39,7 +39,6 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#809](https://github.com/open-mercato/cezar/pull/809) | 2026-09-14 | fix(composer): scroll skill menu on arrow key navigation (#809) | [issue #433](https://github.com/hearsay-tools/cezarion/issues/433) | 2026-09-18 | absent here, applies clean |
 | [#861](https://github.com/open-mercato/cezar/pull/861) | 2026-09-14 | fix(ui): keep CPU/Mem folded on queued task rows (#821) (#861) | [issue #432](https://github.com/hearsay-tools/cezarion/issues/432) | 2026-09-18 | pre-fix code still present at tasks-overview.tsx (queue note reopens folded CPU/Mem); applies clean |
 | [#956](https://github.com/open-mercato/cezar/pull/956) | 2026-09-14 | feat(tasks): copy branch name from task header (#956) | [issue #434](https://github.com/hearsay-tools/cezarion/issues/434) | 2026-09-18 | absent here; run header was redesigned in #235, 2 hunks to re-place |
-| [#942](https://github.com/open-mercato/cezar/pull/942) | 2026-09-14 | feat(thread): per-message timestamps in the task conversation (#942) | [issue #435](https://github.com/hearsay-tools/cezarion/issues/435) | 2026-09-18 | absent here; new files apply clean, 1 hunk in thread-items |
 | [#953](https://github.com/open-mercato/cezar/pull/953) | 2026-09-14 | feat(sidebar): drag project groups to set their order, shared across devices (#952) (#953) | [issue #438](https://github.com/hearsay-tools/cezarion/issues/438) | 2026-09-18 | absent here; needs the contract field plus 4 hunks in project-groups |
 | [#973](https://github.com/open-mercato/cezar/pull/973) | 2026-09-14 | feat(ui): filter the new-task base branch picker (#973) | [issue #436](https://github.com/hearsay-tools/cezarion/issues/436) | 2026-09-18 | absent here; 3 hunks in picker-pill |
 | [#984](https://github.com/open-mercato/cezar/pull/984) | 2026-09-14 | fix(workflows): park intermediate asks for input (#984) | [issue #427](https://github.com/hearsay-tools/cezarion/issues/427) | 2026-09-18 | bug present here: resolveAskTurn is gated on interactive, so a CEZ:ASK from a non-final workflow step is dropped and the next step runs; upstream patch references dispatch code that must be stripped |
@@ -48,7 +47,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1009](https://github.com/open-mercato/cezar/pull/1009) | 2026-09-17 | fix(server-deploy): fail the deploy when the service did not actually restart (#1009) | [issue #430](https://github.com/hearsay-tools/cezarion/issues/430) | 2026-09-18 |  |
 | [#994](https://github.com/open-mercato/cezar/pull/994) | 2026-09-18 | fix(server-install): ubuntu-vps vhost emits a standalone http2 directive nginx < 1.25.1 rejects (#994) | [issue #429](https://github.com/hearsay-tools/cezarion/issues/429) | 2026-09-18 |  |
 
-## Ported (11)
+## Ported (12)
 
 | Upstream | Date | Title | Fork | Decided | Reason / note |
 | --- | --- | --- | --- | --- | --- |
@@ -62,6 +61,7 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#937](https://github.com/open-mercato/cezar/pull/937) | 2026-09-04 | fix(ask): recover a CEZ:ASK payload that is only missing its closing brackets (#937) | [PR #98](https://github.com/hearsay-tools/cezarion/pull/98) | 2026-09-05 |  |
 | [#841](https://github.com/open-mercato/cezar/pull/841) | 2026-09-04 | fix(models): discover Claude models from the host CLI instead of fixed presets (#841) | [PR #99](https://github.com/hearsay-tools/cezarion/pull/99) | 2026-09-05 |  |
 | [#873](https://github.com/open-mercato/cezar/pull/873) | 2026-09-04 | fix(ui): collapse dense run metadata at phone width (#765) (#873) | [PR #103](https://github.com/hearsay-tools/cezarion/pull/103) | 2026-09-06 |  |
+| [#942](https://github.com/open-mercato/cezar/pull/942) | 2026-09-14 | feat(thread): per-message timestamps in the task conversation (#942) | [PR #588](https://github.com/hearsay-tools/cezarion/pull/588) | 2026-09-25 | absent here; new files apply clean, 1 hunk in thread-items |
 | [#1014](https://github.com/open-mercato/cezar/pull/1014) | 2026-09-17 | fix(providers): a runtime auth rejection verifies itself before it sticks (#1014) | [PR #598](https://github.com/hearsay-tools/cezarion/pull/598), [issue #431](https://github.com/hearsay-tools/cezarion/issues/431) | 2026-09-25 |  |
 
 ## Diverged (6)

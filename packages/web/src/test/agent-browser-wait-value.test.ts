@@ -91,6 +91,41 @@ function shortTimeout(ms = 400) {
 }
 const actions = (commands: string[][]) => commands.map(([action]) => action)
 
+describe('AgentBrowser.waitForStable (#415)', () => {
+  it('returns only after the matcher holds across polls spanning holdMs', () => {
+    const { browser, commands } = open(['Skills', 'Skills', 'Skills'])
+    const start = Date.now()
+    let clockReads = 0
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => start + 100 * clockReads++)
+    try {
+      expect(browser.waitForStable('activeLabel()', { holdMs: 200, intervalMs: 1 })).toBe('Skills')
+    } finally {
+      clock.mockRestore()
+    }
+    expect(actions(commands()).filter((action) => action === 'eval').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('a predicate that flips inside the hold window fails the wait, not a later expect', () => {
+    shortTimeout()
+    const { browser } = open(['Skills', 'Settings'])
+    const start = Date.now()
+    let clockReads = 0
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => start + 100 * clockReads++)
+    let error: unknown
+    try {
+      browser.waitForStable('activeLabel()', { holdMs: 200, intervalMs: 1, matcher: (v) => v === 'Skills' })
+    } catch (caught) {
+      error = caught
+    } finally {
+      clock.mockRestore()
+    }
+    expect(error).toBeInstanceOf(WaitForValueError)
+    const failure = error as WaitForValueError
+    expect(failure.message).toMatch(/value never stayed stable: activeLabel\(\)/)
+    expect(failure.lastValue).toBe('Settings')
+  })
+})
+
 describe('AgentBrowser.waitForValue (#409)', () => {
   it('polls evaluate until the matcher passes and returns that sample', () => {
     const { browser, commands } = open([0, 1, 2, 3])

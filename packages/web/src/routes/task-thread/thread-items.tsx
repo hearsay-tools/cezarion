@@ -13,6 +13,7 @@ import { splitToolTitle, streakLabel, type ContextGroupBlock, type WorkerConvers
 import { useThreadCardCache } from './thread-open-cards'
 import { ConversationNavigation } from './conversation-navigation'
 import { isNearBottom } from './thread-scroll'
+import { clockLabel, MessageTime } from './thread-time'
 import type { ThreadConversationMessage, ThreadEntry, ThreadImage, ThreadNote, ThreadProviderAuthRequired } from './thread-state'
 import {
   conversationDeliveryLabel,
@@ -54,10 +55,11 @@ export type ConversationMessageProps = {
   role: 'user' | 'agent'
   children: ReactNode
   className?: string
+  ts?: string
 } & Omit<ComponentPropsWithoutRef<'article'>, 'role' | 'children' | 'className'>
 
 /** Shared user/agent transcript surface (#252). Role only changes label, name, and colors. */
-export function ConversationMessage({ role, children, className, ...rest }: ConversationMessageProps) {
+export function ConversationMessage({ role, children, className, ts, ...rest }: ConversationMessageProps) {
   const surface = MESSAGE_SURFACE[role]
   return (
     <article
@@ -70,8 +72,15 @@ export function ConversationMessage({ role, children, className, ...rest }: Conv
         className,
       )}
     >
-      <p className={cn('m-0 flex items-center gap-2 text-[11px] leading-[1.2] font-semibold tracking-[0.6px] uppercase', surface.accent)}>
-        <MessageSquareIcon aria-hidden="true" className="size-4 shrink-0" />{surface.label}
+      <p className={cn('m-0 flex w-full min-w-0 items-start justify-between gap-2 text-[11px] leading-[1.2] font-semibold tracking-[0.6px] uppercase', surface.accent)}>
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <MessageSquareIcon aria-hidden="true" className="size-4 shrink-0" />{surface.label}
+        </span>
+        {ts !== undefined && clockLabel(ts) !== undefined ? (
+          <span className="shrink-0 font-normal tracking-normal normal-case">
+            <MessageTime ts={ts} />
+          </span>
+        ) : null}
       </p>
       <div className={cn('min-w-0 break-words text-[14px] text-foreground select-text [overflow-wrap:anywhere]', surface.body, 'leading-[1.6]')}>
         {children}
@@ -99,6 +108,7 @@ export function UserBubble({
   text,
   imageCount = 0,
   images = [],
+  ts,
   onEdit,
   onRemove,
   editLabel = 'Edit message',
@@ -107,6 +117,8 @@ export function UserBubble({
   text: string
   imageCount?: number
   images?: readonly string[]
+  /** When it was sent (#941) — in the bubble's top-right corner; omitted if invalid. */
+  ts?: string
   onEdit?: (text: string) => Promise<void>
   onRemove?: () => Promise<void>
   editLabel?: string
@@ -156,7 +168,7 @@ export function UserBubble({
 
   if (editing) {
     return (
-      <ConversationMessage role="user" data-slot="user-bubble" data-editing="true">
+      <ConversationMessage role="user" ts={ts} data-slot="user-bubble" data-editing="true">
         <textarea
           autoFocus
           aria-label="Edit the message"
@@ -199,7 +211,7 @@ export function UserBubble({
   }
 
   return (
-    <ConversationMessage role="user" data-slot="user-bubble" className="group">
+    <ConversationMessage role="user" ts={ts} data-slot="user-bubble" className="group">
       {onEdit || onRemove ? (
         <span
           data-slot="bubble-actions"
@@ -269,9 +281,9 @@ export function UserBubble({
 }
 
 /** An assistant message item, as markdown. */
-export function AssistantMessage({ text }: { text: string }) {
+export function AssistantMessage({ text, ts }: { text: string; ts?: string }) {
   return (
-    <ConversationMessage role="agent" data-slot="assistant-message">
+    <ConversationMessage role="agent" ts={ts} data-slot="assistant-message">
       <Markdown>{text}</Markdown>
     </ConversationMessage>
   )
@@ -326,6 +338,7 @@ function WorkerConversationBatchCard({
   const headingPrefix = direction === 'outbound' ? 'SENT to' : 'RECEIVED from'
   const heading = `${headingPrefix} ${counterpartIds.map((id) => taskTitleFor(id, taskTitles)).join(', ')}`
   const soleMessage = batch.messages[0]
+  const sentAt = soleMessage?.createdAt ?? soleMessage?.recordedAt
   const soleStatus = soleMessage ? conversationStatusLabel(soleMessage) : undefined
   return (
     <article
@@ -334,24 +347,32 @@ function WorkerConversationBatchCard({
       data-kind={batch.kind}
       className={cn('flex w-full min-w-0 flex-col gap-2 rounded-[8px] border p-3 md:px-4 md:py-[14px]', surface.classes)}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <p className={cn('m-0 flex min-w-0 flex-wrap items-center gap-x-2 text-[11px] leading-[1.2] font-semibold tracking-[0.6px] uppercase', surface.accent)}>
-          <span>{headingPrefix}</span>
-          {counterpartIds.map((id, index) => (
-            <span key={id} className="inline-flex min-w-0 items-center gap-x-2 normal-case tracking-normal">
-              {index > 0 ? <span aria-hidden>,</span> : null}
-              <Link className={conversationLinkClass} to={`/tasks/${id}`} aria-label={`${headingPrefix} ${taskTitleFor(id, taskTitles)}`}>
-                {taskTitleFor(id, taskTitles)}
-              </Link>
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <p className={cn('m-0 flex min-w-0 flex-wrap items-center gap-x-2 text-[11px] leading-[1.2] font-semibold tracking-[0.6px] uppercase', surface.accent)}>
+            <span>{headingPrefix}</span>
+            {counterpartIds.map((id, index) => (
+              <span key={id} className="inline-flex min-w-0 items-center gap-x-2 normal-case tracking-normal">
+                {index > 0 ? <span aria-hidden>,</span> : null}
+                <Link className={conversationLinkClass} to={`/tasks/${id}`} aria-label={`${headingPrefix} ${taskTitleFor(id, taskTitles)}`}>
+                  {taskTitleFor(id, taskTitles)}
+                </Link>
+              </span>
+            ))}
+          </p>
+          <span data-slot="conversation-kind" className="rounded-full bg-background/60 px-2 py-0.5 text-[11px] font-semibold tracking-[0.05em] text-foreground uppercase">
+            {conversationKindLabel(batch.kind)}
+          </span>
+          {batch.messages.length === 1 && soleStatus ? (
+            <span data-slot="conversation-outcome" className="text-xs font-medium text-muted-foreground">
+              {soleStatus}
             </span>
-          ))}
-        </p>
-        <span data-slot="conversation-kind" className="rounded-full bg-background/60 px-2 py-0.5 text-[11px] font-semibold tracking-[0.05em] text-foreground uppercase">
-          {conversationKindLabel(batch.kind)}
-        </span>
-        {batch.messages.length === 1 && soleStatus ? (
-          <span data-slot="conversation-outcome" className="text-xs font-medium text-muted-foreground">
-            {soleStatus}
+          ) : null}
+        </div>
+        {sentAt !== undefined && clockLabel(sentAt) !== undefined ? (
+          <span className="flex shrink-0 items-center justify-self-end gap-1 whitespace-nowrap text-[11px] text-soft-foreground">
+            {batch.messages.length > 1 ? 'First sent' : null}
+            <MessageTime ts={sentAt} />
           </span>
         ) : null}
       </div>
@@ -369,6 +390,7 @@ function WorkerConversationBatchCard({
         <ul className="grid min-w-0 gap-1 text-xs text-muted-foreground">
           {batch.messages.map((message) => {
             const status = conversationStatusLabel(message)
+            const sentAt = message.createdAt ?? message.recordedAt
             return (
               <li key={message.id} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2">
                 <Link
@@ -380,6 +402,9 @@ function WorkerConversationBatchCard({
                 </Link>
                 {status ? <span data-slot="conversation-outcome">{status}</span> : null}
                 <ConversationReference message={message} runId={runId} taskTitles={taskTitles} />
+                {sentAt !== undefined && clockLabel(sentAt) !== undefined ? (
+                  <span className="ml-auto whitespace-nowrap"><MessageTime ts={sentAt} /></span>
+                ) : null}
               </li>
             )
           })}

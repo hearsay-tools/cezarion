@@ -231,13 +231,13 @@ entries:
     pr: 942
     title: "feat(thread): per-message timestamps in the task conversation (#942)"
     date: 2026-09-14
-    status: planned
+    status: ported
     hint:
       conflicts: 2
     note: absent here; new files apply clean, 1 hunk in thread-items
     fork:
-      issue: 435
-    decided: 2026-09-18
+      pr: 588
+    decided: 2026-09-25
   - sha: 2b5411e479c63870f857d12314a87572f2cc2ec0
     pr: 953
     title: "feat(sidebar): drag project groups to set their order, shared across devices (#952) (#953)"

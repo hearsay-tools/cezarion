@@ -123,6 +123,15 @@ function summarize(value: unknown, max = 400): string {
   return text.length > max ? `${text.slice(0, max)}…` : text
 }
 
+/** Identity for a hold window: two samples are the same state when they serialize the same. */
+function sameSample(left: unknown, right: unknown): boolean {
+  try {
+    return JSON.stringify(left) === JSON.stringify(right)
+  } catch {
+    return left === right
+  }
+}
+
 /**
  * What `waitForValue` throws when the matcher never passed. Carries the last sample so a helper
  * built on the primitive (`focusWithKeyboard`) can name what it saw — the element that took
@@ -512,24 +521,82 @@ export class AgentBrowser {
     }
   }
 
+  /** operation: assert (`eval`), polled until the matcher holds across `holdMs` (#415).
+   *
+   *  `waitForValue` answers first truth. That is the wrong primitive when the page can reach
+   *  a state and leave it inside one CLI round-trip — `smoke.e2e.ts` settled on Skills and
+   *  the next read saw Settings. This keeps sampling until consecutive matching samples
+   *  (same JSON) span `holdMs`. A flip, or a new value, restarts the hold. `holdMs: 0` is
+   *  first truth, which is how `waitForValue` is built on this rather than beside it. */
+  waitForStable<T, U extends T>(
+    js: string,
+    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string },
+  ): U
+  waitForStable<T = unknown>(
+    js: string,
+    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
+  ): T
+  waitForStable<T = unknown>(
+    js: string,
+    {
+      holdMs,
+      matcher = (value: T) => value !== null && value !== undefined && value !== false,
+      intervalMs = 100,
+      failure,
+    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string },
+  ): T {
+    const deadline = Date.now() + defaultWaitTimeoutMs()
+    let lastValue: unknown = undefined
+    let lastError: unknown = undefined
+    let holdStartedAt: number | null = null
+    let holdValue: unknown = undefined
+    for (;;) {
+      const now = Date.now()
+      try {
+        const value = this.evaluate(js) as T
+        lastValue = value
+        lastError = undefined
+        if (matcher(value) && (holdStartedAt === null || sameSample(value, holdValue))) {
+          if (holdStartedAt === null) {
+            holdStartedAt = now
+            holdValue = value
+          }
+          if (now - holdStartedAt >= holdMs) return value
+        } else if (matcher(value)) {
+          holdStartedAt = now
+          holdValue = value
+        } else {
+          holdStartedAt = null
+        }
+      } catch (cause) {
+        lastError = cause
+        holdStartedAt = null
+      }
+      if (Date.now() >= deadline) break
+      pause(intervalMs)
+    }
+    const reason: FailureReason = {
+      kind: 'wait-value',
+      expression: js,
+      lastValue,
+      ...(lastError !== undefined ? { lastError: describeError(lastError) } : {}),
+    }
+    const bundle = this.captureFailure(reason, lastError ?? new Error(`last value: ${summarize(lastValue)}`))
+    const last = lastError !== undefined ? `last error: ${describeError(lastError)}` : `last value: ${summarize(lastValue)}`
+    const headline = failure ?? (holdMs > 0 ? 'value never stayed stable' : 'value never matched')
+    throw new WaitForValueError(
+      `cezar e2e: ${headline}: ${js} (${last}) (failure bundle: ${bundle})`,
+      js,
+      lastValue,
+      bundle,
+      lastError !== undefined ? { cause: lastError } : undefined,
+    )
+  }
+
   /** operation: assert (`eval`), polled — "wait, then read" as one step (#409).
    *
-   *  `waitForFunction` answers *whether* the page reached a state; the read that follows it is a
-   *  second CLI call against a page that may have moved on, which is the two-call race
-   *  `hoverVisiblePoint` used to lose (`no visible hover point`: the predicate scrolled and
-   *  hit-tested, the read hit-tested a layout that had shifted since). This samples `js` until
-   *  `matcher` accepts a value and returns THAT value, so the state checked and the state read
-   *  are the same sample.
-   *
-   *  The default matcher accepts anything but `null`, `undefined` and `false`, so an expression
-   *  can answer "not yet" with `null` and still hand back `0` or `''` as a real value. A sample
-   *  whose expression throws in the page (`querySelector(...)` was `null`) is a miss, not a
-   *  failure: it is retried, and the last page error is reported if nothing ever matched.
-   *
-   *  Gives up after the CLI's default timeout (`AGENT_BROWSER_DEFAULT_TIMEOUT`, 25 s) through
-   *  the #408 failure bundle, whose `probe.json` records the expression and the last sample.
-   *  `failure` replaces the generic headline of that error with the caller's own ("no visible
-   *  hover point for …"). Never use it to assert absence: "not there" is a value, read it once. */
+   *  Built on `waitForStable` with `holdMs: 0`: first matching sample returns. Callers that
+   *  need the page to *stay* in that state pass `waitForStable` a hold instead. */
   waitForValue<T, U extends T>(
     js: string,
     matcher: (value: T) => value is U,
@@ -543,38 +610,9 @@ export class AgentBrowser {
   waitForValue<T = unknown>(
     js: string,
     matcher: (value: T) => boolean = (value) => value !== null && value !== undefined && value !== false,
-    { intervalMs = 100, failure }: { intervalMs?: number; failure?: string } = {},
+    options: { intervalMs?: number; failure?: string } = {},
   ): T {
-    const deadline = Date.now() + defaultWaitTimeoutMs()
-    let lastValue: unknown = undefined
-    let lastError: unknown = undefined
-    for (;;) {
-      try {
-        const value = this.evaluate(js) as T
-        lastValue = value
-        lastError = undefined
-        if (matcher(value)) return value
-      } catch (cause) {
-        lastError = cause
-      }
-      if (Date.now() >= deadline) break
-      pause(intervalMs)
-    }
-    const reason: FailureReason = {
-      kind: 'wait-value',
-      expression: js,
-      lastValue,
-      ...(lastError !== undefined ? { lastError: describeError(lastError) } : {}),
-    }
-    const bundle = this.captureFailure(reason, lastError ?? new Error(`last value: ${summarize(lastValue)}`))
-    const last = lastError !== undefined ? `last error: ${describeError(lastError)}` : `last value: ${summarize(lastValue)}`
-    throw new WaitForValueError(
-      `cezar e2e: ${failure ?? 'value never matched'}: ${js} (${last}) (failure bundle: ${bundle})`,
-      js,
-      lastValue,
-      bundle,
-      lastError !== undefined ? { cause: lastError } : undefined,
-    )
+    return this.waitForStable(js, { holdMs: 0, matcher, ...options })
   }
 
   /** operation: interact (`press`) — a key press against whatever currently has focus. */

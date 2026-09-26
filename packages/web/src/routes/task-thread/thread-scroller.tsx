@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 
+import { isCockpitE2e } from '@/lib/e2e-mode'
 import {
   NEAR_BOTTOM_SLACK_PX,
   isNearHistoryStart,
@@ -171,6 +172,21 @@ export function useThreadScroll(
     anchorIndex: number
   } | null>(null)
   const historyRestoreGenerationRef = useRef(0)
+
+  useEffect(() => {
+    if (!isCockpitE2e()) return
+    const scrollTo = (top: number) => {
+      pendingRestoreRef.current = null
+      historyRestoreGenerationRef.current += 1
+      pendingHistoryRestoreRef.current = null
+      stuckRef.current = false
+      setOffset(top)
+    }
+    window.__cezThreadScrollTo = scrollTo
+    return () => {
+      if (window.__cezThreadScrollTo === scrollTo) delete window.__cezThreadScrollTo
+    }
+  }, [setOffset])
 
   const restoreHistoryAnchor = useCallback(() => {
     const pending = pendingHistoryRestoreRef.current
