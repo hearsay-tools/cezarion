@@ -824,6 +824,58 @@ describe('ProviderAuthService', () => {
       expect(runCommand).toHaveBeenCalledTimes(2);
     });
 
+    it('arms one deferred re-check when the cooldown declines a verification', async () => {
+      let now = 1_000;
+      const retries: Array<{ fn: () => void; delay: number }> = [];
+      let cancelled = 0;
+      const runCommand = runner();
+      const service = new ProviderAuthService({
+        runCommand,
+        now: () => now,
+        scheduleRuntimeRetry: (fn, delayMs) => {
+          const entry = { fn, delay: delayMs };
+          retries.push(entry);
+          return () => {
+            cancelled += 1;
+            const index = retries.indexOf(entry);
+            if (index >= 0) retries.splice(index, 1);
+          };
+        },
+        createAuthFailureId: () => 'incident-1',
+      });
+
+      // The first incident verifies clean and clears.
+      service.reportRuntimeAuthFailure('claude');
+      await expect(service.verifyRuntimeAuthFailure('claude')).resolves.not.toBeNull();
+      expect(runCommand).toHaveBeenCalledTimes(1);
+
+      // A second incident inside the window is declined — but must not become a dead end: the
+      // watcher only fires on the latch edge, so without a deferred re-check this incident
+      // would stand until Settings' Try again no matter what the credentials did.
+      service.reportRuntimeAuthFailure('claude');
+      now += 59_000;
+      await expect(service.verifyRuntimeAuthFailure('claude')).resolves.toBeNull();
+      expect(runCommand).toHaveBeenCalledTimes(1);
+      expect(retries).toEqual([expect.objectContaining({ delay: 1_000 })]);
+
+      // Later declined requests re-arm the one retry instead of stacking another.
+      now += 500;
+      await expect(service.verifyRuntimeAuthFailure('claude')).resolves.toBeNull();
+      expect(retries).toEqual([expect.objectContaining({ delay: 500 })]);
+      expect(cancelled).toBe(1);
+
+      // The window closes, the deferred re-check runs, and the standing incident gets its own
+      // answer — no human in the loop.
+      now += 500;
+      retries[0]!.fn();
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(2));
+      await expect(service.status()).resolves.toMatchObject({
+        providers: expect.arrayContaining([
+          expect.objectContaining({ provider: 'claude', status: 'connected' }),
+        ]),
+      });
+    });
+
     it('never answers an older question: a rejection arriving mid-probe survives', async () => {
       const ids = ['incident-1', 'incident-2'];
       let release!: () => void;

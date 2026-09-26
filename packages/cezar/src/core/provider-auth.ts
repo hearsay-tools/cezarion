@@ -376,17 +376,29 @@ export interface RuntimeAuthFailureReport {
   transitioned: boolean;
 }
 
+/** One deferred re-verification when the cooldown declines a check. Detached and unref'd by
+ *  default; tests capture the retry instead of waiting out the window. */
+function defaultScheduleRuntimeRetry(fn: () => void, delayMs: number): () => void {
+  const timer = setTimeout(fn, delayMs);
+  timer.unref();
+  return () => clearTimeout(timer);
+}
+
 export class ProviderAuthService {
   private readonly runCommand: RunProviderCommand;
   private readonly now: () => number;
   private readonly platform: NodeJS.Platform;
   private readonly createAuthFailureId: () => string;
+  private readonly scheduleRuntimeRetry: (fn: () => void, delayMs: number) => () => void;
   private readonly runtimeFailures = new Map<ProviderId, RuntimeAuthFailure>();
   /** One self-check at a time per provider, and not more often than the cooldown. Both guard the
    *  same thing — a CLI spawn per auth-shaped error line — from the two directions it can arrive
    *  from: concurrently, and in quick succession. */
   private readonly verifyingRuntimeFailures = new Set<ProviderId>();
   private readonly lastRuntimeVerification = new Map<ProviderId, number>();
+  /** One pending cooldown-expiry re-check per provider, cancellable. See
+   *  {@link ProviderAuthService.scheduleRuntimeVerification}. */
+  private readonly deferredRuntimeVerifications = new Map<ProviderId, () => void>();
   private nextRuntimeFailureGeneration = 0;
   private nextProbeGeneration = 0;
   private completed?: {
@@ -412,11 +424,13 @@ export class ProviderAuthService {
     now?: () => number;
     platform?: NodeJS.Platform;
     createAuthFailureId?: () => string;
+    scheduleRuntimeRetry?: (fn: () => void, delayMs: number) => () => void;
   }) {
     this.runCommand = options?.runCommand ?? defaultRunProviderCommand;
     this.now = options?.now ?? Date.now;
     this.platform = options?.platform ?? process.platform;
     this.createAuthFailureId = options?.createAuthFailureId ?? randomUUID;
+    this.scheduleRuntimeRetry = options?.scheduleRuntimeRetry ?? defaultScheduleRuntimeRetry;
   }
 
   /**
@@ -517,9 +531,11 @@ export class ProviderAuthService {
    *   older question.
    * - clear on anything but `connected`. `disconnected`, `not-installed` and `unknown` all leave the
    *   latch alone; an inconclusive probe is not evidence of health.
-   * - spawn more than one probe per provider per {@link RUNTIME_AUTH_VERIFY_COOLDOWN_MS}. A
-   *   verification skipped by that cooldown returns `null` and leaves the latch standing — for a
-   *   named account that is the safe side, not a lost recovery.
+ * - spawn more than one probe per provider per {@link RUNTIME_AUTH_VERIFY_COOLDOWN_MS}. A
+ *   verification skipped by that cooldown returns `null`, leaves the latch standing, and arms ONE
+ *   deferred re-verification at cooldown expiry
+ *   ({@link ProviderAuthService.scheduleRuntimeVerification}) — the runtime watcher fires only on
+ *   the latch edge, so without it a re-latch inside the window could never be re-checked.
    */
   async verifyRuntimeAuthFailure(
     provider: ProviderId,
@@ -531,6 +547,11 @@ export class ProviderAuthService {
     if (this.verifyingRuntimeFailures.has(provider)) return null;
     const lastVerifiedAt = this.lastRuntimeVerification.get(provider);
     if (lastVerifiedAt !== undefined && this.now() - lastVerifiedAt < RUNTIME_AUTH_VERIFY_COOLDOWN_MS) {
+      this.scheduleRuntimeVerification(
+        provider,
+        profile,
+        RUNTIME_AUTH_VERIFY_COOLDOWN_MS - (this.now() - lastVerifiedAt),
+      );
       return null;
     }
 
@@ -567,6 +588,29 @@ export class ProviderAuthService {
     }
     this.rememberProbedRow(probed);
     return probed;
+  }
+
+  /**
+   * A verification declined by the cooldown must not become a dead end. The runtime watcher fires
+   * only on the latch edge — a rejection that re-latches right after a successful check gets its
+   * check declined here, and nothing would ever re-ask the CLI: later error lines see a latch that
+   * already stands, and only Settings' Try again could clear it. So the declined request arms ONE
+   * deferred re-verification at cooldown expiry; later declined requests re-arm it (never stack
+   * it), the newest aim winning. Firing after the latch is gone is a no-op —
+   * {@link ProviderAuthService.verifyRuntimeAuthFailure} returns before probing — so the chain
+   * ends the moment the incident is answered.
+   */
+  private scheduleRuntimeVerification(
+    provider: ProviderId,
+    profile: { id: string; configDir: string | null } | undefined,
+    delayMs: number,
+  ): void {
+    this.deferredRuntimeVerifications.get(provider)?.();
+    const cancel = this.scheduleRuntimeRetry(() => {
+      this.deferredRuntimeVerifications.delete(provider);
+      void this.verifyRuntimeAuthFailure(provider, profile).catch(() => {});
+    }, Math.max(delayMs, 0));
+    this.deferredRuntimeVerifications.set(provider, cancel);
   }
 
   /**
