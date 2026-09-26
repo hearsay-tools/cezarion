@@ -60,14 +60,14 @@ jobs:
         id: validate_scan_app
         if: fromJSON(steps.scan.outputs.summary).added > 0
         env:
-          RELEASE_APP_ID: ${{ vars.RELEASE_APP_ID }}
+          RELEASE_APP_CLIENT_ID: ${{ vars.RELEASE_APP_CLIENT_ID }}
           RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
           HAS_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}
         run: |
-          if ! [[ "$RELEASE_APP_ID" =~ ^[1-9][0-9]*$ ]] \
+          if ! [[ "$RELEASE_APP_CLIENT_ID" =~ ^Iv[a-zA-Z0-9]+$ ]] \
             || ! [[ "$RELEASE_APP_BOT_LOGIN" =~ ^[a-z0-9][a-z0-9-]*\[bot\]$ ]] \
             || [ "$HAS_PRIVATE_KEY" != true ]; then
-            echo '::error::Configure RELEASE_APP_ID and RELEASE_APP_BOT_LOGIN variables and RELEASE_APP_PRIVATE_KEY secret. See docs/publishing.md#release-app-setup.'
+            echo '::error::Configure RELEASE_APP_CLIENT_ID and RELEASE_APP_BOT_LOGIN variables and RELEASE_APP_PRIVATE_KEY secret. See docs/publishing.md#release-app-setup.'
             exit 1
           fi
 
@@ -76,7 +76,7 @@ jobs:
         if: fromJSON(steps.scan.outputs.summary).added > 0
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
           permission-pull-requests: write
