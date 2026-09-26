@@ -60,9 +60,11 @@ export const SCENARIOS = [
   'split-text',
   'provider-error',
   'ask',
+  'ask-snapshot',
   'ask-bad',
   'ask-reply-late',
   'subagent',
+  'subagent-after-park',
   'steer-tool',
   'steer-late',
 ] as const;
@@ -104,8 +106,10 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'provider-error': 'mock:auth-error',
       ask: 'mock:ask',
       'ask-reply-late': 'mock:ask',
+      'ask-snapshot': 'mock:ask-snapshot',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagents',
+      'subagent-after-park': 'mock:subagent-after-park',
       'steer-tool': 'mock:steer-tool',
       // A line written after the last model call runs as the CLI's next queued turn.
       'steer-late': 'mock:hold',
@@ -124,9 +128,11 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'provider-error': 'mock:provider-error',
       ask: 'mock:native-codex-ask',
       'ask-reply-late': 'mock:native-codex-ask',
+      'ask-snapshot': 'mock:ask-snapshot',
       'ask-bad': 'mock:ask-bad',
       // #600's repro: a child thread's own turn/completed must not end the parent.
       subagent: 'mock:child-turn',
+      'subagent-after-park': 'mock:subagent-after-park',
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
     },
@@ -143,8 +149,10 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'provider-error': 'mock:provider-error',
       ask: 'mock:ask',
       'ask-reply-late': 'mock:ask-reply-late',
+      'ask-snapshot': 'mock:ask-snapshot',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagent',
+      'subagent-after-park': 'mock:subagent-after-park',
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
     },
@@ -155,7 +163,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-acp.mjs'),
     scenarios: { baseline: BASELINE_PROMPT, done: 'mock:done', hold: 'mock:hold',
       'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
-      ask: 'mock:ask', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent' },
+      ask: 'mock:ask', 'ask-snapshot': 'mock:ask-snapshot', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask', subagent: 'mock:subagent',
+      'subagent-after-park': 'mock:subagent-after-park' },
   },
   pi: {
     backend: 'pi',
@@ -169,6 +178,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'provider-error': 'mock:provider-error',
       ask: 'mock:ask',
       'ask-reply-late': 'mock:ask',
+      'ask-snapshot': 'mock:ask-snapshot',
       'ask-bad': 'mock:ask-bad',
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
@@ -219,6 +229,30 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  {
+    criterion: 'R16', backend: 'claude', kind: 'capability-absent',
+    reason: 'Claude stream-json has whole assistant text blocks and a result-only fallback, not a separate completed-text channel. claude-cli-runner handleClaudeMessage and claude-ui-mapper mapResult consume the same text (text-turn.ndjson and claude-ui-mapper result-fallback tests).',
+  },
+  {
+    criterion: 'R16', backend: 'codex', kind: 'capability-absent',
+    reason: 'Codex app-server item/completed carries the authoritative agentMessage.text snapshot to both the v1 coalescer and v2 mapper (text-turn.ndjson). Omitting deltas does not omit v1 text; no independent final-text channel exists.',
+  },
+  {
+    criterion: 'R16', backend: 'opencode', kind: 'capability-absent',
+    reason: 'OpenCode SSE message.part.updated supplies the same assistant text snapshot and time.end to v1 and v2 (text-turn.ndjson). The role/session filters agree; snapshot-only completion cannot omit just v1.',
+  },
+  {
+    criterion: 'R16', backend: 'pi', kind: 'capability-absent',
+    reason: 'Pi RPC text_end.content is authoritative for both v1 and v2, including snapshot-only blocks (rpc-lifecycle.ndjson). message_end has no separately mapped assistant-text channel.',
+  },
+  {
+    criterion: 'R16', backend: 'cursor', kind: 'capability-absent',
+    reason: 'Cursor ACP agent_message_chunk has a single text channel; cursor-acp-runner emits v1 directly from each completed parent v2 message (acp-lifecycle.ndjson). A completed marker cannot be present only on v2.',
+  },
+  {
+    criterion: 'R15', backend: 'pi', kind: 'scenario-unconstructible',
+    reason: 'Pi RPC has no child session or nested child transcript (rpc-lifecycle.ndjson); like S9/R12, post-park child items cannot be constructed on that wire.',
+  },
   {
     criterion: 'I1', backend: 'cursor', kind: 'scenario-unconstructible',
     reason: 'Cursor ACP 2026.09.18: a second session/prompt cancels the running turn (live probe 2026-09-23), so agent input cannot be admitted mid-turn without cancelling tools. inputDelivery is boundary (#505).',
@@ -406,6 +440,7 @@ export async function driveRun(
   scenario: ScenarioName | { prompt: string },
   settled: (record: RunRecord | undefined) => boolean,
   timeoutMs = 30_000,
+  afterSettled?: (context: { store: RunStore; manager: RunManager; runId: string }) => Promise<void>,
 ): Promise<RunObservation> {
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
@@ -444,6 +479,7 @@ export async function driveRun(
       }
       await new Promise((r) => setTimeout(r, 50));
     }
+    if (afterSettled) await afterSettled({ store, manager, runId });
     store.flush();
     // Cleanup mutates the live record; return the observed state before cancellation.
     return { statuses, record: structuredClone(record()), events: readRunEvents(repoRoot, started.id) };

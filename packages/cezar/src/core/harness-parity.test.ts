@@ -340,6 +340,8 @@ const CONTROL_CRITERIA = [
   { id: 'R9', scenario: 'ask-reply-late' },
   { id: 'R10', scenario: 'done' },
   { id: 'R11', scenario: 'baseline' },
+  { id: 'R15', scenario: 'subagent-after-park' },
+  { id: 'R16', scenario: 'ask-snapshot' },
 ] as const;
 
 /**
@@ -573,6 +575,92 @@ describe('harness parity — run tier', () => {
         60_000,
       );
     }
+  }
+});
+
+// #121/#401: release native child frames only AFTER the manager has parked.
+// Waiting for the final wire-derived event prevents a green test that returned
+// before the late frames were read. OpenCode discards closed child scopes;
+// its passive usage barrier proves those frames crossed the SSE transport.
+describe('harness parity — late child attention', () => {
+  for (const backend of RUNNER_IDS) {
+    const exempt = exemptionFor('R15', backend);
+    if (exempt) {
+      it(`${backend} is exempt from R15 — ${exempt.reason}`, () => {
+        expect(exempt.kind).toBe('scenario-unconstructible');
+        expect(HARNESS_ADAPTERS[backend].scenarios['subagent-after-park']).toBeUndefined();
+      });
+      continue;
+    }
+    it(`${backend} R15 keeps its monitoring wake after post-park child items`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'cez-post-park-'));
+      const release = join(dir, 'release');
+      try {
+        await driveRun(backend, { prompt: `${promptFor(backend, 'subagent-after-park')} parity-release=${release}` },
+          record => record?.activity === 'monitoring' || record?.status === 'waiting', 30_000,
+          async ({ store, runId }) => {
+            expect(store.getRun(runId)).toMatchObject({ status: 'running', activity: 'monitoring' });
+            const wake = store.getRun(runId)?.monitoringWakeAt;
+            expect(wake).toBeDefined();
+            const before = store.readEvents(runId).length;
+            const changes: Array<{ status: string; activity?: string; monitoringWakeAt?: string }> = [];
+            const recordChange = (record: NonNullable<RunObservation['record']>) => {
+              if (record.id === runId) changes.push({ status: record.status, activity: record.activity, monitoringWakeAt: record.monitoringWakeAt });
+            };
+            store.on('run', recordChange);
+            try {
+              writeFileSync(release, 'go');
+              await waitFor(() => store.readEvents(runId).slice(before).some(event =>
+                backend === 'opencode'
+                  ? event.type === 'usage.updated' && (event.usage as { total?: number } | undefined)?.total === 424242
+                  : JSON.stringify(event).includes('Post-park child update processed.')));
+              expect(store.getRun(runId)).toMatchObject({ status: 'running', activity: 'monitoring', monitoringWakeAt: wake });
+              for (const change of changes) expect(change).toEqual({ status: 'running', activity: 'monitoring', monitoringWakeAt: wake });
+              const after = store.readEvents(runId).slice(before);
+              expect(after.some(event => event.type === 'turn.started')).toBe(false);
+              const childItems = (backend === 'opencode' ? store.readEvents(runId).slice(0, before) : after)
+                .filter(event => event.type.startsWith('item.') && event.item && (event.item as { parentItemId?: string }).parentItemId);
+              expect(childItems.length).toBeGreaterThan(0);
+              if (backend === 'opencode') expect(after.some(event => event.type.startsWith('item.'))).toBe(false);
+            } finally { store.off('run', recordChange); }
+          });
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }, 60_000);
+  }
+});
+
+// #134/#401: use native completed-message frames, not an injected UiEvent or
+// fake runner. Current wires couple that snapshot to v1; the named exemptions
+// are pinned in the inverse direction, in addition to the actual park/card.
+describe('harness parity — stored assistant ASK', () => {
+  for (const backend of RUNNER_IDS) {
+    const exempt = exemptionFor('R16', backend);
+    it(exempt ? `${backend} is exempt from R16 v2-only ASK — ${exempt.reason}` : `${backend} R16 parks an ASK present only on its stored v2 message`, async () => {
+      const seam = await driveSeam(backend, 'ask-snapshot');
+      const snapshots = seam.v2.flatMap(event => event.type === 'item.completed'
+        && event.item.kind === 'message' && event.item.role === 'assistant' && !event.item.parentItemId
+        ? [event.item.text] : []);
+      const marker = snapshots.find(text => text.includes('CEZ:ASK'));
+      expect(marker).toBeDefined();
+      expect(seam.v1.some(event => event.type === 'turn-end')).toBe(true);
+      // Assert this exact absent capability, not "some assertion threw": a
+      // broken mock or missing v2 snapshot cannot pass as a wire exemption.
+      const v1HasMarker = textEvents(seam.v1).some(text => text.includes('CEZ:ASK'));
+      if (exempt) {
+        expect(exempt.kind).toBe('capability-absent');
+        expect(v1HasMarker).toBe(true);
+        expect(textEvents(seam.v1).join('\n')).toContain(marker);
+      } else {
+        expect(v1HasMarker).toBe(false);
+      }
+      const run = await driveRun(backend, 'ask-snapshot', record => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''));
+      expect(run.record).toMatchObject({ status: 'waiting', hasPendingHumanAsk: true });
+      expect(run.record?.activity).toBeUndefined();
+      expect(run.record?.monitoringWakeAt).toBeUndefined();
+      expect(askEvents(run)).toHaveLength(1);
+      expect(askEvents(run)[0]?.questions).toMatchObject([{ header: 'Library', question: 'Which test library?' }]);
+      expect(run.events.some(event => event.type === 'item.completed' && JSON.stringify(event.item).includes('CEZ:ASK'))).toBe(true);
+    }, 60_000);
   }
 });
 
@@ -943,7 +1031,7 @@ describe('harness parity — the matrix itself', () => {
     const missing: string[] = [];
     for (const backend of RUNNER_IDS) {
       for (const id of allIds) {
-        const declared = HARNESS_ADAPTERS[backend].scenarios[scenarioOf(id)] !== undefined;
+        const declared = HARNESS_ADAPTERS[backend]?.scenarios[scenarioOf(id)] !== undefined;
         if (!declared && !exemptionFor(id, backend)) missing.push(`${backend}/${id}`);
       }
     }
@@ -981,8 +1069,10 @@ describe('harness parity — the matrix itself', () => {
   });
 
   it('uses no skipped or pending cell — an inapplicable one is a declared exemption', () => {
-    const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
-    expect(source).not.toMatch(/\b(?:it|test|describe)\s*\.\s*(?:skip|todo)\s*\(/);
+    for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.test.ts', import.meta.url)]) {
+      const source = readFileSync(url, 'utf8');
+      expect(source).not.toMatch(/\b(?:it|test|describe)\s*\.\s*(?:skip|todo)\s*\(/);
+    }
   });
 });
 

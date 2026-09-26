@@ -729,6 +729,20 @@ ask routing and park declarations. It exists because nine fixes (#2, #3, #4, #5,
 #6, #46, #48, #53, #54) each repaired a failure mode on ONE backend that no
 shared contract covered, so the same class of bug shipped again on the next one.
 
+**Regression coverage belongs in the fixing PR.** A fix to runner lifecycle,
+input delivery, attention, asks or completion MUST add or extend a shared
+`RUNNER_IDS` case in this matrix, or an equivalent exhaustive adapter loop such
+as `workflows/worker-parent-attention.test.ts`. Do this when fixing the bug; a
+separate parity issue is not a prerequisite. Keep a focused backend test when it
+helps explain the wire, but it is not the shared regression proof.
+
+Drive each real runner through its own native mock frames. Register each new
+criterion in the total-coverage guard, and use a named, executable exemption only
+when the wire cannot express the case. Prove the new test fails when the relevant
+production fix is removed, then restore it and record the passing run in the PR.
+An injected normalized event can test the manager in isolation; it cannot prove
+that another runner constructs or attributes that event correctly.
+
 **Two tiers.** The seam tier drives each real runner class against that
 backend's own offline mock and asserts over the v1 and v2 streams plus the
 settled result. The run tier drives a real `RunManager` run in a temp git repo.
@@ -754,6 +768,8 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | `ask-bad` | a malformed ask, and then still end the turn |
 | `ask-reply-late` | the same ask, with OpenCode SSE idle preceding the independent reply HTTP acknowledgement |
 | `subagent` | child work and a child terminal signal the parent survives, then parent `CEZ:MONITORING` text followed by child text before parent turn-end |
+| `subagent-after-park` | wait for the manager to park, then emit native child updates without a new parent turn |
+| `ask-snapshot` | a complete parent assistant ASK snapshot, without earlier text deltas where the wire supports snapshots |
 
 S9 also pins parent-only v1/result text while child messages remain nested on v2.
 R12 asserts the `subagent` turn parks as `running`/`monitoring`, never `waiting`
@@ -761,6 +777,28 @@ R12 asserts the `subagent` turn parks as `running`/`monitoring`, never `waiting`
 session transcript. Codex filters both child message deltas and completions;
 Claude excludes child assistant text from v1 and its result fallback buffer;
 the v2 fallback uses the same parent-only guard.
+
+R15 (#121/#401) releases native child updates only after the run has parked,
+then checks that status, activity and the monitoring wake deadline survive.
+Claude and Codex retain nested items; Cursor retains attributed late task
+metadata while dropping closed child-session chunks; OpenCode discards closed
+child scopes. Pi has the same explicit child-wire exemption as S9/R12.
+
+R16 (#134/#401) checks a stored assistant ASK and exactly one waiting question
+card on every runner. All current wires couple their completed parent text to
+v1, so the v2-only precondition has named `capability-absent` exemptions pinned
+by the opposite assertion: the raw v1 stream must contain that same marker.
+A future runner that can carry independent final text must exercise the v2-only
+case instead. The isolated manager fallback tests remain in `run.test.ts`; the
+wire rows do not pretend to reproduce a missing-v1 envelope these protocols do
+not supply.
+
+`worker-parent-attention.test.ts` (#249/#401) loops every runner for fresh and
+Continue sessions: markerless turns with live workers stay monitoring, and real
+ASK still wins. Codex/OpenCode/Pi delay transport acknowledgement past turn-end.
+Claude/Cursor acknowledge pipe writes, so their named executable exemptions hold
+the provider response and prove acceptance precedes it. Its exhaustive ACK table
+makes a new runner fail until its transport is classified and exercised.
 
 Owned-input rows S11/S12 pin ask separation and each runner's declared delivery mode:
 a `steer` runner admits busy input, a `boundary` runner refuses and retries at its
