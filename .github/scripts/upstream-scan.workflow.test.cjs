@@ -38,6 +38,8 @@ test('scan PR creation uses the scoped App client without giving it branch crede
   const mint = job.steps.find(step => step.id === 'scan_app');
   assert.ok(mint, 'mint a PR-only installation token for native CI');
   assert.match(mint.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
+  assert.equal(mint.with['client-id'], '${{ vars.RELEASE_APP_CLIENT_ID }}');
+  assert.equal(mint.with['app-id'], undefined);
   assert.equal(mint.with['permission-pull-requests'], 'write');
   assert.equal(mint.with['permission-contents'], undefined);
   assert.equal(mint.with.repositories, '${{ github.event.repository.name }}');
@@ -68,13 +70,13 @@ test('scan App configuration fails before PR creation rather than falling back t
   assert.ok(validate, 'validate the existing release App settings');
   assert.ok(job.steps.indexOf(validate) < job.steps.findIndex(step => step.id === 'pr'));
   for (const [id, login, key, success] of [
-    ['123', 'cezarion-release[bot]', 'true', true],
+    ['Iv23ct5zcAQpntZQdSfo', 'cezarion-release[bot]', 'true', true],
     ['', 'cezarion-release[bot]', 'true', false],
-    ['123', 'human', 'true', false],
-    ['123', 'cezarion-release[bot]', 'false', false],
+    ['Iv23ct5zcAQpntZQdSfo', 'human', 'true', false],
+    ['Iv23ct5zcAQpntZQdSfo', 'cezarion-release[bot]', 'false', false],
   ]) {
     const result = spawnSync('bash', ['-e', '-c', validate.run], { encoding: 'utf8',
-      env: { ...process.env, RELEASE_APP_ID: id, RELEASE_APP_BOT_LOGIN: login, HAS_PRIVATE_KEY: key } });
+      env: { ...process.env, RELEASE_APP_CLIENT_ID: id, RELEASE_APP_BOT_LOGIN: login, HAS_PRIVATE_KEY: key } });
     assert.equal(result.status === 0, success, result.stderr);
   }
   const identity = job.steps.find(step => step.name === 'Check scan App identity');
