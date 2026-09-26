@@ -410,6 +410,18 @@ describe('cez task', () => {
       expect(discoveries).toBe(0);
     });
 
+    it.each([[['--help']], [['start', '--help']]])('documents safe task input in %j (#568)', async (argv) => {
+      expect(await run(argv)).toBe(0);
+      const help = out.at(-1)!;
+      expect(help).toMatch(/cez task start --task-file <path\|-> \| '<task>'/);
+      expect(help).toContain('cez task start --task-file task.md');
+      expect(help).toContain("cez task start --task-file - <<'EOF'");
+      expect(help).toContain('POSIX shells expand backticks and $() in double-quoted arguments');
+      expect(help).toContain('before the CLI receives the text');
+      expect(help).toContain('Do not put raw backticks in double-quoted task arguments');
+      expect(discoveries).toBe(0);
+    });
+
     it('describes the webhook flags and the notify operation (#589)', async () => {
       expect(await run(['--help'])).toBe(0);
       const all = out.at(-1)!;
