@@ -75,8 +75,13 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
 
 - `processStartToken(pid)` as above.
 - `processesWithCwdUnder(dirs)`: the worker's worktree and every agent tmp dir location
-  (`agentTmpDirLocations`), because finalization deletes that scratch. Linux reads `/proc/*/cwd`, skipping `ENOENT`/`EACCES`
-  per entry. macOS uses `lsof -a -d cwd -Fpn` with a bounded timeout. It excludes
+  (`agentTmpDirLocations`), because finalization deletes that scratch. Linux reads `/proc/*/cwd`,
+  skipping `ENOENT` (the process vanished) and `EACCES` on another user's process. An
+  unreadable process of our own user is non-dumpable (`systemd --user`, `sshd`,
+  `gpg-agent`). It counts as a possible holder, reported by PID and never signalled, unless it
+  started before the worker's record was created (`since`, from `/proc/stat` btime plus
+  starttime ticks). A process that old cannot be the worker's descendant, and every host has
+  some. macOS uses `lsof -a -d cwd -Fpn` with a bounded timeout. It excludes
   `process.pid`, compares realpaths, and matches a dir itself or anything beneath it. cezar's own
   `git` children in the worktree make the scan read `alive` for a moment; that is
   conservative, and it clears on the next probe. If

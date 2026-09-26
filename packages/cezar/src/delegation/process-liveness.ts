@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
 /**
@@ -72,19 +72,53 @@ export function isCurrentProcess(entry: RecordedProcess): boolean {
   return entry.startToken === undefined || own === undefined || sameIncarnation(entry.startToken, own);
 }
 
+/** The `/proc` reads the Linux scan makes; injectable because EACCES cannot be staged for real. */
+export type ProcReader = {
+  readdir: () => string[]; readlink: (pid: string) => string;
+  ownerUid: (pid: string) => number | undefined; startedAtMs: (pid: string) => number | undefined;
+};
+let clockTicks: number | undefined;
+let bootTimeMs: number | undefined;
+/** Wall-clock start of a process: boot time (`/proc/stat` btime) plus its starttime ticks. */
+function procStartedAtMs(pid: string): number | undefined {
+  try {
+    bootTimeMs ??= Number(/^btime (\d+)$/m.exec(readFileSync('/proc/stat', 'utf8'))?.[1]) * 1000;
+    clockTicks ??= Number(spawnSync('getconf', ['CLK_TCK'], { encoding: 'utf8', timeout: 2_000 }).stdout.trim()) || 100;
+    const start = procStat(Number(pid))?.startToken;
+    return start === undefined || !Number.isFinite(bootTimeMs) ? undefined : bootTimeMs + Number(start) / clockTicks * 1000;
+  } catch { return undefined; }
+}
+const realProc: ProcReader = {
+  readdir: () => readdirSync('/proc'),
+  readlink: pid => readlinkSync(`/proc/${pid}/cwd`),
+  ownerUid: pid => { try { return statSync(`/proc/${pid}`).uid; } catch { return undefined; } },
+  startedAtMs: procStartedAtMs,
+};
+
 /** PIDs (never this process) whose working directory is one of `dirs` or beneath it, in one scan
  * pass; `unknown` when no scan can run. cezar's own short-lived git children in a worktree make
- * this read "alive" briefly: conservative, and a retry self-heals. */
-export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform): number[] | 'unknown' {
+ * this read "alive" briefly: conservative, and a retry self-heals. `since` (epoch ms) is the
+ * earliest moment the generation's processes can have started; see the EACCES rule below. */
+export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc, since?: number): number[] | 'unknown' {
   const targets = (typeof dirs === 'string' ? [dirs] : dirs).map(dir => { try { return realpathSync(dir); } catch { return resolve(dir); } });
   const under = (cwd: string) => { const path = cwd.replace(/ \(deleted\)$/, ''); return targets.some(target => path === target || path.startsWith(target + sep)); };
   const found: number[] = [];
   if (platform === 'linux') {
     let entries: string[];
-    try { entries = readdirSync('/proc'); } catch { return 'unknown'; }
+    try { entries = proc.readdir(); } catch { return 'unknown'; }
+    const uid = process.getuid?.();
     for (const entry of entries) {
       if (!/^\d+$/.test(entry) || Number(entry) === process.pid) continue;
-      try { if (under(readlinkSync(`/proc/${entry}/cwd`))) found.push(Number(entry)); } catch { /* ENOENT/EACCES: skip the entry */ }
+      try { if (under(proc.readlink(entry))) found.push(Number(entry)); }
+      catch (error) {
+        // A vanished process is gone; another user's is unreadable by design and skipped. Our own
+        // user's non-dumpable processes are unreadable too (systemd --user, sshd, gpg-agent, which
+        // every host has), so they cannot all block the proof: one that started before the worker
+        // existed cannot be its descendant. A later one is a possible holder, never signalled.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT' || uid === undefined || proc.ownerUid(entry) !== uid) continue;
+        const started = since === undefined ? undefined : proc.startedAtMs(entry);
+        if (started === undefined || started >= since!) found.push(Number(entry));
+      }
     }
     return found;
   }
@@ -105,14 +139,14 @@ export type GenerationProbe = { liveness: GenerationLiveness; controller?: numbe
 /** A missing record (legacy) relies on the working-directory scan alone. `paths` are the
  * worktree and every scratch location, which finalization deletes. A live foreign controller
  * short-circuits the scan; otherwise `pids` names every live recorded or scanned process. */
-export function inspectGeneration({ record, paths }: { record?: WorkerProcessRecord; paths: readonly string[] }): GenerationProbe {
+export function inspectGeneration({ record, paths, since }: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationProbe {
   if (record && !isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
   const recorded = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];
-  const scan = processesWithCwdUnder(paths);
+  const scan = processesWithCwdUnder(paths, process.platform, realProc, since);
   const pids = [...new Set([...recorded, ...(scan === 'unknown' ? [] : scan)])];
   return { liveness: pids.length ? 'alive' : scan === 'unknown' ? 'unknown' : 'gone', pids };
 }
 
-export function probeGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[] }): GenerationLiveness {
+export function probeGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; since?: number }): GenerationLiveness {
   return inspectGeneration(input).liveness;
 }

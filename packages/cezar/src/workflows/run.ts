@@ -796,7 +796,7 @@ export class RunManager {
    * manager holds the run); `unknown` is a present record that proves nothing. */
   private orphanState(runId: string, admitting = false):
     | { state: 'none' | 'busy' | 'unknown' }
-    | { state: 'orphan'; generation: string; record?: WorkerProcessRecord; paths: string[] } {
+    | { state: 'orphan'; generation: string; record?: WorkerProcessRecord; paths: string[]; since?: number } {
     const run = this.store.getRun(runId);
     if (run?.delegation?.role !== 'worker' || this.disposed) return { state: 'none' };
     if (this.executions.has(runId) || this.active.has(runId) || this.starting.has(runId) || (!admitting && this.queue.includes(runId))) return { state: 'busy' };
@@ -809,7 +809,9 @@ export class RunManager {
     if (record !== 'absent' && isCurrentProcess(record.controller)) return { state: 'none' };
     // Finalization deletes the scratch too, so a process working there keeps the generation alive.
     return { state: 'orphan', generation: proof.generation, ...(record === 'absent' ? {} : { record }),
-      paths: [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, runId)] };
+      paths: [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, runId)],
+      // No process of this worker can predate its record (1 s slack for tick rounding).
+      ...(Number.isFinite(Date.parse(run.createdAt)) ? { since: Date.parse(run.createdAt) - 1_000 } : {}) };
   }
 
   private orphanedWorkerGeneration(runId: string, admitting = false) {
