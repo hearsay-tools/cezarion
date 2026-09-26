@@ -453,6 +453,54 @@ describe('watchProviderRuntimeAuthFailures', () => {
       });
     });
 
+    it('falls back to the backend default, not the run profile, for a mixed-backend step', async () => {
+      // A codex step failing inside a Claude run must be verified against CODEX's own login: the
+      // run's agentProfile belongs to the run's runner, and asking for it under codex answers a
+      // question nobody asked.
+      const runCommand = vi.fn<RunProviderCommand>(async (executable) => ({
+        stdout: CONNECTED_OUTPUT[providerForExecutable(executable)],
+        stderr: '',
+        exitCode: 0,
+      }));
+      providerAuth = new ProviderAuthService({
+        platform: 'linux',
+        runCommand,
+        createAuthFailureId: () => 'auth-incident-1',
+      });
+      const profileResolver = vi.fn<RuntimeAuthProfileResolver>(async (provider, profileId) => (
+        profileId === 'work'
+          ? { kind: 'profile' as const, id: 'work', configDir: '/work' }
+          : { kind: 'default' as const }
+      ));
+      const onProviderStatus = watch(profileResolver);
+      const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
+
+      const run = store.createRun({
+        title: 'mixed backend',
+        workflow: 'mixed',
+        task: 'work',
+        runner: 'claude',
+        agentProfile: 'work',
+        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+      });
+      store.updateStep(run.id, 'implement', { backend: 'codex' });
+      store.appendEvent(run.id, {
+        type: 'error',
+        stepId: 'implement',
+        message: 'codex: turn failed: unauthorized',
+      });
+      await verified(verifying);
+
+      // The codex step ran under codex's DEFAULT login — the run's claude profile is not asked
+      // about, and codex is verified bare.
+      expect(profileResolver).toHaveBeenCalledWith('codex', undefined);
+      expect(runCommand).toHaveBeenCalledWith('codex', ['login', 'status'], 10_000);
+      expect(onProviderStatus.mock.calls.map(([status]) => status)).toEqual([
+        expect.objectContaining({ provider: 'codex', status: 'disconnected' }),
+        { provider: 'codex', status: 'connected' },
+      ]);
+    });
+
     it('keeps the latch when the recorded account cannot be checked at all', async () => {
       const runCommand = accountAwareRunCommand({ stdout: '{"loggedIn":true}', exitCode: 0 });
       const onProviderStatus = watch(workAccountResolver);

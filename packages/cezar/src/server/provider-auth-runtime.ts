@@ -57,6 +57,11 @@ export function watchProviderRuntimeAuthFailures(
       ? run.steps.find(({ id }) => id === event.stepId)
       : undefined;
     const provider: ProviderId = step?.backend ?? run.runner ?? 'claude';
+    // The run-level profile belongs to the run's RUNNER: a mixed-backend step failing on another
+    // backend ran under THAT backend's own default login, and asking the resolver for the runner's
+    // profile under the wrong provider can only mis-answer the check or stall it unresolved.
+    const profileId = step?.profileId
+      ?? (provider === (run.runner ?? 'claude') ? run.agentProfile : undefined);
     const report = providerAuth.reportRuntimeAuthFailure(provider);
     if (!report) return;
     if (report.transitioned) onProviderStatus(report.status);
@@ -84,7 +89,7 @@ export function watchProviderRuntimeAuthFailures(
     // then stand down rather than answer for it.
     const observed = { generation: report.generation };
     void (async () => {
-      const target = await resolveProfile(provider, step?.profileId ?? run.agentProfile);
+      const target = await resolveProfile(provider, profileId);
       // An account we cannot name cannot be verified: leave the latch exactly as it stands and let
       // Settings' Try again — which asks no such question — stay the way out.
       if (!target) return;
