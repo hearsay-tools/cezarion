@@ -132,12 +132,8 @@ function historyAnchorDiagnostics(): string {
   return JSON.stringify(
     browser.evaluate(`(() => {
       const main = ${MAIN}
-      const samples = window.__cezHistoryDiag ?? []
       return {
-        origin: window.__cezHistoryOrigin,
-        settled: window.__cezSettledHistoryAnchor,
-        sampleCount: samples.length,
-        samples,
+        idle: window.__cezIdle,
         mountedKeys: [...document.querySelectorAll('[data-slot="thread-row"][data-row-key]')].map(
           (row) => row.dataset.rowKey,
         ),
@@ -151,64 +147,29 @@ function historyAnchorDiagnostics(): string {
   )
 }
 
-function settleHistoryAnchor(rowExpr: string, holdAtStart = false): HistoryAnchor {
-  browser.evaluate(`(() => {
-    window.__cezHistoryAnchor = null
-    window.__cezHistoryOrigin = null
-    window.__cezSettledHistoryAnchor = null
-    window.__cezHistoryDiag = []
-  })()`)
-  const holdStart = holdAtStart
-    ? `if (main.scrollTop > 2) {
-      main.scrollTop = 0
-      main.dispatchEvent(new Event('scroll', { bubbles: true }))
-      window.__cezHistoryAnchor = null
-      window.__cezHistoryOrigin = null
-      return false
-    }`
-    : ''
+function waitUntilCockpitIdle(): void {
   try {
-    browser.waitForFunction(`(() => {
-    const main = ${MAIN}
-    if (!main) return false
-    ${holdStart}
-    const sample = ${historyAnchorSample(rowExpr)}
-    const diag = window.__cezHistoryDiag
-    const prev = diag.at(-1)
-    if (!prev || JSON.stringify(prev.sample) !== JSON.stringify(sample)) {
-      diag.push({
-        ts: performance.now(),
-        sample,
-        scrollTop: main.scrollTop,
-        mountedKeys: [...main.querySelectorAll('[data-slot="thread-row"][data-row-key]')].map(
-          (row) => row.dataset.rowKey,
-        ),
-      })
-      if (diag.length > 32) diag.shift()
-    }
-    if (!sample) return false
-    const origin = window.__cezHistoryOrigin
-    if (
-      origin &&
-      origin.key === sample.key &&
-      Math.abs(origin.top - sample.top) < 2 &&
-      Math.abs(origin.scrollTop - sample.scrollTop) < 2
-    ) {
-      origin.hits += 1
-      if (origin.hits >= 3) {
-        window.__cezSettledHistoryAnchor = sample
-        return true
-      }
-      return false
-    }
-    window.__cezHistoryOrigin = { ...sample, hits: 1 }
-    return false
-  })()`)
+    browser.waitForStable(`window.__cezIdle !== false`, { holdMs: 50 })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(`${message}\n${historyAnchorDiagnostics()}`)
   }
-  return browser.evaluate(`window.__cezSettledHistoryAnchor`) as HistoryAnchor
+}
+
+function settleHistoryAnchor(rowExpr: string): HistoryAnchor {
+  try {
+    return browser.waitForStable(
+      `(() => {
+        const main = ${MAIN}
+        if (!main) return null
+        return ${historyAnchorSample(rowExpr)}
+      })()`,
+      { holdMs: 200 },
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`${message}\n${historyAnchorDiagnostics()}`)
+  }
 }
 
 function parkAndSettleHistoryStart(): HistoryAnchor {
@@ -216,8 +177,14 @@ function parkAndSettleHistoryStart(): HistoryAnchor {
     const main = ${MAIN}
     // Unpin while still at the live tail so a later wheel at the boundary cannot load a page.
     main.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }))
+    // Virtua ignores a raw scrollTop write; the e2e seam goes through the scroll owner.
+    window.__cezThreadScrollTo?.(0)
   })()`)
-  return settleHistoryAnchor(`main.querySelector('[data-slot="thread-row"][data-row-key]')`, true)
+  browser.waitForValue(
+    `document.querySelector('[data-slot="main"]')?.scrollTop ?? null`,
+    (top): top is number => typeof top === 'number' && top <= 2,
+  )
+  return settleHistoryAnchor(`main.querySelector('[data-slot="thread-row"][data-row-key]')`)
 }
 
 function settleNamedHistoryAnchor(key: string): HistoryAnchor {
@@ -234,7 +201,7 @@ function navigateAndSampleArrival(runId: string): ArrivalSample[] {
   browser.evaluate(`(() => {
     const link = document.querySelector(${JSON.stringify(`a[href="${href}"]`)})
     if (!link) throw new Error('missing task navigation link: ${href}')
-    window.__cezArrivalSamples = []
+    const samples = []
     let attempts = 0
     const sample = () => {
       attempts += 1
@@ -244,18 +211,24 @@ function navigateAndSampleArrival(runId: string): ArrivalSample[] {
       )
       const ready = destination?.querySelector('[data-slot="thread-rows"]')
       if (main && ready) {
-        window.__cezArrivalSamples.push({
+        samples.push({
           top: main.scrollTop,
           maxTop: main.scrollHeight - main.clientHeight,
         })
       }
-      if (window.__cezArrivalSamples.length < 6 && attempts < 120) requestAnimationFrame(sample)
+      if (samples.length < 6 && attempts < 120) requestAnimationFrame(sample)
+      else document.documentElement.dataset.e2eArrival = JSON.stringify(samples)
     }
+    delete document.documentElement.dataset.e2eArrival
     requestAnimationFrame(sample)
     link.click()
   })()`)
-  browser.waitForFunction(`window.__cezArrivalSamples?.length >= 6`)
-  return browser.evaluate(`window.__cezArrivalSamples`) as ArrivalSample[]
+  const packed = browser.waitForValue(
+    `document.documentElement.dataset.e2eArrival || null`,
+    (value): value is string => typeof value === 'string' && value.length > 2,
+  )
+  browser.evaluate(`delete document.documentElement.dataset.e2eArrival`)
+  return JSON.parse(packed) as ArrivalSample[]
 }
 
 function parkCurrentThread(): number {
@@ -299,6 +272,7 @@ beforeAll(async () => {
     `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '1' &&
      document.querySelector('[data-slot="history-boundary"] button:not([disabled])') !== null`,
   )
+  waitUntilCockpitIdle()
 }, 120_000)
 
 afterAll(() => {
@@ -434,6 +408,7 @@ describe('progressive long-session history', () => {
       `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '1' &&
        document.querySelector('[data-slot="thread-rows"]')?.dataset.virtualized === 'true'`,
     )
+    waitUntilCockpitIdle()
     parkAndSettleHistoryStart()
     browser.evaluate(`(() => {
       const main = ${MAIN}

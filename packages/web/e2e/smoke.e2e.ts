@@ -314,43 +314,34 @@ describe('cockpit app shell', () => {
   })
 
   it('marks exactly one nav item active, following the route', () => {
-    const activeLabel = () =>
-      browser.evaluate(
-        `Array.from(document.querySelectorAll('[data-slot="sidebar"] nav a[aria-current="page"]')).map(a => {
-          const clone = a.cloneNode(true)
-          clone.querySelector('[data-slot="nav-badge"], [data-slot="nav-unread-badge"]')?.remove()
-          return clone.textContent.trim()
-        })`
-      )
-
     // Every URL below is a LEGACY flat one, so each load settles in two hops: the boot-project
     // redirect, then whatever the route itself redirects to. Pathname can update a tick before
     // React commits `aria-current`, so wait for both — sampling the nav on URL alone reads the
     // previous screen's answer.
     const settleAt = (pathname: string, label: string) =>
-      browser.waitForFunction(`(() => {
-        if (location.pathname !== '${pathname}') return false
+      browser.waitForStable(
+        `(() => {
+        if (location.pathname !== '${pathname}') return null
         const labels = Array.from(document.querySelectorAll('[data-slot="sidebar"] nav a[aria-current="page"]')).map(a => {
           const clone = a.cloneNode(true)
           clone.querySelector('[data-slot="nav-badge"], [data-slot="nav-unread-badge"]')?.remove()
           return clone.textContent.trim()
         })
-        return labels.length === 1 && labels[0] === '${label}'
-      })()`)
+        return labels.length === 1 && labels[0] === '${label}' ? labels : null
+      })()`,
+        { holdMs: 250 },
+      )
 
     browser.goto(baseUrl + '/')
-    settleAt(scoped('/'), 'Tasks')
-    expect(activeLabel()).toEqual(['Tasks'])
+    expect(settleAt(scoped('/'), 'Tasks')).toEqual(['Tasks'])
 
     browser.goto(baseUrl + '/git')
-    settleAt(scoped('/git'), 'Git')
-    expect(activeLabel()).toEqual(['Git'])
+    expect(settleAt(scoped('/git'), 'Git')).toEqual(['Git'])
 
     // The nested Settings area: the more specific item wins, and only it. `/settings/skills`
     // is itself a redirect onto the top-level catalog, so this asserts both hops.
     browser.goto(baseUrl + '/settings/skills')
-    settleAt(scoped('/skills'), 'Skills')
-    expect(activeLabel()).toEqual(['Skills'])
+    expect(settleAt(scoped('/skills'), 'Skills')).toEqual(['Skills'])
   })
 
   it('makes main the only scroller — the document never scrolls', () => {

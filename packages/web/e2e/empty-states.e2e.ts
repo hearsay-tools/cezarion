@@ -64,7 +64,14 @@ beforeAll(async () => {
 afterAll(() => {
   browser?.close()
   server?.kill()
-  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
+  // The killed server may still be flushing into dataRoot, which races rmSync and
+  // throws ENOTEMPTY — a suite-level failure on a run whose every test passed.
+  // A temp dir that outlives the run is litter, not a failure; the OS reaps it.
+  try {
+    if (dataRoot) rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  } catch {
+    /* the OS reaps it */
+  }
 })
 
 describe('tasks overview — no tasks yet', () => {

@@ -106,10 +106,12 @@ import type {
   RunRecord,
   SelectAgentProfileInput,
   SetAgentConfigInput,
+  SkillsUpdateState,
   UpdateAgentProfileInput,
   UpdateProjectInput,
   NotifyRunInput,
 } from '@open-mercato/cezar-api-client'
+import { liveRefetchInterval } from '@/lib/live-refetch'
 import { subscribeTopic } from './ws'
 
 /**
@@ -338,7 +340,7 @@ export function useProviderStatus() {
     // reverse-proxy-authenticated mobile browser. A focus refresh is allowed once the answer is
     // five minutes old, covering credentials changed outside cezar without permanent polling.
     staleTime: 5 * 60_000,
-    refetchInterval: false,
+    refetchInterval: liveRefetchInterval(false),
     refetchOnWindowFocus: true,
   })
 }
@@ -853,7 +855,7 @@ export function useRunsIndex(enabled = true, refetchIntervalMs?: number) {
     // dropped socket, a frozen tab, a run that ended while the connection was down), not the only
     // freshness mechanism. Only the global Tasks page (a live view rather than a glance) asks for
     // one; the palette leaves it off and keeps its 30s staleness.
-    ...(refetchIntervalMs === undefined ? {} : { refetchInterval: refetchIntervalMs }),
+    ...(refetchIntervalMs === undefined ? {} : { refetchInterval: liveRefetchInterval(refetchIntervalMs) }),
     // No `refetchOnWindowFocus` here on purpose, though the tab-comes-back case is real (the
     // interval above does not run in a hidden tab). `global-events.tsx` already reconciles this
     // key on `visibilitychange`, which is the same event with better manners — one reconcile for
@@ -942,7 +944,7 @@ export function useRunChanges(id: string | undefined, live = false) {
     retry: false,
     // While the run is active the agent is still writing — poll so the Changes tab keeps up
     // instead of showing a stale empty snapshot from before the first write (#changes-live).
-    refetchInterval: live ? 4000 : false,
+    refetchInterval: liveRefetchInterval(live ? 4000 : false),
     // Once a run finishes, polling stops (live === false) — but final agent/post-run-hook
     // writes and the user editing files in the worktree still change the diff. Scope a
     // focus refetch and a zero staleTime to THIS query (the global client keeps
@@ -996,7 +998,7 @@ export function useRunCommits(id: string | undefined, live = false) {
     queryFn: ({ signal }) => getRunCommits(id as string, { signal }),
     enabled: Boolean(id),
     retry: false,
-    refetchInterval: live ? 5000 : false,
+    refetchInterval: liveRefetchInterval(live ? 5000 : false),
   })
 }
 
@@ -1237,12 +1239,12 @@ export function useSkillsUpdate(projectId: string, enabled = true) {
     // response converges. Checks may legitimately take tens of seconds, so a one-minute cadence
     // avoids repeatedly challenging authenticated remote sessions while still converging after
     // a long-running operation. The initial mount remains the session's one automatic check.
-    refetchInterval: (query) => {
+    refetchInterval: liveRefetchInterval((query: { state: { data?: SkillsUpdateState } }) => {
       const status = query.state.data?.status
       return status === undefined || status === 'idle' || status === 'checking' || status === 'updating'
         ? 60_000
         : false
-    },
+    }),
   })
 }
 
@@ -1516,7 +1518,7 @@ export function useGithub(params: { limit?: number } = {}, enabled = true) {
     queryFn: ({ signal }) => getGithub({ limit: params.limit }, { signal }),
     enabled,
     staleTime: 60_000,
-    refetchInterval: 60_000,
+    refetchInterval: liveRefetchInterval(60_000),
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   })
@@ -1897,8 +1899,8 @@ export function useReferenceStatuses(
       staleTime: (query: { state: { data?: GithubRefStatusData } }) =>
         refStatusRecheckAfter(query.state.data) ?? Infinity,
       // `refetchIntervalInBackground` stays at its default, so a hidden tab schedules nothing.
-      refetchInterval: (query: { state: { data?: GithubRefStatusData } }) =>
-        refStatusRecheckAfter(query.state.data) ?? false,
+      refetchInterval: liveRefetchInterval((query: { state: { data?: GithubRefStatusData } }) =>
+        refStatusRecheckAfter(query.state.data) ?? false),
       // Coming back to the tab is the strongest "is this still true?" signal there is, and the
       // staleTime above rate-limits it to the same cadence — an answer that can never change has
       // an infinite staleTime and so ignores focus entirely. The global default is `false` for the

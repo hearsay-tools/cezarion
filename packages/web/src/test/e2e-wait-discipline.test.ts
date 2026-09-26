@@ -89,10 +89,11 @@ describe(':hover inside a wait', () => {
       `browser.waitForValue(\`(() => {`,
       `  return document.querySelector('.m').matches(':hover')`,
       `})()\`)`,
+      `browser.waitForStable(\`document.querySelector('.m').matches(':hover')\`, { holdMs: 200 })`,
     ].join('\n')
     const sites = scanSource('x.e2e.ts', src)
-    expect(rules(sites)).toEqual(['hover-in-wait', 'hover-in-wait'])
-    expect(lines(sites)).toEqual([1, 2])
+    expect(rules(sites)).toEqual(['hover-in-wait', 'hover-in-wait', 'hover-in-wait'])
+    expect(lines(sites)).toEqual([1, 2, 5])
   })
 
   it('leaves a one-shot :hover assertion to the other rules', () => {
