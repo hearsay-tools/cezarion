@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from 'vitest';
@@ -67,5 +67,33 @@ export async function withDelayedCommand(backend: 'codex' | 'opencode' | 'pi', b
     writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
     adapter.mockBin = mock;
     await body(() => writeFileSync(released, ''));
+  } finally { adapter.mockBin = original; rmSync(root, { recursive: true, force: true }); }
+}
+
+/** Executable pipe-write ACK exemption (Claude stream-json and Cursor ACP).
+ * Hold the provider response after it reads an owned input. Both real runners
+ * acknowledge the local stdin write independently; withholding a protocol
+ * response therefore cannot construct a turn-end-before-ACK race. */
+export async function withHeldPipeResponse(
+  backend: 'claude' | 'cursor',
+  body: (release: () => void, responseHeld: () => boolean) => Promise<void>,
+): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), 'cez-delivery-pipe-'));
+  const released = join(root, 'released'), received = join(root, 'received');
+  const adapter = HARNESS_ADAPTERS[backend] as { mockBin: string };
+  const original = adapter.mockBin, mock = join(root, 'mock.mjs');
+  let source = readFileSync(original, 'utf8').replace(/^#!.*\n/, '');
+  const anchor = backend === 'claude'
+    ? "  if (userText.includes('mock:agent-echo')) {"
+    : "  if (input.includes('mock:agent-echo')) {";
+  expect(source.split(anchor)).toHaveLength(2);
+  source = `import * as pipeGateFs from 'node:fs';\n${source}`.replace(anchor, `${anchor}
+    pipeGateFs.writeFileSync(${JSON.stringify(received)}, '');
+    while (!pipeGateFs.existsSync(${JSON.stringify(released)})) await new Promise(resolve => setTimeout(resolve, 5));
+  `);
+  try {
+    writeFileSync(mock, '#!/usr/bin/env node\n' + source, { mode: 0o755 });
+    adapter.mockBin = mock;
+    await body(() => writeFileSync(released, ''), () => existsSync(received));
   } finally { adapter.mockBin = original; rmSync(root, { recursive: true, force: true }); }
 }

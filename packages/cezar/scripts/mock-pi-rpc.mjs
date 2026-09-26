@@ -181,6 +181,13 @@ async function handle(command) {
     send({ type: 'turn_start' });
     sendText(['parity done: the task is complete\n\nCEZ:DONE']);
     sendTurnEnd();
+  } else if (command.type === 'prompt' && command.message.includes('mock:ask-snapshot')) {
+    // #401: authoritative text_end without deltas, using rpc-lifecycle frames.
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' });
+    send({ type: 'turn_start' });
+    send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: 'Choose a test library.\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', partial: {} } });
+    sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:ask-bad')) {
     // A marker whose JSON body is invalid. `parseAskMarker` must render no card
     // and the turn must still end (harness parity R4) — pi has no native ask

@@ -2,6 +2,15 @@
 // Offline Cursor ACP wire. Shapes: cursor.com/docs/cli/acp; ACP v1 schema.
 import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import * as parityGateFs from 'node:fs';
+
+// #401: let the test observe the actual monitoring park before releasing late wire frames.
+async function afterParityPark(prompt) {
+  const gate = /parity-release=([^\s"\\]+)/.exec(prompt)?.[1];
+  if (!gate) throw new Error('post-park scenario requires a release path');
+  while (!parityGateFs.existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
+}
+
 const record = (file, value) => { if (file) appendFileSync(file, `${JSON.stringify(value, (key, value) => key === 'env' && Array.isArray(value) ? value.map(item => item.name?.startsWith('CEZ_TOOL_') ? { ...item, value: '[redacted]' } : item) : value)}\n`); };
 record(process.env.CEZ_MOCK_ARGS_FILE, process.argv.slice(2));
 /** #529: remaining-count file. Each session/new or session/load decrements; at >0 the process writes stderr and exits 1 before the reply. */
@@ -62,11 +71,31 @@ async function prompt(id, content) {
   if (input.includes('mock:provider-error-instant-far')) { text(`\n\nError: usage limit reached, try again at ${new Date(Date.now() + 6 * 3600000).toISOString()}.`); complete(id); return; }
   if (input.includes('mock:provider-error-verbose')) { text(`\n\nError: usage limit reached. The request ${'x'.repeat(600)} could not be completed, try again at ${new Date(Date.now() + 6 * 3600000).toISOString()}.`); complete(id); return; }
   if (input.includes('mock:provider-error') && !input.includes('mock:provider-error-')) { text('\n\nError: [unauthenticated] Backend rejected authentication.'); complete(id); return; }
+  // #401: ACP has chunks only, so completion must flush the same text to v1/v2.
+  if (input.includes('mock:ask-snapshot')) {
+    text('Choose a test library.\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}'); complete(id); return;
+  }
   if (input.includes('mock:ask-bad')) { pendingAsk = { id }; emit({ id: 'bad-question', method: 'cursor/ask_question', params: { questions: [] } }); return; }
   if (input.includes('mock:plan')) { pendingAsk = { id, input }; emit({ id: 'plan-1', method: 'cursor/create_plan', params: { name: 'Test plan', overview: 'Approve the changes?', plan: 'Implement the change and run tests.' } }); return; }
   if (input.includes('mock:multi-ask')) { pendingAsk = { id }; emit({ id: 'multi-question', method: 'cursor/ask_question', params: { title: 'Choices', questions: [question, { ...question, id: 'build', prompt: 'Which build tool?', options: [{ id: 'vite', label: 'Vite' }, { id: 'webpack', label: 'Webpack' }] }] } }); return; }
   if (input.includes('mock:ask')) { pendingAsk = { id, input }; emit({ id: 'question-1', method: 'cursor/ask_question', params: { toolCallId: 'ask-tool', title: 'Tests', questions: [question] } }); return; }
   if (input.includes('mock:permission')) { pendingAsk = { id }; emit({ id: 'permission-1', method: 'session/request_permission', params: { sessionId, toolCall: { toolCallId: 'shell-1', title: 'echo hello', kind: 'execute' }, options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' }] } }); return; }
+  // ACP subagent attribution from __fixtures__/cursor/acp-subagents.ndjson.
+  if (input.includes('mock:subagent-after-park')) {
+    update({ sessionUpdate: 'subagent_spawned', subagentSessionId: 'park-child', name: 'Reviewer', task: 'Review', capabilities: {}, _meta: { cursor: { toolCallId: 'park-task', agentId: 'park-agent' } } });
+    update({ sessionUpdate: 'tool_call', toolCallId: 'late-read', kind: 'other', title: 'Inspect README', status: 'in_progress' }, 'park-child');
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'late-read', status: 'completed' }, 'park-child');
+    text('Watching the child.\nCEZ:MONITORING');
+    complete(id);
+    await afterParityPark(input);
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'late-read', status: 'completed', rawOutput: 'Read the file.' }, 'park-child');
+    update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Late child text.' } }, 'park-child');
+    // Cursor task metadata can follow the regular completion (acp-subagents.ndjson).
+    // Sessionless extensions are attributed by their known child toolCallId even
+    // after prompt completion; this is the ordered barrier and a nested item update.
+    emit({ method: 'cursor/task', params: { toolCallId: 'late-read', description: 'Post-park child update processed.' } });
+    return;
+  }
   if (input.includes('mock:subagent')) {
     update({ sessionUpdate: 'tool_call', toolCallId: 'task-1', title: 'Review', kind: 'other', rawInput: { description: 'Review' }, status: 'in_progress' });
     update({ sessionUpdate: 'subagent_spawned', subagentSessionId: 'child', name: 'Reviewer', task: 'Review', capabilities: {}, _meta: { cursor: { toolCallId: 'task-1', agentId: 'child-agent' } } });
