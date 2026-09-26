@@ -486,6 +486,15 @@ export class ProviderAuthService {
    * Ask the provider's OWN CLI whether a runtime rejection was real, and drop the incident when it
    * was not. Resolves to the recovered row when it cleared one, `null` otherwise.
    *
+   * `profile` aims the self-check at the account the failing step actually ran under (spec
+   * 2026-07-29-agent-profiles). Probing the bare default instead would answer a question nobody
+   * asked: a named account can be rejected while the default login is fine, and clearing the latch
+   * on the default's answer lets every future run on the broken account fail again. A named
+   * verification writes the per-account cache and stamps its row `profileId`; the default
+   * verification keeps folding into the whole-response cache exactly as before. The CALLER decides
+   * what to do when the recorded account cannot be resolved — for the runtime watcher that is
+   * "keep the latch" (an unverifiable incident is not a recovered one).
+   *
    * A latch is raised by matching a runner's error text against
    * {@link isRuntimeProviderAuthFailure} — a heuristic over vendor prose — and it then outranks every
    * probe (`withRuntimeFailures`). Before this existed, `clearRuntimeAuthFailure` had exactly one
@@ -505,9 +514,14 @@ export class ProviderAuthService {
    *   older question.
    * - clear on anything but `connected`. `disconnected`, `not-installed` and `unknown` all leave the
    *   latch alone; an inconclusive probe is not evidence of health.
-   * - spawn more than one probe per provider per {@link RUNTIME_AUTH_VERIFY_COOLDOWN_MS}.
+   * - spawn more than one probe per provider per {@link RUNTIME_AUTH_VERIFY_COOLDOWN_MS}. A
+   *   verification skipped by that cooldown returns `null` and leaves the latch standing — for a
+   *   named account that is the safe side, not a lost recovery.
    */
-  async verifyRuntimeAuthFailure(provider: ProviderId): Promise<ProviderStatus | null> {
+  async verifyRuntimeAuthFailure(
+    provider: ProviderId,
+    profile?: { id: string; configDir: string | null },
+  ): Promise<ProviderStatus | null> {
     if (process.env.CEZ_DRY_RUN === '1' || providerAuthChecksDisabled()) return null;
     const failure = this.runtimeFailures.get(provider);
     if (!failure) return null;
@@ -521,13 +535,24 @@ export class ProviderAuthService {
     let probed: ProviderStatus;
     try {
       this.lastRuntimeVerification.set(provider, this.now());
-      probed = await this.probe(descriptorFor(provider));
+      probed = await this.probe(descriptorFor(provider), profile?.configDir);
     } finally {
       this.verifyingRuntimeFailures.delete(provider);
     }
 
     if (probed.status !== 'connected') return null;
     if (!this.clearRuntimeAuthFailure(provider, failure.authFailureId)) return null;
+    if (profile) {
+      // Per-account knowledge goes to the per-account cache. Folding it into the whole-response
+      // cache would let a named account's answer speak for the default row for the TTL that
+      // follows — the same sharing bug the `(provider, profileId)` key was introduced to prevent.
+      const stamped: ProviderStatus = { ...probed, profileId: profile.id };
+      this.completedProfiles.set(profileCacheKey(provider, profile.id), {
+        status: stamped,
+        timestamp: this.now(),
+      });
+      return stamped;
+    }
     this.rememberProbedRow(probed);
     return probed;
   }
@@ -540,11 +565,35 @@ export class ProviderAuthService {
    * `unknown`. Clearing an incident only to reveal a stale contradiction would trade a red banner for
    * a grey one. The cache TIMESTAMP is deliberately untouched: this corrects one row, it is not a
    * full probe, and it must not extend the whole response's lifetime.
+   *
+   * The row also carries a FRESH generation, and a generation alone is not enough when the cache is
+   * cold: a full probe already in flight would land afterwards and, being a complete response, would
+   * replace the correction with rows gathered before the recovery was known (or discard it outright
+   * when `completed` is still unset). So when nothing is cached yet, the merge waits for the
+   * in-flight probe to land and folds over ITS answer — still generation-stamped, so a probe that
+   * started even later wins on its own merits.
    */
   private rememberProbedRow(status: ProviderStatus): void {
+    const generation = ++this.nextProbeGeneration;
+    if (this.completed) {
+      this.mergeProbedRow(status, generation);
+      return;
+    }
+    const inFlight = this.inFlight;
+    if (!inFlight) return;
+    void inFlight.raw.catch(() => {}).then(() => {
+      // A newer full probe landing first (its generation outranks ours) makes this a no-op: its
+      // rows are the fresher answer and must not be patched by an older correction.
+      if (!this.completed || this.completed.generation >= generation) return;
+      this.mergeProbedRow(status, generation);
+    });
+  }
+
+  private mergeProbedRow(status: ProviderStatus, generation: number): void {
     if (!this.completed) return;
     this.completed = {
       ...this.completed,
+      generation,
       response: {
         providers: this.completed.response.providers.map((row) => (
           row.provider === status.provider ? status : row

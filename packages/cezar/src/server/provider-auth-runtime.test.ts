@@ -8,6 +8,8 @@ import {
   type RunProviderCommand,
 } from '../core/provider-auth.ts';
 import { RunStore } from '../runs/store.ts';
+import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
+import type { RuntimeAuthProfileResolver } from './provider-auth-runtime.ts';
 import {
   ProviderRuntimeAuthObserver,
   recoverWithProviderRuntimeAuthObservation,
@@ -77,10 +79,19 @@ describe('watchProviderRuntimeAuthFailures', () => {
     else process.env.CEZ_DRY_RUN = savedDryRun;
   });
 
-  const watch = () => {
+  const watch = (resolveProfile?: RuntimeAuthProfileResolver) => {
     const onInvalidated = vi.fn();
-    unwatchers.push(watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated));
+    unwatchers.push(resolveProfile
+      ? watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, resolveProfile)
+      : watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated));
     return onInvalidated;
+  };
+
+  /** The self-check now runs behind the async account resolution, so it is posted, not synchronous
+   *  with `appendEvent` — wait for the call, then for its answer. */
+  const verified = async (verifying: ReturnType<typeof vi.spyOn>) => {
+    await vi.waitFor(() => expect(verifying).toHaveBeenCalled());
+    await verifying.mock.results[0]!.value;
   };
 
   it('invalidates the step backend for an auth error in a mixed-provider run', () => {
@@ -293,7 +304,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
       const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
 
       failing(store);
-      await verifying.mock.results[0]!.value;
+      await verified(verifying);
 
       expect(onProviderStatus.mock.calls.map(([status]) => status)).toEqual([
         expect.objectContaining({ provider: 'claude', status: 'disconnected' }),
@@ -312,7 +323,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
       const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
 
       failing(store);
-      await verifying.mock.results[0]!.value;
+      await verified(verifying);
 
       expect(onProviderStatus).toHaveBeenCalledTimes(1);
       expect(onProviderStatus).toHaveBeenCalledWith(expect.objectContaining({
@@ -336,7 +347,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
       for (const type of ['session.error', 'note'] as const) {
         store.appendEvent(run.id, { type, message: 'unauthorized: 401 token expired' });
       }
-      await verifying.mock.results[0]!.value;
+      await verified(verifying);
 
       expect(verifying).toHaveBeenCalledTimes(1);
     });
@@ -345,11 +356,213 @@ describe('watchProviderRuntimeAuthFailures', () => {
       watch();
       const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
       const run = failing(store);
-      await verifying.mock.results[0]!.value;
+      await verified(verifying);
 
       // Recovery repairs workspace status, not history: the task still shows why it stopped.
       expect(store.readEvents(run.id).filter(({ type }) => type === 'provider-auth-required'))
         .toEqual([expect.objectContaining({ provider: 'claude', authFailureId: 'auth-incident-1' })]);
+    });
+
+    // The CLI answers per login: the `work` account's config dir hears the truth about `work`, the
+    // bare default about itself. The pair below only passes when the self-check asks the RIGHT one.
+    const accountAwareRunCommand = (workAnswer: { stdout: string; exitCode: number }) => {
+      const runCommand = vi.fn<RunProviderCommand>(async (_executable, _args, _timeout, env) => (
+        env?.CLAUDE_CONFIG_DIR === '/work'
+          ? { stdout: workAnswer.stdout, stderr: '', exitCode: workAnswer.exitCode }
+          : { stdout: '{"loggedIn":true}', stderr: '', exitCode: 0 }
+      ));
+      providerAuth = new ProviderAuthService({
+        platform: 'linux',
+        runCommand,
+        createAuthFailureId: () => 'auth-incident-1',
+      });
+      return runCommand;
+    };
+    const workAccountResolver = vi.fn<RuntimeAuthProfileResolver>(async (_provider, profileId) => (
+      profileId === 'work' ? { kind: 'profile' as const, id: 'work', configDir: '/work' } : null
+    ));
+
+    it('self-checks the account the failing step recorded', async () => {
+      const runCommand = accountAwareRunCommand({ stdout: '{"loggedIn":true}', exitCode: 0 });
+      const onProviderStatus = watch(workAccountResolver);
+      const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
+
+      const run = store.createRun({
+        title: 'named account',
+        workflow: 'quick-task',
+        task: 'work',
+        runner: 'claude',
+        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+      });
+      store.updateStep(run.id, 'implement', { profileId: 'work' });
+      store.appendEvent(run.id, {
+        type: 'error',
+        stepId: 'implement',
+        message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+      });
+      await verified(verifying);
+
+      // The probe carried the account's config dir, and its answer cleared the latch.
+      expect(runCommand).toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
+        CLAUDE_CONFIG_DIR: '/work',
+      });
+      expect(onProviderStatus.mock.calls.map(([status]) => status)).toEqual([
+        expect.objectContaining({ provider: 'claude', status: 'disconnected' }),
+        expect.objectContaining({ provider: 'claude', status: 'connected', profileId: 'work' }),
+      ]);
+    });
+
+    it('keeps the latch when the recorded account itself confirms the logout', async () => {
+      // The DEFAULT login is connected — that answer must not clear an incident raised by `work`,
+      // or every later run on the broken account is waved through to fail again.
+      accountAwareRunCommand({ stdout: '{"loggedIn":false}', exitCode: 1 });
+      const onProviderStatus = watch(workAccountResolver);
+      const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
+
+      const run = store.createRun({
+        title: 'named account logged out',
+        workflow: 'quick-task',
+        task: 'work',
+        runner: 'claude',
+        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+      });
+      store.updateStep(run.id, 'implement', { profileId: 'work' });
+      store.appendEvent(run.id, {
+        type: 'error',
+        stepId: 'implement',
+        message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+      });
+      await verified(verifying);
+
+      expect(onProviderStatus).toHaveBeenCalledTimes(1);
+      expect(onProviderStatus).toHaveBeenCalledWith(expect.objectContaining({
+        provider: 'claude',
+        status: 'disconnected',
+        authFailureId: 'auth-incident-1',
+      }));
+      await expect(providerAuth.status()).resolves.toMatchObject({
+        providers: expect.arrayContaining([
+          expect.objectContaining({ provider: 'claude', status: 'disconnected' }),
+        ]),
+      });
+    });
+
+    it('keeps the latch when the recorded account cannot be checked at all', async () => {
+      const runCommand = accountAwareRunCommand({ stdout: '{"loggedIn":true}', exitCode: 0 });
+      const onProviderStatus = watch(workAccountResolver);
+      const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
+
+      const run = store.createRun({
+        title: 'dangling account',
+        workflow: 'quick-task',
+        task: 'work',
+        runner: 'claude',
+        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+      });
+      store.updateStep(run.id, 'implement', { profileId: 'gone' });
+      store.appendEvent(run.id, {
+        type: 'error',
+        stepId: 'implement',
+        message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+      });
+      // The watcher resolves the account (and gets nothing) before deciding to skip the probe.
+      await vi.waitFor(() => expect(workAccountResolver).toHaveBeenCalled());
+      await workAccountResolver.mock.results[0]!.value;
+
+      // No resolvable account, no probe, no recovery: the incident stands for Try again to clear.
+      expect(verifying).not.toHaveBeenCalled();
+      expect(runCommand).not.toHaveBeenCalled();
+      expect(onProviderStatus).toHaveBeenCalledTimes(1);
+      expect(onProviderStatus).toHaveBeenCalledWith(expect.objectContaining({
+        provider: 'claude',
+        status: 'disconnected',
+      }));
+    });
+
+    it('falls back to the run account for an error with no matching step', async () => {
+      const runCommand = accountAwareRunCommand({ stdout: '{"loggedIn":true}', exitCode: 0 });
+      const onProviderStatus = watch(workAccountResolver);
+      const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
+
+      const run = store.createRun({
+        title: 'run account',
+        workflow: 'quick-task',
+        task: 'work',
+        runner: 'claude',
+        agentProfile: 'work',
+        steps: [],
+      });
+      store.appendEvent(run.id, {
+        type: 'error',
+        message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+      });
+      await verified(verifying);
+
+      expect(runCommand).toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
+        CLAUDE_CONFIG_DIR: '/work',
+      });
+      expect(onProviderStatus).toHaveBeenCalledTimes(2);
+      expect(onProviderStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+        provider: 'claude',
+        status: 'connected',
+        profileId: 'work',
+      }));
+    });
+
+    it('resolves a recorded account through the workspace store by default', async () => {
+      await mergeWriteAgentAccounts((current) => ({
+        ...current,
+        accounts: [...current.accounts, {
+          id: 'work',
+          provider: 'claude' as const,
+          configDir: '/work-from-store',
+          label: 'Work',
+          addedAt: '',
+        }],
+      }));
+      const runCommand = vi.fn<RunProviderCommand>(async (_executable, _args, _timeout, env) => (
+        env?.CLAUDE_CONFIG_DIR === '/work-from-store'
+          ? { stdout: '{"loggedIn":true}', stderr: '', exitCode: 0 }
+          : { stdout: '{"loggedIn":false}', stderr: '', exitCode: 1 }
+      ));
+      providerAuth = new ProviderAuthService({
+        platform: 'linux',
+        runCommand,
+        createAuthFailureId: () => 'auth-incident-1',
+      });
+      const onProviderStatus = watch();
+      const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
+
+      const run = store.createRun({
+        title: 'stored account',
+        workflow: 'quick-task',
+        task: 'work',
+        runner: 'claude',
+        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+      });
+      store.updateStep(run.id, 'implement', { profileId: 'work' });
+      store.appendEvent(run.id, {
+        type: 'error',
+        stepId: 'implement',
+        message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+      });
+      await verified(verifying);
+
+      expect(runCommand).toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
+        CLAUDE_CONFIG_DIR: '/work-from-store',
+      });
+      expect(onProviderStatus).toHaveBeenCalledTimes(2);
+      expect(onProviderStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+        provider: 'claude',
+        status: 'connected',
+        profileId: 'work',
+      }));
+
+      // Leave the shared per-worker sandbox as it was found.
+      await mergeWriteAgentAccounts((current) => ({
+        ...current,
+        accounts: current.accounts.filter((account) => account.id !== 'work'),
+      }));
     });
   });
 
