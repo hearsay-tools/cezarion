@@ -1059,7 +1059,8 @@ describe('the calmer row (#617)', () => {
       expect(pin.className).toContain('text-soft-foreground')
       expect(pin.className).toContain('hover:text-foreground')
       expect(pin.className).not.toContain('accent')
-      expect(pin.querySelector('[data-slot="pin-icon"]')?.getAttribute('class')).toContain('size-3')
+      // Explicit px: `size-3` follows `--spacing` and would render 9px under ultra density.
+      expect(pin.querySelector('[data-slot="pin-icon"]')?.getAttribute('class')).toContain('size-[12px]')
       expect(pin.className).toContain('size-5')
     }
     expect(plain.querySelector('[data-slot="pin-icon"]')?.getAttribute('fill')).toBe('none')
@@ -1149,5 +1150,45 @@ describe('the calmer row (#617)', () => {
     for (const node of [open, ...open.querySelectorAll('*')]) {
       expect(node.getAttribute('class') ?? '').not.toMatch(/accent-text|task-brand|accent-strong\/35/)
     }
+  })
+})
+
+describe('meta-line state words (#617, the issue\'s list exactly)', () => {
+  const ref = { pullRequestUrl: 'https://github.com/o/r/pull/594' }
+  const stateOf = (id: string) => row(id)?.querySelector('[data-slot="task-row-state"]')?.textContent ?? null
+  const metaOf = (id: string) => row(id)?.querySelector('[data-slot="task-row-meta"]')?.textContent
+
+  it('omits the state word where the dot already says it — needs you, done, cancelled — and keeps references and age', () => {
+    renderList({ runs: [
+      run({ id: 'you', status: 'waiting', ...ref }),
+      run({ id: 'done', status: 'done', ...ref }),
+      run({ id: 'gone', status: 'cancelled', ...ref }),
+    ] })
+    for (const id of ['you', 'done', 'gone']) {
+      expect(stateOf(id), id).toBeNull()
+      expect(metaOf(id), id).toBe('PR #594 · 1m')
+    }
+  })
+
+  it('says it for every state the issue lists', () => {
+    const workers = { role: 'root', permissions: [], receipts: [], wait: { id: 'w', workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } }
+    renderList({ runs: [
+      run({ id: 'mon', status: 'running', activity: 'monitoring' }),
+      run({ id: 'run', status: 'running' }),
+      run({ id: 'rev', status: 'review' }),
+      run({ id: 'fail', status: 'failed' }),
+      run({ id: 'sched', status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' }),
+      run({ id: 'q', status: 'queued' }),
+      run({ id: 'wk', status: 'waiting', delegation: workers } as Partial<RunRecord>),
+      run({ id: 'rep', status: 'waiting', delegation: { ...workers, wait: { ...workers.wait, requestIds: ['00000000-0000-4000-8000-000000000009'] } } } as Partial<RunRecord>),
+    ] })
+    expect(stateOf('mon')).toBe('monitoring')
+    expect(stateOf('run')).toBe('running')
+    expect(stateOf('rev')).toBe('needs review')
+    expect(stateOf('fail')).toBe('failed')
+    expect(stateOf('sched')).toBe('scheduled')
+    expect(stateOf('q')).toBe('queued #1')
+    expect(stateOf('wk')).toBe('waiting on 2 workers')
+    expect(stateOf('rep')).toBe('waiting on worker replies')
   })
 })

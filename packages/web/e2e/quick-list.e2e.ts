@@ -410,6 +410,48 @@ describe('tasks table overview', () => {
     browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
   })
 
+  it('paints a done pill with the status key — a visible green dot, no teal chip — on every task list (#617)', () => {
+    type PillFacts = { dotShown: boolean; dotGreen: boolean; teal: boolean; background: string; mutedBackground: string; label: string }
+    // Resolved by the real stylesheet: a sheet once turned a done pill into a teal "Done" chip
+    // and hid its dot on the table, the mobile card and the global rows (and every dot on the
+    // grouped global cards).
+    const facts = (selector: string) => `(() => {
+      const pill = document.querySelector(${JSON.stringify(selector)})
+      const dot = pill?.querySelector('[data-slot="status-dot"]')
+      if (!pill || !dot) return null
+      const resolve = (prop, value) => { const probe = document.createElement('span'); probe.style[prop] = value
+        document.body.append(probe); const out = getComputedStyle(probe)[prop]; probe.remove(); return out }
+      const d = getComputedStyle(dot), p = getComputedStyle(pill)
+      return { dotShown: d.display !== 'none' && dot.getBoundingClientRect().width > 0,
+        dotGreen: d.backgroundColor === resolve('color', 'var(--success)'),
+        teal: p.color === resolve('color', 'var(--accent-text)'),
+        background: p.backgroundColor, mutedBackground: resolve('backgroundColor', 'var(--muted)'), label: pill.textContent }
+    })()`
+    const check = (surface: string, selector: string, background: 'muted' | 'none') => {
+      const f = browser.waitForValue(facts(selector)) as PillFacts
+      expect(f.dotShown, `${surface}: dot shown`).toBe(true)
+      expect(f.dotGreen, `${surface}: dot green`).toBe(true)
+      expect(f.teal, `${surface}: teal ink`).toBe(false)
+      expect(f.label, `${surface}: label`).toBe('done')
+      expect(f.background, `${surface}: pill fill`).toBe(background === 'muted' ? f.mutedBackground : 'rgba(0, 0, 0, 0)')
+    }
+    try {
+      check('table', `${TABLE_ROW}[data-run-id="fix-done"] [data-slot="pill"]`, 'muted')
+      browser.setViewport(360, 640)
+      check('mobile card', '[data-slot="task-card"][data-run-id="fix-done"] [data-slot="pill"]', 'muted')
+      browser.setViewport(1440, 900)
+      browser.goto(`${baseUrl}/tasks`)
+      check('global row', '[data-route="global-tasks"][data-presentation="summary"] [data-slot="global-task-row"][data-run-id="fix-done"] [data-slot="pill"]', 'muted')
+      // Grouped cards keep their text-only pill (no fill), and still show the dot.
+      browser.goto(`${baseUrl}/tasks?group=project`)
+      check('grouped card', '[data-route="global-tasks"][data-presentation="cards"] [data-slot="global-task-row"][data-run-id="fix-done"] [data-slot="pill"]', 'none')
+    } finally {
+      browser.setViewport(1440, 900)
+      browser.goto(`${baseUrl}${scoped('/')}`)
+      browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    }
+  })
+
   it('is the home: the table renders every active fixture run with its status', () => {
     const rows = browser.evaluate(`[...document.querySelectorAll('${TABLE_ROW}')].map((tr) => ({
       id: tr.dataset.runId,
@@ -747,6 +789,31 @@ describe('the tasks table under worst-case row content', () => {
     browser.setViewport(1440, 900)
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
+  })
+
+  it('keeps the waiting-on-workers robot and the pin at 12px under every density (#617)', () => {
+    const sidebarRow = '[data-slot="task-row"][data-run-id="worst-wrapping"]'
+    type Glyphs = { lucide: boolean; label: string | null; box: string; bot: string; pin: string }
+    try {
+      for (const density of ['comfortable', 'compact', 'ultra'] as const) {
+        browser.evaluate(`(() => {
+          if (${JSON.stringify(density)} === 'comfortable') delete document.documentElement.dataset.density
+          else document.documentElement.dataset.density = ${JSON.stringify(density)}
+        })()`)
+        const glyphs = browser.waitForValue(`(() => {
+          const dataset = document.documentElement.dataset.density ?? 'comfortable'
+          if (dataset !== ${JSON.stringify(density)}) return null
+          const dot = document.querySelector('${sidebarRow} [data-slot="status-dot"][data-shape="workers"]')
+          const bot = dot?.querySelector('svg'), pin = document.querySelector('${sidebarRow} [data-slot="pin-icon"]')
+          if (!dot || !bot || !pin) return null
+          const size = (el) => { const r = el.getBoundingClientRect(); return Math.round(r.width) + 'x' + Math.round(r.height) }
+          return { lucide: bot.classList.contains('lucide-bot'), label: dot.getAttribute('aria-label'), box: size(dot), bot: size(bot), pin: size(pin) }
+        })()`) as Glyphs
+        expect(glyphs, density).toEqual({ lucide: true, label: 'waiting on 1 worker', box: '12x12', bot: '12x12', pin: '12x12' })
+      }
+    } finally {
+      browser.evaluate(`delete document.documentElement.dataset.density`)
+    }
   })
 
   it('serves the worst case as data the real store parsed', async () => {

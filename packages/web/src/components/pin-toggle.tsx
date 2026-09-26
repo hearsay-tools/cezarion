@@ -53,7 +53,7 @@ export function PinToggle({
     >
       {/* Lucide's stroked pin rather than the exported glyph: the same outline has to exist
           filled, and one geometry for both is what makes the two read as one control. */}
-      <PinIcon data-slot="pin-icon" className="size-3" fill={pinned ? 'currentColor' : 'none'} aria-hidden="true" />
+      <PinIcon data-slot="pin-icon" className="size-[12px]" fill={pinned ? 'currentColor' : 'none'} aria-hidden="true" />
     </button>
   )
 }

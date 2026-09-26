@@ -352,6 +352,26 @@ describe('design guardian', () => {
     }
   })
 
+  it('lets no stylesheet hide or restyle a status dot or a status pill (#617: one status key everywhere)', () => {
+    // The dot's tone and shape are the status; a sheet that hides the dot (or paints a done pill
+    // as a teal chip) replaces the key with a second, surface-local one. StatusDot and Pill own
+    // their look; a sheet may only position them.
+    const offenders: string[] = []
+    for (const file of sources.filter(f => f.ext === '.css')) {
+      const css = file.lines.join('\n')
+      for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const selector = match[1]!.trim(), body = match[2]!
+        const dot = /data-slot=["']status-dot["']/.test(selector)
+        const statusPill = /\[data-status=[^\]]+\][^,{]*\[data-slot=["']pill["']\]/.test(selector)
+        if ((dot && /display:\s*none|background|color|width|height/.test(body)) ||
+            (statusPill && /background|color:|display:\s*none/.test(body))) {
+          offenders.push(`${file.rel}: ${selector.replace(/\s+/g, ' ')}`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
   it('paints live-run dots with dedicated running purple, not review-required info', () => {
     const css = readFileSync(path.join(APP_ROOT, 'src/styles/index.css'), 'utf8')
     const dark = cssTokenMap(css, ':root {')

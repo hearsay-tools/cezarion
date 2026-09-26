@@ -12,7 +12,7 @@ import { PinToggle } from '@/components/pin-toggle'
 import { TaskReferenceChip } from '@/components/reference-conflict-action'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { StatusDot } from '@/components/status-dot'
-import { deriveAttention } from '@/lib/attention'
+import { deriveAttention, type Attention } from '@/lib/attention'
 import { shortAge } from '@/lib/format'
 import { isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
@@ -391,12 +391,15 @@ const ROW_UNREAD_WITH_PIN_CLASS =
   ' max-md:absolute max-md:top-1/2 max-md:left-0 max-md:-translate-y-1/2 max-md:opacity-100' +
   ' no-hover:absolute no-hover:top-1/2 no-hover:left-0 no-hover:-translate-y-1/2 no-hover:opacity-100'
 
-/** The meta line's state word: the attention label wherever the dot alone cannot say it — which
- *  is every state but `done`, whose green dot already is the whole story. A queued row folds its
- *  position in (`queued #2`), because the position is the one thing a queued row is scanned for. */
-function metaStateWord(label: string, queuePosition: number | null): string | undefined {
-  if (label === 'done') return undefined
-  if (label === 'queued' && queuePosition !== null) return `queued #${queuePosition}`
+/** The meta line's state word (#617): the attention label only for the states the issue lists,
+ *  where the dot alone cannot say it — monitoring, the dependency waits (waiting on N workers,
+ *  on worker replies, on a parent reply), needs review, needs permission, failed, scheduled,
+ *  queued (with its position, `queued #2`) and running. `needs you`, `done` and `cancelled` get
+ *  none: the amber, green and grey filled dots already are the whole story. */
+function metaStateWord(attention: Attention, queuePosition: number | null): string | undefined {
+  const { label } = attention
+  if (label === 'queued') return queuePosition !== null ? `queued #${queuePosition}` : label
+  if (label === 'needs you' || label === 'done' || label === 'cancelled') return undefined
   return label
 }
 
@@ -449,7 +452,7 @@ function RunRow({
   // together, so an age says nothing that tells them apart. A queued row's position rides in
   // its state word instead of an age.
   const age = variant || queuePosition !== null ? '' : shortAge(run.finishedAt ?? run.createdAt, now)
-  const stateWord = metaStateWord(attention.label, queuePosition)
+  const stateWord = metaStateWord(attention, queuePosition)
 
   const meta: React.ReactNode[] = []
   if (stateWord) meta.push(<span key="state" data-slot="task-row-state">{stateWord}</span>)

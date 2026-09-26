@@ -88,12 +88,17 @@ describe('StatusDot', () => {
       expect(dot.getAttribute('role')).toBe('img')
       expect(dot.getAttribute('aria-label')).toBe('waiting on 2 workers')
       expect(dot.className).toContain('text-status-running')
-      expect(dot.className).toContain('size-3')
+      // Explicit px, not a spacing unit: `size-3` follows `--spacing` and shrinks under density.
+      expect(dot.className).toContain('size-[12px]')
+      expect(dot.className).not.toMatch(/(^|\s)size-3(\s|$)/)
       expect(dot.className).not.toContain('rounded-full')
       const svg = dot.querySelector('svg')
       expect(svg).not.toBeNull()
       expect(svg?.getAttribute('aria-hidden')).toBe('true')
-      expect(svg?.getAttribute('data-design-icon')).toBe('bot')
+      // The lucide `bot` glyph the issue names, not the exported design-icon outline.
+      expect(svg?.getAttribute('class')).toContain('lucide-bot')
+      expect(svg?.getAttribute('data-design-icon')).toBeNull()
+      expect(svg?.getAttribute('class')).toContain('size-[12px]')
     })
 
     it('pulses a ring when asked, like a filled dot', () => {

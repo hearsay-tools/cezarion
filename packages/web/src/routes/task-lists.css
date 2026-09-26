@@ -70,12 +70,8 @@
   [data-slot="tasks-table"] col[data-column-id="memory"][data-expanded="true"] { width: 120px !important; }
 }
 
-[data-slot="task-summary-row"][data-status="done"] [data-slot="pill"],
-[data-slot="task-card"][data-status="done"] [data-slot="pill"],
-[data-slot="global-task-row"][data-status="done"] [data-slot="pill"] { border-radius: 4px; background: color-mix(in srgb, var(--accent-strong) 13%, transparent); color: var(--accent-text); text-transform: capitalize; padding: 6px 8px; }
-[data-slot="task-summary-row"][data-status="done"] [data-slot="pill"] [data-slot="status-dot"],
-[data-slot="task-card"][data-status="done"] [data-slot="pill"] [data-slot="status-dot"],
-[data-slot="global-task-row"][data-status="done"] [data-slot="pill"] [data-slot="status-dot"] { display: none; }
+/* No done-pill override (#617): a done run's pill is the same dot + label as every other
+   status, a green filled dot, never a teal chip with the dot hidden. */
 @media (max-width: 767px) {
   [data-route="tasks"] h1, [data-route="global-tasks"] h1 { font-size: 25px; }
 }
@@ -98,7 +94,6 @@
 [data-presentation="cards"] [data-slot="global-task-age"] { grid-column: 4; grid-row: 2; align-self: center; text-align: left; }
 [data-presentation="cards"] [data-slot="global-task-actions"] { grid-column: 1 / -1; grid-row: 3; margin: 0; }
 [data-presentation="cards"] [data-slot="global-task-title"] [data-slot="pill"] { padding: 0; background: transparent; color: var(--muted-foreground); font-size: 12px; font-weight: 400; text-transform: capitalize; }
-[data-presentation="cards"] [data-slot="global-task-title"] [data-slot="status-dot"] { display: none; }
 [data-presentation="cards"] [data-slot="global-task-actions"] [data-slot="button"] { font-weight: 400; }
 @media (max-width: 767px) {
   [data-presentation="cards"] [data-slot="global-task-row"] { grid-template-columns: auto minmax(0, 1fr); }

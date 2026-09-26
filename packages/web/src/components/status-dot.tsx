@@ -1,7 +1,7 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
-import { BotIcon } from "@/components/design-icons"
+import { BotIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 /* The 7px status dot — the design system's single carrier of status color.
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils"
  *
  * `shape` is the status key's second channel (#617): hue says the family, shape says whether it is
  * waiting. `filled` — moving or ended; `ring` — the same 7px box as a 1.5px stroke with a clear
- * centre, waiting on something outside it; `workers` — the 12px bot glyph, waiting on its own
+ * centre, waiting on something outside it; `workers` — lucide's 12px `bot` glyph, waiting on its own
  * workers. The tone maps to a fill, a stroke or an ink depending on the shape, so one tone name
  * paints all three.
  */
@@ -31,7 +31,8 @@ const statusDotVariants = cva("inline-block shrink-0", {
     shape: {
       filled: "size-[7px] rounded-full",
       ring: "size-[7px] rounded-full border-[1.5px] bg-transparent",
-      workers: "inline-flex size-3 items-center justify-center",
+      // Explicit px: `size-3` follows `--spacing`, so density would shrink the 12px robot.
+      workers: "inline-flex size-[12px] items-center justify-center",
     },
     pulse: {
       true: "animate-pulse motion-reduce:animate-none",
@@ -90,7 +91,7 @@ function StatusDot({
       className={cn(statusDotVariants({ tone, shape, pulse, className }))}
       {...props}
     >
-      {shape === "workers" ? <BotIcon className="size-3" aria-hidden="true" /> : null}
+      {shape === "workers" ? <BotIcon className="size-[12px]" aria-hidden="true" /> : null}
     </span>
   )
 }

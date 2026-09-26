@@ -181,7 +181,7 @@ describe('selection and control states (#171)', () => {
           metaWrap: m.whiteSpace, dot: d.width + ' ' + d.height, metaHeight: m.height,
           dotSlot: getComputedStyle(row.querySelector('[data-slot="task-row-dot"]')).width,
           trailing: getComputedStyle(row.querySelector('[data-slot="task-row-trailing"]')).width }
-      })()`)
+      })()`) as Record<string, string | boolean>
       // Padding follows the density scale (`ultra` shrinks `--spacing`); the rest is fixed px.
       expect(resolved).toEqual({ padding: variant.density === 'comfortable' ? '6px 8px 6px 10px' : resolved.padding, radius: '6px',
         titleSize: '13px', titleWeight: '500', titleWrap: 'nowrap', titleOverflow: 'ellipsis', titleInk: true, metaSize: '11.5px',
