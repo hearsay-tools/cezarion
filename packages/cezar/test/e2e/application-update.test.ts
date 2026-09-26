@@ -39,12 +39,15 @@ async function localJson(url: string): Promise<Record<string, any>> {
   } finally { agent.destroy(); }
 }
 
-// Polls like the restart helper (helper.ts): the ack precedes the health
-// pre-warm, so a single first read can outlast its 1s on a cold snapshot.
-async function pollLocalJson(url: string, deadlineMs = 20_000): Promise<Record<string, any>> {
+// The ack can land before the boot health pre-warm (server.ts refreshHealth)
+// finishes; the first GET then joins that in-flight compute, whose CLI probes
+// can outlast a one-shot 1s read under load. So poll like the restart helper
+// (helper.ts), and stop as soon as the child dies.
+async function pollLocalJson(url: string, child: ReturnType<typeof spawn>, deadlineMs = 20_000): Promise<Record<string, any>> {
   const deadline = Date.now() + deadlineMs;
   let last: unknown;
   do {
+    if (child.exitCode !== null) throw new Error(`built CLI exited before health: ${child.exitCode}`);
     try { return await localJson(url); } catch (error) { last = error; }
     await new Promise(resolve => setTimeout(resolve, 150));
   } while (Date.now() < deadline);
@@ -574,7 +577,7 @@ for (const ephemeral of [false, true]) test(`built production CLI acknowledges i
     if (!ephemeral) assert.equal(listening.port, port);
     assert.equal(listening.type, 'application-update-listening');
     assert.equal(listening.repoRoot, root);
-    const health = await pollLocalJson(`http://${host}:${listening.port}/api/v1/health`);
+    const health = await pollLocalJson(`http://${host}:${listening.port}/api/v1/health`, child);
     assert.equal(health.version, listening.version);
     assert.equal(health.repoRoot, root);
   } finally {
