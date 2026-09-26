@@ -39,6 +39,21 @@ async function localJson(url: string): Promise<Record<string, any>> {
   } finally { agent.destroy(); }
 }
 
+// The ack can land before the boot health pre-warm (server.ts refreshHealth)
+// finishes; the first GET then joins that in-flight compute, whose CLI probes
+// can outlast a one-shot 1s read under load. So poll like the restart helper
+// (helper.ts), and stop as soon as the child dies.
+async function pollLocalJson(url: string, child: ReturnType<typeof spawn>, deadlineMs = 20_000): Promise<Record<string, any>> {
+  const deadline = Date.now() + deadlineMs;
+  let last: unknown;
+  do {
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`built CLI exited before health: ${child.exitCode ?? child.signalCode}`);
+    try { return await localJson(url); } catch (error) { last = error; }
+    await new Promise(resolve => setTimeout(resolve, 150));
+  } while (Date.now() < deadline);
+  throw new Error(`local fixture never answered within ${deadlineMs}ms: ${last instanceof Error ? last.message : String(last)}`, { cause: last });
+}
+
 // Keep this owner alive until cleanup, so its replacement children are reaped.
 // The endpoint cases enable an explicit rejecting local proxy in this child;
 // production must keep its private loopback probe off that proxy.
@@ -536,7 +551,7 @@ const p=${JSON.stringify(join(fixture.original, 'package.json'))}; const pkg=JSO
   }
 });
 
-for (const ephemeral of [false, true]) test(`built production CLI acknowledges its actual listener (ephemeral=${ephemeral})`, { timeout: 30_000 }, async () => {
+for (const ephemeral of [false, true]) test(`built production CLI acknowledges its actual listener (ephemeral=${ephemeral})`, { timeout: 50_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'cez-built-listener-'));
   await execFile('git', ['init', '-q', root]);
   const probe = createServer();
@@ -562,7 +577,7 @@ for (const ephemeral of [false, true]) test(`built production CLI acknowledges i
     if (!ephemeral) assert.equal(listening.port, port);
     assert.equal(listening.type, 'application-update-listening');
     assert.equal(listening.repoRoot, root);
-    const health = await localJson(`http://${host}:${listening.port}/api/v1/health`);
+    const health = await pollLocalJson(`http://${host}:${listening.port}/api/v1/health`, child);
     assert.equal(health.version, listening.version);
     assert.equal(health.repoRoot, root);
   } finally {
