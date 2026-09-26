@@ -550,6 +550,59 @@ describe('watchProviderRuntimeAuthFailures', () => {
       ]);
     });
 
+    it('carries the reported incident through the account-resolution wait', async () => {
+      // A's check is triggered, but its account resolution stalls; while it stalls, another auth
+      // failure advances the incident (a non-transition line the watcher skips). The stalled
+      // check must answer the incident it was triggered by — or stand down entirely — never
+      // clear the newer one.
+      let releaseResolver!: (target: { kind: 'profile'; id: string; configDir: string }) => void;
+      const resolverGate = new Promise<{ kind: 'profile'; id: string; configDir: string }>(
+        (resolve) => { releaseResolver = resolve; },
+      );
+      const gatingResolver = vi.fn<RuntimeAuthProfileResolver>(async () => resolverGate);
+      const runCommand = accountAwareRunCommand({ stdout: '{"loggedIn":true}', exitCode: 0 });
+      const onProviderStatus = watch(gatingResolver);
+      const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
+
+      const run = store.createRun({
+        title: 'resolver race',
+        workflow: 'quick-task',
+        task: 'work',
+        runner: 'claude',
+        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+      });
+      store.updateStep(run.id, 'implement', { profileId: 'work' });
+      store.appendEvent(run.id, {
+        type: 'error',
+        stepId: 'implement',
+        message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+      });
+      await vi.waitFor(() => expect(gatingResolver).toHaveBeenCalled());
+      // The newer failure advances the incident while A's resolution is still pending.
+      store.appendEvent(run.id, {
+        type: 'error',
+        stepId: 'implement',
+        message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+      });
+      releaseResolver({ kind: 'profile', id: 'work', configDir: '/work' });
+      await vi.waitFor(() => expect(verifying).toHaveBeenCalled());
+      await verifying.mock.results[0]!.value;
+
+      // The stalled check stood down: A's CLI was never asked, and the incident stands.
+      expect(runCommand).not.toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
+        CLAUDE_CONFIG_DIR: '/work',
+      });
+      await expect(providerAuth.status()).resolves.toMatchObject({
+        providers: expect.arrayContaining([
+          expect.objectContaining({
+            provider: 'claude',
+            status: 'disconnected',
+            authFailureId: 'auth-incident-1',
+          }),
+        ]),
+      });
+    });
+
     it('resolves a recorded account through the workspace store by default', async () => {
       await mergeWriteAgentAccounts((current) => ({
         ...current,

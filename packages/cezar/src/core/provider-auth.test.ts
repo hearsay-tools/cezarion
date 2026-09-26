@@ -696,6 +696,7 @@ describe('ProviderAuthService', () => {
     if (!first) throw new Error('runtime incident was not created');
     expect(first).toEqual({
       transitioned: true,
+      generation: 1,
       status: {
         provider: 'claude',
         status: 'disconnected',
@@ -705,6 +706,7 @@ describe('ProviderAuthService', () => {
     });
     expect(service.reportRuntimeAuthFailure('claude')).toEqual({
       transitioned: false,
+      generation: 2,
       status: first.status,
     });
     await expect(service.status()).resolves.toMatchObject({
@@ -975,6 +977,40 @@ describe('ProviderAuthService', () => {
       expect(runCommand).toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
         CLAUDE_CONFIG_DIR: '/b',
       });
+      await expect(service.status()).resolves.toMatchObject({
+        providers: expect.arrayContaining([
+          expect.objectContaining({ provider: 'claude', status: 'connected' }),
+        ]),
+      });
+    });
+
+    it('answers only the generation a check was asked about', async () => {
+      // The runtime watcher resolves the failing account ASYNC before checking: a newer failure
+      // can advance the incident during that wait. A check that observed the older generation
+      // must stand down instead of probing and clearing the newer incident it never saw.
+      const runCommand: RunProviderCommand = vi.fn(async () => connectedResults.claude!);
+      const service = new ProviderAuthService({
+        runCommand,
+        now: () => 1_000,
+        createAuthFailureId: () => 'incident-1',
+      });
+
+      service.reportRuntimeAuthFailure('claude');
+      // A newer failure arrives while the watcher is still resolving the account.
+      service.reportRuntimeAuthFailure('claude');
+
+      await expect(service.verifyRuntimeAuthFailure(
+        'claude',
+        { id: 'a', configDir: '/a' },
+        { generation: 1 },
+      )).resolves.toBeNull();
+      expect(runCommand).not.toHaveBeenCalled();
+      // A check that observed the CURRENT generation proceeds as usual.
+      await expect(service.verifyRuntimeAuthFailure(
+        'claude',
+        { id: 'a', configDir: '/a' },
+        { generation: 2 },
+      )).resolves.toEqual({ provider: 'claude', status: 'connected', profileId: 'a' });
       await expect(service.status()).resolves.toMatchObject({
         providers: expect.arrayContaining([
           expect.objectContaining({ provider: 'claude', status: 'connected' }),

@@ -79,6 +79,10 @@ export function watchProviderRuntimeAuthFailures(
     // would only spend spawns on an answer we have. The service's own cooldown backstops the case the
     // edge cannot see — a rejection that re-latches right after a successful recovery.
     if (!report.transitioned) return;
+    // The check carries the incident's generation THROUGH the account-resolution wait: while the
+    // resolver is pending a newer failure can replace the incident, and an older question must
+    // then stand down rather than answer for it.
+    const observed = { generation: report.generation };
     void (async () => {
       const target = await resolveProfile(provider, step?.profileId ?? run.agentProfile);
       // An account we cannot name cannot be verified: leave the latch exactly as it stands and let
@@ -88,8 +92,8 @@ export function watchProviderRuntimeAuthFailures(
         ? await providerAuth.verifyRuntimeAuthFailure(provider, {
           id: target.id,
           configDir: target.configDir,
-        })
-        : await providerAuth.verifyRuntimeAuthFailure(provider);
+        }, observed)
+        : await providerAuth.verifyRuntimeAuthFailure(provider, undefined, observed);
       if (!recovered) return;
       if (target.kind !== 'profile') {
         onProviderStatus(recovered);

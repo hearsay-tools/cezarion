@@ -371,6 +371,10 @@ export interface RuntimeAuthFailureReport {
     status: 'disconnected';
     authFailureId: string;
   };
+  /** The incident's generation at report time. A self-check that starts asynchronously (the
+   *  runtime watcher resolves the failing account first) carries it through so the check can
+   *  stand down when a newer failure replaced the incident it was triggered by. */
+  generation: number;
   /** True only for the global latch edge, so callers can fan out one coarse
    * status update while every affected task still records its own callout. */
   transitioned: boolean;
@@ -486,6 +490,7 @@ export class ProviderAuthService {
         hint: RUNTIME_AUTH_HINT,
         authFailureId: failure.authFailureId,
       },
+      generation: failure.generation,
       transitioned: current === undefined,
     };
   }
@@ -531,19 +536,27 @@ export class ProviderAuthService {
    *   older question.
    * - clear on anything but `connected`. `disconnected`, `not-installed` and `unknown` all leave the
    *   latch alone; an inconclusive probe is not evidence of health.
- * - spawn more than one probe per provider per {@link RUNTIME_AUTH_VERIFY_COOLDOWN_MS}. A
- *   verification skipped by that cooldown returns `null`, leaves the latch standing, and arms ONE
- *   deferred re-verification at cooldown expiry
- *   ({@link ProviderAuthService.scheduleRuntimeVerification}) — the runtime watcher fires only on
- *   the latch edge, so without it a re-latch inside the window could never be re-checked.
-   */
+    * - spawn more than one probe per provider per {@link RUNTIME_AUTH_VERIFY_COOLDOWN_MS}. A
+    *   verification skipped by that cooldown returns `null`, leaves the latch standing, and arms ONE
+    *   deferred re-verification at cooldown expiry
+    *   ({@link ProviderAuthService.scheduleRuntimeVerification}) — the runtime watcher fires only on
+    *   the latch edge, so without it a re-latch inside the window could never be re-checked.
+    *
+    * `observed` names the incident generation the CALLER saw when it decided to check. The runtime
+    *   watcher resolves the failing account asynchronously before calling this, and a newer failure
+    *   can replace the incident during that wait — a check for the older question then stands down
+    *   at the door (no probe) instead of answering the newer one with the older aim.
+    */
   async verifyRuntimeAuthFailure(
     provider: ProviderId,
     profile?: { id: string; configDir: string | null },
+    observed?: { generation: number },
   ): Promise<ProviderStatus | null> {
     if (process.env.CEZ_DRY_RUN === '1' || providerAuthChecksDisabled()) return null;
     const failure = this.runtimeFailures.get(provider);
     if (!failure) return null;
+    const expectedGeneration = observed?.generation ?? failure.generation;
+    if (failure.generation !== expectedGeneration) return null;
     if (this.verifyingRuntimeFailures.has(provider)) return null;
     const lastVerifiedAt = this.lastRuntimeVerification.get(provider);
     if (lastVerifiedAt !== undefined && this.now() - lastVerifiedAt < RUNTIME_AUTH_VERIFY_COOLDOWN_MS) {
@@ -551,7 +564,7 @@ export class ProviderAuthService {
         provider,
         profile,
         RUNTIME_AUTH_VERIFY_COOLDOWN_MS - (this.now() - lastVerifiedAt),
-        failure.generation,
+        expectedGeneration,
       );
       return null;
     }
@@ -571,7 +584,7 @@ export class ProviderAuthService {
     // answer — gathered for the incident as it was — clear a newer failure reported mid-probe,
     // one the latch-edge watcher will never re-check. Generations are unique per report.
     const current = this.runtimeFailures.get(provider);
-    if (!current || current.generation !== failure.generation) return null;
+    if (!current || current.generation !== expectedGeneration) return null;
     if (!this.clearRuntimeAuthFailure(provider, failure.authFailureId)) return null;
     if (profile) {
       // Per-account knowledge goes to the per-account cache. Folding it into the whole-response
@@ -613,9 +626,7 @@ export class ProviderAuthService {
     this.deferredRuntimeVerifications.get(provider)?.();
     const cancel = this.scheduleRuntimeRetry(() => {
       this.deferredRuntimeVerifications.delete(provider);
-      const current = this.runtimeFailures.get(provider);
-      if (!current || current.generation !== generation) return;
-      void this.verifyRuntimeAuthFailure(provider, profile).catch(() => {});
+      void this.verifyRuntimeAuthFailure(provider, profile, { generation }).catch(() => {});
     }, Math.max(delayMs, 0));
     this.deferredRuntimeVerifications.set(provider, cancel);
   }
