@@ -181,8 +181,9 @@ performs this setup once:
    commits, publish packages, post checks, or bypass branch rules.
 3. Install the App on `hearsay-tools`, selecting only `cezarion`.
 4. In [Actions repository variables](https://github.com/hearsay-tools/cezarion/settings/variables/actions),
-   add `RELEASE_APP_ID` using the numeric App ID and `RELEASE_APP_BOT_LOGIN`
-   using the exact App slug plus `[bot]` (for example, `cezarion-release[bot]`).
+   add `RELEASE_APP_CLIENT_ID` using the App's Client ID (`Iv…`), which is
+   different from its numeric App ID, and `RELEASE_APP_BOT_LOGIN` using the
+   exact App slug plus `[bot]` (for example, `cezarion-release[bot]`).
    The slug is the final component of the App's public `/apps/<slug>` URL,
    not its display name. The workflow checks it against the minted token's App.
 5. Generate a private key on the App settings page. Put the entire PEM, including

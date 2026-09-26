@@ -90,6 +90,8 @@ test('release App setup is checked before publish and token only reaches PR crea
   const app = steps.find(s => s.id === 'release_app');
   assert.ok(app, 'release needs a short-lived App token');
   assert.match(app.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
+  assert.equal(app.with['client-id'], '${{ vars.RELEASE_APP_CLIENT_ID }}');
+  assert.equal(app.with['app-id'], undefined);
   assert.equal(app.with['permission-pull-requests'], 'write');
   assert.equal(app.with.repositories, '${{ github.event.repository.name }}');
   assert.ok(steps.indexOf(app) < steps.findIndex(s => s.name === 'Publish release'));
@@ -108,10 +110,10 @@ test('release App preflight rejects missing setup and mismatched identity before
   const { spawnSync } = require('node:child_process');
   const steps = parse(fs.readFileSync(workflowPath, 'utf8')).jobs.release.steps;
   const validate = steps.find(s => s.id === 'validate_release_app');
-  const valid = { RELEASE_APP_ID: '12345', RELEASE_APP_BOT_LOGIN: 'cezar-release[bot]', HAS_PRIVATE_KEY: 'true' };
+  const valid = { RELEASE_APP_CLIENT_ID: 'Iv23ct5zcAQpntZQdSfo', RELEASE_APP_BOT_LOGIN: 'cezar-release[bot]', HAS_PRIVATE_KEY: 'true' };
   const run = (step, env) => spawnSync('bash', ['-e', '-c', step.run], { env: { ...process.env, ...env }, encoding: 'utf8' });
   assert.equal(run(validate, valid).status, 0);
-  for (const change of [{RELEASE_APP_ID:''}, {RELEASE_APP_ID:'bad'}, {HAS_PRIVATE_KEY:'false'}, {RELEASE_APP_BOT_LOGIN:'human'}]) {
+  for (const change of [{RELEASE_APP_CLIENT_ID:''}, {RELEASE_APP_CLIENT_ID:'12345'}, {HAS_PRIVATE_KEY:'false'}, {RELEASE_APP_BOT_LOGIN:'human'}]) {
     const result = run(validate, { ...valid, ...change });
     assert.equal(result.status, 1);
     assert.match(result.stdout, /docs\/publishing.md#release-app-setup/);
