@@ -850,6 +850,32 @@ describe('ProviderAuthService', () => {
       });
     });
 
+    it('never clears a newer failure reported while the probe was in flight', async () => {
+      let release!: () => void;
+      const waiting = new Promise<void>((resolve) => { release = resolve; });
+      const runCommand = vi.fn(async (executable: string) => {
+        await waiting;
+        return resultFor(executable);
+      });
+      const service = new ProviderAuthService({ runCommand, createAuthFailureId: () => 'incident-1' });
+      service.reportRuntimeAuthFailure('claude');
+
+      const verifying = service.verifyRuntimeAuthFailure('claude');
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(1));
+      // A second run — possibly on a DIFFERENT account of the same provider — fails while the
+      // self-check is in flight. The latch does not transition (same incident id), so the watcher
+      // will never re-check what this answer would wrongly clear; the answer must not clear it.
+      service.reportRuntimeAuthFailure('claude');
+      release();
+
+      await expect(verifying).resolves.toBeNull();
+      await expect(service.status()).resolves.toMatchObject({
+        providers: expect.arrayContaining([
+          expect.objectContaining({ provider: 'claude', status: 'disconnected', authFailureId: 'incident-1' }),
+        ]),
+      });
+    });
+
     it('collapses concurrent self-checks onto the one already in flight', async () => {
       let release!: () => void;
       const waiting = new Promise<void>((resolve) => { release = resolve; });

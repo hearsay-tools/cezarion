@@ -541,6 +541,12 @@ export class ProviderAuthService {
     }
 
     if (probed.status !== 'connected') return null;
+    // Fence the clear against the captured GENERATION, not just the id: while the latch stands a
+    // new failure report keeps the same `authFailureId`, so an id comparison alone would let this
+    // answer — gathered for the incident as it was — clear a newer failure reported mid-probe,
+    // one the latch-edge watcher will never re-check. Generations are unique per report.
+    const current = this.runtimeFailures.get(provider);
+    if (!current || current.generation !== failure.generation) return null;
     if (!this.clearRuntimeAuthFailure(provider, failure.authFailureId)) return null;
     if (profile) {
       // Per-account knowledge goes to the per-account cache. Folding it into the whole-response
