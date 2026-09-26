@@ -68,6 +68,7 @@ export function HandoffAction({ run }: { run: ApiRun }) {
               data-slot="notifying-chip"
               className="h-11 gap-1.5 md:h-[30px]"
               aria-label={url ? `Notifying ${webhookLabel(url)} — webhook actions` : 'Notifying — webhook actions'}
+              title={url ? webhookLabel(url) : undefined}
             >
               <StatusDot tone="success" />
               <span>Notifying</span>
@@ -76,8 +77,8 @@ export function HandoffAction({ run }: { run: ApiRun }) {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" data-slot="notifying-menu" className="w-[240px] max-w-[calc(100vw-2rem)] p-2">
             {url ? (
-              <DropdownMenuLabel className="truncate px-2 py-1.5 font-mono text-[11px] font-normal text-muted-foreground">
-                {webhookLabel(url)}
+              <DropdownMenuLabel className="truncate px-2 py-1.5 text-[11px] font-normal text-muted-foreground">
+                <span title={webhookLabel(url)}>Task webhook</span>
               </DropdownMenuLabel>
             ) : null}
             {url ? (
@@ -178,9 +179,11 @@ function HandoffDialog({
           <DialogHeader className="text-left">
             <DialogTitle>{isNote ? 'Send a note to the webhook' : 'Hand off to webhook'}</DialogTitle>
             <DialogDescription>
-              {isNote
-                ? `The bot at ${label} gets this note with the task's current status.`
-                : `The bot at ${label} will start receiving this task's status updates. Add a note for it (optional).`}
+              <span data-webhook-destination="" title={label}>
+                {isNote
+                  ? "The bot gets this note with the task's current status."
+                  : "The webhook will start receiving this task's status updates. Add a note for it (optional)."}
+              </span>
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-1.5">
