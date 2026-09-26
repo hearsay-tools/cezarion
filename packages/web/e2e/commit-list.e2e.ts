@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import record from './fixtures/thread-run.record.json'
 import { waitForHealth } from './poll'
@@ -146,15 +147,10 @@ beforeAll(async () => {
   openCommits()
 }, 180_000)
 
-afterAll(() => {
+afterAll(async () => {
   browser?.close()
-  server?.kill()
-  // Cleanup races the dying server (see thread-scroll.e2e.ts) — litter, not a failure.
-  try {
-    if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
-  } catch {
-    /* the OS reaps it */
-  }
+  await stopFixtureServer(server)
+  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
 describe(`the task Commits tab on a ${COMMITS}-commit branch`, () => {

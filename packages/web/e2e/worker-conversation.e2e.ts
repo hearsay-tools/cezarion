@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 import record from './fixtures/thread-run.record.json'
@@ -80,10 +81,10 @@ beforeAll(async () => {
   browser = AgentBrowser.open(`e2e-worker-cards-${process.pid}`)
 }, 120_000)
 
-afterAll(() => {
+afterAll(async () => {
   browser?.close()
-  server?.kill()
-  try { if (root) rmSync(root, { recursive: true, force: true }) } catch { /* server may still be flushing */ }
+  await stopFixtureServer(server)
+  if (root) rmSync(root, { recursive: true, force: true })
 })
 
 function waitForFocusedCard(selector: string) {

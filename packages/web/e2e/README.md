@@ -104,6 +104,12 @@ line; the fix is a wait, never a baseline entry.
    beyond a line scan; that case is why the helper exists, so use it for every dismissal a keyboard
    step follows.
 
+8. **Stop fixture servers before removing their directories.** In an async `afterAll`, call
+   `await stopFixtureServer(server)` before `rmSync(dataRoot, ...)`. The server flushes state after
+   SIGTERM, so `kill()` alone does not settle cleanup. The helper waits for `exit` and sends
+   SIGKILL if graceful shutdown takes more than five seconds. The unit check rejects bare
+   fixture-server kills in e2e specs.
+
 One site to know about: `selection-states.e2e.ts` asserts `matches(':hover')` after
 `hoverVisiblePoint`. That is a one-shot assertion, not a wait, and it holds because that spec adds
 `--blink-settings=primaryHoverType=2` to `AGENT_BROWSER_ARGS` before it attaches. Rule 1

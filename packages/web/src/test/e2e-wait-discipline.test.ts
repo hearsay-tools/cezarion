@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -325,6 +325,15 @@ describe('the baseline', () => {
 })
 
 describe('the cockpit suite', () => {
+  it('never calls kill directly in a fixture spec', () => {
+    const bareKills = readdirSync(e2eDir)
+      .filter((file) => file.endsWith('.e2e.ts'))
+      .flatMap((file) => readFileSync(join(e2eDir, file), 'utf8')
+        .split('\n')
+        .flatMap((line, index) => /\.kill\s*\(/.test(line) ? [`${file}:${index + 1}`] : []))
+    expect(bareKills).toEqual([])
+  })
+
   it('scans every spec and the browser-driving helpers', () => {
     const files = new Set(scanSuite().map((s) => s.file))
     // Sanity: the scan covers the whole directory, not one file.
