@@ -1036,6 +1036,44 @@ describe('ProviderAuthService', () => {
       });
     });
 
+    it('fences a verified account row against an older profile probe landing late', async () => {
+      // The per-account probe is already in flight when the self-check answers; the older answer
+      // must not overwrite the newer verified row in the per-account cache — the same fence the
+      // default cache's generation guard provides.
+      let releaseProfileProbe!: () => void;
+      let releaseVerification!: () => void;
+      const profileProbeGate = new Promise<void>((resolve) => { releaseProfileProbe = resolve; });
+      const verificationGate = new Promise<void>((resolve) => { releaseVerification = resolve; });
+      let claudeCalls = 0;
+      const runCommand = vi.fn(async (executable: string, _args, _timeout, _env) => {
+        if (executable !== 'claude') return resultFor(executable);
+        claudeCalls += 1;
+        // Call 1: the account probe, gathered BEFORE the recovery. Call 2: the self-check.
+        if (claudeCalls === 1) {
+          await profileProbeGate;
+          return { stdout: '{"loggedIn":false}', stderr: '', exitCode: 1 };
+        }
+        await verificationGate;
+        return connectedResults.claude!;
+      });
+      const service = new ProviderAuthService({ runCommand, createAuthFailureId: () => 'incident-1' });
+
+      const profileProbe = service.profileStatus('claude', { id: 'work', configDir: '/work' });
+      await vi.waitFor(() => expect(claudeCalls).toBe(1));
+      service.reportRuntimeAuthFailure('claude');
+      const verifying = service.verifyRuntimeAuthFailure('claude', { id: 'work', configDir: '/work' });
+      await vi.waitFor(() => expect(claudeCalls).toBe(2));
+
+      releaseVerification();
+      await expect(verifying)
+        .resolves.toEqual({ provider: 'claude', status: 'connected', profileId: 'work' });
+      // The older account probe lands afterwards; the cache must keep the verified answer.
+      releaseProfileProbe();
+      await expect(profileProbe).resolves.toMatchObject({ status: 'disconnected' });
+      expect(service.peekProfileStatus('claude', 'work'))
+        .toEqual({ provider: 'claude', status: 'connected', profileId: 'work' });
+    });
+
     it('is a no-op when nothing was latched', async () => {
       const runCommand = runner();
       const service = new ProviderAuthService({ runCommand });

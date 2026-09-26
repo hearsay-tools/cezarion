@@ -400,8 +400,11 @@ export class ProviderAuthService {
   };
   /** Per-account probe results, keyed by `profileCacheKey` (spec 2026-07-29-agent-profiles).
    *  Separate from `completed` because a second Claude login is a different answer to the same
-   *  question, and sharing one slot would let whichever probe ran last speak for both. */
-  private readonly completedProfiles = new Map<string, { status: ProviderStatus; timestamp: number }>();
+   *  question, and sharing one slot would let whichever probe ran last speak for both. Each
+   *  entry carries the generation of the probe that wrote it, so an older probe landing after a
+   *  newer verification cannot overwrite the correction — the fence `completed` gets from
+   *  `startFreshProbe`/`rememberProbedRow`, on this cache's own key. */
+  private readonly completedProfiles = new Map<string, { status: ProviderStatus; timestamp: number; generation: number }>();
   private readonly inFlightProfiles = new Map<string, Promise<ProviderStatus>>();
 
   constructor(options?: {
@@ -552,10 +555,13 @@ export class ProviderAuthService {
       // Per-account knowledge goes to the per-account cache. Folding it into the whole-response
       // cache would let a named account's answer speak for the default row for the TTL that
       // follows — the same sharing bug the `(provider, profileId)` key was introduced to prevent.
+      // The FRESH generation fences the write against an older per-account probe that is still in
+      // flight and lands afterwards.
       const stamped: ProviderStatus = { ...probed, profileId: profile.id };
       this.completedProfiles.set(profileCacheKey(provider, profile.id), {
         status: stamped,
         timestamp: this.now(),
+        generation: ++this.nextProbeGeneration,
       });
       return stamped;
     }
@@ -697,10 +703,17 @@ export class ProviderAuthService {
     if (cached && this.now() - cached.timestamp < cacheTtlFor([cached.status])) return cached.status;
     const pending = this.inFlightProfiles.get(key);
     if (pending) return pending;
+    const generation = ++this.nextProbeGeneration;
     const probe = this.probe(descriptorFor(provider), profile.configDir)
       .then((status) => {
         const stamped: ProviderStatus = { ...status, profileId: profile.id };
-        this.completedProfiles.set(key, { status: stamped, timestamp: this.now() });
+        const current = this.completedProfiles.get(key);
+        // A verification (or newer probe) that wrote while this probe was in flight keeps its
+        // place: an older answer must not overwrite a fresher row, the same fence the default
+        // cache's generation guard provides. The caller still gets this probe's own answer.
+        if (current === undefined || generation >= current.generation) {
+          this.completedProfiles.set(key, { status: stamped, timestamp: this.now(), generation });
+        }
         return stamped;
       })
       .finally(() => {
