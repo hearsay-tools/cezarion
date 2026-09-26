@@ -1014,7 +1014,7 @@ describe('the calmer row (#617)', () => {
       expect(title.className).toContain('text-[13px]')
       expect(title.className).toContain('leading-[1.45]')
       expect(meta.className).toContain('truncate')
-      expect(meta.className).toContain('h-4')
+      expect(meta.className).toContain('h-[16px]')
       expect(meta.className).toContain('text-soft-foreground')
       // The title line is a fixed 19px box and the meta line a fixed 16px one, so height is
       // independent of content; no reference is ever a line of its own.
@@ -1032,7 +1032,7 @@ describe('the calmer row (#617)', () => {
     for (const id of ['bare', 'unread', 'nopin']) {
       const slot = row(id)?.querySelector('[data-slot="task-row-trailing"]') as HTMLElement
       expect(slot, id).not.toBeNull()
-      expect(slot.className).toContain('w-4')
+      expect(slot.className).toContain('w-[16px]')
       expect(slot.className).toContain('shrink-0')
     }
   })
@@ -1105,7 +1105,7 @@ describe('the calmer row (#617)', () => {
     // Both glyphs sit in the same fixed 12px dot slot, so the titles start at the same x.
     for (const id of ['p', 'r']) {
       expect(dotOf(id)?.parentElement?.getAttribute('data-slot')).toBe('task-row-dot')
-      expect(dotOf(id)?.parentElement?.className).toContain('w-3')
+      expect(dotOf(id)?.parentElement?.className).toContain('w-[12px]')
     }
     expect(row('p')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('waiting on 2 workers · 1m')
   })
@@ -1141,6 +1141,9 @@ describe('the calmer row (#617)', () => {
     expect(row('other')?.className).toContain('hover:bg-sidebar-row-hover')
     expect(open.className).not.toContain('task-brand-selected')
     expect(open.querySelector('[data-slot="task-row-title"]')?.className).toContain('text-foreground')
+    // …and the meta line steps up one ink on the selected fill, to hold 4.5:1.
+    expect(open.querySelector('[data-slot="task-row-meta"]')?.className).toContain('text-muted-foreground')
+    expect(row('other')?.querySelector('[data-slot="task-row-meta"]')?.className).toContain('text-soft-foreground')
     expect(row('other')?.className).not.toContain('bg-sidebar-row-selected')
     expect(row('other')?.querySelector('[data-slot="task-row-title"]')?.className).toContain('text-muted-foreground')
     for (const node of [open, ...open.querySelectorAll('*')]) {

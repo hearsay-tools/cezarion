@@ -290,7 +290,8 @@ describe('task quick-list', () => {
       return { review: of('fix-review-pr'), done: of('fix-done'), failed: of('fix-failed') }
     })()`) as Record<string, { tone: string; pulses: boolean }>
 
-    expect(tones.review).toEqual({ tone: 'accent', pulses: true })
+    // Review is info blue since the #617 status key (it used to be brand teal, which read as done).
+    expect(tones.review).toEqual({ tone: 'info', pulses: true })
     // Terminal rows are still — the pulse means "transitioning", and these are not.
     expect(tones.done).toEqual({ tone: 'success', pulses: false })
     expect(tones.failed).toEqual({ tone: 'danger', pulses: false })
@@ -300,7 +301,7 @@ describe('task quick-list', () => {
       browser.evaluate(
         `getComputedStyle(document.querySelector('[data-run-id="fix-done"] [data-slot="status-dot"]')).width`
       )
-    ).toBe('10px')
+    ).toBe('7px')
   })
 
   it('links a row to its task, and the PR chip to the PR', () => {
@@ -327,8 +328,9 @@ describe('task quick-list', () => {
     browser.click(TILE)
     browser.waitForFunction(`document.querySelector('${ROW}[data-run-id="fix-var-a"]') !== null`)
     // Historical fixtures have no directional counters: show each backend, never invent usage.
-    expect(textOf(`${ROW}[data-run-id="fix-var-a"]`)).toBe('Aclaude')
-    expect(textOf(`${ROW}[data-run-id="fix-var-b"]`)).toBe('Bcodex')
+    // Line two is the meta line — the state word, no age (#617).
+    expect(textOf(`${ROW}[data-run-id="fix-var-a"]`)).toBe('Aclaudeneeds review')
+    expect(textOf(`${ROW}[data-run-id="fix-var-b"]`)).toBe('Bcodexneeds review')
     // Each variant is still its own deep link.
     expect(
       browser.evaluate(`document.querySelector('${ROW}[data-run-id="fix-var-b"] a').getAttribute('href')`)
@@ -899,8 +901,9 @@ describe('the tasks table under worst-case row content', () => {
         expect(facts.unbrokenContained, `${theme}/${density}: unbroken title`).toBe(true)
         expect(facts.workflowContained, `${theme}/${density}: workflow ellipsis`).toBe(true)
         // The longest label the status column can be asked to print, and it comes from the
-        // record's own parked delegation rather than from a rewritten pill.
-        expect(facts.statusLabel, `${theme}/${density}: parked status label`).toBe('waiting on workers')
+        // record's own parked delegation rather than from a rewritten pill. A full record
+        // carries its worker ids, so the count is said (#617).
+        expect(facts.statusLabel, `${theme}/${density}: parked status label`).toBe('waiting on 1 worker')
         expect.soft(facts.statusContained, `${theme}/${density}: status pill`).toBe(true)
         expect.soft(facts.referenceContained, `${theme}/${density}: reference chip`).toBe(true)
         expect(facts.referenceLabel, `${theme}/${density}: compact reference label`).toBe('#1234')
@@ -1111,7 +1114,8 @@ describe('a row under width contention, in a column the user can widen', () => {
     })()`) as { title: string; chip: string; chipHref: string; tooltip: string }
 
     expect(painted.title).toBe('implementing comment threads across the whole thread view')
-    expect(painted.chip).toBe('#775')
+    // Plain text on the meta line since #617, spelled as the kind and the number.
+    expect(painted.chip).toBe('PR #775')
     expect(painted.chipHref).toBe('https://github.com/open-mercato/cezar/pull/775')
     // The number was moved, not deleted — the stored title is still one hover away.
     expect(painted.tooltip).toBe(FULL_TITLE)

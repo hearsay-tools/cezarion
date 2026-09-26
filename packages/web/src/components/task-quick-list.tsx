@@ -491,10 +491,12 @@ function RunRow({
         variant && 'pl-[26px]'
       )}
     >
-      {/* The dot slot: 12px wide so the 12px robot fits, 19px tall so a 7px dot and the robot
+      {/* Line boxes and slots are fixed px, not spacing units: `ultra` density shrinks
+          `--spacing`, which would clip the 16px meta line and squeeze the 12px robot.
+          The dot slot: 12px wide so the 12px robot fits, 19px tall so a 7px dot and the robot
           both centre on the title line and every title starts at the same x. Not a control — a
           click on it is a row click. */}
-      <span data-slot="task-row-dot" className="flex h-[19px] w-3 shrink-0 items-center justify-center">
+      <span data-slot="task-row-dot" className="flex h-[19px] w-[12px] shrink-0 items-center justify-center">
         <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} aria-label={attention.label} title={attention.label} role="img" />
       </span>
       <div className="flex min-w-0 flex-1 flex-col">
@@ -544,7 +546,13 @@ function RunRow({
             here (#617) — no chip border, no teal — but keep their status panel and their name. */}
         <div
           data-slot="task-row-meta"
-          className="h-4 min-w-0 truncate text-[11.5px] leading-[1.4] font-normal text-soft-foreground"
+          className={cn(
+            'h-[16px] min-w-0 truncate text-[11.5px] leading-[1.4] font-normal text-soft-foreground',
+            // On the selected fill `--soft-foreground` is 4.45:1 (dark) / 4.25:1 (light), under
+            // the 4.5:1 an 11.5px line needs; it steps up one ink, as the title steps to
+            // `--foreground`.
+            isActive && 'text-muted-foreground',
+          )}
         >
           {meta.length ? meta.flatMap((part, index) => (index ? [<MetaSeparator key={`sep-${index}`} />, part] : [part])) : ' '}
         </div>
@@ -553,7 +561,7 @@ function RunRow({
       {/* The trailing slot — reserved on every row, whether or not anything is in it (#617). */}
       <span
         data-slot="task-row-trailing"
-        className="relative flex h-[19px] w-4 shrink-0 items-center justify-center max-md:h-auto max-md:w-11 max-md:self-stretch no-hover:h-auto no-hover:w-11 no-hover:self-stretch"
+        className="relative flex h-[19px] w-[16px] shrink-0 items-center justify-center max-md:h-auto max-md:w-11 max-md:self-stretch no-hover:h-auto no-hover:w-11 no-hover:self-stretch"
       >
         {unread ? (
           <StatusDot

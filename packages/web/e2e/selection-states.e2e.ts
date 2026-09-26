@@ -136,6 +136,75 @@ describe('selection and control states (#171)', () => {
       expect(style('[data-slot="skill-row"][data-skill="review"]', '::before').content).toBe('none')
     })
 
+    // The calmer sidebar row (#617). Desktop only: the drawer at 360px is the same component,
+    // and this spec's primaryHoverType=2 flag is what makes `hover:` CSS resolve at all.
+    if (variant.viewport.width === 1440) it(`${variant.id}: the sidebar row keeps its geometry under the pointer and its ink readable (#617)`, () => {
+      variantId = variant.id
+      browser.goto(`${baseUrl}/p/${project}/tasks/one`)
+      browser.waitForFunction(`document.querySelector('[data-slot="task-row"][data-run-id="one"][data-active="true"] [data-slot="task-row-meta"]') !== null`)
+      applyContrastQaVariant(browser, variant)
+      browser.moveTo(0, 0)
+      const selected = '[data-slot="task-row"][data-run-id="one"]'
+      const other = '[data-slot="task-row"][data-run-id="two"]'
+      // The tokens the issue names, resolved by the real stylesheet in this theme.
+      const fill = variant.theme === 'dark'
+        ? { hover: 'rgb(27, 33, 48)', selected: 'rgb(38, 44, 62)' }
+        : { hover: 'rgb(244, 245, 248)', selected: 'rgb(234, 237, 243)' }
+      type Geometry = { title: string; row: number; bg: string; pin: string | null }
+      const geometry = (selector: string) => `(() => {
+        const row = document.querySelector(${JSON.stringify(selector)})
+        const t = row.querySelector('[data-slot="task-row-title"]').getBoundingClientRect()
+        const pin = row.querySelector('[data-slot="pin-toggle"]')
+        return { title: [t.left, t.top, t.width, t.height].map(Math.round).join(','), row: Math.round(row.getBoundingClientRect().height),
+          bg: getComputedStyle(row).backgroundColor, pin: pin && getComputedStyle(pin).opacity }
+      })()`
+      // At rest: no fill, pin invisible (its slot is still reserved).
+      const rest = browser.waitForValue(geometry(other), (g: Geometry) => g.bg === 'rgba(0, 0, 0, 0)' && g.pin === '0') as Geometry
+      expect(browser.evaluate(`getComputedStyle(document.querySelector('${selected}')).backgroundColor`)).toBe(fill.selected)
+      hoverVisiblePoint(browser, other)
+      // Hovered: the neutral hover fill and the pin revealed — and the title box and the row
+      // height identical to rest, to the pixel. This is the jump the old w-0→w-5 pin caused.
+      const hovered = browser.waitForValue(geometry(other), (g: Geometry) => g.bg === fill.hover && g.pin === '1') as Geometry
+      expect({ title: hovered.title, row: hovered.row }).toEqual({ title: rest.title, row: rest.row })
+      // The row as the issue specifies it, from the resolved stylesheet rather than the classes:
+      // nothing in a later sheet may restyle it (an override layer once clamped the title to two
+      // 12px lines and painted the selected title teal).
+      const resolved = browser.evaluate(`(() => {
+        const row = document.querySelector('${selected}'), s = getComputedStyle(row)
+        const t = getComputedStyle(row.querySelector('[data-slot="task-row-title"]'))
+        const m = getComputedStyle(row.querySelector('[data-slot="task-row-meta"]'))
+        const d = getComputedStyle(row.querySelector('[data-slot="status-dot"]'))
+        const probe = document.createElement('span'); probe.style.color = 'var(--foreground)'
+        document.body.append(probe); const ink = getComputedStyle(probe).color; probe.remove()
+        return { padding: s.padding, radius: s.borderRadius, titleSize: t.fontSize, titleWeight: t.fontWeight,
+          titleWrap: t.whiteSpace, titleOverflow: t.textOverflow, titleInk: t.color === ink, metaSize: m.fontSize,
+          metaWrap: m.whiteSpace, dot: d.width + ' ' + d.height, metaHeight: m.height,
+          dotSlot: getComputedStyle(row.querySelector('[data-slot="task-row-dot"]')).width,
+          trailing: getComputedStyle(row.querySelector('[data-slot="task-row-trailing"]')).width }
+      })()`)
+      // Padding follows the density scale (`ultra` shrinks `--spacing`); the rest is fixed px.
+      expect(resolved).toEqual({ padding: variant.density === 'comfortable' ? '6px 8px 6px 10px' : resolved.padding, radius: '6px',
+        titleSize: '13px', titleWeight: '500', titleWrap: 'nowrap', titleOverflow: 'ellipsis', titleInk: true, metaSize: '11.5px',
+        metaWrap: 'nowrap', dot: '7px 7px', metaHeight: '16px', dotSlot: '12px', trailing: '16px' })
+      // Every row is the same two-line height.
+      expect(browser.evaluate(`Math.round(document.querySelector('${selected}').getBoundingClientRect().height)`)).toBe(rest.row)
+      // Ink on both fills: text at 4.5:1, the status dot as a non-text mark at 3:1.
+      for (const [row, state] of [[selected, 'selected'], [other, 'hover']] as const) {
+        for (const part of ['[data-slot="task-row-title"]', '[data-slot="task-row-meta"]']) {
+          const sample = browser.evaluate(contrastSampleExpression(`${row} ${part}`)) as ContrastSample
+          samples.push({ variant: variantId, target: `${row} ${part}`, state: `${state} row text`, ...sample })
+          expect(sample.ratio, `${state} ${part}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(4.5)
+        }
+        const dot = browser.evaluate(contrastSampleExpression(`${row} [data-slot="status-dot"]`, 'background-color', 'parent')) as ContrastSample
+        samples.push({ variant: variantId, target: `${row} status-dot`, state: `${state} row dot`, ...dot })
+        expect(dot.ratio, `${state} dot: ${JSON.stringify(dot)}`).toBeGreaterThanOrEqual(3)
+      }
+      const pin = browser.evaluate(contrastSampleExpression(`${other} [data-slot="pin-toggle"]`, 'color', 'parent')) as ContrastSample
+      samples.push({ variant: variantId, target: `${other} pin`, state: 'hover pin', ...pin })
+      expect(pin.ratio, `pin: ${JSON.stringify(pin)}`).toBeGreaterThanOrEqual(3)
+      browser.screenshot(`${artifacts}/states-sidebar-row-${variant.id}.png`, { viewport: true })
+    })
+
     it(`${variant.id}: enabled control icons contrast and disabled selectors remain unavailable`, () => {
       variantId = variant.id
       browser.goto(`${baseUrl}/p/${project}/new`)

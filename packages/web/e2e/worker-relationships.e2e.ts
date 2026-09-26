@@ -160,7 +160,8 @@ it('shows unavailable parent with retry, successful empty state, worker wait and
   browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${region} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
   expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   open(emptyId); browser.waitForFunction(`document.querySelector('${region}').textContent.includes('No workers')`)
-  open(waitingId); expect(browser.text(region)).toContain('Waiting on workers')
+  // A full record carries its worker ids, so the count is said (#617).
+  open(waitingId); browser.waitForFunction(`document.querySelector('${region}')?.textContent.includes('Waiting on 1 worker')`)
   expect(browser.count('[data-slot="ask-card"]')).toBe(0)
   // The real server derives attention from the seeded ask.requested event.
   // Visit both lists before the ask detail so its history cannot prime attention.
