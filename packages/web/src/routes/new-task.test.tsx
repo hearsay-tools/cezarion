@@ -1987,7 +1987,9 @@ describe('the Notify webhook toggle (#589)', () => {
     await pillReady()
     await waitFor(() => expect(toggle()).not.toBeNull())
     expect(toggle()!.getAttribute('aria-checked')).toBe('false')
-    expect(toggle()!.textContent).toContain('bot.example/hooks/cez')
+    // The row names the action. The host and path stay on the tooltip (#614).
+    expect(toggle()!.textContent).toContain('Send status changes')
+    expect(toggle()!.textContent).not.toContain('bot.example')
     fireEvent.click(toggle()!)
     expect(toggle()!.getAttribute('aria-checked')).toBe('true')
     fireEvent.change(textarea(), { target: { value: 'do it' } })

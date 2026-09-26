@@ -87,7 +87,9 @@ describe('Hand off to webhook', () => {
     browser.click(handoff)
     browser.waitForFunction(`document.querySelector(${JSON.stringify(dialog)}) !== null`)
     const text = browser.waitForValue(`document.querySelector(${JSON.stringify(dialog)})?.textContent || null`) as string
-    expect(text).toContain('bot.example/hooks/cez')
+    expect(text).not.toContain('bot.example/hooks/cez')
+    const tip = browser.waitForValue(`document.querySelector(${JSON.stringify('[data-webhook-destination]')})?.getAttribute('title') || null`) as string
+    expect(tip).toContain('bot.example/hooks/cez')
     expect(text).toContain('The note goes to the webhook only, not to the agent.')
     settledShot('desktop-dialog.png')
 
@@ -155,5 +157,40 @@ describe('Hand off to webhook', () => {
     expect(browser.evaluate(`document.body.innerHTML.includes('e2e-token')`)).toBe(false)
     browser.evaluate(`document.querySelector('[data-slot="task-webhook"]').scrollIntoView({ block: 'center' })`)
     settledShot('mobile-settings.png')
+  })
+
+  it('keeps the new-task notify row inside 360×640 with AA contrast', () => {
+    browser.setViewport(360, 640)
+    browser.goto(`${baseUrl}/p/${project}/new`)
+    const sample = browser.waitForValue(`(() => {
+      const row = document.querySelector('[data-slot="notify-webhook-toggle"]')
+      const card = document.querySelector('[data-slot="execution-options"]')
+      if (!row || !card || row.getBoundingClientRect().height === 0) return null
+      return {
+        text: row.textContent || '',
+        title: row.getAttribute('title') || '',
+        height: row.getBoundingClientRect().height,
+        cardOverflow: card.scrollWidth > card.clientWidth + 1,
+        pageOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+      }
+    })()`) as { text: string; title: string; height: number; cardOverflow: boolean; pageOverflow: boolean }
+    expect(sample.text).toContain('Send status changes')
+    expect(sample.text).not.toContain('bot.example')
+    expect(sample.title).toContain('bot.example/hooks/cez')
+    expect(sample.height).toBeGreaterThanOrEqual(44)
+    expect(sample.cardOverflow).toBe(false)
+    expect(sample.pageOverflow).toBe(false)
+    for (const theme of ['dark', 'light'] as const) {
+      applyContrastQaVariant(browser, { id: `notify-${theme}`, theme, density: 'comfortable', viewport: { width: 360, height: 640 } })
+      browser.waitForFunction(`(() => {
+        const el = document.querySelector('[data-slot="notify-webhook-subtitle"]')
+        return Boolean(el) && el.getAnimations({ subtree: true }).every(a => a.playState !== 'running')
+      })()`)
+      const contrast = browser.waitForValue(contrastSampleExpression('[data-slot="notify-webhook-subtitle"]')) as ContrastSample
+      expect(contrast.ratio, `${theme} notify subtitle ${JSON.stringify(contrast)}`).toBeGreaterThanOrEqual(AA_NORMAL_TEXT)
+      browser.evaluate(`document.querySelector('[data-slot="notify-webhook-toggle"]').scrollIntoView({ block: 'center' })`)
+      settledShot(`mobile-new-task-notify-${theme}.png`)
+    }
+    restoreContrastQaDefaults(browser)
   })
 })
