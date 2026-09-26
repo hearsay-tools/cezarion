@@ -88,6 +88,28 @@ function procStartedAtMs(pid: string): number | undefined {
     return start === undefined || !Number.isFinite(bootTimeMs) ? undefined : bootTimeMs + Number(start) / clockTicks * 1000;
   } catch { return undefined; }
 }
+/** The darwin scan: `lsof` for working directories, `ps` for our own user's processes. */
+export type DarwinReader = { lsof: () => { ok: boolean; stdout: string }; ownProcesses: () => Array<{ pid: number; startedAtMs?: number }> | undefined };
+const realDarwin: DarwinReader = {
+  lsof: () => {
+    const lsof = spawnSync('lsof', ['-a', '-d', 'cwd', '-Fpn'], { encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024 });
+    // Status 1 is ordinary (some process unreadable); completeness is judged against `ps` instead.
+    return { ok: !lsof.error && (lsof.status === 0 || lsof.status === 1) && !!lsof.stdout, stdout: lsof.stdout ?? '' };
+  },
+  ownProcesses: () => {
+    const uid = process.getuid?.();
+    if (uid === undefined) return undefined;
+    const ps = spawnSync('ps', ['-U', String(uid), '-o', 'pid=,lstart='], { encoding: 'utf8', timeout: 2_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
+    if (ps.error || ps.status !== 0 || !ps.stdout) return undefined;
+    return ps.stdout.split('\n').flatMap(line => {
+      const match = /^\s*(\d+)\s+(.+?)\s*$/.exec(line);
+      // `ps` lists itself, and lsof (which ran first) never saw it.
+      if (!match || Number(match[1]) === ps.pid) return [];
+      const startedAtMs = Date.parse(`${match[2]} UTC`);
+      return [{ pid: Number(match[1]), ...(Number.isFinite(startedAtMs) ? { startedAtMs } : {}) }];
+    });
+  },
+};
 const realProc: ProcReader = {
   readdir: () => readdirSync('/proc'),
   readlink: pid => readlinkSync(`/proc/${pid}/cwd`),
@@ -99,7 +121,7 @@ const realProc: ProcReader = {
  * pass; `unknown` when no scan can run. cezar's own short-lived git children in a worktree make
  * this read "alive" briefly: conservative, and a retry self-heals. `since` (epoch ms) is the
  * earliest moment the generation's processes can have started; see the EACCES rule below. */
-export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc, since?: number): number[] | 'unknown' {
+export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc, since?: number, darwin: DarwinReader = realDarwin): number[] | 'unknown' {
   const targets = (typeof dirs === 'string' ? [dirs] : dirs).map(dir => { try { return realpathSync(dir); } catch { return resolve(dir); } });
   const under = (cwd: string) => { const path = cwd.replace(/ \(deleted\)$/, ''); return targets.some(target => path === target || path.startsWith(target + sep)); };
   const found: number[] = [];
@@ -123,13 +145,21 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
     return found;
   }
   if (platform !== 'darwin') return 'unknown';
-  const lsof = spawnSync('lsof', ['-a', '-d', 'cwd', '-Fpn'], { encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024 });
-  // lsof exits 1 when some processes are unreadable; no output at all is not a proof.
-  if (lsof.error || (lsof.status !== 0 && lsof.status !== 1) || !lsof.stdout) return 'unknown';
+  const lsof = darwin.lsof();
+  if (!lsof.ok) return 'unknown';
+  const seen = new Set<number>();
   let pid: number | undefined;
   for (const line of lsof.stdout.split('\n')) {
-    if (line.startsWith('p')) pid = Number(line.slice(1));
+    if (line.startsWith('p')) { pid = Number(line.slice(1)); seen.add(pid); }
     else if (line.startsWith('n') && pid !== undefined && pid !== process.pid && under(line.slice(1))) found.push(pid);
+  }
+  // lsof silently omits what it cannot read. An own-user process it omitted is judged by the
+  // Linux EACCES rule: a possible holder unless it predates the worker. Other users' are skipped.
+  const own = darwin.ownProcesses();
+  if (!own) return 'unknown';
+  for (const entry of own) {
+    if (seen.has(entry.pid) || entry.pid === process.pid) continue;
+    if (since === undefined || entry.startedAtMs === undefined || entry.startedAtMs >= since) found.push(entry.pid);
   }
   return [...new Set(found)];
 }

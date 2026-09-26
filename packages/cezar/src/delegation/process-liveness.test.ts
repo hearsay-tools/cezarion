@@ -44,6 +44,22 @@ describe('process liveness (#469)', () => {
     expect(processesWithCwdUnder(tmpdir(), 'linux', vanished, since)).toEqual([]);
   });
 
+  it('darwin: an own-user process lsof could not read counts like an unreadable Linux one', () => {
+    const since = Date.now();
+    const linuxUnused = { readdir: () => [], readlink: () => '', ownerUid: () => undefined, startedAtMs: () => undefined };
+    const dir = tmpdir();
+    const darwin = (stdout: string, own: { pid: number; startedAtMs?: number }[] | undefined, ok = true) => ({ lsof: () => ({ ok, stdout }), ownProcesses: () => own });
+    const lsof = `p10\nn/\np11\nn${dir}\n`;
+    // lsof saw 10 and 11; 12 is ours but absent from its output, so its cwd is unknown.
+    expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin(lsof, [{ pid: 10 }, { pid: 11 }, { pid: 12, startedAtMs: since + 5_000 }]))).toEqual([11, 12]);
+    expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin(lsof, [{ pid: 12 }]))).toEqual([11, 12]);
+    // Older than the worker: cannot be its descendant.
+    expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin(lsof, [{ pid: 12, startedAtMs: since - 60_000 }]))).toEqual([11]);
+    // Completeness cannot be judged without our own process list, and a failed lsof proves nothing.
+    expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin(lsof, undefined))).toBe('unknown');
+    expect(processesWithCwdUnder(dir, 'darwin', linuxUnused, since, darwin('', [], false))).toBe('unknown');
+  });
+
   it.runIf(linux)('finds a real child by its working directory and loses it after exit', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-liveness-')); dirs.push(dir);
     const nested = join(dir, 'nested'); mkdirSync(nested);
