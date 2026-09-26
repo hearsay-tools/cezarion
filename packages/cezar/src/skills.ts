@@ -56,11 +56,19 @@ export const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
 /* Deliberately `homedir()` and not `agentHomePaths().claude`: these do NOT follow an
    agent profile (`src/core/agent-profiles.ts`). A skill is CONTENT — a playbook — not
    identity, and a second Claude login is not a second skill library. `npx skills`, which
-   writes the `~/.claude/skills` mirror, is profile-unaware for the same reason. */
-const GLOBAL_SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
-  { dir: join(homedir(), '.agents/skills'), source: 'global' },
-  { dir: join(homedir(), '.claude/skills'), source: 'global' },
-];
+   writes the `~/.claude/skills` mirror, is profile-unaware for the same reason.
+
+   Resolved at catalog-read time (not module load) so a test can plant fixtures under a
+   temp `$HOME`. #366: empty under vitest — the same `process.env.VITEST` seam #365 uses
+   for the vendor team source — so the unit suite does not merge the developer's real
+   `~/.agents/skills` / `~/.claude/skills`. Production is unchanged. */
+function globalSkillDirs(): Array<{ dir: string; source: Skill['source'] }> {
+  if (process.env.VITEST) return [];
+  return [
+    { dir: join(homedir(), '.agents/skills'), source: 'global' },
+    { dir: join(homedir(), '.claude/skills'), source: 'global' },
+  ];
+}
 
 /**
  * Discover the merged skill catalog for a repo. Name collisions resolve
@@ -86,7 +94,7 @@ export async function discoverSkills(repoRoot: string): Promise<Skill[]> {
   const [lists, gatedRepos, uiState] = await Promise.all([
     Promise.all([
       ...SKILL_DIRS.map(({ dir, source }) => readMarkdownSkills(resolve(repoRoot, dir), source)),
-      ...GLOBAL_SKILL_DIRS.map(({ dir, source }) => readMarkdownSkills(dir, source)),
+      ...globalSkillDirs().map(({ dir, source }) => readMarkdownSkills(dir, source)),
     ]),
     gatedSkillsRepos(repoRoot),
     readWorkspaceUiState(),

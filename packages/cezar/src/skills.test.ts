@@ -1,5 +1,5 @@
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -154,5 +154,67 @@ describe('discoverSkills local entrypoints', () => {
 
     expect(skills).toHaveLength(1);
     expect(skills[0]?.source).toBe('agents');
+  });
+});
+
+/**
+ * #366: `discoverSkills` used to merge the developer's real `~/.agents/skills` and
+ * `~/.claude/skills` into every catalog read. Those are filesystem walks with no
+ * spawn cost, but they make the unit suite machine-dependent — a laptop with
+ * global skills sees them, CI (a bare home) does not. Gate the dirs the same way
+ * #365 gates the vendor team source (`process.env.VITEST`), and plant fixtures
+ * under a temp `$HOME` so `os.homedir()` still resolves them when the gate is off.
+ */
+describe('discoverSkills global dirs', () => {
+  const planted = {
+    agents: 'cez-vitest-global-agents',
+    claude: 'cez-vitest-global-claude',
+  };
+
+  async function plantGlobalHome(): Promise<{ home: string; repoRoot: string; restore: () => void }> {
+    const home = await mkdtemp(join(tmpdir(), 'cez-skills-home-'));
+    const repoRoot = await mkdtemp(join(tmpdir(), 'cez-skills-repo-'));
+    tempDirs.push(home, repoRoot);
+    await mkdir(join(home, '.agents/skills', planted.agents), { recursive: true });
+    await mkdir(join(home, '.claude/skills', planted.claude), { recursive: true });
+    await writeFile(join(home, '.agents/skills', planted.agents, 'SKILL.md'), '# Agents global');
+    await writeFile(join(home, '.claude/skills', planted.claude, 'SKILL.md'), '# Claude global');
+    const previousHome = process.env.HOME;
+    process.env.HOME = home;
+    return {
+      home,
+      repoRoot,
+      restore: () => {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+      },
+    };
+  }
+
+  it('does not merge the real (or planted) global skill dirs under vitest', async () => {
+    const { home, repoRoot, restore } = await plantGlobalHome();
+    try {
+      expect(homedir()).toBe(home);
+      const skills = await discoverSkills(repoRoot);
+      expect(skills.find((skill) => skill.name === planted.agents)).toBeUndefined();
+      expect(skills.find((skill) => skill.name === planted.claude)).toBeUndefined();
+      expect(skills.filter((skill) => skill.source === 'global')).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('reads ~/.agents/skills and ~/.claude/skills outside vitest', async () => {
+    const { home, repoRoot, restore } = await plantGlobalHome();
+    const vitest = process.env.VITEST;
+    delete process.env.VITEST;
+    try {
+      expect(homedir()).toBe(home);
+      const skills = (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'global');
+      expect(skills.map((skill) => skill.name).sort()).toEqual([planted.agents, planted.claude].sort());
+    } finally {
+      if (vitest !== undefined) process.env.VITEST = vitest;
+      restore();
+    }
   });
 });
