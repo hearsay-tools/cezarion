@@ -376,7 +376,7 @@ describe('collectRunCommits — the run branch commits since base', () => {
       'first task commit',
     ]);
     // The base commit is excluded, and every commit carries a full sha + author.
-    expect(result.commits.every((c) => /^[0-9a-f]{40}$/.test(c.sha) && c.author === 'cezar-test')).toBe(true);
+    expect(result.commits.every((c) => /^[0-9a-f]{40}$/.test(c.sha) && c.author === 'Cezar Tests')).toBe(true);
   });
 
   it('is empty (not an error) when the branch has no commits past base', async () => {
@@ -1019,7 +1019,7 @@ describe('repo git API routes (R5 Step 1.3 — main working tree)', () => {
     };
     expect(body.sha).toBe(sha);
     expect(body.subject).toBe('second: edit + add');
-    expect(body.author).toBe('cezar-test');
+    expect(body.author).toBe('Cezar Tests');
     expect(body.when.length).toBeGreaterThan(0);
     const byPath = new Map(body.files.map((f) => [f.path, f]));
     expect(byPath.get('base.txt')).toMatchObject({ status: 'modified', adds: 1, dels: 1 });

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, statSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
@@ -15,6 +15,12 @@ import { dirname, join, resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
 const descriptorPath = resolve(repoRoot, '.ai/qa/test-env.json')
+const fixtureGitSandbox = mkdtempSync(join(realpathSync(process.platform === 'win32'
+  ? (process.env.SystemRoot ? join(process.env.SystemRoot, 'Temp') : 'C:\\Temp')
+  : '/tmp'), 'cez-e2e-git-'))
+const fixtureGitConfig = join(fixtureGitSandbox, 'gitconfig')
+writeFileSync(fixtureGitConfig, '')
+process.once('exit', () => rmSync(fixtureGitSandbox, { recursive: true, force: true }))
 
 /**
  * The built CLI a spec spawns when it needs its OWN cezar rather than the shared test env
@@ -303,6 +309,12 @@ export function fixtureServeEnv(
   // Bound both discovery and the child at tmpdir so nested repos inside temp
   // still fail the safety check, while the host worktree cannot be inherited.
   env.GIT_CEILING_DIRECTORIES = realpathSync(tmpdir())
+  env.GIT_CONFIG_GLOBAL = fixtureGitConfig
+  env.GIT_CONFIG_NOSYSTEM = '1'
+  env.GIT_AUTHOR_NAME = 'Cezar Tests'
+  env.GIT_AUTHOR_EMAIL = 'tests@cezar.invalid'
+  env.GIT_COMMITTER_NAME = 'Cezar Tests'
+  env.GIT_COMMITTER_EMAIL = 'tests@cezar.invalid'
   const discovery = spawnSync('git', ['rev-parse', '--show-toplevel'], {
     cwd: fixtureRoot, env: { ...env, LC_ALL: 'C' }, encoding: 'utf8', timeout: 5_000,
   })

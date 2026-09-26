@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -39,6 +39,15 @@ describe('getRepoInfo — remote discovery', () => {
     g(dir, 'remote', 'add', 'origin', 'git@github.com:acme/demo.git');
     const info = await getRepoInfo(dir);
     expect(info?.remote).toBe('git@github.com:acme/demo.git');
+  });
+
+  it('uses an empty test-only global config, no system config, and a fixed commit identity', () => {
+    const globalConfig = process.env.GIT_CONFIG_GLOBAL;
+    expect(globalConfig).toBeTruthy();
+    expect(readFileSync(globalConfig!, 'utf8')).toBe('');
+    expect(process.env.GIT_CONFIG_NOSYSTEM).toBe('1');
+    expect(g(dir, 'var', 'GIT_AUTHOR_IDENT')).toMatch(/^Cezar Tests <tests@cezar.invalid> /);
+    expect(g(dir, 'var', 'GIT_COMMITTER_IDENT')).toMatch(/^Cezar Tests <tests@cezar.invalid> /);
   });
 
   it('falls back to the first configured remote when none is named origin', async () => {
