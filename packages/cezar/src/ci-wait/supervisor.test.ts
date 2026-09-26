@@ -29,7 +29,20 @@ describe('bounded GitHub supervisor',()=>{
   const result=await supervisor(mode).watch(wait(),new AbortController().signal); expect(result.outcome).toBe('error'); expect(result.diagnostic).not.toContain('secret-token');
  });
  it('never converts pending checks to success at the deadline',async()=>{
-  const result=await supervisor('pending').watch(wait(10),new AbortController().signal); expect(result).toMatchObject({outcome:'deadline',totalChecks:1});
+  const deadline = new AbortController();
+  let onWatch!: () => void;
+  const watchInvoked = new Promise<void>(resolve => { onWatch = resolve; });
+  const github = new GithubCiClient({command:{file:process.execPath,args:[fixture]},env:{...process.env,CI_FIXTURE_MODE:'pending'}});
+  github.watch = async (_pr, signal) => {
+   onWatch();
+   await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), {once:true}));
+  };
+  const timeout = vi.spyOn(AbortSignal,'timeout').mockReturnValueOnce(deadline.signal);
+  const pending = supervisor('pending',{},github).watch(wait(),new AbortController().signal);
+  timeout.mockRestore();
+  await watchInvoked;
+  deadline.abort();
+  expect(await pending).toMatchObject({outcome:'deadline',totalChecks:1});
  }, 20_000);
  it('computes failure before truncating the snapshot and enforces the serialized bound',async()=>{
   const result=await supervisor('many').watch(wait(),new AbortController().signal); expect(result).toMatchObject({outcome:'failed',totalChecks:151,truncated:true}); expect(result.checks.length).toBeLessThanOrEqual(100); expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(32768);
