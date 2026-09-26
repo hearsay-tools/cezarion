@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
@@ -14,6 +14,8 @@ const osTempRoot = process.platform === 'win32'
   ? (process.env.SystemRoot ? join(process.env.SystemRoot, 'Temp') : 'C:\\Temp')
   : '/tmp'
 const sandboxTemp = mkdtempSync(join(realpathSync(osTempRoot), 'cez-vitest-tmp-'))
+const sandboxGitConfig = join(sandboxTemp, 'gitconfig')
+writeFileSync(sandboxGitConfig, '')
 process.env.TMPDIR = sandboxTemp
 process.env.TMP = sandboxTemp
 process.env.TEMP = sandboxTemp
@@ -58,12 +60,23 @@ const pinSandboxTemp = (): void => {
   process.env.TEMP = sandboxTemp
 }
 
+const pinGitEnvironment = (): void => {
+  process.env.GIT_CONFIG_GLOBAL = sandboxGitConfig
+  process.env.GIT_CONFIG_NOSYSTEM = '1'
+  process.env.GIT_AUTHOR_NAME = 'Cezar Tests'
+  process.env.GIT_AUTHOR_EMAIL = 'tests@cezar.invalid'
+  process.env.GIT_COMMITTER_NAME = 'Cezar Tests'
+  process.env.GIT_COMMITTER_EMAIL = 'tests@cezar.invalid'
+}
+
 pinSandboxTemp()
 pinSandboxHome()
+pinGitEnvironment()
 clearHostBinAndModeOverrides()
 beforeEach(() => {
   pinSandboxTemp()
   pinSandboxHome()
+  pinGitEnvironment()
   clearHostBinAndModeOverrides()
 })
 // Registered before any suite's own hooks, so vitest runs it last on the way out —
@@ -71,9 +84,10 @@ beforeEach(() => {
 afterEach(() => {
   pinSandboxTemp()
   pinSandboxHome()
+  pinGitEnvironment()
   clearHostBinAndModeOverrides()
 })
 afterAll(() => {
   rmSync(sandboxHome, { recursive: true, force: true })
-  rmSync(sandboxTemp, { recursive: true, force: true })
+  rmSync(sandboxTemp, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
 })

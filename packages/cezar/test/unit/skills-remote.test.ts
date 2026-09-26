@@ -74,6 +74,18 @@ test('safeRemoteFor expands ~/ so git (no shell) can actually find it', () => {
   assert.equal(safeRemoteFor('~/skills'), join(homedir(), 'skills'));
 });
 
+test('node test Git fixtures use isolated config and a fixed identity', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'cez-git-env-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  git('remote', 'add', 'origin', 'git@github.com:acme/demo.git');
+  assert.equal(git('remote', 'get-url', 'origin'), 'git@github.com:acme/demo.git');
+  git('commit', '--allow-empty', '-qm', 'fixture');
+  assert.equal(git('log', '-1', '--format=%an <%ae>'), 'Cezar Tests <tests@cezar.invalid>');
+  assert.equal(process.env.GIT_CONFIG_NOSYSTEM, '1');
+});
+
 // ---- isSafeRef / isPinnedSha: ref injection guard (#428) ---------------------
 
 test('isSafeRef rejects argument-injection and range refs', () => {
@@ -411,4 +423,3 @@ test('refreshTeamSkills fetches even when the stamp is still fresh (#367)', asyn
   const greeter = loaded.find((s) => s.name === 'greeter');
   assert.equal(greeter?.team?.commit, sha2);
 });
-
