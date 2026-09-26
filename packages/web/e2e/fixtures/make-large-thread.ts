@@ -7,8 +7,9 @@
  *
  * Shape per turn (rows it becomes): a v1 `user-message` (bubble) → an assistant message item
  * (+ v1 `text` twin, deduped by the reducer) → a completed Bash execute item (+ v1
- * `tool-call`/`tool-result` twins) → a `$ …` note line → `turn.completed`. Four rendered rows
- * per turn; the run's own `task` bubble and the leading lifecycle/step lines add a few more.
+ * `tool-call`/`tool-result` twins) → a `$ …` note line → `turn.completed` (its own turn-time
+ * row, #941). Five rendered rows per turn; the run's own `task` bubble and the leading
+ * lifecycle/step lines add a few more.
  */
 
 interface Line {
@@ -84,11 +85,11 @@ export function largeThreadEvents(turnCount: number): Array<Line & { seq: number
 }
 
 /** How many thread rows the transcript renders: task bubble + the leading dim lines + per
- *  turn (bubble from turn 2 on, message, tool card, note). Kept next to the generator so the
- *  e2e's DOM-count assertions state their expectation instead of re-deriving it. */
+ *  turn (bubble from turn 2 on, message, tool card, note, turn-time). Kept next to the generator
+ *  so the e2e's DOM-count assertions state their expectation instead of re-deriving it. */
 export function expectedRowCount(turnCount: number): number {
   const leading = 1 /* task bubble */ + 2 /* lifecycle + worktree notes */
-  const perTurn = 4 // user bubble + assistant message + tool card + `$ …` note
+  const perTurn = 5 // user bubble + assistant message + tool card + `$ …` note + turn-time (#941)
   const trailing = 1 // 'goal achieved' lifecycle line
   return leading + perTurn * turnCount - 1 /* turn 1 has no user bubble */ + trailing
 }

@@ -31,7 +31,7 @@ const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e
 const sessionId = `e2e-thread-scroll-${process.pid}`
 
 const TURNS = 250
-const ROWS = expectedRowCount(TURNS) // 1002 — comfortably past the ~300 threshold
+const ROWS = expectedRowCount(TURNS) // 1253 — comfortably past the ~300 threshold
 
 const RUN_ID = 'aaaaaaaa-1111-4222-8333-bbbbbbbbcccc'
 /** The real record fixture, re-ided for the synthetic transcript; the untouched fields keep
