@@ -41,15 +41,16 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Verified manifest-only bot release/v* bumps: review-round sets
-          # can_review=false. Allow the actor through so the aggregate stays green.
+          # Verified manifest-only bot release/v* bumps and ledger-only App
+          # upstream-scan PRs: review-round sets can_review=false. Allow the
+          # actor through so the aggregate stays green.
           if [ -n "${PR_NUMBER:-}" ]; then
             if LIVE_HEAD_SHA="$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)" \
               && PR_FILES="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"; then
               export LIVE_HEAD_SHA PR_FILES PR_FILES_OK=1
             fi
           fi
-          if node -e 'process.exit(require("./.github/scripts/release-bump-pr.cjs").classifyFromEnv()?0:1)'; then
+          if node -e 'const c = require("./.github/scripts/release-bump-pr.cjs"); process.exit(c.classifyFromEnv() || c.classifyUpstreamScanFromEnv?.() ? 0 : 1)'; then
             exit 0
           fi
           if [[ "$ACTOR" == *'[bot]' && "$ACTOR" != 'claude[bot]' ]]; then
@@ -179,7 +180,7 @@ jobs:
             else
               unset PR_FILES PR_FILES_OK LIVE_HEAD_SHA || true
             fi
-            if [ -f "$classifier" ] && node --input-type=commonjs -e "process.exit(require(require('node:path').resolve(process.cwd(), process.env.CLASSIFIER)).classifyFromEnv()?0:1)"; then
+            if [ -f "$classifier" ] && node --input-type=commonjs -e "const c = require(require('node:path').resolve(process.cwd(), process.env.CLASSIFIER)); process.exit(c.classifyFromEnv() || c.classifyUpstreamScanFromEnv?.() ? 0 : 1)"; then
               can_review=false
             else
               review_count="$(gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.submitted_at != null) | .id' | wc -l)"
@@ -307,16 +308,21 @@ jobs:
             from .review-context/prior-review-bodies.jsonl and inline review
             comments from .review-context/prior-inline-comments.jsonl. Group
             those inline comments by thread using id and in_reply_to_id. For
-            each earlier actionable finding, read the whole thread, not only
-            the original body, and report in summary whether it was
-            addressed or remains unresolved, including its location and reason.
-            Treat implementer replies as evidence: valid pushback
+            each earlier actionable finding, meaning every thread whose root
+            comment (the one with no in_reply_to_id) was written by
+            github-actions[bot], read the whole thread, not only the original
+            body, and return one prior_findings entry: comment_id is that root
+            comment's id, verdict says whether it was addressed or remains
+            unresolved, and reason names its location and reason in one or
+            two sentences. Treat implementer replies as evidence: valid pushback
             (a sound disagreement, or a won't-fix whose reason holds)
-            counts as addressed even with no code change, and do not
-            re-file the same inline finding. Invalid pushback stays
-            unresolved and names why the reply fails, not only that the
-            code did not change; re-file the finding when the defect is
-            still real. Never resolve review threads. Set head_sha
+            counts as addressed even with no code change. Invalid pushback
+            stays unresolved and names why the reply fails, not only that
+            the code did not change. Never re-file a finding that already has
+            a thread; its prior_findings verdict carries it. Do not resolve
+            review threads yourself: CI posts each reason as a thread reply
+            and resolves the addressed ones. On a first round, or for a
+            skipped or failed outcome, return an empty prior_findings. Set head_sha
             to the exact event head SHA
             ${{ needs.review-round.outputs.head_sha }}, never the checked-out
             merge SHA. Return only JSON matching the supplied schema. Set
@@ -332,7 +338,7 @@ jobs:
             --max-turns 40
             ${{ vars.CLAUDE_REVIEW_EFFORT && format('--effort {0}', vars.CLAUDE_REVIEW_EFFORT) || '' }}
             --allowedTools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(git log:*),Bash(git rev-parse:*)"
-            --json-schema '{"type":"object","additionalProperties":false,"required":["head_sha","outcome","findings","summary"],"properties":{"head_sha":{"type":["string","null"],"pattern":"^[0-9a-fA-F]{40}$"},"outcome":{"type":"string","enum":["reviewed","skipped","failed"]},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","line","body","severity"],"properties":{"path":{"type":"string","minLength":1,"maxLength":1000},"line":{"type":"integer","minimum":1},"body":{"type":"string","minLength":1,"pattern":"\\S","maxLength":10000},"severity":{"type":["string","null"],"enum":["critical","high","medium","low","error","warning","notice","info",null]}}}},"summary":{"type":["string","null"],"minLength":1,"maxLength":20000}}}'
+            --json-schema '{"type":"object","additionalProperties":false,"required":["head_sha","outcome","findings","prior_findings","summary"],"properties":{"head_sha":{"type":["string","null"],"pattern":"^[0-9a-fA-F]{40}$"},"outcome":{"type":"string","enum":["reviewed","skipped","failed"]},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","line","body","severity"],"properties":{"path":{"type":"string","minLength":1,"maxLength":1000},"line":{"type":"integer","minimum":1},"body":{"type":"string","minLength":1,"pattern":"\\S","maxLength":10000},"severity":{"type":["string","null"],"enum":["critical","high","medium","low","error","warning","notice","info",null]}}}},"prior_findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["comment_id","verdict","reason"],"properties":{"comment_id":{"type":"integer","minimum":1},"verdict":{"type":"string","enum":["addressed","unresolved"]},"reason":{"type":"string","minLength":1,"pattern":"\\S","maxLength":2000}}}},"summary":{"type":["string","null"],"minLength":1,"maxLength":20000}}}'
 
       - name: Write Claude review artifact
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -485,10 +491,12 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    outputs:
+      new_threads: ${{ steps.post.outputs.new_threads }}
+      open_threads: ${{ steps.post.outputs.open_threads }}
 
     steps:
       - name: Checkout trusted validator
-        if: needs.review-round.outputs.can_review == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.review-round.outputs.base_sha }}
@@ -502,9 +510,10 @@ jobs:
           path: review-output
 
       - name: Validate and post review findings
-        if: needs.review-round.outputs.can_review == 'true'
+        id: post
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
+          CAN_REVIEW: ${{ needs.review-round.outputs.can_review }}
           REVIEW_OUTPUT: review-output/review-findings.json
           PROVIDER: ${{ needs.validate-provider.outputs.provider }}
           PR_NUMBER: ${{ needs.review-round.outputs.pr_number }}
@@ -520,9 +529,21 @@ jobs:
               loadReview,
               changedLinesFromFiles,
               postReview,
+              assertLiveHead,
+              listReviewThreads,
+              countOpenAutomatedThreads,
+              applyVerdicts,
             } = require('./.github/scripts/automated-review.cjs');
             const { owner, repo } = context.repo;
             const pullNumber = Number(process.env.PR_NUMBER);
+            const eventHeadSha = process.env.HEAD_SHA;
+            // A skipped round posts nothing; it only reports what is still open.
+            if (process.env.CAN_REVIEW !== 'true') {
+              const threads = await listReviewThreads({ github, owner, repo, pullNumber });
+              core.setOutput('new_threads', '0');
+              core.setOutput('open_threads', String(countOpenAutomatedThreads(threads)));
+              return;
+            }
             const files = await github.paginate(github.rest.pulls.listFiles, {
               owner,
               repo,
@@ -530,7 +551,6 @@ jobs:
               per_page: 100,
             });
             const review = loadReview(fs.readFileSync(process.env.REVIEW_OUTPUT, 'utf8'));
-            const eventHeadSha = process.env.HEAD_SHA;
             const roundsRaw = process.env.AUTOMATED_REVIEW_ROUNDS;
             const maxRounds = roundsRaw ? Number(roundsRaw) : 3;
             const result = validateReview({
@@ -539,7 +559,8 @@ jobs:
               changedLines: changedLinesFromFiles(files),
               noFindingsSummary: 'No issues found',
             });
-            await postReview({
+            // Findings are posted before any verdict, so a red check still shows them.
+            const newThreads = await postReview({
               github,
               owner,
               repo,
@@ -551,6 +572,15 @@ jobs:
               ignoreCap: process.env.IGNORE_CAP === 'true',
               patchId: process.env.PATCH_ID,
             });
+            if (result.verdicts.length > 0) {
+              await assertLiveHead({ github, owner, repo, pullNumber, eventHeadSha, reviewedHeadSha: review.head_sha });
+              const threads = await listReviewThreads({ github, owner, repo, pullNumber });
+              const applied = await applyVerdicts({ github, owner, repo, pullNumber, threads, verdicts: result.verdicts });
+              core.info(`Resolved ${applied.resolved} addressed thread(s); ${applied.unresolved} stay unresolved.`);
+            }
+            const threads = await listReviewThreads({ github, owner, repo, pullNumber });
+            core.setOutput('new_threads', String(newThreads));
+            core.setOutput('open_threads', String(countOpenAutomatedThreads(threads)));
 
   review-complete:
     needs: [validate-provider, review-round, claude-review, codex-review, post-review]
@@ -568,17 +598,29 @@ jobs:
           CLAUDE_RESULT: ${{ needs.claude-review.result }}
           CODEX_RESULT: ${{ needs.codex-review.result }}
           POST_RESULT: ${{ needs.post-review.result }}
+          NEW_THREADS: ${{ needs.post-review.outputs.new_threads }}
+          OPEN_THREADS: ${{ needs.post-review.outputs.open_threads }}
         run: |
           [ "$VALIDATE_RESULT" = 'success' ] || exit 1
           [ "$REVIEW_ROUND_RESULT" = 'success' ] || exit 1
-          [ "$CAN_REVIEW" = 'false' ] && exit 0
-          case "$PROVIDER" in
-            claude)
-              [ "$CLAUDE_RESULT" = 'success' ] || exit 1
-              [ "$POST_RESULT" = 'success' ] || exit 1
-              ;;
-            codex)
-              [ "$CODEX_RESULT" = 'success' ] || exit 1
-              [ "$POST_RESULT" = 'success' ] || exit 1
-              ;;
-          esac
+          if [ "$CAN_REVIEW" != 'false' ]; then
+            case "$PROVIDER" in
+              claude) [ "$CLAUDE_RESULT" = 'success' ] || exit 1 ;;
+              codex) [ "$CODEX_RESULT" = 'success' ] || exit 1 ;;
+              *) exit 1 ;;
+            esac
+          fi
+          [ "$POST_RESULT" = 'success' ] || exit 1
+          if ! [[ "$NEW_THREADS" =~ ^[0-9]+$ && "$OPEN_THREADS" =~ ^[0-9]+$ ]]; then
+            echo '::error::post-review reported no thread counts.' >&2
+            exit 1
+          fi
+          # Findings are already posted; red here means "address them", not a broken review.
+          if [ "$NEW_THREADS" -gt 0 ]; then
+            echo "::error::This review opened $NEW_THREADS new finding thread(s). Address them and push, or reply with pushback and re-run this workflow."
+            exit 1
+          fi
+          if [ "$OPEN_THREADS" -gt 0 ]; then
+            echo "::error::$OPEN_THREADS automated review thread(s) are still unresolved."
+            exit 1
+          fi

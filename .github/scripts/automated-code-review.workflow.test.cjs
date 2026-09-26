@@ -262,9 +262,11 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(claude, /\.review-context\/prior-review-bodies\.jsonl/);
   assert.match(claude, /\.review-context\/prior-inline-comments\.jsonl/);
   assert.match(claude, /each\s+earlier actionable\s+finding/i);
-  assert.match(claude, /addressed or\s+remains unresolved/i);
+  assert.match(claude, /one prior_findings\s+entry/i);
+  assert.match(claude, /addressed or\s+remains\s+unresolved/i);
   assert.match(claude, /location and reason/i);
-  assert.match(claude, /never resolve review\s+threads/i);
+  assert.match(claude, /do not resolve\s+review\s+threads yourself/i);
+  assert.match(claude, /never\s+re-file a finding that already has\s+a thread/i);
   assert.match(claude, /already-commented[\s\S]*same current head/i, 'Claude may skip only when an automated review already targets the current head');
   assert.match(claude, /older head[\s\S]*do not stop/i, 'Claude must continue later rounds after a push');
   assert.match(claude, /rm -rf -- \.review-context\n\s+mkdir -- \.review-context/, 'Claude must replace an untrusted context symlink before writing');
@@ -340,9 +342,11 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(codexPrompt, /\.review-context\/ci-results\.md/);
   assert.match(codexPrompt, /read `\.review-context\/ci-results\.md`/i);
   assert.match(codexPrompt, /each\s+earlier actionable\s+finding/i);
-  assert.match(codexPrompt, /addressed or\s+remains unresolved/i);
+  assert.match(codexPrompt, /one `prior_findings` entry/i);
+  assert.match(codexPrompt, /addressed or\s+remains\s+unresolved/i);
   assert.match(codexPrompt, /location and reason/i);
-  assert.match(codexPrompt, /never resolve review\s+threads/i);
+  assert.match(codexPrompt, /do not resolve\s+review\s+threads yourself/i);
+  assert.match(codexPrompt, /never\s+re-file a finding that already has\s+a thread/i);
   assertCodexEnvironment(codexPrompt);
   assert.match(codex, /working-directory: pull-request/);
 
@@ -365,7 +369,11 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(poster, /if: \$\{\{ always\(\) &&/);
   assert.match(poster, /needs: \[validate-provider, review-round, claude-review, codex-review\]/);
   assert.match(poster, /needs\.review-round\.outputs\.can_review == 'false'/);
-  assert.match(poster, /if: needs\.review-round\.outputs\.can_review == 'true'/);
+  assert.match(poster, /name: Download review output\n\s+if: needs\.review-round\.outputs\.can_review == 'true'/, 'only a real review round has an artifact to download');
+  assert.doesNotMatch(poster, /name: (?:Checkout trusted validator|Validate and post review findings)\n\s+if:/, 'a skipped round still reports open threads');
+  assert.match(poster, /new_threads: \$\{\{ steps\.post\.outputs\.new_threads \}\}/);
+  assert.match(poster, /open_threads: \$\{\{ steps\.post\.outputs\.open_threads \}\}/);
+  assert.match(poster, /CAN_REVIEW: \$\{\{ needs\.review-round\.outputs\.can_review \}\}/);
   assert.match(poster, /timeout-minutes: 5/);
   assert.match(poster, /permissions:\n      contents: read\n      pull-requests: write/);
   assert.equal((workflow.match(/pull-requests: write/g) || []).length, 1, 'post-review is the sole write-scoped job');
@@ -386,20 +394,24 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.doesNotMatch(poster, /noFindingsSummary: process\.env\.PROVIDER/);
   assert.match(poster, /\n              eventHeadSha,/);
   assert.match(poster, /reviewedHeadSha: review\.head_sha/);
-  assert.doesNotMatch(poster, /resolveReviewThread/i, 'review threads must never be resolved automatically');
+  assert.doesNotMatch(poster, /resolveReviewThread/, 'thread resolution lives in the tested helper, not inline workflow script');
+  assert.ok(poster.indexOf('await postReview(') < poster.indexOf('applyVerdicts('), 'findings are posted before verdicts, so a red check still shows them');
+  assert.match(poster, /assertLiveHead\(\{[^}]*reviewedHeadSha: review\.head_sha \}\);\n\s+const threads = await listReviewThreads/, 'verdicts are applied only while the reviewed head is live');
+  assert.match(poster, /core\.setOutput\('new_threads', String\(newThreads\)\)/);
+  assert.match(poster, /core\.setOutput\('open_threads', String\(countOpenAutomatedThreads\(threads\)\)\)/);
 
   const aggregate = job(workflow, 'review-complete');
   assert.match(aggregate, /if: \$\{\{ always\(\) \}\}/);
   assert.match(aggregate, /needs: \[validate-provider, review-round, claude-review, codex-review, post-review\]/);
   assert.match(aggregate, /name: Automated Code Review/);
   assert.match(aggregate, /\[ "\$VALIDATE_RESULT" = 'success' \] \|\| exit 1/);
-  assert.match(aggregate, /\[ "\$CLAUDE_RESULT" = 'success' \] \|\| exit 1/);
-  assert.match(aggregate, /\[ "\$CODEX_RESULT" = 'success' \] \|\| exit 1/);
+  assert.match(aggregate, /claude\) \[ "\$CLAUDE_RESULT" = 'success' \] \|\| exit 1 ;;/);
+  assert.match(aggregate, /codex\) \[ "\$CODEX_RESULT" = 'success' \] \|\| exit 1 ;;/);
   assert.match(aggregate, /\[ "\$POST_RESULT" = 'success' \] \|\| exit 1/);
   assert.match(aggregate, /REVIEW_ROUND_RESULT: \$\{\{ needs\.review-round\.result \}\}/);
   assert.match(aggregate, /CAN_REVIEW: \$\{\{ needs\.review-round\.outputs\.can_review \}\}/);
   assert.match(aggregate, /\[ "\$REVIEW_ROUND_RESULT" = 'success' \] \|\| exit 1/);
-  assert.match(aggregate, /\[ "\$CAN_REVIEW" = 'false' \] && exit 0/);
+  assert.doesNotMatch(aggregate, /\[ "\$CAN_REVIEW" = 'false' \] && exit 0/, 'a skipped round must still fail on open threads');
 
   const validator = job(workflow, 'validate-provider');
   assert.match(validator, /permissions:\n      contents: read\n      pull-requests: read/);
@@ -414,7 +426,7 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(validator, /\[\[ "\$ACTOR" == \*'\[bot\]' && "\$ACTOR" != 'claude\[bot\]' \]\]/);
   assert.ok(validator.indexOf('name: Reject untrusted bot actors') < validator.indexOf('id: provider'), 'bot guard must run before provider validation and the wildcard action allowlist');
   assert.match(aggregate, /permissions: \{\}/);
-  assert.doesNotMatch(workflow, /resolveReviewThread/i, 'workflow must never resolve review threads automatically');
+  assert.equal((workflow.match(/applyVerdicts\(/g) || []).length, 1, 'only post-review applies verdicts to threads');
 });
 
 test('bot-authored release/v* PRs set can_review=false without spending a review round', () => {
@@ -506,7 +518,8 @@ function assertLaterRoundThreadPushback(prompt, label) {
   assert.match(prompt, /no code change/i, `${label} must treat valid pushback as addressed without a code change`);
   assert.match(prompt, /invalid pushback/i, `${label} must keep invalid pushback unresolved`);
   assert.match(prompt, /why the reply fails/i, `${label} must name why invalid pushback fails`);
-  assert.match(prompt, /never resolve review\s+threads/i, `${label} must not resolve GitHub review threads`);
+  assert.match(prompt, /do not resolve\s+review\s+threads yourself/i, `${label} must leave thread resolution to CI`);
+  assert.match(prompt, /prior_findings/, `${label} must return a verdict per earlier thread`);
 }
 
 test('review schema requires every object property and models optional values as nullable', () => {
@@ -787,4 +800,46 @@ test('both model jobs require successful verification and trusted context rechec
       assert.equal(modelJob.steps[mergeIndex]?.with?.['allow-unsafe-pr-checkout'], true);
     }
   }
+});
+
+test('the Automated Code Review check fails on new or still-open finding threads', async () => {
+  const { parse } = await import('yaml');
+  const { spawnSync } = require('node:child_process');
+  const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
+  const [step] = workflow.jobs['review-complete'].steps;
+  const passing = {
+    VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true', PROVIDER: 'codex',
+    CLAUDE_RESULT: 'skipped', CODEX_RESULT: 'success', POST_RESULT: 'success', NEW_THREADS: '0', OPEN_THREADS: '0',
+  };
+  const run = (overrides) => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', step.run], {
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', ...passing, ...overrides }, encoding: 'utf8',
+  });
+  const cases = [
+    ['a clean review', {}, 0],
+    ['a skip with nothing open', { CAN_REVIEW: 'false', PROVIDER: '', CODEX_RESULT: 'skipped' }, 0],
+    ['a review that resolved every earlier thread', { OPEN_THREADS: '0', NEW_THREADS: '0' }, 0],
+    ['new findings', { NEW_THREADS: '2', OPEN_THREADS: '2' }, 1],
+    ['earlier findings still open', { OPEN_THREADS: '1' }, 1],
+    ['a skip while earlier findings are open', { CAN_REVIEW: 'false', PROVIDER: '', CODEX_RESULT: 'skipped', OPEN_THREADS: '1' }, 1],
+    ['a provider failure', { CODEX_RESULT: 'failure' }, 1],
+    ['an unknown provider', { PROVIDER: 'other' }, 1],
+    ['a post failure', { POST_RESULT: 'failure', NEW_THREADS: '', OPEN_THREADS: '' }, 1],
+    ['a validation failure', { VALIDATE_RESULT: 'failure' }, 1],
+    ['a round failure', { REVIEW_ROUND_RESULT: 'failure' }, 1],
+    ['missing thread counts', { NEW_THREADS: '', OPEN_THREADS: '' }, 1],
+  ];
+  for (const [label, overrides, status] of cases) {
+    const result = run(overrides);
+    assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
+  }
+  assert.match(run({ NEW_THREADS: '2', OPEN_THREADS: '2' }).stdout, /opened 2 new finding thread/);
+  assert.match(run({ OPEN_THREADS: '3' }).stdout, /3 automated review thread\(s\) are still unresolved/);
+});
+
+test('App-authored upstream-scan PRs skip review through the trusted classifier', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const validator = job(workflow, 'validate-provider');
+  const round = job(workflow, 'review-round');
+  assert.match(validator, /c\.classifyFromEnv\(\) \|\| c\.classifyUpstreamScanFromEnv\?\.\(\)/);
+  assert.match(round, /c\.classifyFromEnv\(\) \|\| c\.classifyUpstreamScanFromEnv\?\.\(\)/);
 });

@@ -27,14 +27,19 @@ On later rounds, read earlier automated review bodies from
 `.review-context/prior-review-bodies.jsonl` and inline review comments from
 `.review-context/prior-inline-comments.jsonl`. Group those inline comments
 by thread using `id` and `in_reply_to_id`. For each earlier actionable
-finding, read the whole thread, not only the original body, and report in
-`summary` whether it was addressed or remains unresolved, including its
-location and reason. Treat implementer replies as evidence: valid pushback
-(a sound disagreement, or a won't-fix whose reason holds) counts as
-addressed even with no code change, and do not re-file the same inline
-finding. Invalid pushback stays unresolved and names why the reply fails,
-not only that the code did not change; re-file the finding when the defect
-is still real. Never resolve review threads.
+finding, meaning every thread whose root comment (the one with no
+`in_reply_to_id`) was written by `github-actions[bot]`, read the whole
+thread, not only the original body, and return one `prior_findings` entry:
+`comment_id` is that root comment's `id`, `verdict` says whether it was
+addressed or remains unresolved, and `reason` names its location and reason
+in one or two sentences. Treat implementer replies as evidence: valid
+pushback (a sound disagreement, or a won't-fix whose reason holds) counts as
+addressed even with no code change. Invalid pushback stays unresolved and
+names why the reply fails, not only that the code did not change. Never
+re-file a finding that already has a thread; its `prior_findings` verdict
+carries it. Do not resolve review threads yourself: CI posts each reason as
+a thread reply and resolves the addressed ones. On a first round, or for a
+skipped or failed outcome, return an empty `prior_findings`.
 
 Read `.review-context/pull-request.json` for the resolved `pr_number`,
 `head_sha`, and `base_sha`. Set the output `head_sha` to that exact `head_sha`
