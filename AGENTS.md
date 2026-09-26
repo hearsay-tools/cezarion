@@ -264,5 +264,5 @@ row's value when the thing it names changes, rather than its label.
 | Automated review rounds | `AUTOMATED_REVIEW_ROUNDS` (default 3) |
 | Commit convention | Conventional Commits |
 | Specs and plans | unknown |
-| Board | **Cezar**, user `wjarka`, project #4 |
+| Board | **Cezarion**, org `hearsay-tools`, project #1 |
 | Task orchestrator | Cezar |
