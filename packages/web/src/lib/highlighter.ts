@@ -259,6 +259,15 @@ export async function highlight(code: string, lang: string, options: HighlightOp
   return highlightSync(code, lang, options) ?? plaintext(code)
 }
 
+/**
+ * Test seam: resolve once the core boot and every in-flight grammar load have settled. A render
+ * starts those loads un-awaited, so without this they run on past cleanup into the next case
+ * (#601). Rejections are swallowed — callers already degrade a failed load to plaintext.
+ */
+export async function highlighterSettledForTests(): Promise<void> {
+  await Promise.allSettled([corePromise, ...langPromises.values()])
+}
+
 /** Test seam: drop the singleton so a suite can assert cold-boot behavior. */
 export function resetHighlighterForTests(): void {
   core = null

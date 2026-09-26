@@ -1,12 +1,10 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, HealthResponse, WorktreeEntry } from '@open-mercato/cezar-api-client'
-
-import { highlight } from '@/lib/highlighter'
 
 import { TaskFilesRoute } from './task-files'
 
@@ -124,13 +122,6 @@ async function openFile(path: string) {
 // ---- the route -------------------------------------------------------------------------------
 
 describe('the Files tab route', () => {
-  // #601: previewing hello.ts starts an un-awaited Shiki grammar load that runs on past
-  // cleanup into the next case, delaying its FilesView mount (223ms vs 62ms warm) inside
-  // RTL's 1000ms waitFor. Warm every grammar the fixtures render so no case pays for it.
-  beforeAll(async () => {
-    await Promise.all([highlight('', 'typescript'), highlight('', 'markdown')])
-  })
-
   it('opens a bookmarked file selection without searching the tree', async () => {
     stubFetch()
     renderFilesRoute('?path=hello.ts')

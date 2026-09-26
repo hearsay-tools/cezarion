@@ -10,6 +10,7 @@ export default mergeConfig(
     test: {
       name: 'web',
       environment: 'jsdom',
+      setupFiles: ['./vitest.setup.ts'],
       include: ['src/**/*.test.{ts,tsx}'],
     },
   }),
