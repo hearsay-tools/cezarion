@@ -7,6 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearThreadScrollCaches, saveThreadScroll } from './thread-scroll'
 import { JumpToLatestPill, ThreadRows, useThreadScroll, type ThreadRow } from './thread-scroller'
 
+const isCockpitE2e = vi.hoisted(() => vi.fn(() => false))
+vi.mock('@/lib/e2e-mode', () => ({ isCockpitE2e: () => isCockpitE2e() }))
+
 beforeEach(() => {
   // virtua measures with a ResizeObserver; jsdom has none and never lays anything out.
   vi.stubGlobal(
@@ -24,6 +27,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  isCockpitE2e.mockReturnValue(false)
+  delete window.__cezThreadScrollTo
   vi.useRealTimers()
   cleanup()
   document.body.replaceChildren()
@@ -225,6 +230,28 @@ describe('useThreadScroll — outside a shell scroller (jsdom, tests, storybook-
     fireEvent.scroll(scroller)
     act(() => result.current.restickIfStuck())
     expect(scroller.scrollTop).toBe(1570)
+  })
+
+  it('exposes an e2e scroll seam that unpins and uses the product offset', () => {
+    isCockpitE2e.mockReturnValue(true)
+    const Harness = () => {
+      const controls = useThreadScroll('r1')
+      return (
+        <main data-slot="main">
+          <div ref={controls.attachContent} />
+        </main>
+      )
+    }
+    render(<Harness />)
+    const scroller = document.querySelector<HTMLElement>('[data-slot="main"]')!
+    Object.defineProperties(scroller, {
+      scrollTop: { value: 900, writable: true, configurable: true },
+      clientHeight: { value: 400 },
+      scrollHeight: { value: 1_300 },
+    })
+    expect(typeof window.__cezThreadScrollTo).toBe('function')
+    act(() => window.__cezThreadScrollTo?.(0))
+    expect(scroller.scrollTop).toBe(0)
   })
 
   it('attaches without a [data-slot=main] ancestor and stays inert', () => {

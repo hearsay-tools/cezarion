@@ -1,9 +1,10 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowserRouter } from 'react-router'
 
 import { GlobalEventsProvider } from './api/global-events'
 import { createQueryClient } from './api/query-client'
+import { attachQueryIdle } from './lib/cez-idle'
 import { AppErrorBoundary } from './components/app-error-boundary'
 import { AppShellContainer } from './components/app-shell-container'
 import { AppearanceProvider } from './components/appearance-provider'
@@ -31,6 +32,7 @@ export function App() {
   // test (or a remount) never inherits another's cache, and StrictMode's double-invoke of the
   // component body still yields exactly one client.
   const [queryClient] = useState(createQueryClient)
+  useEffect(() => attachQueryIdle(queryClient), [queryClient])
 
   return (
     // Outermost, above every provider: a render error anywhere below leaves a failure surface

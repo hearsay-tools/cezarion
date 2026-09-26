@@ -47,12 +47,14 @@ TEST_ENV_CACHE_TTL_SECONDS=${TEST_ENV_CACHE_TTL_SECONDS:-600}
 # packages/cezar/dist/, then `vite build` → packages/cezar/web/dist/. All are required — a
 # fresh worktree has no node_modules, and the server serves the React cockpit from
 # packages/cezar/web/dist (missing it would silently test the fallback hint page).
-BUILD_COMMAND="npm ci && npm run build"
+# VITE_CEZ_E2E=1 is the cockpit e2e mode (#415): it pins useNow and every refetchInterval
+# in the served bundle. Production `npm run build` leaves the flag unset.
+BUILD_COMMAND="npm ci && VITE_CEZ_E2E=1 npm run build"
 BUILD_ARTIFACTS="node_modules/zod/package.json packages/cezar/dist/index.js packages/cezar/web/dist/index.html"
 # Fingerprint inputs — a change to any of these invalidates the cached build. Each workspace
 # contributes its own sources AND its own manifest: a dependency moved between packages
 # changes what gets bundled without touching a single source file.
-BUILD_INPUT_PATHS="packages/contract/src packages/contract/package.json packages/cezar/src packages/cezar/package.json packages/cezar/tsconfig.json packages/api-client/src packages/api-client/package.json packages/web/src packages/web/index.html packages/web/vite.config.ts packages/web/package.json package.json package-lock.json"
+BUILD_INPUT_PATHS="packages/contract/src packages/contract/package.json packages/cezar/src packages/cezar/package.json packages/cezar/tsconfig.json packages/api-client/src packages/api-client/package.json packages/web/src packages/web/index.html packages/web/vite.config.ts packages/web/package.json package.json package-lock.json .ai/scripts/test-env-up.sh"
 
 # CEZ_DRY_RUN=1 swaps the agent CLIs for the bundled mock, so booting needs no
 # `claude` login and reaches no network — the whole point for CI/e2e.

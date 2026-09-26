@@ -20,7 +20,17 @@
  *   ← {type: 'error', topic?, error}        — ignored here beyond being non-events
  */
 
+import { setIdleSource } from '@/lib/cez-idle'
+
 export type TopicListener = (data: unknown) => void
+
+const busySockets = new Set<object>()
+
+function markSocketBusy(id: object, inFlight: boolean): void {
+  if (inFlight) busySockets.add(id)
+  else busySockets.delete(id)
+  setIdleSource('ws', busySockets.size > 0)
+}
 
 const WS_PATH = '/api/v1/ws'
 
@@ -54,10 +64,17 @@ export interface TopicSocket {
 
 export function createTopicSocket(url?: string): TopicSocket {
   const listeners = new Map<string, Set<TopicListener>>()
+  const pendingSnapshots = new Set<string>()
+  const id = {}
+  let connecting = false
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
   let idleTimer: ReturnType<typeof setTimeout> | undefined
   let watchdogTimer: ReturnType<typeof setTimeout> | undefined
+
+  const syncIdle = (): void => {
+    markSocketBusy(id, connecting || pendingSnapshots.size > 0)
+  }
 
   // Restart the liveness deadline. Called on open and on every inbound frame (the server's
   // heartbeat beat counts, so a healthy-but-quiet socket keeps resetting it); if it ever fires,
@@ -87,11 +104,16 @@ export function createTopicSocket(url?: string): TopicSocket {
 
     const ws = new Ctor(socketUrl())
     socket = ws
+    connecting = true
+    syncIdle()
 
     // Every handler checks `ws === socket`: a superseded socket (closed during reconnect,
     // replaced by a newer connect) must not mutate state that now belongs to its successor.
     ws.addEventListener('open', () => {
       if (ws !== socket) return
+      connecting = false
+      for (const topic of listeners.keys()) pendingSnapshots.add(topic)
+      syncIdle()
       petWatchdog() // arm liveness detection the moment the socket is usable
       // (Re)announce everything held — on a reconnect the server-side subscription state died
       // with the old socket, and each subscribe answers with a fresh snapshot, so listeners
@@ -113,12 +135,16 @@ export function createTopicSocket(url?: string): TopicSocket {
       if (type !== 'event' || typeof topic !== 'string') return
       const held = listeners.get(topic)
       if (!held) return // an unsubscribe raced an in-flight event — drop it
+      pendingSnapshots.delete(topic)
+      syncIdle()
       for (const listener of [...held]) listener(data)
     })
 
     ws.addEventListener('close', () => {
       if (ws !== socket) return
       socket = null
+      connecting = false
+      syncIdle()
       clearTimeout(watchdogTimer) // no live socket to watch; a fresh one re-arms on open
       watchdogTimer = undefined
       // Reconnect only while something is held; the idle path already closed on purpose.
@@ -144,6 +170,8 @@ export function createTopicSocket(url?: string): TopicSocket {
       }
       const firstForTopic = held.size === 0
       held.add(listener)
+      if (firstForTopic) pendingSnapshots.add(topic)
+      syncIdle()
 
       // Any live subscription cancels a pending idle close — the socket is wanted again.
       clearTimeout(idleTimer)
@@ -167,6 +195,8 @@ export function createTopicSocket(url?: string): TopicSocket {
         held.delete(listener)
         if (held.size > 0) return
         listeners.delete(topic)
+        pendingSnapshots.delete(topic)
+        syncIdle()
         send({ type: 'unsubscribe', topic })
         if (listeners.size === 0 && idleTimer === undefined) {
           idleTimer = setTimeout(() => {

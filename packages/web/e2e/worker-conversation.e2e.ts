@@ -18,7 +18,7 @@ const bravo = '33333333-3333-4333-8333-333333333333'
 const large = '44444444-4444-4444-8444-444444444444'
 const diagnostics = '55555555-5555-4555-8555-555555555555'
 const reqA = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', senderRunId: parent, recipientRunId: alpha, kind: 'request', text: 'Inspect the parser and report findings.', createdAt: '2026-09-20T12:00:00Z', state: 'accepted', requestHash: 'a'.repeat(64) }
-const reqB = { ...reqA, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', recipientRunId: bravo }
+const reqB = { ...reqA, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', recipientRunId: bravo, createdAt: '2026-09-20T12:03:00Z' }
 const reply = { ...reqA, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', senderRunId: alpha, recipientRunId: parent, kind: 'reply', requestId: reqA.id, text: 'Alpha found one parser edge case.', createdAt: '2026-09-20T12:05:00Z' }
 const follow = { ...reqA, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', kind: 'follow-up', requestId: reqA.id, text: 'Also check empty input.' }
 const projection = (message: object) => ({ type: 'conversation-message', message, delivery: 'delivered' })
@@ -49,7 +49,7 @@ beforeAll(async () => {
   mkdirSync(join(root, '.ai/cezar/runs'), { recursive: true })
   mkdirSync(artifacts, { recursive: true })
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([
-    [parent, 'Parent coordinator'], [alpha, 'Alpha'], [bravo, 'Bravo'], [large, 'Long conversation'], [diagnostics, 'Delivery feedback'],
+    [parent, 'Parent coordinator'], [alpha, 'Alpha'], [bravo, 'Bravo — parser review and integration worker'], [large, 'Long conversation'], [diagnostics, 'Delivery feedback'],
   ].map(([id, title]) => ({ ...record, id, title, titleSummary: title, task: 'Coordinate the workers.', pullRequestUrl: undefined }))))
   for (const [id, padding] of [[parent, 0], [large, 70]] as const) {
     const lines = events(padding).map((event, n) => ({ seq: n + 1, ts: '2026-09-20T12:05:00Z', ...event }))
@@ -99,6 +99,41 @@ function waitForFocusedCard(selector: string) {
 }
 
 describe('chronological worker conversation', () => {
+  it('keeps every message clock at its card’s top-right edge, even when worker headings wrap', () => {
+    try {
+      for (const width of [360, 1440]) {
+        browser.setViewport(width, 900)
+        browser.goto(`${base}/p/${project}/tasks/${parent}?thread=flat`)
+        const insets = browser.waitForValue<Array<{ top: number; right: number; overflow: boolean }>>(`(() => {
+          const selectors = ['[data-slot="user-bubble"]', '[data-slot="assistant-message"]', '${request}', '${replyCard}'];
+          const cards = selectors.map(selector => document.querySelector(selector));
+          if (cards.some(card => !card?.querySelector('[data-slot="message-time"]'))) return null;
+          return cards.map(card => {
+            const box = card.getBoundingClientRect();
+            const clock = card.querySelector('[data-slot="message-time"]').getBoundingClientRect();
+            return { top: clock.top - box.top, right: box.right - clock.right, overflow: card.scrollWidth > card.clientWidth };
+          });
+        })()`, value => Array.isArray(value) && value.length === 4)
+        const batchTimes = browser.waitForValue<string[]>(`[...document.querySelectorAll('${request} ul li time')].map(el => el.dateTime)`, value => value.length === 2)
+        expect(batchTimes).toEqual([reqA.createdAt, reqB.createdAt])
+        expect(browser.waitForValue<string>(`document.querySelector('${request} > div.grid')?.textContent`, value => value.includes('First sent'))).toContain('First sent')
+        if (width === 360) {
+          const wrappedHeading = browser.waitForValue<number>(`document.querySelector('${request} > div > div > p')?.getBoundingClientRect().height`)
+          expect(wrappedHeading).toBeGreaterThan(50)
+        }
+        for (const { top, right, overflow } of insets) {
+          expect(top).toBeGreaterThanOrEqual(0)
+          expect(top).toBeLessThan(28)
+          expect(right).toBeGreaterThanOrEqual(0)
+          expect(right).toBeLessThan(28)
+          expect(overflow).toBe(false)
+        }
+      }
+    } finally {
+      browser.setViewport(1440, 900)
+    }
+  })
+
   for (const variant of contrastQaVariants.filter(v => v.density === 'comfortable')) {
     it(`shows actionable delivery feedback and distinct clocks: ${variant.id}`, () => {
       browser.goto(`${base}/p/${project}/tasks/${diagnostics}?thread=flat`)
@@ -139,7 +174,7 @@ describe('chronological worker conversation', () => {
       expect(kinds).toEqual(['user', 'request', 'thinking', 'tool', 'assistant', 'follow-up', 'reply'])
       const colors = browser.waitForValue<string[]>(`['[data-slot="user-bubble"]', '${request}', '${replyCard}'].map(s => getComputedStyle(document.querySelector(s)).backgroundColor)`)
       expect(new Set(colors).size).toBe(3)
-      for (const selector of [`${request} > div > p`, `${replyCard} > div > p`]) {
+      for (const selector of [`${request} > div > div > p`, `${replyCard} > div > div > p`]) {
         const contrast = browser.waitForValue<ContrastSample>(contrastSampleExpression(selector))
         expect(contrast.ratio).toBeGreaterThanOrEqual(4.5)
       }
