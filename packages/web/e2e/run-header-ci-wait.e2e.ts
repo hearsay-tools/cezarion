@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser } from './agent-browser'
 import { pollFor } from './poll'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
@@ -71,10 +72,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   browser?.close()
-  if (server && server.exitCode === null) {
-    server.kill()
-    await once(server, 'exit')
-  }
+  await stopFixtureServer(server)
   for (const extension of ['html', 'tsx']) rmSync(resolve(webRoot, `${fixtureName}.${extension}`), { force: true })
 })
 

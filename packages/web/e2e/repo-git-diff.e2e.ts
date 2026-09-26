@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { assertDiffCoverage } from './repo-diff-coverage'
 import { waitForHealth } from './poll'
@@ -94,13 +95,9 @@ async function bootFixture(
   return { repo, server, baseUrl, scoped: (path: string) => `/p/${project}${path}` }
 }
 
-function stopFixture(server: ChildProcess | undefined, repo: string | undefined): void {
-  server?.kill()
-  try {
-    if (repo) rmSync(repo, { recursive: true, force: true })
-  } catch {
-    /* the OS reaps it */
-  }
+async function stopFixture(server: ChildProcess | undefined, repo: string | undefined): Promise<void> {
+  await stopFixtureServer(server)
+  if (repo) rmSync(repo, { recursive: true, force: true })
 }
 
 beforeAll(() => {
@@ -108,7 +105,7 @@ beforeAll(() => {
   browser.setViewport(1440, 900)
 })
 
-afterAll(() => {
+afterAll(async () => {
   browser?.close()
 })
 
@@ -138,8 +135,8 @@ describe('repo Git diffs on a small auto-flat fixture', () => {
     expect(commit.files.length).toBe(SMALL_FILES)
   }, 120_000)
 
-  afterAll(() => {
-    stopFixture(server, repo)
+  afterAll(async () => {
+    await stopFixture(server, repo)
   })
 
   it('working-tree totals, tree paths, and mounted cards match the API', () => {
@@ -182,8 +179,8 @@ describe('repo Git diffs on a large auto-virtual fixture', () => {
     expect(commit.files.length).toBe(LARGE_FILES)
   }, 120_000)
 
-  afterAll(() => {
-    stopFixture(server, repo)
+  afterAll(async () => {
+    await stopFixture(server, repo)
   })
 
   it('working-tree totals and tree match the API; last off-screen file mounts', () => {

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { expectedRowCount, largeThreadEvents } from './fixtures/make-large-thread'
 import record from './fixtures/thread-run.record.json'
@@ -177,17 +178,10 @@ beforeAll(async () => {
   browser.setViewport(1440, 900)
 }, 120_000)
 
-afterAll(() => {
+afterAll(async () => {
   browser?.close()
-  server?.kill()
-  // The killed server may still be flushing its NDJSON into dataRoot, which races rmSync and
-  // throws ENOTEMPTY — a suite-level failure on a run whose every test passed. A temp dir that
-  // outlives the run is litter, not a failure; the OS reaps it.
-  try {
-    if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
-  } catch {
-    /* the OS reaps it */
-  }
+  await stopFixtureServer(server)
+  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
 describe('thread virtualization on a 1,000-row transcript', () => {
