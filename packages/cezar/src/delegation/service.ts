@@ -401,8 +401,9 @@ export class DelegationService {
     });
   }
   async inspect(caller: Caller, params: WorkerParams): Promise<WorkerInspection> {
-    const { worker, parent } = this.target(caller, params, 'inspect');
+    const { project, worker, parent } = this.target(caller, params, 'inspect');
     if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    project.manager.settleOrphanedWorkerExecution(worker.id); // #469: an orphan that died after recovery settles
     const outcome = workerOutcome(worker, new Date().toISOString());
     const wait = parent.delegation?.role === 'root' ? parent.delegation.wait : undefined;
     return { workerId: worker.id, parentRunId: parent.id, status: worker.status, workspace: worker.delegation.workspace,
@@ -425,6 +426,7 @@ export class DelegationService {
       return project.store.commitWorkerResult(caller.runId, evidence, project.store.readWorkerResultDiff(caller.runId, workerId));
     }
     authorizeWorker(caller, worker, 'inspect', parent, project.id);
+    project.manager.settleOrphanedWorkerExecution(workerId); // #469: before `settled` is computed
     if (parent?.delegation?.role === 'root' && parent.delegation.receipts.some(receipt => receipt.workerId === workerId && receipt.deletion?.phase === 'pending')) {
       const retained = project.store.readWorkerResult(parent.id, workerId);
       if (!retained || !project.store.canDeleteRun(workerId)) throw new DelegationPolicyError('incompatible_state', 'Worker history deletion evidence is unavailable');
@@ -512,7 +514,7 @@ export class DelegationService {
       persist('terminating', ['process', ...resources]);
       project.manager.requestWorkerStop(workerId);
       let result: WorkerDestroyResult;
-      if (!await project.manager.awaitRunTermination(workerId, 30_000)) {
+      if (!await project.manager.awaitRunTermination(workerId, 30_000, { reapOrphans: true })) {
         result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: 'Worker termination is not proven; retry cleanup later' };
       } else {
         persist('cleaning', resources);

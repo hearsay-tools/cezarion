@@ -17,6 +17,7 @@ import {
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { isCurrentProcess, probeGeneration, processStartToken, recordedProcessLive, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { createRunner } from '../core/runner-factory.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
@@ -718,6 +719,8 @@ export class RunManager {
 
   private beginWorkerExecution(runId: string, admitted = true): void {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') return;
+    // #469: one site for Continue, --resume, parent replies and queued revival after a crash.
+    if (!this.executions.has(runId)) this.settleOrphanedWorkerExecution(runId, true);
     const existing = this.executions.get(runId);
     if (existing) {
       const proof = this.store.readWorkerExecution(runId);
@@ -773,6 +776,63 @@ export class RunManager {
     } catch { /* Finalized in this process; preserve exact generation for an explicit retry. */ }
   }
 
+  /** #469: the generation a dead controller left `starting`, if this manager may judge it. A
+   * generation this process controls is never judged here: the in-memory execution map owns it,
+   * and a disposed manager's still-running sessions look like orphans. */
+  private orphanedWorkerGeneration(runId: string, admitting = false): { generation: string; record?: WorkerProcessRecord; worktreePath: string } | undefined {
+    const run = this.store.getRun(runId);
+    if (run?.delegation?.role !== 'worker' || this.disposed || this.executions.has(runId) || this.active.has(runId) ||
+      this.starting.has(runId) || (!admitting && this.queue.includes(runId))) return undefined;
+    const proof = this.store.readWorkerExecution(runId);
+    if (proof?.phase !== 'starting') return undefined;
+    const record = this.store.readWorkerProcesses(runId, proof.generation);
+    if (record && isCurrentProcess(record.controller)) return undefined;
+    return { generation: proof.generation, ...(record ? { record } : {}), worktreePath: run.delegation.workspace.path };
+  }
+
+  /** Completes a crashed generation's proof once every one of its processes is proven gone (#469).
+   * Sync and signal-free; recovery, resume, delivery, collect and destroy then take their normal paths. */
+  settleOrphanedWorkerExecution(runId: string, admitting = false): boolean {
+    const orphan = this.orphanedWorkerGeneration(runId, admitting);
+    if (!orphan || probeGeneration(orphan) !== 'gone') return false;
+    try { if (!this.store.commitWorkerExecutionComplete(runId, orphan.generation)) return false; } catch { return false; }
+    this.store.appendEvent(runId, { type: 'lifecycle', message: "cezar restarted — the interrupted worker's processes are gone; its execution was finalized" });
+    removeAgentTmpDir(this.dataDir, runId);
+    return true;
+  }
+
+  /** Destroy only (#469): signal the recorded, token-verified survivors of a generation whose
+   * controller is proven dead, then finalize on `gone`. Scan-only processes are never signalled. */
+  private async reapOrphanedWorker(runId: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + Math.min(30_000, Math.max(0, Number.isFinite(timeoutMs) ? timeoutMs : 0));
+    const orphan = this.orphanedWorkerGeneration(runId);
+    if (!orphan || this.settleOrphanedWorkerExecution(runId)) return;
+    // A live controller is another cezar's; an unrecorded (legacy) controller is unknown.
+    if (!orphan.record || recordedProcessLive(orphan.record.controller)) return;
+    const targets = orphan.record.processes.filter(entry => entry.startToken !== undefined && recordedProcessLive(entry));
+    const signal = (name: NodeJS.Signals) => {
+      for (const entry of targets) {
+        if (this.orphanedWorkerGeneration(runId)?.generation !== orphan.generation) return;
+        // Re-verified immediately before every signal: a reused PID is never touched.
+        if (processStartToken(entry.pid) === entry.startToken) try { process.kill(entry.pid, name); } catch { /* already gone */ }
+      }
+    };
+    const pause = () => new Promise(resolve => setTimeout(resolve, 100));
+    signal('SIGTERM');
+    const killAt = Math.min(deadline, Date.now() + 10_000);
+    while (Date.now() < killAt && targets.some(recordedProcessLive)) await pause();
+    if (targets.some(recordedProcessLive)) signal('SIGKILL');
+    while (!this.settleOrphanedWorkerExecution(runId) && Date.now() < deadline && this.orphanedWorkerGeneration(runId)?.generation === orphan.generation) await pause();
+  }
+
+  /** Best effort: a failed write leaves the working-directory scan as this process's evidence. */
+  private recordWorkerProcess(runId: string, pid: number): void {
+    const generation = this.executions.get(runId)?.generation;
+    if (!generation) return;
+    try { if (!this.store.appendWorkerProcess(runId, generation, pid)) console.warn(`[cez] worker ${runId} process record unavailable; relying on the working-directory scan`); }
+    catch { console.warn(`[cez] worker ${runId} process record write failed; relying on the working-directory scan`); }
+  }
+
   private trackTurnEnd(runId: string, text: string): void {
     const task = this.recordTurnEnd(runId, text);
     const turns = this.executions.get(runId)?.turns;
@@ -787,11 +847,13 @@ export class RunManager {
     return { workerId: runId, state: !this.executions.has(runId) && this.store.readWorkerExecution(runId)?.phase === 'complete' ? 'terminated' : 'stopping' };
   }
 
-  async awaitRunTermination(runId: string, timeoutMs: number): Promise<boolean> {
+  async awaitRunTermination(runId: string, timeoutMs: number, opts: { reapOrphans?: boolean } = {}): Promise<boolean> {
     const execution = this.executions.get(runId);
     if (!execution) {
       const generation = this.finalizedWorkers.get(runId);
       if (!this.disposed && generation) this.persistWorkerCompletion(runId, generation);
+      else if (!generation && opts.reapOrphans) await this.reapOrphanedWorker(runId, timeoutMs);
+      else if (!generation) this.settleOrphanedWorkerExecution(runId);
       return this.store.readWorkerExecution(runId)?.phase === 'complete';
     }
     if (this.disposed) return false;
@@ -1929,6 +1991,9 @@ export class RunManager {
         if (replayed.length) this.store.appendEvent(run.id, { type: 'note', message: `replaying ${replayed.length} message${replayed.length === 1 ? '' : 's'} accepted before the restart but not read` });
       }
     }
+    // #469: a generation whose processes died with the old controller is finalized first, so it
+    // re-launches through the ordinary Continue path and its scratch is not retained.
+    for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.settleOrphanedWorkerExecution(run.id);
     this.reconcileWorkerWaits();
     const live = this.store
       .listRuns()
@@ -5087,7 +5152,7 @@ export class RunManager {
     try {
       this.flushDeferred(runId);
       this.flushAgentInputs(runId);
-      if (session.pid !== undefined) registerRunProcess(runId, session.pid);
+      if (session.pid !== undefined) { registerRunProcess(runId, session.pid); this.recordWorkerProcess(runId, session.pid); }
       setupComplete = true;
       const result = await session.result.finally(() => state.agentInputFlight?.settled).finally(() => this.requeueUnreadAtClose(runId, state, session));
       if (this.preserveRunAfterDisposal(runId, state)) return;
@@ -5945,7 +6010,7 @@ export class RunManager {
     try {
       this.flushDeferred(runId);
       this.flushAgentInputs(runId);
-      if (session.pid !== undefined) registerRunProcess(runId, session.pid);
+      if (session.pid !== undefined) { registerRunProcess(runId, session.pid); this.recordWorkerProcess(runId, session.pid); }
       setupComplete = true;
       const result = await session.result.finally(() => state.agentInputFlight?.settled).finally(() => this.requeueUnreadAtClose(runId, state, session));
       if (this.isDisposedDelegatedRun(runId)) return null;

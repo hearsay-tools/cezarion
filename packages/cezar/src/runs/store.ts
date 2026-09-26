@@ -15,6 +15,7 @@ import { storedDelegationStateSchema } from './delegation-state.ts';
 import { refreshHumanAskSummary } from './human-ask-summary.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { reconcileWorkerWait } from '../delegation/wait.ts';
+import { processStartToken, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { MAX_REF } from './task-refs.ts';
@@ -766,6 +767,12 @@ export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean 
   }
   return changed;
 }
+
+const WORKER_PROCESS_CAP = 32;
+const recordedProcessSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().min(1).max(128).optional() }).strict();
+const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), controller: recordedProcessSchema,
+  processes: z.array(recordedProcessSchema).max(WORKER_PROCESS_CAP) }).strict();
+const startToken = (pid: number) => { const token = processStartToken(pid); return token === undefined ? {} : { startToken: token }; };
 
 /**
  * File-backed run store: `runs.json` index (atomic tmp+rename writes, the
@@ -2007,8 +2014,53 @@ export class RunStore extends EventEmitter {
       throw new Error('Worker execution checkpoint does not prove safe admission');
     }
     const generation = randomUUID();
+    // #469: the controller is durable before `starting`, so a crash leaves a provable generation.
+    this.writeWorkerProcesses(id, { generation, controller: { pid: process.pid, ...startToken(process.pid) }, processes: [] });
     this.writeWorkerExecution(id, { generation, phase: 'starting' });
     return generation;
+  }
+
+  /** Private process record (#469): which processes a generation spawned, never part of run JSON or SSE. */
+  private processesPath(id: string): string {
+    return this.executionPath(id).replace(/\.execution\.json$/, '.processes.json');
+  }
+
+  /** A record of another generation is not this generation's evidence; unreadable → absent. */
+  readWorkerProcesses(id: string, generation: string): WorkerProcessRecord | undefined {
+    try {
+      const fd = openSync(this.processesPath(id), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        const info = fstatSync(fd);
+        if (!info.isFile() || info.size > 8192 || (info.mode & 0o077)) return undefined;
+        const buffer = Buffer.alloc(8193); const count = readSync(fd, buffer, 0, buffer.length, 0);
+        const record = workerProcessRecordSchema.parse(JSON.parse(buffer.subarray(0, count).toString('utf8')));
+        return record.generation === generation ? record : undefined;
+      } finally { closeSync(fd); }
+    } catch { return undefined; }
+  }
+
+  private writeWorkerProcesses(id: string, record: WorkerProcessRecord): void {
+    const path = this.processesPath(id);
+    try {
+      const existing = lstatSync(path);
+      if (!existing.isFile() || existing.isSymbolicLink()) throw new Error('Unsafe process record');
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    try { writeFileSync(fd, JSON.stringify(workerProcessRecordSchema.parse(record))); fsyncSync(fd); } finally { closeSync(fd); }
+    try { renameSync(temporary, path); } finally { rmSync(temporary, { force: true }); }
+  }
+
+  /** Bound to the current generation. Past the cap the record never drops an entry: the
+   * working-directory scan is the remaining evidence. */
+  appendWorkerProcess(id: string, generation: string, pid: number): boolean {
+    const record = this.readWorkerProcesses(id, generation);
+    if (!record || this.readWorkerExecution(id)?.generation !== generation) return false;
+    const entry: RecordedProcess = { pid, ...startToken(pid) };
+    if (record.processes.some(known => known.pid === entry.pid && known.startToken === entry.startToken)) return true;
+    if (record.processes.length >= WORKER_PROCESS_CAP) return false;
+    this.writeWorkerProcesses(id, { ...record, processes: [...record.processes, entry] });
+    return true;
   }
 
   commitWorkerExecutionComplete(id: string, generation: string): boolean {
@@ -2115,6 +2167,7 @@ export class RunStore extends EventEmitter {
         this.removeRunHistoryBytes(id);
         // Private process/account evidence is now replaced by the exact parent receipt.
         rmSync(this.identityPath(id), { force: true });
+        rmSync(this.processesPath(id), { force: true });
         rmSync(this.executionPath(id), { force: true });
         const retained = this.readWorkerResult(parent.id, id)!;
         this.commitWorkerResult(parent.id, { ...retained, observedAt: new Date().toISOString(),

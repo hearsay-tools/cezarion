@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
+import { RunManager } from '../workflows/run.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
@@ -342,6 +343,22 @@ describe('delegation service durable authority', () => {
     const before = structuredClone(f.store.getRun(f.parent.id));
     expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(settled);
     expect(f.store.getRun(f.parent.id)).toEqual(before);
+  });
+  it('collect settles a worker whose crashed generation left no live process (#469)', async () => {
+    const { workerId } = await f.service.spawn(f.caller, input());
+    const generation = f.store.commitWorkerExecutionStart(workerId);
+    f.store.updateRun(workerId, { status: 'failed', finishedAt: new Date().toISOString() });
+    const record = join(f.root, '.ai/cezar/runs', `${workerId}.processes.json`);
+    const dead = spawn(process.execPath, ['-e', '']); await new Promise(resolve => dead.once('exit', resolve));
+    writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, 'utf8')), controller: { pid: dead.pid, startToken: '1' } }));
+    f.store.flush();
+    // The restarted cezar: a fresh manager owns no execution or queue entry for the worker.
+    const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = new RunManager(reopened, f.root);
+    f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });
+    try {
+      expect(await f.service.collect(f.caller, { workerId })).toMatchObject({ settled: true });
+      expect(reopened.readWorkerExecution(workerId)).toEqual({ generation, phase: 'complete' });
+    } finally { manager.dispose(); reopened.flush(); }
   });
   it('returns only the retained old cancellation while a queued parent has a newer wait', async () => {
     const { workerId, waitId } = await cancellableWait(); const old = await f.service.cancelWait(f.caller, { waitId });
