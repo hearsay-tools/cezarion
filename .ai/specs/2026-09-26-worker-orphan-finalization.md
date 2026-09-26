@@ -81,7 +81,12 @@ A synchronous, dependency-free module (a sync probe lets `continueRun` stay sync
   `gpg-agent`). It counts as a possible holder, reported by PID and never signalled, unless it
   started before the worker's record was created (`since`, from `/proc/stat` btime plus
   starttime ticks). A process that old cannot be the worker's descendant, and every host has
-  some. macOS uses `lsof -a -d cwd -Fpn` with a bounded timeout. It excludes
+  some. The cutoff is the worker's creation, not the current generation's start, because an
+  earlier generation can leave a daemon holding the worktree. macOS uses
+  `lsof -a -d cwd -Fpn` with a bounded timeout. `lsof` silently omits processes it cannot
+  read, so any process of our user (`ps -U <uid> -o pid=,lstart=`, minus `ps` itself) missing
+  from its output is judged by the same rule. Without that `ps` list the scan is `unknown`.
+  It excludes
   `process.pid`, compares realpaths, and matches a dir itself or anything beneath it. cezar's own
   `git` children in the worktree make the scan read `alive` for a moment; that is
   conservative, and it clears on the next probe. If
