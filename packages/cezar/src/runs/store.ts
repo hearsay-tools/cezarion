@@ -2025,18 +2025,19 @@ export class RunStore extends EventEmitter {
     return this.executionPath(id).replace(/\.execution\.json$/, '.processes.json');
   }
 
-  /** A record of another generation is not this generation's evidence; unreadable → absent. */
-  readWorkerProcesses(id: string, generation: string): WorkerProcessRecord | undefined {
+  /** Tri-state: only ENOENT is `absent` (legacy, scan-only). A present record that is unreadable,
+   * wrongly permissioned, malformed or of another generation is `unknown`: never finalized or reaped. */
+  readWorkerProcesses(id: string, generation: string): WorkerProcessRecord | 'absent' | 'unknown' {
     try {
       const fd = openSync(this.processesPath(id), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
         const info = fstatSync(fd);
-        if (!info.isFile() || info.size > 8192 || (info.mode & 0o077)) return undefined;
+        if (!info.isFile() || info.size > 8192 || (info.mode & 0o077)) return 'unknown';
         const buffer = Buffer.alloc(8193); const count = readSync(fd, buffer, 0, buffer.length, 0);
         const record = workerProcessRecordSchema.parse(JSON.parse(buffer.subarray(0, count).toString('utf8')));
-        return record.generation === generation ? record : undefined;
+        return record.generation === generation ? record : 'unknown';
       } finally { closeSync(fd); }
-    } catch { return undefined; }
+    } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unknown'; }
   }
 
   private writeWorkerProcesses(id: string, record: WorkerProcessRecord): void {
@@ -2055,7 +2056,7 @@ export class RunStore extends EventEmitter {
    * working-directory scan is the remaining evidence. */
   appendWorkerProcess(id: string, generation: string, pid: number): boolean {
     const record = this.readWorkerProcesses(id, generation);
-    if (!record || this.readWorkerExecution(id)?.generation !== generation) return false;
+    if (typeof record === 'string' || this.readWorkerExecution(id)?.generation !== generation) return false;
     const entry: RecordedProcess = { pid, ...startToken(pid) };
     if (record.processes.some(known => known.pid === entry.pid && known.startToken === entry.startToken)) return true;
     if (record.processes.length >= WORKER_PROCESS_CAP) return false;

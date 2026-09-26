@@ -17,7 +17,7 @@ import {
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
-import { isCurrentProcess, probeGeneration, processStartToken, recordedProcessLive, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { isCurrentProcess, probeGeneration, processesWithCwdUnder, processStartToken, recordedProcessLive, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { createRunner } from '../core/runner-factory.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
@@ -83,6 +83,7 @@ import { reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retent
 import {
   AgentTempDirError,
   agentTmpEnv,
+  agentTmpDirLocations,
   removeAgentTmpDir,
   sweepAgentTmpDirs,
 } from '../runs/agent-tmpdir.ts';
@@ -692,6 +693,9 @@ export function isUntouchedCancelledRun(run: RunRecord): boolean {
     run.steps.every(step => step.status === 'pending' && !step.startedAt && !step.sessionId);
 }
 
+/** #469: how long a non-gone orphan probe stands before the next scan. */
+const ORPHAN_PROBE_CACHE_MS = 2_000;
+
 /**
  * The mini workflow engine: executes a `WorkflowDef` against a repo, one step
  * at a time, persisting every event to the RunStore (which the SSE endpoints
@@ -720,7 +724,7 @@ export class RunManager {
   private beginWorkerExecution(runId: string, admitted = true): void {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') return;
     // #469: one site for Continue, --resume, parent replies and queued revival after a crash.
-    if (!this.executions.has(runId)) this.settleOrphanedWorkerExecution(runId, true);
+    if (!this.executions.has(runId)) this.settleOrphanedWorkerExecution(runId, { admitting: true });
     const existing = this.executions.get(runId);
     if (existing) {
       const proof = this.store.readWorkerExecution(runId);
@@ -779,50 +783,96 @@ export class RunManager {
   /** #469: the generation a dead controller left `starting`, if this manager may judge it. A
    * generation this process controls is never judged here: the in-memory execution map owns it,
    * and a disposed manager's still-running sessions look like orphans. */
-  private orphanedWorkerGeneration(runId: string, admitting = false): { generation: string; record?: WorkerProcessRecord; worktreePath: string } | undefined {
+  private orphanedWorkerGeneration(runId: string, admitting = false): { generation: string; record?: WorkerProcessRecord; paths: string[] } | undefined {
     const run = this.store.getRun(runId);
     if (run?.delegation?.role !== 'worker' || this.disposed || this.executions.has(runId) || this.active.has(runId) ||
       this.starting.has(runId) || (!admitting && this.queue.includes(runId))) return undefined;
     const proof = this.store.readWorkerExecution(runId);
     if (proof?.phase !== 'starting') return undefined;
     const record = this.store.readWorkerProcesses(runId, proof.generation);
-    if (record && isCurrentProcess(record.controller)) return undefined;
-    return { generation: proof.generation, ...(record ? { record } : {}), worktreePath: run.delegation.workspace.path };
+    // A present record that proves nothing (unreadable, malformed, another generation) blocks both
+    // finalization and reaping; only an absent one is legacy, scan-only evidence.
+    if (record === 'unknown' || (record !== 'absent' && isCurrentProcess(record.controller))) return undefined;
+    // Finalization deletes the scratch too, so a process working there keeps the generation alive.
+    return { generation: proof.generation, ...(record === 'absent' ? {} : { record }),
+      paths: [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, runId)] };
   }
 
   /** Completes a crashed generation's proof once every one of its processes is proven gone (#469).
-   * Sync and signal-free; recovery, resume, delivery, collect and destroy then take their normal paths. */
-  settleOrphanedWorkerExecution(runId: string, admitting = false): boolean {
-    const orphan = this.orphanedWorkerGeneration(runId, admitting);
-    if (!orphan || probeGeneration(orphan) !== 'gone') return false;
+   * Sync and signal-free; recovery, resume, delivery, collect and destroy then take their normal paths.
+   * A non-gone probe is cached briefly: on darwin the scan is a synchronous `lsof` on the event loop. */
+  settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean } = {}): boolean {
+    const orphan = this.orphanedWorkerGeneration(runId, opts.admitting);
+    if (!orphan) return false;
+    const cached = this.orphanProbes.get(runId);
+    if (!opts.fresh && cached?.generation === orphan.generation && Date.now() - cached.at < ORPHAN_PROBE_CACHE_MS) return false;
+    if (probeGeneration(orphan) !== 'gone') { this.orphanProbes.set(runId, { generation: orphan.generation, at: Date.now() }); return false; }
     try { if (!this.store.commitWorkerExecutionComplete(runId, orphan.generation)) return false; } catch { return false; }
-    this.store.appendEvent(runId, { type: 'lifecycle', message: "cezar restarted — the interrupted worker's processes are gone; its execution was finalized" });
+    this.orphanProbes.delete(runId); this.orphanBlockers.delete(runId); this.clearOrphanReprobe(runId);
+    this.store.appendEvent(runId, { type: 'lifecycle', message: "the interrupted worker's processes are gone; its execution was finalized" });
     removeAgentTmpDir(this.dataDir, runId);
     return true;
   }
+
+  private readonly orphanProbes = new Map<string, { generation: string; at: number }>();
+  private readonly orphanReprobes = new Map<string, NodeJS.Timeout>();
+  private readonly orphanBlockers = new Map<string, number[]>();
+  // Private and overridable so tests need not wait out production cadence.
+  private orphanReprobeMs = 15_000;
+  private orphanReprobeLimitMs = 15 * 60_000;
+  private orphanTermGraceMs = 10_000;
+
+  /** #469: a survivor that dies after recovery has no other wake source (no exit callback for a
+   * process another cezar spawned). Bounded and unref'd; finalization's `run` event then lets
+   * worker waits and outcomes observe it. */
+  private armOrphanReprobe(runId: string): void {
+    if (this.disposed || this.orphanReprobes.has(runId) || !this.orphanedWorkerGeneration(runId)) return;
+    const giveUpAt = Date.now() + this.orphanReprobeLimitMs;
+    const timer = setInterval(() => {
+      if (this.settleOrphanedWorkerExecution(runId) || !this.orphanedWorkerGeneration(runId) || Date.now() >= giveUpAt) this.clearOrphanReprobe(runId);
+    }, this.orphanReprobeMs);
+    timer.unref?.();
+    this.orphanReprobes.set(runId, timer);
+  }
+
+  private clearOrphanReprobe(runId: string): void {
+    const timer = this.orphanReprobes.get(runId);
+    if (timer) clearInterval(timer);
+    this.orphanReprobes.delete(runId);
+  }
+
+  /** PIDs the last destroy found still working in the worker's worktree or scratch (#469). */
+  workerTerminationBlockers(runId: string): number[] { return this.orphanBlockers.get(runId) ?? []; }
 
   /** Destroy only (#469): signal the recorded, token-verified survivors of a generation whose
    * controller is proven dead, then finalize on `gone`. Scan-only processes are never signalled. */
   private async reapOrphanedWorker(runId: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + Math.min(30_000, Math.max(0, Number.isFinite(timeoutMs) ? timeoutMs : 0));
+    this.orphanBlockers.delete(runId);
     const orphan = this.orphanedWorkerGeneration(runId);
-    if (!orphan || this.settleOrphanedWorkerExecution(runId)) return;
+    if (!orphan || this.settleOrphanedWorkerExecution(runId, { fresh: true })) return;
+    const same = () => this.orphanedWorkerGeneration(runId)?.generation === orphan.generation;
+    // >= 500 ms: every probe may be a synchronous darwin `lsof`.
+    const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(500, deadline - Date.now()))));
     // A live controller is another cezar's; an unrecorded (legacy) controller is unknown.
-    if (!orphan.record || recordedProcessLive(orphan.record.controller)) return;
-    const targets = orphan.record.processes.filter(entry => entry.startToken !== undefined && recordedProcessLive(entry));
-    const signal = (name: NodeJS.Signals) => {
-      for (const entry of targets) {
-        if (this.orphanedWorkerGeneration(runId)?.generation !== orphan.generation) return;
-        // Re-verified immediately before every signal: a reused PID is never touched.
-        if (processStartToken(entry.pid) === entry.startToken) try { process.kill(entry.pid, name); } catch { /* already gone */ }
-      }
-    };
-    const pause = () => new Promise(resolve => setTimeout(resolve, 100));
-    signal('SIGTERM');
-    const killAt = Math.min(deadline, Date.now() + 10_000);
-    while (Date.now() < killAt && targets.some(recordedProcessLive)) await pause();
-    if (targets.some(recordedProcessLive)) signal('SIGKILL');
-    while (!this.settleOrphanedWorkerExecution(runId) && Date.now() < deadline && this.orphanedWorkerGeneration(runId)?.generation === orphan.generation) await pause();
+    if (orphan.record && !recordedProcessLive(orphan.record.controller)) {
+      const targets = orphan.record.processes.filter(entry => entry.startToken !== undefined && recordedProcessLive(entry));
+      const signal = (name: NodeJS.Signals) => {
+        for (const entry of targets) {
+          if (!same()) return;
+          // Re-verified immediately before every signal: a reused PID is never touched.
+          if (processStartToken(entry.pid) === entry.startToken) try { process.kill(entry.pid, name); } catch { /* already gone */ }
+        }
+      };
+      signal('SIGTERM');
+      const killAt = Math.min(deadline, Date.now() + this.orphanTermGraceMs);
+      while (Date.now() < killAt && targets.some(recordedProcessLive)) await pause();
+      if (targets.some(recordedProcessLive)) signal('SIGKILL');
+      while (!this.settleOrphanedWorkerExecution(runId, { fresh: true }) && Date.now() < deadline && same()) await pause();
+    }
+    if (!same()) return;
+    const scan = processesWithCwdUnder(orphan.paths);
+    if (scan !== 'unknown' && scan.length) this.orphanBlockers.set(runId, scan);
   }
 
   /** Best effort: a failed write leaves the working-directory scan as this process's evidence. */
@@ -1041,6 +1091,8 @@ export class RunManager {
     this.ciResources.release();
     this.delegationProvisioner = undefined;
     this.finalizedWorkers.clear();
+    for (const runId of [...this.orphanReprobes.keys()]) this.clearOrphanReprobe(runId);
+    this.orphanProbes.clear(); this.orphanBlockers.clear();
     for (const settle of this.terminationWaiters) settle();
     this.store.off('run', this.onDelegationRun);
     for (const timer of this.workerWaitTimers.values()) clearTimeout(timer);
@@ -1993,7 +2045,7 @@ export class RunManager {
     }
     // #469: a generation whose processes died with the old controller is finalized first, so it
     // re-launches through the ordinary Continue path and its scratch is not retained.
-    for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.settleOrphanedWorkerExecution(run.id);
+    for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker' && !this.settleOrphanedWorkerExecution(run.id)) this.armOrphanReprobe(run.id);
     this.reconcileWorkerWaits();
     const live = this.store
       .listRuns()
@@ -3569,6 +3621,8 @@ export class RunManager {
     if (this.disposed || this.reconcilingWorkers) return;
     this.reconcilingWorkers = true;
     try {
+      // #469: an orphan proven gone is settled before any outcome is computed from its proof.
+      for (const run of this.store.listRuns()) if (run.delegation?.role === 'worker') this.settleOrphanedWorkerExecution(run.id);
       this.reconcileConversations();
       for (const parent of this.store.listRuns()) {
         if (!parent.delegation || parent.delegation.role === 'invalid' || this.historyDeletionPending(parent.id)) continue;

@@ -599,8 +599,10 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       expect(store.appendWorkerProcess(w.id, randomUUID(), 100)).toBe(false);
       for (let pid = 100; pid < 132; pid++) expect(store.appendWorkerProcess(w.id, generation, pid)).toBe(true);
       expect(store.appendWorkerProcess(w.id, generation, 132)).toBe(false);
-      expect(store.readWorkerProcesses(w.id, generation)?.processes.map(entry => entry.pid)).toEqual(Array.from({ length: 32 }, (_, index) => 100 + index));
-      expect(store.readWorkerProcesses(w.id, randomUUID())).toBeUndefined();
+      const record = store.readWorkerProcesses(w.id, generation);
+      expect(typeof record === 'string' ? record : record.processes.map(entry => entry.pid)).toEqual(Array.from({ length: 32 }, (_, index) => 100 + index));
+      expect(store.readWorkerProcesses(w.id, randomUUID())).toBe('unknown');
+      rmSync(recordPath(w.id)); expect(store.readWorkerProcesses(w.id, generation)).toBe('absent');
     });
 
     it('a dead child is finalized by recovery, re-launches, and destroy completes', async () => {
@@ -618,8 +620,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       } finally { other.dispose(); reopened.flush(); }
     });
 
-    it('destroy reaps a recorded child that ignores SIGTERM, then completes', { timeout: 45_000 }, async () => {
+    it('destroy reaps a recorded child that ignores SIGTERM, then completes', async () => {
       const { w, child, prior, reopened, other, service } = await crashed('failed');
+      (other as unknown as { orphanTermGraceMs: number }).orphanTermGraceMs = 500;
       try {
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         await child.exited;
@@ -635,7 +638,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         rmSync(recordPath(w.id));
         await other.recover();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
-        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process', 'worktree', 'branch']) });
+        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process', 'worktree', 'branch']),
+          error: expect.stringMatching(new RegExp(`^Worker termination is not proven: pid .*\\b${child.proc.pid}\\b.* still use the worker worktree; retry cleanup later$`)) });
+        expect(reopened.readEvents(w.id).filter(event => event.type === 'lifecycle' && String(event.message).startsWith('destroy blocked:') && String(event.message).includes(String(child.proc.pid)))).toHaveLength(1);
         expect(existsSync(workspace(w).path)).toBe(true);
         expect(child.proc.exitCode).toBeNull(); expect(child.proc.signalCode).toBeNull();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
@@ -656,6 +661,50 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         expect(existsSync(workspace(w).path)).toBe(true);
         expect(foreign.proc.exitCode).toBeNull(); expect(foreign.proc.signalCode).toBeNull();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
+      } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it.each(['malformed', 'another generation'] as const)('a present but %s record proves nothing: no finalization, no reap', async shape => {
+      const { w, child, prior, reopened, other, service } = await crashed('failed');
+      try {
+        child.proc.kill('SIGKILL'); await child.exited;
+        writeFileSync(recordPath(w.id), shape === 'malformed' ? '{broken' : JSON.stringify({ ...readRecord(w.id), generation: randomUUID() }));
+        await other.recover();
+        expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
+        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process']) });
+        expect(existsSync(workspace(w).path)).toBe(true);
+        expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
+      } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it('a process working in the run scratch keeps the generation alive', async () => {
+      const { w, child, prior, reopened, other } = await crashed('failed');
+      const scratch = resolveAgentTmpDir(join(root, '.ai/cezar'), w.id); mkdirSync(scratch, { recursive: true });
+      const holder = await spawnReady(scratch);
+      try {
+        child.proc.kill('SIGKILL'); await child.exited;
+        await other.recover();
+        expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
+        expect(existsSync(scratch)).toBe(true);
+        expect(holder.proc.exitCode).toBeNull();
+      } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it('a parked parent wait resolves once a survivor dies after recovery', async () => {
+      const { w, child, reopened, other } = await crashed('failed');
+      (other as unknown as { orphanReprobeMs: number }).orphanReprobeMs = 100;
+      const root = reopened.getRun(parent.id)!;
+      if (root.delegation?.role !== 'root') throw Error('fixture');
+      reopened.commitDelegation([{ id: parent.id, delegation: { ...root.delegation, wait: { id: randomUUID(), workerIds: [w.id],
+        revisions: [{ workerId: w.id, revision: 0 }], deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'parked', outcomes: [] } } }]);
+      const wait = () => { const run = reopened.getRun(parent.id); return run?.delegation?.role === 'root' ? run.delegation.wait : undefined; };
+      try {
+        await other.recover();
+        expect(reopened.readWorkerExecution(w.id)?.phase).toBe('starting');
+        expect(wait()?.outcomes).toEqual([]);
+        child.proc.kill('SIGKILL'); await child.exited;
+        await until(() => reopened.readWorkerExecution(w.id)?.phase === 'complete');
+        await until(() => wait() === undefined || wait()!.phase === 'wake-pending' || wait()!.outcomes.some(outcome => outcome.workerId === w.id));
       } finally { other.dispose(); reopened.flush(); }
     });
 

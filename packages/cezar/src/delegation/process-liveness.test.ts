@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -36,10 +36,12 @@ describe('process liveness (#469)', () => {
       expect(processesWithCwdUnder(dir)).toContain(proc.pid);
       expect(processesWithCwdUnder(`${dir}-sibling`)).not.toContain(proc.pid);
       expect(processesWithCwdUnder(dir)).not.toContain(process.pid);
-      expect(probeGeneration({ worktreePath: dir })).toBe('alive');
+      expect(probeGeneration({ paths: [dir] })).toBe('alive');
+      // One scan pass over several roots (#469: worktree plus scratch).
+      expect(processesWithCwdUnder([`${dir}-sibling`, nested])).toContain(proc.pid);
     } finally { proc.kill('SIGKILL'); await exited; }
     expect(processesWithCwdUnder(dir)).not.toContain(proc.pid);
-    expect(probeGeneration({ worktreePath: dir })).toBe('gone');
+    expect(probeGeneration({ paths: [dir] })).toBe('gone');
   });
 
   it.runIf(linux)('a reused PID (token mismatch) counts as gone; a matching or token-less live PID is alive', async () => {
@@ -47,16 +49,18 @@ describe('process liveness (#469)', () => {
     const { proc, exited } = await child(tmpdir());
     try {
       const token = processStartToken(proc.pid!);
-      expect(token).toMatch(/^\d+$/);
+      // #469: `<boot_id>:<starttime>`, so a reboot cannot replay an old incarnation's token.
+      const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+      expect(token).toBe(`${boot}:${parseProcStat(readFileSync(`/proc/${proc.pid}/stat`, 'utf8'))!.startToken}`);
       expect(recordedProcessLive({ pid: proc.pid!, startToken: token })).toBe(true);
       expect(recordedProcessLive({ pid: proc.pid! })).toBe(true);
       expect(recordedProcessLive({ pid: proc.pid!, startToken: `${token}0` })).toBe(false);
       const record = (processes: { pid: number; startToken?: string }[]) => ({ generation: 'g', controller: { pid: process.pid }, processes });
-      expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: `${token}0` }]), worktreePath: dir })).toBe('gone');
-      expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: token }]), worktreePath: dir })).toBe('alive');
+      expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: `${token}0` }]), paths: [dir] })).toBe('gone');
+      expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: token }]), paths: [dir] })).toBe('alive');
       // This process as controller is never "alive": the in-memory execution map owns it.
-      expect(probeGeneration({ record: record([]), worktreePath: dir })).toBe('gone');
-      expect(probeGeneration({ record: { generation: 'g', controller: { pid: proc.pid!, startToken: token }, processes: [] }, worktreePath: dir })).toBe('alive');
+      expect(probeGeneration({ record: record([]), paths: [dir] })).toBe('gone');
+      expect(probeGeneration({ record: { generation: 'g', controller: { pid: proc.pid!, startToken: token }, processes: [] }, paths: [dir] })).toBe('alive');
     } finally { proc.kill('SIGKILL'); await exited; }
     expect(recordedProcessLive({ pid: proc.pid! })).toBe(false);
   });

@@ -331,10 +331,14 @@ export function agentTmpEnv(
  * between mint and reap; removing a name that was never minted is a no-op, so
  * trying them all is pure safety.
  */
+/** Every place a run's scratch may live: the local directory and each OS-root fallback. */
+export function agentTmpDirLocations(dataDir: string, runId: string): string[] {
+  return safeRunId(runId) ? [agentTmpDir(dataDir, runId), ...osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId))] : [];
+}
+
 export function removeAgentTmpDir(dataDir: string, runId: string): void {
   if (!safeRunId(runId)) return;
-  const locations = [agentTmpDir(dataDir, runId), ...osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId))];
-  for (const dir of locations) {
+  for (const dir of agentTmpDirLocations(dataDir, runId)) {
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {

@@ -21,12 +21,23 @@ function procStat(pid: number) {
   try { return parseProcStat(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return undefined; }
 }
 
+let bootId: string | null | undefined;
+/** `starttime` counts ticks since boot, so it repeats across reboots; the boot id scopes it. */
+function linuxBootId(): string | undefined {
+  if (bootId === undefined) { try { bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim() || null; } catch { bootId = null; } }
+  return bootId ?? undefined;
+}
+
 /** One process incarnation, so a reused PID never matches. Absent when the platform cannot say. */
 export function processStartToken(pid: number, platform: NodeJS.Platform = process.platform): string | undefined {
   if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
-  if (platform === 'linux') return procStat(pid)?.startToken;
+  if (platform === 'linux') {
+    const start = procStat(pid)?.startToken; const boot = linuxBootId();
+    return start && boot ? `${boot}:${start}` : start;
+  }
   if (platform !== 'darwin') return undefined;
-  const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000 });
+  // `lstart` is locale- and zone-formatted; pin both so the token is stable across cezar processes.
+  const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
   const token = ps.status === 0 ? ps.stdout.trim() : '';
   return token || undefined;
 }
@@ -52,11 +63,12 @@ export function isCurrentProcess(entry: RecordedProcess): boolean {
   return entry.startToken === undefined || own === undefined || entry.startToken === own;
 }
 
-/** PIDs (never this process) whose working directory is `dir` or beneath it; `unknown` when no scan can run. */
-export function processesWithCwdUnder(dir: string, platform: NodeJS.Platform = process.platform): number[] | 'unknown' {
-  let target: string;
-  try { target = realpathSync(dir); } catch { target = resolve(dir); }
-  const under = (cwd: string) => { const path = cwd.replace(/ \(deleted\)$/, ''); return path === target || path.startsWith(target + sep); };
+/** PIDs (never this process) whose working directory is one of `dirs` or beneath it, in one scan
+ * pass; `unknown` when no scan can run. cezar's own short-lived git children in a worktree make
+ * this read "alive" briefly: conservative, and a retry self-heals. */
+export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform): number[] | 'unknown' {
+  const targets = (typeof dirs === 'string' ? [dirs] : dirs).map(dir => { try { return realpathSync(dir); } catch { return resolve(dir); } });
+  const under = (cwd: string) => { const path = cwd.replace(/ \(deleted\)$/, ''); return targets.some(target => path === target || path.startsWith(target + sep)); };
   const found: number[] = [];
   if (platform === 'linux') {
     let entries: string[];
@@ -79,11 +91,12 @@ export function processesWithCwdUnder(dir: string, platform: NodeJS.Platform = p
   return [...new Set(found)];
 }
 
-/** A missing record (legacy) relies on the working-directory scan alone. */
-export function probeGeneration({ record, worktreePath }: { record?: WorkerProcessRecord; worktreePath: string }): GenerationLiveness {
+/** A missing record (legacy) relies on the working-directory scan alone. `paths` are the
+ * worktree and every scratch location, which finalization deletes. */
+export function probeGeneration({ record, paths }: { record?: WorkerProcessRecord; paths: readonly string[] }): GenerationLiveness {
   if (record && !isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) return 'alive';
   if (record?.processes.some(recordedProcessLive)) return 'alive';
-  const scan = processesWithCwdUnder(worktreePath);
+  const scan = processesWithCwdUnder(paths);
   if (scan === 'unknown') return 'unknown';
   return scan.length ? 'alive' : 'gone';
 }

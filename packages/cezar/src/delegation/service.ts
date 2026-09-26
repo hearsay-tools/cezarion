@@ -515,7 +515,12 @@ export class DelegationService {
       project.manager.requestWorkerStop(workerId);
       let result: WorkerDestroyResult;
       if (!await project.manager.awaitRunTermination(workerId, 30_000, { reapOrphans: true })) {
-        result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: 'Worker termination is not proven; retry cleanup later' };
+        // #469: name what the working-directory scan found; other causes keep the generic message.
+        const blockers = project.manager.workerTerminationBlockers(workerId);
+        if (blockers.length) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: pid ${blockers.join(', ')} still use the worker worktree` });
+        result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: blockers.length
+          ? `Worker termination is not proven: pid ${blockers.join(', ')} still use the worker worktree; retry cleanup later`
+          : 'Worker termination is not proven; retry cleanup later' };
       } else {
         persist('cleaning', resources);
         const snapshot = structuredClone(check());
