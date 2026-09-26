@@ -11,6 +11,15 @@
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
 
+import * as parityGateFs from 'node:fs';
+
+// #401: let the test observe the actual monitoring park before releasing late wire frames.
+async function afterParityPark(prompt) {
+  const gate = /parity-release=([^\s"\\]+)/.exec(prompt)?.[1];
+  if (!gate) throw new Error('post-park scenario requires a release path');
+  while (!parityGateFs.existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
+}
+
 const write = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 // #505: like the real app-server, any active main-thread turn accepts `turn/steer`.
 // Steers accepted by an ordinary scripted turn are read just before it completes:
@@ -140,6 +149,23 @@ rl.on('line', async (line) => {
     if (process.env.CEZ_MOCK_CODEX_NO_USER_ITEM !== '1') {
       emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: opening } });
       emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: opening } });
+    }
+    // Native thread attribution from collab-agent-tool-call.ndjson (#121/#401).
+    if (turnText.includes('mock:subagent-after-park')) {
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', item: { type: 'collabAgentToolCall', id: 'park-spawn', tool: 'spawnAgent', status: 'inProgress', receiverThreadIds: ['th_park_child'] } } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'agentMessage', id: 'park-parent', text: 'Watching the child.\nCEZ:MONITORING' } } });
+      emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
+      await afterParityPark(turnText);
+      emit({ method: 'item/started', params: { threadId: 'th_park_child', item: { type: 'commandExecution', id: 'late-read', command: 'cat README.md', status: 'inProgress' } } });
+      emit({ method: 'item/completed', params: { threadId: 'th_park_child', item: { type: 'commandExecution', id: 'late-read', command: 'cat README.md', status: 'completed', exitCode: 0 } } });
+      emit({ method: 'item/completed', params: { threadId: 'th_park_child', item: { type: 'agentMessage', id: 'late-child', text: 'Post-park child update processed.' } } });
+      return;
+    }
+    // #401: agentMessage completion without deltas (same item envelope as baseline).
+    if (turnText.includes('mock:ask-snapshot')) {
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'ask-snapshot', text: 'Choose a test library.\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}' } } });
+      emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
+      return;
     }
     if (turnText.includes('mock:ci-wait')) {
       const { ciPrompt } = await import('./mock-ci-tool.mjs');

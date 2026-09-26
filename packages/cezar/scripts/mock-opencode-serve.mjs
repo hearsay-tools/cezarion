@@ -11,6 +11,15 @@ import { createServer } from 'node:http';
 
 if (process.env.CEZ_MOCK_ARGS_FILE && process.env.OPENCODE_CONFIG_CONTENT) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, JSON.stringify({ type: 'runtime-config', config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT) }) + '\n');
 if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}')); }
+import * as parityGateFs from 'node:fs';
+
+// #401: let the test observe the actual monitoring park before releasing late wire frames.
+async function afterParityPark(prompt) {
+  const gate = /parity-release=([^\s"\\]+)/.exec(prompt)?.[1];
+  if (!gate) throw new Error('post-park scenario requires a release path');
+  while (!parityGateFs.existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
+}
+
 const args = process.argv.slice(2);
 const arg = (flag, fallback) => {
   const i = args.indexOf(flag);
@@ -194,6 +203,23 @@ const server = createServer((req, res) => {
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
+      // SSE child attribution from __fixtures__/opencode/subtask-nested.ndjson.
+      if (body.includes('mock:subagent-after-park')) {
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'park-task', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'subtask', prompt: 'Review', description: 'Review', agent: 'general' } } });
+        send({ type: 'message.updated', properties: { info: { ...info({}), id: 'park-child-msg', sessionID: 'park-child', parentID: SESSION_ID, mode: 'subagent' } } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'early-child', messageID: 'park-child-msg', sessionID: 'park-child', type: 'text', text: 'Child review started.', time: { start: 1, end: 2 } } } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'park-parent', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: 'Watching the child.\nCEZ:MONITORING', time: { start: 1, end: 2 } } } });
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+        await afterParityPark(body);
+        send({ type: 'message.part.updated', properties: { part: { id: 'late-read', messageID: 'park-child-msg', sessionID: 'park-child', type: 'tool', tool: 'read', state: { status: 'running', input: { path: 'README.md' } } } } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'late-read', messageID: 'park-child-msg', sessionID: 'park-child', type: 'tool', tool: 'read', state: { status: 'completed', input: { path: 'README.md' }, output: 'Read the file.' } } } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'late-child-text', messageID: 'park-child-msg', sessionID: 'park-child', type: 'text', text: 'Late child text.', time: { start: 3, end: 4 } } } });
+        // Closed child scopes are ignored. This passive usage snapshot proves the
+        // preceding SSE frames have reached the runner before the test observes it.
+        send({ type: 'message.updated', properties: { info: info({ tokens: { input: 424240, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } }) } });
+        return;
+      }
       if (body.includes('mock:subagent')) {
         // Wire shape from `__fixtures__/opencode/subtask-nested.ndjson`: a
         // `subtask` part on the parent message, then a child message whose info
@@ -285,6 +311,13 @@ const server = createServer((req, res) => {
           cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
         }) } });
         setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+        return;
+      }
+      // #401: one completed text snapshot, without an earlier streaming part.
+      if (body.includes('mock:ask-snapshot')) {
+        send({ type: 'message.updated', properties: { info: info({}) } });
+        send({ type: 'message.part.updated', properties: { part: { id: 'ask-snapshot', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: 'Choose a test library.\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', time: { start: 1, end: 2 } } } });
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
       if (body.includes('mock:ask-bad')) {

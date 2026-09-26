@@ -8,6 +8,15 @@
 import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 
+import * as parityGateFs from 'node:fs';
+
+// #401: let the test observe the actual monitoring park before releasing late wire frames.
+async function afterParityPark(prompt) {
+  const gate = /parity-release=([^\s"\\]+)/.exec(prompt)?.[1];
+  if (!gate) throw new Error('post-park scenario requires a release path');
+  while (!parityGateFs.existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 
@@ -103,6 +112,23 @@ async function respond(userText, imageCount, uuid) {
     const text = ['steer tool done', ...steered.map(s => `saw: ${s.userText}`)].join('\n');
     emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
     emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid, ...steered.map(s => s.uuid)].filter(Boolean), usage: { input_tokens: 20, output_tokens: 10 } });
+    return;
+  }
+  // Native child attribution from __fixtures__/claude/subagent-task.ndjson.
+  if (!userText.includes('[cez-namer]') && userText.includes('mock:subagent-after-park')) {
+    const task = `toolu_park_${turn}`;
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: task, name: 'Task', input: { description: 'Review' } }] } });
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Watching the child.\nCEZ:MONITORING' }] } });
+    emit({ type: 'result', subtype: 'success', result: 'Watching the child.\nCEZ:MONITORING', usage: { input_tokens: 10, output_tokens: 5 } });
+    await afterParityPark(userText);
+    emit({ type: 'assistant', parent_tool_use_id: task, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'late-read', name: 'Read', input: { file_path: 'README.md' } }] } });
+    emit({ type: 'user', parent_tool_use_id: task, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'late-read', content: 'Read the file.' }] } });
+    emit({ type: 'assistant', parent_tool_use_id: task, message: { role: 'assistant', content: [{ type: 'text', text: 'Post-park child update processed.' }] } });
+    return;
+  }
+  // #401: result-only full text; mapResult and v1 use the same fallback.
+  if (!userText.includes('[cez-namer]') && userText.includes('mock:ask-snapshot')) {
+    emit({ type: 'result', subtype: 'success', result: 'Choose a test library.\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', usage: { input_tokens: 10, output_tokens: 5 } });
     return;
   }
   if (userText.includes('mock:ci-wait')) {
