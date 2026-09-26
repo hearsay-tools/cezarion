@@ -294,7 +294,9 @@ test('the readiness workflow runs trusted code with the least permissions that c
   assert.match(source, /uses: actions\/[\w-]+@[0-9a-f]{40}/);
   assert.equal(token['continue-on-error'], true, 'a missing App permission must not fail readiness');
   assert.equal(token.with['permission-organization-projects'], 'write');
-  assert.match(token.if, /vars\.RELEASE_APP_ID != ''/);
+  assert.match(token.if, /vars\.RELEASE_APP_CLIENT_ID != ''/);
+  assert.equal(token.with['client-id'], '${{ vars.RELEASE_APP_CLIENT_ID }}');
+  assert.equal(token.with['app-id'], undefined);
   assert.match(script.with.script, /process\.env\.BOARD_TOKEN \? getOctokit\(process\.env\.BOARD_TOKEN\) : null/);
   assert.match(script.with.script, /require\('\.\/\.github\/scripts\/pr-readiness\.cjs'\)/);
   assert.equal(script.env.BOARD_TOKEN, '${{ steps.board_app.outputs.token }}');
