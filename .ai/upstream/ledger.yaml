@@ -376,12 +376,13 @@ entries:
     pr: 1014
     title: "fix(providers): a runtime auth rejection verifies itself before it sticks (#1014)"
     date: 2026-09-17
-    status: planned
+    status: ported
     hint:
       conflicts: 0
     fork:
       issue: 431
-    decided: 2026-09-18
+      pr: 598
+    decided: 2026-09-25
   - sha: ea7f3489650e511f92529c6c22edfd63fd77b301
     pr: 1015
     title: "fix(dispatch): tell parents --budget is optional so uncapped trees don't get invented caps (#1015)"

@@ -102,6 +102,19 @@ const COMMAND_TIMEOUT_MS = 10_000;
 const CONNECTED_TTL_MS = 10 * 60_000;
 const UNSETTLED_TTL_MS = 60_000;
 
+/**
+ * How long before the same provider may be self-checked again after a runtime rejection
+ * (`verifyRuntimeAuthFailure`).
+ *
+ * A latch is raised from a PATTERN MATCH on a runner's error text, and a single failing run can emit
+ * several auth-shaped lines in a row. Without a floor, each line that re-latches after a successful
+ * self-check would buy its own CLI spawn. One self-check a minute is plenty for the case this exists
+ * for — a rejection that was transient against credentials that are still valid — and it bounds the
+ * pathological case (a CLI that reports logged in while the vendor keeps rejecting the token) to one
+ * probe per minute instead of one per error line.
+ */
+const RUNTIME_AUTH_VERIFY_COOLDOWN_MS = 60_000;
+
 /** The lifetime for a set of rows: minutes only when EVERY row is connected. A mixed answer takes
  *  the short window, because the not-connected row in it is the one that might self-heal.
  *
@@ -358,9 +371,21 @@ export interface RuntimeAuthFailureReport {
     status: 'disconnected';
     authFailureId: string;
   };
+  /** The incident's generation at report time. A self-check that starts asynchronously (the
+   *  runtime watcher resolves the failing account first) carries it through so the check can
+   *  stand down when a newer failure replaced the incident it was triggered by. */
+  generation: number;
   /** True only for the global latch edge, so callers can fan out one coarse
    * status update while every affected task still records its own callout. */
   transitioned: boolean;
+}
+
+/** One deferred re-verification when the cooldown declines a check. Detached and unref'd by
+ *  default; tests capture the retry instead of waiting out the window. */
+function defaultScheduleRuntimeRetry(fn: () => void, delayMs: number): () => void {
+  const timer = setTimeout(fn, delayMs);
+  timer.unref();
+  return () => clearTimeout(timer);
 }
 
 export class ProviderAuthService {
@@ -368,7 +393,16 @@ export class ProviderAuthService {
   private readonly now: () => number;
   private readonly platform: NodeJS.Platform;
   private readonly createAuthFailureId: () => string;
+  private readonly scheduleRuntimeRetry: (fn: () => void, delayMs: number) => () => void;
   private readonly runtimeFailures = new Map<ProviderId, RuntimeAuthFailure>();
+  /** One self-check at a time per provider, and not more often than the cooldown. Both guard the
+   *  same thing — a CLI spawn per auth-shaped error line — from the two directions it can arrive
+   *  from: concurrently, and in quick succession. */
+  private readonly verifyingRuntimeFailures = new Set<ProviderId>();
+  private readonly lastRuntimeVerification = new Map<ProviderId, number>();
+  /** One pending cooldown-expiry re-check per provider, cancellable. See
+   *  {@link ProviderAuthService.scheduleRuntimeVerification}. */
+  private readonly deferredRuntimeVerifications = new Map<ProviderId, () => void>();
   private nextRuntimeFailureGeneration = 0;
   private nextProbeGeneration = 0;
   private completed?: {
@@ -382,8 +416,11 @@ export class ProviderAuthService {
   };
   /** Per-account probe results, keyed by `profileCacheKey` (spec 2026-07-29-agent-profiles).
    *  Separate from `completed` because a second Claude login is a different answer to the same
-   *  question, and sharing one slot would let whichever probe ran last speak for both. */
-  private readonly completedProfiles = new Map<string, { status: ProviderStatus; timestamp: number }>();
+   *  question, and sharing one slot would let whichever probe ran last speak for both. Each
+   *  entry carries the generation of the probe that wrote it, so an older probe landing after a
+   *  newer verification cannot overwrite the correction — the fence `completed` gets from
+   *  `startFreshProbe`/`rememberProbedRow`, on this cache's own key. */
+  private readonly completedProfiles = new Map<string, { status: ProviderStatus; timestamp: number; generation: number }>();
   private readonly inFlightProfiles = new Map<string, Promise<ProviderStatus>>();
 
   constructor(options?: {
@@ -391,11 +428,13 @@ export class ProviderAuthService {
     now?: () => number;
     platform?: NodeJS.Platform;
     createAuthFailureId?: () => string;
+    scheduleRuntimeRetry?: (fn: () => void, delayMs: number) => () => void;
   }) {
     this.runCommand = options?.runCommand ?? defaultRunProviderCommand;
     this.now = options?.now ?? Date.now;
     this.platform = options?.platform ?? process.platform;
     this.createAuthFailureId = options?.createAuthFailureId ?? randomUUID;
+    this.scheduleRuntimeRetry = options?.scheduleRuntimeRetry ?? defaultScheduleRuntimeRetry;
   }
 
   /**
@@ -451,6 +490,7 @@ export class ProviderAuthService {
         hint: RUNTIME_AUTH_HINT,
         authFailureId: failure.authFailureId,
       },
+      generation: failure.generation,
       transitioned: current === undefined,
     };
   }
@@ -462,6 +502,178 @@ export class ProviderAuthService {
     if (!current || current.authFailureId !== authFailureId) return false;
     this.runtimeFailures.delete(provider);
     return true;
+  }
+
+  /**
+   * Ask the provider's OWN CLI whether a runtime rejection was real, and drop the incident when it
+   * was not. Resolves to the recovered row when it cleared one, `null` otherwise.
+   *
+   * `profile` aims the self-check at the account the failing step actually ran under (spec
+   * 2026-07-29-agent-profiles). Probing the bare default instead would answer a question nobody
+   * asked: a named account can be rejected while the default login is fine, and clearing the latch
+   * on the default's answer lets every future run on the broken account fail again. A named
+   * verification writes the per-account cache and stamps its row `profileId`; the default
+   * verification keeps folding into the whole-response cache exactly as before. The CALLER decides
+   * what to do when the recorded account cannot be resolved — for the runtime watcher that is
+   * "keep the latch" (an unverifiable incident is not a recovered one).
+   *
+   * A latch is raised by matching a runner's error text against
+   * {@link isRuntimeProviderAuthFailure} — a heuristic over vendor prose — and it then outranks every
+   * probe (`withRuntimeFailures`). Before this existed, `clearRuntimeAuthFailure` had exactly one
+   * caller, `POST /providers/:provider/retry`, so the only way out of a latch was a human opening
+   * Settings and pressing "Try again". That button clears the incident and re-probes, and it works,
+   * which is the whole diagnosis: the credentials were still there. A transient 401 and a false
+   * positive of the text match were both indistinguishable from a real logout, and both parked the
+   * cockpit until someone clicked.
+   *
+   * So the latch stays authoritative — it is raised instantly, and `provider-action-gate` keeps
+   * refusing to start runs against it — but it no longer stands unexamined. This is deliberately the
+   * same two steps the retry route performs, minus the human: probe, then clear.
+   *
+   * What it will NOT do:
+   * - clear an incident it did not observe. The id is captured before the probe and handed to
+   *   `clearRuntimeAuthFailure`, so a rejection that arrives mid-probe survives the answer to an
+   *   older question.
+   * - clear on anything but `connected`. `disconnected`, `not-installed` and `unknown` all leave the
+   *   latch alone; an inconclusive probe is not evidence of health.
+    * - spawn more than one probe per provider per {@link RUNTIME_AUTH_VERIFY_COOLDOWN_MS}. A
+    *   verification skipped by that cooldown returns `null`, leaves the latch standing, and arms ONE
+    *   deferred re-verification at cooldown expiry
+    *   ({@link ProviderAuthService.scheduleRuntimeVerification}) — the runtime watcher fires only on
+    *   the latch edge, so without it a re-latch inside the window could never be re-checked.
+    *
+    * `observed` names the incident generation the CALLER saw when it decided to check. The runtime
+    *   watcher resolves the failing account asynchronously before calling this, and a newer failure
+    *   can replace the incident during that wait — a check for the older question then stands down
+    *   at the door (no probe) instead of answering the newer one with the older aim.
+    */
+  async verifyRuntimeAuthFailure(
+    provider: ProviderId,
+    profile?: { id: string; configDir: string | null },
+    observed?: { generation: number },
+  ): Promise<ProviderStatus | null> {
+    if (process.env.CEZ_DRY_RUN === '1' || providerAuthChecksDisabled()) return null;
+    const failure = this.runtimeFailures.get(provider);
+    if (!failure) return null;
+    const expectedGeneration = observed?.generation ?? failure.generation;
+    if (failure.generation !== expectedGeneration) return null;
+    if (this.verifyingRuntimeFailures.has(provider)) return null;
+    const lastVerifiedAt = this.lastRuntimeVerification.get(provider);
+    if (lastVerifiedAt !== undefined && this.now() - lastVerifiedAt < RUNTIME_AUTH_VERIFY_COOLDOWN_MS) {
+      this.scheduleRuntimeVerification(
+        provider,
+        profile,
+        RUNTIME_AUTH_VERIFY_COOLDOWN_MS - (this.now() - lastVerifiedAt),
+        expectedGeneration,
+      );
+      return null;
+    }
+
+    this.verifyingRuntimeFailures.add(provider);
+    let probed: ProviderStatus;
+    try {
+      this.lastRuntimeVerification.set(provider, this.now());
+      probed = await this.probe(descriptorFor(provider), profile?.configDir);
+    } finally {
+      this.verifyingRuntimeFailures.delete(provider);
+    }
+
+    if (probed.status !== 'connected') return null;
+    // Fence the clear against the captured GENERATION, not just the id: while the latch stands a
+    // new failure report keeps the same `authFailureId`, so an id comparison alone would let this
+    // answer — gathered for the incident as it was — clear a newer failure reported mid-probe,
+    // one the latch-edge watcher will never re-check. Generations are unique per report.
+    const current = this.runtimeFailures.get(provider);
+    if (!current || current.generation !== expectedGeneration) return null;
+    if (!this.clearRuntimeAuthFailure(provider, failure.authFailureId)) return null;
+    if (profile) {
+      // Per-account knowledge goes to the per-account cache. Folding it into the whole-response
+      // cache would let a named account's answer speak for the default row for the TTL that
+      // follows — the same sharing bug the `(provider, profileId)` key was introduced to prevent.
+      // The FRESH generation fences the write against an older per-account probe that is still in
+      // flight and lands afterwards.
+      const stamped: ProviderStatus = { ...probed, profileId: profile.id };
+      this.completedProfiles.set(profileCacheKey(provider, profile.id), {
+        status: stamped,
+        timestamp: this.now(),
+        generation: ++this.nextProbeGeneration,
+      });
+      return stamped;
+    }
+    this.rememberProbedRow(probed);
+    return probed;
+  }
+
+  /**
+   * A verification declined by the cooldown must not become a dead end. The runtime watcher fires
+   * only on the latch edge — a rejection that re-latches right after a successful check gets its
+   * check declined here, and nothing would ever re-ask the CLI: later error lines see a latch that
+   * already stands, and only Settings' Try again could clear it. So the declined request arms ONE
+   * deferred re-verification at cooldown expiry; later declined requests re-arm it (never stack
+   * it), the newest aim and generation winning. The retry is bound to the incident it was
+   * scheduled against: a newer failure that arrived meanwhile (a non-transition line the watcher
+   * skips) stands when it fires, because the queued aim may no longer be the account that failed
+   * and its answer must not clear what it was never asked about. Firing after the latch is gone
+   * is equally a no-op — {@link ProviderAuthService.verifyRuntimeAuthFailure} returns before
+   * probing — so the chain ends the moment the incident is answered.
+   */
+  private scheduleRuntimeVerification(
+    provider: ProviderId,
+    profile: { id: string; configDir: string | null } | undefined,
+    delayMs: number,
+    generation: number,
+  ): void {
+    this.deferredRuntimeVerifications.get(provider)?.();
+    const cancel = this.scheduleRuntimeRetry(() => {
+      this.deferredRuntimeVerifications.delete(provider);
+      void this.verifyRuntimeAuthFailure(provider, profile, { generation }).catch(() => {});
+    }, Math.max(delayMs, 0));
+    this.deferredRuntimeVerifications.set(provider, cancel);
+  }
+
+  /**
+   * Fold ONE freshly probed row into the cached response.
+   *
+   * Without this, dropping a latch would uncover whatever the last full probe happened to say about
+   * that provider — which can be older than the answer we just got, and on a cold-ish cache can be
+   * `unknown`. Clearing an incident only to reveal a stale contradiction would trade a red banner for
+   * a grey one. The cache TIMESTAMP is deliberately untouched: this corrects one row, it is not a
+   * full probe, and it must not extend the whole response's lifetime.
+   *
+   * The row also carries a FRESH generation, and a generation alone is not enough when the cache is
+   * cold: a full probe already in flight would land afterwards and, being a complete response, would
+   * replace the correction with rows gathered before the recovery was known (or discard it outright
+   * when `completed` is still unset). So when nothing is cached yet, the merge waits for the
+   * in-flight probe to land and folds over ITS answer — still generation-stamped, so a probe that
+   * started even later wins on its own merits.
+   */
+  private rememberProbedRow(status: ProviderStatus): void {
+    const generation = ++this.nextProbeGeneration;
+    if (this.completed) {
+      this.mergeProbedRow(status, generation);
+      return;
+    }
+    const inFlight = this.inFlight;
+    if (!inFlight) return;
+    void inFlight.raw.catch(() => {}).then(() => {
+      // A newer full probe landing first (its generation outranks ours) makes this a no-op: its
+      // rows are the fresher answer and must not be patched by an older correction.
+      if (!this.completed || this.completed.generation >= generation) return;
+      this.mergeProbedRow(status, generation);
+    });
+  }
+
+  private mergeProbedRow(status: ProviderStatus, generation: number): void {
+    if (!this.completed) return;
+    this.completed = {
+      ...this.completed,
+      generation,
+      response: {
+        providers: this.completed.response.providers.map((row) => (
+          row.provider === status.provider ? status : row
+        )),
+      },
+    };
   }
 
   /**
@@ -553,10 +765,17 @@ export class ProviderAuthService {
     if (cached && this.now() - cached.timestamp < cacheTtlFor([cached.status])) return cached.status;
     const pending = this.inFlightProfiles.get(key);
     if (pending) return pending;
+    const generation = ++this.nextProbeGeneration;
     const probe = this.probe(descriptorFor(provider), profile.configDir)
       .then((status) => {
         const stamped: ProviderStatus = { ...status, profileId: profile.id };
-        this.completedProfiles.set(key, { status: stamped, timestamp: this.now() });
+        const current = this.completedProfiles.get(key);
+        // A verification (or newer probe) that wrote while this probe was in flight keeps its
+        // place: an older answer must not overwrite a fresher row, the same fence the default
+        // cache's generation guard provides. The caller still gets this probe's own answer.
+        if (current === undefined || generation >= current.generation) {
+          this.completedProfiles.set(key, { status: stamped, timestamp: this.now(), generation });
+        }
         return stamped;
       })
       .finally(() => {

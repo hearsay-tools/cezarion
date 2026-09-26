@@ -152,6 +152,41 @@ export async function profileDirState(
 }
 
 /**
+ * Which login a runtime-auth self-check must interrogate for a recorded `profileId`.
+ *
+ * Three answers, deliberately distinct because they demand different behavior from the caller:
+ *
+ * - `{ kind: 'default' }` — the step ran on the discovered account (no id, or the reserved
+ *   `default`), so probing bare is correct and is the whole zero-config path.
+ * - `{ kind: 'profile', … }` — a stored account; verify THAT login, not whichever one happens to
+ *   be default. A named account can be rejected while the default is fine, and clearing the
+ *   incident on the default's answer would let every future run on the broken account fail again.
+ * - `null` — the id names no account we can see (dangling reference, unreadable store). The caller
+ *   must KEEP the incident latched: an unverifiable rejection is not a recovered one, and
+ *   `selectProfile`'s silent degrade-to-default is exactly the wrong policy here.
+ */
+export type RuntimeAuthVerificationTarget =
+  | { kind: 'default' }
+  | { kind: 'profile'; id: string; configDir: string };
+
+export async function resolveRuntimeAuthVerificationTarget(
+  provider: ProviderId,
+  profileId: string | undefined,
+): Promise<RuntimeAuthVerificationTarget | null> {
+  if (profileId === undefined || profileId === DEFAULT_AGENT_ACCOUNT_ID) return { kind: 'default' };
+  let store: AgentAccountStore;
+  try {
+    store = await loadAgentAccounts();
+  } catch {
+    return null;
+  }
+  const account = store.accounts.find((a) => a.id === profileId && a.provider === provider);
+  return account
+    ? { kind: 'profile', id: account.id, configDir: resolveStoredProfile(account).path }
+    : null;
+}
+
+/**
  * Is `path` the same directory as an existing account's (or the default's)?
  *
  * Compared through `realpath` so two spellings of one dir — a symlink, a trailing slash — cannot
