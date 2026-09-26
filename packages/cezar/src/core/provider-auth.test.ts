@@ -876,6 +876,112 @@ describe('ProviderAuthService', () => {
       });
     });
 
+    it('stands a deferred re-check down when a newer failure changed the incident', async () => {
+      // The queued retry answers the incident it was scheduled against. A later failure (possibly
+      // a DIFFERENT account — the non-transition line the latch-edge watcher skips) must not be
+      // cleared by the queued aim's answer, or the stale retry re-creates the wrong-clear the
+      // generation fence removed from the direct path.
+      let now = 1_000;
+      const retries: Array<() => void> = [];
+      let claudeCalls = 0;
+      const runCommand: RunProviderCommand = vi.fn(async (_executable, _args, _timeout, env) => {
+        if (env?.CLAUDE_CONFIG_DIR === '/a') return connectedResults.claude!;
+        claudeCalls += 1;
+        // Call 1: the default self-check, confirming the logout. The rest: ordinary probes.
+        return claudeCalls === 1 ? loggedOutClaude : connectedResults.claude!;
+      });
+      const service = new ProviderAuthService({
+        runCommand,
+        now: () => now,
+        scheduleRuntimeRetry: (fn) => {
+          retries.push(fn);
+          return () => {};
+        },
+        createAuthFailureId: () => 'incident-1',
+      });
+
+      // Incident-1 stands and its default-aim check is declined by the CLI…
+      service.reportRuntimeAuthFailure('claude');
+      await expect(service.verifyRuntimeAuthFailure('claude')).resolves.toBeNull();
+      expect(runCommand).toHaveBeenCalledTimes(1);
+      now += 1_000;
+      service.reportRuntimeAuthFailure('claude');
+      // …so the account-A request queues the retry, bound to THAT incident.
+      await expect(service.verifyRuntimeAuthFailure('claude', { id: 'a', configDir: '/a' }))
+        .resolves.toBeNull();
+      expect(retries).toHaveLength(1);
+      // A newer failure arrives while the retry is queued; the window then closes.
+      service.reportRuntimeAuthFailure('claude');
+      now += 59_500;
+
+      // Firing must stand down: A's answer must not clear the newer incident, so nothing probes.
+      retries[0]!();
+      await expect(service.status()).resolves.toMatchObject({
+        providers: expect.arrayContaining([
+          expect.objectContaining({ provider: 'claude', status: 'disconnected', authFailureId: 'incident-1' }),
+        ]),
+      });
+      // The queued aim never reached the CLI (the only extra spawns are status' own cold probe).
+      expect(runCommand).not.toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
+        CLAUDE_CONFIG_DIR: '/a',
+      });
+    });
+
+    it('rebinds the queued re-check when a newer declined request changes the aim', async () => {
+      // The guard twin of the stand-down: a newer DECLINED request re-arms the retry with the new
+      // aim and generation, and that rebinding keeps the newer incident on the path to an answer.
+      let now = 1_000;
+      const retries: Array<() => void> = [];
+      let cancelled = 0;
+      let claudeCalls = 0;
+      const runCommand: RunProviderCommand = vi.fn(async (_executable, _args, _timeout, env) => {
+        if (env?.CLAUDE_CONFIG_DIR === '/b') return connectedResults.claude!;
+        claudeCalls += 1;
+        return claudeCalls === 1 ? loggedOutClaude : connectedResults.claude!;
+      });
+      const service = new ProviderAuthService({
+        runCommand,
+        now: () => now,
+        scheduleRuntimeRetry: (fn) => {
+          retries.push(fn);
+          return () => {
+            cancelled += 1;
+            const index = retries.indexOf(fn);
+            if (index >= 0) retries.splice(index, 1);
+          };
+        },
+        createAuthFailureId: () => 'incident-1',
+      });
+
+      service.reportRuntimeAuthFailure('claude');
+      await expect(service.verifyRuntimeAuthFailure('claude')).resolves.toBeNull();
+      now += 1_000;
+      service.reportRuntimeAuthFailure('claude');
+      await expect(service.verifyRuntimeAuthFailure('claude', { id: 'a', configDir: '/a' }))
+        .resolves.toBeNull();
+      expect(retries).toHaveLength(1);
+      // Account B fails and its own request re-arms the queue with the new aim.
+      now += 500;
+      service.reportRuntimeAuthFailure('claude');
+      await expect(service.verifyRuntimeAuthFailure('claude', { id: 'b', configDir: '/b' }))
+        .resolves.toBeNull();
+      expect(retries).toHaveLength(1);
+      expect(cancelled).toBe(1);
+
+      // The rebinding retry answers B's incident with B's own connected answer.
+      now += 59_500;
+      retries[0]!();
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(2));
+      expect(runCommand).toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
+        CLAUDE_CONFIG_DIR: '/b',
+      });
+      await expect(service.status()).resolves.toMatchObject({
+        providers: expect.arrayContaining([
+          expect.objectContaining({ provider: 'claude', status: 'connected' }),
+        ]),
+      });
+    });
+
     it('never answers an older question: a rejection arriving mid-probe survives', async () => {
       const ids = ['incident-1', 'incident-2'];
       let release!: () => void;

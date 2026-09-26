@@ -551,6 +551,7 @@ export class ProviderAuthService {
         provider,
         profile,
         RUNTIME_AUTH_VERIFY_COOLDOWN_MS - (this.now() - lastVerifiedAt),
+        failure.generation,
       );
       return null;
     }
@@ -596,18 +597,24 @@ export class ProviderAuthService {
    * check declined here, and nothing would ever re-ask the CLI: later error lines see a latch that
    * already stands, and only Settings' Try again could clear it. So the declined request arms ONE
    * deferred re-verification at cooldown expiry; later declined requests re-arm it (never stack
-   * it), the newest aim winning. Firing after the latch is gone is a no-op —
-   * {@link ProviderAuthService.verifyRuntimeAuthFailure} returns before probing — so the chain
-   * ends the moment the incident is answered.
+   * it), the newest aim and generation winning. The retry is bound to the incident it was
+   * scheduled against: a newer failure that arrived meanwhile (a non-transition line the watcher
+   * skips) stands when it fires, because the queued aim may no longer be the account that failed
+   * and its answer must not clear what it was never asked about. Firing after the latch is gone
+   * is equally a no-op — {@link ProviderAuthService.verifyRuntimeAuthFailure} returns before
+   * probing — so the chain ends the moment the incident is answered.
    */
   private scheduleRuntimeVerification(
     provider: ProviderId,
     profile: { id: string; configDir: string | null } | undefined,
     delayMs: number,
+    generation: number,
   ): void {
     this.deferredRuntimeVerifications.get(provider)?.();
     const cancel = this.scheduleRuntimeRetry(() => {
       this.deferredRuntimeVerifications.delete(provider);
+      const current = this.runtimeFailures.get(provider);
+      if (!current || current.generation !== generation) return;
       void this.verifyRuntimeAuthFailure(provider, profile).catch(() => {});
     }, Math.max(delayMs, 0));
     this.deferredRuntimeVerifications.set(provider, cancel);
