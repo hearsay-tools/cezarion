@@ -31,7 +31,7 @@ Work enters through two paths: a free-form task brief handed to an agent, or a f
 
 Pipeline labels are mutually exclusive: a PR carries at most one, and it names where the PR sits in the flow.
 
-- A ready, non-draft PR carries `review`.
+- A ready, non-draft PR carries `review`. CI decides when a PR is ready (#603). Every new commit converts it back to draft. It is marked ready once every required check on that head is green, including `Automated Code Review`, which fails while the review has open finding threads, and once no review thread is unresolved. The linked board card follows: draft is `In progress`, ready is `In review`. See `CODE_REVIEW.md` § CI surface rules.
 - The reviewer moves it: request changes → `changes-requested`; after fixes it returns to `review`; approval → `merge-queue`.
 - `merge-queue` is routing, not proof of QA: a `needs-qa` PR legitimately sits there until QA signs off.
 - Only a QA reviewer sets the `qa` pipeline label. They move a queued `needs-qa` PR from `merge-queue` to `qa` while testing, then back to `merge-queue` with `qa-approved` on pass, or to `qa-failed` on failure. Automated skills request QA with `needs-qa`; they never set `qa`.

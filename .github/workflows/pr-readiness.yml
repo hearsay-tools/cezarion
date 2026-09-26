@@ -1,0 +1,76 @@
+name: PR Readiness
+
+# Draft until every required check on the head is green (#603). Runs only the
+# default branch's trusted script and never checks out pull-request code.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
+    branches:
+      - main
+  workflow_run:
+    workflows: [CI, Automated Code Review]
+    types: [completed]
+  # Actions has no review-thread-resolved event: after resolving a thread by
+  # hand, dispatch this to re-check a PR instead of waiting for the next run.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to re-check
+        required: true
+        type: number
+
+permissions: {}
+
+concurrency:
+  group: pr-readiness-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch || inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      checks: read
+      # convertPullRequestToDraft / markPullRequestReadyForReview refuse the
+      # workflow token without it. No step checks out or pushes PR code.
+      contents: write
+      pull-requests: write
+      statuses: read
+    steps:
+      - name: Checkout trusted readiness script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A dispatch may name any branch; the script always comes from main.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      # Optional: board sync needs the release App's Organization projects
+      # permission. Without it this step fails quietly and only the sync skips.
+      - name: Create board token
+        id: board_app
+        if: vars.RELEASE_APP_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-organization-projects: write
+
+      - name: Follow the head's checks with draft state and board status
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          BOARD_TOKEN: ${{ steps.board_app.outputs.token }}
+        with:
+          script: |
+            const { handleEvent } = require('./.github/scripts/pr-readiness.cjs');
+            const projectGithub = process.env.BOARD_TOKEN ? getOctokit(process.env.BOARD_TOKEN) : null;
+            await handleEvent({
+              github,
+              projectGithub,
+              ...context.repo,
+              eventName: context.eventName,
+              payload: context.payload,
+              log: (message) => core.info(message),
+            });

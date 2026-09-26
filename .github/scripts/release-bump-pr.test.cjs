@@ -8,6 +8,8 @@ const {
   isBotReleaseBumpPr,
   onlyVersionValueChanges,
   classifyFromEnv,
+  isAppUpstreamScanPr,
+  classifyUpstreamScanFromEnv,
 } = require('./release-bump-pr.cjs');
 
 const HEAD = 'a'.repeat(40);
@@ -174,4 +176,40 @@ test('configured release App author is exact and keeps every version-stamp guard
     { PR_FILES: 'src/code.ts' }, { LIVE_HEAD_SHA: 'c'.repeat(40) }, { PR_FILES_OK: '0' },
   ]) assert.equal(classifyFromEnv({ ...env, ...change }, ok), false);
   assert.equal(classifyFromEnv(env, { filesAreVersionStampsOnly: () => false }), false);
+});
+
+test('only a ledger-only upstream-scan PR authored by the configured release App skips review', () => {
+  const env = { EVENT_NAME: 'pull_request_target', HEAD_REF: 'upstream-scan/2026-09-21',
+    PR_AUTHOR: 'cezarion-release[bot]', RELEASE_APP_BOT_LOGIN: 'cezarion-release[bot]',
+    EXPECTED_HEAD_SHA: 'a'.repeat(40), LIVE_HEAD_SHA: 'A'.repeat(40),
+    PR_FILES_OK: '1', PR_FILES: '.ai/upstream/ledger.yaml\n.ai/upstream/LEDGER.md\n' };
+  assert.equal(classifyUpstreamScanFromEnv(env), true);
+  for (const change of [
+    { EVENT_NAME: 'workflow_dispatch' },
+    { HEAD_REF: 'feature/upstream-scan' },
+    { PR_AUTHOR: 'github-actions[bot]' },
+    { PR_AUTHOR: 'octocat', RELEASE_APP_BOT_LOGIN: 'octocat' },
+    { RELEASE_APP_BOT_LOGIN: '' },
+    { RELEASE_APP_BOT_LOGIN: undefined },
+    { PR_FILES: '.ai/upstream/ledger.yaml\npackages/cezar/src/index.ts' },
+    { PR_FILES: '.ai/upstream/../../src/index.ts' },
+    { PR_FILES: '.ai/upstreamish/ledger.yaml' },
+    { PR_FILES: '' },
+    { PR_FILES_OK: '0' },
+    { PR_FILES_OK: undefined },
+    { LIVE_HEAD_SHA: 'b'.repeat(40) },
+    { EXPECTED_HEAD_SHA: '' },
+  ]) assert.equal(classifyUpstreamScanFromEnv({ ...env, ...change }), false, JSON.stringify(change));
+  assert.equal(isAppUpstreamScanPr({ headRef: 'upstream-scan/x', prAuthor: 'cezarion-release[bot]',
+    files: [], releaseAppBotLogin: 'cezarion-release[bot]' }), false, 'an empty file list is not ledger-only');
+  assert.equal(isAppUpstreamScanPr(), false);
+});
+
+test('an upstream-scan PR never passes as a release bump, nor a release bump as a scan', () => {
+  const scan = { EVENT_NAME: 'pull_request_target', HEAD_REF: 'upstream-scan/2026-09-21',
+    PR_AUTHOR: 'cezarion-release[bot]', RELEASE_APP_BOT_LOGIN: 'cezarion-release[bot]',
+    EXPECTED_HEAD_SHA: 'a'.repeat(40), LIVE_HEAD_SHA: 'a'.repeat(40), BASE_SHA: 'b'.repeat(40),
+    GITHUB_REPOSITORY: 'example/project', PR_FILES_OK: '1', PR_FILES: '.ai/upstream/ledger.yaml' };
+  assert.equal(classifyFromEnv(scan, { filesAreVersionStampsOnly: () => true }), false);
+  assert.equal(classifyUpstreamScanFromEnv({ ...scan, HEAD_REF: 'release/v1.2.3', PR_FILES: 'package-lock.json' }), false);
 });

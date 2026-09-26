@@ -203,6 +203,36 @@ function classifyFromEnv(env = process.env, deps = {}) {
   });
 }
 
+// The release App's weekly upstream-scan PR (upstream-scan-pr.cjs) carries only
+// ledger data, which humans edit on the same branch to decide rows. Review has
+// nothing to judge there, so it skips green, but only while every changed file
+// stays under .ai/upstream/: code pushed onto that branch is reviewed as usual.
+const UPSTREAM_LEDGER_DIR = '.ai/upstream/';
+
+function isAppUpstreamScanPr({ headRef, prAuthor, files, releaseAppBotLogin } = {}) {
+  return typeof headRef === 'string'
+    && headRef.startsWith('upstream-scan/')
+    && typeof releaseAppBotLogin === 'string'
+    && /^[a-z0-9][a-z0-9-]*\[bot\]$/.test(releaseAppBotLogin)
+    && prAuthor === releaseAppBotLogin
+    && Array.isArray(files) && files.length > 0
+    && files.every((file) => typeof file === 'string' && file.startsWith(UPSTREAM_LEDGER_DIR) && !file.includes('..'));
+}
+
+// Same env contract and fail-closed rules as classifyFromEnv.
+function classifyUpstreamScanFromEnv(env = process.env) {
+  if (env.EVENT_NAME !== 'pull_request' && env.EVENT_NAME !== 'pull_request_target') return false;
+  if (!headShasMatch(env.EXPECTED_HEAD_SHA, env.LIVE_HEAD_SHA)) return false;
+  if (env.PR_FILES_OK !== '1' || typeof env.PR_FILES !== 'string') return false;
+  const files = env.PR_FILES.split('\n').map((line) => line.trim()).filter(Boolean);
+  return isAppUpstreamScanPr({
+    headRef: env.HEAD_REF || '',
+    prAuthor: env.PR_AUTHOR || '',
+    files,
+    releaseAppBotLogin: env.RELEASE_APP_BOT_LOGIN,
+  });
+}
+
 if (require.main === module) {
   const bump = classifyFromEnv();
   writeGithubOutput('bump_pr', bump ? 'true' : 'false');
@@ -218,5 +248,7 @@ module.exports = {
   headShasMatch,
   listPullFilesViaGh,
   classifyFromEnv,
+  isAppUpstreamScanPr,
+  classifyUpstreamScanFromEnv,
   writeGithubOutput,
 };
