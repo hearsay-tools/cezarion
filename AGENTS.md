@@ -77,6 +77,17 @@ design, `git log -S` and `git merge-base --is-ancestor <commit> <tag>` settle "w
 the release the user is on", and a user's "it worked in 0.9.1" is a testable claim, not an
 opinion. #810 was confirmed in one command before a line of code was read.
 
+## Runner regressions ship with shared coverage
+
+When fixing runner lifecycle, input delivery, Needs You, monitoring, ASK or
+completion behavior, add or extend an exhaustive `RUNNER_IDS` regression in the
+same PR. Use each runner's own native mock wire through `HARNESS_ADAPTERS`;
+a backend-only test or injected normalized event does not cover the other
+runners. Register new cells in the parity guard and give genuine wire gaps
+named executable exemptions. Prove the relevant regression fails without the
+fix. See `AGENT_PROTOCOL.md` §7 for the contract and examples. Do not defer this
+coverage to a separate issue.
+
 ## The HTTP API
 
 Four invariants. A feature that breaks any of them compiles on its own branch and stops working
