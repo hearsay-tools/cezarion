@@ -320,6 +320,11 @@ export function agentTmpEnv(
   return { TMPDIR: dir, TEMP: dir, TMP: dir };
 }
 
+/** Every place a run's scratch may live: the local directory and each OS-root fallback. */
+export function agentTmpDirLocations(dataDir: string, runId: string): string[] {
+  return safeRunId(runId) ? [agentTmpDir(dataDir, runId), ...osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId))] : [];
+}
+
 /**
  * Reap one run's directory. Scratch, not an artifact: nothing reads it once the
  * agent is gone, and a Continue re-creates it through `agentTmpEnv`. Never
@@ -333,8 +338,7 @@ export function agentTmpEnv(
  */
 export function removeAgentTmpDir(dataDir: string, runId: string): void {
   if (!safeRunId(runId)) return;
-  const locations = [agentTmpDir(dataDir, runId), ...osTempRoots().map((root) => fallbackTmpDir(root, dataDir, runId))];
-  for (const dir of locations) {
+  for (const dir of agentTmpDirLocations(dataDir, runId)) {
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {

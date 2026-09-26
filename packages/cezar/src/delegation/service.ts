@@ -94,6 +94,8 @@ export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
 export class DelegationService {
   private projects = new Map<string, DelegationProject>();
   private serial = new Map<string, Promise<unknown>>();
+  /** How long destroy waits for proven termination; private and overridable so tests need not wait it out. */
+  private terminationTimeoutMs = 30_000;
   registerProject(project: DelegationProject): () => void {
     const existing = this.projects.get(project.id);
     if (existing?.store === project.store && existing.manager === project.manager) return () => {};
@@ -401,8 +403,9 @@ export class DelegationService {
     });
   }
   async inspect(caller: Caller, params: WorkerParams): Promise<WorkerInspection> {
-    const { worker, parent } = this.target(caller, params, 'inspect');
+    const { project, worker, parent } = this.target(caller, params, 'inspect');
     if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    project.manager.settleOrphanedWorkerExecution(worker.id); // #469: an orphan that died after recovery settles
     const outcome = workerOutcome(worker, new Date().toISOString());
     const wait = parent.delegation?.role === 'root' ? parent.delegation.wait : undefined;
     return { workerId: worker.id, parentRunId: parent.id, status: worker.status, workspace: worker.delegation.workspace,
@@ -425,6 +428,7 @@ export class DelegationService {
       return project.store.commitWorkerResult(caller.runId, evidence, project.store.readWorkerResultDiff(caller.runId, workerId));
     }
     authorizeWorker(caller, worker, 'inspect', parent, project.id);
+    project.manager.settleOrphanedWorkerExecution(workerId); // #469: before `settled` is computed
     if (parent?.delegation?.role === 'root' && parent.delegation.receipts.some(receipt => receipt.workerId === workerId && receipt.deletion?.phase === 'pending')) {
       const retained = project.store.readWorkerResult(parent.id, workerId);
       if (!retained || !project.store.canDeleteRun(workerId)) throw new DelegationPolicyError('incompatible_state', 'Worker history deletion evidence is unavailable');
@@ -512,8 +516,15 @@ export class DelegationService {
       persist('terminating', ['process', ...resources]);
       project.manager.requestWorkerStop(workerId);
       let result: WorkerDestroyResult;
-      if (!await project.manager.awaitRunTermination(workerId, 30_000)) {
-        result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: 'Worker termination is not proven; retry cleanup later' };
+      if (!await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true })) {
+        // #469: name what blocks a crashed generation; other causes keep the generic message.
+        const taken = project.manager.takeWorkerTerminationBlocker(workerId);
+        const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
+          : taken.blocker.kind === 'controller' ? `the worker is still controlled by a live cezar (pid ${taken.blocker.pid})`
+          : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${taken.blocker.pids.join(', ')} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
+        if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${reason}` });
+        result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: !taken ? 'Worker termination is not proven; retry cleanup later'
+          : taken.blocker.kind === 'unreadable' ? reason! : `Worker termination is not proven: ${reason}; retry cleanup later` };
       } else {
         persist('cleaning', resources);
         const snapshot = structuredClone(check());

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -117,10 +118,19 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { f.close(); }
   });
 
-  it('a parent reply answers the worker after a restart', async () => {
+  async function replyAfterRestart(crashed: boolean) {
     const f = await askedPair();
     f.close();
-    await restart(false, undefined, eventCheckpoint());
+    const files = eventCheckpoint();
+    if (crashed) {
+      // #469: restore the worker's pre-cancel `starting` proof, as a real crash leaves it, with a dead controller.
+      const proof = join(root, '.ai/cezar/runs', `${f.w.id}.execution.json`), record = proof.replace(/\.execution\.json$/, '.processes.json');
+      expect(store.readWorkerExecution(f.w.id)?.phase).toBe('starting');
+      const dead = spawn(process.execPath, ['-e', '']); await new Promise(resolve => dead.once('exit', resolve));
+      files.set(proof, readFileSync(proof, 'utf8'));
+      files.set(record, JSON.stringify({ ...JSON.parse(readFileSync(record, 'utf8')), controller: { pid: dead.pid, startToken: '1' } }));
+    }
+    await restart(false, undefined, files);
     const credentials = new CredentialRegistry();
     try {
       const parentCaller = credentials.authenticate(credentials.issue('project', f.p.id, randomUUID()))!;
@@ -134,7 +144,9 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       await until(() => said(f.w.id, 'Use the parser'));
       expect(eventsOf(f.w.id, 'user-message').some(event => String(event.text).includes('Use the parser'))).toBe(false);
     } finally { credentials.close(); }
-  });
+  }
+  it('a parent reply answers the worker after a restart', () => replyAfterRestart(false));
+  it('a parent reply answers the worker after a crash left its execution starting (#469)', () => replyAfterRestart(true));
 
   it('holds a worker question while the parent waits on the human, then delivers it behind the answer', async () => {
     process.env.CEZ_DELEGATION = '1';
