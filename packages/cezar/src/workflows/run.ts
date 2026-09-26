@@ -904,20 +904,24 @@ export class RunManager {
     const same = () => this.orphanedWorkerGeneration(runId)?.generation === orphan.generation;
     // >= 500 ms: every probe may be a synchronous darwin `lsof`.
     const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(500, deadline - Date.now()))));
-    // A live controller is another cezar's; an unrecorded (legacy) controller is unknown.
-    if (orphan.record && !recordedProcessLive(orphan.record.controller)) {
-      const targets = orphan.record.processes.filter(entry => entry.startToken !== undefined && recordedProcessLive(entry));
-      const signal = (name: NodeJS.Signals) => {
-        for (const entry of targets) {
-          if (!same()) return;
-          // Re-verified immediately before every signal, exactly: a reused PID is never touched.
-          if (processStartToken(entry.pid) === entry.startToken) try { process.kill(entry.pid, name); } catch { /* already gone */ }
-        }
-      };
-      signal('SIGTERM');
-      const killAt = Math.min(deadline, Date.now() + this.orphanTermGraceMs);
-      while (Date.now() < killAt && targets.some(recordedProcessLive)) await pause();
-      if (targets.some(recordedProcessLive)) signal('SIGKILL');
+    // A live controller is another cezar's: nothing to signal or wait for. Otherwise signal only
+    // recorded, token-verified survivors (none for a legacy record-less generation), then wait
+    // out every other holder until the deadline; the scan's processes are never signalled.
+    if (!orphan.record || !recordedProcessLive(orphan.record.controller)) {
+      if (orphan.record) {
+        const targets = orphan.record.processes.filter(entry => entry.startToken !== undefined && recordedProcessLive(entry));
+        const signal = (name: NodeJS.Signals) => {
+          for (const entry of targets) {
+            if (!same()) return;
+            // Re-verified immediately before every signal, exactly: a reused PID is never touched.
+            if (processStartToken(entry.pid) === entry.startToken) try { process.kill(entry.pid, name); } catch { /* already gone */ }
+          }
+        };
+        signal('SIGTERM');
+        const killAt = Math.min(deadline, Date.now() + this.orphanTermGraceMs);
+        while (Date.now() < killAt && targets.some(recordedProcessLive)) await pause();
+        if (targets.some(recordedProcessLive)) signal('SIGKILL');
+      }
       while (!this.settleOrphanedWorkerExecution(runId, { fresh: true }) && Date.now() < deadline && same()) await pause();
     }
     if (!same()) return;

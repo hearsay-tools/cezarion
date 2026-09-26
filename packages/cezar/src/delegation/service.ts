@@ -94,6 +94,8 @@ export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
 export class DelegationService {
   private projects = new Map<string, DelegationProject>();
   private serial = new Map<string, Promise<unknown>>();
+  /** How long destroy waits for proven termination; private and overridable so tests need not wait it out. */
+  private terminationTimeoutMs = 30_000;
   registerProject(project: DelegationProject): () => void {
     const existing = this.projects.get(project.id);
     if (existing?.store === project.store && existing.manager === project.manager) return () => {};
@@ -514,7 +516,7 @@ export class DelegationService {
       persist('terminating', ['process', ...resources]);
       project.manager.requestWorkerStop(workerId);
       let result: WorkerDestroyResult;
-      if (!await project.manager.awaitRunTermination(workerId, 30_000, { reapOrphans: true })) {
+      if (!await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true })) {
         // #469: name what blocks a crashed generation; other causes keep the generic message.
         const taken = project.manager.takeWorkerTerminationBlocker(workerId);
         const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'

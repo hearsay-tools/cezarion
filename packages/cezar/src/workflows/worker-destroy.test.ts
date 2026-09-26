@@ -634,6 +634,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
     it('a survivor found only by the working-directory scan is never signalled and keeps the worktree', async () => {
       const { w, child, prior, reopened, other, service } = await crashed('failed');
+      // The survivor never exits, so each destroy waits out its deadline (#469); keep it short.
+      (service as unknown as { terminationTimeoutMs: number }).terminationTimeoutMs = 1_500;
       try {
         rmSync(recordPath(w.id));
         await other.recover();
@@ -723,6 +725,20 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         await until(() => reopened.readWorkerExecution(w.id)?.phase === 'complete');
         await until(() => !!wait()?.outcomes.some(outcome => outcome.workerId === w.id));
         expect(wait()!.outcomes).toEqual([expect.objectContaining({ workerId: w.id, revision: 0, status: 'failed' })]);
+      } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it('destroy waits out a scan-only survivor of a legacy generation instead of returning at once', async () => {
+      const { w, child, reopened, other, service } = await crashed('failed');
+      try {
+        rmSync(recordPath(w.id));
+        await other.recover();
+        expect(reopened.readWorkerExecution(w.id)).toMatchObject({ phase: 'starting' });
+        // The survivor exits on its own well inside destroy's deadline; nothing signals it.
+        const exit = setTimeout(() => child.proc.kill('SIGKILL'), 1_000);
+        try { expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] }); }
+        finally { clearTimeout(exit); }
+        expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
       } finally { other.dispose(); reopened.flush(); }
     });
 

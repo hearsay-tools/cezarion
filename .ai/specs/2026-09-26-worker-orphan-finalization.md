@@ -151,7 +151,8 @@ Callers:
 
 `awaitRunTermination(runId, timeoutMs, { reapOrphans: true })` is passed only by
 `destroySerialized`. It applies when the finalizer's preconditions hold, the probe says
-`alive`, and the controller is dead:
+`alive`, and the controller is dead or unrecorded (legacy). A legacy generation has nothing to
+signal, so it skips step 1 and still waits in step 3:
 
 1. For each recorded process whose token still matches: SIGTERM. Poll for up to 10 s,
    **re-verify the token**, then SIGKILL, all inside the caller's timeout (30 s).
