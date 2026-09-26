@@ -35,7 +35,10 @@ export type RuntimeAuthProfileResolver = (
  * finds the credentials were never gone. One callback rather than two on purpose — every caller
  * wires it to the same `provider-status` fan-out, and the cockpit already folds a `connected` row
  * over a latched one (`applyProviderStatusRow` drops the stale incident id), so recovery needs no
- * new wiring at any of the observer's construction sites.
+ * new wiring at any of the observer's construction sites. The channel speaks DEFAULT rows (the
+ * cockpit's parser drops `profileId`), so a DEFAULT recovery publishes its verified row while a
+ * NAMED recovery publishes the provider's current cached default row — the account's own answer
+ * stays under the account, and a disconnected default is never shown connected.
  */
 export function watchProviderRuntimeAuthFailures(
   store: RunStore,
@@ -87,7 +90,18 @@ export function watchProviderRuntimeAuthFailures(
           configDir: target.configDir,
         })
         : await providerAuth.verifyRuntimeAuthFailure(provider);
-      if (recovered) onProviderStatus(recovered);
+      if (!recovered) return;
+      if (target.kind !== 'profile') {
+        onProviderStatus(recovered);
+        return;
+      }
+      // A NAMED recovery answers for one account, not for the provider's default login, and this
+      // channel carries default rows — the cockpit's parser drops `profileId`, so publishing the
+      // account row would mark a disconnected default connected. Publish the provider's CURRENT
+      // default row (cache only, no spawn) so observers see the latch lift with the default's own
+      // answer; with nothing cached there is no default row to reconcile on this channel.
+      const defaultRow = providerAuth.peekStatus()?.providers.find(({ provider: id }) => id === provider);
+      if (defaultRow) onProviderStatus(defaultRow);
     })().catch(() => {});
   };
 

@@ -406,10 +406,16 @@ describe('watchProviderRuntimeAuthFailures', () => {
       expect(runCommand).toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
         CLAUDE_CONFIG_DIR: '/work',
       });
-      expect(onProviderStatus.mock.calls.map(([status]) => status)).toEqual([
-        expect.objectContaining({ provider: 'claude', status: 'disconnected' }),
-        expect.objectContaining({ provider: 'claude', status: 'connected', profileId: 'work' }),
-      ]);
+      // The account's answer is filed under the account; the workspace channel carries DEFAULT
+      // rows only, and with no cached default answer there is nothing to reconcile on it.
+      expect(onProviderStatus).toHaveBeenCalledTimes(1);
+      expect(onProviderStatus).toHaveBeenCalledWith(expect.objectContaining({
+        provider: 'claude',
+        status: 'disconnected',
+        authFailureId: 'auth-incident-1',
+      }));
+      expect(providerAuth.peekProfileStatus('claude', 'work'))
+        .toEqual({ provider: 'claude', status: 'connected', profileId: 'work' });
     });
 
     it('keeps the latch when the recorded account itself confirms the logout', async () => {
@@ -501,12 +507,47 @@ describe('watchProviderRuntimeAuthFailures', () => {
       expect(runCommand).toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
         CLAUDE_CONFIG_DIR: '/work',
       });
-      expect(onProviderStatus).toHaveBeenCalledTimes(2);
-      expect(onProviderStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+      // The account's answer is filed under the account, never broadcast as the default's.
+      expect(onProviderStatus).toHaveBeenCalledTimes(1);
+      expect(onProviderStatus).toHaveBeenCalledWith(expect.objectContaining({
         provider: 'claude',
-        status: 'connected',
-        profileId: 'work',
+        status: 'disconnected',
       }));
+    });
+
+    it('publishes the default row, not the account row, when a named account recovers', async () => {
+      accountAwareRunCommand({ stdout: '{"loggedIn":true}', exitCode: 0 });
+      // The workspace holds a complete default answer, as it does after any page load.
+      await providerAuth.status();
+      const onProviderStatus = watch(workAccountResolver);
+      const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
+
+      const run = store.createRun({
+        title: 'named recovery',
+        workflow: 'quick-task',
+        task: 'work',
+        runner: 'claude',
+        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+      });
+      store.updateStep(run.id, 'implement', { profileId: 'work' });
+      store.appendEvent(run.id, {
+        type: 'error',
+        stepId: 'implement',
+        message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+      });
+      await verified(verifying);
+
+      expect(onProviderStatus.mock.calls.map(([status]) => status)).toEqual([
+        expect.objectContaining({
+          provider: 'claude',
+          status: 'disconnected',
+          authFailureId: 'auth-incident-1',
+        }),
+        // The named account's answer stays under the account; the workspace channel carries the
+        // provider's DEFAULT row, so a disconnected default is never shown connected. A row with
+        // `profileId` here would be dropped by the cockpit's parser and misread as the default.
+        { provider: 'claude', status: 'connected' },
+      ]);
     });
 
     it('resolves a recorded account through the workspace store by default', async () => {
@@ -551,12 +592,14 @@ describe('watchProviderRuntimeAuthFailures', () => {
       expect(runCommand).toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
         CLAUDE_CONFIG_DIR: '/work-from-store',
       });
-      expect(onProviderStatus).toHaveBeenCalledTimes(2);
-      expect(onProviderStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+      // Filed under the account, never broadcast as the default's answer.
+      expect(onProviderStatus).toHaveBeenCalledTimes(1);
+      expect(onProviderStatus).toHaveBeenCalledWith(expect.objectContaining({
         provider: 'claude',
-        status: 'connected',
-        profileId: 'work',
+        status: 'disconnected',
       }));
+      expect(providerAuth.peekProfileStatus('claude', 'work'))
+        .toEqual({ provider: 'claude', status: 'connected', profileId: 'work' });
 
       // Leave the shared per-worker sandbox as it was found.
       await mergeWriteAgentAccounts((current) => ({
