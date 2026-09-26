@@ -963,7 +963,7 @@ function NotifyWebhookToggle({
       title={on ? `Status changes go to ${webhookLabel(url)}` : `Check to send this task's status changes to ${webhookLabel(url)}`}
       className="flex min-h-11 items-center justify-between gap-3 px-0 py-3 text-left"
     >
-      <span className="min-w-0"><span className="block text-[13px] font-medium">Notify webhook</span><span className="block truncate text-[12px] text-muted-foreground">Send status changes to {webhookLabel(url)}</span></span>
+      <span className="min-w-0"><span className="block text-[13px] font-medium">Notify webhook</span><span data-slot="notify-webhook-subtitle" className="block truncate text-[12px] text-muted-foreground">Send status changes</span></span>
       <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
     </button>
   )

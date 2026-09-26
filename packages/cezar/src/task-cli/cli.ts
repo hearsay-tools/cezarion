@@ -61,7 +61,7 @@ const TIMEOUT_FLAG: FlagSpec = { type: 'string', help: `<1-${MAX_TIMEOUT_SECONDS
 
 export const OPERATIONS: Record<string, Operation> = {
   start: {
-    args: "'<task>' | --task-file <path|->",
+    args: "--task-file <path|-> | '<task>'",
     description: 'Start a task in the cockpit serving this checkout.',
     positionals: [0, 1],
     flags: {
@@ -174,6 +174,17 @@ export function taskHelp(operation?: string): string {
       return [`  cez task ${name} ${op.args}`.trimEnd(), `    ${op.description}`];
     }), '', 'Options:',
     ...[...flags].map(([flag, spec]) => `  --${flag} ${spec.help}`), '',
+    ...(names.includes('start') ? [
+      'Safe task input (file or stdin):',
+      '  cez task start --task-file task.md',
+      "  cez task start --task-file - <<'EOF'",
+      'Fix the `cez task` docs; keep $(example) literal.',
+      'EOF', '',
+      'POSIX shells expand backticks and $() in double-quoted arguments',
+      'before the CLI receives the text. Do not put raw backticks in double-quoted task arguments.',
+      'Use --task-file PATH or --task-file - with a quoted heredoc delimiter as above.',
+      "For short tasks, a single-quoted positional argument still works: cez task start 'Fix the typo'.", '',
+    ] : []),
     'Commands find the running cockpit that serves this checkout (ports 4321-4370) and print JSON.',
     'notify: with a task webhook set in Settings → General, start notifies it unless --no-notify;',
     'the webhook gets task.status, task.question, task.activity and task.subscribed POSTs.',

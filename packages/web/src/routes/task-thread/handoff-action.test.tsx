@@ -88,8 +88,11 @@ describe('Hand off', () => {
 
     const dialog = within(await screen.findByRole('dialog'))
     expect(dialog.getByText('Hand off to webhook')).toBeTruthy()
-    // The webhook is named by host and path — never the query string that may hold a secret.
-    expect(document.querySelector('[data-slot="handoff-dialog"]')?.textContent).toContain('bot.example/hooks/cez')
+    // Primary copy stays short. Host and path are the description tooltip, never the query string (#614).
+    const description = document.querySelector('[data-slot="dialog-description"]')
+    expect(description?.textContent).toContain("this task's status updates")
+    expect(description?.textContent).not.toContain('bot.example')
+    expect(description?.querySelector('[data-webhook-destination]')?.getAttribute('title')).toContain('bot.example/hooks/cez')
     expect(document.querySelector('[data-slot="handoff-dialog"]')?.textContent).not.toContain('secret')
     expect(dialog.getByText('The note goes to the webhook only, not to the agent.')).toBeTruthy()
 
@@ -137,7 +140,9 @@ describe('Notifying chip', () => {
     renderHeader(run({ notify: true }))
     const menu = await openMenu()
     expect(screen.queryByRole('button', { name: 'Hand off to webhook' })).toBeNull()
-    expect(menu.getByText('bot.example/hooks/cez')).toBeTruthy()
+    const destination = menu.getByText('Task webhook')
+    expect(destination.textContent).not.toContain('bot.example')
+    expect(destination.getAttribute('title')).toContain('bot.example/hooks/cez')
   })
 
   it('sends another note from "Send a note…"', async () => {
@@ -145,6 +150,9 @@ describe('Notifying chip', () => {
     renderHeader(run({ notify: true }))
     fireEvent.click((await openMenu()).getByRole('menuitem', { name: /Send a note/ }))
     const dialog = within(await screen.findByRole('dialog'))
+    const noteDescription = document.querySelector('[data-slot="dialog-description"]')
+    expect(noteDescription?.textContent).not.toContain('bot.example')
+    expect(noteDescription?.querySelector('[data-webhook-destination]')?.getAttribute('title')).toContain('bot.example/hooks/cez')
     const send = dialog.getByRole('button', { name: 'Send note' })
     // A note dialog with no note has nothing to send.
     expect(send.hasAttribute('disabled')).toBe(true)
