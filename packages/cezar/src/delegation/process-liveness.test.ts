@@ -55,6 +55,11 @@ describe('process liveness (#469)', () => {
       expect(recordedProcessLive({ pid: proc.pid!, startToken: token })).toBe(true);
       expect(recordedProcessLive({ pid: proc.pid! })).toBe(true);
       expect(recordedProcessLive({ pid: proc.pid!, startToken: `${token}0` })).toBe(false);
+      // Liveness only: a side without the boot id compares by starttime; two boot ids must agree.
+      const start = token!.split(':')[1]!;
+      expect(recordedProcessLive({ pid: proc.pid!, startToken: start })).toBe(true);
+      expect(recordedProcessLive({ pid: proc.pid!, startToken: `${start}0` })).toBe(false);
+      expect(recordedProcessLive({ pid: proc.pid!, startToken: `00000000-0000-0000-0000-000000000000:${start}` })).toBe(false);
       const record = (processes: { pid: number; startToken?: string }[]) => ({ generation: 'g', controller: { pid: process.pid }, processes });
       expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: `${token}0` }]), paths: [dir] })).toBe('gone');
       expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: token }]), paths: [dir] })).toBe('alive');

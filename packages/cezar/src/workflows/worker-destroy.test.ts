@@ -639,8 +639,11 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         await other.recover();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process', 'worktree', 'branch']),
-          error: expect.stringMatching(new RegExp(`^Worker termination is not proven: pid .*\\b${child.proc.pid}\\b.* still use the worker worktree; retry cleanup later$`)) });
-        expect(reopened.readEvents(w.id).filter(event => event.type === 'lifecycle' && String(event.message).startsWith('destroy blocked:') && String(event.message).includes(String(child.proc.pid)))).toHaveLength(1);
+          error: expect.stringMatching(new RegExp(`^Worker termination is not proven: process(es)? (\\d+, )*${child.proc.pid}(, \\d+)* still holds? the worker's worktree or scratch; retry cleanup later$`)) });
+        // A retry with the same blocker set appends no second event.
+        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete' });
+        expect(reopened.readEvents(w.id).filter(event => event.type === 'lifecycle' && String(event.message).startsWith('destroy blocked:'))).toEqual([
+          expect.objectContaining({ message: `destroy blocked: process ${child.proc.pid} still holds the worker's worktree or scratch` })]);
         expect(existsSync(workspace(w).path)).toBe(true);
         expect(child.proc.exitCode).toBeNull(); expect(child.proc.signalCode).toBeNull();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
@@ -656,8 +659,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         setController(w.id, { pid: foreign.proc.pid!, ...(token ? { startToken: token } : {}) });
         await other.recover();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
-        expect(other.continueRun(w.id, { text: 'try again' })).toMatchObject({ ok: false, error: expect.stringContaining('checkpoint') });
-        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process']) });
+        expect(other.continueRun(w.id, { text: 'try again' })).toEqual({ ok: false, error: `a process of the previous execution is still running (pid ${foreign.proc.pid})` });
+        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process']),
+          error: `Worker termination is not proven: the worker is still controlled by a live cezar (pid ${foreign.proc.pid}); retry cleanup later` });
         expect(existsSync(workspace(w).path)).toBe(true);
         expect(foreign.proc.exitCode).toBeNull(); expect(foreign.proc.signalCode).toBeNull();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
@@ -671,9 +675,22 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         writeFileSync(recordPath(w.id), shape === 'malformed' ? '{broken' : JSON.stringify({ ...readRecord(w.id), generation: randomUUID() }));
         await other.recover();
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
-        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process']) });
+        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process']),
+          error: 'worker process record is unreadable; termination cannot be proven' });
         expect(existsSync(workspace(w).path)).toBe(true);
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
+      } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it('resume right after a cached alive probe re-probes, so a survivor that just died does not refuse it', async () => {
+      const { w, child, prior, reopened, other, launches } = await crashed('failed');
+      try {
+        await other.recover();
+        expect(reopened.readWorkerExecution(w.id)).toEqual(prior); // cached "alive" for 2 s
+        child.proc.kill('SIGKILL'); await child.exited;
+        expect(other.continueRun(w.id, { text: 'resume' })).toEqual({ ok: true });
+        await until(() => launches() === 2);
+        expect(reopened.readWorkerExecution(w.id)?.generation).not.toBe(prior.generation);
       } finally { other.dispose(); reopened.flush(); }
     });
 
@@ -693,18 +710,19 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     it('a parked parent wait resolves once a survivor dies after recovery', async () => {
       const { w, child, reopened, other } = await crashed('failed');
       (other as unknown as { orphanReprobeMs: number }).orphanReprobeMs = 100;
-      const root = reopened.getRun(parent.id)!;
-      if (root.delegation?.role !== 'root') throw Error('fixture');
-      reopened.commitDelegation([{ id: parent.id, delegation: { ...root.delegation, wait: { id: randomUUID(), workerIds: [w.id],
+      const owner = reopened.getRun(parent.id)!;
+      if (owner.delegation?.role !== 'root') throw Error('fixture');
+      reopened.commitDelegation([{ id: parent.id, delegation: { ...owner.delegation, wait: { id: randomUUID(), workerIds: [w.id],
         revisions: [{ workerId: w.id, revision: 0 }], deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'parked', outcomes: [] } } }]);
-      const wait = () => { const run = reopened.getRun(parent.id); return run?.delegation?.role === 'root' ? run.delegation.wait : undefined; };
+      const wait = () => { const run = reopened.getRun(parent.id); return run?.delegation?.role === 'root' ? run.delegation.wait ?? run.delegation.lastWait : undefined; };
       try {
         await other.recover();
         expect(reopened.readWorkerExecution(w.id)?.phase).toBe('starting');
         expect(wait()?.outcomes).toEqual([]);
         child.proc.kill('SIGKILL'); await child.exited;
         await until(() => reopened.readWorkerExecution(w.id)?.phase === 'complete');
-        await until(() => wait() === undefined || wait()!.phase === 'wake-pending' || wait()!.outcomes.some(outcome => outcome.workerId === w.id));
+        await until(() => !!wait()?.outcomes.some(outcome => outcome.workerId === w.id));
+        expect(wait()!.outcomes).toEqual([expect.objectContaining({ workerId: w.id, revision: 0, status: 'failed' })]);
       } finally { other.dispose(); reopened.flush(); }
     });
 

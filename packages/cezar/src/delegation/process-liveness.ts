@@ -49,18 +49,27 @@ function pidExists(pid: number): boolean {
   return process.platform !== 'linux' || procStat(pid)?.state !== 'Z';
 }
 
+const LINUX_TOKEN = /^(?:[0-9a-f-]{36}:)?(\d+)$/;
+/** Liveness-only comparison: when exactly one Linux token lacks the boot id (it was unreadable on one
+ * side), the `starttime` suffix decides. Reaping still requires an exact match. */
+function sameIncarnation(recorded: string, current: string): boolean {
+  if (recorded === current) return true;
+  const a = LINUX_TOKEN.exec(recorded), b = LINUX_TOKEN.exec(current);
+  return !!a && !!b && recorded.includes(':') !== current.includes(':') && a[1] === b[1];
+}
+
 /** Live and the same incarnation. A token-less entry (or an unreadable current token) counts while the PID exists. */
 export function recordedProcessLive(entry: RecordedProcess): boolean {
   if (!pidExists(entry.pid)) return false;
   if (entry.startToken === undefined) return true;
   const current = processStartToken(entry.pid);
-  return current === undefined || current === entry.startToken;
+  return current === undefined || sameIncarnation(entry.startToken, current);
 }
 
 export function isCurrentProcess(entry: RecordedProcess): boolean {
   if (entry.pid !== process.pid) return false;
   const own = processStartToken(process.pid);
-  return entry.startToken === undefined || own === undefined || entry.startToken === own;
+  return entry.startToken === undefined || own === undefined || sameIncarnation(entry.startToken, own);
 }
 
 /** PIDs (never this process) whose working directory is one of `dirs` or beneath it, in one scan
@@ -91,12 +100,19 @@ export function processesWithCwdUnder(dirs: string | readonly string[], platform
   return [...new Set(found)];
 }
 
+export type GenerationProbe = { liveness: GenerationLiveness; controller?: number; pids: number[] };
+
 /** A missing record (legacy) relies on the working-directory scan alone. `paths` are the
- * worktree and every scratch location, which finalization deletes. */
-export function probeGeneration({ record, paths }: { record?: WorkerProcessRecord; paths: readonly string[] }): GenerationLiveness {
-  if (record && !isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) return 'alive';
-  if (record?.processes.some(recordedProcessLive)) return 'alive';
+ * worktree and every scratch location, which finalization deletes. A live foreign controller
+ * short-circuits the scan; otherwise `pids` names every live recorded or scanned process. */
+export function inspectGeneration({ record, paths }: { record?: WorkerProcessRecord; paths: readonly string[] }): GenerationProbe {
+  if (record && !isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
+  const recorded = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];
   const scan = processesWithCwdUnder(paths);
-  if (scan === 'unknown') return 'unknown';
-  return scan.length ? 'alive' : 'gone';
+  const pids = [...new Set([...recorded, ...(scan === 'unknown' ? [] : scan)])];
+  return { liveness: pids.length ? 'alive' : scan === 'unknown' ? 'unknown' : 'gone', pids };
+}
+
+export function probeGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[] }): GenerationLiveness {
+  return inspectGeneration(input).liveness;
 }
