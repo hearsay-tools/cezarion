@@ -162,7 +162,7 @@ export function RunHeader({
             {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
           </p>
           <EditableTitle run={run} />
-          <Pill dot={attention.tone} pulse={attention.pulse}>
+          <Pill dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>
             {attention.label}{queuePosition !== undefined ? ` #${queuePosition}` : ''}
           </Pill>
           <span className="ml-auto flex shrink-0 items-center gap-1 md:gap-2.5">

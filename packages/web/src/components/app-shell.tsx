@@ -619,13 +619,13 @@ function SidebarContent({
                       {inboxCount}
                     </span>
                   ) : null}
-                  {/* Unread done items (#unread-done-items): same violet count grammar as the
-                      Inbox badge — the two share the "needs a human" hue. */}
+                  {/* Unread done items (#unread-done-items): a neutral count (#617). It is a
+                      number, not a status, and the status hues now each mean one thing. */}
                   {item.badge === 'tasks-unread' && unreadCount ? (
                     <span
                       data-slot="nav-unread-badge"
                       title={`${unreadCount} unread finished ${unreadCount === 1 ? 'task' : 'tasks'}`}
-                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[11px] font-semibold tabular-nums text-accent-strong-foreground"
+                      className="ml-auto rounded-full bg-muted px-1.5 py-px text-[11px] font-semibold tabular-nums text-foreground"
                     >
                       {unreadCount}
                     </span>

@@ -62,7 +62,7 @@ import {
 } from '@/lib/global-tasks'
 import { scopeTo } from '@/lib/project-router'
 import { allProjectTags } from '@/lib/project-tags'
-import { canBeUnread, isReadDoneItem, isUnread } from '@/lib/read-state'
+import { canBeUnread, isReadDoneItem, isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { runTitle, type ListView } from '@/lib/task-groups'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
@@ -757,9 +757,10 @@ function TaskRow({
           >
             {runTitle(run)}
           </Link>
+          {/* In the run's outcome colour, like every unread marker (#617). */}
           {unread ? (
             <StatusDot
-              tone="accent"
+              tone={unreadMarkerTone(run)}
               role="img"
               aria-label="unread"
               title="Unread — not opened since it finished"
@@ -768,7 +769,7 @@ function TaskRow({
           ) : null}
         </span>
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button type="button" aria-expanded={resourcesOpen} aria-label={`${resourcesOpen ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} onClick={() => setResourcesOpen((value) => !value)} aria-describedby={`global-status-${run.projectId}-${run.id}`} title="Resources and actions" className="min-h-[26px] rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted"><Pill id={`global-status-${run.projectId}-${run.id}`} dot={attention.tone} pulse={attention.pulse}>{attention.label}</Pill></button>
+          <button type="button" aria-expanded={resourcesOpen} aria-label={`${resourcesOpen ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} onClick={() => setResourcesOpen((value) => !value)} aria-describedby={`global-status-${run.projectId}-${run.id}`} title="Resources and actions" className="min-h-[26px] rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted"><Pill id={`global-status-${run.projectId}-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>{attention.label}</Pill></button>
       {showProject ? (
         <span className="text-[11px] text-muted-foreground">
           <Link to={scopeTo(run.projectId, '/')} className="truncate hover:text-foreground">

@@ -56,7 +56,9 @@ export function AutoResumeHint({ run }: { run: ApiRun }) {
       role="status"
       className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs text-muted-foreground"
     >
-      <StatusDot tone="pending" pulse />
+      {/* The status key's `scheduled` mark (#617): a still neutral ring — parked on a clock,
+          the same answer `deriveAttention` gives this run everywhere else. */}
+      <StatusDot tone="neutral" shape="ring" />
       <span>
         Usage limit reached — this task resumes automatically at{' '}
         <time dateTime={run.autoResumeAt} className="font-medium text-foreground">

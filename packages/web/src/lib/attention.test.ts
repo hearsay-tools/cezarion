@@ -42,13 +42,13 @@ const ALL_STATUSES: readonly RunStatus[] = [
 
 describe('deriveAttention', () => {
   const cases: ReadonlyArray<[RunStatus, Attention]> = [
-    ['waiting', { bucket: 'waiting', tone: 'pending', pulse: true, label: 'needs you' }],
-    ['review', { bucket: 'waiting', tone: 'accent', pulse: true, label: 'needs review' }],
-    ['running', { bucket: 'running', tone: 'running', pulse: true, label: 'running' }],
-    ['queued', { bucket: 'none', tone: 'neutral', pulse: false, label: 'queued' }],
-    ['done', { bucket: 'none', tone: 'success', pulse: false, label: 'done' }],
-    ['failed', { bucket: 'error', tone: 'danger', pulse: false, label: 'failed' }],
-    ['cancelled', { bucket: 'none', tone: 'neutral', pulse: false, label: 'cancelled' }],
+    ['waiting', { bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' }],
+    ['review', { bucket: 'waiting', tone: 'info', shape: 'filled', pulse: true, label: 'needs review' }],
+    ['running', { bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running' }],
+    ['queued', { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }],
+    ['done', { bucket: 'none', tone: 'success', shape: 'filled', pulse: false, label: 'done' }],
+    ['failed', { bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' }],
+    ['cancelled', { bucket: 'none', tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' }],
   ]
 
   it.each(cases)('maps %s', (status, expected) => {
@@ -150,7 +150,8 @@ describe('a run waiting out a usage limit', () => {
     // 2026-08-03-auto-resume-after-usage-limit) — amber and still, like `queued`.
     expect(deriveAttention(scheduled)).toEqual({
       bucket: 'none',
-      tone: 'pending',
+      tone: 'neutral',
+      shape: 'ring',
       pulse: false,
       label: 'scheduled',
     })
@@ -182,6 +183,7 @@ describe("running activity: 'monitoring' (#490)", () => {
     expect(deriveAttention(run({ status: 'running', activity: 'monitoring' }))).toEqual({
       bucket: 'running',
       tone: 'running',
+      shape: 'ring',
       pulse: true,
       label: 'monitoring',
     })
@@ -210,19 +212,68 @@ describe('tone vocabulary', () => {
 
   it('every status yields a tone StatusDot can paint', () => {
     const tones = new Set(ALL_STATUSES.map((status) => deriveAttention(run({ status })).tone))
-    expect([...tones].sort()).toEqual(['accent', 'danger', 'neutral', 'pending', 'running', 'success'])
+    expect([...tones].sort()).toEqual(['danger', 'info', 'neutral', 'pending', 'running', 'success'])
   })
 })
 
 it.each(['registered', 'parked', 'wake-pending'] as const)('distinguishes worker wait %s without masking human attention', phase => {
   const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase, outcomes: [] } } })
-  expect(deriveAttention(record).label).toBe(phase === 'parked' ? 'waiting on workers' : 'needs you')
+  expect(deriveAttention(record).label).toBe(phase === 'parked' ? 'waiting on 1 worker' : 'needs you')
   expect(wantsAttention(record)).toBe(phase !== 'parked')
   if (phase === 'parked') expect(deriveAttention(record).pulse).toBe(false)
 })
 
 it('keeps a parked parent with a pending human ask in list attention without transcript context', () => {
   const record = run({ status: 'waiting', hasPendingHumanAsk: true, delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['child'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] } } })
-  expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', pulse: true, label: 'needs you' })
+  expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
   expect(wantsAttention(record)).toBe(true)
+})
+
+/** The status key (#617): hue says the family, shape says whether it is waiting. One row per
+ *  state in the issue's table, so a regression in any rung is named by the row it broke. */
+describe('status key (#617)', () => {
+  const parkedRoot = (wait: Record<string, unknown> = {}) => run({
+    status: 'waiting',
+    delegation: { role: 'root', permissions: [], receipts: [], wait: { id: 'wait', workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [], ...wait } },
+  } as Partial<RunRecord>)
+  const rows: ReadonlyArray<[string, RunRecord, Pick<Attention, 'tone' | 'shape' | 'pulse' | 'label'>]> = [
+    ['needs you', run({ status: 'waiting' }), { tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' }],
+    ['needs review', run({ status: 'review' }), { tone: 'info', shape: 'filled', pulse: true, label: 'needs review' }],
+    ['running', run({ status: 'running' }), { tone: 'running', shape: 'filled', pulse: true, label: 'running' }],
+    ['monitoring', run({ status: 'running', activity: 'monitoring' }), { tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' }],
+    ['waiting on workers', parkedRoot(), { tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers' }],
+    ['queued', run({ status: 'queued' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }],
+    ['scheduled', run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' }), { tone: 'neutral', shape: 'ring', pulse: false, label: 'scheduled' }],
+    ['done', run({ status: 'done' }), { tone: 'success', shape: 'filled', pulse: false, label: 'done' }],
+    ['failed', run({ status: 'failed' }), { tone: 'danger', shape: 'filled', pulse: false, label: 'failed' }],
+    ['cancelled', run({ status: 'cancelled' }), { tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' }],
+  ]
+
+  it.each(rows)('%s', (_name, record, expected) => {
+    expect(deriveAttention(record)).toMatchObject(expected)
+  })
+
+  const look = (record: RunRecord) => { const { tone, shape } = deriveAttention(record); return `${tone}/${shape}` }
+  it('separates the pairs that used to collide', () => {
+    expect(look(run({ status: 'running' }))).not.toBe(look(run({ status: 'running', activity: 'monitoring' })))
+    expect(look(parkedRoot())).not.toBe(look(run({ status: 'done' })))
+    expect(look(run({ status: 'queued' }))).not.toBe(look(run({ status: 'cancelled' })))
+  })
+
+  it('no status rung paints the brand accent any more', () => {
+    for (const [, record] of rows) expect(deriveAttention(record).tone).not.toBe('accent')
+  })
+
+  it('counts one worker in the singular, and says no number when the list row carries none', () => {
+    expect(deriveAttention(parkedRoot({ workerIds: ['00000000-0000-4000-8000-000000000001'] })).label).toBe('waiting on 1 worker')
+    // The slim index projection (global Tasks, palette) has only the phase: no count to claim.
+    const slim = run({ status: 'waiting', delegation: { role: 'root', wait: { phase: 'parked' } } } as unknown as Partial<RunRecord>)
+    expect(deriveAttention(slim)).toMatchObject({ shape: 'workers', label: 'waiting on workers' })
+  })
+
+  it('a root waiting on worker replies is still its own workers; a worker waiting on its parent is a ring', () => {
+    expect(deriveAttention(parkedRoot({ requestIds: ['00000000-0000-4000-8000-000000000009'] }))).toMatchObject({ shape: 'workers', label: 'waiting on worker replies' })
+    const worker = run({ status: 'waiting', delegation: { role: 'worker', wait: { phase: 'parked', requestIds: ['00000000-0000-4000-8000-000000000009'] } } } as unknown as Partial<RunRecord>)
+    expect(deriveAttention(worker)).toMatchObject({ tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' })
+  })
 })

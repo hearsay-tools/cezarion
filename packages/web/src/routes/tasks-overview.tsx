@@ -30,7 +30,7 @@ import { toast } from '@/components/ui/toaster'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { deriveAttention } from '@/lib/attention'
 import { shortAge } from '@/lib/format'
-import { isReadDoneItem, isUnread, unreadDoneCount } from '@/lib/read-state'
+import { isReadDoneItem, isUnread, unreadDoneCount, unreadMarkerTone } from '@/lib/read-state'
 import {
   isColumnExpanded,
   normalizeExpandedColumns,
@@ -448,7 +448,7 @@ function SummaryTasksTable({ projectName, runs, positions, onRename, onTogglePin
             <td className="py-5 pr-4 align-top">
               <TitleCell run={run} to={`/tasks/${run.id}`} onRename={onRename} onTogglePin={onTogglePin} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button type="button" aria-label={`${open ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} aria-expanded={open} aria-controls={detailId} aria-describedby={`summary-status-${run.id}`} onClick={() => setExpanded((current) => { const next = new Set(current); if (open) next.delete(run.id); else next.add(run.id); return next })} className="inline-flex min-h-[26px] items-center gap-1 rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"><Pill id={`summary-status-${run.id}`} dot={attention.tone} pulse={attention.pulse}>{attention.label}{scheduled ? ` ${scheduled.label}` : ''}</Pill></button>
+                <button type="button" aria-label={`${open ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} aria-expanded={open} aria-controls={detailId} aria-describedby={`summary-status-${run.id}`} onClick={() => setExpanded((current) => { const next = new Set(current); if (open) next.delete(run.id); else next.add(run.id); return next })} className="inline-flex min-h-[26px] items-center gap-1 rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"><Pill id={`summary-status-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>{attention.label}{scheduled ? ` ${scheduled.label}` : ''}</Pill></button>
                 {projectName ? <span className="text-xs text-muted-foreground">{projectName}</span> : null}
                 {run.status === 'queued' ? <span className="text-xs text-muted-foreground">#{positions.get(run.id)} in queue</span> : null}
 
@@ -743,6 +743,7 @@ function TaskTableCell({
               queue position — the row's whole answer to "what is this waiting for?". */}
           <Pill
             dot={attention.tone}
+            shape={attention.shape}
             pulse={attention.pulse}
             title={scheduled?.title ?? attention.label}
             className="w-full max-w-full overflow-hidden"
@@ -883,10 +884,10 @@ function TitleCell({
       >
         {title}
       </Link>
-      {/* The unread marker — same trailing violet dot as the sidebar row. */}
+      {/* The unread marker — the sidebar row's trailing dot, in the run's outcome colour (#617). */}
       {unread ? (
         <StatusDot
-          tone="accent"
+          tone={unreadMarkerTone(run)}
           role="img"
           aria-label="unread"
           title="Unread — not opened since it finished"
@@ -1019,7 +1020,7 @@ function TaskCard({
       className="cursor-pointer border-b border-border py-5 first:pt-0 last:border-0 last:pb-0"
     >
       <div className="flex flex-wrap items-start gap-2.5">
-        <button data-slot="mobile-resources-toggle" type="button" aria-controls={`mobile-resources-${run.id}`} aria-describedby={`mobile-status-${run.id}`} aria-label={resourcesOpen ? 'Hide resources' : 'Show resources'} title={resourcesOpen ? 'Hide resources' : 'Show resources'} aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}><Pill id={`mobile-status-${run.id}`} dot={attention.tone} pulse={attention.pulse} className="mt-px shrink-0" title={scheduled?.title}>
+        <button data-slot="mobile-resources-toggle" type="button" aria-controls={`mobile-resources-${run.id}`} aria-describedby={`mobile-status-${run.id}`} aria-label={resourcesOpen ? 'Hide resources' : 'Show resources'} title={resourcesOpen ? 'Hide resources' : 'Show resources'} aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}><Pill id={`mobile-status-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse} className="mt-px shrink-0" title={scheduled?.title}>
           {attention.label}
           {scheduled ? <span className="tabular-nums">{scheduled.label}</span> : null}
         </Pill></button>
@@ -1033,10 +1034,10 @@ function TaskCard({
           {run.delegation?.role === 'worker' ? <span className="mr-2 text-xs text-muted-foreground">Worker</span> : null}
           {runTitle(run)}
         </Link>
-        {/* The unread marker — trailing violet dot, as on the desktop row. */}
+        {/* The unread marker — trailing dot in the outcome colour, as on the desktop row (#617). */}
         {unread ? (
           <StatusDot
-            tone="accent"
+            tone={unreadMarkerTone(run)}
             role="img"
             aria-label="unread"
             title="Unread — not opened since it finished"

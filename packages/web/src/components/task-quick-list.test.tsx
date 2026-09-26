@@ -92,7 +92,7 @@ describe('TaskQuickList', () => {
 
     const headers = [...document.querySelectorAll('[data-slot="quick-list-bucket"] h2')].map((h) => h.textContent)
     expect(headers).toEqual(['Recent'])
-    expect(rowsIn('Recent')).toEqual(['Structured changes endpoint1m', 'Normalize agent-event protocol1m', 'README parallel-agents tagline1m'])
+    expect(rowsIn('Recent')).toEqual(['Structured changes endpointneeds review · 1m', 'Normalize agent-event protocolrunning · 1m', 'README parallel-agents tagline1m'])
   })
 
   it('links every row to its task', () => {
@@ -124,8 +124,6 @@ describe('TaskQuickList', () => {
     expect(chip.getAttribute('href')).toBe('https://github.com/o/r/pull/7')
     expect(chip.getAttribute('target')).toBe('_blank')
     expect(chip.getAttribute('rel')).toBe('noopener noreferrer')
-    expect(chip.className).toContain('no-hover:min-h-11')
-    expect(chip.className).toContain('no-hover:min-w-11')
 
     const stopJsdomNav = (event: Event) => event.preventDefault()
     document.addEventListener('click', stopJsdomNav)
@@ -244,7 +242,7 @@ describe('TaskQuickList', () => {
         ],
       })
       expect(dotOf('w')?.getAttribute('data-tone')).toBe('pending')
-      expect(dotOf('v')?.getAttribute('data-tone')).toBe('accent')
+      expect(dotOf('v')?.getAttribute('data-tone')).toBe('info')
       expect(dotOf('r')?.getAttribute('data-tone')).toBe('running')
       expect(dotOf('d')?.getAttribute('data-tone')).toBe('success')
       expect(dotOf('f')?.getAttribute('data-tone')).toBe('danger')
@@ -306,13 +304,12 @@ describe('TaskQuickList', () => {
       expect(chip.closest('[data-slot="task-row"]')).toBe(row('x'))
     })
 
-    it('leads the row and takes the age slot, spelling the number rather than the word "PR" (#788)', () => {
+    it('sits on the meta line as plain text, after the state word and before the age (#617)', () => {
       renderList({
         runs: [run({ id: 'x', title: 'Has a PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/7' })],
       })
-      // Chip first, then the name: the number is the row's leading identifier, and the age it
-      // displaces was the weaker of the two signals.
-      expect(rowsIn('Recent')).toEqual(['#7Has a PR'])
+      // Title on line one; state word, reference and age on line two.
+      expect(rowsIn('Recent')).toEqual(['Has a PRneeds review · PR #7 · 1m'])
     })
 
     it('carries the issue when no PR exists yet — the number the title prefix was about', () => {
@@ -340,7 +337,7 @@ describe('TaskQuickList', () => {
       renderList({ runs: [run({ id: 'noturl', title: '402: no url for this one', prNumber: 402 })] })
       const chip = document.querySelector('[data-run-id="noturl"] [data-slot="pr-chip"]') as HTMLElement
       expect(chip.tagName).toBe('SPAN')
-      expect(chip.textContent).toBe('#402')
+      expect(chip.textContent).toBe('PR #402')
     })
   })
 
@@ -360,7 +357,7 @@ describe('TaskQuickList', () => {
       const title = document.querySelector('[data-run-id="dedup"] [data-slot="task-row-title"]')
       expect(title?.textContent).toBe('implementing comment threads')
       // Nothing is lost: the number is a chip, and the stored title is still the row's tooltip.
-      expect(document.querySelector('[data-run-id="dedup"] [data-slot="pr-chip"]')?.textContent).toBe('#775')
+      expect(document.querySelector('[data-run-id="dedup"] [data-slot="pr-chip"]')?.textContent).toBe('PR #775')
       expect(
         document.querySelector('[data-run-id="dedup"] a[href="/tasks/dedup"]')?.getAttribute('title')
       ).toBe('775: implementing comment threads')
@@ -383,7 +380,7 @@ describe('TaskQuickList', () => {
       expect(document.querySelector('[data-run-id="two"] [data-slot="task-row-title"]')?.textContent).toBe(
         '788: implementing readable task names'
       )
-      expect(document.querySelector('[data-run-id="two"] [data-slot="pr-chip"]')?.textContent).toBe('#790')
+      expect(document.querySelector('[data-run-id="two"] [data-slot="pr-chip"]')?.textContent).toBe('PR #790')
     })
 
     it('keeps a leading number that is not a reference at all', () => {
@@ -427,9 +424,9 @@ describe('TaskQuickList', () => {
       // Dropped from view, never from reach — the exact numbers stay in its tooltip.
       expect(diff.getAttribute('title')).toBe('+59514 −12160 across 208 files')
 
-      // Everything the row paints, in reading order: reference, name, diff, unread marker. No
-      // age — the reference took that slot.
-      expect(rowsIn('Recent')).toEqual(['#775implementing comment threads across the whole thread view+59,514 −12,160'])
+      // Everything the row paints, in reading order: name and diff on line one; reference and
+      // age on the meta line (a done row has no state word — its green dot says it).
+      expect(rowsIn('Recent')).toEqual(['implementing comment threads across the whole thread view+59,514 −12,160PR #775 · 1m'])
     })
 
     it('gives the collapsed variant tile the same floor', () => {
@@ -459,10 +456,11 @@ describe('TaskQuickList', () => {
         ],
       })
       expect(metadataText(row('old'))).toBe('Old2h')
-      const age = Array.from(row('old')!.querySelectorAll('span')).find(el => el.textContent === '2h') as HTMLElement
+      const age = row('old')!.querySelector('[data-slot="task-row-age"]') as HTMLElement
+      expect(age.textContent).toBe('2h')
       expect(age.classList.contains('sr-only')).toBe(false)
-      expect(age.className).toContain('text-[12px]')
-      expect(metadataText(row('new'))).toBe('New4m')
+      expect(age.closest('[data-slot="task-row-meta"]')?.className).toContain('text-[11.5px]')
+      expect(metadataText(row('new'))).toBe('Newrunning · 4m')
     })
 
     it('shows the queue position instead of an age for queued runs', () => {
@@ -472,8 +470,9 @@ describe('TaskQuickList', () => {
           run({ id: 'q2', title: 'Second', status: 'queued', createdAt: ago(60_000) }),
         ],
       })
-      expect(metadataText(row('q1'))).toBe('First#1')
-      expect(metadataText(row('q2'))).toBe('Second#2')
+      // The position rides in the state word (`queued #2`), in place of an age.
+      expect(metadataText(row('q1'))).toBe('Firstqueued #1')
+      expect(metadataText(row('q2'))).toBe('Secondqueued #2')
     })
 
     it('keeps the queue position even when the row has a reference chip', () => {
@@ -491,10 +490,10 @@ describe('TaskQuickList', () => {
           }),
         ],
       })
-      expect(metadataText(row('qref'))).toBe('#788queued on an issue#1')
+      expect(metadataText(row('qref'))).toBe('queued on an issuequeued #1 · #788')
     })
 
-    it('still drops the age for a referenced row that is not queued', () => {
+    it('keeps the age beside the reference on the meta line — there is room for both now (#617)', () => {
       renderList({
         runs: [
           run({
@@ -506,7 +505,7 @@ describe('TaskQuickList', () => {
           }),
         ],
       })
-      expect(metadataText(row('aged'))).toBe('#9Finished with a PR')
+      expect(metadataText(row('aged'))).toBe('Finished with a PRPR #9 · 2h')
     })
   })
 
@@ -555,8 +554,9 @@ describe('TaskQuickList', () => {
       expect(screen.getByRole('button', { expanded: true })).not.toBeNull()
 
       // The letter chip, its own dot, and what actually differs between the variants.
-      expect(metadataText(row('va'))).toBe('Aclaude · IN 92.0k · OUT 4.2k · $0.31')
-      expect(metadataText(row('vb'))).toBe('Bcodex · IN 40.0k · OUT 1.8k · $0.12')
+      // Line two is the meta line: state word (and references), never an age (#617 decision 1).
+      expect(metadataText(row('va'))).toBe('Aclaude · IN 92.0k · OUT 4.2k · $0.31running')
+      expect(metadataText(row('vb'))).toBe('Bcodex · IN 40.0k · OUT 1.8k · $0.12running')
       expect(dotOf('va')?.getAttribute('data-tone')).toBe('running')
       // Each variant is still its own deep link.
       expect(row('vb')?.querySelector('a')?.getAttribute('href')).toBe('/tasks/vb')
@@ -581,14 +581,14 @@ describe('TaskQuickList', () => {
         ),
       })
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(metadataText(row('va'))).toBe('Aclaude · $0.31')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31running')
     })
 
     it('gates variant token directions and cost independently', () => {
       renderList({ runs: variants(), showTokens: false, showCost: true })
       fireEvent.click(screen.getByRole('button', { expanded: false }))
-      expect(metadataText(row('va'))).toBe('Aclaude · $0.31')
-      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12')
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31running')
+      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12running')
     })
   })
 
@@ -631,11 +631,11 @@ describe('TaskQuickList', () => {
       })
       const pin = row('open')!.querySelector('[data-slot="pin-toggle"]') as HTMLElement
       expect(pin.getAttribute('data-pinned')).toBeNull()
-      expect(pin.className).toContain('w-0')
       expect(pin.className).toContain('opacity-0')
       expect(pin.className).not.toContain('group-focus-within')
       expect(pin.className).toContain('group-hover/task-row:opacity-100')
-      expect(pin.className).toContain('data-[pinned=true]:opacity-100')
+      // Keyboard focus anywhere in the row reveals it; a click's lingering `:focus` does not.
+      expect(pin.className).toContain('group-has-[:focus-visible]/task-row:opacity-100')
     })
 
     it('stays reachable on a device that cannot hover — the drawer has no pointer', () => {
@@ -646,11 +646,13 @@ describe('TaskQuickList', () => {
       renderList({ runs: [run({ id: 'plain', status: 'done' })], onTogglePin: vi.fn() })
       const pin = document.querySelector('[data-slot="pin-toggle"]') as HTMLElement
       expect(pin.className).toContain('no-hover:opacity-100')
-      // …and big enough for a thumb there, where 20px is not a target.
-      expect(pin.className).toContain('no-hover:size-11')
-      // The quiet default survives for pointer devices: still zero-width until hovered.
-      expect(pin.className).toContain('w-0')
-      expect(pin.className).toContain('group-hover/task-row:w-5')
+      // …and big enough for a thumb there, where 20px is not a target — in a slot that is
+      // 44px wide on that device all the time, so the reveal still moves nothing.
+      expect(pin.className).toContain('no-hover:min-h-11')
+      expect(pin.className).toContain('no-hover:min-w-11')
+      expect(pin.closest('[data-slot="task-row-trailing"]')?.className).toContain('no-hover:w-11')
+      // The quiet default survives for pointer devices: invisible until hovered.
+      expect(pin.className).toContain('opacity-0')
     })
 
     it('paints no pin control at all when no container wired one', () => {
@@ -977,10 +979,172 @@ it('marks the parent row active when currentRunId is the worker', () => {
   expect(row('parent')?.getAttribute('data-active')).toBe('true')
 })
 
-it('shows both tracker references on the separate badge line', () => {
+it('shows both tracker references on the meta line, never a line of their own', () => {
   renderList({ runs: [run({ id: 'both', pullRequestUrl: 'https://github.com/o/r/pull/217', referencedIssueUrl: 'https://github.com/o/r/issues/214' })] })
-  const badges = row('both')?.querySelector('[data-slot="session-references"]')
-  expect(badges?.querySelector('[data-slot="pr-chip"]')?.textContent).toBe('#217')
-  expect(badges?.querySelector('[data-slot="issue-chip"]')?.textContent).toBe('#214')
+  const meta = row('both')?.querySelector('[data-slot="task-row-meta"]')
+  expect(meta?.querySelector('[data-slot="pr-chip"]')?.textContent).toBe('PR #217')
+  expect(meta?.querySelector('[data-slot="issue-chip"]')?.textContent).toBe('#214')
+  expect(meta?.textContent).toBe('PR #217 · #214 · 1m')
   expect(row('both')?.querySelector('a a')).toBeNull()
+})
+
+describe('the calmer row (#617)', () => {
+  const parked = (id: string, workers = 2) => run({
+    id,
+    title: 'Assessing reviewer agent',
+    status: 'waiting',
+    delegation: {
+      role: 'root', permissions: [], receipts: [],
+      wait: { id: 'wait', workerIds: Array.from({ length: workers }, (_, i) => `00000000-0000-4000-8000-00000000000${i + 1}`), deadline: '2026-09-06T00:00:00.000Z', phase: 'parked', outcomes: [] },
+    },
+  } as Partial<RunRecord>)
+
+  it('is two fixed lines — a truncated title and a truncated meta line — whatever the reference count', () => {
+    renderList({
+      runs: [
+        run({ id: 'long', title: 'A very long task title that will never fit into a 232px sidebar column at all', pullRequestUrl: 'https://github.com/o/r/pull/217', referencedIssueUrl: 'https://github.com/o/r/issues/214' }),
+        run({ id: 'short', title: 'Short' }),
+      ],
+    })
+    for (const id of ['long', 'short']) {
+      const el = row(id) as HTMLElement
+      const title = el.querySelector('[data-slot="task-row-title"]') as HTMLElement
+      const meta = el.querySelector('[data-slot="task-row-meta"]') as HTMLElement
+      expect(title.className).toContain('truncate')
+      expect(title.className).toContain('text-[13px]')
+      expect(title.className).toContain('leading-[1.45]')
+      expect(meta.className).toContain('truncate')
+      expect(meta.className).toContain('h-4')
+      expect(meta.className).toContain('text-soft-foreground')
+      // The title line is a fixed 19px box and the meta line a fixed 16px one, so height is
+      // independent of content; no reference is ever a line of its own.
+      expect(title.closest('a')?.className).toContain('h-[19px]')
+      expect(el.querySelector('[data-slot="session-references"]')).toBeNull()
+      for (const chip of el.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')) {
+        expect(chip.parentElement).toBe(meta)
+      }
+    }
+  })
+
+  it('reserves the 16px trailing slot on every row, pin or not, unread or not', () => {
+    renderList({ runs: [run({ id: 'bare' }), run({ id: 'unread', finishedAt: ago(1_000) })], onTogglePin: vi.fn() })
+    renderList({ runs: [run({ id: 'nopin' })] })
+    for (const id of ['bare', 'unread', 'nopin']) {
+      const slot = row(id)?.querySelector('[data-slot="task-row-trailing"]') as HTMLElement
+      expect(slot, id).not.toBeNull()
+      expect(slot.className).toContain('w-4')
+      expect(slot.className).toContain('shrink-0')
+    }
+  })
+
+  it('reveals the pin by opacity only, inside the slot — hovering changes no width or margin', () => {
+    renderList({ runs: [run({ id: 'r' })], onTogglePin: vi.fn() })
+    const el = row('r') as HTMLElement
+    const pin = el.querySelector('[data-slot="pin-toggle"]') as HTMLElement
+    expect(pin.closest('[data-slot="task-row-trailing"]')).not.toBeNull()
+    expect(pin.className).toContain('absolute')
+    // Nothing in the row may change its box under the pointer or on focus (the old pin grew
+    // from w-0 to w-5 and pushed the title into a rewrap).
+    for (const node of [el, ...el.querySelectorAll('*')]) {
+      const cls = node.getAttribute('class') ?? ''
+      expect(cls, cls).not.toMatch(/(group-hover\/task-row|focus-visible|group-has-\[:focus-visible\]\/task-row):(w|mr|ml|size|px|pl|pr)-/)
+    }
+  })
+
+  it('pin: 12px, soft-foreground, never teal; filled when pinned', () => {
+    renderList({ runs: [run({ id: 'plain' }), run({ id: 'kept', pinned: true })], onTogglePin: vi.fn() })
+    const plain = row('plain')?.querySelector('[data-slot="pin-toggle"]') as HTMLElement
+    const kept = row('kept')?.querySelector('[data-slot="pin-toggle"]') as HTMLElement
+    for (const pin of [plain, kept]) {
+      expect(pin.className).toContain('text-soft-foreground')
+      expect(pin.className).toContain('hover:text-foreground')
+      expect(pin.className).not.toContain('accent')
+      expect(pin.querySelector('[data-slot="pin-icon"]')?.getAttribute('class')).toContain('size-3')
+      expect(pin.className).toContain('size-5')
+    }
+    expect(plain.querySelector('[data-slot="pin-icon"]')?.getAttribute('fill')).toBe('none')
+    expect(kept.querySelector('[data-slot="pin-icon"]')?.getAttribute('fill')).toBe('currentColor')
+  })
+
+  it('Pinned bucket: the pin is hidden at rest and shows filled (unpin) on hover', () => {
+    renderList({ runs: [run({ id: 'kept', pinned: true })], onTogglePin: vi.fn() })
+    const pin = bucket('Pinned').querySelector('[data-run-id="kept"] [data-slot="pin-toggle"]') as HTMLElement
+    expect(pin.getAttribute('aria-label')).toBe('Unpin task')
+    expect(pin.className).toContain('opacity-0')
+    expect(pin.className).toContain('group-hover/task-row:opacity-100')
+    expect(pin.className).not.toContain('data-[pinned=true]:opacity-100')
+    expect(pin.querySelector('[data-slot="pin-icon"]')?.getAttribute('fill')).toBe('currentColor')
+  })
+
+  it('puts the unread marker in the trailing slot, in the outcome colour', () => {
+    renderList({
+      runs: [
+        run({ id: 'd', status: 'done', finishedAt: ago(1_000) }),
+        run({ id: 'f', status: 'failed', finishedAt: ago(1_000) }),
+      ],
+      onTogglePin: vi.fn(),
+    })
+    const marker = (id: string) => row(id)?.querySelector('[data-slot="unread-marker"]') as HTMLElement
+    expect(marker('d').getAttribute('data-tone')).toBe('success')
+    expect(marker('f').getAttribute('data-tone')).toBe('danger')
+    for (const id of ['d', 'f']) {
+      expect(marker(id).closest('[data-slot="task-row-trailing"]')).not.toBeNull()
+      // The pin takes the slot on hover; the marker steps aside rather than stacking.
+      expect(marker(id).className).toContain('group-hover/task-row:opacity-0')
+      expect(row(id)?.querySelector('[data-slot="task-row-title"]')?.className).toContain('font-semibold')
+    }
+  })
+
+  it('shows the violet robot for a parent waiting on its workers, with a counted label, in the same dot slot', () => {
+    renderList({ runs: [parked('p'), run({ id: 'r', status: 'running' })] })
+    const dot = dotOf('p') as HTMLElement
+    expect(dot.getAttribute('data-shape')).toBe('workers')
+    expect(dot.getAttribute('data-tone')).toBe('running')
+    expect(dot.getAttribute('aria-label')).toBe('waiting on 2 workers')
+    expect(dot.querySelector('svg')).not.toBeNull()
+    // Both glyphs sit in the same fixed 12px dot slot, so the titles start at the same x.
+    for (const id of ['p', 'r']) {
+      expect(dotOf(id)?.parentElement?.getAttribute('data-slot')).toBe('task-row-dot')
+      expect(dotOf(id)?.parentElement?.className).toContain('w-3')
+    }
+    expect(row('p')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('waiting on 2 workers · 1m')
+  })
+
+  it('paints the monitoring ring and the queued ring apart from running and cancelled', () => {
+    renderList({ runs: [
+      run({ id: 'm', status: 'running', activity: 'monitoring' }),
+      run({ id: 'q', status: 'queued' }),
+      run({ id: 'c', status: 'cancelled' }),
+    ] })
+    expect(dotOf('m')?.getAttribute('data-shape')).toBe('ring')
+    expect(dotOf('q')?.getAttribute('data-shape')).toBe('ring')
+    expect(dotOf('c')?.getAttribute('data-shape')).toBe('filled')
+    expect(row('m')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('monitoring')
+  })
+
+  it('makes references keyboard-reachable links on the meta line', () => {
+    renderList({ runs: [run({ id: 'x', title: 'Has refs', pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451' })] })
+    const links = within(row('x') as HTMLElement).getAllByRole('link').filter(a => a.getAttribute('href')?.startsWith('https://'))
+    expect(links.map(a => a.textContent)).toEqual(['PR #594', '#451'])
+    for (const link of links) {
+      expect(link.getAttribute('tabindex')).not.toBe('-1')
+      expect(link.closest('a[href^="/tasks/"]')).toBeNull()
+    }
+  })
+
+  it('uses the neutral hover and selected fills — no teal anywhere on the row', () => {
+    renderList({ runs: [run({ id: 'open', pullRequestUrl: 'https://github.com/o/r/pull/7' }), run({ id: 'other' })], currentRunId: 'open', onTogglePin: vi.fn() })
+    const open = row('open') as HTMLElement
+    expect(open.className).toContain('bg-sidebar-row-selected')
+    // Selected holds under the pointer; the other rows take the hover fill.
+    expect(open.className).toContain('hover:bg-sidebar-row-selected')
+    expect(row('other')?.className).toContain('hover:bg-sidebar-row-hover')
+    expect(open.className).not.toContain('task-brand-selected')
+    expect(open.querySelector('[data-slot="task-row-title"]')?.className).toContain('text-foreground')
+    expect(row('other')?.className).not.toContain('bg-sidebar-row-selected')
+    expect(row('other')?.querySelector('[data-slot="task-row-title"]')?.className).toContain('text-muted-foreground')
+    for (const node of [open, ...open.querySelectorAll('*')]) {
+      expect(node.getAttribute('class') ?? '').not.toMatch(/accent-text|task-brand|accent-strong\/35/)
+    }
+  })
 })

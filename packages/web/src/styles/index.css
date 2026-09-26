@@ -81,6 +81,14 @@
   /* Live-run fill. Same hex as --merged-strong (the pre-#373 accent-strong); own role so
    * running/monitoring dots are not merged chips and not review-required --info. */
   --running: #7c3aed;
+  /* The status key's violet family (#617): running and monitoring dots and the waiting-on-workers
+   * robot. Its own token rather than a new --running, which other surfaces keep: #7c3aed is
+   * 3.15:1 on the dark sidebar and 2.44:1 on a selected row, under the 3:1 non-text minimum. */
+  --status-running: #a78bfa;
+  /* The sidebar task row (#617): neutral hover and selected fills, replacing the teal
+   * --task-brand-selected on the row so "selected" stops reading as loud. */
+  --sidebar-row-hover: #1b2130;
+  --sidebar-row-selected: #262c3e;
 
   /* Cezarion surfaces from design.pen. Elevation comes from surface steps, not shadows. */
   --surface-base: #0b0f17;
@@ -218,6 +226,9 @@
   --merged-strong: #7c3aed;
   --merged-text: #6d28d9;
   --running: #7c3aed;
+  --status-running: #7c3aed;
+  --sidebar-row-hover: #f4f5f8;
+  --sidebar-row-selected: #eaedf3;
 
   --message-user-bg: #fff9e8;
   --message-user-border: #ddc978;
@@ -412,6 +423,9 @@
   --color-merged-strong: var(--merged-strong);
   --color-merged-text: var(--merged-text);
   --color-running: var(--running);
+  --color-status-running: var(--status-running);
+  --color-sidebar-row-hover: var(--sidebar-row-hover);
+  --color-sidebar-row-selected: var(--sidebar-row-selected);
   --color-ring: var(--ring);
 
   --color-danger: var(--danger);

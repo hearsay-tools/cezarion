@@ -929,6 +929,8 @@ describe('global tasks page', () => {
       renderPage()
       await screen.findByText('Bump the runner')
       expect(document.querySelectorAll('[aria-label="unread"]')).toHaveLength(1)
+      // The outcome colour, not violet (#617 decision 2).
+      expect(document.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('success')
 
       const markRead = screen.getByRole('button', { name: /Mark Bump the runner read/ })
       expect(markRead.className).toContain('text-accent-icon')

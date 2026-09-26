@@ -437,7 +437,7 @@ export function ThreadView({
               data-slot="paused-hint"
               className="flex items-center gap-2 px-1 text-xs text-muted-foreground"
             >
-              <StatusDot tone={attention.tone} pulse={attention.pulse} />
+              <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} />
               {attention.bucket === 'waiting' ? 'The agent is paused, waiting for your reply' : `${attention.label.charAt(0).toUpperCase()}${attention.label.slice(1)} — you can send a message to resume`}
             </div>
           ) : null}
@@ -447,7 +447,8 @@ export function ThreadView({
               data-slot="queued-hint"
               className="flex items-center gap-2 px-1 text-xs text-muted-foreground"
             >
-              <StatusDot tone="pending" />
+              {/* The status key's queued mark (#617): a still neutral ring, waiting for a slot. */}
+              <StatusDot tone="neutral" shape="ring" />
               Messages you add now are folded into the prompt before the run starts.
             </div>
           ) : null}
@@ -588,7 +589,7 @@ function QueuedPlaceholder({ run }: { run: ApiRun }) {
   const position = queuePosition(runs.data ?? [], run.id)
   return (
     <div data-slot="queued-state" className="flex flex-col items-center gap-1.5 py-10 text-center">
-      <StatusDot tone="pending" pulse />
+      <StatusDot tone="neutral" shape="ring" />
       <p className="text-[13px] font-medium">
         Waiting for a free agent slot{position !== undefined ? ` — #${position} in queue` : ''}
       </p>

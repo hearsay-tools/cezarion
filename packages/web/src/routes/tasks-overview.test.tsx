@@ -256,7 +256,9 @@ describe('TasksOverview — the table', () => {
     expect(pillOf('sched')?.textContent).toContain('scheduled')
     // The time itself, locale-formatted — assert it is there rather than its spelling.
     expect(pillOf('sched')?.querySelector('.tabular-nums')?.textContent).toMatch(/\d{1,2}[:.]\d{2}/)
-    expect(pillOf('sched')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('pending')
+    // The status key's scheduled mark (#617): neutral ring, still.
+    expect(pillOf('sched')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('neutral')
+    expect(pillOf('sched')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-shape')).toBe('ring')
     // …and an ordinary failure is untouched.
     expect(pillOf('broke')?.textContent).toBe('failed')
     expect(pillOf('broke')?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('danger')
@@ -848,15 +850,21 @@ describe('TasksOverview — header', () => {
         run({ id: 'cancelled', status: 'cancelled', finishedAt: FINISHED }),
       ],
     })
-    // Keyed on the aria-label, not on the violet tone alone: the attention pill's OWN dot is
-    // violet for the live states (running/waiting/review), so a tone-only selector would be
-    // matching two different signals and would quietly stop meaning what it says.
+    // Keyed on the aria-label, not on the tone alone: the marker wears the run's OUTCOME colour
+    // (#617), which is exactly the colour the attention pill's own dot has, so a tone-only
+    // selector would be matching two different signals.
     const unreadDot = (id: string) =>
       tableRow(id)?.querySelector('[data-slot="status-dot"][aria-label="unread"]')
     expect(unreadDot('unread')).not.toBeNull()
-    expect(unreadDot('unread')?.getAttribute('data-tone')).toBe('accent')
+    expect(unreadDot('unread')?.getAttribute('data-tone')).toBe('success')
     expect(unreadDot('read')).toBeNull()
     expect(unreadDot('cancelled')).toBeNull()
+  })
+
+  it('paints an unread failed row\'s marker red, on the table and on the mobile card (#617)', () => {
+    renderOverview({ runs: [run({ id: 'boom', status: 'failed', finishedAt: ago(60_000) })] })
+    expect(tableRow('boom')?.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('danger')
+    expect(card('boom')?.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('danger')
   })
 
   it('offers Mark all read only while something is unread, and calls back on click', () => {

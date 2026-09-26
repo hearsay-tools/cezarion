@@ -345,7 +345,7 @@ describe('design guardian', () => {
     for (const [name, value] of [...Object.entries(dark), ...Object.entries(light)]) {
       if (reservedPurple.has(value)) {
         expect(
-          name.startsWith('merged') || name === 'running',
+          name.startsWith('merged') || name === 'running' || name === 'status-running',
           `${name} still carries reserved purple ${value}`,
         ).toBe(true)
       }
@@ -361,9 +361,13 @@ describe('design guardian', () => {
     expect(dark['info']).toBe('#83baff')
     expect(light['info']).toBe('#2366b1')
 
+    // #617: the status dot's violet family has its own sidebar-safe token; `--running` above is
+    // unchanged for its other users.
+    expect(dark['status-running']).toBe('#a78bfa')
+    expect(light['status-running']).toBe('#7c3aed')
     const source = readFileSync(path.join(APP_ROOT, 'src/components/status-dot.tsx'), 'utf8')
-    expect(source).toMatch(/running:\s*"bg-running"/)
-    expect(source).not.toMatch(/running:\s*"bg-info"/)
+    expect(source).toMatch(/tone:\s*"running",\s*className:\s*"bg-status-running"/)
+    expect(source).not.toMatch(/tone:\s*"running",\s*className:\s*"bg-info"/)
   })
 
   it('keeps summary merged chips on reserved purple, not brand accent', () => {

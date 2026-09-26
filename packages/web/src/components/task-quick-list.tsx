@@ -14,7 +14,7 @@ import { ReferenceStatusProvider } from '@/components/reference-status'
 import { StatusDot } from '@/components/status-dot'
 import { deriveAttention } from '@/lib/attention'
 import { shortAge } from '@/lib/format'
-import { isReadDoneItem, isUnread } from '@/lib/read-state'
+import { isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
 import {
   groupRuns,
@@ -242,7 +242,7 @@ function Row({
     <>
       {/* Like RunRow: the compare link is the toggle button's flex SIBLING, not its child —
           a link inside a button is invalid, and both targets are real. */}
-      <div className="flex items-center rounded-sm hover:bg-muted">
+      <div className="flex items-center rounded-[6px] hover:bg-sidebar-row-hover">
         <button
           type="button"
           data-slot="group-tile"
@@ -344,56 +344,65 @@ function ExpandedVariantMembers({
 }
 
 /**
- * One run.
+ * One run — two fixed lines (#617), so every row is the same height whatever its title length
+ * or reference count:
+ *
+ *   [dot slot] [title ........................ diff] [trailing slot]
+ *              [state word · references · age      ]
  *
  * The whole row opens `/tasks/:id` — empty space and the status dot included — but a click that
- * lands on any nested anchor or button (the PR/issue chip, the title's real `<Link>`, the pin)
- * belongs to that control. The title stays a true `<Link>` so keyboards and middle-clicks work.
- * The chip and pin are flex *siblings* of that link, not its children: an anchor inside an
- * anchor is invalid. The status dot is a sibling too, so the reading order can be dot → chip →
- * title rather than a chip wedged in front of the status it is not about.
+ * lands on any nested anchor or button (a reference, the title's real `<Link>`, the pin) belongs
+ * to that control. The title stays a true `<Link>` so keyboards and middle-clicks work. The
+ * references and the pin are SIBLINGS of that link, never its children: an anchor inside an
+ * anchor is invalid.
  *
  * WIDTH-PRIORITY RULE (#788, option C) — read this before adding anything to this row.
  * The column is 232px by default and the title is the ONLY thing here a person scans for, so:
  *
- *  1. The title is the only element allowed to GROW (`flex-1`) and it has a floor
- *     (`min-w-[7rem]`, replacing the `min-w-0` that let it be squeezed to nothing) that no other
- *     element may push it below.
+ *  1. The title is the only element on its line allowed to GROW (`flex-1`) and it has a floor
+ *     (`min-w-[7rem]`) that no other element may push it below.
  *  2. Every other element is metadata and must be DROPPABLE beneath that floor. The mechanism is
  *     the `@container/sidebar` the app shell declares: metadata that does not fit a narrow column
- *     is hidden by a container query and comes back when the user drags the column wider.
+ *     is hidden by a container query and comes back when the user drags the column wider. The
+ *     meta line itself truncates rather than wrapping — that is what keeps the row two lines.
  *  3. Anything a dropped element was the only carrier of has to survive somewhere reachable —
- *     the diff numbers keep their `title` tooltip, the reference keeps its own chip.
+ *     the diff numbers keep their `title` tooltip, and the full title is the link's `title`.
  *
- * Before this rule the title was the sole compressible item in a row of `shrink-0` metadata, so
- * it absorbed 100% of any deficit — which is how `775: i…` happened.
- */
-/**
- * When the row's pin is visible, and what it costs when it is not (#935).
- *
- * Zero-width rather than `opacity-0` alone, because of the width-priority rule above: a
- * permanently reserved 20px slot is 20px the title never gets back, on every row, forever. A
- * zero-width button is still focusable and still in the tab order, which `hidden` would not be.
- *
- * Four things reveal it, and each answers a different way of reaching the row:
- *  - `group-hover` — the pointer.
- *  - `focus-visible` — the keyboard, on the pin itself. Revealing from the row's link
- *    (`group-focus-within`) kept the pin up on the current task after a click, because that
- *    link stays focused.
- *  - `no-hover` — a device that CANNOT hover, where the first two never fire and a
- *    hover-revealed control is simply unreachable. This is the phone and tablet case; the
- *    drawer keeps the sidebar's fixed 232px, so the width rule applies there too and the pin
- *    still cannot be permanent — it is bigger instead (`size-11`), because a 20px target under a
- *    thumb is not a target. See the variant's definition in `styles/index.css`.
- *  - `data-[pinned=true]` — an already-pinned row, where the pin is a fact about the row rather
- *    than an offer, and hiding it would leave `Pinned` unexplained.
+ * THE TRAILING SLOT (#617) is 16px and ALWAYS reserved. The pin used to appear on hover by
+ * taking width from the title, which rewrapped it and made the row jump under the cursor; now
+ * the pin and the unread marker share one fixed slot and only swap opacity, so hovering changes
+ * no geometry at all. On a device that cannot hover (and on a narrow viewport, where the pin is a
+ * 44px target) the slot is 44px wide instead — permanently, so nothing reflows there either.
  */
 const ROW_PIN_CLASS =
-  'w-0 overflow-hidden opacity-0' +
-  ' group-hover/task-row:mr-1 group-hover/task-row:w-5 group-hover/task-row:opacity-100' +
-  ' focus-visible:mr-1 focus-visible:w-5 focus-visible:opacity-100' +
-  ' no-hover:mr-1 no-hover:size-11 no-hover:opacity-100' +
-  ' data-[pinned=true]:mr-1 data-[pinned=true]:w-5 data-[pinned=true]:opacity-100'
+  'opacity-0 group-hover/task-row:opacity-100 focus-visible:opacity-100' +
+  // Keyboard focus anywhere in the row (the title link, a reference) reveals it too; `:focus`
+  // alone would keep it up on the current task after a click, whose link stays focused.
+  ' group-has-[:focus-visible]/task-row:opacity-100' +
+  // A device that CANNOT hover, where none of the above ever fires: always visible, 44px.
+  ' no-hover:opacity-100'
+
+/** The unread marker hides wherever the pin shows — the two share the slot. On a no-hover device
+ *  (or a narrow viewport) the pin never hides, so the marker steps to the slot's leading edge and
+ *  both stay readable. Only applied to a row that HAS a pin; otherwise the marker simply sits there. */
+const ROW_UNREAD_WITH_PIN_CLASS =
+  'transition-opacity motion-reduce:transition-none' +
+  ' group-hover/task-row:opacity-0 group-has-[:focus-visible]/task-row:opacity-0' +
+  ' max-md:absolute max-md:top-1/2 max-md:left-0 max-md:-translate-y-1/2 max-md:opacity-100' +
+  ' no-hover:absolute no-hover:top-1/2 no-hover:left-0 no-hover:-translate-y-1/2 no-hover:opacity-100'
+
+/** The meta line's state word: the attention label wherever the dot alone cannot say it — which
+ *  is every state but `done`, whose green dot already is the whole story. A queued row folds its
+ *  position in (`queued #2`), because the position is the one thing a queued row is scanned for. */
+function metaStateWord(label: string, queuePosition: number | null): string | undefined {
+  if (label === 'done') return undefined
+  if (label === 'queued' && queuePosition !== null) return `queued #${queuePosition}`
+  return label
+}
+
+function MetaSeparator() {
+  return <span aria-hidden="true">{' · '}</span>
+}
 
 function RunRow({
   run,
@@ -424,32 +433,43 @@ function RunRow({
   const attention = deriveAttention(run)
   const isActive = run.id === currentRunId
   // The strongest tracker reference the run knows about — the PR once one exists, else the issue
-  // it was opened on. It is the row's leading chip AND the reason the title may drop its `NNN: `
-  // prefix (#788, option C): the number is painted once, as a link, instead of twice as digits.
+  // it was opened on. It is the reason the title may drop its `NNN: ` prefix (#788, option C):
+  // the number is painted once, as a link on the meta line, instead of twice.
   const reference = taskReference(run)
   const references = taskReferences(run)
   const title = runTitle(run)
   // Only when the two numbers are the same number — see `refPrefixMatches`. A run opened on issue
-  // #788 that shipped as PR #790 keeps its prefix, because the chip is no longer saying it.
+  // #788 that shipped as PR #790 keeps its prefix, because the reference is not saying it.
   const displayTitle = refPrefixMatches(title, reference?.number) ? splitRefPrefix(title).rest : title
-  // Read/unread (#unread-done-items, "Option B"): an unread done item is promoted (bright +
-  // semibold) and wears a trailing violet dot; a read one dims so the history steps back. Both
-  // are orthogonal to the leading status dot, which keeps saying done/failed.
+  // Read/unread (#unread-done-items): an unread done item is promoted (bright + semibold) and
+  // wears a trailing marker in its OUTCOME colour (#617); a read one stays muted so the history
+  // steps back. Both are orthogonal to the leading status dot, which keeps saying done/failed.
   const unread = isUnread(run)
-  const readDone = isReadDoneItem(run)
-  // A variant row spends its width on what distinguishes the variants (runner and spend) rather
-  // than on an age they all share — they started together. Per the mockup.
-  const age = variant
-    ? ''
-    : queuePosition !== null
-      ? `#${queuePosition}`
-      : shortAge(run.finishedAt ?? run.createdAt, now)
+  // A variant row spends its meta line on state and references only — the variants started
+  // together, so an age says nothing that tells them apart. A queued row's position rides in
+  // its state word instead of an age.
+  const age = variant || queuePosition !== null ? '' : shortAge(run.finishedAt ?? run.createdAt, now)
+  const stateWord = metaStateWord(attention.label, queuePosition)
+
+  const meta: React.ReactNode[] = []
+  if (stateWord) meta.push(<span key="state" data-slot="task-row-state">{stateWord}</span>)
+  for (const ref of references) {
+    meta.push(
+      <TaskReferenceChip
+        key={`${ref.kind}-${ref.number}-${ref.url}`}
+        run={run}
+        reference={ref}
+        plain
+      />,
+    )
+  }
+  if (age) meta.push(<span key="age" data-slot="task-row-age" className="tabular-nums">{age}</span>)
 
   return (
     <div
       data-slot="task-row"
       data-run-id={run.id}
-      // The row's highlight is a wrapper concern (the dot and the reference chip sit outside the
+      // The row's highlight is a wrapper concern (the dot and the references sit outside the
       // Link), so the active state has to be readable here rather than only from the Link's
       // `aria-current`.
       data-active={isActive ? 'true' : undefined}
@@ -461,100 +481,102 @@ function RunRow({
         navigate(to)
       }}
       className={cn(
-        'selection-row group/task-row flex cursor-pointer items-center gap-2 rounded-sm pl-2.5 hover:bg-muted',
-        isActive && 'bg-[var(--task-brand-selected)]',
+        'selection-row group/task-row flex cursor-pointer items-start gap-2.5 rounded-[6px] py-1.5 pr-2 pl-2.5 hover:bg-sidebar-row-hover',
+        // Neutral, not teal (#617): the selected fill is a surface step, and it holds under the
+        // pointer so hovering the open task does not make it look unselected.
+        isActive && 'bg-sidebar-row-selected hover:bg-sidebar-row-selected',
         // The indent a member row wears under an expanded group tile. One padding declaration,
         // not two: `cn` is tailwind-merge, so this REPLACES the `pl-2.5` above rather than losing
         // to it — 26px = the row's own 10px plus the 16px indent.
         variant && 'pl-[26px]'
       )}
     >
-      {/* Outside the Link so it can lead the reference chip. The dot is not its own control — a
-          click on it is a row click, and the wrapper still owns the row's hover surface. */}
-      <StatusDot tone={attention.tone} pulse={attention.pulse} aria-label={attention.label} title={attention.label} role="img" />
-      {/* The reference, ONCE (#788, option C): the number that used to be both a `775: ` title
-          prefix and a trailing `PR ↗` chip is now one leading chip that is itself the link. */}
-      {references.length ? <div data-slot="session-references" className="flex flex-wrap items-center gap-1">
-        {references.map(ref => <TaskReferenceChip key={`${ref.kind}-${ref.number}-${ref.url}`} run={run} reference={ref} compact className="h-auto shrink-0 gap-[2px] px-1 py-px text-[12px] no-hover:min-h-11 no-hover:min-w-11" />)}
-      </div> : null}
-      <Link
-        to={to}
-        // `title` carries the FULL stored title — including a `NNN: ` prefix the chip let the
-        // visible text drop — so hover always gives back everything the column could not show.
-        title={title}
-        aria-current={isActive ? 'page' : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2 py-[7px] pr-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground"
-      >
-
-        {variant ? (
-          <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-accent-strong/15 font-mono text-[11px] font-semibold text-accent-text">
-            {run.variant ?? '?'}
-          </span>
-        ) : null}
-        <span
-          data-slot="task-row-title"
-          className={cn(
-            // `min-w-[7rem]`: the floor of the width-priority rule above. The title never gives
-            // way past ~17 characters; metadata drops instead.
-            'min-w-[7rem] flex-1 truncate text-[13px]',
-            unread ? 'font-semibold text-foreground' : readDone ? 'font-medium text-muted-foreground' : 'font-medium'
-          )}
+      {/* The dot slot: 12px wide so the 12px robot fits, 19px tall so a 7px dot and the robot
+          both centre on the title line and every title starts at the same x. Not a control — a
+          click on it is a row click. */}
+      <span data-slot="task-row-dot" className="flex h-[19px] w-3 shrink-0 items-center justify-center">
+        <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} aria-label={attention.label} title={attention.label} role="img" />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Link
+          to={to}
+          // `title` carries the FULL stored title — including a `NNN: ` prefix the reference let
+          // the visible text drop — so hover always gives back everything the column could not show.
+          title={title}
+          aria-current={isActive ? 'page' : undefined}
+          className="flex h-[19px] min-w-0 items-center gap-2 rounded-[2px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground"
         >
-          {variant ? variantLabel(run, showTokens, showCost) : displayTitle}
-        </span>
-        {/* The diff numbers, once a turn has produced any (R2 #389). Nothing before that — a
-            sidebar row has no column to hold an em dash open for.
+          {variant ? (
+            <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-accent-strong/15 font-mono text-[11px] font-semibold text-accent-text">
+              {run.variant ?? '?'}
+            </span>
+          ) : null}
+          <span
+            data-slot="task-row-title"
+            className={cn(
+              // `min-w-[7rem]`: the floor of the width-priority rule above. The title never gives
+              // way past ~17 characters; the diff pair drops instead.
+              'min-w-[7rem] flex-1 truncate text-[13px] leading-[1.45] font-medium text-muted-foreground',
+              unread && 'font-semibold text-foreground',
+              // A read finished row keeps the muted base colour — the history stays stepped back.
+              isActive && 'text-foreground',
+            )}
+          >
+            {variant ? variantLabel(run, showTokens, showCost) : displayTitle}
+          </span>
+          {/* The diff numbers, once a turn has produced any (R2 #389). Nothing before that — a
+              sidebar row has no column to hold an em dash open for.
 
-            Droppable metadata, per the width-priority rule: `+59514 −12160` is ~82px, which a
-            232px column cannot spend and still name the task, and its exact numbers stay in the
-            `title` tooltip and in the Tasks table's ± column either way.
+              Droppable metadata, per the width-priority rule: `+59514 −12160` is ~82px, which a
+              232px column cannot spend and still name the task, and its exact numbers stay in the
+              `title` tooltip and in the Tasks table's ± column either way.
 
-            23rem is not the width at which the pair merely *fits* — it is the width at which it
-            fits AND the name is still at least as long as it was in the default 232px column.
-            Anything narrower buys the
-            numbers back by making the task names shorter than they were before the drag, which
-            is precisely the bargain this issue exists to stop making. */}
-        {run.diffStat ? (
-          <DiffStatLabel
-            stat={run.diffStat}
-            className="hidden shrink-0 text-[12px] @min-[23rem]/sidebar:inline"
-          />
-        ) : null}
-        {/* The reference chip takes the AGE's slot when there is one — same as the mockup, and
-            the same trade as before: a row that knows its PR or issue number is identified by
-            that, not by how long ago it finished.
-
-            It never takes the QUEUE POSITION's slot. `#2` is not an age, it is where the engine
-            will pick this run up, it is carried nowhere else in the row, and a queued run is
-            exactly the kind that has an issue reference and no PR yet — so keying this on "has a
-            reference" alone would have silently deleted the queue position from every
-            issue-driven queued row. */}
-        {age && (queuePosition !== null || !reference) ? (
-          <span className="shrink-0 text-[12px] text-supporting-foreground tabular-nums">{age}</span>
-        ) : null}
-        {/* The unread marker (#unread-done-items): a trailing violet dot, opposite end and
-            different hue from the leading status dot, so the two read as two signals. */}
+              23rem is not the width at which the pair merely *fits* — it is the width at which it
+              fits AND the name is still at least as long as it was in the default 232px column. */}
+          {run.diffStat ? (
+            <DiffStatLabel
+              stat={run.diffStat}
+              className="hidden shrink-0 text-[12px] @min-[23rem]/sidebar:inline"
+            />
+          ) : null}
+        </Link>
+        {/* The meta line: one line, truncated, never wrapped. References are plain muted links
+            here (#617) — no chip border, no teal — but keep their status panel and their name. */}
+        <div
+          data-slot="task-row-meta"
+          className="h-4 min-w-0 truncate text-[11.5px] leading-[1.4] font-normal text-soft-foreground"
+        >
+          {meta.length ? meta.flatMap((part, index) => (index ? [<MetaSeparator key={`sep-${index}`} />, part] : [part])) : ' '}
+        </div>
+      </div>
+      {run.delegation?.role === 'worker' ? <span className="sr-only">Worker · {attention.label}</span> : null}
+      {/* The trailing slot — reserved on every row, whether or not anything is in it (#617). */}
+      <span
+        data-slot="task-row-trailing"
+        className="relative flex h-[19px] w-4 shrink-0 items-center justify-center max-md:h-auto max-md:w-11 max-md:self-stretch no-hover:h-auto no-hover:w-11 no-hover:self-stretch"
+      >
         {unread ? (
           <StatusDot
-            tone="accent"
+            tone={unreadMarkerTone(run)}
             role="img"
             aria-label="unread"
             title="Unread — not opened since it finished"
-            className="ml-0.5 shrink-0"
+            data-slot="unread-marker"
+            className={onTogglePin ? ROW_UNREAD_WITH_PIN_CLASS : undefined}
           />
         ) : null}
-      </Link>
-      {run.delegation?.role === 'worker' ? <span className="sr-only">Worker · {attention.label}</span> : null}
-      {/* The pin (#935), a SIBLING of the Link for the same reason the status dot and the
-          reference chip are: a button inside an anchor is invalid, and this one has its own
-          target. Reveal rules in `ROW_PIN_CLASS`. */}
-      {onTogglePin ? (
-        <PinToggle
-          pinned={Boolean(run.pinned)}
-          onToggle={(pinned) => onTogglePin(run, pinned)}
-          className={ROW_PIN_CLASS}
-        />
-      ) : null}
+        {/* The pin (#935), a SIBLING of the Link: a button inside an anchor is invalid, and this
+            one has its own target. Centred over the slot rather than sized by it, so its 20px
+            target never widens the slot; where it is a 44px target the slot is 44px wide and
+            stretches to the row's height, so the target stays inside its own row. */}
+        {onTogglePin ? (
+          <PinToggle
+            pinned={Boolean(run.pinned)}
+            onToggle={(pinned) => onTogglePin(run, pinned)}
+            className={cn('absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2', ROW_PIN_CLASS)}
+          />
+        ) : null}
+      </span>
     </div>
   )
 }

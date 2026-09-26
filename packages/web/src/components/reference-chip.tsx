@@ -85,6 +85,7 @@ export function ReferenceChip({
   projectId,
   className,
   compact = false,
+  plain = false,
 }: {
   reference: { kind: 'PR' | 'Issue'; number?: number; url?: string }
   taskTitle: string
@@ -113,6 +114,13 @@ export function ReferenceChip({
    * label, exactly as in the full treatment.
    */
   compact?: boolean
+  /**
+   * The sidebar row's meta line (#617): the reference as plain muted text — `PR #594`, `#451` —
+   * with no border, no tone colour and no glyph, underlined on hover and focus. It is still the
+   * same link with the same status panel and the same accessible name (which carries the
+   * status), so nothing the chip said is lost; the row just stops painting it in teal.
+   */
+  plain?: boolean
 }) {
   const { kind, number, url } = reference
   // An explicit `status` wins — it is what a test or a one-off caller passes — and otherwise the
@@ -133,19 +141,26 @@ export function ReferenceChip({
   // nothing is known, and nothing known must never colour a chip.
   const conflicting = kind === 'PR' && (explicitConflicting ?? entry.conflicting) === true
   const presentation = conflicting ? REFERENCE_CONFLICT : statusPresentation
-  const chipClass = cn(
-    'inline-flex h-[22px] items-center gap-1 rounded-md border px-1.5 font-mono text-[12px] font-normal',
-    TONE_CLASS[presentation?.tone ?? 'accent'],
-    className,
-  )
+  const chipClass = plain
+    ? cn(
+        'rounded-[2px] text-inherit underline-offset-2 hover:text-muted-foreground hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-link-foreground',
+        className,
+      )
+    : cn(
+        'inline-flex h-[22px] items-center gap-1 rounded-md border px-1.5 font-mono text-[12px] font-normal',
+        TONE_CLASS[presentation?.tone ?? 'accent'],
+        className,
+      )
   // The overridden status rides along into the tooltip whenever the conflict took the chip.
   const tooltip = statusTooltip(entry, presentation, conflicting ? statusPresentation : undefined)
-  const label = number ? `${!compact && kind === 'Issue' ? 'Issue ' : ''}#${number}` : kind
+  const label = plain
+    ? number ? `${kind === 'PR' ? 'PR ' : ''}#${number}` : kind
+    : number ? `${!compact && kind === 'Issue' ? 'Issue ' : ''}#${number}` : kind
   const kindWord = kind === 'PR' ? 'pull request' : 'issue'
   // The accessible name carries the status too — a screen reader gets what the color says.
   const ariaLabel = `Open the ${kindWord} for ${taskTitle}${presentation ? ` — ${presentation.label}` : ''}`
 
-  const body = (
+  const body = plain ? label : (
     <>
       {/* `presentation ? status : undefined` — one gate for every status channel, so an unknown
           value cannot paint a glyph either. The conflict overrides the glyph as it overrides the
@@ -188,7 +203,7 @@ export function ReferenceChip({
         // element is a browser popup fighting a designed one.
         title={tooltip ? undefined : url}
         aria-label={ariaLabel}
-        className={cn(chipClass, TONE_HOVER[presentation?.tone ?? 'accent'])}
+        className={plain ? chipClass : cn(chipClass, TONE_HOVER[presentation?.tone ?? 'accent'])}
       >
         {body}
       </a>

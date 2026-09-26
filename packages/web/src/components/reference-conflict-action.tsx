@@ -132,6 +132,7 @@ export function TaskReferenceChip({
   reference,
   className,
   compact = false,
+  plain = false,
 }: {
   run: ApiRun
   reference: { kind: 'PR' | 'Issue'; number?: number; url?: string }
@@ -139,6 +140,8 @@ export function TaskReferenceChip({
   /** The narrow sidebar row — the chip's own abbreviation. The panel it opens is the full one:
    *  there is room for words in a panel wherever the row it hangs off is. */
   compact?: boolean
+  /** The sidebar meta line's plain-text reference (#617) — see `ReferenceChip`. */
+  plain?: boolean
 }) {
   return (
     <ReferenceChip
@@ -147,6 +150,7 @@ export function TaskReferenceChip({
       conflictAction={<ResolveConflictsButton run={run} prNumber={reference.number} />}
       className={className}
       compact={compact}
+      plain={plain}
     />
   )
 }

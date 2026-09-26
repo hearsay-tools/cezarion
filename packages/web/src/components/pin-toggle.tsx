@@ -1,4 +1,4 @@
-import { PinIcon } from '@/components/design-icons'
+import { PinIcon } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 
@@ -9,8 +9,10 @@ import { cn } from '@/lib/utils'
  *
  * Shared rather than re-styled per surface for the reason the status dot is: a pin is one idea,
  * and three hand-rolled variants of it would drift into three different meanings of "filled".
- * The filled pin means pinned, the outline one means "pinnable"; the surface decides only when
- * the outline is *visible* (a row reveals it on hover so it is not permanently busy — see the
+ * The filled pin means pinned (and, pressed, "unpin"), the outline one means "pinnable"; both are
+ * a quiet 12px `--soft-foreground` glyph that brightens to `--foreground` under the pointer —
+ * never teal (#617: teal on every pin read as loud, not as pinned). The surface decides only when
+ * the glyph is *visible* (a row reveals it on hover so it is not permanently busy — see the
  * width-priority rule in `task-quick-list.tsx`) by passing its own classes.
  *
  * `stopPropagation` because two of the three surfaces are row-click navigation targets: the
@@ -45,12 +47,13 @@ export function PinToggle({
       }}
       className={cn(
         'inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-soft-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
-        pinned && 'text-accent-text hover:text-accent-text',
         className,
         'max-md:min-h-11 max-md:min-w-11 no-hover:min-h-11 no-hover:min-w-11',
       )}
     >
-      <PinIcon className={cn('size-[18px]' )} aria-hidden="true" />
+      {/* Lucide's stroked pin rather than the exported glyph: the same outline has to exist
+          filled, and one geometry for both is what makes the two read as one control. */}
+      <PinIcon data-slot="pin-icon" className="size-3" fill={pinned ? 'currentColor' : 'none'} aria-hidden="true" />
     </button>
   )
 }
