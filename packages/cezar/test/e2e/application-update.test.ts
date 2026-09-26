@@ -47,7 +47,7 @@ async function pollLocalJson(url: string, child: ReturnType<typeof spawn>, deadl
   const deadline = Date.now() + deadlineMs;
   let last: unknown;
   do {
-    if (child.exitCode !== null) throw new Error(`built CLI exited before health: ${child.exitCode}`);
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`built CLI exited before health: ${child.exitCode ?? child.signalCode}`);
     try { return await localJson(url); } catch (error) { last = error; }
     await new Promise(resolve => setTimeout(resolve, 150));
   } while (Date.now() < deadline);
