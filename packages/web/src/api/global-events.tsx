@@ -243,6 +243,14 @@ function createRunListBatcher(queryClient: QueryClient) {
     const cacheKey = JSON.stringify(event.query.queryKey)
     const entry = needsReconcile.get(cacheKey)
     if (!entry) return
+    if (event.action.type === 'setState') {
+      // Cancelling the last observer can revert to a manual SSE write's fresh-looking snapshot.
+      // Preserve the obligation without fetching a list that nobody is observing.
+      if (!event.query.state.isInvalidated) {
+        void queryClient.invalidateQueries({ queryKey: entry.key, exact: true, refetchType: 'none' })
+      }
+      return
+    }
     if (event.action.type === 'fetch') {
       if (entry.phase === 'awaiting-fetch') entry.phase = 'fetching'
       return
