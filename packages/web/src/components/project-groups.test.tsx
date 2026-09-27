@@ -91,13 +91,14 @@ function renderGroups(
   entry = '/p/cezar/',
   // #801: workspace-wide, unlike the per-project forge gate — one env var on the one server that
   // serves every group. Off by default here, exactly as a default server reports it.
-  { automations = false }: { automations?: boolean } = {},
+  { automations = false, inboxCount = null, skillsUpdateAvailable = false }: { automations?: boolean; inboxCount?: number | null; skillsUpdateAvailable?: boolean } = {},
 ) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={[entry]}>
         <ListViewProvider>
-          <ProjectGroups projects={projects} bootProjectId="cezar" automationsAvailable={automations} />
+          <ProjectGroups projects={projects} bootProjectId="cezar" automationsAvailable={automations}
+            inboxAvailable={inboxCount !== null} inboxCount={inboxCount} skillsUpdateAvailable={skillsUpdateAvailable} />
         </ListViewProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -245,6 +246,32 @@ describe('ProjectGroups', () => {
       expect(link.className).not.toContain('text-xs')
       expect(link.className).toContain('md:h-[30px]')
     }
+  })
+
+  // #617 01c: a grouped project's nav speaks the same selection language as the task rows.
+  it('selects a nav row with the task row fill, hovers neutral, and badges by meaning (#617)', async () => {
+    serve({ '/api/v1/p/cezar/runs': [] })
+    renderGroups([project()], '/p/cezar/inbox', { inboxCount: 3, skillsUpdateAvailable: true })
+    const nav = within(group('cezar')).getByRole('navigation')
+    const selected = within(nav).getByRole('link', { current: 'page' })
+    expect(selected.textContent).toContain('Inbox')
+    for (const token of ['bg-sidebar-row-selected', 'text-foreground', 'font-medium']) expect(selected.className.split(' ')).toContain(token)
+    expect(selected.querySelector('svg')?.getAttribute('class')).toContain('text-foreground')
+    for (const link of within(nav).getAllByRole('link')) {
+      expect(link.className).toContain(link === selected ? 'hover:bg-sidebar-row-selected' : 'hover:bg-sidebar-row-hover')
+      expect(link.className).toContain('hover:text-foreground')
+      expect(link.querySelector('svg')?.getAttribute('class')).toContain('group-hover/nav:text-foreground')
+      expect(link.className).not.toMatch(/task-brand-selected|accent-(text|strong|icon)/)
+    }
+    const git = within(nav).getByRole('link', { name: 'Git' })
+    expect(git.className).not.toContain('bg-sidebar-row-selected')
+    expect(git.className).toContain('font-normal')
+    expect(git.querySelector('svg')?.getAttribute('class')).toContain('text-soft-foreground')
+    const badge = group('cezar').querySelector('[data-slot="nav-badge"]') as HTMLElement
+    expect(badge.textContent).toBe('3')
+    expect(badge.className.split(' ')).toEqual(expect.arrayContaining(['bg-inbox-count', 'text-inbox-count-foreground', 'text-[11px]', 'font-semibold']))
+    const dot = group('cezar').querySelector('[data-slot="nav-update-marker"] > span[aria-hidden]') as HTMLElement
+    expect(dot.className.split(' ')).toEqual(expect.arrayContaining(['size-[6px]', 'rounded-full', 'bg-info']))
   })
 
   it('collapses an unpinned previous project when another project is selected', async () => {

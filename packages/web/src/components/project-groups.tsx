@@ -8,6 +8,7 @@ import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { useSidebarNavigate } from '@/components/app-shell'
 import { useListView } from '@/components/list-view'
 import { activeNavPath, visibleNavItems } from '@/components/nav-items'
+import { NAV_INBOX_COUNT_CLASS, NAV_UPDATE_DOT_CLASS, navIconClass, navRowClass } from '@/components/nav-row-styles'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { QuickListBuckets } from '@/components/task-quick-list'
 import { Link, pathnameProjectId, scopeTo, stripProjectPrefix, useProjectMatch } from '@/lib/project-router'
@@ -299,12 +300,9 @@ function ProjectGroup({
                   to={scopeTo(project.id, item.to)}
                   onClick={onNavigate}
                   aria-current={isActive ? 'page' : undefined}
-                  className={cn(
-                    'selection-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-[30px]',
-                    isActive && 'bg-[var(--task-brand-selected)] text-accent-text',
-                  )}
+                  className={navRowClass(isActive)}
                 >
-                  <Icon className="size-[15px] shrink-0 text-soft-foreground" aria-hidden="true" />
+                  <Icon className={navIconClass(isActive)} aria-hidden="true" />
                   {item.label}
                   {/* `/api/todos` is fetched for the active scope only, so only the active
                       group has a real count to show — a badge on the others would be the active
@@ -312,14 +310,14 @@ function ProjectGroup({
                   {item.badge === 'inbox-count' && active && inboxCount ? (
                     <span
                       data-slot="nav-badge"
-                      className="ml-auto rounded-full bg-accent-strong px-1.5 py-px text-[11px] font-semibold tabular-nums text-accent-strong-foreground"
+                      className={NAV_INBOX_COUNT_CLASS}
                     >
                       {inboxCount}
                     </span>
                   ) : null}
                   {item.badge === 'skills-update' && active && skillsUpdateAvailable ? (
                     <span data-slot="nav-update-marker" className="ml-auto flex items-center">
-                      <span className="size-1.5 rounded-full bg-accent-strong" aria-hidden="true" />
+                      <span className={NAV_UPDATE_DOT_CLASS} aria-hidden="true" />
                       <span className="sr-only">Skills update available</span>
                     </span>
                   ) : null}

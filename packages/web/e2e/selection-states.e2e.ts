@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { stopFixtureServer } from './fixture-server'
 import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
+import { applyContrastQaVariant, contrastQaVariants, type ContrastQaVariant, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 
 const originalBrowserArgs = process.env.AGENT_BROWSER_ARGS
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -42,6 +42,8 @@ beforeAll(async () => {
       groupId: 'g-sel', variant: index ? 'B' : 'A', referencedIssueUrl: 'https://github.com/o/r/issues/425',
     })),
   ]))
+  // Two follow-ups for the Inbox nav count (#617 01c); the inbox itself is opt-in (CEZ_FOLLOWUPS).
+  writeFileSync(join(root, '.ai/cezar/todos.json'), JSON.stringify([{ id: 'sel-1', summary: 'Review the PR' }, { id: 'sel-2', summary: 'Rerun the checks' }]))
   const probe = createServer()
   const port = await new Promise<number>((done) => probe.listen(0, '127.0.0.1', () => {
     const address = probe.address() as { port: number }
@@ -49,7 +51,7 @@ beforeAll(async () => {
   }))
   baseUrl = `http://127.0.0.1:${port}`
   server = spawn(process.execPath, [cezarCli, 'serve', '--repo', root, '--port', String(port), '--no-open'], {
-    env: fixtureServeEnv(root), stdio: 'ignore',
+    env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1' }), stdio: 'ignore',
   })
   for (let attempt = 0; attempt < 60; attempt++) {
     try { if ((await fetch(`${baseUrl}/api/v1/health`)).ok) break } catch { /* booting */ }
@@ -103,6 +105,151 @@ function focus(selector: string): void {
   const sample = browser.evaluate(contrastSampleExpression(selector, 'outline-color', 'parent')) as ContrastSample
   samples.push({ variant: variantId, target: selector, state: 'keyboard focus', ...sample })
   expect(sample.ratio, JSON.stringify(sample)).toBeGreaterThanOrEqual(3)
+}
+
+/*
+ * #617 addendum 01c: one selection language. A selected nav item, New task on /new and a selected
+ * task row resolve to the SAME fill; hover is the neutral row hover; badges follow their meaning.
+ * Every value comes from the real stylesheet in this theme and density, in the desktop sidebar
+ * and in the mobile drawer (the same nav component).
+ */
+function checkNavSelection(variant: ContrastQaVariant, { base, projectId, nav: navSelector }: {
+  base: string; projectId: string; nav: string
+}): void {
+  variantId = variant.id
+  const mobile = variant.viewport.width === 360
+  const container = mobile ? '[role="dialog"] ' : ''
+  const fill = variant.theme === 'dark'
+    ? { hover: 'rgb(27, 33, 48)', selected: 'rgb(38, 44, 62)' }
+    : { hover: 'rgb(244, 245, 248)', selected: 'rgb(234, 237, 243)' }
+  // The addendum's hex values, as the browser serialises them (0x26 → 0.15, 0x40 → 0.25).
+  const amber = variant.theme === 'dark'
+    ? { fill: 'rgba(244, 197, 66, 0.15)', ink: 'rgb(244, 197, 66)' }
+    : { fill: 'rgba(244, 197, 66, 0.25)', ink: 'rgb(122, 82, 0)' }
+  const open = (path: string, ready: string) => {
+    browser.setViewport(variant.viewport.width, variant.viewport.height)
+    browser.goto(`${base}/p/${projectId}${path}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]') !== null`)
+    applyContrastQaVariant(browser, variant)
+    browser.moveTo(0, 0)
+    if (mobile) browser.click('[data-slot="mobile-top-bar"] button')
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(container + ready)})?.getBoundingClientRect().width > 0`)
+  }
+  const record = (target: string, state: string, min: number, property = 'color') => {
+    const sample = browser.evaluate(contrastSampleExpression(target, property)) as ContrastSample
+    samples.push({ variant: variantId, target, state, ...sample })
+    expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(min)
+  }
+  const nav = `${container}${navSelector}`
+  const tasksNav = `${nav} a[aria-current="page"]`
+  const taskRow = `${container}[data-slot="task-row"][data-run-id="one"][data-active="true"]`
+  const resolveFn = `const resolve = (value) => { const probe = document.createElement('span'); probe.style.color = value
+    document.body.appendChild(probe); const out = getComputedStyle(probe).color; probe.remove(); return out }`
+  type Facts = { tasks: string; row: string; label: string; icon: string; weight: string; ink: string
+    height: number; inbox: { bg: string; color: string; text: string } | null }
+  // One expression, polled whole (#409): the state checked is the state read.
+  const facts = `(() => {
+    const q = (sel) => document.querySelector(sel), cs = (sel) => getComputedStyle(q(sel))
+    ${resolveFn}
+    const inboxEl = q(${JSON.stringify(`${nav} [data-slot="nav-badge"]`)})
+    return { tasks: cs(${JSON.stringify(tasksNav)}).backgroundColor, row: q(${JSON.stringify(taskRow)}) ? cs(${JSON.stringify(taskRow)}).backgroundColor : '',
+      label: cs(${JSON.stringify(tasksNav)}).color, icon: cs(${JSON.stringify(`${tasksNav} svg`)}).color,
+      weight: cs(${JSON.stringify(tasksNav)}).fontWeight, ink: resolve('var(--foreground)'),
+      height: q(${JSON.stringify(tasksNav)}).getBoundingClientRect().height,
+      inbox: inboxEl && { bg: getComputedStyle(inboxEl).backgroundColor, color: getComputedStyle(inboxEl).color, text: inboxEl.textContent } }
+  })()`
+  open('/tasks/one', '[data-slot="task-row"][data-run-id="one"][data-active="true"]')
+  // Waited, not sampled: the inbox count lands from its own query.
+  const f = browser.waitForValue(facts, (v: Facts | null) => v !== null && v.inbox?.text === '2' && v.tasks === fill.selected) as Facts
+  expect({ tasks: f.tasks, row: f.row }).toEqual({ tasks: fill.selected, row: fill.selected })
+  expect({ label: f.label, icon: f.icon, weight: f.weight }).toEqual({ label: f.ink, icon: f.ink, weight: '500' })
+  expect({ bg: f.inbox?.bg, color: f.inbox?.color }).toEqual({ bg: amber.fill, color: amber.ink })
+  // Below 48rem the unlayered floor keeps `nav a` at 44px in every density.
+  if (mobile) expect(f.height).toBeGreaterThanOrEqual(44)
+  record(tasksNav, 'selected nav label', 4.5)
+  record(`${tasksNav} svg`, 'selected nav icon', 3)
+  record(`${nav} [data-slot="nav-badge"]`, 'inbox-count number', 4.5)
+
+  // Two badges no fixture can put on screen, resolved from their exact markup instead: the
+  // skills update marker (skills-update.e2e.ts explains why Chrome cannot get one) and the Tasks
+  // unread count, which only the flat fallback nav renders while the project registry is absent
+  // (app-shell-container.tsx) — every booted workspace shows project groups. Each probe carries
+  // the classes nav-row-styles.ts ships, sits detached on the fill it can appear on, and is
+  // resolved against the real stylesheet in this theme and density.
+  type Probe = { width: string; height: string; bg: string; color: string; size: string; weight: string; padding: string; radius: string
+    info: string; ink: string; muted: string; sidebar: string; surface: string; ratio: number }
+  const detached = (surface: string, classes: string, ink: 'color' | 'background-color') => browser.evaluate(`(() => {
+    const probe = document.createElement('div'); probe.style.background = 'var(${surface})'; probe.style.display = 'flex'
+    probe.innerHTML = '<span class="${classes}" style="display:block">2</span>'
+    document.body.appendChild(probe)
+    const tint = (value) => { const t = document.createElement('i'); t.style.color = value; probe.appendChild(t); const out = getComputedStyle(t).color; t.remove(); return out }
+    const c = getComputedStyle(probe.firstElementChild), p = getComputedStyle(probe)
+    const rgba = (v) => { const n = v.match(/[\\d.]+/g).map(Number); return { r: n[0], g: n[1], b: n[2], a: n[3] ?? 1 } }
+    const over = (f, b) => ({ r: f.r * f.a + b.r * (1 - f.a), g: f.g * f.a + b.g * (1 - f.a), b: f.b * f.a + b.b * (1 - f.a), a: 1 })
+    const lum = (x) => [x.r, x.g, x.b].map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 })
+      .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0)
+    const back = over(rgba(${ink === 'color' ? 'c.backgroundColor' : "'rgba(0, 0, 0, 0)'"}), rgba(p.backgroundColor))
+    const front = over(rgba(c.getPropertyValue('${ink}')), back)
+    const a = lum(front), b = lum(back)
+    const out = { width: c.width, height: c.height, bg: c.backgroundColor, color: c.color, size: c.fontSize, weight: c.fontWeight,
+      padding: c.padding, radius: c.borderRadius, info: tint('var(--info)'), ink: tint('var(--foreground)'), muted: tint('var(--muted)'),
+      sidebar: tint('var(--sidebar)'), surface: p.backgroundColor, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) }
+    probe.remove()
+    return out
+  })()`) as Probe
+  const keep = (target: string, state: string, sample: Probe, min: number) => {
+    samples.push({ variant: variantId, target, state, foreground: sample.color, background: sample.surface, ratio: sample.ratio })
+    expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(min)
+  }
+  // The update marker: a 6px --info dot, 3:1 on every fill it can sit on.
+  for (const surface of ['--sidebar', '--sidebar-row-hover', '--sidebar-row-selected']) {
+    const marker = detached(surface, 'size-[6px] rounded-full bg-info', 'background-color')
+    expect({ width: marker.width, height: marker.height, bg: marker.bg }).toEqual({ width: '6px', height: '6px', bg: marker.info })
+    keep(`update marker on ${surface}`, 'update marker', marker, 3)
+  }
+  // tasks-unread: neutral 11px/600, 1px 6px, radius 9px; --muted at rest, --sidebar on the selected row.
+  const chipShape = 'ml-auto rounded-[9px] px-[6px] py-px text-[11px] leading-[16px] font-semibold tabular-nums text-foreground'
+  for (const [surface, chipFill, expected] of [['--sidebar', 'bg-muted', 'muted'], ['--sidebar-row-hover', 'bg-muted', 'muted'], ['--sidebar-row-selected', 'bg-sidebar', 'sidebar']] as const) {
+    const chip = detached(surface, `${chipShape} ${chipFill}`, 'color')
+    expect({ bg: chip.bg, color: chip.color, size: chip.size, weight: chip.weight, padding: chip.padding, radius: chip.radius })
+      .toEqual({ bg: chip[expected], color: chip.ink, size: '11px', weight: '600', padding: '1px 6px', radius: '9px' })
+    keep(`tasks-unread on ${surface}`, 'tasks-unread number', chip, 4.5)
+  }
+
+  // Hover, any nav item: the neutral row hover, with foreground label and icon.
+  const git = `${nav} a[href$="/git"]`
+  hoverVisiblePoint(browser, git)
+  type Ink = { bg: string; label: string; icon: string; ink: string; weight: string; width: number; height: number }
+  const ink = (selector: string) => `(() => {
+    const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null
+    ${resolveFn}
+    const s = getComputedStyle(el), r = el.getBoundingClientRect()
+    return { bg: s.backgroundColor, label: s.color, icon: getComputedStyle(el.querySelector('svg')).color, ink: resolve('var(--foreground)'),
+      weight: s.fontWeight, width: r.width, height: r.height }
+  })()`
+  const hovered = browser.waitForValue(ink(git), (v: Ink | null) => v !== null && v.bg === fill.hover) as Ink
+  expect({ label: hovered.label, icon: hovered.icon }).toEqual({ label: hovered.ink, icon: hovered.ink })
+  record(git, 'hover nav label', 4.5)
+  record(`${git} svg`, 'hover nav icon', 3)
+  browser.screenshot(`${artifacts}/states-nav-${variant.id}.png`, { viewport: true })
+
+  // New task on /new: the same fill as the selected nav item and the selected task row.
+  const newTask = `${container}[data-sidebar-item="new-task"]`
+  open('/new', '[data-sidebar-item="new-task"][aria-current="page"]')
+  const composer = browser.waitForValue(ink(newTask), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
+  expect({ label: composer.label, icon: composer.icon, weight: composer.weight }).toEqual({ label: composer.ink, icon: composer.ink, weight: '500' })
+  record(newTask, 'new task on /new', 4.5)
+
+  // The footer's active icon: a 36px square on the selected fill, foreground icon. Desktop only:
+  // the drawer renders the same footer component, and its touch rules are not this slice's.
+  if (!mobile) {
+    browser.goto(`${base}/settings/global`)
+    applyContrastQaVariant(browser, variant)
+    const gear = '[data-slot="global-settings-link"][aria-current="page"]'
+    const footer = browser.waitForValue(ink(gear), (v: Ink | null) => v !== null && v.bg === fill.selected) as Ink
+    expect({ width: footer.width, height: footer.height, icon: footer.icon }).toEqual({ width: 36, height: 36, icon: footer.ink })
+    record(`${gear} svg`, 'active footer icon', 3)
+  }
 }
 
 describe('selection and control states (#171)', () => {
@@ -218,6 +365,11 @@ describe('selection and control states (#171)', () => {
       samples.push({ variant: variantId, target: `${other} pin`, state: 'hover pin', ...pin })
       expect(pin.ratio, `pin: ${JSON.stringify(pin)}`).toBeGreaterThanOrEqual(3)
       browser.screenshot(`${artifacts}/states-sidebar-row-${variant.id}.png`, { viewport: true })
+    })
+
+    // #617 addendum 01c, in the default grouped navigation (see checkNavSelection).
+    it(`${variant.id}: grouped nav items share the task row's selection, and badges follow their meaning (#617 01c)`, () => {
+      checkNavSelection(variant, { base: baseUrl, projectId: project, nav: '[data-slot="project-group-body"] nav' })
     })
 
     if (variant.id === 'desktop-dark-comfortable') it(`${variant.id}: the group row's shared reference is a link with the status panel (#617)`, () => {

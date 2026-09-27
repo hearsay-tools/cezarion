@@ -89,6 +89,10 @@
    * --task-brand-selected on the row so "selected" stops reading as loud. */
   --sidebar-row-hover: #1b2130;
   --sidebar-row-selected: #262c3e;
+  /* The Inbox nav count (#617 01c): soft amber, because follow-ups wait for you. A tinted fill
+   * with amber ink rather than the teal brand chip; 8.1:1 on the dark sidebar. */
+  --inbox-count: #f4c54226;
+  --inbox-count-foreground: #f4c542;
 
   /* Cezarion surfaces from design.pen. Elevation comes from surface steps, not shadows. */
   --surface-base: #0b0f17;
@@ -229,6 +233,9 @@
   --status-running: #7c3aed;
   --sidebar-row-hover: #f4f5f8;
   --sidebar-row-selected: #eaedf3;
+  /* amber-400 ink on white is ~1.6:1, so the light count darkens its number (6.0:1 on the tint). */
+  --inbox-count: #f4c54240;
+  --inbox-count-foreground: #7a5200;
 
   --message-user-bg: #fff9e8;
   --message-user-border: #ddc978;
@@ -426,6 +433,8 @@
   --color-status-running: var(--status-running);
   --color-sidebar-row-hover: var(--sidebar-row-hover);
   --color-sidebar-row-selected: var(--sidebar-row-selected);
+  --color-inbox-count: var(--inbox-count);
+  --color-inbox-count-foreground: var(--inbox-count-foreground);
   --color-ring: var(--ring);
 
   --color-danger: var(--danger);
