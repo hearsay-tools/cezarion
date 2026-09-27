@@ -355,12 +355,15 @@ entries:
     pr: 993
     title: "fix(automations): a stale poll lock no longer silences every project for ten minutes (#993)"
     date: 2026-09-16
-    status: planned
+    status: ported
     hint:
       conflicts: 3
     fork:
       issue: 428
-    decided: 2026-09-18
+      commits:
+        - 0f47bdfa
+        - 3ff408df
+    decided: 2026-09-27
   - sha: 13e727c2e4dde4c4afa6fe3a845407490ddd3b1c
     pr: 1005
     title: "fix(opencode): a turn longer than five minutes no longer parks the run under Needs you (#1005)"

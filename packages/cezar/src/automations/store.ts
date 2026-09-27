@@ -286,7 +286,7 @@ export class AutomationStore {
     return undefined;
   }
 
-  /** A crashed reclaimer's guard is recoverable; a live guard is never removed. */
+  /** Fresh live guards are respected; abandoned or aged-out guards are recoverable. */
   private retireAbandonedReclaimGuard(path: string, staleAfterMs: number): boolean {
     const marker = join(path, '.reaping');
     let claimedToken: string | undefined;
