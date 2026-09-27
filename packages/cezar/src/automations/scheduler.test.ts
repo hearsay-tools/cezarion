@@ -71,6 +71,7 @@ describe('ProjectAutomationScheduler', () => {
     const other = owner.create({ name: 'Other', enabled: true, events: ['issue.opened'], intervalSeconds: 300, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Other' } }, 'two');
     const contender = AutomationStore.open(owner.dataDir);
     const held = owner.acquireLease();
+    owner.appendLog({ automationId: definition.id, revision: definition.revision, result: 'no-match' });
     owner.setState(definition.id, { baselineAt: '2026-09-14T06:00:00.000Z', cursor: { timestamp: '2026-09-14T06:01:00.000Z' }, consecutiveFailures: 3, backoffUntil: '2026-09-14T07:00:00.000Z' });
     owner.setState(other.id, { baselineAt: '2026-09-14T06:02:00.000Z' });
     const path = join(owner.dataDir, 'automation-state.json');
@@ -80,6 +81,9 @@ describe('ProjectAutomationScheduler', () => {
       await expect(scheduler.check(definition)).rejects.toBeInstanceOf(LeaseHeldError);
       expect(await readFile(path, 'utf8')).toBe(before);
       expect(contender.logs({ automationId: definition.id })[0]?.result).toBe('skipped');
+      const newest = contender.logs({ automationId: definition.id, limit: 1 })[0]!;
+      expect(newest.seq).toBe(2);
+      expect(contender.logs({ automationId: definition.id, cursor: newest.seq, limit: 1 })[0]?.result).toBe('no-match');
     } finally { held?.release(); }
   });
 

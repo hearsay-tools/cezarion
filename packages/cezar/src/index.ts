@@ -776,6 +776,8 @@ function ensureDataGitignore(repoRoot: string): void {
     'automation-receipts.ndjson.tmp',
     'automation-log.ndjson',
     'automation-log.ndjson.tmp',
+    'automation-log.lock',
+    'automation-log.reclaim*/',
     'automation-poll.lock',
     'automation-poll.reclaim*/',
   ];

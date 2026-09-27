@@ -32,6 +32,8 @@ const DEFINITIONS = 'automations.json';
 const STATE = 'automation-state.json';
 const RECEIPTS = 'automation-receipts.ndjson';
 const LOG = 'automation-log.ndjson';
+const LOG_LOCK = 'automation-log.lock';
+const LOG_RECLAIM = 'automation-log.reclaim';
 const POLL_LOCK = 'automation-poll.lock';
 const POLL_RECLAIM = 'automation-poll.reclaim';
 const RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
@@ -51,7 +53,6 @@ export class AutomationStore {
   private stateFile: StateFile = { version: 1, states: {} };
   private definitions = new Map<string, AutomationDefinition>();
   private warned = new Set<string>();
-  private logSeq = 0;
   private readonly now: () => Date;
   private readonly secrets = collectSecretValues();
 
@@ -174,13 +175,17 @@ export class AutomationStore {
   appendLog(
     record: Omit<AutomationLogRecord, 'seq' | 'ts'> & Partial<Pick<AutomationLogRecord, 'ts'>>,
   ): AutomationLogRecord {
-    const parsed = automationLogRecordSchema.parse({
-      ...record,
-      seq: ++this.logSeq,
-      ts: record.ts ?? this.now().toISOString(),
+    return this.withLogLease(() => {
+      const seq = this.readNdjson(LOG, automationLogRecordSchema)
+        .reduce((highest, row) => Math.max(highest, row.seq), 0) + 1;
+      const parsed = automationLogRecordSchema.parse({
+        ...record,
+        seq,
+        ts: record.ts ?? this.now().toISOString(),
+      });
+      this.appendNdjson(LOG, redactDeep(parsed, this.secrets));
+      return parsed;
     });
-    this.appendNdjson(LOG, redactDeep(parsed, this.secrets));
-    return parsed;
   }
 
   logs(options: { automationId?: string; result?: AutomationLogRecord['result']; event?: AutomationLogRecord['event']; since?: string; cursor?: number; limit?: number } = {}): AutomationLogRecord[] {
@@ -201,8 +206,10 @@ export class AutomationStore {
       (row) => Date.parse(row.updatedAt) >= cutoff,
     );
     this.rewriteNdjson(RECEIPTS, latest);
-    const logs = this.readNdjson(LOG, automationLogRecordSchema);
-    this.rewriteNdjson(LOG, logs.slice(-10_000));
+    this.withLogLease(() => {
+      const logs = this.readNdjson(LOG, automationLogRecordSchema);
+      this.rewriteNdjson(LOG, logs.slice(-10_000));
+    });
   }
 
   maybeCompact(): void {
@@ -213,11 +220,26 @@ export class AutomationStore {
 
   acquireLease(staleAfterMs = 10 * 60_000): AutomationLease | undefined {
     mkdirSync(this.dataDir, { recursive: true });
-    return this.tryAcquireLease(join(this.dataDir, POLL_LOCK), staleAfterMs, 0, false);
+    return this.tryAcquireLease(join(this.dataDir, POLL_LOCK), join(this.dataDir, POLL_RECLAIM), staleAfterMs, 0, false);
   }
 
-  private tryAcquireLease(path: string, staleAfterMs: number, attempt: number, reclaiming: boolean): AutomationLease | undefined {
-    const guardPath = join(this.dataDir, POLL_RECLAIM);
+  private withLogLease<T>(operation: () => T): T {
+    mkdirSync(this.dataDir, { recursive: true });
+    const path = join(this.dataDir, LOG_LOCK);
+    const guardPath = join(this.dataDir, LOG_RECLAIM);
+    const deadline = Date.now() + 15_000;
+    const pause = new Int32Array(new SharedArrayBuffer(4));
+    let lease: AutomationLease | undefined;
+    while (!lease && Date.now() < deadline) {
+      lease = this.tryAcquireLease(path, guardPath, 10 * 60_000, 0, false);
+      if (!lease) Atomics.wait(pause, 0, 0, 10);
+    }
+    if (!lease) throw new Error('automation log lock is busy; retry shortly');
+    try { return operation(); }
+    finally { lease.release(); }
+  }
+
+  private tryAcquireLease(path: string, guardPath: string, staleAfterMs: number, attempt: number, reclaiming: boolean): AutomationLease | undefined {
     if (!reclaiming && existsSync(guardPath)) {
       const releaseGuard = this.acquireReclaimGuard(guardPath, staleAfterMs);
       if (!releaseGuard) return undefined;
@@ -243,7 +265,7 @@ export class AutomationStore {
           const observed = fstatSync(observedFd);
           if (this.isLeaseAbandoned(path, staleAfterMs) && sameFile(observed, statSync(path))) {
             unlinkSync(path);
-            return this.tryAcquireLease(path, staleAfterMs, attempt + 1, true);
+            return this.tryAcquireLease(path, guardPath, staleAfterMs, attempt + 1, true);
           }
         } finally {
           closeSync(observedFd);
@@ -336,8 +358,6 @@ export class AutomationStore {
       version: 1,
       states: {},
     });
-    const logs = this.readNdjson(LOG, automationLogRecordSchema);
-    this.logSeq = logs.at(-1)?.seq ?? 0;
   }
 
   private loadDefinitions(): void {
