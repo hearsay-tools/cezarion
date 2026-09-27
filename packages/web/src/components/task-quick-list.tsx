@@ -365,13 +365,16 @@ function GroupRow({
           {meta.join(' · ') || '\u00a0'}
         </span>
       </button>
-      <span data-slot="group-trailing" className="flex h-[19px] w-[36px] shrink-0 items-center justify-end gap-0.5">
+      {/* 36px on a pointer device; on touch the compare link is a 44px target of its own, beside
+          (never over) the disclosure, and the slot reserves that room permanently — px, not
+          spacing units, so density cannot shrink it. */}
+      <span data-slot="group-trailing" className="flex h-[19px] w-[36px] shrink-0 items-center justify-end gap-0.5 no-hover:h-auto no-hover:w-[60px] no-hover:self-stretch">
         <Link
           to={scopeTo(scope, `/compare/${row.groupId}`)}
           data-slot="group-compare"
           title="Compare the variants"
           aria-label={`Compare the variants of ${row.title}`}
-          className="inline-flex size-[18px] shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground"
+          className="inline-flex size-[18px] shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground no-hover:size-[44px] no-hover:min-h-[44px] no-hover:min-w-[44px]"
         >
           <ScaleIcon className="size-[14px]" aria-hidden="true" />
         </Link>
@@ -494,6 +497,24 @@ const ROW_UNREAD_WITH_PIN_CLASS =
   ' max-md:absolute max-md:top-1/2 max-md:left-0 max-md:-translate-y-1/2 max-md:opacity-100' +
   ' no-hover:absolute no-hover:top-1/2 no-hover:left-0 no-hover:-translate-y-1/2 no-hover:opacity-100'
 
+/** Whether `ref`'s content is wider than its box, kept live by a ResizeObserver (and a re-check
+ *  once web fonts land, which change widths without resizing anything). Off when `enabled` is
+ *  false; `key` re-checks when the text changes. No ResizeObserver (jsdom): never overflows. */
+function useOverflow(ref: React.RefObject<HTMLElement | null>, enabled: boolean, key: string): boolean {
+  const [overflows, setOverflows] = React.useState(false)
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    if (!enabled || !el || typeof ResizeObserver === 'undefined') return
+    const check = () => setOverflows(el.scrollWidth > el.clientWidth)
+    check()
+    const observer = new ResizeObserver(check)
+    observer.observe(el)
+    void document.fonts?.ready.then(check)
+    return () => observer.disconnect()
+  }, [ref, enabled, key])
+  return overflows
+}
+
 /** The meta line's state word (#617): the attention label only for the states the issue lists,
  *  where the dot alone cannot say it — monitoring, the dependency waits (waiting on N workers,
  *  on worker replies, on a parent reply), needs review, needs permission, failed, scheduled,
@@ -571,6 +592,11 @@ function RunRow({
     ? directionalUsageText(run.inputTokens, run.outputTokens)
     : ''
   const cost = variant && showCost ? formatCost(run.costUsd) : ''
+  // Width priority on a member row (#617 01a): tokens drop first, then cost. The two sit on
+  // different lines, so truncation alone cannot order them; measure line 1 instead, and while
+  // it overflows (the cost is being cut) take the tokens off line 2.
+  const titleRef = React.useRef<HTMLSpanElement | null>(null)
+  const lineOneOverflows = useOverflow(titleRef, variant, `${run.runner}|${cost}`)
 
   const meta: React.ReactNode[] = []
   if (stateWord) meta.push(<span key="state" data-slot="task-row-state">{stateWord}</span>)
@@ -586,7 +612,7 @@ function RunRow({
     )
   }
   if (age) meta.push(<span key="age" data-slot="task-row-age" className="tabular-nums">{age}</span>)
-  if (tokens) meta.push(<span key="tokens" data-slot="task-row-tokens" className="tabular-nums">{tokens}</span>)
+  if (tokens && !lineOneOverflows) meta.push(<span key="tokens" data-slot="task-row-tokens" className="tabular-nums">{tokens}</span>)
   // A needs-you variant says no state word — its amber dot and the Needs you group say it —
   // unless its line 2 would otherwise be empty; the row keeps its two lines either way.
   if (variant && !meta.length && attention.label === 'needs you') {
@@ -648,13 +674,16 @@ function RunRow({
             </span>
           ) : null}
           <span
+            ref={variant ? titleRef : undefined}
             data-slot="task-row-title"
             className={cn(
               // `min-w-[7rem]`: the floor of the width-priority rule above. The title never gives
               // way past ~17 characters; the diff pair drops instead.
               'min-w-[7rem] flex-1 truncate text-[13px] leading-[1.45] font-medium text-muted-foreground',
-              // A member row's line 1 is `runner · $cost`: the runner never drops, the cost may.
-              variant && 'flex min-w-0',
+              // A member row's line 1 is `runner · $cost` as INLINE text: a flex row would drop the
+              // separator's leading space ("claude· $0.40"), and inline text ellipsizes from the
+              // end, so the cost gives way before the runner does.
+              variant && 'min-w-0',
               unread && 'font-semibold text-foreground',
               // A read finished row keeps the muted base colour — the history stays stepped back.
               isActive && 'text-foreground',
@@ -662,8 +691,8 @@ function RunRow({
           >
             {variant ? (
               <>
-                <span className="shrink-0">{run.runner ?? 'claude'}</span>
-                {cost ? <span data-slot="variant-cost" className="min-w-0 truncate">{` · ${cost}`}</span> : null}
+                {run.runner ?? 'claude'}
+                {cost ? <>{' · '}<span data-slot="variant-cost">{cost}</span></> : null}
               </>
             ) : displayTitle}
           </span>

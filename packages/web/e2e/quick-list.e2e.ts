@@ -1377,6 +1377,112 @@ describe('a row under width contention, in a column the user can widen', () => {
 })
 
 /** The other half of the truth: with no runs, the sidebar says so rather than inventing any. */
+/**
+ * Variant rows and the group row at the default 264px column (#617 fix round). Its own fixture:
+ * a short-token opencode variant is the case where line 1 (`opencode · $0.40`) runs out of room
+ * while line 2's tokens would still fit, and only a real layout can say which gives way.
+ */
+describe('variant rows and the group row under width pressure', () => {
+  let varServer: ChildProcess
+  let varRoot: string
+  let varUrl: string
+  let varProject: string
+  const GROUP = '[data-slot="group-row"][data-group-id="g-wide"]'
+  const member = (id: string) => `[data-slot="task-row"][data-run-id="${id}"]`
+  const VARIANTS = ['wa', 'wb'].map((id, index) => ({
+    id, title: `Ledger scan (${index ? 'B' : 'A'})`, workflow: 'default', task: 'scan the ledger', status: 'review',
+    createdAt: ago((20 - index) * 60_000), finishedAt: ago((10 - index) * 60_000), tokensUsed: 2,
+    runner: 'opencode', costUsd: 0.4, inputTokens: 1, outputTokens: 1,
+    groupId: 'g-wide', variant: index ? 'B' : 'A', archived: false, steps: [],
+  }))
+
+  beforeAll(async () => {
+    varRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-variants-'))
+    mkdirSync(join(varRoot, '.ai/cezar'), { recursive: true })
+    writeFileSync(join(varRoot, '.ai/cezar/runs.json'), JSON.stringify(VARIANTS, null, 2), 'utf8')
+    const port = await freePort()
+    varUrl = `http://localhost:${port}`
+    varServer = spawn(process.execPath, [cezarCli, 'serve', '--repo', varRoot, '--port', String(port), '--no-open'], {
+      env: fixtureServeEnv(varRoot), stdio: 'ignore',
+    })
+    await waitForHealth(varUrl, 'the variant-width fixture server')
+    varProject = await bootProjectId(varUrl)
+  }, 90_000)
+
+  afterAll(() => {
+    browser.evaluate(`localStorage.removeItem('cez-sidebar-width')`)
+    varServer?.kill()
+    if (varRoot) rmSync(varRoot, { recursive: true, force: true })
+    browser.setViewport(1440, 900)
+    browser.goto(`${baseUrl}${scoped('/')}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
+  })
+
+  const open = (width: number) => {
+    browser.setViewport(1440, 900)
+    browser.goto(`${varUrl}/p/${varProject}/`)
+    browser.evaluate(`localStorage.setItem('cez-sidebar-width', '${width}')`)
+    browser.goto(`${varUrl}/p/${varProject}/`)
+    browser.waitForFunction(`document.querySelector('${GROUP} [data-slot="group-tile"]')?.getAttribute('aria-expanded') === 'false'`)
+    browser.click(`${GROUP} [data-slot="group-tile"]`)
+  }
+
+  type Line = { text: string; rendered: string; overflows: boolean; tokens: boolean; costShown: boolean }
+  const lineOf = (id: string) => `(() => {
+    const row = document.querySelector(${JSON.stringify(member(id))})
+    const title = row?.querySelector('[data-slot="task-row-title"]')
+    if (!title) return null
+    const cost = title.querySelector('[data-slot="variant-cost"]')
+    return { text: title.textContent, rendered: title.innerText, overflows: title.scrollWidth > title.clientWidth,
+      tokens: row.querySelector('[data-slot="task-row-tokens"]') !== null,
+      costShown: cost !== null && cost.getBoundingClientRect().right <= title.getBoundingClientRect().right + 0.5 }
+  })()`
+
+  it('at 264px, never shows the tokens while the cost is cut, and reads "opencode · $0.40"', () => {
+    open(264)
+    for (const id of ['wa', 'wb']) {
+      // The layout settles after the ResizeObserver's first pass: wait for a stable answer.
+      const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null && !(l.overflows && l.tokens) }) as Line
+      expect(line.text, id).toBe('opencode · $0.40')
+      // Rendered text keeps the separator's spaces (a flex item dropped the leading one).
+      expect(line.rendered, id).toBe('opencode · $0.40')
+      // Tokens drop first: either the whole cost is visible, or the tokens are gone.
+      expect(line.costShown || !line.tokens, JSON.stringify(line)).toBe(true)
+    }
+    browser.screenshot(`${artifactsDir}/quick-list-variants-264.png`, { viewport: true })
+  })
+
+  it('at 420px, has room for both: the full cost and the tokens', () => {
+    open(420)
+    for (const id of ['wa', 'wb']) {
+      const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null && l.tokens && !l.overflows }) as Line
+      expect(line.costShown, JSON.stringify(line)).toBe(true)
+    }
+  })
+
+  it('gives the compare link a real 44px touch target beside the disclosure, and a tap opens compare', () => {
+    open(264)
+    type Target = { noHover: boolean; w: number; h: number; clearOfDisclosure: boolean; hits: boolean[]; x: number; y: number }
+    const target = browser.waitForValue(`(() => {
+      const link = document.querySelector('${GROUP} [data-slot="group-compare"]')
+      const chevron = document.querySelector('${GROUP} [data-slot="group-disclosure"]')
+      if (!link || !chevron) return null
+      const r = link.getBoundingClientRect(), c = chevron.getBoundingClientRect()
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+      const points = [[r.left + 1, cy], [r.right - 1, cy], [cx, r.top + 1], [cx, r.bottom - 1], [cx, cy]]
+      return { noHover: matchMedia('(hover: none)').matches, w: r.width, h: r.height, clearOfDisclosure: r.right <= c.left + 0.5,
+        hits: points.map(([x, y]) => link.contains(document.elementFromPoint(x, y))), x: Math.round(cx), y: Math.round(cy) }
+    })()`) as Target
+    // This spec's browser reports `hover: none` — the touch path this target exists for.
+    expect(target.noHover).toBe(true)
+    expect([target.w, target.h]).toEqual([44, 44])
+    expect(target.clearOfDisclosure).toBe(true)
+    expect(target.hits).toEqual([true, true, true, true, true])
+    browser.tapAt(target.x, target.y)
+    browser.waitForFunction(`location.pathname.endsWith('/compare/g-wide')`)
+  })
+})
+
 describe('empty quick-list', () => {
   let emptyServer: ChildProcess
   let emptyRoot: string

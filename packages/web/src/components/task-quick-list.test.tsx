@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -1350,4 +1350,57 @@ describe('references on a device that cannot hover (#617 01b)', () => {
 it('says when a scheduled run resumes, in the meta line (#617 01b)', () => {
   renderList({ runs: [run({ id: 's', status: 'failed', autoResumeAt: new Date(NOW + 12 * 60_000).toISOString() })] })
   expect(row('s')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('resumes in 12m')
+})
+
+describe('variant line 1 under width pressure (#617 fix round)', () => {
+  const pair = () => [
+    run({ id: 'oa', groupId: 'g2', variant: 'A', title: 'Ledger (A)', status: 'running', runner: 'opencode', costUsd: 0.4, inputTokens: 1, outputTokens: 1 }),
+    run({ id: 'ob', groupId: 'g2', variant: 'B', title: 'Ledger (B)', status: 'running', runner: 'claude', costUsd: 0.4, inputTokens: 1, outputTokens: 1 }),
+  ]
+  const expand = () => fireEvent.click(screen.getByRole('button', { expanded: false }))
+
+  it('reads "runner · $cost" as inline text — the separator keeps its spaces', () => {
+    renderList({ runs: pair() })
+    expand()
+    const title = row('oa')?.querySelector('[data-slot="task-row-title"]') as HTMLElement
+    expect(title.textContent).toBe('opencode · $0.40')
+    // Inline, not a flex row: a flex item would drop the separator's leading space ("claude· $0.40").
+    expect(title.className).not.toMatch(/(^|\s)flex(\s|$)/)
+  })
+
+  it('drops the tokens once the cost no longer fits, so the cost is never cut while tokens show', () => {
+    const observers: Array<() => void> = []
+    vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { observers.push(cb) } observe() {} unobserve() {} disconnect() {} })
+    const widths = { scroll: 0, client: 0 }
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.dataset.slot === 'task-row-title' ? widths.scroll : 0 })
+    const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.dataset.slot === 'task-row-title' ? widths.client : 0 })
+    try {
+      renderList({ runs: pair() })
+      expand()
+      expect(row('oa')?.querySelector('[data-slot="task-row-tokens"]')?.textContent).toBe('IN 1 · OUT 1')
+      // Line 1 overflows: 43px of text in a 24px box.
+      widths.scroll = 43
+      widths.client = 24
+      act(() => observers.forEach((cb) => cb()))
+      expect(row('oa')?.querySelector('[data-slot="task-row-tokens"]')).toBeNull()
+      expect(row('oa')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running')
+      // Room again: the tokens come back.
+      widths.scroll = 24
+      act(() => observers.forEach((cb) => cb()))
+      expect(row('oa')?.querySelector('[data-slot="task-row-tokens"]')?.textContent).toBe('IN 1 · OUT 1')
+    } finally {
+      scroll.mockRestore()
+      client.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('gives the compare link a dedicated 44px target on touch, in a slot that reserves the room', () => {
+    renderList({ runs: pair() })
+    const compare = document.querySelector('[data-slot="group-compare"]') as HTMLElement
+    expect(compare.className).toContain('no-hover:size-[44px]')
+    const trailing = document.querySelector('[data-slot="group-trailing"]') as HTMLElement
+    expect(trailing.className).toContain('w-[36px]')
+    expect(trailing.className).toContain('no-hover:w-[60px]')
+  })
 })
