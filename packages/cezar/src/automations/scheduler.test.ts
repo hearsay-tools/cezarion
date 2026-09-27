@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -50,12 +50,11 @@ describe('ProjectAutomationScheduler', () => {
     expect(store.state(definition.id)).toMatchObject({ consecutiveFailures: 1, backoffUntil: expect.any(String) });
   });
 
-  it('records a held lease as skipped and advances the scheduled check without failure backoff', async () => {
+  it('records a held lease as skipped without writing polling state', async () => {
     const { store, definition } = await setup();
     const held = store.acquireLease();
     const poll = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
     const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll } as never, launch: async () => ({ runId: 'unused' }) });
-    const before = Date.now();
     try {
       const error = await scheduler.check(definition).catch((cause: unknown) => cause);
       expect(error).toBeInstanceOf(LeaseHeldError);
@@ -63,10 +62,24 @@ describe('ProjectAutomationScheduler', () => {
       expect(poll).not.toHaveBeenCalled();
       expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'skipped', reason: 'automation polling lease is held by another process' });
       expect(contractLogRecordSchema.safeParse(store.logs({ automationId: definition.id })[0]).success).toBe(true);
-      const state = store.state(definition.id)!;
-      expect(Date.parse(state.nextCheckAt!)).toBeGreaterThanOrEqual(before + 300_000);
-      expect(state.consecutiveFailures).toBeUndefined();
-      expect(state.backoffUntil).toBeUndefined();
+      expect(store.state(definition.id)).toBeUndefined();
+    } finally { held?.release(); }
+  });
+
+  it('does not overwrite the lease owner\'s persisted state from a stale store', async () => {
+    const { store: owner, definition } = await setup();
+    const other = owner.create({ name: 'Other', enabled: true, events: ['issue.opened'], intervalSeconds: 300, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Other' } }, 'two');
+    const contender = AutomationStore.open(owner.dataDir);
+    const held = owner.acquireLease();
+    owner.setState(definition.id, { baselineAt: '2026-09-14T06:00:00.000Z', cursor: { timestamp: '2026-09-14T06:01:00.000Z' }, consecutiveFailures: 3, backoffUntil: '2026-09-14T07:00:00.000Z' });
+    owner.setState(other.id, { baselineAt: '2026-09-14T06:02:00.000Z' });
+    const path = join(owner.dataDir, 'automation-state.json');
+    const before = await readFile(path, 'utf8');
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store: contender, poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never, launch: async () => ({ runId: 'unused' }) });
+    try {
+      await expect(scheduler.check(definition)).rejects.toBeInstanceOf(LeaseHeldError);
+      expect(await readFile(path, 'utf8')).toBe(before);
+      expect(contender.logs({ automationId: definition.id })[0]?.result).toBe('skipped');
     } finally { held?.release(); }
   });
 

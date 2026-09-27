@@ -43,7 +43,6 @@ export class ProjectAutomationScheduler {
   async check(definition: AutomationDefinition, mode: 'preview' | 'execute' = 'execute'): Promise<GithubPollResult> {
     const detectionOnly = mode === 'execute' && !this.handle.launch;
     if (detectionOnly) mode = 'preview';
-    const scheduled = mode === 'execute' || detectionOnly;
     const { store } = this.handle;
     const started = Date.now();
     let completion: { result: 'preview' | 'no-match'; reason: string } | undefined;
@@ -102,7 +101,7 @@ export class ProjectAutomationScheduler {
         : { result: 'no-match', reason: 'Scheduled check completed.' };
       return { ...result, candidates: eligible };
     } catch (error) {
-      if (error instanceof LeaseHeldError) this.recordSkip(definition, error, scheduled);
+      if (error instanceof LeaseHeldError) this.recordSkip(definition, error);
       else if (mode === 'execute') this.recordFailure(definition, error);
       else store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
       throw error;
@@ -131,14 +130,10 @@ export class ProjectAutomationScheduler {
     }
   }
 
-  private recordSkip(definition: AutomationDefinition, error: LeaseHeldError, scheduled: boolean): void {
+  private recordSkip(definition: AutomationDefinition, error: LeaseHeldError): void {
     const { store } = this.handle;
     store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'skipped', reason: error.message });
-    if (!scheduled) return;
-    store.setState(definition.id, {
-      ...store.state(definition.id),
-      nextCheckAt: new Date(Date.now() + definition.intervalSeconds * 1_000).toISOString(),
-    });
+    // The lease owner may be writing state. The workspace retry floor handles our next attempt.
     this.handle.onChange?.(definition.id, definition.revision);
   }
 

@@ -777,6 +777,7 @@ function ensureDataGitignore(repoRoot: string): void {
     'automation-log.ndjson',
     'automation-log.ndjson.tmp',
     'automation-poll.lock',
+    'automation-poll.reclaim*/',
   ];
   try {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });

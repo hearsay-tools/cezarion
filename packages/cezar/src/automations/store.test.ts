@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -133,6 +133,113 @@ describe('AutomationStore.acquireLease', () => {
     expect(store.acquireLease()).toBeUndefined();
     writeFileSync(path, JSON.stringify({ pid: 2147483647, startedAt: new Date().toISOString() }));
     const lease = store.acquireLease();
+    expect(lease).toBeDefined();
+    lease?.release();
+  });
+
+  it('does not remove a new live lock after another contender reclaims the dead one', async () => {
+    const dir = await directory();
+    const path = join(dir, 'automation-poll.lock');
+    writeFileSync(path, JSON.stringify({ pid: 424242, startedAt: new Date().toISOString() }));
+    let winner: ReturnType<AutomationStore['acquireLease']>;
+    const first = AutomationStore.open(dir, {
+      processAlive: () => {
+        winner = AutomationStore.open(dir, { processAlive: () => false }).acquireLease();
+        return false;
+      },
+    });
+    const losing = first.acquireLease();
+    try {
+      expect(Number(Boolean(winner)) + Number(Boolean(losing))).toBe(1);
+      expect(AutomationStore.open(dir).acquireLease()).toBeUndefined();
+    } finally {
+      losing?.release();
+      winner?.release();
+    }
+    const next = AutomationStore.open(dir).acquireLease();
+    expect(next).toBeDefined();
+    next?.release();
+  });
+
+  it('revalidates the observed lock identity after a liveness probe', async () => {
+    const dir = await directory();
+    const path = join(dir, 'automation-poll.lock');
+    writeFileSync(path, JSON.stringify({ pid: 424242, startedAt: new Date().toISOString() }));
+    const store = AutomationStore.open(dir, {
+      processAlive: () => {
+        unlinkSync(path);
+        writeFileSync(path, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+        return false;
+      },
+    });
+    expect(store.acquireLease()).toBeUndefined();
+    expect(JSON.parse(readFileSync(path, 'utf8')).pid).toBe(process.pid);
+  });
+
+  it('does not remove another owner\'s replacement lock on release', async () => {
+    const dir = await directory();
+    const path = join(dir, 'automation-poll.lock');
+    const store = AutomationStore.open(dir);
+    const first = store.acquireLease();
+    expect(first).toBeDefined();
+    unlinkSync(path);
+    writeFileSync(path, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+    first?.release();
+    expect(JSON.parse(readFileSync(path, 'utf8')).pid).toBe(process.pid);
+  });
+
+  it('does not reclaim while another process holds the reclaim guard', async () => {
+    const dir = await directory();
+    writeFileSync(join(dir, 'automation-poll.lock'), JSON.stringify({ pid: 424242, startedAt: new Date().toISOString() }));
+    const guard = join(dir, 'automation-poll.reclaim');
+    mkdirSync(guard);
+    writeFileSync(join(guard, 'owner.json'), JSON.stringify({ pid: process.pid }));
+    expect(AutomationStore.open(dir, { processAlive: () => false }).acquireLease()).toBeUndefined();
+  });
+
+  it('recovers a reclaim guard left by a dead process', async () => {
+    const dir = await directory();
+    writeFileSync(join(dir, 'automation-poll.lock'), JSON.stringify({ pid: 424242, startedAt: new Date().toISOString() }));
+    const guard = join(dir, 'automation-poll.reclaim');
+    mkdirSync(guard);
+    writeFileSync(join(guard, 'owner.json'), JSON.stringify({ pid: 2147483647 }));
+    const lease = AutomationStore.open(dir, { processAlive: () => false }).acquireLease();
+    expect(lease).toBeDefined();
+    lease?.release();
+  });
+
+  it('recovers when a dead reclaimer removed the old lock before crashing', async () => {
+    const dir = await directory();
+    const guard = join(dir, 'automation-poll.reclaim');
+    mkdirSync(guard);
+    writeFileSync(join(guard, 'owner.json'), JSON.stringify({ pid: 2147483647 }));
+    const lease = AutomationStore.open(dir, { processAlive: () => false }).acquireLease();
+    expect(lease).toBeDefined();
+    lease?.release();
+  });
+
+  it('eventually clears a crashed reaper marker instead of leaving a permanent guard', async () => {
+    const dir = await directory();
+    const guard = join(dir, 'automation-poll.reclaim');
+    mkdirSync(guard);
+    writeFileSync(join(guard, 'owner.json'), JSON.stringify({ pid: 2147483647 }));
+    const marker = join(guard, '.reaping');
+    writeFileSync(marker, JSON.stringify({ pid: 2147483647 }));
+    utimesSync(marker, new Date(0), new Date(0));
+    const store = AutomationStore.open(dir, { processAlive: () => false });
+    expect(store.acquireLease(1_000)).toBeUndefined();
+    const lease = store.acquireLease(1_000);
+    expect(lease).toBeDefined();
+    lease?.release();
+  });
+
+  it('uses the age fallback when a crashed guard pid has been reused', async () => {
+    const dir = await directory();
+    const guard = join(dir, 'automation-poll.reclaim');
+    mkdirSync(guard);
+    writeFileSync(join(guard, 'owner.json'), JSON.stringify({ pid: process.pid }));
+    utimesSync(guard, new Date(0), new Date(0));
+    const lease = AutomationStore.open(dir).acquireLease(1_000);
     expect(lease).toBeDefined();
     lease?.release();
   });

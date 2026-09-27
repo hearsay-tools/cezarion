@@ -1,10 +1,13 @@
 import {
   closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
+  rmdirSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -30,6 +33,7 @@ const STATE = 'automation-state.json';
 const RECEIPTS = 'automation-receipts.ndjson';
 const LOG = 'automation-log.ndjson';
 const POLL_LOCK = 'automation-poll.lock';
+const POLL_RECLAIM = 'automation-poll.reclaim';
 const RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
 const LEASE_RECLAIM_ATTEMPTS = 1;
 
@@ -209,25 +213,112 @@ export class AutomationStore {
 
   acquireLease(staleAfterMs = 10 * 60_000): AutomationLease | undefined {
     mkdirSync(this.dataDir, { recursive: true });
-    return this.tryAcquireLease(join(this.dataDir, POLL_LOCK), staleAfterMs, 0);
+    return this.tryAcquireLease(join(this.dataDir, POLL_LOCK), staleAfterMs, 0, false);
   }
 
-  private tryAcquireLease(path: string, staleAfterMs: number, attempt: number): AutomationLease | undefined {
+  private tryAcquireLease(path: string, staleAfterMs: number, attempt: number, reclaiming: boolean): AutomationLease | undefined {
+    const guardPath = join(this.dataDir, POLL_RECLAIM);
+    if (!reclaiming && existsSync(guardPath)) {
+      const releaseGuard = this.acquireReclaimGuard(guardPath, staleAfterMs);
+      if (!releaseGuard) return undefined;
+      releaseGuard();
+    }
     try {
       const fd = openSync(path, 'wx', 0o600);
       writeFileSync(fd, JSON.stringify({ pid: process.pid, startedAt: this.now().toISOString() }));
-      return new AutomationLease(path, fd);
+      const lease = new AutomationLease(path, fd);
+      if (!reclaiming && (existsSync(guardPath) || !lease.isCurrent())) {
+        lease.release();
+        return undefined;
+      }
+      return lease;
     } catch {
       if (attempt >= LEASE_RECLAIM_ATTEMPTS) return undefined;
+      const releaseGuard = this.acquireReclaimGuard(guardPath, staleAfterMs);
+      if (!releaseGuard) return undefined;
       try {
-        if (this.isLeaseAbandoned(path, staleAfterMs)) {
-          unlinkSync(path);
-          return this.tryAcquireLease(path, staleAfterMs, attempt + 1);
+        // Keep the observed inode open: some filesystems immediately reuse an unlinked inode.
+        const observedFd = openSync(path, 'r');
+        try {
+          const observed = fstatSync(observedFd);
+          if (this.isLeaseAbandoned(path, staleAfterMs) && sameFile(observed, statSync(path))) {
+            unlinkSync(path);
+            return this.tryAcquireLease(path, staleAfterMs, attempt + 1, true);
+          }
+        } finally {
+          closeSync(observedFd);
         }
       } catch {
         // A contender removed the lock or the directory is read-only.
+      } finally {
+        releaseGuard();
       }
       return undefined;
+    }
+  }
+
+  /** Only one process may inspect and remove an abandoned poll lock at a time. */
+  private acquireReclaimGuard(path: string, staleAfterMs: number): (() => void) | undefined {
+    for (let attempt = 0; attempt <= 1; attempt++) {
+      try {
+        mkdirSync(path, { mode: 0o700 });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || attempt > 0) return undefined;
+        if (!this.retireAbandonedReclaimGuard(path, staleAfterMs)) return undefined;
+        continue;
+      }
+      const ownerPath = join(path, 'owner.json');
+      try {
+        writeFileSync(ownerPath, JSON.stringify({ pid: process.pid }), { flag: 'wx', mode: 0o600 });
+      } catch {
+        try { rmdirSync(path); } catch { /* a crashed writer's guard ages out */ }
+        return undefined;
+      }
+      const identity = statSync(path);
+      return () => {
+        try {
+          if (!sameFile(identity, statSync(path)) || readLeasePid(ownerPath) !== process.pid) return;
+          unlinkSync(ownerPath);
+          rmdirSync(path);
+        } catch { /* another process may already have retired it */ }
+      };
+    }
+    return undefined;
+  }
+
+  /** A crashed reclaimer's guard is recoverable; a live guard is never removed. */
+  private retireAbandonedReclaimGuard(path: string, staleAfterMs: number): boolean {
+    const marker = join(path, '.reaping');
+    let claimedToken: string | undefined;
+    try {
+      const identity = statSync(path);
+      const pid = readLeasePid(join(path, 'owner.json'));
+      const agedOut = this.now().getTime() - identity.mtimeMs > staleAfterMs;
+      if (!agedOut && (pid === undefined || pid === process.pid || (this.options.processAlive ?? isProcessAlive)(pid))) return false;
+      const token = randomUUID();
+      try {
+        writeFileSync(marker, JSON.stringify({ pid: process.pid, token }), { flag: 'wx', mode: 0o600 });
+        claimedToken = token;
+      } catch {
+        // A reaper that crashed after claiming the guard leaves a bounded age fallback.
+        if (this.now().getTime() - statSync(marker).mtimeMs > staleAfterMs) {
+          unlinkSync(marker);
+        }
+        return false;
+      }
+      if (!sameFile(identity, statSync(path))) return false;
+      const retired = `${path}.retired-${randomUUID()}`;
+      renameSync(path, retired);
+      rmSync(retired, { recursive: true, force: true });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (claimedToken) {
+        try {
+          if ((JSON.parse(readFileSync(marker, 'utf8')) as { token?: string }).token === claimedToken) unlinkSync(marker);
+        } catch { /* the guard moved or was retired */ }
+      }
     }
   }
 
@@ -373,6 +464,10 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+function sameFile(left: { dev: number; ino: number }, right: { dev: number; ino: number }): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
 export class AutomationLease {
   private released = false;
 
@@ -381,14 +476,20 @@ export class AutomationLease {
     private readonly fd: number,
   ) {}
 
+  isCurrent(): boolean {
+    try { return sameFile(fstatSync(this.fd), statSync(this.path)); }
+    catch { return false; }
+  }
+
   release(): void {
     if (this.released) return;
     this.released = true;
-    closeSync(this.fd);
     try {
-      unlinkSync(this.path);
+      if (this.isCurrent()) unlinkSync(this.path);
     } catch {
       // Already removed during shutdown cleanup.
+    } finally {
+      closeSync(this.fd);
     }
   }
 }
