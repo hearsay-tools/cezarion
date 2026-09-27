@@ -13,6 +13,7 @@ import { discoverInstallation } from '../../dist/application-update/discovery.js
 import { promoteOriginal, restoreOriginal, runHelper } from '../../dist/application-update/helper.js';
 import { withDirectoryLock } from '../../dist/application-update/lock.js';
 import { armRestartHelper } from '../../dist/application-update/launcher.js';
+import { stopChild } from './stop-child.js';
 
 const execFile = promisify(execFileCallback);
 const npm = async (args: string[], env: NodeJS.ProcessEnv) => execFile('npm', args, { env, timeout: 90_000, maxBuffer: 2_000_000 });
@@ -581,9 +582,8 @@ for (const ephemeral of [false, true]) test(`built production CLI acknowledges i
     assert.equal(health.version, listening.version);
     assert.equal(health.repoRoot, root);
   } finally {
-    child.kill('SIGTERM');
-    if (child.exitCode === null) await new Promise<void>((resolve) => child.once('exit', () => resolve()));
-    await rm(root, { recursive: true, force: true });
+    try { await stopChild(child, 'built CLI listener'); }
+    finally { await rm(root, { recursive: true, force: true }); }
   }
 });
 
@@ -727,11 +727,12 @@ const pkg=JSON.parse(fs.readFileSync(p)); pkg.version='2.0.0'; fs.writeFileSync(
         }
         assert.throws(() => process.kill(pid, 0), 'owned fixture child must be reaped');
       }
-      helper.child.kill('SIGTERM');
-      if (helper.child.exitCode === null) await new Promise<void>(resolve => helper.child.once('exit', () => resolve()));
-      proxy.closeAllConnections();
-      await new Promise<void>(resolve => proxy.close(() => resolve()));
-      await rm(fixture.root, { recursive: true, force: true });
+      try { await stopChild(helper.child, 'isolated helper owner'); }
+      finally {
+        proxy.closeAllConnections();
+        await new Promise<void>(resolve => proxy.close(() => resolve()));
+        await rm(fixture.root, { recursive: true, force: true });
+      }
     }
   });
 }
