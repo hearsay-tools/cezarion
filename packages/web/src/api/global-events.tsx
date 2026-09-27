@@ -223,21 +223,42 @@ function createRunListBatcher(queryClient: QueryClient) {
     key: readonly [string, 'runs', 'list']; baseList: ApiRun[] | undefined
     baseQuery: object | undefined; baseUpdateCount: number | undefined; runs: Map<string, RunRecord>
   }>()
-  const needsReconcile = new Map<string, readonly [string, 'runs', 'list']>()
+  type Reconciliation = { key: readonly [string, 'runs', 'list']; phase: 'needs-start' | 'awaiting-fetch' | 'fetching' }
+  const needsReconcile = new Map<string, Reconciliation>()
+  const startRecovery = (key: readonly [string, 'runs', 'list']): void => {
+    const entry = needsReconcile.get(JSON.stringify(key))
+    if (!entry) return
+    const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
+    const previousRequest = query?.promise
+    entry.phase = 'awaiting-fetch'
+    // The first GET must start after the discarded archive. An already-running request may have
+    // captured the old list; TanStack cancels and replaces it for an active query.
+    void queryClient.invalidateQueries({ queryKey: key, exact: true })
+    // Query.fetch can silently replace a running request without dispatching a new `fetch`
+    // action when fetchStatus and metadata stay the same. The promise identity still changes.
+    if (query?.promise && query.promise !== previousRequest) entry.phase = 'fetching'
+  }
   const unsubscribe = queryClient.getQueryCache().subscribe(event => {
-    if (!needsReconcile.size || event.type !== 'updated' || event.action.type !== 'success') return
+    if (!needsReconcile.size || event.type !== 'updated') return
     const cacheKey = JSON.stringify(event.query.queryKey)
-    const key = needsReconcile.get(cacheKey)
-    if (!key) return
-    if (!event.action.manual) {
-      // Only the list's own query function can establish the authoritative answer. A live SSE
-      // patch is a manual cache success and would otherwise clear TanStack's invalidated flag.
-      needsReconcile.delete(cacheKey)
+    const entry = needsReconcile.get(cacheKey)
+    if (!entry) return
+    if (event.action.type === 'fetch') {
+      if (entry.phase === 'awaiting-fetch') entry.phase = 'fetching'
       return
     }
+    if (event.action.type !== 'success') return
+    if (!event.action.manual) {
+      // A response from a pre-event GET cannot satisfy this obligation. Only a fetch that began
+      // after the first recovery invalidation can clear it.
+      if (entry.phase === 'fetching') needsReconcile.delete(cacheKey)
+      else startRecovery(entry.key)
+      return
+    }
+    if (entry.phase === 'needs-start') return // the current live event finishes before first recovery
     // A reconciliation fetch may already be in flight. Keep it and its eventual authoritative
     // result instead of cancelling/restarting a GET for every live worker event.
-    void queryClient.invalidateQueries({ queryKey: key, exact: true }, { cancelRefetch: false })
+    void queryClient.invalidateQueries({ queryKey: entry.key, exact: true }, { cancelRefetch: false })
   })
   let frame: number | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -255,7 +276,7 @@ function createRunListBatcher(queryClient: QueryClient) {
       const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
       if (query !== baseQuery || query?.state.dataUpdateCount !== baseUpdateCount || query?.state.data !== baseList) {
         reconcileKeys.push(key)
-        needsReconcile.set(JSON.stringify(key), key)
+        needsReconcile.set(JSON.stringify(key), { key, phase: 'needs-start' })
         continue
       }
       queryClient.setQueryData<ApiRun[]>(key, list => {
@@ -266,7 +287,7 @@ function createRunListBatcher(queryClient: QueryClient) {
     }
     pending.clear()
     if (!deferReconcile) {
-      for (const key of reconcileKeys) void queryClient.invalidateQueries({ queryKey: key, exact: true })
+      for (const key of reconcileKeys) startRecovery(key)
     }
     return reconcileKeys
   }
@@ -310,13 +331,9 @@ function createRunListBatcher(queryClient: QueryClient) {
         if (event.type === 'run') queryClient.setQueryData<ApiRun[]>(key, list => applyRunEvent(list, event.run))
         else queryClient.setQueryData<ApiRun[]>(key, list => applyRunDeleted(list, event.id))
       }
-      // The current event may have patched one of the ambiguous lists above; its manual success
-      // re-invalidated that key. Cover any other pending scope whose key this event did not write.
-      for (const key of reconcileAfterWrite) {
-        if (!queryClient.getQueryState(key)?.isInvalidated) {
-          void queryClient.invalidateQueries({ queryKey: key, exact: true })
-        }
-      }
+      // Start recovery only after the current event's manual write. A pre-event GET must be
+      // replaced once; subsequent SSE writes keep that new request in flight.
+      for (const key of reconcileAfterWrite) startRecovery(key)
     },
     flush,
     cancel(): void {
