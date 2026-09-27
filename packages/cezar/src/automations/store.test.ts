@@ -89,9 +89,9 @@ describe('AutomationStore', () => {
     const dir = await directory();
     const owner = AutomationStore.open(dir);
     const contender = AutomationStore.open(dir);
-    owner.appendLog({ automationId: 'one', revision: 1, result: 'no-match' });
-    contender.appendLog({ automationId: 'one', revision: 1, result: 'skipped' });
-    owner.appendLog({ automationId: 'one', revision: 1, result: 'preview' });
+    await owner.appendLog({ automationId: 'one', revision: 1, result: 'no-match' });
+    await contender.appendLog({ automationId: 'one', revision: 1, result: 'skipped' });
+    await owner.appendLog({ automationId: 'one', revision: 1, result: 'preview' });
 
     const reader = AutomationStore.open(dir);
     const first = reader.logs({ limit: 2 });
@@ -106,9 +106,9 @@ describe('AutomationStore', () => {
     const stale = AutomationStore.open(dir);
     const modulePath = fileURLToPath(new URL('./store.ts', import.meta.url));
     execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
-      `import { AutomationStore } from ${JSON.stringify(modulePath)}; AutomationStore.open(${JSON.stringify(dir)}).appendLog({ automationId: 'one', revision: 1, result: 'no-match' });`,
+      `import { AutomationStore } from ${JSON.stringify(modulePath)}; await AutomationStore.open(${JSON.stringify(dir)}).appendLog({ automationId: 'one', revision: 1, result: 'no-match' });`,
     ]);
-    stale.appendLog({ automationId: 'one', revision: 1, result: 'skipped' });
+    await stale.appendLog({ automationId: 'one', revision: 1, result: 'skipped' });
 
     const reader = AutomationStore.open(dir);
     const first = reader.logs({ limit: 1 });
@@ -128,7 +128,7 @@ describe('AutomationStore', () => {
       const store = AutomationStore.open(${JSON.stringify(dir)});
       process.stdout.write('ready\\n');
       while (true) { try { await access(${JSON.stringify(barrier)}); break; } catch { await new Promise(resolve => setTimeout(resolve, 5)); } }
-      for (let i = 0; i < 10; i++) store.appendLog({ automationId: process.argv[1], revision: 1, result: 'no-match' });
+      for (let i = 0; i < 10; i++) await store.appendLog({ automationId: process.argv[1], revision: 1, result: 'no-match' });
     `;
     const children = ['one', 'two'].map((id) => spawn(process.execPath,
       ['--import', 'tsx', '--input-type=module', '-e', script, id], { stdio: ['ignore', 'pipe', 'pipe'] }));
@@ -153,8 +153,41 @@ describe('AutomationStore', () => {
     const dir = await directory();
     writeFileSync(join(dir, 'automation-log.lock'), JSON.stringify({ pid: 424242 }));
     const store = AutomationStore.open(dir, { processAlive: () => false });
-    expect(store.appendLog({ automationId: 'one', revision: 1, result: 'skipped' }).seq).toBe(1);
+    expect((await store.appendLog({ automationId: 'one', revision: 1, result: 'skipped' })).seq).toBe(1);
     expect(store.logs().map((row) => row.result)).toEqual(['skipped']);
+  });
+
+  it('keeps every row when compaction overlaps an append from another store', async () => {
+    const dir = await directory();
+    const owner = AutomationStore.open(dir);
+    const other = AutomationStore.open(dir);
+    await owner.appendLog({ automationId: 'one', revision: 1, result: 'no-match' });
+    await Promise.all([
+      owner.compact(),
+      other.appendLog({ automationId: 'one', revision: 1, result: 'skipped' }),
+    ]);
+    expect(AutomationStore.open(dir).logs().map((row) => [row.seq, row.result])).toEqual([
+      [2, 'skipped'], [1, 'no-match'],
+    ]);
+  });
+
+  it('lets event-loop timers run while another process holds the log lock', async () => {
+    const dir = await directory();
+    writeFileSync(join(dir, 'automation-log.lock'), JSON.stringify({ pid: process.pid }));
+    const releaser = spawn(process.execPath, ['-e', `
+      const fs = require('node:fs');
+      process.stdout.write('ready\\n');
+      setTimeout(() => fs.unlinkSync(${JSON.stringify(join(dir, 'automation-log.lock'))}), 600);
+    `], { stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      await new Promise<void>((resolve) => releaser.stdout.once('data', () => resolve()));
+      const started = Date.now();
+      const timer = new Promise<number>((resolve) => setTimeout(() => resolve(Date.now() - started), 20));
+      await AutomationStore.open(dir).appendLog({ automationId: 'one', revision: 1, result: 'skipped' });
+      expect(await timer).toBeLessThan(300);
+    } finally {
+      releaser.kill();
+    }
   });
 
   it('holds an exclusive recoverable project polling lease', async () => {

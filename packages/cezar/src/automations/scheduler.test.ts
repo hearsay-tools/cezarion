@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -71,7 +71,7 @@ describe('ProjectAutomationScheduler', () => {
     const other = owner.create({ name: 'Other', enabled: true, events: ['issue.opened'], intervalSeconds: 300, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Other' } }, 'two');
     const contender = AutomationStore.open(owner.dataDir);
     const held = owner.acquireLease();
-    owner.appendLog({ automationId: definition.id, revision: definition.revision, result: 'no-match' });
+    await owner.appendLog({ automationId: definition.id, revision: definition.revision, result: 'no-match' });
     owner.setState(definition.id, { baselineAt: '2026-09-14T06:00:00.000Z', cursor: { timestamp: '2026-09-14T06:01:00.000Z' }, consecutiveFailures: 3, backoffUntil: '2026-09-14T07:00:00.000Z' });
     owner.setState(other.id, { baselineAt: '2026-09-14T06:02:00.000Z' });
     const path = join(owner.dataDir, 'automation-state.json');
@@ -96,6 +96,23 @@ describe('ProjectAutomationScheduler', () => {
       expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'skipped' });
       expect(store.state(definition.id)).toBeUndefined();
     } finally { held?.release(); }
+  });
+
+  it('releases the polling lease when completion logging times out', async () => {
+    const { store, definition } = await setup();
+    await writeFile(join(store.dataDir, 'automation-log.lock'), JSON.stringify({ pid: process.pid }));
+    const realNow = Date.now;
+    let advanced = realNow();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => (advanced += 2_000));
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', owner: 'acme', repo: 'demo', store, poller: { poll: async () => ({ candidates: [], truncated: false, pages: 1 }) } as never, launch: async () => ({ runId: 'unused' }) });
+    try {
+      await expect(scheduler.check(definition)).rejects.toThrow('automation log lock is busy');
+      const next = store.acquireLease();
+      expect(next).toBeDefined();
+      next?.release();
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('starts provider discovery from the durable cursor overlap', async () => {

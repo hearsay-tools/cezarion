@@ -174,7 +174,7 @@ export class AutomationStore {
 
   appendLog(
     record: Omit<AutomationLogRecord, 'seq' | 'ts'> & Partial<Pick<AutomationLogRecord, 'ts'>>,
-  ): AutomationLogRecord {
+  ): Promise<AutomationLogRecord> {
     return this.withLogLease(() => {
       const seq = this.readNdjson(LOG, automationLogRecordSchema)
         .reduce((highest, row) => Math.max(highest, row.seq), 0) + 1;
@@ -200,21 +200,21 @@ export class AutomationStore {
       .reverse();
   }
 
-  compact(): void {
+  async compact(): Promise<void> {
     const cutoff = this.now().getTime() - RETENTION_MS;
     const latest = [...this.latestReceipts().values()].filter(
       (row) => Date.parse(row.updatedAt) >= cutoff,
     );
     this.rewriteNdjson(RECEIPTS, latest);
-    this.withLogLease(() => {
+    await this.withLogLease(() => {
       const logs = this.readNdjson(LOG, automationLogRecordSchema);
       this.rewriteNdjson(LOG, logs.slice(-10_000));
     });
   }
 
-  maybeCompact(): void {
+  async maybeCompact(): Promise<void> {
     if (this.receipts().length > 20_000 || this.readNdjson(LOG, automationLogRecordSchema).length > 10_500) {
-      this.compact();
+      await this.compact();
     }
   }
 
@@ -223,16 +223,15 @@ export class AutomationStore {
     return this.tryAcquireLease(join(this.dataDir, POLL_LOCK), join(this.dataDir, POLL_RECLAIM), staleAfterMs, 0, false);
   }
 
-  private withLogLease<T>(operation: () => T): T {
+  private async withLogLease<T>(operation: () => T): Promise<T> {
     mkdirSync(this.dataDir, { recursive: true });
     const path = join(this.dataDir, LOG_LOCK);
     const guardPath = join(this.dataDir, LOG_RECLAIM);
     const deadline = Date.now() + 15_000;
-    const pause = new Int32Array(new SharedArrayBuffer(4));
     let lease: AutomationLease | undefined;
     while (!lease && Date.now() < deadline) {
       lease = this.tryAcquireLease(path, guardPath, 10 * 60_000, 0, false);
-      if (!lease) Atomics.wait(pause, 0, 0, 10);
+      if (!lease) await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
     if (!lease) throw new Error('automation log lock is busy; retry shortly');
     try { return operation(); }

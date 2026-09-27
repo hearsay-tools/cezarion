@@ -101,15 +101,18 @@ export class ProjectAutomationScheduler {
         : { result: 'no-match', reason: 'Scheduled check completed.' };
       return { ...result, candidates: eligible };
     } catch (error) {
-      if (error instanceof LeaseHeldError) this.recordSkip(definition, error);
-      else if (mode === 'execute') this.recordFailure(definition, error);
-      else store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
+      if (error instanceof LeaseHeldError) await this.recordSkip(definition, error);
+      else if (mode === 'execute') await this.recordFailure(definition, error);
+      else await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
-      if (completion) store.appendLog({ automationId: definition.id, revision: definition.revision, ...completion, durationMs: Date.now() - started });
-      if (lease) {
-        try { store.maybeCompact(); } catch { /* append-only state remains readable; next check retries */ }
-        lease.release();
+      try {
+        if (completion) await store.appendLog({ automationId: definition.id, revision: definition.revision, ...completion, durationMs: Date.now() - started });
+        if (lease) {
+          try { await store.maybeCompact(); } catch { /* append-only state remains readable; next check retries */ }
+        }
+      } finally {
+        lease?.release();
       }
     }
   }
@@ -117,27 +120,27 @@ export class ProjectAutomationScheduler {
   private async launch(definition: AutomationDefinition, candidate: GithubCandidate): Promise<void> {
     const receipt = this.handle.store.reserveReceipt({ automationId: definition.id, revision: definition.revision, eventId: candidate.eventId, candidate });
     if (!receipt) {
-      this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'duplicate', reason: 'A durable receipt already exists for this automation and event.', githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
+      await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'duplicate', reason: 'A durable receipt already exists for this automation and event.', githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
       return;
     }
     try {
       const launched = await this.handle.launch!(definition, candidate, receipt.receiptId);
       this.handle.store.appendReceipt({ ...receipt, status: 'launched', runId: launched.runId, updatedAt: new Date().toISOString() });
-      this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'launched', receiptId: receipt.receiptId, runId: launched.runId, githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
+      await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'launched', receiptId: receipt.receiptId, runId: launched.runId, githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
     } catch (error) {
       this.handle.store.appendReceipt({ ...receipt, status: 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
       throw error;
     }
   }
 
-  private recordSkip(definition: AutomationDefinition, error: LeaseHeldError): void {
+  private async recordSkip(definition: AutomationDefinition, error: LeaseHeldError): Promise<void> {
     const { store } = this.handle;
-    store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'skipped', reason: error.message });
+    await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'skipped', reason: error.message });
     // The lease owner may be writing state. The workspace retry floor handles our next attempt.
     this.handle.onChange?.(definition.id, definition.revision);
   }
 
-  private recordFailure(definition: AutomationDefinition, error: unknown): void {
+  private async recordFailure(definition: AutomationDefinition, error: unknown): Promise<void> {
     const state = this.handle.store.state(definition.id) ?? {};
     const failures = (state.consecutiveFailures ?? 0) + 1;
     const delay = Math.min(6 * 60 * 60_000, 60_000 * 2 ** (failures - 1));
@@ -147,7 +150,7 @@ export class ProjectAutomationScheduler {
       backoffUntil: new Date(Date.now() + delay).toISOString(),
       nextCheckAt: new Date(Date.now() + delay).toISOString(),
     });
-    this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
+    await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
     this.handle.onChange?.(definition.id, definition.revision);
   }
 }
