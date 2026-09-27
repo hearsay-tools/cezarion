@@ -145,6 +145,14 @@ describe('chronological worker conversation', () => {
       expect(explanations.some(text => text.includes('Not delivered: worker is done') && text.includes('--resume'))).toBe(true)
       const rejected = browser.waitForValue<string>(`[...document.querySelectorAll('${card}')].find(el => el.textContent.includes('Correct the returned result'))?.textContent`)
       expect(rejected).toContain('Not delivered')
+      // #548 verification reproduction: `npm run test:e2e -- worker-conversation.e2e.ts
+      // -t 'shows actionable delivery feedback and distinct clocks: desktop-dark-comfortable'`.
+      // Bundle: .ai/qa/failures/worker-conversation/
+      // shows-actionable-delivery-feedback-and-distinct-clocks-desktop-dark-comfortable-1/.
+      // Its probe reports the sticky header covering Details. A local geometry probe showed
+      // hover repinning main.scrollTop from 16 to 449 and moving Details from y=459.53 to
+      // y=26.53. The old CLI wheel failed the inMain assertion below; explicit wheelAt
+      // reached main and reduced scrollTop by 100 in all four viewport/theme variants.
       const scroller = browser.waitForStable<{ x: number; y: number; top: number; height: number; scrollHeight: number }>(`(() => {
         const main = document.querySelector('[data-slot="main"]');
         const rect = main.getBoundingClientRect();
