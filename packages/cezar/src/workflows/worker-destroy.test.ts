@@ -676,6 +676,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const realReadlink = fs.readlinkSync;
       vi.spyOn(fs, 'readlinkSync').mockImplementation(((...args: unknown[]) => {
         const pid = /^\/proc\/(\d+)\/cwd$/.exec(String(args[0]))?.[1];
+        // Each cwd read starts a fresh probe for this PID; an earlier pass's uid/start token
+        // must not stand in when the current pass cannot read them.
+        if (pid) scanReads.set(Number(pid), {});
         try {
           const result = Reflect.apply(realReadlink, fs, args);
           if (pid) { const entry = observed(Number(pid)); entry.cwd = String(result); entry.readlinkError = undefined; }
