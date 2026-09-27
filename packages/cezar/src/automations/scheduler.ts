@@ -1,6 +1,6 @@
 import type { AutomationCoordinator } from './coordinator.ts';
 import type { GithubCandidate, GithubPoller, GithubPollResult } from './github-poller.ts';
-import type { AutomationStore } from './store.ts';
+import type { AutomationLease, AutomationStore } from './store.ts';
 import type { AutomationDefinition } from './types.ts';
 
 export interface AutomationLaunchResult { runId: string }
@@ -32,6 +32,11 @@ class GithubRequestArbiter {
 }
 const githubRequests = new GithubRequestArbiter();
 
+/** A different process currently owns this project's poll lock. */
+export class LeaseHeldError extends Error {
+  constructor() { super('automation polling lease is held by another process'); }
+}
+
 export class ProjectAutomationScheduler {
   constructor(private readonly handle: ProjectAutomationHandle) {}
 
@@ -39,11 +44,12 @@ export class ProjectAutomationScheduler {
     const detectionOnly = mode === 'execute' && !this.handle.launch;
     if (detectionOnly) mode = 'preview';
     const { store } = this.handle;
-    const lease = store.acquireLease();
-    if (!lease) throw new Error('automation polling lease is held by another process');
     const started = Date.now();
     let completion: { result: 'preview' | 'no-match'; reason: string } | undefined;
+    let lease: AutomationLease | undefined;
     try {
+      lease = store.acquireLease();
+      if (!lease) throw new LeaseHeldError();
       const state = store.state(definition.id) ?? {};
       if (state.backoffUntil && Date.parse(state.backoffUntil) > Date.now()) {
         throw new Error(`automation is backed off until ${state.backoffUntil}`);
@@ -95,33 +101,46 @@ export class ProjectAutomationScheduler {
         : { result: 'no-match', reason: 'Scheduled check completed.' };
       return { ...result, candidates: eligible };
     } catch (error) {
-      if (mode === 'execute') this.recordFailure(definition, error);
-      else store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
+      if (error instanceof LeaseHeldError) await this.recordSkip(definition, error);
+      else if (mode === 'execute') await this.recordFailure(definition, error);
+      else await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
-      if (completion) store.appendLog({ automationId: definition.id, revision: definition.revision, ...completion, durationMs: Date.now() - started });
-      try { store.maybeCompact(); } catch { /* append-only state remains readable; next check retries */ }
-      lease.release();
+      try {
+        if (completion) await store.appendLog({ automationId: definition.id, revision: definition.revision, ...completion, durationMs: Date.now() - started });
+        if (lease) {
+          try { await store.maybeCompact(); } catch { /* append-only state remains readable; next check retries */ }
+        }
+      } finally {
+        lease?.release();
+      }
     }
   }
 
   private async launch(definition: AutomationDefinition, candidate: GithubCandidate): Promise<void> {
     const receipt = this.handle.store.reserveReceipt({ automationId: definition.id, revision: definition.revision, eventId: candidate.eventId, candidate });
     if (!receipt) {
-      this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'duplicate', reason: 'A durable receipt already exists for this automation and event.', githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
+      await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'duplicate', reason: 'A durable receipt already exists for this automation and event.', githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
       return;
     }
     try {
       const launched = await this.handle.launch!(definition, candidate, receipt.receiptId);
       this.handle.store.appendReceipt({ ...receipt, status: 'launched', runId: launched.runId, updatedAt: new Date().toISOString() });
-      this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'launched', receiptId: receipt.receiptId, runId: launched.runId, githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
+      await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event, result: 'launched', receiptId: receipt.receiptId, runId: launched.runId, githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
     } catch (error) {
       this.handle.store.appendReceipt({ ...receipt, status: 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
       throw error;
     }
   }
 
-  private recordFailure(definition: AutomationDefinition, error: unknown): void {
+  private async recordSkip(definition: AutomationDefinition, error: LeaseHeldError): Promise<void> {
+    const { store } = this.handle;
+    await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'skipped', reason: error.message });
+    // The lease owner may be writing state. The workspace retry floor handles our next attempt.
+    this.handle.onChange?.(definition.id, definition.revision);
+  }
+
+  private async recordFailure(definition: AutomationDefinition, error: unknown): Promise<void> {
     const state = this.handle.store.state(definition.id) ?? {};
     const failures = (state.consecutiveFailures ?? 0) + 1;
     const delay = Math.min(6 * 60 * 60_000, 60_000 * 2 ** (failures - 1));
@@ -131,7 +150,7 @@ export class ProjectAutomationScheduler {
       backoffUntil: new Date(Date.now() + delay).toISOString(),
       nextCheckAt: new Date(Date.now() + delay).toISOString(),
     });
-    this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
+    await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
     this.handle.onChange?.(definition.id, definition.revision);
   }
 }
@@ -147,6 +166,8 @@ function laterCursor(
   return order > 0 ? observed : current;
 }
 
+const MIN_RETRY_MS = 60_000;
+
 export interface WorkspaceAutomationSchedulerOptions {
   coordinator: AutomationCoordinator;
   handle: (projectId: string, store: AutomationStore) => ProjectAutomationHandle | undefined;
@@ -158,6 +179,7 @@ export class WorkspaceAutomationScheduler {
   private timer?: ReturnType<typeof setTimeout>;
   private stopped = true;
   private scheduleGeneration = 0;
+  private readonly retryAfter = new Map<string, number>();
   constructor(private readonly options: WorkspaceAutomationSchedulerOptions) {}
 
   async start(): Promise<void> {
@@ -186,22 +208,30 @@ export class WorkspaceAutomationScheduler {
 
   private schedule(): void {
     if (this.stopped) return;
-    const due: Array<{ at: number; definition: AutomationDefinition; scheduler: ProjectAutomationScheduler }> = [];
+    const due: Array<{ key: string; at: number; retryAfterMs: number; definition: AutomationDefinition; scheduler: ProjectAutomationScheduler }> = [];
+    const live = new Set<string>();
     for (const projectId of this.options.coordinator.enabledProjectIds()) {
       const store = this.options.coordinator.store(projectId);
       if (!store) continue;
       const handle = this.options.handle(projectId, store);
       if (!handle) continue;
       for (const definition of store.list().filter((item) => item.enabled)) {
-        due.push({ at: Date.parse(store.state(definition.id)?.nextCheckAt ?? new Date().toISOString()), definition, scheduler: new ProjectAutomationScheduler(handle) });
+        const key = `${projectId}:${definition.id}`;
+        live.add(key);
+        const at = Date.parse(store.state(definition.id)?.nextCheckAt ?? new Date().toISOString());
+        due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: Math.max(definition.intervalSeconds * 1_000, MIN_RETRY_MS), definition, scheduler: new ProjectAutomationScheduler(handle) });
       }
     }
+    for (const key of this.retryAfter.keys()) if (!live.has(key)) this.retryAfter.delete(key);
     if (!due.length) return;
     due.sort((a, b) => a.at - b.at);
     const next = due[0]!;
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      void next.scheduler.check(next.definition).catch(() => undefined).finally(() => this.schedule());
+      void next.scheduler.check(next.definition).then(
+        () => { this.retryAfter.delete(next.key); },
+        () => { this.retryAfter.set(next.key, (this.options.now?.() ?? Date.now()) + next.retryAfterMs); },
+      ).finally(() => this.schedule());
     }, Math.max(0, next.at - (this.options.now?.() ?? Date.now())));
   }
 }
