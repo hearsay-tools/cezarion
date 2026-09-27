@@ -11,11 +11,11 @@ import { delegationEndpoint } from './cli.ts';
 export type DelegationSession = { restrictNativeDelegation: true; env: Record<string, string>; instructions: string; revoke(): void };
 export type DelegationProvisioner = (runId: string) => DelegationSession | undefined;
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-export function bundledWorkerInvocation(): string {
+export function bundledWorkerInvocation(command: 'worker' | 'discover' = 'worker'): string {
   // Source-mode dev uses this checkout's loader; a published installation needs only Node.
   const source = import.meta.url.endsWith('.ts');
   const entry = fileURLToPath(new URL(source ? '../index.ts' : '../index.js', import.meta.url));
-  return [process.execPath, ...(source ? ['--import', import.meta.resolve('tsx')] : []), entry].map(quote).join(' ') + ' worker';
+  return [process.execPath, ...(source ? ['--import', import.meta.resolve('tsx')] : []), entry].map(quote).join(' ') + ` ${command}`;
 }
 
 export function provisionDelegationSession(options: { projectId: string; runId: string; store: RunStore; credentials: CredentialRegistry; url: string }): DelegationSession | undefined {
@@ -66,6 +66,9 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `Per-run controls suppress verified native entry points only; custom extensions and same-user unrestricted shell are not hard isolation.`,
         `Owned workers are available through the bundled command ${invocation}.`,
         `Commands return JSON.`,
+        `Before choosing a runner or model, use ${bundledWorkerInvocation('discover')} runners, then ${bundledWorkerInvocation('discover')} models --runner=<name>.`,
+        `Discovery lists host default-account runner status, enablement, model IDs and advertised per-model effortLevels; absent effort metadata means unknown. It uses your controller automatically. Spawn still uses --backend for runner selection.`,
+        `A fresh nonempty default-account catalog rejects unknown explicit default-account model pins before creating a worker and reports available models and alternative runners; unavailable, empty or stale discovery does not invent choices. Inherited defaults and accepted retries stay unchanged.`,
         conversationGuidance,
         `Worker questions arrive as requests carrying a question; answer with worker reply <worker-id> '<answer>' --id <new-message-UUID> --request-id <question-id>, one '<header>: <option>' line per question, which the worker reads verbatim as its answer. If you cannot decide, ask the human with your own question, then reply. Progress and follow-ups never answer it, and you cannot finish while it is unanswered.`,
         `Use ${invocation} spawn --baseline parent-head --request-id <UUID> '<task>' (or an explicit committed ref).`,

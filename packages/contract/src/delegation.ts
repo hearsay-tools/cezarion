@@ -1,3 +1,4 @@
+import { modelChoicesSchema } from './discovery.ts';
 import { z } from 'zod';
 import { conversationAttributionSchema, conversationStateSchema, requestOutcomeSchema } from './conversations.ts';
 import { effortFieldSchema } from './effort.ts';
@@ -288,6 +289,7 @@ export const delegationErrorResponseSchema = z.object({
     'invalid_baseline', 'incompatible_state', 'capacity_limit', 'unavailable_diff', 'incomplete_cleanup',
   ]),
   error: errorSchema,
+  modelChoices: modelChoicesSchema.optional(),
 });
 export type DelegationErrorResponse = z.infer<typeof delegationErrorResponseSchema>;
 

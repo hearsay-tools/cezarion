@@ -22,3 +22,4 @@ export * from './automations.ts';
 export * from './conversations.ts';
 export * from './ci-wait.ts';
 export * from './artifacts.ts';
+export * from './discovery.ts';

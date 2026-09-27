@@ -281,7 +281,7 @@ export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env)
 const REPOSITORY_ROOT_LOCK_DISABLED_NOTE =
   'repository-root lock disabled by CEZ_DISABLE_REPO_LOCK=1 (shared checkout is unsafe)';
 
-export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string; effort?: string; agentProfile: string; accountBinding?: WorkerAccountBinding; systemPrompt?: string; allowedTools?: string[]; bashAllowlist?: string[] };
+export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string; modelIdentity?: string; effort?: string; agentProfile: string; accountBinding?: WorkerAccountBinding; systemPrompt?: string; allowedTools?: string[]; bashAllowlist?: string[] };
 
 interface ActiveRun {
   /** Last cumulative Claude report per provider session during this process. */
@@ -1554,7 +1554,7 @@ export class RunManager {
    * does not know is refused rather than degraded to the default, because a worker silently
    * running on another login is a billing boundary crossed without anyone choosing it.
    */
-  async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId; model?: string; effort?: string; agentProfile?: string }): Promise<DelegationExecutionSettings> {
+  async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId; model?: string; effort?: string; agentProfile?: string }, validateModel?: (settings: DelegationExecutionSettings) => Promise<void>): Promise<DelegationExecutionSettings> {
     const parent = this.delegationExecutionSettings(runId);
     const runner = selection.backend ?? parent.runner;
     const sameBackend = runner === parent.runner;
@@ -1578,11 +1578,15 @@ export class RunManager {
       env = { ...env, ...boundWorkerAccountEnv(accountBinding, env) };
       const native = await readAgentModelSettings(runner, this.repoRoot, env);
       const chosen = selection.model ?? (sameBackend ? parent.model : locked ? undefined : native.model);
-      if (chosen && modelConflictsWithRunner(chosen, runner)) throw new Error('Model is incompatible with the selected backend');
-      const model = normalizeModelForBackend(runner, chosen, { configuredProvider: native.provider })?.backendModel;
-      return { ...parent, runner, model, effort: effortPin ?? (sameBackend ? parent.effort : undefined),
+      const normalized = normalizeModelForBackend(runner, chosen, { configuredProvider: native.provider });
+      const settings = { ...parent, runner, model: normalized?.backendModel, modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined, effort: effortPin ?? (sameBackend ? parent.effort : undefined),
         agentProfile: accountBinding.profileId, accountBinding };
+      // A populated catalog gives a useful choice list before the legacy preset fallback rejects.
+      await validateModel?.(settings);
+      if (chosen && modelConflictsWithRunner(chosen, runner)) throw new Error('Model is incompatible with the selected backend');
+      return settings;
     } catch (error) {
+      if (error instanceof DelegationPolicyError) throw error;
       throw new DelegationPolicyError('invalid_input', error instanceof Error ? error.message : 'Worker execution selection is unavailable');
     }
   }

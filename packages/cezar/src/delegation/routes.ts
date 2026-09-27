@@ -2,7 +2,7 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { ZodError } from 'zod';
 import { z } from 'zod';
-import { conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema, workerCancelWaitRequestSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
+import { discoveryRequestSchema, conversationSendRequestSchema, conversationInspectRequestSchema, conversationCancelRequestSchema, inboxReceiptRequestSchema, requestWaitRequestSchema, workerCancelWaitRequestSchema, workerSpawnRequestSchema, workerSteerRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
 import { jsonZodValidator, paramZodValidator, queryZodValidator } from '../server/validators.ts';
 import { isLoopbackHostHeader } from '../server/capabilities.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
@@ -17,7 +17,7 @@ export function delegationFailure(error: unknown) {
   const status = known.code === 'unauthenticated' ? 401 : known.code === 'denied_scope' ? 403
     : known.code === 'invalid_input' || known.code === 'invalid_baseline' ? 400
     : known.code === 'unavailable_transport' ? 503 : 409;
-  return { body: { code: known.code, error: known.message.slice(0, 2_000) }, status } as const;
+  return { body: { code: known.code, error: known.message.slice(0, 2_000), ...(known.modelChoices ? { modelChoices: known.modelChoices } : {}) }, status } as const;
 }
 
 /** Only this family runs on the private listener. It never inherits hosted cockpit exposure. */
@@ -44,6 +44,7 @@ export function createDelegationRoutes(service: DelegationService, credentials: 
     .use('*', authenticateDelegation)
     .use('*', bodyLimit({ maxSize: 1_048_576, onError: c => c.json({ code: 'invalid_input' as const, error: 'Delegation request too large' }, 400) }))
     .use('*', queryZodValidator(workerEmptyRequestSchema, invalid))
+    .post('/discover', jsonZodValidator(discoveryRequestSchema, invalid), async c => c.json(await service.discover(c.get('caller'), c.req.valid('json')), 200))
     .post('/spawn', jsonZodValidator(workerSpawnRequestSchema, invalid), async c => c.json(await service.spawn(c.get('caller'), c.req.valid('json')), 201))
     .post('/wait', jsonZodValidator(z.union([workerWaitRequestSchema, requestWaitRequestSchema]), invalid), async c => { const value = c.req.valid('json'); return c.json(await ('requestIds' in value ? service.waitRequests(c.get('caller'), value) : service.wait(c.get('caller'), value)), 200); })
     .post('/cancel-wait', jsonZodValidator(workerCancelWaitRequestSchema, invalid), async c => c.json(await service.cancelWait(c.get('caller'), c.req.valid('json')), 200))
