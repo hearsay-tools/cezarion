@@ -401,6 +401,118 @@ describe('ubuntu-vps redeploy npx-cache refresh (#696)', () => {
   });
 });
 
+describe('ubuntu-vps redeploy restart verification (#430)', () => {
+  function redeployContext(opts: {
+    before?: string;
+    after?: string;
+    restartCode?: number;
+    scope?: 'user' | 'system';
+    instance?: string;
+    dryRun?: boolean;
+    journal?: string;
+    journalThrows?: boolean;
+  } = {}) {
+    const calls: string[] = [];
+    let shows = 0;
+    const runner: Runner = {
+      capture: async (program, args) => {
+        calls.push(`${program} ${args.join(' ')}`);
+        if (program === 'systemctl' && args.includes('ExecStart')) return { code: 0, stdout: '', stderr: '' };
+        if (program === 'systemctl' && args.includes('show')) {
+          const stdout = shows++ === 0 ? opts.before : opts.after;
+          return { code: stdout === undefined ? 1 : 0, stdout: stdout ?? '', stderr: '' };
+        }
+        if (program === 'journalctl') {
+          if (opts.journalThrows) throw new Error('journal unavailable');
+          return { code: 0, stdout: opts.journal ?? 'recent service failure\n', stderr: '' };
+        }
+        if (program === 'curl') return { code: 0, stdout: '200', stderr: '' };
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      interactive: async (program, args) => {
+        calls.push(`${program} ${args.join(' ')}`);
+        return args.some((arg) => arg.includes('restart')) ? (opts.restartCode ?? 0) : 0;
+      },
+    };
+    const ctx = ctxWith({
+      runner,
+      dryRun: opts.dryRun,
+      state: {
+        externalProxy: true,
+        steps: { autostart: { status: 'done', created: { artifacts: [{ kind: 'owned', type: 'service', name: 'cezar.service', scope: opts.scope ?? 'user' }] } } },
+      },
+    });
+    ctx.instance = opts.instance ?? 'default';
+    return { ctx, calls };
+  }
+
+  const before = 'ActiveState=active\nExecMainStartTimestampMonotonic=100\n';
+  const after = 'ActiveState=active\nExecMainStartTimestampMonotonic=200\n';
+
+  it('fails an inactive user unit even when the old HTTP endpoint answers', async () => {
+    const { ctx, calls } = redeployContext({ before, after: 'ActiveState=failed\nExecMainStartTimestampMonotonic=200\n' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*inactive|cezar\.service.*failed/);
+    expect(calls.join('\n')).toContain('journalctl --user -u cezar.service');
+  });
+
+  it('includes bounded journal output without hiding the restart failure', async () => {
+    const journal = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n');
+    const { ctx } = redeployContext({ before, after, restartCode: 1, journal });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/line 20[\s\S]*line 49/);
+    const unavailable = redeployContext({ before, after, restartCode: 1, journalThrows: true });
+    await expect(ubuntuVps.redeploy!(unavailable.ctx)).rejects.toThrow(/cezar\.service.*restart returned code 1/);
+  });
+
+  it('fails an unchanged start timestamp even if the process ID could differ', async () => {
+    const { ctx } = redeployContext({ before, after: 'ActiveState=active\nExecMainStartTimestampMonotonic=100\nMainPID=999\n' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*start timestamp.*unchanged/);
+  });
+
+  it('fails a nonzero user restart despite a healthy old endpoint', async () => {
+    const { ctx } = redeployContext({ before, after, restartCode: 1 });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*restart.*code 1/);
+  });
+
+  it('accepts an active service with an advanced timestamp even when PID is reused', async () => {
+    const { ctx } = redeployContext({ before: `${before}MainPID=42\n`, after: `${after}MainPID=42\n` });
+    await expect(ubuntuVps.redeploy!(ctx)).resolves.toBeUndefined();
+  });
+
+  it('fails when the before or after service identity is unreadable', async () => {
+    for (const snapshots of [{ before: undefined, after }, { before, after: 'ActiveState=active\n' }]) {
+      const { ctx } = redeployContext(snapshots);
+      await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*timestamp.*unavailable/);
+    }
+  });
+
+  it('fails when the after snapshot cannot be read at all', async () => {
+    const { ctx } = redeployContext({ before, after: undefined });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*inactive or unreadable/);
+  });
+
+  it('uses the named system unit and fails an unchanged timestamp', async () => {
+    const { ctx, calls } = redeployContext({ before, after: before, scope: 'system', instance: 'shop' });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar-shop\.service.*start timestamp.*unchanged/);
+    expect(calls.join('\n')).toContain('journalctl -u cezar-shop.service');
+  });
+
+  it('fails a nonzero system restart even if systemd reports an advanced timestamp', async () => {
+    const { ctx } = redeployContext({ before, after, scope: 'system', restartCode: 7 });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/cezar\.service.*restart.*code 7/);
+  });
+
+  it('accepts a healthy named system restart', async () => {
+    const { ctx } = redeployContext({ before, after, scope: 'system', instance: 'shop' });
+    await expect(ubuntuVps.redeploy!(ctx)).resolves.toBeUndefined();
+  });
+
+  it('keeps dry run free of restart probes', async () => {
+    const { ctx, calls } = redeployContext({ dryRun: true });
+    await expect(ubuntuVps.redeploy!(ctx)).resolves.toBeUndefined();
+    expect(calls.some((call) => call.includes('ExecMainStartTimestampMonotonic'))).toBe(false);
+  });
+});
+
 describe('ubuntu-vps autostart step (dry-run)', () => {
   it('records a user-scoped service artifact and writes nothing to disk', async () => {
     const created = await stepById('autostart').run(ctxWith({ dryRun: true }));

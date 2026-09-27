@@ -156,9 +156,12 @@ npx cezarion server-deploy --platform ubuntu-vps
 #   npm script:       npm run server-deploy -- --platform ubuntu-vps
 ```
 
-`server-deploy` reloads systemd, **restarts the cezar service**, waits for it to
-answer, and re-runs the same authenticated end-to-end check as install — so a
-green deploy means the cockpit is actually serving the new version.
+`server-deploy` reloads systemd, **restarts the cezar service**, checks that the
+unit is active and its start timestamp advanced, waits for cezar to answer, and
+re-runs the same authenticated end-to-end check as install. A failed restart
+stops the deploy even if the old cockpit still answers. The error names the
+unit and includes up to 30 recent journal lines. A green deploy means the
+service restarted and the cockpit is serving the new version.
 
 - **From a checkout** the service runs `<node> <repo>/packages/cezar/dist/index.js` — so build
   first, then deploy: `git pull && npm run build && npx cezarion server-deploy --platform ubuntu-vps`.
