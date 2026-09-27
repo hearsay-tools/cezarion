@@ -60,11 +60,8 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     process.env.CEZ_AUTOMATIONS = '1';
     // Deterministic on any machine: no network, no real agent CLIs.
     process.env.CEZ_DRY_RUN = '1';
-    // `skillsRepos: []` disables team skills — no background clone can warm a
-    // cache between the first and third spelling of the /skills sweep.
     for (const root of [repoRoot, otherRoot]) {
       mkdirSync(join(root, '.ai/cezar'), { recursive: true });
-      writeFileSync(join(root, '.ai/cezar', 'config.json'), '{"skillsRepos": []}\n', 'utf8');
     }
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });

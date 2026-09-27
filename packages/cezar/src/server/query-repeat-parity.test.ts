@@ -16,9 +16,8 @@ import { apiRequest } from './loopback-request.testkit.ts'
  *
  * `queryValue` in server.ts collapses the array back to its first element. One strict route and
  * one permissive route are enough to pin it — every query schema shares that helper. `/skills`
- * would exercise it too but shells out to discover skills, so it times out under a loaded full
- * run; a guard that flakes teaches people to ignore it. Same for `/providers/status` — inject a
- * no-spawn auth service so the parity check never waits on real CLIs.
+ * would exercise it too, but adds no coverage of the shared query helper. For
+ * `/providers/status`, inject a no-spawn auth service so the parity check never waits on real CLIs.
  */
 describe('a repeated query key stays 200 (c.req.query took the first value)', () => {
   let repoRoot: string
