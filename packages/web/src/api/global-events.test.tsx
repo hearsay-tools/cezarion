@@ -207,6 +207,68 @@ describe('useGlobalEvents — connection', () => {
 })
 
 describe('useGlobalEvents — archived run bursts (#657)', () => {
+  it('keeps a structurally equal unarchive returned by REST after the event', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'done' })
+    const response = deferredResponse()
+    vi.mocked(fetch).mockReturnValue(response.promise)
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
+    const original = client.getQueryData(queryKeys.runs.list())
+    const count = client.getQueryState(queryKeys.runs.list())?.dataUpdateCount
+    renderHook(() => useRuns(), { wrapper })
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...run, archived: true, archivedAt: '2026-09-28T00:00:00.000Z' }))
+
+    await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
+    await act(async () => response.resolve(json([{ ...run }])))
+    expect(client.getQueryState(queryKeys.runs.list())?.dataUpdateCount).toBe((count ?? 0) + 1)
+    expect(client.getQueryData(queryKeys.runs.list())).toBe(original)
+    act(() => vi.advanceTimersByTime(50))
+
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(false)
+  })
+
+  it('does not apply a queued archive to a recreated list query', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'done' })
+    const list = [run]
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), list)
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...run, archived: true }))
+    client.removeQueries({ queryKey: queryKeys.runs.list(), exact: true })
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), list)
+
+    act(() => vi.advanceTimersByTime(50))
+
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(false)
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
+  })
+
+  it('keeps a later live update after replacement and reconciles the list once', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'running' })
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...run, archived: true }))
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...run, archived: true, title: 'REST title' }])
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    source.emit('run', stampedRun({ ...run, archived: true, status: 'done', title: 'Worker finished' }))
+    act(() => vi.advanceTimersByTime(100))
+
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]).toMatchObject({
+      status: 'done', title: 'Worker finished',
+    })
+    expect(invalidate.mock.calls.filter(([filter]) => filter?.exact === true &&
+      JSON.stringify(filter.queryKey) === JSON.stringify(queryKeys.runs.list()))).toHaveLength(1)
+  })
+
   it('does not resurrect a row absent from a newer REST list', () => {
     vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))

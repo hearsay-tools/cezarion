@@ -220,7 +220,8 @@ function runListCacheKey(project: string, bootProject: string | undefined): read
  * changing project scope before the frame must not move an earlier project's update. */
 function createRunListBatcher(queryClient: QueryClient) {
   const pending = new Map<string, {
-    key: readonly [string, 'runs', 'list']; baseList: ApiRun[] | undefined; runs: Map<string, RunRecord>
+    key: readonly [string, 'runs', 'list']; baseList: ApiRun[] | undefined
+    baseQuery: object | undefined; baseUpdateCount: number | undefined; runs: Map<string, RunRecord>
   }>()
   let frame: number | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -231,12 +232,12 @@ function createRunListBatcher(queryClient: QueryClient) {
     if (frame !== undefined) cancelAnimationFrame(frame)
     frame = undefined
     const reconcileKeys: Array<readonly [string, 'runs', 'list']> = []
-    for (const { key, baseList, runs } of pending.values()) {
-      // Another write may have replaced this list while the archive frame waited. Its contents
-      // cannot tell us whether it was fetched before or after the event: an absent or unarchived
-      // row may be a newer deletion/unarchive, or a stale response. Keep that result and ask the
-      // server again. Invalidating also marks an inactive list stale for its next mount.
-      if (queryClient.getQueryData<ApiRun[]>(key) !== baseList) {
+    for (const { key, baseList, baseQuery, baseUpdateCount, runs } of pending.values()) {
+      // A successful write during the wait may be older or newer than the archive event. Even
+      // when REST returns the original row, structural sharing can retain the same list object.
+      // The query identity also catches removal followed by recreation with the same data.
+      const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
+      if (query !== baseQuery || query?.state.dataUpdateCount !== baseUpdateCount || query?.state.data !== baseList) {
         reconcileKeys.push(key)
         continue
       }
@@ -268,7 +269,11 @@ function createRunListBatcher(queryClient: QueryClient) {
           const cacheKey = JSON.stringify(key)
           let entry = pending.get(cacheKey)
           if (!entry) {
-            entry = { key, baseList: queryClient.getQueryData<ApiRun[]>(key), runs: new Map() }
+            const query = queryClient.getQueryCache().find({ queryKey: key, exact: true })
+            entry = {
+              key, baseList: query?.state.data as ApiRun[] | undefined,
+              baseQuery: query, baseUpdateCount: query?.state.dataUpdateCount, runs: new Map(),
+            }
             pending.set(cacheKey, entry)
           }
           entry.runs.set(event.run.id, event.run)
