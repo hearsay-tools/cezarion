@@ -4,6 +4,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 
@@ -48,13 +49,13 @@ beforeAll(async () => {
   browser = AgentBrowser.open(`states-${process.pid}`)
 })
 
-afterAll(() => {
+afterAll(async () => {
   mkdirSync(artifacts, { recursive: true })
   writeFileSync(join(artifacts, 'selection-state-contrast.json'), JSON.stringify(samples, null, 2))
   browser?.close()
   if (originalBrowserArgs === undefined) delete process.env.AGENT_BROWSER_ARGS
   else process.env.AGENT_BROWSER_ARGS = originalBrowserArgs
-  server?.kill()
+  await stopFixtureServer(server)
   if (root) rmSync(root, { recursive: true, force: true })
 })
 

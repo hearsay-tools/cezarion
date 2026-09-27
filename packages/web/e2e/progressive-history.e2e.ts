@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, fixtureServeEnv } from './agent-browser'
 import { largeThreadEvents } from './fixtures/make-large-thread'
 import record from './fixtures/thread-run.record.json'
@@ -275,14 +276,10 @@ beforeAll(async () => {
   waitUntilCockpitIdle()
 }, 120_000)
 
-afterAll(() => {
+afterAll(async () => {
   browser?.close()
-  server?.kill()
-  try {
-    if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
-  } catch {
-    // The killed fixture may still be releasing its transcript file; the OS reaps the temp dir.
-  }
+  await stopFixtureServer(server)
+  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
 describe('progressive long-session history', () => {

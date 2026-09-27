@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { dismissWithEscape, focusWithKeyboard } from './contrast'
 
@@ -53,10 +54,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   browser?.close()
-  if (server && server.exitCode === null) {
-    server.kill()
-    await once(server, 'exit')
-  }
+  await stopFixtureServer(server)
   if (root) rmSync(root, { recursive: true, force: true })
 })
 

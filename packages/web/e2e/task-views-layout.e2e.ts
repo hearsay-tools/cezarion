@@ -4,6 +4,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { beforeAll, afterAll, expect, it } from 'vitest'
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth } from './poll'
 import record from './fixtures/thread-run.record.json'
@@ -41,7 +42,7 @@ beforeAll(async () => {
   browser = AgentBrowser.open(`task-views-${process.pid}`)
   mkdirSync(artifacts, { recursive: true })
 }, 60_000)
-afterAll(() => { browser?.close(); server?.kill(); if (root) rmSync(root, { recursive: true, force: true }) })
+afterAll(async () => { browser?.close(); await stopFixtureServer(server); if (root) rmSync(root, { recursive: true, force: true }) })
 const scoped = (path: string) => `/p/${project}${path}`
 const prepare = (width: number, theme: string) => {
   browser.setViewport(width, 1000)
@@ -134,5 +135,5 @@ it('renders loading, retryable error, and filtered-empty states in both themes a
       browser.waitForFunction(`document.body.textContent.includes('No matching tasks')`)
       browser.screenshot(join(artifacts, `empty-${width}-${theme}.png`))
     }
-  } finally { proxy.kill() }
+  } finally { await stopFixtureServer(proxy) }
 }, 90_000)

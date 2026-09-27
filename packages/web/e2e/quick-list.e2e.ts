@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { stopFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
@@ -204,9 +205,9 @@ beforeAll(async () => {
   browser.setViewport(1440, 900)
 }, 90_000)
 
-afterAll(() => {
+afterAll(async () => {
   browser?.close()
-  server?.kill()
+  await stopFixtureServer(server)
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
@@ -734,13 +735,13 @@ describe('the tasks table under worst-case row content', () => {
     showResourceTable()
   }, 90_000)
 
-  afterAll(() => {
+  afterAll(async () => {
     browser.evaluate(`(() => {
       localStorage.removeItem('cez-sidebar-width')
       document.documentElement.classList.remove('light')
       delete document.documentElement.dataset.density
     })()`)
-    worstServer?.kill()
+    await stopFixtureServer(worstServer)
     if (worstRoot) rmSync(worstRoot, { recursive: true, force: true })
     browser.setViewport(1440, 900)
     browser.goto(`${baseUrl}${scoped('/')}`)
@@ -1084,8 +1085,8 @@ describe('a row under width contention, in a column the user can widen', () => {
     wideProject = await bootProjectId(wideUrl)
   }, 90_000)
 
-  afterAll(() => {
-    wideServer?.kill()
+  afterAll(async () => {
+    await stopFixtureServer(wideServer)
     if (wideRoot) rmSync(wideRoot, { recursive: true, force: true })
   })
 
@@ -1252,8 +1253,8 @@ describe('empty quick-list', () => {
     emptyProject = await bootProjectId(emptyUrl)
   }, 60_000)
 
-  afterAll(() => {
-    emptyServer?.kill()
+  afterAll(async () => {
+    await stopFixtureServer(emptyServer)
     if (emptyRoot) rmSync(emptyRoot, { recursive: true, force: true })
   })
 
