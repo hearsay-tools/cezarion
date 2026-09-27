@@ -286,12 +286,11 @@ function Row({
  *   [lead dot] [title ×N                     ] [compare ›]
  *              [1 needs you · 1 working · #425 · 12m]
  *
- * The toggle is a real `<button>` over the text column (keyboard and screen readers get
- * `aria-expanded`), and a click anywhere else on the row but the compare link toggles too. The
- * compare link is a flex SIBLING of that button, never its child: a link inside a button is
- * invalid. The shared reference is plain text here for the same reason — it sits inside the
- * button; each member row carries the links. The trailing slot is a constant 36px, and both lines
- * are fixed boxes, so expanding or collapsing changes nothing about this row's height.
+ * The toggle is a real `<button>` over line 1 (keyboard and screen readers get `aria-expanded`),
+ * and a click anywhere else on the row but a link toggles too. The compare link and line 2's
+ * shared references are SIBLINGS of that button, never its children: a link inside a button is
+ * invalid. The trailing slot is a constant 36px (60px on touch), and both lines are fixed boxes,
+ * so expanding or collapsing changes nothing about this row's height.
  */
 function GroupRow({
   row,
@@ -310,11 +309,23 @@ function GroupRow({
 }) {
   const lead = deriveAttention(row.lead)
   const { families, shared, age } = groupMetaParts(row.members, now)
-  const sharedReferences = taskReferences(row.members[0]!).filter((reference) => shared.has(referenceKey(reference)))
-  const meta = [
-    ...families,
-    ...sharedReferences.map((reference) => `${reference.kind === 'PR' ? 'PR ' : ''}#${reference.number}`),
-    ...(age ? [age] : []),
+  const noHover = useNoHover()
+  const first = row.members[0]!
+  const sharedReferences = taskReferences(first).filter((reference) => shared.has(referenceKey(reference)))
+  // Line 2 in the task row's own grammar: words, then the shared references as the same plain
+  // links (with the status panel) a task row uses — inert text on touch (#617 01b) — then the age.
+  const meta: React.ReactNode[] = [
+    ...families.map((family) => <span key={`family-${family}`}>{family}</span>),
+    ...sharedReferences.map((reference) => (
+      <TaskReferenceChip
+        key={`${reference.kind}-${reference.number}-${reference.url}`}
+        run={first}
+        reference={reference}
+        plain
+        inert={noHover}
+      />
+    )),
+    ...(age ? [<span key="age" className="tabular-nums">{age}</span>] : []),
   ]
   const Disclosure = expanded ? ChevronDownIcon : ChevronRightIcon
   return (
@@ -335,15 +346,19 @@ function GroupRow({
       <span data-slot="task-row-dot" className="flex h-[19px] w-[12px] shrink-0 items-center justify-center">
         <StatusDot tone={lead.tone} shape={lead.shape} pulse={lead.pulse} aria-label={lead.label} title={lead.label} role="img" />
       </span>
-      <button
-        type="button"
-        data-slot="group-tile"
-        data-group-id={row.groupId}
-        aria-expanded={expanded}
-        onClick={() => onToggle(row.groupId)}
-        className="flex min-w-0 flex-1 flex-col text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground rounded-[2px]"
-      >
-        <span className="flex h-[19px] w-full min-w-0 items-center gap-1.5">
+      {/* The text column. The toggle `<button>` is line 1 only (its accessible name is the title
+          and count, and it carries `aria-expanded`); line 2 sits beside it, not inside, because
+          it holds reference LINKS and a link inside a button is invalid. A click on line 2
+          outside a link still toggles through the row handler above. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <button
+          type="button"
+          data-slot="group-tile"
+          data-group-id={row.groupId}
+          aria-expanded={expanded}
+          onClick={() => onToggle(row.groupId)}
+          className="flex h-[19px] w-full min-w-0 items-center gap-1.5 rounded-[2px] text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground"
+        >
           <span
             data-slot="group-title"
             className={cn('min-w-0 truncate text-[13px] leading-[1.45] font-medium text-muted-foreground', active && 'text-foreground')}
@@ -354,17 +369,17 @@ function GroupRow({
           <span data-slot="group-count" className="shrink-0 rounded-[9px] bg-muted px-1.5 py-px font-mono text-[11px] leading-[1.3] font-semibold tabular-nums text-muted-foreground">
             ×{row.members.length}
           </span>
-        </span>
-        <span
+        </button>
+        <div
           data-slot="group-meta"
           className={cn(
-            'block h-[16px] w-full min-w-0 truncate text-[11.5px] leading-[1.4] font-normal text-soft-foreground',
+            'h-[16px] w-full min-w-0 truncate text-[11.5px] leading-[1.4] font-normal text-soft-foreground',
             active && 'text-muted-foreground',
           )}
         >
-          {meta.join(' · ') || '\u00a0'}
-        </span>
-      </button>
+          {meta.length ? meta.flatMap((part, index) => (index ? [<MetaSeparator key={`sep-${index}`} />, part] : [part])) : '\u00a0'}
+        </div>
+      </div>
       {/* 36px on a pointer device; on touch the compare link is a 44px target of its own, beside
           (never over) the disclosure, and the slot reserves that room permanently — px, not
           spacing units, so density cannot shrink it. */}

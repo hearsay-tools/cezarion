@@ -544,8 +544,10 @@ describe('TaskQuickList', () => {
       renderList({ runs: variants() })
 
       const tile = screen.getByRole('button', { expanded: false })
-      // Line 2 is the aggregate in words (#617 01a).
-      expect(tile.textContent).toBe('Add skills autocomplete×22 working · 1m')
+      // The toggle is line 1 only; line 2 (the aggregate in words, #617 01a) sits beside it,
+      // because it can hold reference links and a link inside a button is invalid.
+      expect(tile.textContent).toBe('Add skills autocomplete×2')
+      expect(document.querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · 1m')
       // Collapsed: the members are not rows of their own.
       expect(row('va')).toBeNull()
       expect(row('vb')).toBeNull()
@@ -1402,5 +1404,54 @@ describe('variant line 1 under width pressure (#617 fix round)', () => {
     const trailing = document.querySelector('[data-slot="group-trailing"]') as HTMLElement
     expect(trailing.className).toContain('w-[36px]')
     expect(trailing.className).toContain('no-hover:w-[60px]')
+  })
+})
+
+describe("the group row's shared reference (#617 review round 4)", () => {
+  const ISSUE = 'https://github.com/o/r/issues/425'
+  const pair = () => [
+    run({ id: 'sa', groupId: 'g3', variant: 'A', title: 'Shared (A)', status: 'running', referencedIssueUrl: ISSUE }),
+    run({ id: 'sb', groupId: 'g3', variant: 'B', title: 'Shared (B)', status: 'running', referencedIssueUrl: ISSUE }),
+  ]
+  const groupRow = () => document.querySelector('[data-slot="group-row"][data-group-id="g3"]') as HTMLElement
+
+  it('is a real link on line 2, outside the toggle button, with nothing interactive nested', () => {
+    renderList({ runs: pair() })
+    const link = groupRow().querySelector('[data-slot="group-meta"] a[data-slot="issue-chip"]') as HTMLElement
+    expect(link?.getAttribute('href')).toBe(ISSUE)
+    expect(link.textContent).toBe('#425')
+    expect(link.closest('button')).toBeNull()
+    const toggle = groupRow().querySelector('[data-slot="group-tile"]') as HTMLElement
+    expect(toggle.querySelector('a, button')).toBeNull()
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(groupRow().querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · #425 · 1m')
+  })
+
+  it('does not toggle the group when the link is clicked', () => {
+    renderList({ runs: pair() })
+    const link = groupRow().querySelector('[data-slot="group-meta"] a') as HTMLElement
+    const stopJsdomNav = (event: Event) => event.preventDefault()
+    document.addEventListener('click', stopJsdomNav)
+    fireEvent.click(link)
+    document.removeEventListener('click', stopJsdomNav)
+    expect(groupRow().querySelector('[data-slot="group-tile"]')?.getAttribute('aria-expanded')).toBe('false')
+    // …while a click elsewhere on line 2 still toggles, as before.
+    fireEvent.click(groupRow().querySelector('[data-slot="group-meta"]') as HTMLElement)
+    expect(groupRow().querySelector('[data-slot="group-tile"]')?.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('is inert text on a device that cannot hover', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(hover: none)', media: query, onchange: null,
+      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+    }))
+    try {
+      renderList({ runs: pair() })
+      const meta = groupRow().querySelector('[data-slot="group-meta"]') as HTMLElement
+      expect(meta.querySelector('a')).toBeNull()
+      expect(meta.querySelector('[data-slot="issue-chip"]')?.getAttribute('data-inert')).toBe('true')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

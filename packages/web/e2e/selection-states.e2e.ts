@@ -27,12 +27,20 @@ beforeAll(async () => {
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   mkdirSync(join(root, '.ai/skills'), { recursive: true })
   for (const name of ['review', 'ship']) writeFileSync(join(root, `.ai/skills/${name}.md`), `---\ndescription: ${name} the changes\n---\nCheck the work.\n`)
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(['one', 'two'].map((id) => ({
+  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([...['one', 'two'].map((id) => ({
     id, title: `Review task ${id}`, task: 'Check the work', workflow: 'default', status: 'review', tokensUsed: 0,
     createdAt: new Date().toISOString(), finishedAt: new Date().toISOString(), archived: false, steps: [],
     // One reference, on the row this spec hovers: the pointer path keeps it a real link (#617 01b).
     ...(id === 'two' ? { referencedPullRequestUrl: 'https://github.com/o/r/pull/594' } : {}),
-  }))))
+  })),
+    // A variant group sharing one issue (#617 review round 4): its reference lives on the group
+    // row's line 2 and must stay a real link with the status panel on a pointer device.
+    ...['ga', 'gb'].map((id, index) => ({
+      id, title: `Grouped task (${index ? 'B' : 'A'})`, task: 'Check the work', workflow: 'default', status: 'review', tokensUsed: 0,
+      createdAt: new Date(Date.now() - 3_600_000).toISOString(), finishedAt: new Date(Date.now() - 3_600_000).toISOString(), archived: false, steps: [],
+      groupId: 'g-sel', variant: index ? 'B' : 'A', referencedIssueUrl: 'https://github.com/o/r/issues/425',
+    })),
+  ]))
   const probe = createServer()
   const port = await new Promise<number>((done) => probe.listen(0, '127.0.0.1', () => {
     const address = probe.address() as { port: number }
@@ -46,7 +54,7 @@ beforeAll(async () => {
     try { if ((await fetch(`${baseUrl}/api/v1/health`)).ok) break } catch { /* booting */ }
     await new Promise((done) => setTimeout(done, 250))
   }
-  expect((await (await fetch(`${baseUrl}/api/v1/runs`)).json()).map((run: { id: string }) => run.id).sort()).toEqual(['one', 'two'])
+  expect((await (await fetch(`${baseUrl}/api/v1/runs`)).json()).map((run: { id: string }) => run.id).sort()).toEqual(['ga', 'gb', 'one', 'two'])
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`states-${process.pid}`)
 })
@@ -209,6 +217,25 @@ describe('selection and control states (#171)', () => {
       samples.push({ variant: variantId, target: `${other} pin`, state: 'hover pin', ...pin })
       expect(pin.ratio, `pin: ${JSON.stringify(pin)}`).toBeGreaterThanOrEqual(3)
       browser.screenshot(`${artifacts}/states-sidebar-row-${variant.id}.png`, { viewport: true })
+    })
+
+    if (variant.id === 'desktop-dark-comfortable') it(`${variant.id}: the group row's shared reference is a link with the status panel (#617)`, () => {
+      variantId = variant.id
+      browser.goto(`${baseUrl}/p/${project}/tasks/one`)
+      const group = '[data-slot="group-row"][data-group-id="g-sel"]'
+      const link = `${group} [data-slot="group-meta"] a[data-slot="issue-chip"]`
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)}) !== null`)
+      applyContrastQaVariant(browser, variant)
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)})?.getBoundingClientRect().width > 0`)
+      expect(browser.evaluate(`(() => { const a = document.querySelector(${JSON.stringify(link)}); return { href: a.getAttribute('href'), inToggle: a.closest('button') !== null, text: a.textContent } })()`))
+        .toEqual({ href: 'https://github.com/o/r/issues/425', inToggle: false, text: '#425' })
+      // Keyboard focus opens the same status panel a task row's reference has.
+      focusWithKeyboard(browser, link)
+      browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') !== null`)
+      // …and focusing the link did not toggle the group.
+      expect(browser.evaluate(`document.querySelector('${group} [data-slot="group-tile"]').getAttribute('aria-expanded')`)).toBe('false')
+      browser.press('Escape')
+      browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') === null`)
     })
 
     it(`${variant.id}: enabled control icons contrast and disabled selectors remain unavailable`, () => {

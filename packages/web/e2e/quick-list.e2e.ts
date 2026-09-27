@@ -1394,6 +1394,8 @@ describe('variant rows and the group row under width pressure', () => {
     id, title: `Ledger scan (${index ? 'B' : 'A'})`, workflow: 'default', task: 'scan the ledger', status: 'review',
     createdAt: ago((20 - index) * 60_000), finishedAt: ago((10 - index) * 60_000), tokensUsed: 2,
     runner: 'opencode', costUsd: 0.4, inputTokens: 1, outputTokens: 1,
+    // Shared by both, so it belongs to the group row's line 2 (#617 01a).
+    referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/425',
     groupId: 'g-wide', variant: index ? 'B' : 'A', archived: false, steps: [],
   }))
 
@@ -1459,6 +1461,33 @@ describe('variant rows and the group row under width pressure', () => {
       const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null && l.tokens && !l.overflows }) as Line
       expect(line.costShown, JSON.stringify(line)).toBe(true)
     }
+  })
+
+  it("puts the shared reference on the group row's line 2, and keeps the row's height through expand", () => {
+    browser.setViewport(1440, 900)
+    browser.goto(`${varUrl}/p/${varProject}/`)
+    type Group = { expanded: string | null; height: number; meta: string; inert: string | null; links: number; inToggle: boolean }
+    const group = `(() => {
+      const row = document.querySelector('${GROUP}')
+      const meta = row?.querySelector('[data-slot="group-meta"]')
+      if (!meta) return null
+      const chip = meta.querySelector('[data-slot="issue-chip"]')
+      return { expanded: row.querySelector('[data-slot="group-tile"]').getAttribute('aria-expanded'),
+        height: Math.round(row.getBoundingClientRect().height), meta: meta.textContent,
+        inert: chip?.dataset.inert ?? null, links: meta.querySelectorAll('a').length, inToggle: chip?.closest('button') != null }
+    })()`
+    const collapsed = browser.waitForValue(group, (g: Group | null) => g?.expanded === 'false') as Group
+    expect(collapsed.meta).toBe('2 needs review · #425 · 9m')
+    // This spec's browser reports `hover: none`, so the reference is inert text here; the
+    // pointer path (a link with the status panel) is pinned in selection-states.
+    expect(collapsed).toMatchObject({ inert: 'true', links: 0, inToggle: false })
+    browser.click(`${GROUP} [data-slot="group-tile"]`)
+    const expanded = browser.waitForValue(group, (g: Group | null) => g?.expanded === 'true') as Group
+    expect(expanded.height).toBe(collapsed.height)
+    // The members no longer repeat the reference their group row carries.
+    const memberMeta = browser.waitForValue(`document.querySelector('${member('wa')} [data-slot="task-row-meta"]')?.textContent ?? null`) as string
+    expect(memberMeta).toMatch(/^needs review/)
+    expect(memberMeta).not.toContain('#425')
   })
 
   it('gives the compare link a real 44px touch target beside the disclosure, and a tap opens compare', () => {
