@@ -411,9 +411,11 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
     instance?: string;
     dryRun?: boolean;
     journal?: string;
+    journalStderr?: string;
     journalThrows?: boolean;
     journalUnreadable?: boolean;
     sudoJournal?: string;
+    sudoJournalCode?: number;
     sudoAllowed?: boolean;
     curlCode?: string;
   } = {}) {
@@ -429,9 +431,9 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
         }
         if (program === 'journalctl') {
           if (opts.journalThrows) throw new Error('journal unavailable');
-          return { code: opts.journalUnreadable ? 1 : 0, stdout: opts.journalUnreadable ? '' : opts.journal ?? 'recent service failure\n', stderr: '' };
+          return { code: opts.journalUnreadable ? 1 : 0, stdout: opts.journalUnreadable ? '' : opts.journal ?? 'recent service failure\n', stderr: opts.journalStderr ?? '' };
         }
-        if (program === 'sudo' && args.includes('journalctl')) return { code: 0, stdout: opts.sudoJournal ?? '', stderr: '' };
+        if (program === 'sudo' && args.includes('journalctl')) return { code: opts.sudoJournalCode ?? 0, stdout: opts.sudoJournal ?? '', stderr: '' };
         if (program === 'sudo' && args.includes('true')) return { code: opts.sudoAllowed === false ? 1 : 0, stdout: '', stderr: '' };
         if (program === 'curl') return { code: 0, stdout: opts.curlCode ?? '200', stderr: '' };
         return { code: 0, stdout: '', stderr: '' };
@@ -521,6 +523,24 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
   it('uses noninteractive sudo for system logs only after sudo ran the restart', async () => {
     const { ctx, calls } = redeployContext({ before, after: before, scope: 'system', journalUnreadable: true, sudoJournal: 'root journal detail\n' });
     await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/root journal detail/);
+    expect(calls.join('\n')).toContain('sudo -n journalctl -u cezar.service -n 30');
+  });
+
+  it('uses authorized sudo when ordinary journalctl reports no entries with a permission warning', async () => {
+    const { ctx, calls } = redeployContext({
+      before, after: before, scope: 'system', journal: '-- No entries --\n',
+      journalStderr: 'Hint: You are currently not seeing messages from other users and the system.\n',
+      sudoJournal: 'root journal detail\n',
+    });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/root journal detail/);
+    expect(calls.join('\n')).toContain('sudo -n journalctl -u cezar.service -n 30');
+  });
+
+  it('retains ordinary journal output when authorized sudo cannot read it', async () => {
+    const { ctx, calls } = redeployContext({
+      before, after: before, scope: 'system', journal: 'ordinary detail\n', sudoJournalCode: 1,
+    });
+    await expect(ubuntuVps.redeploy!(ctx)).rejects.toThrow(/ordinary detail/);
     expect(calls.join('\n')).toContain('sudo -n journalctl -u cezar.service -n 30');
   });
 

@@ -692,7 +692,10 @@ async function failedRestart(ctx: InstallContext, scope: 'user' | 'system', unit
     const ordinary = await ctx.runner.capture('journalctl', args);
     if (ordinary.code === 0 && ordinary.stdout.trim()) recent = ordinary.stdout.trim().split('\n').slice(-30).join('\n').slice(-6000);
   } catch { /* Diagnostics must not hide the restart failure. */ }
-  if (recent === 'recent journal unavailable' && scope === 'system' && sudoUsed) {
+  // An unprivileged journalctl may exit 0 with "-- No entries --" and a
+  // permission hint on stderr. Once this deploy used sudo for the restart,
+  // prefer its noninteractive journal read; keep ordinary output on failure.
+  if (scope === 'system' && sudoUsed) {
     try {
       const privileged = await ctx.runner.capture('sudo', ['-n', 'journalctl', ...args]);
       if (privileged.code === 0 && privileged.stdout.trim()) recent = privileged.stdout.trim().split('\n').slice(-30).join('\n').slice(-6000);
