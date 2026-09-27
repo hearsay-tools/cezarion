@@ -357,7 +357,8 @@ function ExpandedVariantMembers({
  * anchor is invalid.
  *
  * WIDTH-PRIORITY RULE (#788, option C) — read this before adding anything to this row.
- * The column is 232px by default and the title is the ONLY thing here a person scans for, so:
+ * The column is 264px by default (`DEFAULT_SIDEBAR_WIDTH`, `lib/sidebar-width.ts`) and the title is
+ * the ONLY thing here a person scans for, so:
  *
  *  1. The title is the only element on its line allowed to GROW (`flex-1`) and it has a floor
  *     (`min-w-[7rem]`) that no other element may push it below.
@@ -532,12 +533,13 @@ function RunRow({
           {/* The diff numbers, once a turn has produced any (R2 #389). Nothing before that — a
               sidebar row has no column to hold an em dash open for.
 
-              Droppable metadata, per the width-priority rule: `+59514 −12160` is ~82px, which a
-              232px column cannot spend and still name the task, and its exact numbers stay in the
-              `title` tooltip and in the Tasks table's ± column either way.
+              Droppable metadata, per the width-priority rule: `+59514 −12160` is ~82px, which the
+              default 264px column cannot spend and still name the task, and its exact numbers stay
+              in the `title` tooltip and in the Tasks table's ± column either way.
 
               23rem is not the width at which the pair merely *fits* — it is the width at which it
-              fits AND the name is still at least as long as it was in the default 232px column. */}
+              fits AND the name keeps the length it has in the default column. It was derived when
+              that default was 232px (#788) and has not been re-derived for 264px. */}
           {run.diffStat ? (
             <DiffStatLabel
               stat={run.diffStat}
