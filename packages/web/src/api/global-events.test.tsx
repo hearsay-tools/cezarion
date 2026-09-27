@@ -1,13 +1,15 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { act, cleanup, render, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
+import { Profiler, type ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createUsageStore, type UsageStore } from './events'
 import { GlobalEventsProvider, useGlobalEvents, useRunUsage, useUsage } from './global-events'
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import { createQueryClient } from './query-client'
-import { queryKeys, useRun, useProviderStatus, workspaceQueryKeys } from './queries'
+import { queryKeys, useRun, useRuns, useProviderStatus, workspaceQueryKeys } from './queries'
+import { TasksOverview } from '../routes/tasks-overview'
 import type { ApiRun, ProviderStatusResponse, RunRecord } from '@open-mercato/cezar-api-client'
 
 /**
@@ -201,6 +203,191 @@ describe('useGlobalEvents — connection', () => {
     vi.stubGlobal('EventSource', undefined)
     expect(() => renderHook(() => useGlobalEvents(usage), { wrapper })).not.toThrow()
     expect(FakeEventSource.instances).toHaveLength(0)
+  })
+})
+
+describe('useGlobalEvents — archived run bursts (#657)', () => {
+  it('renders the actual overview once for a parent-and-worker archive burst', async () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const runs: RunRecord[] = []
+    for (let p = 0; p < 12; p++) {
+      const parent = runRecord(`parent-${p}`, { status: 'done' })
+      runs.push(parent)
+      for (let w = 0; w < 4; w++) {
+        const id = `worker-${p}-${w}`
+        runs.push(runRecord(id, {
+          status: 'running',
+          delegation: {
+            role: 'worker', parentRunId: parent.id, permissions: [],
+            workspace: {
+              ownerRunId: id, resourceId: id, kind: 'owned-isolated', path: `/managed/${id}`,
+              branch: `cez/${id}`, baselineSha: 'a'.repeat(40),
+            },
+          },
+        }))
+      }
+    }
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), runs)
+    let overviewCommits = 0
+    function LiveOverview() {
+      useGlobalEvents(usage)
+      const list = useRuns()
+      return <MemoryRouter><Profiler id="overview" onRender={() => { overviewCommits++ }}>
+        <TasksOverview runs={list.data} view="active" onViewChange={() => undefined}
+          onArchiveFinished={() => undefined} onMarkAllRead={() => undefined}
+          onRename={() => undefined} />
+      </Profiler></MemoryRouter>
+    }
+    render(<QueryClientProvider client={client}><LiveOverview /></QueryClientProvider>)
+    const baseline = overviewCommits
+
+    for (const run of runs) FakeEventSource.last.emit('run', stampedRun({ ...run, archived: true }))
+    await act(async () => {})
+    expect(overviewCommits).toBe(baseline)
+    await waitFor(() => expect(overviewCommits - baseline).toBeGreaterThanOrEqual(1))
+    expect(overviewCommits - baseline).toBeLessThanOrEqual(2)
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.filter(run => run.archived)).toHaveLength(60)
+  })
+
+  it('commits one list update and one subscriber render for 60 archived run frames', async () => {
+    // A background tab may pause animation frames. The bounded timer must still flush the burst.
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const original = Array.from({ length: 60 }, (_, i) => runRecord(`run-${i}`, { status: 'done' }))
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), original)
+    let listWrites = 0
+    const unsubscribe = client.getQueryCache().subscribe(event => {
+      if (event.type === 'updated' && JSON.stringify(event.query.queryKey) === JSON.stringify(queryKeys.runs.list())) listWrites++
+    })
+    let renders = 0
+    renderHook(() => {
+      useGlobalEvents(usage)
+      const runs = useRuns()
+      renders++
+      return runs.data
+    }, { wrapper })
+    const baseline = renders
+
+    for (const run of original) {
+      FakeEventSource.last.emit('run', stampedRun({ ...run, archived: true, archivedAt: '2026-09-28T00:00:00.000Z' }))
+    }
+    await act(async () => {})
+    expect(listWrites).toBe(0)
+    expect(renders).toBe(baseline)
+
+    await waitFor(() => expect(listWrites).toBe(1))
+    await waitFor(() => expect(renders - baseline).toBe(1))
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.every(run => run.archived)).toBe(true)
+    unsubscribe()
+  })
+
+  it('keeps detail permission updates immediate while the archived list waits', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'done' })
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
+    client.setQueryData(queryKeys.runs.detail('r1'), { ...run, finishBlocked: null })
+    const { source, unmount } = mount()
+
+    source.emit('run', stampedRun({ ...run, archived: true }))
+
+    expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.archived).toBe(true)
+    expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeUndefined()
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(false)
+    unmount()
+  })
+
+  it('flushes an archived update before a later deletion so the row cannot return', async () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'done' })
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
+    const { source } = mount()
+
+    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-deleted', JSON.stringify({ id: run.id, project: BOOT }))
+
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
+    await new Promise(resolve => setTimeout(resolve, 70))
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
+  })
+
+  it('writes queued events to their receipt-time project keys across a scope switch', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    client.setQueryData<ApiRun[]>(['default', 'runs', 'list'], [])
+    client.setQueryData<ApiRun[]>(['other-project', 'runs', 'list'], [])
+    const { source, unmount } = mount()
+
+    source.emit('run', stampedRun(runRecord('boot-run', { archived: true }), BOOT))
+    setApiScope('other-project')
+    source.emit('run', stampedRun(runRecord('other-run', { archived: true }), 'other-project'))
+    unmount() // cleanup must commit pending updates, not leave stale cache behind
+
+    expect(client.getQueryData<ApiRun[]>(['default', 'runs', 'list'])?.map(run => run.id)).toEqual(['boot-run'])
+    expect(client.getQueryData<ApiRun[]>(['other-project', 'runs', 'list'])?.map(run => run.id)).toEqual(['other-run'])
+  })
+
+  it('flushes pending archived list events before reconnect reconciliation', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'done' })
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
+    const { source } = mount()
+    source.open()
+
+    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.drop()
+    source.open()
+
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true)
+  })
+
+  it('flushes a hidden tab on return before its authoritative reconciliation', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'done' })
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
+    const { source } = mount()
+
+    setVisibility('hidden')
+    source.emit('run', stampedRun({ ...run, archived: true }))
+    setVisibility('visible')
+
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true)
+  })
+
+  it('does not overwrite a newer authoritative archived row when the burst flushes', async () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = runRecord('r1', { status: 'done' })
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
+    const { source } = mount()
+    source.emit('run', stampedRun({ ...run, archived: true, archivedAt: '2026-09-28T00:00:00.000Z' }))
+
+    // The mutation's authoritative refetch may finish before the animation frame.
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{
+      ...run, title: 'Server-renamed title', archived: true, archivedAt: '2026-09-28T00:00:00.000Z',
+    }])
+    await waitFor(() => expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true))
+    await new Promise(resolve => setTimeout(resolve, 70))
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.title).toBe('Server-renamed title')
+  })
+
+  it('applies later updates to an already archived live worker with the same archivedAt', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const worker = runRecord('worker', {
+      status: 'running', archived: true, archivedAt: '2026-09-28T00:00:00.000Z',
+    })
+    client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [worker])
+    const { source } = mount()
+
+    source.emit('run', stampedRun({ ...worker, status: 'done', title: 'Worker finished' }))
+
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.status).toBe('done')
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.title).toBe('Worker finished')
   })
 })
 
