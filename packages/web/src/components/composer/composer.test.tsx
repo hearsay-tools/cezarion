@@ -372,6 +372,30 @@ describe('/ skills autocomplete (#380)', () => {
     expect(textarea.value).toBe('/om-review ')
   })
 
+  it.each([
+    ['ArrowDown', 'om-review'],
+    ['ArrowUp', 'global-deploy'],
+  ])('%s scrolls the selected item into view while focus stays in the textarea', async (key, label) => {
+    const { textarea } = renderComposer()
+    type(textarea, '/')
+    await screen.findByText('global-deploy')
+    const items = [...document.querySelectorAll<HTMLElement>('[data-slot="composer-menu-item"]')]
+    expect(items).toHaveLength(3)
+    const scrolls = items.map(() => vi.fn())
+    items.forEach((item, index) => { item.scrollIntoView = scrolls[index]! })
+
+    textarea.focus()
+    fireEvent.keyDown(textarea, { key })
+
+    const selected = items.find((item) => item.textContent?.includes(label))!
+    await waitFor(() => expect(selected.getAttribute('data-selected')).toBe('true'))
+    await waitFor(() => expect(selected.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }))
+    expect(items.filter((item) => item !== selected).every((item) =>
+      !scrolls[items.indexOf(item)]!.mock.calls.some(([options]) => options?.block === 'nearest'),
+    )).toBe(true)
+    expect(document.activeElement).toBe(textarea)
+  })
+
   it('clicking an item inserts it too', async () => {
     const { textarea } = renderComposer()
     type(textarea, '/om')
