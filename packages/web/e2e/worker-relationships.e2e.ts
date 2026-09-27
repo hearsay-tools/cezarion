@@ -160,7 +160,10 @@ it('shows unavailable parent with retry, successful empty state, worker wait and
   browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${region} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
   expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   open(emptyId); browser.waitForFunction(`document.querySelector('${region}').textContent.includes('No workers')`)
-  // A full record carries its worker ids, so the count is said (#617).
+  // A full record carries its worker ids, so the count is said (#617). Not a flake fix: no failure
+  // on record. The asserted text changed ("Waiting on workers" -> "Waiting on 1 worker"), and the
+  // rewritten line reads after `open`, so it waits then reads per e2e/README.md instead of keeping
+  // the one-shot read the wait discipline calls a race.
   open(waitingId); browser.waitForFunction(`document.querySelector('${region}')?.textContent.includes('Waiting on 1 worker')`)
   expect(browser.count('[data-slot="ask-card"]')).toBe(0)
   // The real server derives attention from the seeded ask.requested event.
