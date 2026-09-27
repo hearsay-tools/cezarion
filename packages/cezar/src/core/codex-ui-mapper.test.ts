@@ -65,6 +65,7 @@ const GOLDEN_FIXTURES = [
   'turn-plan-updated',
   'turn-failed',
   'provider-error',
+  'stream-retry',
   'review-mode',
   // Codex 0.144.6 generated schema, plus the current upstream spelling.
   'collab-agent-tool-call',
@@ -1151,4 +1152,18 @@ describe('codex reasoning text survives replay (#528)', () => {
     ]);
     expect(reasoningAt(events, 'item.completed', 'item_rsn_2')).toMatchObject({ text: 'Next' });
   });
+});
+
+
+it('recovers from recorded retry errors through the real app-server transport (#550)', async () => {
+  const runner = new CodexAppServerRunner({ bin: join(HERE, '../../scripts/mock-codex-app-server.mjs'), timeoutMs: 0 });
+  const v1: AgentEvent[] = []; const v2: UiEvent[] = [];
+  const session = runner.startSession({ userPrompt: 'mock:stream-retry recover', cwd: process.cwd() },
+    event => v1.push(event), { autoEndAfterFirstTurn: true, onUiEvent: event => v2.push(event) });
+  const result = await session.result;
+  expect(result.text).toBe('Recovered after reconnect.');
+  expect(v1.some(e => e.type === 'error')).toBe(false);
+  expect(v1).toContainEqual(expect.objectContaining({ type: 'note', message: expect.stringContaining('UnknownIssuer') }));
+  expect(v2).toContainEqual(expect.objectContaining({ type: 'session.error', fatal: false }));
+  expect(v2).toContainEqual(expect.objectContaining({ type: 'turn.completed', stopReason: 'end_turn' }));
 });

@@ -1,0 +1,2 @@
+{"method": "error", "params": {"error": {"message": "Reconnecting... 2/5", "codexErrorInfo": {"responseStreamDisconnected": {"httpStatusCode": null}}, "additionalDetails": "stream disconnected before completion: invalid peer certificate: UnknownIssuer"}, "willRetry": true}}
+{"method": "error", "params": {"error": {"message": "Reconnecting... waiting for network", "additionalDetails": "Connection failed: error sending request"}, "willRetry": true}}

@@ -23,6 +23,7 @@ import { parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import { InputSubmissions } from './input-submissions.ts';
+import { codexStreamError } from './codex-stream-error.ts';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 import {
   CodexAppServerRpc,
@@ -45,6 +46,8 @@ import {
 // One startup budget, including handshake ACKs and the first main-thread turn.
 // This is not a model-turn or human-question lifetime limit.
 const STARTUP_TIMEOUT_MS = 60_000;
+// A retry episode gets one budget, regardless of error/warning frequency.
+const STREAM_RETRY_TIMEOUT_MS = 60_000;
 // After real process exit, allow buffered output to drain before closing pipes
 // a descendant may have inherited. This timer never proves termination.
 const EXIT_DRAIN_MS = 250;
@@ -148,6 +151,8 @@ class CodexSession implements AgentSession {
   private stdinOpen = true;
   private threadId: string | undefined;
   private activeTurnId: string | undefined;
+  private streamRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  private streamRetryError: string | undefined;
   private agentInputReady = false;
   /** Accepted agent input not yet seen as a consumed userMessage item (#505). */
   private readonly submissions = new InputSubmissions();
@@ -277,6 +282,8 @@ class CodexSession implements AgentSession {
           if (!this.open && (msg.id !== undefined || (!PASSIVE_OUTPUT_METHODS.has(msg.method ?? '') && !finalOutcome))) continue;
           // Child turn lifecycle must reach neither channel (#600).
           if (this.isForeignTurnLifecycle(msg)) continue;
+          // Stale/child retry errors must neither fail nor warn on this turn.
+          if (msg.method === 'error' && !this.isCurrentTurn((msg.params ?? {}) as Record<string, unknown>)) continue;
           this.emitUi((state) => mapCodexNotification(msg, state));
           this.dispatch(msg);
         }
@@ -482,6 +489,7 @@ class CodexSession implements AgentSession {
   }
 
   private closeInput(reason: string): void {
+    this.clearStreamRetry();
     this.stdinOpen = false;
     this.rejectPendingUserInput(reason);
     this.agentInputReady = false;
@@ -645,6 +653,7 @@ class CodexSession implements AgentSession {
       this.rpc.respond({ id: rpcId, error: { code: -32602, message: 'unsupported or malformed requestUserInput payload' } });
       return;
     }
+    if (this.isCurrentTurn(params)) this.clearStreamRetry();
     if (this.pendingUserInput) this.rejectPendingUserInput('superseded by a newer requestUserInput');
     this.pendingUserInput = { rpcId, questions };
     this.opts.onUiEvent?.({ type: 'ask.requested', requestId: `codex-${String(rpcId)}`, questions });
@@ -676,8 +685,51 @@ class CodexSession implements AgentSession {
     return this.isForeignThreadTurn((msg.params ?? {}) as Record<string, unknown>);
   }
 
+  private isCurrentTurn(params: Record<string, unknown>): boolean {
+    const turnId = turnIdOf(params);
+    return !!this.activeTurnId && !this.isForeignThreadTurn(params)
+      && (!turnId || turnId === this.activeTurnId);
+  }
+
+  private clearStreamRetry(): void {
+    if (this.streamRetryTimer) clearTimeout(this.streamRetryTimer);
+    this.streamRetryTimer = undefined;
+    this.streamRetryError = undefined;
+  }
+
+  private handleStreamError(params: Record<string, unknown>): void {
+    const message = codexStreamError(params);
+    if (!message || !this.isCurrentTurn(params)) return;
+    if (params.willRetry === false) {
+      this.fail(new Error(message));
+      return;
+    }
+    this.emit({ type: 'note', message });
+    if (params.willRetry !== true) return;
+    this.streamRetryError = message;
+    if (this.streamRetryTimer) return;
+    this.streamRetryTimer = setTimeout(() => {
+      const lastError = this.streamRetryError;
+      if (!this.open || !lastError) return;
+      this.emitUi(state => mapCodexNotification({ method: 'turn/completed', params: {
+        turn: { id: this.activeTurnId, status: 'failed', error: { message: lastError } },
+      } }, state));
+      this.fail(new Error(`Codex stream made no progress for 60s: ${lastError}`));
+    }, STREAM_RETRY_TIMEOUT_MS);
+    this.streamRetryTimer.unref?.();
+  }
+
   private handleNotification(method: string, params: Record<string, unknown>): void {
+    if (this.streamRetryTimer && this.isCurrentTurn(params) && isStreamProgress(method, params)) {
+      this.clearStreamRetry();
+    }
     switch (method) {
+      case 'error':
+        this.handleStreamError(params);
+        break;
+      case 'warning':
+        if (typeof params.message === 'string' && params.message.trim()) this.emit({ type: 'note', message: params.message.trim() });
+        break;
       case 'turn/started': {
         if (!this.isForeignThreadTurn(params)) this.turnBoundaryVersion += 1;
         if (this.isForeignThreadTurn(params)) break; // sub-agent child thread — not our turn (#600)
@@ -685,6 +737,7 @@ class CodexSession implements AgentSession {
           this.firstTurnStarted = true;
           this.checkStartupComplete();
         }
+        if (turnIdOf(params) !== this.activeTurnId) this.clearStreamRetry();
         this.activeTurnId = turnIdOf(params) ?? this.activeTurnId;
         break;
       }
@@ -743,6 +796,7 @@ class CodexSession implements AgentSession {
       case 'turn/completed':
       case 'turn/failed': {
         if (this.isForeignThreadTurn(params)) break; // don't end the parent turn on a child turn (#600)
+        if (this.isCurrentTurn(params)) this.clearStreamRetry();
         this.turnBoundaryVersion += 1;
         this.pendingUserInput = undefined;
         this.activeTurnId = undefined;
@@ -798,6 +852,25 @@ class CodexSession implements AgentSession {
 }
 
 // ---- helpers --------------------------------------------------------------
+
+/** Only model/tool output proves recovery; bookkeeping, user input and retry
+ * chatter do not. Unknown notifications are deliberately not heartbeats. */
+function isStreamProgress(method: string, params: Record<string, unknown>): boolean {
+  if (STREAM_PROGRESS_DELTAS.has(method)) {
+    return typeof params.delta === 'string' && params.delta.length > 0;
+  }
+  if (method !== 'item/started' && method !== 'item/completed') return false;
+  const item = params.item;
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+  const record = item as Record<string, unknown>;
+  return !!stringField(record, 'id') && !!stringField(record, 'type') && record.type !== 'userMessage';
+}
+
+const STREAM_PROGRESS_DELTAS = new Set([
+  'item/agentMessage/delta', 'item/reasoning/textDelta', 'item/reasoning/summaryDelta',
+  'item/reasoning/summaryTextDelta', 'item/commandExecution/outputDelta',
+]);
+
 
 function codexAskQuestions(value: unknown): AskQuestion[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > 4) return null;
