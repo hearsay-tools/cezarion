@@ -1410,9 +1410,9 @@ describe('variant rows and the group row under width pressure', () => {
     varProject = await bootProjectId(varUrl)
   }, 90_000)
 
-  afterAll(() => {
+  afterAll(async () => {
     browser.evaluate(`localStorage.removeItem('cez-sidebar-width')`)
-    varServer?.kill()
+    await stopFixtureServer(varServer)
     if (varRoot) rmSync(varRoot, { recursive: true, force: true })
     browser.setViewport(1440, 900)
     browser.goto(`${baseUrl}${scoped('/')}`)
