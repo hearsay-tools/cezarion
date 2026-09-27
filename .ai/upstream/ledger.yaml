@@ -206,6 +206,7 @@ entries:
     note: queued rows honor folded CPU/Mem columns; regression tests cover both folds and either expanded column
     fork:
       issue: 432
+      pr: 652
       commits: [2b66db1d]
     decided: 2026-09-27
   - sha: 14226c4aa894dc31a525a8db004ebc39aecc8289
