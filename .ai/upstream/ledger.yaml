@@ -226,6 +226,7 @@ entries:
     note: "Branch-adjacent copy control adapted to the fork header, with keyboard and theme coverage"
     fork:
       issue: 434
+      pr: 645
       commits:
         - 2dbe279966c804cf3be2942dc28b8b6dc8871b95
     decided: 2026-09-27
