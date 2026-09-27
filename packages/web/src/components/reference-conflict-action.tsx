@@ -133,6 +133,7 @@ export function TaskReferenceChip({
   className,
   compact = false,
   plain = false,
+  inert = false,
 }: {
   run: ApiRun
   reference: { kind: 'PR' | 'Issue'; number?: number; url?: string }
@@ -142,6 +143,8 @@ export function TaskReferenceChip({
   compact?: boolean
   /** The sidebar meta line's plain-text reference (#617) — see `ReferenceChip`. */
   plain?: boolean
+  /** Plain text only — the sidebar row on a device that cannot hover (#617 01b). */
+  inert?: boolean
 }) {
   return (
     <ReferenceChip
@@ -151,6 +154,7 @@ export function TaskReferenceChip({
       className={className}
       compact={compact}
       plain={plain}
+      inert={inert}
     />
   )
 }

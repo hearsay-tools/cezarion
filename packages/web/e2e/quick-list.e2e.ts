@@ -309,12 +309,15 @@ describe('task quick-list', () => {
       scoped('/tasks/fix-done')
     )
 
+    // This spec's headless Chrome reports `hover: none`, which is the touch path (#617 01b): the
+    // sidebar reference is plain text there, and the whole row is the tap target. The pointer
+    // path (a real link with the status panel) is pinned in selection-states, which forces a
+    // hover-capable pointer, and in the unit suite.
     const chip = browser.evaluate(`(() => {
       const el = document.querySelector('[data-run-id="fix-review-pr"] [data-slot="pr-chip"]')
-      return { href: el.href, target: el.target }
-    })()`) as { href: string; target: string }
-    expect(chip.href).toBe('https://github.com/open-mercato/cezar/pull/396')
-    expect(chip.target).toBe('_blank')
+      return { noHover: matchMedia('(hover: none)').matches, tag: el.tagName, inert: el.dataset.inert ?? null, text: el.textContent }
+    })()`) as { noHover: boolean; tag: string; inert: string | null; text: string }
+    expect(chip).toEqual({ noHover: true, tag: 'SPAN', inert: 'true', text: 'PR #396' })
 
     // Only the run that has one.
     expect(browser.count('[data-run-id="fix-done"] [data-slot="pr-chip"]')).toBe(0)
@@ -340,6 +343,75 @@ describe('task quick-list', () => {
 
     browser.click(TILE)
     browser.waitForFunction(`document.querySelector('${ROW}[data-run-id="fix-var-a"]') === null`)
+  })
+
+  it('keeps the group row two fixed lines through expand and collapse, each member dot under its title (#617)', () => {
+    const group = '[data-slot="group-row"][data-group-id="fix-group-1"]'
+    type Geometry = { expanded: string | null; height: number; titleLeft: number; meta: string }
+    const geometry = `(() => {
+      const row = document.querySelector('${group}')
+      if (!row) return null
+      return { expanded: row.querySelector('${TILE}').getAttribute('aria-expanded'),
+        height: Math.round(row.getBoundingClientRect().height),
+        titleLeft: row.querySelector('[data-slot="group-title"]').getBoundingClientRect().left,
+        meta: row.querySelector('[data-slot="group-meta"]').textContent }
+    })()`
+    const collapsed = browser.waitForValue(geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
+    // Two review members, no shared reference: the aggregate in words, then the latest age.
+    expect(collapsed.meta).toBe('2 needs review · 11m')
+    browser.click(TILE)
+    const open = browser.waitForValue(geometry, (g: Geometry | null) => g?.expanded === 'true') as Geometry
+    expect(open.height).toBe(collapsed.height)
+    const dots = browser.waitForValue(`(() => {
+      const slots = ['fix-var-a', 'fix-var-b'].map((id) => document.querySelector('${ROW}[data-run-id="' + id + '"] [data-slot="task-row-dot"]'))
+      return slots.every(Boolean) ? slots.map((slot) => slot.getBoundingClientRect().left) : null
+    })()`) as number[]
+    for (const left of dots) expect(Math.abs(left - collapsed.titleLeft), `dot at ${left}, title at ${collapsed.titleLeft}`).toBeLessThanOrEqual(1)
+    browser.click(TILE)
+    const closed = browser.waitForValue(geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
+    expect(closed.height).toBe(collapsed.height)
+  })
+
+  it('keeps the group and member rows readable, at rest and selected, in both themes (#617)', () => {
+    const group = '[data-slot="group-row"][data-group-id="fix-group-1"]'
+    const member = `${ROW}[data-run-id="fix-var-a"]`
+    const read = (selector: string, state: string) => {
+      const sample = browser.evaluate(contrastSampleExpression(selector)) as ContrastSample
+      expect(sample.ratio, `${state} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(4.5)
+    }
+    const mark = (selector: string, state: string) => {
+      const sample = browser.evaluate(contrastSampleExpression(selector, 'background-color', 'parent')) as ContrastSample
+      expect(sample.ratio, `${state} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(3)
+    }
+    try {
+      for (const variant of contrastQaVariants.filter(({ viewport }) => viewport.width === 1440)) {
+        // The compare page selects the group; a member's thread (expanded) selects the member.
+        for (const [path, groupSelected] of [[scoped('/compare/fix-group-1'), true], [scoped('/tasks/fix-var-a'), false]] as const) {
+          browser.goto(`${baseUrl}${path}`)
+          browser.waitForFunction(`document.querySelector('${group} ${TILE}')?.getAttribute('aria-expanded') === 'false'`)
+          applyContrastQaVariant(browser, variant)
+          browser.click(TILE)
+          browser.waitForFunction(`document.querySelector('${member}') !== null && (document.querySelector('${group}').dataset.active === 'true') === ${groupSelected} && (document.querySelector('${member}').dataset.active === 'true') === ${!groupSelected}`)
+          const state = `${variant.id} ${groupSelected ? 'group selected' : 'member selected'}`
+          for (const part of ['group-title', 'group-meta', 'group-count']) read(`${group} [data-slot="${part}"]`, state)
+          for (const part of ['task-row-title', 'task-row-meta', 'task-row-variant-letter']) read(`${member} [data-slot="${part}"]`, state)
+          // The letter chip as resolved: a 16px circle saying `A`. The compare view's sheet
+          // styles its own `variant-letter` slot globally (`Variant ` prefix, 18px), which is
+          // why this one has a slot of its own.
+          expect(browser.evaluate(`(() => {
+            const chip = document.querySelector('${member} [data-slot="task-row-variant-letter"]'), s = getComputedStyle(chip)
+            return { size: s.width + ' ' + s.height, before: getComputedStyle(chip, '::before').content, text: chip.textContent }
+          })()`), state).toEqual({ size: '16px 16px', before: 'none', text: 'A' })
+          mark(`${group} [data-slot="status-dot"]`, state)
+          mark(`${member} [data-slot="status-dot"]`, state)
+          browser.screenshot(`${artifactsDir}/quick-list-group-${variant.id}-${groupSelected ? 'group' : 'member'}.png`, { viewport: true })
+        }
+      }
+    } finally {
+      restoreContrastQaDefaults(browser)
+      browser.goto(`${baseUrl}${scoped('/')}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
+    }
   })
 
   it('lights the row for the task the route has open', () => {
@@ -1175,15 +1247,16 @@ describe('a row under width contention, in a column the user can widen', () => {
       return {
         title: row.querySelector('[data-slot="task-row-title"]').textContent,
         chip: chip.textContent,
-        chipHref: chip.href,
+        chipInert: chip.dataset.inert ?? null,
         tooltip: row.querySelector('a[href$="/tasks/wide-load"]').getAttribute('title'),
       }
-    })()`) as { title: string; chip: string; chipHref: string; tooltip: string }
+    })()`) as { title: string; chip: string; chipInert: string | null; tooltip: string }
 
     expect(painted.title).toBe('implementing comment threads across the whole thread view')
     // Plain text on the meta line since #617, spelled as the kind and the number.
     expect(painted.chip).toBe('PR #775')
-    expect(painted.chipHref).toBe('https://github.com/open-mercato/cezar/pull/775')
+    // Plain text on this spec's `hover: none` browser (#617 01b); the task header has the link.
+    expect(painted.chipInert).toBe('true')
     // The number was moved, not deleted — the stored title is still one hover away.
     expect(painted.tooltip).toBe(FULL_TITLE)
   })

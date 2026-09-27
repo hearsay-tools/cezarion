@@ -106,6 +106,8 @@ export function ProjectGroups({
   const runMatch = useProjectMatch('/tasks/:id/*')
   const runExact = useProjectMatch('/tasks/:id')
   const currentRunId = runMatch?.params.id ?? runExact?.params.id ?? null
+  // The open compare page lights its variant group's row (#617 01a).
+  const currentGroupId = useProjectMatch('/compare/:groupId')?.params.groupId ?? null
   const now = useNow(30_000)
   const health = useHealth()
   const metricVisibility = usageMetricVisibility(health.data)
@@ -130,6 +132,7 @@ export function ProjectGroups({
           view={view}
           activeTo={activeTo}
           currentRunId={currentRunId}
+          currentGroupId={currentGroupId}
           now={now}
           inboxAvailable={inboxAvailable}
           automationsAvailable={automationsAvailable}
@@ -152,6 +155,7 @@ function ProjectGroup({
   view,
   activeTo,
   currentRunId,
+  currentGroupId,
   now,
   inboxAvailable,
   automationsAvailable,
@@ -171,6 +175,7 @@ function ProjectGroup({
   /** The `to` of the nav item that owns the current URL — applied to the ACTIVE group only. */
   activeTo: string | null
   currentRunId: string | null
+  currentGroupId: string | null
   now: number
   inboxAvailable: boolean
   automationsAvailable: boolean
@@ -329,6 +334,7 @@ function ProjectGroup({
             <QuickListBuckets
               buckets={buckets}
               currentRunId={active ? sidebarActiveRunId(currentRunId, runs.data ?? []) : null}
+              currentGroupId={active ? currentGroupId : null}
               now={now}
               scope={project.id}
               showTokens={showTokens}

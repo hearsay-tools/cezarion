@@ -1,4 +1,4 @@
-import { ChevronDownIcon } from '@/components/design-icons'
+import { ChevronDownIcon, ChevronRightIcon } from '@/components/design-icons'
 import { ScaleIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
@@ -13,6 +13,8 @@ import { TaskReferenceChip } from '@/components/reference-conflict-action'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { StatusDot } from '@/components/status-dot'
 import { deriveAttention, type Attention } from '@/lib/attention'
+import { groupMetaParts, referenceKey, resumeLabel, sharedReferenceKeys } from '@/lib/group-summary'
+import { useNoHover } from '@/lib/use-no-hover'
 import { shortAge } from '@/lib/format'
 import { isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { directionalUsageText } from '@/components/directional-usage'
@@ -45,6 +47,7 @@ export function TaskQuickList({
   view,
   onViewChange,
   currentRunId = null,
+  currentGroupId = null,
   now = Date.now(),
   showTokens = true,
   showCost = true,
@@ -56,6 +59,8 @@ export function TaskQuickList({
   onViewChange: (view: ListView) => void
   /** The run open at `/tasks/:id`, so its row can show as active. */
   currentRunId?: string | null
+  /** The variant group open at `/compare/:groupId`, so its group row can show as active. */
+  currentGroupId?: string | null
   /** Injected so the ages are not racing the clock in tests. */
   now?: number
   /** Presentation capability; defaults visible for older health responses and direct renders. */
@@ -99,6 +104,7 @@ export function TaskQuickList({
         <QuickListBuckets
           buckets={buckets}
           currentRunId={sidebarActiveRunId(currentRunId, runs)}
+          currentGroupId={currentGroupId}
           now={now}
           showTokens={showTokens}
           showCost={showCost}
@@ -119,6 +125,7 @@ export function TaskQuickList({
 export function QuickListBuckets({
   buckets,
   currentRunId = null,
+  currentGroupId = null,
   now = Date.now(),
   scope = null,
   showTokens = true,
@@ -127,6 +134,7 @@ export function QuickListBuckets({
 }: {
   buckets: QuickListBucket[]
   currentRunId?: string | null
+  currentGroupId?: string | null
   now?: number
   scope?: string | null
   showTokens?: boolean
@@ -148,7 +156,7 @@ export function QuickListBuckets({
     const rows = buckets.filter(bucket => label === 'Recent' ? bucket.label !== 'Pinned' && bucket.label !== 'Archived' : bucket.label === label).flatMap(bucket => bucket.rows)
     if (rows.length) sidebarBuckets.push({ label, rows })
   }
-  const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} />
+  const renderRow = (row: QuickListRow) => <Row row={row} currentRunId={currentRunId} currentGroupId={currentGroupId} now={now} scope={scope} showTokens={showTokens} showCost={showCost} expanded={row.kind === 'group' && expanded.has(row.groupId)} onToggle={toggleGroup} onTogglePin={onTogglePin} />
 
   return (
     <>
@@ -206,6 +214,7 @@ function ViewTab({
 function Row({
   row,
   currentRunId,
+  currentGroupId,
   now,
   scope,
   expanded,
@@ -216,6 +225,7 @@ function Row({
 }: {
   row: QuickListRow
   currentRunId: string | null
+  currentGroupId: string | null
   now: number
   scope: string | null
   expanded: boolean
@@ -240,40 +250,19 @@ function Row({
   }
   return (
     <>
-      {/* Like RunRow: the compare link is the toggle button's flex SIBLING, not its child —
-          a link inside a button is invalid, and both targets are real. */}
-      <div className="flex items-center rounded-[6px] hover:bg-sidebar-row-hover">
-        <button
-          type="button"
-          data-slot="group-tile"
-          data-group-id={row.groupId}
-          aria-expanded={expanded}
-          onClick={() => onToggle(row.groupId)}
-          className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left"
-        >
-          <ChevronDownIcon
-            className={cn('size-3 shrink-0 text-soft-foreground transition-transform', !expanded && '-rotate-90')}
-            aria-hidden="true"
-          />
-          {/* Same width-priority rule as `RunRow`: the shared title has a floor, and the `×N`
-              badge and the compare link give way before it does. */}
-          <span className="min-w-[7rem] flex-1 truncate text-[13px] font-medium">{row.title}</span>
-          <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-mono text-[11px] font-semibold tabular-nums text-muted-foreground">
-            ×{row.members.length}
-          </span>
-        </button>
-        <Link
-          to={scopeTo(scope, `/compare/${row.groupId}`)}
-          data-slot="group-compare"
-          title="Compare the variants"
-          aria-label={`Compare the variants of ${row.title}`}
-          className="mr-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-accent-strong/10 hover:text-accent-icon"
-        >
-          <ScaleIcon className="size-3.5" aria-hidden="true" />
-        </Link>
-      </div>
-      {/* No pin on the TILE (#935): a pin is per task, and the tile is a stand-in for two or
-          three of them. Expanding it pins the variant you mean, and the tile rises to `Pinned`
+      <GroupRow
+        row={row}
+        now={now}
+        scope={scope}
+        expanded={expanded}
+        onToggle={onToggle}
+        // One highlighted row (#617): the group while its compare page is open, or while a
+        // member's thread is open and the group is collapsed (the member row is not painted
+        // then, so the group says where you are). Expanded, the member row takes it instead.
+        active={currentGroupId === row.groupId || (!expanded && row.members.some((member) => member.id === currentRunId))}
+      />
+      {/* No pin on the group (#935): a pin is per task, and the group row stands in for two or
+          three of them. Expanding it pins the variant you mean, and the group rises to `Pinned`
           with it — the same best-ranked-member rule that already moves it between buckets. */}
       {expanded ? (
         <ExpandedVariantMembers
@@ -287,6 +276,111 @@ function Row({
         />
       ) : null}
     </>
+  )
+}
+
+/**
+ * The variant group's row (#617 addendum 01a): the task row's skeleton — a 12px status slot, two
+ * fixed lines, a reserved trailing slot — so a group and a task read as the same kind of thing.
+ *
+ *   [lead dot] [title ×N                     ] [compare ›]
+ *              [1 needs you · 1 working · #425 · 12m]
+ *
+ * The toggle is a real `<button>` over the text column (keyboard and screen readers get
+ * `aria-expanded`), and a click anywhere else on the row but the compare link toggles too. The
+ * compare link is a flex SIBLING of that button, never its child: a link inside a button is
+ * invalid. The shared reference is plain text here for the same reason — it sits inside the
+ * button; each member row carries the links. The trailing slot is a constant 36px, and both lines
+ * are fixed boxes, so expanding or collapsing changes nothing about this row's height.
+ */
+function GroupRow({
+  row,
+  now,
+  scope,
+  expanded,
+  onToggle,
+  active,
+}: {
+  row: Extract<QuickListRow, { kind: 'group' }>
+  now: number
+  scope: string | null
+  expanded: boolean
+  onToggle: (groupId: string) => void
+  active: boolean
+}) {
+  const lead = deriveAttention(row.lead)
+  const { families, shared, age } = groupMetaParts(row.members, now)
+  const sharedReferences = taskReferences(row.members[0]!).filter((reference) => shared.has(referenceKey(reference)))
+  const meta = [
+    ...families,
+    ...sharedReferences.map((reference) => `${reference.kind === 'PR' ? 'PR ' : ''}#${reference.number}`),
+    ...(age ? [age] : []),
+  ]
+  const Disclosure = expanded ? ChevronDownIcon : ChevronRightIcon
+  return (
+    <div
+      data-slot="group-row"
+      data-group-id={row.groupId}
+      data-active={active ? 'true' : undefined}
+      onClick={(event) => {
+        if (!event.currentTarget.contains(event.target as Node)) return
+        if ((event.target as Element).closest('a, button')) return
+        onToggle(row.groupId)
+      }}
+      className={cn(
+        'selection-row flex cursor-pointer items-start gap-2.5 rounded-[6px] py-1.5 pr-2 pl-2.5 hover:bg-sidebar-row-hover',
+        active && 'bg-sidebar-row-selected hover:bg-sidebar-row-selected',
+      )}
+    >
+      <span data-slot="task-row-dot" className="flex h-[19px] w-[12px] shrink-0 items-center justify-center">
+        <StatusDot tone={lead.tone} shape={lead.shape} pulse={lead.pulse} aria-label={lead.label} title={lead.label} role="img" />
+      </span>
+      <button
+        type="button"
+        data-slot="group-tile"
+        data-group-id={row.groupId}
+        aria-expanded={expanded}
+        onClick={() => onToggle(row.groupId)}
+        className="flex min-w-0 flex-1 flex-col text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground rounded-[2px]"
+      >
+        <span className="flex h-[19px] w-full min-w-0 items-center gap-1.5">
+          <span
+            data-slot="group-title"
+            className={cn('min-w-0 truncate text-[13px] leading-[1.45] font-medium text-muted-foreground', active && 'text-foreground')}
+          >
+            {row.title}
+          </span>
+          {/* Never truncates: the count is the one thing that says this row is several tasks. */}
+          <span data-slot="group-count" className="shrink-0 rounded-[9px] bg-muted px-1.5 py-px font-mono text-[11px] leading-[1.3] font-semibold tabular-nums text-muted-foreground">
+            ×{row.members.length}
+          </span>
+        </span>
+        <span
+          data-slot="group-meta"
+          className={cn(
+            'block h-[16px] w-full min-w-0 truncate text-[11.5px] leading-[1.4] font-normal text-soft-foreground',
+            active && 'text-muted-foreground',
+          )}
+        >
+          {meta.join(' · ') || '\u00a0'}
+        </span>
+      </button>
+      <span data-slot="group-trailing" className="flex h-[19px] w-[36px] shrink-0 items-center justify-end gap-0.5">
+        <Link
+          to={scopeTo(scope, `/compare/${row.groupId}`)}
+          data-slot="group-compare"
+          title="Compare the variants"
+          aria-label={`Compare the variants of ${row.title}`}
+          className="inline-flex size-[18px] shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground"
+        >
+          <ScaleIcon className="size-[14px]" aria-hidden="true" />
+        </Link>
+        {/* Decorative: the button carries `aria-expanded`; a click here is a row click. */}
+        <span data-slot="group-disclosure" data-expanded={expanded ? 'true' : 'false'} aria-hidden="true" className="inline-flex size-[14px] shrink-0 items-center justify-center text-soft-foreground">
+          <Disclosure className="size-[14px]" />
+        </span>
+      </span>
+    </div>
   )
 }
 
@@ -312,21 +406,29 @@ function ExpandedVariantMembers({
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
 }) {
-  const rows = members.map((member) => (
-    <RunRow
-      key={member.id}
-      run={member}
-      queuePosition={null}
-      currentRunId={currentRunId}
-      now={now}
-      scope={scope}
-      variant
-      showTokens={showTokens}
-      showCost={showCost}
-      onTogglePin={onTogglePin}
-    />
-  ))
-  if (!scope) return <>{rows}</>
+  const shared = sharedReferenceKeys(members)
+  // 15.5px in, a 1px guide line, then 6px: with the row's own 10px padding that puts each
+  // member's dot directly under the group's title (#617 01a).
+  const rows = (
+    <div data-slot="variant-list" className="ml-[15.5px] border-l border-border pl-[6px]">
+      {members.map((member) => (
+        <RunRow
+          key={member.id}
+          run={member}
+          queuePosition={null}
+          currentRunId={currentRunId}
+          now={now}
+          scope={scope}
+          variant
+          groupReferences={shared}
+          showTokens={showTokens}
+          showCost={showCost}
+          onTogglePin={onTogglePin}
+        />
+      ))}
+    </div>
+  )
+  if (!scope) return rows
   return (
     <ReferenceStatusProvider
       projectId={scope}
@@ -397,10 +499,12 @@ const ROW_UNREAD_WITH_PIN_CLASS =
  *  on worker replies, on a parent reply), needs review, needs permission, failed, scheduled,
  *  queued (with its position, `queued #2`) and running. `needs you`, `done` and `cancelled` get
  *  none: the amber, green and grey filled dots already are the whole story. */
-function metaStateWord(attention: Attention, queuePosition: number | null): string | undefined {
+function metaStateWord(attention: Attention, queuePosition: number | null, run: RunRecord, now: number): string | undefined {
   const { label } = attention
   if (label === 'queued') return queuePosition !== null ? `queued #${queuePosition}` : label
   if (label === 'needs you' || label === 'done' || label === 'cancelled') return undefined
+  // When, not just that (#617 01b): `resumes in 12m` / `resumes 14:05`, else `scheduled`.
+  if (label === 'scheduled') return resumeLabel(run.autoResumeAt, now)
   return label
 }
 
@@ -415,6 +519,7 @@ function RunRow({
   now,
   scope,
   variant = false,
+  groupReferences,
   showTokens,
   showCost,
   onTogglePin,
@@ -428,11 +533,17 @@ function RunRow({
   /** A member row under an expanded group tile: indented, letter-chipped, and labelled with what
    *  actually distinguishes the variants (runner and spend) rather than the shared title. */
   variant?: boolean
+  /** A member row's group-wide references: the group row shows them, so the member shows only
+   *  references of its own (#617 01a — each variant that opened its own PR shows it). */
+  groupReferences?: ReadonlySet<string>
   showTokens: boolean
   showCost: boolean
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
 }) {
   const navigate = useNavigate()
+  // On a device that cannot hover, the references are plain text and the whole row is the tap
+  // target (#617 01b); the task header keeps them as 44px links.
+  const noHover = useNoHover()
   const to = scopeTo(scope, `/tasks/${run.id}`)
   const attention = deriveAttention(run)
   const isActive = run.id === currentRunId
@@ -440,7 +551,7 @@ function RunRow({
   // it was opened on. It is the reason the title may drop its `NNN: ` prefix (#788, option C):
   // the number is painted once, as a link on the meta line, instead of twice.
   const reference = taskReference(run)
-  const references = taskReferences(run)
+  const references = taskReferences(run).filter((ref) => !groupReferences?.has(referenceKey(ref)))
   const title = runTitle(run)
   // Only when the two numbers are the same number — see `refPrefixMatches`. A run opened on issue
   // #788 that shipped as PR #790 keeps its prefix, because the reference is not saying it.
@@ -453,7 +564,13 @@ function RunRow({
   // together, so an age says nothing that tells them apart. A queued row's position rides in
   // its state word instead of an age.
   const age = variant || queuePosition !== null ? '' : shortAge(run.finishedAt ?? run.createdAt, now)
-  const stateWord = metaStateWord(attention, queuePosition)
+  const stateWord = metaStateWord(attention, queuePosition, run, now)
+  // A variant's tokens live on line 2, last, so they are the first thing a narrow column cuts
+  // (#617 01a: tokens drop first, then cost; the letter and the runner never drop).
+  const tokens = variant && showTokens && (run.inputTokens !== undefined || run.outputTokens !== undefined)
+    ? directionalUsageText(run.inputTokens, run.outputTokens)
+    : ''
+  const cost = variant && showCost ? formatCost(run.costUsd) : ''
 
   const meta: React.ReactNode[] = []
   if (stateWord) meta.push(<span key="state" data-slot="task-row-state">{stateWord}</span>)
@@ -464,10 +581,17 @@ function RunRow({
         run={run}
         reference={ref}
         plain
+        inert={noHover}
       />,
     )
   }
   if (age) meta.push(<span key="age" data-slot="task-row-age" className="tabular-nums">{age}</span>)
+  if (tokens) meta.push(<span key="tokens" data-slot="task-row-tokens" className="tabular-nums">{tokens}</span>)
+  // A needs-you variant says no state word — its amber dot and the Needs you group say it —
+  // unless its line 2 would otherwise be empty; the row keeps its two lines either way.
+  if (variant && !meta.length && attention.label === 'needs you') {
+    meta.push(<span key="state" data-slot="task-row-state">{attention.label}</span>)
+  }
 
   return (
     <div
@@ -489,10 +613,8 @@ function RunRow({
         // Neutral, not teal (#617): the selected fill is a surface step, and it holds under the
         // pointer so hovering the open task does not make it look unselected.
         isActive && 'bg-sidebar-row-selected hover:bg-sidebar-row-selected',
-        // The indent a member row wears under an expanded group tile. One padding declaration,
-        // not two: `cn` is tailwind-merge, so this REPLACES the `pl-2.5` above rather than losing
-        // to it — 26px = the row's own 10px plus the 16px indent.
-        variant && 'pl-[26px]'
+        // A member row's indent is its list's (`variant-list`: 15.5px, the guide line, 6px), so
+        // the row itself keeps the ordinary padding and its dot lands under the group title.
       )}
     >
       {/* Line boxes and slots are fixed px, not spacing units: `ultra` density shrinks
@@ -513,7 +635,15 @@ function RunRow({
           className="flex h-[19px] min-w-0 items-center gap-2 rounded-[2px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground"
         >
           {variant ? (
-            <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-accent-strong/15 font-mono text-[11px] font-semibold text-accent-text">
+            // The variant's name in the compare view and the thread header, so the sidebar says
+            // it too — neutral, not teal (#617 01a); one step up on the selected fill.
+            <span
+              data-slot="task-row-variant-letter"
+              className={cn(
+                'inline-flex size-[16px] shrink-0 items-center justify-center rounded-full bg-muted font-mono text-[10.5px] font-semibold text-muted-foreground',
+                isActive && 'bg-sidebar text-foreground',
+              )}
+            >
               {run.variant ?? '?'}
             </span>
           ) : null}
@@ -523,12 +653,19 @@ function RunRow({
               // `min-w-[7rem]`: the floor of the width-priority rule above. The title never gives
               // way past ~17 characters; the diff pair drops instead.
               'min-w-[7rem] flex-1 truncate text-[13px] leading-[1.45] font-medium text-muted-foreground',
+              // A member row's line 1 is `runner · $cost`: the runner never drops, the cost may.
+              variant && 'flex min-w-0',
               unread && 'font-semibold text-foreground',
               // A read finished row keeps the muted base colour — the history stays stepped back.
               isActive && 'text-foreground',
             )}
           >
-            {variant ? variantLabel(run, showTokens, showCost) : displayTitle}
+            {variant ? (
+              <>
+                <span className="shrink-0">{run.runner ?? 'claude'}</span>
+                {cost ? <span data-slot="variant-cost" className="min-w-0 truncate">{` · ${cost}`}</span> : null}
+              </>
+            ) : displayTitle}
           </span>
           {/* The diff numbers, once a turn has produced any (R2 #389). Nothing before that — a
               sidebar row has no column to hold an em dash open for.
@@ -594,18 +731,6 @@ function RunRow({
   )
 }
 
-/** A variant row's subtitle: what differs between A and B — the backend and what it has spent.
- *  `runner` is absent on records predating the choice; those are Claude by definition. */
-function variantLabel(run: RunRecord, showTokens: boolean, showCost: boolean): string {
-  const parts: string[] = [run.runner ?? 'claude']
-  if (showTokens && (run.inputTokens !== undefined || run.outputTokens !== undefined)) {
-    parts.push(directionalUsageText(run.inputTokens, run.outputTokens))
-  }
-  const cost = formatCost(run.costUsd)
-  if (showCost && cost) parts.push(cost)
-  return parts.join(' · ')
-}
-
 /**
  * The quick-list wired to live data: `useRuns()` for the list (kept fresh by the global SSE
  * stream, Step 3.2), the router for which row is open, and the sidebar Active/Archived context —
@@ -620,6 +745,8 @@ export function TaskQuickListContainer({ showViewControls = true }: { showViewCo
   // Project-prefix-agnostic matches (step 3.2): `/p/<id>/tasks/:id` must light its row too.
   const match = useProjectMatch('/tasks/:id/*')
   const exact = useProjectMatch('/tasks/:id')
+  // The open compare page lights its group row (#617 01a).
+  const compare = useProjectMatch('/compare/:groupId')
   const now = useNow(30_000)
   // The sidebar's chips are the same chips as the tables', so they get their status the same way:
   // one batched request for the whole list, mounted here where the list is.
@@ -647,6 +774,7 @@ export function TaskQuickListContainer({ showViewControls = true }: { showViewCo
         onViewChange={setView}
         // Both matches: `/tasks/:id` and its `/changes` and `/files` children all keep the row lit.
         currentRunId={match?.params.id ?? exact?.params.id ?? null}
+        currentGroupId={compare?.params.groupId ?? null}
         now={now}
         showTokens={visibility.tokens}
         showCost={visibility.cost}

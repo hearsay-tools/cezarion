@@ -29,6 +29,8 @@ beforeAll(async () => {
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(['one', 'two'].map((id) => ({
     id, title: `Review task ${id}`, task: 'Check the work', workflow: 'default', status: 'review', tokensUsed: 0,
     createdAt: new Date().toISOString(), finishedAt: new Date().toISOString(), archived: false, steps: [],
+    // One reference, on the row this spec hovers: the pointer path keeps it a real link (#617 01b).
+    ...(id === 'two' ? { referencedPullRequestUrl: 'https://github.com/o/r/pull/594' } : {}),
   }))))
   const probe = createServer()
   const port = await new Promise<number>((done) => probe.listen(0, '127.0.0.1', () => {
@@ -186,6 +188,9 @@ describe('selection and control states (#171)', () => {
       expect(resolved).toEqual({ padding: variant.density === 'comfortable' ? '6px 8px 6px 10px' : resolved.padding, radius: '6px',
         titleSize: '13px', titleWeight: '500', titleWrap: 'nowrap', titleOverflow: 'ellipsis', titleInk: true, metaSize: '11.5px',
         metaWrap: 'nowrap', dot: '7px 7px', metaHeight: '16px', dotSlot: '12px', trailing: '16px' })
+      // With a hover-capable pointer the reference is a real link (on touch it is plain text).
+      expect(browser.evaluate(`(() => { const a = document.querySelector('${other} [data-slot="task-row-meta"] [data-slot="pr-chip"]'); return a && { tag: a.tagName, href: a.getAttribute('href') } })()`))
+        .toEqual({ tag: 'A', href: 'https://github.com/o/r/pull/594' })
       // Every row is the same two-line height.
       expect(browser.evaluate(`Math.round(document.querySelector('${selected}').getBoundingClientRect().height)`)).toBe(rest.row)
       // Ink on both fills: text at 4.5:1, the status dot as a non-text mark at 3:1.

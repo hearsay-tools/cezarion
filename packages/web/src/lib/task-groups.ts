@@ -66,6 +66,9 @@ export type QuickListRow =
       title: string
       /** Every member, ordered by variant letter (A, B, C). Always ≥ 2 — see `groupRuns`. */
       members: RunRecord[]
+      /** The best-ranked member — the one that picks the group's bucket, and whose dot the group
+       *  row shows (#617 01a: needs you beats running beats done). */
+      lead: RunRecord
     }
 
 export interface QuickListBucket {
@@ -287,7 +290,7 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
         .filter((member) => member.groupId === run.groupId)
         .sort((a, b) => (a.variant ?? '').localeCompare(b.variant ?? ''))
       if (members.length > 1) {
-        push(bucketOf(run, view), { kind: 'group', groupId: run.groupId, title: groupTitle(run), members })
+        push(bucketOf(run, view), { kind: 'group', groupId: run.groupId, title: groupTitle(run), members, lead: run })
         continue
       }
     }

@@ -429,15 +429,18 @@ describe('TaskQuickList', () => {
       expect(rowsIn('Recent')).toEqual(['implementing comment threads across the whole thread view+59,514 −12,160PR #775 · 1m'])
     })
 
-    it('gives the collapsed variant tile the same floor', () => {
+    it('lets the collapsed group title truncate before its ×N chip does', () => {
       renderList({
         runs: [
           run({ id: 'ga', title: 'Add skills autocomplete (A)', groupId: 'g', variant: 'A' }),
           run({ id: 'gb', title: 'Add skills autocomplete (B)', groupId: 'g', variant: 'B' }),
         ],
       })
-      const tileTitle = document.querySelector('[data-slot="group-tile"] span') as HTMLElement
-      expect(tileTitle.className).toContain('min-w-[7rem]')
+      // #617 01a: the group title flexes and truncates; its ×N chip is what never gives way.
+      const tileTitle = document.querySelector('[data-slot="group-title"]') as HTMLElement
+      expect(tileTitle.className).toContain('truncate')
+      expect(tileTitle.className).toContain('min-w-0')
+      expect(document.querySelector('[data-slot="group-count"]')?.className).toContain('shrink-0')
     })
   })
 
@@ -541,7 +544,8 @@ describe('TaskQuickList', () => {
       renderList({ runs: variants() })
 
       const tile = screen.getByRole('button', { expanded: false })
-      expect(tile.textContent).toBe('Add skills autocomplete×2')
+      // Line 2 is the aggregate in words (#617 01a).
+      expect(tile.textContent).toBe('Add skills autocomplete×22 working · 1m')
       // Collapsed: the members are not rows of their own.
       expect(row('va')).toBeNull()
       expect(row('vb')).toBeNull()
@@ -555,8 +559,9 @@ describe('TaskQuickList', () => {
 
       // The letter chip, its own dot, and what actually differs between the variants.
       // Line two is the meta line: state word (and references), never an age (#617 decision 1).
-      expect(metadataText(row('va'))).toBe('Aclaude · IN 92.0k · OUT 4.2k · $0.31running')
-      expect(metadataText(row('vb'))).toBe('Bcodex · IN 40.0k · OUT 1.8k · $0.12running')
+      // Line 1 `runner · $cost`, line 2 state · tokens (#617 01a).
+      expect(metadataText(row('va'))).toBe('Aclaude · $0.31running · IN 92.0k · OUT 4.2k')
+      expect(metadataText(row('vb'))).toBe('Bcodex · $0.12running · IN 40.0k · OUT 1.8k')
       expect(dotOf('va')?.getAttribute('data-tone')).toBe('running')
       // Each variant is still its own deep link.
       expect(row('vb')?.querySelector('a')?.getAttribute('href')).toBe('/tasks/vb')
@@ -1177,7 +1182,8 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
       run({ id: 'run', status: 'running' }),
       run({ id: 'rev', status: 'review' }),
       run({ id: 'fail', status: 'failed' }),
-      run({ id: 'sched', status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' }),
+      // Already due: no time left to name, so the word falls back to `scheduled`.
+      run({ id: 'sched', status: 'failed', autoResumeAt: ago(60_000) }),
       run({ id: 'q', status: 'queued' }),
       run({ id: 'wk', status: 'waiting', delegation: workers } as Partial<RunRecord>),
       run({ id: 'rep', status: 'waiting', delegation: { ...workers, wait: { ...workers.wait, requestIds: ['00000000-0000-4000-8000-000000000009'] } } } as Partial<RunRecord>),
@@ -1191,4 +1197,157 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
     expect(stateOf('wk')).toBe('waiting on 2 workers')
     expect(stateOf('rep')).toBe('waiting on worker replies')
   })
+})
+
+describe('the variant group and its members (#617 addendum 01a)', () => {
+  const ISSUE = 'https://github.com/o/r/issues/425'
+  const members = (over: [Partial<RunRecord>, Partial<RunRecord>] = [{}, {}]) => [
+    run({ id: 'va', groupId: 'g1', variant: 'A', title: 'Upstream ledger (A)', status: 'running', runner: 'claude', costUsd: 0.4, inputTokens: 12_000, outputTokens: 3_000, createdAt: ago(12 * 60_000), referencedIssueUrl: ISSUE, ...over[0] }),
+    run({ id: 'vb', groupId: 'g1', variant: 'B', title: 'Upstream ledger (B)', status: 'running', runner: 'codex', costUsd: 0.22, inputTokens: 9_000, outputTokens: 2_000, createdAt: ago(12 * 60_000), referencedIssueUrl: ISSUE, ...over[1] }),
+  ]
+  const tile = () => document.querySelector('[data-slot="group-row"]') as HTMLElement
+  const expand = () => fireEvent.click(screen.getByRole('button', { expanded: false }))
+
+  it('shows the loudest member\'s status, the title with a non-truncating ×N chip, the aggregate line and a 36px trailing slot', () => {
+    renderList({ runs: members([{}, { status: 'waiting' }]) })
+    const row = tile()
+    // Needs you beats running: B picks the bucket, so B's dot leads the group.
+    const dot = row.querySelector('[data-slot="task-row-dot"] [data-slot="status-dot"]') as HTMLElement
+    expect(dot.getAttribute('data-tone')).toBe('pending')
+    const count = row.querySelector('[data-slot="group-count"]') as HTMLElement
+    expect(count.textContent).toBe('×2')
+    expect(count.className).toContain('shrink-0')
+    expect(count.className).toContain('bg-muted')
+    expect(count.className).toContain('text-muted-foreground')
+    expect(row.querySelector('[data-slot="group-title"]')?.className).toContain('truncate')
+    expect(row.querySelector('[data-slot="group-meta"]')?.textContent).toBe('1 needs you · 1 working · #425 · 12m')
+    const trailing = row.querySelector('[data-slot="group-trailing"]') as HTMLElement
+    expect(trailing.className).toContain('w-[36px]')
+    const [compare, chevron] = [...trailing.children]
+    expect(compare?.getAttribute('data-slot')).toBe('group-compare')
+    expect(chevron?.getAttribute('data-slot')).toBe('group-disclosure')
+    expect(chevron?.getAttribute('data-expanded')).toBe('false')
+    // Compare stays a link, never inside the toggle button.
+    expect(compare?.closest('button')).toBeNull()
+  })
+
+  it('joins only the parts that exist, and drops a reference only some members carry', () => {
+    renderList({ runs: members([{ referencedIssueUrl: undefined }, { referencedIssueUrl: undefined, pullRequestUrl: 'https://github.com/o/r/pull/611' }]) })
+    expect(tile().querySelector('[data-slot="group-meta"]')?.textContent).toBe('2 working · 12m')
+  })
+
+  it('toggles from anywhere on the row but the compare link, and flips the chevron', () => {
+    renderList({ runs: members() })
+    fireEvent.click(tile().querySelector('[data-slot="group-disclosure"]') as HTMLElement)
+    expect(row('va')).not.toBeNull()
+    expect(tile().querySelector('[data-slot="group-disclosure"]')?.getAttribute('data-expanded')).toBe('true')
+    fireEvent.click(tile().querySelector('[data-slot="group-meta"]') as HTMLElement)
+    expect(row('va')).toBeNull()
+  })
+
+  it('keeps the compare hover neutral and paints no teal on the group or its variants', () => {
+    renderList({ runs: members(), currentGroupId: 'g1' })
+    expand()
+    const compare = tile().querySelector('[data-slot="group-compare"]') as HTMLElement
+    expect(compare.className).toContain('hover:bg-sidebar-row-hover')
+    for (const node of [tile(), ...tile().querySelectorAll('*'), ...document.querySelectorAll('[data-slot="variant-list"] *')]) {
+      expect(node.getAttribute('class') ?? '').not.toMatch(/accent/)
+    }
+  })
+
+  it('indents the members 15.5px behind a 1px guide line, so each dot sits under the group title', () => {
+    renderList({ runs: members() })
+    expand()
+    const list = document.querySelector('[data-slot="variant-list"]') as HTMLElement
+    expect(list.className).toContain('ml-[15.5px]')
+    expect(list.className).toContain('border-l')
+    expect(list.className).toContain('border-border')
+    expect(list.className).toContain('pl-[6px]')
+    expect(row('va')?.className).not.toContain('pl-[26px]')
+    expect(row('va')?.className).toContain('pl-2.5')
+  })
+
+  it('variant line 1 is the neutral letter chip and runner · cost; line 2 is state, its own reference, tokens', () => {
+    renderList({ runs: members([{}, { pullRequestUrl: 'https://github.com/o/r/pull/611' }]) })
+    expand()
+    const chip = row('va')?.querySelector('[data-slot="task-row-variant-letter"]') as HTMLElement
+    expect(chip.textContent).toBe('A')
+    expect(chip.className).toContain('bg-muted')
+    expect(chip.className).toContain('text-muted-foreground')
+    expect(row('va')?.querySelector('[data-slot="task-row-title"]')?.textContent).toBe('claude · $0.40')
+    // The shared issue is the group's; each variant shows only a reference of its own.
+    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running · IN 12.0k · OUT 3.0k')
+    expect(row('vb')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running · PR #611 · IN 9.0k · OUT 2.0k')
+  })
+
+  it('keeps honouring showTokens and showCost, across both lines', () => {
+    renderList({ runs: members(), showTokens: false, showCost: false })
+    expand()
+    expect(row('va')?.querySelector('[data-slot="task-row-title"]')?.textContent).toBe('claude')
+    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('running')
+  })
+
+  it('a needs-you variant says no state word — unless line 2 would otherwise be empty', () => {
+    renderList({ runs: members([{ status: 'waiting' }, {}]) })
+    expand()
+    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('IN 12.0k · OUT 3.0k')
+    cleanup()
+    renderList({ runs: members([{ status: 'waiting' }, {}]), showTokens: false })
+    expand()
+    expect(row('va')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('needs you')
+  })
+
+  describe('selection: one highlighted row', () => {
+    it('selects the group while its compare page is open', () => {
+      renderList({ runs: members(), currentGroupId: 'g1' })
+      expect(tile().getAttribute('data-active')).toBe('true')
+      expect(tile().className).toContain('bg-sidebar-row-selected')
+    })
+
+    it('selects the collapsed group while a member\'s thread is open', () => {
+      renderList({ runs: members(), currentRunId: 'vb' })
+      expect(tile().getAttribute('data-active')).toBe('true')
+    })
+
+    it('once expanded, selects the member and not the group', () => {
+      renderList({ runs: members(), currentRunId: 'vb' })
+      expand()
+      expect(tile().getAttribute('data-active')).toBeNull()
+      expect(row('vb')?.getAttribute('data-active')).toBe('true')
+      expect(document.querySelectorAll('[data-active="true"]')).toHaveLength(1)
+      const chip = row('vb')?.querySelector('[data-slot="task-row-variant-letter"]') as HTMLElement
+      expect(chip.className).toContain('bg-sidebar')
+      expect(chip.className).toContain('text-foreground')
+    })
+  })
+})
+
+describe('references on a device that cannot hover (#617 01b)', () => {
+  const stubHover = (none: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === '(hover: none)' ? none : false, media: query, onchange: null,
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+  }))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('renders them as plain text, not links, so the whole row is the tap target', () => {
+    stubHover(true)
+    renderList({ runs: [run({ id: 't', title: 'Touch', pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451' })] })
+    const meta = row('t')?.querySelector('[data-slot="task-row-meta"]') as HTMLElement
+    expect(meta.textContent).toBe('PR #594 · #451 · 1m')
+    expect(meta.querySelector('a')).toBeNull()
+    expect(meta.querySelector('[tabindex]')).toBeNull()
+    fireEvent.click(meta.querySelector('[data-slot="pr-chip"]') as HTMLElement)
+    expect(location()).toBe('/tasks/t')
+  })
+
+  it('keeps them links with a pointer', () => {
+    stubHover(false)
+    renderList({ runs: [run({ id: 't', pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
+    expect(row('t')?.querySelector('[data-slot="task-row-meta"] a[href="https://github.com/o/r/pull/594"]')).not.toBeNull()
+  })
+})
+
+it('says when a scheduled run resumes, in the meta line (#617 01b)', () => {
+  renderList({ runs: [run({ id: 's', status: 'failed', autoResumeAt: new Date(NOW + 12 * 60_000).toISOString() })] })
+  expect(row('s')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('resumes in 12m')
 })

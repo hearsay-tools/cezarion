@@ -86,6 +86,7 @@ export function ReferenceChip({
   className,
   compact = false,
   plain = false,
+  inert = false,
 }: {
   reference: { kind: 'PR' | 'Issue'; number?: number; url?: string }
   taskTitle: string
@@ -121,6 +122,13 @@ export function ReferenceChip({
    * status), so nothing the chip said is lost; the row just stops painting it in teal.
    */
   plain?: boolean
+  /**
+   * Plain text and nothing else — not a link, not focusable, no status panel. For a list row on
+   * a device that cannot hover (#617 01b), where the whole row is the tap target and a second,
+   * 16px-tall target inside it guarantees mis-taps. The reference stays one tap away as a real
+   * 44px link in the task header.
+   */
+  inert?: boolean
 }) {
   const { kind, number, url } = reference
   // An explicit `status` wins — it is what a test or a one-off caller passes — and otherwise the
@@ -159,6 +167,19 @@ export function ReferenceChip({
   const kindWord = kind === 'PR' ? 'pull request' : 'issue'
   // The accessible name carries the status too — a screen reader gets what the color says.
   const ariaLabel = `Open the ${kindWord} for ${taskTitle}${presentation ? ` — ${presentation.label}` : ''}`
+
+  if (plain && inert) {
+    return (
+      <span
+        data-slot={kind === 'PR' ? 'pr-chip' : 'issue-chip'}
+        data-status={status}
+        data-inert="true"
+        className={cn('text-inherit', className)}
+      >
+        {label}
+      </span>
+    )
+  }
 
   const body = plain ? label : (
     <>
