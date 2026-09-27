@@ -296,6 +296,7 @@ async function serveCommand(
     () => manager.recover(),
     providerRuntimeAuth,
   );
+  delegation.service.armDestroyRetries(bootProjectId ?? 'default');
   if (recovered > 0) console.log(`  recovered ${recovered} run(s) from the previous session`);
 
   // Update discovery (#368) — fire-and-forget; the banner prints whenever the
