@@ -462,6 +462,42 @@ describe('task thread', () => {
     }
   })
 
+  it('keeps clipboard failure instructions AA readable in light and dark themes', () => {
+    const copy = '[data-slot="run-meta"] [aria-label="Copy branch name"]'
+    const cases = contrastQaVariants.filter((variant) => variant.density === 'comfortable')
+    const measurements: Array<{ variant: string; failure: string; ratio: number }> = []
+    try {
+      for (const variant of cases) {
+        browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
+        browser.waitForFunction(`document.querySelector('[data-slot="branch-chip"]') !== null`)
+        applyContrastQaVariant(browser, variant)
+        if (variant.viewport.width === 360) {
+          browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
+          browser.evaluate(`document.querySelector('[aria-label="Show run details"]').focus()`)
+          browser.press('Enter')
+          browser.waitForFunction(`document.querySelector('[aria-label="Hide run details"]') !== null`)
+        }
+        const failure = variant.id.includes('dark') ? 'denied' : 'missing'
+        browser.evaluate(`Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: ${failure === 'denied' ? '{ writeText: () => Promise.reject(new Error("denied")) }' : 'undefined'}
+        })`)
+        focusWithKeyboard(browser, copy)
+        browser.press('Enter')
+        browser.waitForFunction(`document.querySelector('[data-slot="toast"]')?.textContent.includes('Select and copy: cez/fcd519dd')`)
+        const sample = browser.evaluate(contrastSampleExpression('[data-slot="toast"]')) as ContrastSample
+        expect(sample.ratio, `${variant.id} ${failure} fallback`).toBeGreaterThanOrEqual(4.5)
+        measurements.push({ variant: variant.id, failure, ratio: sample.ratio })
+      }
+      mkdirSync(artifactsDir, { recursive: true })
+      writeFileSync(join(artifactsDir, 'branch-copy-fallback-qa.json'), JSON.stringify(measurements, null, 2))
+    } finally {
+      restoreContrastQaDefaults(browser)
+      browser.goto(`${baseUrl}${scoped(`/tasks/${RUN_ID}`)}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="branch-chip"]') !== null`)
+    }
+  })
+
   it('tabs point at the routed Session/Changes/Files surfaces; the done run offers the closed-run actions', () => {
     const tabs = browser.evaluate(`[...document.querySelectorAll('[data-slot="run-tabs"] a')].map((a) => ({
       text: a.textContent,

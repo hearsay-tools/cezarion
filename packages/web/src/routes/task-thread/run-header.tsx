@@ -470,7 +470,7 @@ function BranchCopy({ branch }: { branch: string }) {
       setCopiedBranch(branch)
       resetTimer.current = setTimeout(() => setCopiedBranch(null), 2000)
     } catch {
-      toast(`Could not copy branch. Select and copy: ${branch}`, { tone: 'danger' })
+      toast(`Could not copy branch. Select and copy: ${branch}`)
     }
   }
 

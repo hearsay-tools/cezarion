@@ -816,6 +816,7 @@ describe('branch copy (#434)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show run details' }))
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy branch name' })) })
     expect(screen.getByRole('status').textContent).toContain('cez/feature-434')
+    expect(screen.getByRole('status').getAttribute('data-tone')).toBe('default')
     expect(screen.getByRole('button', { name: 'Copy branch name' })).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Copied branch name' })).toBeNull()
   })
