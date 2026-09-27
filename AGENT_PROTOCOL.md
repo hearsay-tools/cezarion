@@ -649,6 +649,9 @@ Early settlement queues an observation without interrupting the active turn.
 A parked result requests scheduler admission before `sendAgentMessage`; a monitor
 already charged for capacity must not wait for its own slot. Provider acknowledgement
 checkpoints delivery and retires `ciWait` into bounded `lastCiWait` history.
+Until that checkpoint, monitoring remains set while admission reserves capacity.
+Settled observations retry admission and refused delivery once per second without
+human input; withdrawal, terminal state and disposal stop retries.
 
 Human input withdraws the wait and removes its undelivered lifecycle input. A
 pending human question takes precedence and must never be answered with CI data.
@@ -794,7 +797,7 @@ case instead. The isolated manager fallback tests remain in `run.test.ts`; the
 wire rows do not pretend to reproduce a missing-v1 envelope these protocols do
 not supply.
 
-R17/R18 (#548) use every runner's native message wire to check final-line ASK
+R18/R19 (#548) use every runner's native message wire to check final-line ASK
 selection after an earlier prose mention, and quoted ASK examples without a
 marker. Parsing and transcript stripping must select the same final line;
 ordinary examples leave no question card or rejection note.
@@ -931,6 +934,39 @@ delete the parent. Summary and bounded diff snapshots survive child deletion unt
 parent deletion; general artifacts are not archived. Removed paths, branch names
 and historical SHAs do not promise live resources. A worker's pending human ask is
 never answered by lifecycle input, and no automatic merge/review acceptance exists.
+
+---
+
+### Codex retrying stream errors (#550)
+
+App-server `error` notifications map `error.message` plus nonempty
+`error.additionalDetails` to a v1 `note` and v2 `session.error` with `fatal: false`
+while `willRetry: true`. A `warning` notification's message uses the same
+nonfatal channels. `willRetry: false` fails the session immediately and maps to
+`session.error` with `fatal: true`. Malformed errors have no effect.
+
+The first retry error for the active main-thread turn starts a fixed 60-second
+no-progress deadline, enabled by default with no configuration. Later errors
+update the retained failure reason without extending the deadline. Nonempty
+assistant/reasoning/tool-output deltas, model/tool item lifecycle events and a
+valid current-turn native question prove recovery and clear the deadline.
+User input, metadata, warnings, repeated errors, stale turn output and child
+thread activity do not. A later retry episode gets a fresh deadline. Completion,
+new-turn start and session shutdown clear retry state; recovered turns complete
+normally, and human-question waiting has no retry deadline.
+
+Expiry emits v2 `turn.completed` with `stopReason: error`, then uses the existing
+TERM/KILL teardown and rejects the session result with the latest error, failing
+the run only after process exit. It never converts the error to a successful
+turn-end or leaves a live child holding capacity.
+
+Harness row R17 runs against every `RUNNER_IDS` adapter's native wire. Codex
+replays the recorded reconnect errors without a terminal notification; the other
+adapters use their native terminal provider rejections. Every cell must leave
+`running` as `failed` with a reason, never park for user input. Exact deadline,
+recovery, stale/foreign traffic and cleanup regressions use the real Codex RPC
+reader with a controlled process clock. `__fixtures__/codex/stream-retry.md`
+records the real probe's provenance and the limits of the captured excerpt.
 
 ---
 

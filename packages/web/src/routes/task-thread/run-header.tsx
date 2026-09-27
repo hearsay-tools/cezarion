@@ -2,7 +2,7 @@ import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { FileTextIcon, MailIcon, PencilIcon, PinOffIcon, SquareTerminalIcon } from 'lucide-react'
 import { BotIcon, ChevronDownIcon, CopyIcon, EllipsisIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
-import { Fragment, useId, useMemo, useReducer, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link, useActiveProjectId, useNavigate } from '@/lib/project-router'
 
 import { ApiError, deleteRun, openRunIn, openRunInCli } from '@/api/client'
@@ -453,6 +453,48 @@ function EditableTitle({ run }: { run: ApiRun }) {
   )
 }
 
+function BranchCopy({ branch }: { branch: string }) {
+  const [copiedBranch, setCopiedBranch] = useState<string | null>(null)
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (resetTimer.current !== null) clearTimeout(resetTimer.current)
+  }, [])
+
+  const copied = copiedBranch === branch
+  const copy = async () => {
+    if (resetTimer.current !== null) clearTimeout(resetTimer.current)
+    setCopiedBranch(null)
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+      await navigator.clipboard.writeText(branch)
+      setCopiedBranch(branch)
+      resetTimer.current = setTimeout(() => setCopiedBranch(null), 2000)
+    } catch {
+      toast(`Could not copy branch. Select and copy: ${branch}`)
+    }
+  }
+
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+      <span
+        data-slot="branch-chip"
+        className="min-w-0 rounded-sm border border-border bg-card px-1.5 py-px font-mono text-[11px] font-medium break-all"
+      >
+        {branch}
+      </span>
+      <button
+        type="button"
+        aria-label={copied ? 'Copied branch name' : 'Copy branch name'}
+        onClick={() => void copy()}
+        className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm px-2 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground md:min-h-8"
+      >
+        <CopyIcon className="size-3.5" aria-hidden="true" />
+        <span aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
+      </button>
+    </span>
+  )
+}
+
 /** workflow · branch chip · ± on the left; tokens · cost · agent icon on the right (mockup
  *  `.meta-row`, #416). Each part renders only when the record carries it — absence is absence,
  *  not a placeholder. Runner and model no longer sit in the loose dot-list (#416): they read as
@@ -496,13 +538,7 @@ function MetaRow({
   const parts: ReactNode[] = [<span key="workflow" className="min-w-0 max-w-full break-all">{workflowLabel(run)}</span>]
   if (run.branch) {
     parts.push(
-      <span
-        key="branch"
-        data-slot="branch-chip"
-        className="rounded-sm border border-border bg-card px-1.5 py-px font-mono text-[11px] font-medium max-md:max-w-full max-md:break-all"
-      >
-        {run.branch}
-      </span>,
+      <BranchCopy key="branch" branch={run.branch} />,
     )
   }
   // EVERY PR the task points at, in `taskReferences` order — the same order, and the same

@@ -508,6 +508,21 @@ not settings to create or share. If the tool is unavailable or denied, its error
 is surfaced while ordinary tasks continue. See [the CI-wait protocol](AGENT_PROTOCOL.md#ci-wait-tool-contract-474)
 for limits and the executable harness verification required before release.
 
+## Discover runners and models
+
+Inspect the same host catalog the cockpit uses before selecting a runner or model:
+
+```sh
+cez discover runners
+cez discover models --runner=codex
+```
+
+Both commands return JSON. `runners` lists connection status (`connected`, `disconnected`, `not-installed`, or `unknown`) and enablement, with `scope: "host-default-account"`. Model rows include `effortLevels` when the runner advertises them: an absent field means unknown; an empty array means no advertised levels. Omit `--effort` when spawning to keep the existing default. Model responses retain `source`, `stale`, and any unavailable `reason`; discovery never invents model IDs or effort support.
+
+For operators, the command finds the running cockpit for the current checkout; `--repo`, `--url`, and `CEZ_URL` work as they do for `cez task`. A missing cockpit returns an error and never starts a server. Inside a parent delegation session, the same command uses that session's authenticated controller, including headless runs. It rejects `--url` and `--repo` in that context and never falls back to a public cockpit after an authentication failure. Owned workers cannot use the private discovery route.
+
+The catalog describes host default accounts, not every named account or the selections permitted by a task's model locks and workflow pins. Existing `cez task start` and `cez worker spawn` still call their runner flag `--backend`; discovery uses `--runner`.
+
 ## Owned workers (opt-in)
 
 Start the cockpit or a headless task with `CEZ_DELEGATION=1`. Each eligible parent session receives the absolute bundled Node/CLI invocation and its own environment credentials; no `cez` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the private listener cannot start, ordinary tasks keep working without delegation tools. `.env` is never loaded automatically.
@@ -541,7 +556,11 @@ cez worker destroy <worker-id>
 
 Use `cez worker --help` to list operations and flags, or `cez worker <operation> --help` for one operation. Explicit help prints human-readable text and exits successfully without an active delegation session. Commands otherwise return bounded JSON and a nonzero exit on failure or incomplete cleanup. Spawn requires a committed baseline (`parent-head` or an explicit ref) and pins its SHA at acceptance; dirty parent edits are excluded. Optional `--context '<text>'` or `--context-file <UTF-8-file>` supplies selected context, not the parent's conversation. The two flags are mutually exclusive, and combined task/context text is limited to 100,000 characters. The API also accepts up to 32 pinned-baseline file or parent-attachment references, with at most 8 MiB of copied attachments. Inspect reports worker-local input locations. Reuse a request ID only with the same task, baseline, context, backend, model, effort and workflow when retrying a lost response. There are at most 32 accepted creations per parent, counting destroyed workers, and 32 undelivered steering messages per worker.
 
+An incomplete destroy reports the remaining resources and a reason. Cezar retries that recorded request after a delay, including after the project's context recovers on server restart. It removes the owned checkout only after process termination and ownership are verified. If the reason persists, inspect the worker process, Git worktree lock and ownership receipt; correct the blocker and use `cez worker destroy <worker-id>` or the cockpit Destroy action to retry immediately. Cezar leaves ambiguous or replaced resources in place for operator review.
+
 `--workflow <name>` runs a catalog workflow inside the worker: the built-in `quick-task` or any `.ai/cezar/workflows/*.yaml` by name, with its agent and check steps, `skill:` bodies and `onFail` loops, so a repo's `review.yaml` becomes a dedicated reviewer. Omitted `--workflow` runs `quick-task` exactly as before. `--backend`, `--model` and `--effort` fill only the steps that leave those fields unset; a step's own `allowedTools`/`bashAllowlist` narrow the parent's grants and never widen them. An unknown name is refused. Agent steps may mix runners: at spawn every agent step is resolved and pinned separately, so an implement-with-codex, review-with-claude chain runs each step under its own runner, account, model, effort and grants. A step's optional `agentProfile` names the account it runs under (an id the registry does not know is refused); same-backend steps otherwise inherit the parent's account and other runners resolve their project/default one. Run-level columns show the first agent step.
+
+Explicit default-account model pins are checked against a fresh, nonempty host catalog after account/model resolution and before a worker is created. Named accounts retain existing validation because a default-account catalog cannot disprove their model access. A miss returns `invalid_input`, available models with advertised efforts, and other runners listing the requested ID in `modelChoices`. Empty, stale, or unavailable discovery leaves existing selection validation in place. Accepted retries and omitted model defaults are unchanged.
 
 Omitted `--backend` inherits the parent's active backend. Same-backend workers inherit omitted model/account/effort; `--backend <claude|codex|opencode|pi|cursor>` selecting another backend resolves that backend's project/default account and model without forwarding another provider's settings. `--model <model>` selects a supported model, subject to existing locks. `--effort <low|medium|high|xhigh|max>` pins reasoning effort on same-backend and mixed-backend spawn; omitted `--effort` still inherits the parent pin on same-backend spawn and drops it on mixed-backend spawn. Accepted identity and grants remain fixed across queuing, restart and Continue, including explicit empty grants. Changing or deleting an account registry entry does not rebind a worker. Missing accepted identity evidence or account homes, incompatible Claude state-file layouts, and conflicting later model locks refuse execution explicitly. Credentials and vendor configuration are never copied; each worker receives its own delegation credential, and unspecified native models stay unspecified.
 
@@ -605,7 +624,11 @@ Without either flag, `start` still runs `quick-task`.
 
 `start` is retry-safe: it sends a request id (`--request-id <UUID>` to pick your own), and a
 retry with the same id and task answers with the run the first one created (`created: false`)
-instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`. Exit codes:
+instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`.
+Use `archive <id>` to hide a task from `list`, `unarchive <id>` to restore it, and
+`list --all` to include archived tasks. `archive-finished` sweeps finished tasks and prints
+`{"archived": count}`. The single-task commands print `{"id": "…", "archived": true|false}`.
+Exit codes:
 `0` ok, `1` task failed/cancelled or a message was not delivered, `2` no cockpit or the cockpit
 refused (its `error` is passed through), `3` timed out, `64` usage error. `cez task --help` lists
 every flag.
@@ -681,7 +704,7 @@ Useful environment variables:
 |---|---|
 | `CEZ_DELEGATION=1` | Enable owned workers and the private loopback listener for this controller. Off by default; works with the cockpit and headless `cez run`. Session instructions and credentials are automatic. |
 | `CEZ_DELEGATION_URL`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
-| `CEZ_URL` | Cockpit origin for `cez task` (e.g. a hosted `CEZ_REMOTE` cockpit). Unset, `cez task` finds the local cockpit serving this checkout on ports 4321–4370. |
+| `CEZ_URL` | Cockpit origin for `cez task` and operator `cez discover` (e.g. a hosted `CEZ_REMOTE` cockpit). Unset, they find the local cockpit serving this checkout on ports 4321–4370. Parent discovery uses its delegation controller instead. |
 | `CEZ_DRY_RUN=1` | Use bundled mocks for all five agent backends — the cockpit works offline for demos and development. Explicit backend binary overrides still win. |
 | `CEZ_AGENT_MODELS_LOCKED=1` | Globally lock each runner to the model configured in its native Claude/Codex/OpenCode settings while keeping runner selection available. Exact `1` also delegates authentication and provider enablement to those native agents, so Cezar skips its credential probes and provider-disable preferences. Existing Cezar presets are preserved but ignored, and an environment change requires a restart. The config-file equivalent is `"modelsLocked": true` in global `~/.cezar/config.json` or one repository's `.ai/cezar/config.json`; config-file locks do not disable provider checks. |
 | `CEZ_APPROVAL_GATE=1` | Opt into Claude's interactive approval UI; by default, unapproved tools are denied without interrupting the run. Ignored when `CEZ_CLAUDE_PERMISSION_MODE` is a recognized value (`dontAsk`, `acceptEdits`, or `bypass`). |

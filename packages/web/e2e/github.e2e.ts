@@ -325,7 +325,7 @@ describe('the GitHub tab against the live dry-run server', () => {
       number: 9000 + index,
       title: `Fixture overflow issue ${index}`,
       url: `https://github.com/mock/repo/issues/${9000 + index}`,
-      body: index === 0 ? longBody : 'short',
+      body: index === 0 || index === 3 ? longBody : 'short',
     }))
     const stub = JSON.stringify({ ...gh, issues, prs: gh.prs ?? [] })
 
@@ -480,6 +480,27 @@ describe('the GitHub tab against the live dry-run server', () => {
       expect(after.page).toBe(before.page)
       expect(after.other).toBe(before.other)
     }
+
+    const beforePick = browser.waitForValue<{ page: number; list: number; detail: number }>(`(() => ({
+      page: document.querySelector('[data-slot="main"]').scrollTop,
+      list: document.querySelector('[data-slot="gh-list"]').scrollTop,
+      detail: document.querySelector('[data-slot="gh-detail"]').scrollTop,
+    }))()`, value => Boolean(value && value.page > 0 && value.list > 0 && value.detail > 0))
+    browser.evaluate(`document.querySelector('[data-slot="gh-row"][data-number="9003"]').click()`)
+    browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/github/issues/9003'))}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="gh-row"][data-number="9003"]')?.getAttribute('aria-current') === 'page'`)
+    const afterPick = browser.waitForValue<{ page: number; list: number; detail: number; titleGone: boolean; rowHeight: number }>(`(() => {
+      const main = document.querySelector('[data-slot="main"]');
+      const masthead = document.querySelector('[data-slot="gh-masthead"]');
+      return {
+        page: main.scrollTop,
+        list: document.querySelector('[data-slot="gh-list"]').scrollTop,
+        detail: document.querySelector('[data-slot="gh-detail"]').scrollTop,
+        titleGone: masthead.getBoundingClientRect().bottom <= main.getBoundingClientRect().top + 2,
+        rowHeight: document.querySelector('[data-slot="gh-row"][data-number="9003"]').getBoundingClientRect().height,
+      };
+    })()`, value => Boolean(value && value.rowHeight >= 44))
+    expect(afterPick).toMatchObject({ ...beforePick, titleGone: true })
     browser.screenshot(`${artifactsDir}/github-independent-scroll.png`)
   })
 

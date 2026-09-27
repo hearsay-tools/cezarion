@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { homedir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -135,25 +136,55 @@ async function confirmCezarRunning(ctx: InstallContext, statusCmd: string, logsC
   }
 }
 
+/** nginx -v prints its version banner on stderr. Unknown versions use the compatible syntax. */
+function supportsStandaloneHttp2(version: string | null): boolean {
+  const match = version && /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!match) return false;
+  const [major, minor, patch] = match.slice(1).map(Number);
+  return major! > 1 || (major === 1 && (minor! > 25 || (minor === 25 && patch! >= 1)));
+}
+
+async function installedNginxVersion(ctx: InstallContext): Promise<string | null> {
+  const result = await ctx.runner.capture('nginx', ['-v']);
+  if (result.code !== 0) return null;
+  return /nginx\/(\d+\.\d+\.\d+)/.exec(`${result.stderr}\n${result.stdout}`)?.[1] ?? null;
+}
+
+/** Add HTTP/2 only to Certbot's TLS listeners, preserving its trailing comments. */
+export function enableHttp2OnTlsListenerSed(vhostPath: string): string {
+  const program = `/^[[:space:]]*listen[[:space:]].*443.*[[:space:]]ssl([[:space:]]|;)/{/http2/!s/;/ http2;/;}`;
+  return `sed -i -E ${shquote(program)} ${shquote(vhostPath)}`;
+}
+
+/** Roll back the file if validation or reload fails; mark only a completed edit. */
+export function enableHttp2OnTlsCommand(vhostPath: string, marker: string): string {
+  const backup = `${vhostPath}.cezar-http2-${randomUUID()}`;
+  return `cp -p ${shquote(vhostPath)} ${shquote(backup)} && ` +
+    `if ${enableHttp2OnTlsListenerSed(vhostPath)} && nginx -t && systemctl reload nginx && ` +
+    `printf '\n%s\n' ${shquote(marker)} >> ${shquote(vhostPath)}; then ` +
+    `rm -f ${shquote(backup)} || true; ` +
+    `else cp -p ${shquote(backup)} ${shquote(vhostPath)} && rm -f ${shquote(backup)} && ` +
+    `nginx -t && systemctl reload nginx; false; fi`;
+}
+
 /**
  * The nginx server block: auth_basic identity + SSE-safe proxy to loopback.
  * `serverName` defaults to the catch-all `_`; the SSL step rewrites it to the
  * real domain so the `certbot --nginx` plugin can find this vhost to edit.
  */
-export function nginxVhost(port: number, serverName = '_', htpasswd = '/etc/cezar/htpasswd'): string {
+export function nginxVhost(port: number, serverName = '_', htpasswd = '/etc/cezar/htpasswd', nginxVersion: string | null = null): string {
+  // Older nginx rejects `http2 on;` outright. Its SSL step adds `http2` to
+  // Certbot's TLS listener instead, retaining multiplexing for SSE streams.
+  const http2 = supportsStandaloneHttp2(nginxVersion)
+    ? `\n    # Multiplex long-lived SSE streams over one TLS connection.\n    http2 on;\n`
+    : '';
   return `# Managed by cezar server-install — do not edit by hand.
 server {
     listen 80;
     listen [::]:80;
     server_name ${serverName};
 
-    # HTTP/2 multiplexes every request over ONE TCP connection. Without it the
-    # browser's ~6-connections-per-origin HTTP/1.1 cap is exhausted by cezar's
-    # long-lived SSE run streams, and further requests block until tabs close.
-    # Valid on the plain :80 block too; it only takes effect once the SSL step
-    # adds a 443 ssl listener (certbot preserves this directive).
-    http2 on;
-
+${http2}
     auth_basic "cezar";
     auth_basic_user_file ${htpasswd};
 
@@ -328,7 +359,8 @@ const nginxProxyStep: InstallStep = {
     //    instance keeps the catch-all `_` until the SSL step sets a domain.
     const vhostAvail = vhostAvailable(ctx);
     const vhostEnbl = vhostEnabled(ctx);
-    const vhost = nginxVhost(ctx.state.primaryPort, ctx.state.domain ?? '_', htpasswd);
+    const nginxVersion = await installedNginxVersion(ctx);
+    const vhost = nginxVhost(ctx.state.primaryPort, ctx.state.domain ?? '_', htpasswd, nginxVersion);
     await writeFileStep(ctx, {
       description: 'Write the cezar nginx site, enable it, and reload nginx.',
       path: vhostAvail,
@@ -477,6 +509,7 @@ const sslStep: InstallStep = {
     const vhostAvail = vhostAvailable(ctx);
     const vhostEnbl = vhostEnabled(ctx);
     const vhostHasTls = await verifyCommand(ctx, 'sh', ['-c', `grep -qs ssl_certificate ${vhostAvail}`]);
+    const nginxVersion = await installedNginxVersion(ctx);
     if (vhostHasTls) {
       await sudoStep(ctx, {
         description: `Update server_name to ${trimmedDomain} in the existing TLS-enabled nginx site (certbot config preserved).`,
@@ -485,7 +518,7 @@ const sslStep: InstallStep = {
           verifyCommand(c, 'sh', ['-c', `grep -qF ${shquote(`server_name ${trimmedDomain}`)} ${vhostAvail}`]),
       });
     } else {
-      const domainVhost = nginxVhost(ctx.state.primaryPort, trimmedDomain, htpasswdPath(ctx));
+      const domainVhost = nginxVhost(ctx.state.primaryPort, trimmedDomain, htpasswdPath(ctx), nginxVersion);
       await writeFileStep(ctx, {
         description: `Point the nginx site at ${trimmedDomain} so certbot can configure TLS for it.`,
         path: vhostAvail,
@@ -512,6 +545,29 @@ const sslStep: InstallStep = {
       // is world-readable, so grepping it works without root.
       verify: (c) => verifyCommand(c, 'sh', ['-c', `grep -qs ssl_certificate ${vhostAvail} ${vhostEnbl}`]),
     });
+
+    if (!supportsStandaloneHttp2(nginxVersion)) {
+      // Certbot has now installed the TLS listeners. Keep the existing TLS site
+      // intact on reconfiguration; the edit is idempotent and touches only :443.
+      try {
+        const marker = `# cezar-http2-validated ${randomUUID()}`;
+        await sudoStep(ctx, {
+          description: 'Enable HTTP/2 on the nginx TLS listeners.',
+          command: enableHttp2OnTlsCommand(vhostAvail, marker),
+          skippable: true,
+          skipHint: `add http2 to the TLS listen lines in ${vhostAvail}, then reload nginx`,
+          // A matching listener alone cannot prove `nginx -t` and reload ran:
+          // sudoStep deliberately ignores a command's exit when verification
+          // succeeds, and delegate mode has no exit status to inspect at all.
+          verify: (c) => verifyCommand(c, 'sh', ['-c',
+            `grep -qF ${shquote(marker)} ${shquote(vhostAvail)} && grep -Eqs '^[[:space:]]*listen.*443.*http2' ${shquote(vhostAvail)}`,
+          ]),
+        });
+      } catch (error) {
+        if (!(error instanceof StepSkipped)) throw error;
+        ctx.ui.warn('HTTPS is configured, but HTTP/2 is unavailable; long-lived SSE streams may exhaust the browser connection pool.');
+      }
+    }
 
     ctx.state.publicUrl = `https://${trimmedDomain}`;
     // The cert + its auto-renewal timer are `shared`: uninstall lists them, it
@@ -665,6 +721,43 @@ async function readExecStart(ctx: InstallContext, scope: 'user' | 'system', unit
   const args = [...(scope === 'user' ? ['--user'] : []), 'show', unit, '-p', 'ExecStart'];
   const { stdout } = await ctx.runner.capture('systemctl', args);
   return stdout;
+}
+
+type ServiceSnapshot = { active: string | null; started: bigint | null };
+
+/** Read-only even for a system unit; no sudo prompt during diagnosis. */
+async function serviceSnapshot(ctx: InstallContext, scope: 'user' | 'system', unit: string): Promise<ServiceSnapshot> {
+  const args = [...(scope === 'user' ? ['--user'] : []), 'show', unit, '-p', 'ActiveState', '-p', 'ExecMainStartTimestampMonotonic'];
+  const result = await ctx.runner.capture('systemctl', args);
+  if (result.code !== 0) return { active: null, started: null };
+  const fields = new Map(result.stdout.trim().split('\n').map((line) => {
+    const at = line.indexOf('=');
+    return [line.slice(0, at), line.slice(at + 1)];
+  }));
+  const raw = fields.get('ExecMainStartTimestampMonotonic');
+  return {
+    active: fields.get('ActiveState') ?? null,
+    started: raw && /^\d+$/.test(raw) ? BigInt(raw) : null,
+  };
+}
+
+async function failedRestart(ctx: InstallContext, scope: 'user' | 'system', unit: string, reason: string, sudoUsed = false): Promise<never> {
+  let recent = 'recent journal unavailable';
+  const args = [...(scope === 'user' ? ['--user'] : []), '-u', unit, '-n', '30', '--no-pager', '--output=short'];
+  try {
+    const ordinary = await ctx.runner.capture('journalctl', args);
+    if (ordinary.code === 0 && ordinary.stdout.trim()) recent = ordinary.stdout.trim().split('\n').slice(-30).join('\n').slice(-6000);
+  } catch { /* Diagnostics must not hide the restart failure. */ }
+  // An unprivileged journalctl may exit 0 with "-- No entries --" and a
+  // permission hint on stderr. Once this deploy used sudo for the restart,
+  // prefer its noninteractive journal read; keep ordinary output on failure.
+  if (scope === 'system' && sudoUsed) {
+    try {
+      const privileged = await ctx.runner.capture('sudo', ['-n', 'journalctl', ...args]);
+      if (privileged.code === 0 && privileged.stdout.trim()) recent = privileged.stdout.trim().split('\n').slice(-30).join('\n').slice(-6000);
+    } catch { /* Never let journal access hide the restart failure. */ }
+  }
+  throw new StepAborted(`${unit}: ${reason}\nRecent journal:\n${recent}`);
 }
 
 const autostartStep: InstallStep = {
@@ -988,23 +1081,66 @@ export const ubuntuVps: PlatformStrategy = {
       ctx.ui.info(`DRY RUN — would reload+restart the cezar ${scope} service and re-verify the cockpit.`);
       return;
     }
+    const before = await serviceSnapshot(ctx, scope, UNIT_NAME);
+    let sudoUsed = false;
+    const fail = (reason: string): Promise<never> => failedRestart(ctx, scope, UNIT_NAME, reason, sudoUsed);
+    const assertFreshActive = async (snapshot: ServiceSnapshot): Promise<void> => {
+      if (snapshot.active !== 'active') await fail(`service is ${snapshot.active ?? 'inactive or unreadable'}`);
+      if (before.started === null || snapshot.started === null || snapshot.started === 0n) {
+        await fail('start timestamp unavailable; cannot verify a fresh restart');
+      }
+      if (before.started !== null && snapshot.started !== null && snapshot.started <= before.started) {
+        await fail('start timestamp unchanged after restart');
+      }
+    };
     ctx.ui.info(`Redeploying — restarting the cezar ${scope} service to pick up the new version.`);
+    let after: ServiceSnapshot;
     if (scope === 'user') {
       await ctx.runner.interactive('systemctl', ['--user', 'daemon-reload']);
       const code = await ctx.runner.interactive('systemctl', ['--user', 'restart', UNIT_NAME]);
-      if (code !== 0) ctx.ui.warn('systemctl --user restart returned non-zero — check `systemctl --user status cezar`.');
+      if (code !== 0) await fail(`restart returned code ${code}`);
+      after = await serviceSnapshot(ctx, scope, UNIT_NAME);
     } else {
-      await sudoStep(ctx, {
-        description: 'Reload systemd and restart the cezar service.',
-        command: `systemctl daemon-reload && systemctl restart ${UNIT_NAME}`,
-        verify: (c) => verifyCommand(c, 'systemctl', ['is-active', UNIT_NAME]),
-      });
+      let verified: ServiceSnapshot | undefined;
+      let restartCode: number | undefined;
+      try {
+        await sudoStep(ctx, {
+          description: 'Reload systemd and restart the cezar service.',
+          command: `systemctl daemon-reload && systemctl restart ${UNIT_NAME}`,
+          verify: async (c, commandCode) => {
+            restartCode = commandCode;
+            if (commandCode !== undefined) sudoUsed = true;
+            verified = await serviceSnapshot(c, scope, UNIT_NAME);
+            return (commandCode === undefined || commandCode === 0) &&
+              verified.active === 'active' && before.started !== null && verified.started !== null && verified.started > before.started;
+          },
+        });
+      } catch (err) {
+        if (!(err instanceof StepAborted)) throw err;
+        const reason = restartCode !== undefined && restartCode !== 0
+          ? `restart returned code ${restartCode}`
+          : verified?.active !== 'active'
+          ? `service is ${verified?.active ?? 'inactive or unreadable'}`
+          : before.started === null || verified.started === null
+            ? 'start timestamp unavailable; cannot verify a fresh restart'
+            : 'start timestamp unchanged after restart';
+        await fail(reason);
+      }
+      after = verified ?? await serviceSnapshot(ctx, scope, UNIT_NAME);
     }
+    await assertFreshActive(after);
     await confirmCezarRunning(
       ctx,
-      scope === 'user' ? 'systemctl --user status cezar' : 'sudo systemctl status cezar',
-      scope === 'user' ? 'journalctl --user -u cezar -n 50 --no-pager' : 'sudo journalctl -u cezar -n 50 --no-pager',
+      scope === 'user' ? `systemctl --user status ${UNIT_NAME}` : `sudo systemctl status ${UNIT_NAME}`,
+      scope === 'user' ? `journalctl --user -u ${UNIT_NAME} -n 50 --no-pager` : `sudo journalctl -u ${UNIT_NAME} -n 50 --no-pager`,
     );
-    await identityStep.run(ctx); // throws StepAborted if the cockpit isn't fully working
+    try {
+      await identityStep.run(ctx);
+    } catch (err) {
+      if (!(err instanceof StepAborted)) throw err;
+      const current = await serviceSnapshot(ctx, scope, UNIT_NAME);
+      await fail(`cockpit verification failed: ${err.message}; service is ${current.active ?? 'unreadable'}`);
+    }
+    await assertFreshActive(await serviceSnapshot(ctx, scope, UNIT_NAME));
   },
 };

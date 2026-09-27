@@ -1235,6 +1235,7 @@ export function createApp(deps: ServerDeps) {
       taskWebhooks.attach(project);
       return deps.delegation?.attachProject(project);
     },
+    afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
   // Workspace-level SSE bus (step 2.8) — the registry mutators and the
   // checkout flow (Phase 4) emit here; /api/workspace/events relays.
@@ -3464,7 +3465,7 @@ export function createApp(deps: ServerDeps) {
       return c.body(null, 204);
     })
 
-    .post('/automations/:id/enable', (c) => {
+    .post('/automations/:id/enable', async (c) => {
       const store = c.get('project').automationStore;
       const current = store.get(c.req.param('id'));
       if (!current) return c.json({ error: 'not found' }, 404);
@@ -3477,7 +3478,7 @@ export function createApp(deps: ServerDeps) {
         cursor: { timestamp: baselineAt },
         nextCheckAt: new Date(Date.now() + automation.intervalSeconds * 1_000).toISOString(),
       });
-      store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: 'Enabled from a current-time baseline; existing records were not launched.' });
+      await store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: 'Enabled from a current-time baseline; existing records were not launched.' });
       emitAutomationChange(c.get('project'), automation.id, automation.revision);
       automationsChanged();
       return c.json({ automation });
@@ -3612,6 +3613,7 @@ export function createApp(deps: ServerDeps) {
 
   // ---- chained family: runs lifecycle + artifacts (project-scoped) ----
   const delegationService = deps.delegation?.service ?? new DelegationService();
+  delegationService.setDiscovery({ models: modelCatalog, providers: providerStatus });
   const runsRoutes = new Hono<ProjectApiEnv>()
     .get('/runs', (c) => c.json(c.get('project').store.listRuns().map(run => withUsage(run))))
     .get('/runs/:id/relationships', paramZodValidator(runIdParamSchema), queryZodValidator(workerEmptyRequestSchema), (c) => {
@@ -5888,6 +5890,7 @@ export function startServer(deps: ServerDeps, port: number): ServerType & { shut
       taskWebhooks.attach(project);
       return deps.delegation?.attachProject(project);
     },
+    afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
   // #801: GitHub automations are opt-in. Off, the flag must remove the BEHAVIOR and not merely
   // the UI — no scheduler, no GitHub polling, no launched runs — so every entry point into the

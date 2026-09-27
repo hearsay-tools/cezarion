@@ -404,3 +404,87 @@ describe('Codex startup and Stop (#493)', () => {
     fake.exit(); await flush(); expect(outcome).toBe('rejected'); expect(String(failure)).toContain('initialization rejected');
   });
 });
+
+
+describe('Codex stream retry deadline (#550)', () => {
+  async function running() { start(); await initialize(); await thread(); await opening(); }
+  function retry(message = 'Reconnecting... waiting for network', extra = {}) {
+    fake.frame({ method: 'error', params: {
+      threadId: 'thread_1', turnId: 'turn_1', willRetry: true,
+      error: { message, additionalDetails: 'Connection failed: error sending request' }, ...extra,
+    } });
+  }
+  function progress(extra = {}) {
+    fake.frame({ method: 'item/agentMessage/delta', params: {
+      threadId: 'thread_1', turnId: 'turn_1', itemId: 'message_1', delta: 'Recovered', ...extra,
+    } });
+  }
+
+  it('shows retry details immediately without failing, then fails at 60s with the last error', async () => {
+    await running(); retry('Reconnecting... 2/5'); await flush();
+    expect(events).toContainEqual({ type: 'note', message: 'Reconnecting... 2/5 — Connection failed: error sending request' });
+    expect(ui).toContainEqual({ type: 'session.error', fatal: false, message: 'Reconnecting... 2/5 — Connection failed: error sending request' });
+    expect(events.some(e => e.type === 'error')).toBe(false);
+    await vi.advanceTimersByTimeAsync(30_000); retry(); await flush();
+    await vi.advanceTimersByTimeAsync(29_999); expect(fake.signals).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1); expect(fake.signals).toEqual(['SIGTERM']);
+    expect(outcome).toBe('pending'); // wait for actual process exit
+    fake.exit(); await flush();
+    expect(outcome).toBe('rejected');
+    expect(String(failure)).toContain('Reconnecting... waiting for network — Connection failed: error sending request');
+    expect(ui).toContainEqual(expect.objectContaining({ type: 'turn.completed', stopReason: 'error' }));
+  });
+
+  it('keeps the original deadline through warnings, stale/child progress and user input', async () => {
+    await running(); retry(); await flush(); await vi.advanceTimersByTimeAsync(30_000);
+    fake.frame({ method: 'warning', params: { message: 'Falling back to HTTPS' } });
+    progress({ threadId: 'child' }); progress({ turnId: 'old-turn' }); progress({ delta: '' });
+    fake.frame({ method: 'item/started', params: { threadId: 'thread_1', turnId: 'turn_1', item: { id: 'user', type: 'userMessage' } } });
+    await flush(); await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.signals).toEqual(['SIGTERM']);
+  });
+
+  it('clears a retry episode on real progress and gives a later episode its own budget', async () => {
+    await running(); retry(); await flush(); await vi.advanceTimersByTimeAsync(40_000);
+    progress(); await flush(); await vi.advanceTimersByTimeAsync(60_000);
+    expect(fake.signals).toEqual([]);
+    retry('second episode'); await flush(); await vi.advanceTimersByTimeAsync(59_999);
+    expect(fake.signals).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1); expect(fake.signals).toEqual(['SIGTERM']);
+  });
+
+  it.each(['complete', 'interrupt', 'end'] as const)('clears retry state on %s', async action => {
+    await running(); retry(); await flush();
+    if (action === 'complete') fake.frame({ method: 'turn/completed', params: { threadId: 'thread_1', turn: { id: 'turn_1', status: 'completed' } } });
+    else session[action]();
+    await flush();
+    if (action !== 'complete') { fake.exit(0); await flush(); }
+    await vi.advanceTimersByTimeAsync(70_000);
+    expect(failure).toBeUndefined();
+    expect(events.some(e => e.type === 'error')).toBe(false);
+    if (action === 'complete') { expect(fake.signals).toEqual([]); session.end(); fake.exit(0); await flush(); }
+    expect(outcome).toBe('resolved');
+  });
+
+  it('fails promptly when the server stops retrying', async () => {
+    await running(); retry('provider unavailable', { willRetry: false }); await flush();
+    expect(fake.signals).toEqual(['SIGTERM']); fake.exit(); await flush();
+    expect(outcome).toBe('rejected'); expect(String(failure)).toContain('provider unavailable');
+    expect(ui).toContainEqual(expect.objectContaining({ type: 'session.error', fatal: true }));
+  });
+
+  it('classifies a timed-out interrupted stream as an error, not user cancellation', async () => {
+    await running(); retry('stream interrupted before completion'); await flush();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ui).toContainEqual(expect.objectContaining({ type: 'turn.completed', stopReason: 'error' }));
+  });
+
+  it('ignores malformed and foreign/stale retry errors', async () => {
+    await running();
+    retry('child', { threadId: 'child' }); retry('old', { turnId: 'old-turn' });
+    retry('bad', { error: null });
+    await flush(); await vi.advanceTimersByTimeAsync(60_000);
+    expect(fake.signals).toEqual([]);
+    expect(events.filter(e => e.type === 'note' && /child|old|bad/.test(e.message))).toEqual([]);
+  });
+});

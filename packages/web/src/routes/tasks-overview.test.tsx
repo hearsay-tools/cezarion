@@ -384,6 +384,35 @@ describe('TasksOverview — the table', () => {
     expect(queued.textContent).not.toContain('$0.02')
   })
 
+  it('shows folded CPU and Memory cells instead of a queue note when both are folded', () => {
+    renderOverview({
+      expandedColumns: { cpu: false, memory: false },
+      runs: [run({ id: 'queued-folded', status: 'queued' })],
+    })
+
+    const queued = tableRow('queued-folded') as HTMLElement
+    expect(queued.querySelector('[data-slot="queue-note"]')).toBeNull()
+    for (const column of ['cpu', 'memory']) {
+      const cell = queued.querySelector(`td[data-column-id="${column}"]`)
+      expect(cell?.getAttribute('data-folded')).toBe('true')
+      expect(cell?.textContent).toBe('')
+    }
+  })
+
+  it.each([
+    { expandedColumns: { cpu: true, memory: false }, expanded: 'cpu', folded: 'memory' },
+    { expandedColumns: { cpu: false, memory: true }, expanded: 'memory', folded: 'cpu' },
+  ])('keeps the queue note when $expanded is expanded', ({ expandedColumns, folded }) => {
+    renderOverview({
+      expandedColumns,
+      runs: [run({ id: 'queued-partly-folded', status: 'queued' })],
+    })
+
+    const queued = tableRow('queued-partly-folded') as HTMLElement
+    expect(queued.querySelector('[data-slot="queue-note"]')?.getAttribute('colspan')).toBe('2')
+    expect(queued.querySelector(`td[data-column-id="${folded}"]`)).toBeNull()
+  })
+
   it('keeps headers and normal/queued rows logically aligned when several columns are folded', () => {
     renderOverview({
       expandedColumns: { branch: false, workflow: false, cpu: false, memory: false },
@@ -397,15 +426,11 @@ describe('TasksOverview — the table', () => {
       header.getAttribute('data-column-id'),
     )
     const logicalRowIds = (id: string) =>
-      [...(tableRow(id)?.querySelectorAll('td') ?? [])].flatMap((cell) =>
-        cell.getAttribute('data-column-id') === 'cpu-memory'
-          ? ['cpu', 'memory']
-          : [cell.getAttribute('data-column-id')],
-      )
+      [...(tableRow(id)?.querySelectorAll('td') ?? [])].map((cell) => cell.getAttribute('data-column-id'))
 
     expect(logicalRowIds('aligned')).toEqual(headerIds)
     expect(logicalRowIds('aligned-queue')).toEqual(headerIds)
-    expect(tableRow('aligned-queue')?.querySelector('[data-slot="queue-note"]')?.getAttribute('colspan')).toBe('2')
+    expect(tableRow('aligned-queue')?.querySelector('[data-slot="queue-note"]')).toBeNull()
     expect(document.querySelector('th[data-column-id="cpu"]')?.getAttribute('data-folded')).toBe('true')
     expect(document.querySelector('th[data-column-id="memory"]')?.getAttribute('data-folded')).toBe('true')
   })

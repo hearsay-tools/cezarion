@@ -128,7 +128,7 @@ function formatWorkerCliError(error: unknown, argv0: string | undefined): string
   }
   return 'Invalid worker command arguments';
 }
-async function boundedJson(response: Response): Promise<unknown> {
+export async function boundedJson(response: Response): Promise<unknown> {
   if (Number(response.headers.get('content-length')) > RESPONSE_BYTES) { await response.body?.cancel(); throw Error('Response too large'); }
   const reader = response.body?.getReader();
   if (!reader) throw Error('Empty response');

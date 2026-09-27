@@ -264,6 +264,22 @@ rl.on('line', async (line) => {
       }, 250);
       return;
     }
+    if (turnText.includes('mock:stream-retry')) {
+      // Error payloads from the real 0.155.1 reconnect probe; see stream-retry.md.
+      const frames = [{"method": "error", "params": {"error": {"message": "Reconnecting... 2/5", "codexErrorInfo": {"responseStreamDisconnected": {"httpStatusCode": null}}, "additionalDetails": "stream disconnected before completion: invalid peer certificate: UnknownIssuer"}, "willRetry": true}}, {"method": "error", "params": {"error": {"message": "Reconnecting... waiting for network", "additionalDetails": "Connection failed: error sending request"}, "willRetry": true}}];
+      const send = frame => emit({ ...frame, params: { ...frame.params, threadId: 'th_mock_1', turnId: 'turn_mock_1' } });
+      send(frames[0]);
+      if (turnText.includes('recover')) {
+        await sleep(20);
+        emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'recovered_message', text: 'Recovered after reconnect.' } } });
+        emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
+      } else {
+        send(frames[1]);
+        const retries = setInterval(() => send(frames[1]), 10_000);
+        rl.once('close', () => clearInterval(retries));
+      }
+      return;
+    }
     if (turnText.includes('mock:provider-error') || turnText.includes('mock:empty-success')) {
       // Derived from the 0.147 rollout and upstream envelope; see the source
       // core/__fixtures__/codex/provider-error.md and its independent golden NDJSON.

@@ -185,6 +185,43 @@ describe('AppShell', () => {
     expect(main.scrollTop).toBe(0)
   })
 
+  it.each([
+    ['/github', '/github/issues/42'],
+    ['/github/prs', '/github/prs/43'],
+    ['/p/cezar/github', '/p/cezar/github/issues/42'],
+  ])('keeps the main scroller on a GitHub item hop from %s to %s (#580)', (from, to) => {
+    renderShell(from, {}, <RouterLink to={to}>Open item</RouterLink>)
+    const main = screen.getByRole('main')
+    main.scrollTop = 640
+
+    fireEvent.click(within(main).getByRole('link', { name: 'Open item' }))
+
+    expect(screen.getByTestId('location').textContent).toBe(to)
+    expect(main.scrollTop).toBe(640)
+  })
+
+  it('resets the main scroller when leaving GitHub for Tasks (#580)', () => {
+    renderShell('/github/issues/42', {}, <RouterLink to="/tasks">Tasks</RouterLink>)
+    const main = screen.getByRole('main')
+    main.scrollTop = 640
+
+    fireEvent.click(within(main).getByRole('link', { name: 'Tasks' }))
+
+    expect(screen.getByTestId('location').textContent).toBe('/tasks')
+    expect(main.scrollTop).toBe(0)
+  })
+
+  it('resets the main scroller when GitHub navigation switches projects (#580)', () => {
+    renderShell('/p/alpha/github/issues/42', {}, <RouterLink to="/p/beta/github/issues/43">Other project</RouterLink>)
+    const main = screen.getByRole('main')
+    main.scrollTop = 640
+
+    fireEvent.click(within(main).getByRole('link', { name: 'Other project' }))
+
+    expect(screen.getByTestId('location').textContent).toBe('/p/beta/github/issues/43')
+    expect(main.scrollTop).toBe(0)
+  })
+
   it('leaves task-to-task arrival to the destination transcript owner (#761)', () => {
     renderShell(
       '/tasks/source',

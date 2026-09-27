@@ -141,7 +141,7 @@ describe('chronological worker conversation', () => {
       browser.waitForFunction(`document.querySelectorAll('${card}').length === 3`)
       applyContrastQaVariant(browser, variant)
       const explanations = browser.waitForValue<string[]>(`[...document.querySelectorAll('[data-slot="conversation-delivery-explanation"]')].map(el => el.textContent)`, value => value.length === 2)
-      expect(explanations.some(text => text.includes('Queued for the next safe turn'))).toBe(true)
+      expect(explanations.some(text => text.includes('Queued for delivery') && text.includes('during its current turn'))).toBe(true)
       expect(explanations.some(text => text.includes('Not delivered: worker is done') && text.includes('--resume'))).toBe(true)
       const rejected = browser.waitForValue<string>(`[...document.querySelectorAll('${card}')].find(el => el.textContent.includes('Correct the returned result'))?.textContent`)
       expect(rejected).toContain('Not delivered')

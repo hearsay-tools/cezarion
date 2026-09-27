@@ -179,13 +179,16 @@ entries:
     pr: 809
     title: "fix(composer): scroll skill menu on arrow key navigation (#809)"
     date: 2026-09-14
-    status: planned
+    status: ported
     hint:
       conflicts: 0
-    note: absent here, applies clean
+    note: keyboard selection scroll ported with ArrowUp and ArrowDown regression coverage
     fork:
       issue: 433
-    decided: 2026-09-18
+      pr: 653
+      commits:
+        - 3c27a8c80d1838de919fd80ad17ca8274e712534
+    decided: 2026-09-27
   - sha: d37b21cf407df5442a8a6ef49b049cbb7693b4be
     pr: 839
     title: "docs(specs): a task remembers every PR it has been associated with (#839)"
@@ -200,13 +203,15 @@ entries:
     pr: 861
     title: "fix(ui): keep CPU/Mem folded on queued task rows (#821) (#861)"
     date: 2026-09-14
-    status: planned
+    status: ported
     hint:
       conflicts: 0
-    note: pre-fix code still present at tasks-overview.tsx (queue note reopens folded CPU/Mem); applies clean
+    note: queued rows honor folded CPU/Mem columns; regression tests cover both folds and either expanded column
     fork:
       issue: 432
-    decided: 2026-09-18
+      pr: 652
+      commits: [2b66db1d]
+    decided: 2026-09-27
   - sha: 14226c4aa894dc31a525a8db004ebc39aecc8289
     pr: 963
     title: "docs(changelog): one-line entries for every release, in 0.9.0's format (#963)"
@@ -220,13 +225,16 @@ entries:
     pr: 956
     title: "feat(tasks): copy branch name from task header (#956)"
     date: 2026-09-14
-    status: planned
+    status: ported
     hint:
       conflicts: 2
-    note: "absent here; run header was redesigned in #235, 2 hunks to re-place"
+    note: "Branch-adjacent copy control adapted to the fork header, with keyboard and theme coverage"
     fork:
       issue: 434
-    decided: 2026-09-18
+      pr: 645
+      commits:
+        - 2dbe279966c804cf3be2942dc28b8b6dc8871b95
+    decided: 2026-09-27
   - sha: d15a8bef98ed3c52215071ac6a403f5dfc136432
     pr: 942
     title: "feat(thread): per-message timestamps in the task conversation (#942)"
@@ -355,12 +363,16 @@ entries:
     pr: 993
     title: "fix(automations): a stale poll lock no longer silences every project for ten minutes (#993)"
     date: 2026-09-16
-    status: planned
+    status: ported
     hint:
       conflicts: 3
     fork:
       issue: 428
-    decided: 2026-09-18
+      pr: 651
+      commits:
+        - 0f47bdfa
+        - 3ff408df
+    decided: 2026-09-27
   - sha: 13e727c2e4dde4c4afa6fe3a845407490ddd3b1c
     pr: 1005
     title: "fix(opencode): a turn longer than five minutes no longer parks the run under Needs you (#1005)"
@@ -398,12 +410,14 @@ entries:
     pr: 1009
     title: "fix(server-deploy): fail the deploy when the service did not actually restart (#1009)"
     date: 2026-09-17
-    status: planned
+    status: ported
     hint:
       conflicts: 0
     fork:
       issue: 430
-    decided: 2026-09-18
+      pr: 644
+      commits: [2d328382, 0dfb93c6, 3e676ecd]
+    decided: 2026-09-27
   - sha: 7fd4221f5f8abea3774814ece822a70fcc720a07
     pr: 1022
     title: "docs(readme): fix the mobile layout of the link row and screenshots (#1022)"
@@ -424,12 +438,14 @@ entries:
     pr: 994
     title: "fix(server-install): ubuntu-vps vhost emits a standalone http2 directive nginx < 1.25.1 rejects (#994)"
     date: 2026-09-18
-    status: planned
+    status: ported
     hint:
       conflicts: 2
     fork:
       issue: 429
-    decided: 2026-09-18
+      pr: 648
+      commits: [5847c4282c26ba56fb95d833efc4f391e53b8600]
+    decided: 2026-09-27
   - sha: 456859a499dc3f87ec9f938fbac12727956f428c
     pr: 995
     title: 'fix(runs): a turn parked on its own dispatched subagents stops reading as "needs you" (#995)'
